@@ -1,0 +1,6 @@
+rootProject.name = 'edgebase-android-java'
+include ':core'
+include ':admin'
+
+project(':core').projectDir = file('../core')
+project(':admin').projectDir = file('../admin')

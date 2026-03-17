@@ -1,0 +1,221 @@
+---
+sidebar_position: 0
+sidebar_label: Overview
+slug: /plugins
+hide_title: true
+---
+
+import { OverviewHero, FeatureGrid } from '@site/src/components/OverviewPage';
+
+<OverviewHero
+  title="Plugins"
+  tagline="A build-time extension system for adding reusable functionality to your EdgeBase project. Plugins are npm packages that inject tables, functions, hooks, and manifest metadata into your project — with zero runtime overhead. The server doesn't even know plugins exist; it just sees more tables and functions."
+/>
+
+---
+
+## How It Works
+
+Plugins use an **Explicit Import** pattern. You install a plugin package, import its factory function in `edgebase.config.ts`, and call it with your configuration. At build time, the CLI merges plugin tables, functions, and hooks into the project — the server sees a regular EdgeBase app with more stuff.
+
+```
+npm install @edgebase/plugin-stripe
+```
+
+```typescript title="edgebase.config.ts"
+import { defineConfig } from '@edgebase/shared';
+import { stripePlugin } from '@edgebase/plugin-stripe';
+
+export default defineConfig({
+  plugins: [
+    stripePlugin({
+      secretKey: process.env.STRIPE_SECRET_KEY!,
+      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET!,
+    }),
+  ],
+});
+```
+
+That's it. Deploy and the plugin's tables, functions, hooks, and manifest metadata are live.
+
+`definePlugin()` also stamps the current public `pluginApiVersion` onto the resolved plugin instance. Deploy rejects plugins built against a different contract instead of attempting to run them.
+
+---
+
+## What Plugins Can Inject
+
+<FeatureGrid
+  features={[
+    {
+      icon: '🗄️',
+      title: 'Tables',
+      description:
+        'Custom database tables with schema, access, handlers, and indexes. Automatically namespaced to prevent collisions.',
+    },
+    {
+      icon: '⚡',
+      title: 'Functions',
+      description:
+        'HTTP endpoints, DB triggers, cron jobs — all registered into the existing function system.',
+    },
+    {
+      icon: '🔐',
+      title: 'Authentication Hooks',
+      description:
+        'Hook into 11 auth lifecycle events: signup, signin, sign-out, token refresh, password reset, account deletion, and email verification.',
+    },
+    {
+      icon: '📂',
+      title: 'Storage Hooks',
+      description:
+        'Intercept file uploads, downloads, and deletions with blocking (before*) and non-blocking (after*) hooks.',
+    },
+    {
+      icon: '🔄',
+      title: 'Migrations',
+      description:
+        'Version-keyed migration system with onInstall callback and semver-ordered upgrade scripts.',
+    },
+    {
+      icon: '🧾',
+      title: 'Manifest',
+      description:
+        'Code-level plugin metadata such as description, docs URL, and configTemplate for CLI tooling.',
+    },
+    {
+      icon: '📦',
+      title: 'Client SDK Extensions',
+      description: 'Optional typed client wrappers for calling plugin functions from the frontend.',
+    },
+  ]}
+  columns={3}
+/>
+
+### Namespace Isolation
+
+All plugin resources are automatically prefixed with the plugin name to prevent collisions:
+
+```
+Plugin: plugin-stripe
+Table:     customers    →  plugin-stripe/customers
+Function:  create-checkout  →  plugin-stripe/create-checkout
+Hook:      onTokenRefresh   →  __hook__/plugin-stripe/onTokenRefresh
+```
+
+Multiple plugins can coexist without any naming conflicts.
+
+### Manifest Metadata
+
+Plugins can also declare a serializable `manifest` block inside `definePlugin()`:
+
+```typescript
+manifest: {
+  description: 'Stripe billing for EdgeBase',
+  docsUrl: 'https://edgebase.fun/docs/plugins/stripe',
+  configTemplate: {
+    stripeSecretKey: 'sk_test_CHANGE_ME',
+    stripeWebhookSecret: 'whsec_CHANGE_ME',
+  },
+}
+```
+
+The CLI uses this for `edgebase plugins list`, setup guidance, and future plugin tooling. Metadata lives with the plugin code rather than in `package.json`, so it stays versioned with the actual runtime definition.
+
+---
+
+## Build Pipeline
+
+Plugins are resolved entirely at build time. No runtime scanning, no dynamic imports.
+
+```
+edgebase.config.ts  (plugins: [stripePlugin({...})])
+  → esbuild bundle  (import graph pulls in plugin handler code)
+  → mergePluginTables()  (namespace-prefixed merge into DB blocks)
+  → materializeConfig()  (plugin tables become first-class config)
+  → generateFunctionRegistry()  (plugin functions + hooks registered)
+  → runPluginMigrations()  (version-based migrations on deploy)
+  → wrangler deploy
+```
+
+**Zero overhead**: Plugin code is part of the Worker bundle. The server runtime has no concept of "plugins" — it just executes registered functions and queries registered tables.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│  edgebase.config.ts                             │
+│    plugins: [                                   │
+│      stripePlugin({ secretKey: '...' }),         │
+│      analyticsPlugin({ trackPageViews: true }),  │
+│    ]                                            │
+└──────────────────────┬──────────────────────────┘
+                       │ build time
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+   mergePluginTables  initFunctionRegistry  runPluginMigrations
+   (tables → DB)      (functions + auth/     (onInstall +
+                       storage hooks)        version migrations)
+          │            │            │
+          └────────────┼────────────┘
+                       ▼
+              Worker Bundle (single JS)
+              — server sees: tables + functions
+              — no "plugin" concept at runtime
+```
+
+---
+
+## Key Design Decisions
+
+| Decision                                  | Rationale                                                                                     |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **Explicit Import** (not auto-scan)       | No magic. You see exactly what's loaded in config. Tree-shakeable.                            |
+| **Factory Pattern** (`definePlugin<T>()`) | Type-safe config. Closure captures `userConfig` for all handlers.                             |
+| **Build-time merge** (not runtime)        | Zero cold-start overhead. Plugin code is part of the Worker bundle.                           |
+| **npm as distribution**                   | Standard ecosystem. `npm install` + import. Same workflow for official and community plugins. |
+| **Server-agnostic**                       | Server code never references plugins. Plugin functions are just... functions.                 |
+
+---
+
+## Trust Model
+
+Plugins are trusted server-side code. Installing a plugin means its code is bundled into the same Worker and gets the same admin-side capabilities as first-party server code. EdgeBase does not currently sandbox plugins or require per-plugin capability declarations.
+
+That trust model is intentional: the extension point is build-time composition, not an untrusted runtime marketplace.
+
+---
+
+## Cleanup
+
+Removing a plugin from `edgebase.config.ts` stops its functions and hooks immediately, but data cleanup is a separate explicit step:
+
+```bash
+npx edgebase plugins cleanup my-plugin
+```
+
+The cleanup command removes namespaced plugin tables and plugin migration metadata from the internal control-plane D1 (`CONTROL_DB`). On Cloudflare Edge, pass `--account-id` and `--api-token` when the plugin may have touched dynamic Durable Object instances so the CLI can discover and clean those instances too.
+
+---
+
+## Quick Links
+
+- **[Using Plugins](./plugins/using-plugins)** — Install, configure, and manage plugins
+- **[Creating Plugins](./plugins/creating-plugins)** — Build your own plugin from scratch
+- **[API Reference](./plugins/api-reference)** — `PluginFunctionContext`, `PluginHookContext`, and all types
+
+---
+
+## CLI Commands
+
+```bash
+# Scaffold a new plugin project
+npx edgebase create-plugin my-plugin
+
+# List installed plugins (tables, functions, hooks)
+npx edgebase plugins list
+
+# Remove namespaced data for a removed plugin
+npx edgebase plugins cleanup my-plugin
+```

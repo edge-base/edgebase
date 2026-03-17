@@ -1,0 +1,23 @@
+{
+  "name": "{{PLUGIN_NAME}}-client",
+  "version": "0.1.0",
+  "description": "Client SDK for {{PLUGIN_NAME}}",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "peerDependencies": {
+    "@edgebase/sdk": ">=0.1.0"
+  },
+  "dependencies": {
+    "@edgebase/plugin-core": "latest"
+  },
+  "devDependencies": {
+    "@edgebase/sdk": "latest",
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT"
+}

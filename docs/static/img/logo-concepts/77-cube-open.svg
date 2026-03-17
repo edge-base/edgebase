@@ -1,0 +1,14 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Open isometric cube - wireframe feel with filled faces -->
+  <!-- Top face -->
+  <polygon points="64,20 104,42 64,64 24,42" fill="#60a5fa" />
+  <!-- Left face -->
+  <polygon points="24,42 64,64 64,106 24,84" fill="#6366f1" />
+  <!-- Right face -->
+  <polygon points="104,42 64,64 64,106 104,84" fill="#a855f7" />
+  <!-- Highlight edges -->
+  <polyline points="24,42 64,20 104,42" fill="none" stroke="#93c5fd" stroke-width="2" opacity="0.5" />
+  <!-- Inner glow dot -->
+  <circle cx="64" cy="64" r="6" fill="#ec4899" opacity="0.8" />
+</svg>

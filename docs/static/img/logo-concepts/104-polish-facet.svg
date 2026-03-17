@@ -1,0 +1,29 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g104a" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="g104b" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+    <linearGradient id="g104c" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Each layer has subtle left/right face distinction -->
+  <!-- Layer 1 -->
+  <polygon points="64,18 104,48 64,58" fill="#60a5fa" opacity="0.95" />
+  <polygon points="64,18 24,48 64,58" fill="url(#g104a)" />
+  <!-- Layer 2 -->
+  <polygon points="64,38 104,68 64,78" fill="#818cf8" opacity="0.8" />
+  <polygon points="64,38 24,68 64,78" fill="url(#g104b)" opacity="0.88" />
+  <!-- Layer 3 -->
+  <polygon points="64,58 104,88 64,98" fill="#c084fc" opacity="0.65" />
+  <polygon points="64,58 24,88 64,98" fill="url(#g104c)" opacity="0.75" />
+  <!-- Top highlight -->
+  <polygon points="64,18 84,33 64,38 44,33" fill="white" opacity="0.08" />
+</svg>

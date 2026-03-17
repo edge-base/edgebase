@@ -1,0 +1,44 @@
+{
+    "name": "edgebase",
+    "version": "0.1.0",
+    "type": "module",
+    "private": true,
+    "scripts": {
+        "preinstall": "node ./scripts/check-node-version.mjs",
+        "build": "pnpm -r --if-present run build",
+        "lint": "pnpm -r --if-present run lint",
+        "test": "pnpm -r --if-present run test && pnpm --dir packages/server run test:integration",
+        "test:unit": "pnpm -r --if-present run test",
+        "dev": "./scripts/dev.sh",
+        "build:turbo": "turbo run build",
+        "lint:turbo": "turbo run lint",
+        "test:turbo": "turbo run test",
+        "dev:turbo": "turbo run dev",
+        "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\""
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.39.2",
+        "@types/ws": "^8.18.1",
+        "eslint": "^9.20.0",
+        "prettier": "^3.5.0",
+        "turbo": "^2.4.0",
+        "typescript": "^5.7.0",
+        "typescript-eslint": "^8.55.0",
+        "ws": "^8.19.0"
+    },
+    "engines": {
+        "node": ">=20.19.0"
+    },
+    "packageManager": "pnpm@9.15.0",
+    "pnpm": {
+        "overrides": {
+            "minimatch@<3.1.4": ">=3.1.4",
+            "minimatch@>=9.0.0 <9.0.6": ">=9.0.6",
+            "serialize-javascript@<=7.0.2": ">=7.0.3",
+            "happy-dom@<20.0.0": ">=20.0.0",
+            "svgo@>=3.0.0 <3.3.3": ">=3.3.3",
+            "rollup@>=4.0.0 <4.59.0": ">=4.59.0",
+            "wrangler@>=4.0.0 <4.59.1": ">=4.59.1"
+        }
+    }
+}

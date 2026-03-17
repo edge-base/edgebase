@@ -1,0 +1,12 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- 8-point compass star, blue long / pink short -->
+  <polygon points="64,14 70,56 64,64 58,56" fill="#3b82f6" />
+  <polygon points="114,64 72,70 64,64 72,58" fill="#6366f1" />
+  <polygon points="64,114 58,72 64,64 70,72" fill="#ec4899" />
+  <polygon points="14,64 56,58 64,64 56,70" fill="#8b5cf6" />
+  <polygon points="98,30 72,58 64,64 70,56" fill="#818cf8" />
+  <polygon points="98,98 70,72 64,64 72,70" fill="#a855f7" />
+  <polygon points="30,98 56,70 64,64 58,72" fill="#c084fc" />
+  <polygon points="30,30 58,56 64,64 56,58" fill="#60a5fa" />
+</svg>

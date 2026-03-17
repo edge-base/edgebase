@@ -1,0 +1,37 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeBase Logo - Goddess Point">
+  <defs>
+    <linearGradient id="g9" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+    <linearGradient id="g9b" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#c084fc" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Goddess silhouette - side profile, arm pointing right/forward -->
+  <!-- Head with laurel/helmet suggestion -->
+  <circle cx="48" cy="30" r="12" fill="url(#g9)" />
+  <!-- Hair/helmet crest flowing back -->
+  <path d="M44,20 Q38,14 36,22 Q34,28 38,26 Q42,24 44,20Z" fill="url(#g9)" opacity="0.7" />
+  <!-- Neck -->
+  <path d="M44,42 L52,42 L51,46 L45,46Z" fill="url(#g9)" />
+  <!-- Torso - draped cloth feel -->
+  <path d="M38,46 L58,46 Q62,46 60,56 L56,78 Q54,82 48,82 Q42,82 40,78 L36,56 Q34,46 38,46Z" fill="url(#g9)" />
+  <!-- Right arm extended pointing forward/right -->
+  <path d="M58,50 L88,38 L96,36 L97,38 L90,42 L60,56Z" fill="url(#g9)" />
+  <!-- Pointing finger detail -->
+  <path d="M96,36 L106,33 L106,35 L97,38Z" fill="url(#g9b)" />
+  <!-- Left arm resting -->
+  <path d="M38,52 L30,62 L28,68 L32,66 L36,58Z" fill="url(#g9)" />
+  <!-- Flowing robe/skirt -->
+  <path d="M40,78 Q36,90 32,108 L42,108 L48,88 L54,108 L64,108 Q60,90 56,78Z" fill="url(#g9)" />
+  <!-- Subtle sparkle at fingertip -->
+  <circle cx="106" cy="34" r="3" fill="#c084fc" opacity="0.8" />
+  <circle cx="106" cy="34" r="6" fill="#c084fc" opacity="0.2" />
+  <!-- Small data dots trailing from finger -->
+  <circle cx="100" cy="36" r="1.5" fill="#818cf8" opacity="0.5" />
+  <circle cx="94" cy="38" r="1.5" fill="#818cf8" opacity="0.3" />
+</svg>

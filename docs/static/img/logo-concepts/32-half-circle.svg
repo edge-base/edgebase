@@ -1,0 +1,6 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Two half circles offset = edge/split, super simple -->
+  <path d="M64,24 A40,40 0 0,1 64,104" fill="#f97316" />
+  <path d="M64,32 A32,32 0 0,0 64,96" fill="#facc15" />
+</svg>

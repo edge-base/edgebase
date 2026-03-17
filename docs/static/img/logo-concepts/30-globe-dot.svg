@@ -1,0 +1,21 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g30" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2dd4bf" />
+      <stop offset="100%" stop-color="#0891b2" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Globe outline = global edge, 300+ locations -->
+  <circle cx="64" cy="64" r="38" fill="none" stroke="url(#g30)" stroke-width="2.5" />
+  <!-- Longitude lines -->
+  <ellipse cx="64" cy="64" rx="18" ry="38" fill="none" stroke="url(#g30)" stroke-width="1.5" opacity="0.5" />
+  <!-- Latitude lines -->
+  <ellipse cx="64" cy="64" rx="38" ry="14" fill="none" stroke="url(#g30)" stroke-width="1.5" opacity="0.5" />
+  <!-- Bright edge node dots scattered on the globe -->
+  <circle cx="46" cy="42" r="4" fill="#5eead4" />
+  <circle cx="82" cy="50" r="4" fill="#5eead4" />
+  <circle cx="58" cy="78" r="4" fill="#5eead4" />
+  <circle cx="78" cy="74" r="4" fill="#5eead4" />
+  <circle cx="40" cy="64" r="4" fill="#5eead4" />
+</svg>

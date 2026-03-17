@@ -1,0 +1,299 @@
+---
+sidebar_position: 0
+sidebar_label: Overview
+slug: /room
+title: Overview
+description: Server-authoritative real-time multiplayer state channel. Clients send actions, servers mutate state, all clients sync automatically.
+hide_title: true
+---
+import { OverviewHero, FeatureGrid, StepPath, NextStepCards, DiagramBlock } from '@site/src/components/OverviewPage';
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+:::caution Beta
+This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::
+
+<OverviewHero
+  title="Room"
+  tagline="EdgeBase Room is a server-authoritative real-time state synchronization primitive for multiplayer applications. Clients send actions, the server validates and mutates state, and all connected clients receive only the changed parts (deltas) automatically. Ideal for multiplayer games, collaborative editors, live dashboards, voting systems, and auctions — anything where consistency and trust matter."
+  platforms={["JavaScript", "Dart", "Swift", "Kotlin", "Java", "Unity", "Unreal", "React Native"]}
+/>
+
+---
+
+:::info Control Surface
+- **Access Rules**: [Room Access Rules](/docs/room/access-rules) gate metadata fetches, joins, and client actions.
+- **Hooks**: [Server Hooks and Actions](/docs/room/server) covers lifecycle hooks such as `onCreate`, `onJoin`, `onLeave`, and `onDestroy`.
+- **Triggers**: Room is not a trigger-based surface.
+- **Handlers**: [Server Hooks and Actions](/docs/room/server) also covers `handlers.actions` and `handlers.timers`.
+- **Capabilities**: [State (Room State)](/docs/room/state), [Meta (Room Info)](/docs/room/meta), [Members (Presence)](/docs/room/members), [Signals (Broadcast)](/docs/room/signals), and [Media (Voice/Video)](/docs/room/media) *(alpha)* are the five primary Room surfaces.
+:::
+
+## What is Room?
+
+Room is a **real-time state synchronization primitive** where the server has full authority over all state changes. Room doesn't just relay messages — it **owns the state** and enforces the rules.
+
+Room combines five core real-time capabilities in one primitive:
+
+- **`room.state`** (room state) — server-authoritative shared / player / server state with automatic delta sync
+- **`room.meta`** (room info) — public-safe room metadata for lobby cards, pre-join summaries, and matchmaking
+- **`room.members`** (presence) — built-in presence tracking and ephemeral member state
+- **`room.signals`** (broadcast) — lightweight pub/sub for chat, cursors, WebRTC signaling, and other transient events
+- **`room.media`** (voice/video) — audio/video/screenshare publish, mute, and device state for conferencing UIs *(alpha)*
+
+And the client surface includes two companion namespaces around those five capabilities:
+
+- **`room.admin`** — moderation and operator controls such as kick, mute, and role changes
+- **`room.session`** — connection lifecycle, reconnect, kicked, and error events
+
+This makes Room ideal for anything where **consistency, coordination, or real-time interaction** matter:
+
+- **Multiplayer games** — lobbies, turn-based, real-time
+- **Collaborative editors** — shared documents, whiteboards
+- **Live dashboards** — real-time metrics, leaderboards
+- **Voting / polls** — tamper-proof state
+- **Auctions** — server-enforced bidding rules
+- **Conferencing** — participant tracking, media state, signaling
+
+---
+
+## Choosing Room vs Database Subscriptions vs Push
+
+Choose Room when you need interactive real-time coordination — authoritative state, metadata, presence, signals, or media. If you only need database change feeds in the UI, use [Database Subscriptions](/docs/database/subscriptions). If you need delivery to devices outside the active app session, use [Push](/docs/push).
+
+For the full comparison, see [Choosing Live Features](/docs/guides/choosing-live-features).
+
+---
+
+## How it Works
+
+<DiagramBlock title="Action Flow">
+{`Client A ── send('INCREMENT') ──▶  Server
+                                     │  handlers.actions['INCREMENT'] runs
+                                     │  setSharedState(s => ({ ...s, count: s.count + 1 }))
+Client A ◀── action_result ─────────│
+Client A ◀── shared_delta ──────────│
+Client B ◀── shared_delta ──────────│  (auto-broadcast to all)`}
+</DiagramBlock>
+
+1. Client sends an **action** (type + payload)
+2. Server runs the matching **`handlers.actions` entry**
+3. Handler mutates state via `setSharedState` / `setPlayerState` / `setServerState`
+4. Changed fields are automatically broadcast as **deltas** to connected clients
+5. The handler's return value is sent back to the calling client only
+
+---
+
+## Quick Start
+
+### Step 1 — Server: Define a Room
+
+```typescript
+// edgebase.config.ts
+import { defineConfig } from '@edgebase/shared';
+
+export default defineConfig({
+  rooms: {
+    'counter': {
+      handlers: {
+        lifecycle: {
+          onCreate(room) {
+            room.setSharedState(() => ({ count: 0 }));
+          },
+        },
+        actions: {
+          INCREMENT: (_payload, room) => {
+            room.setSharedState(s => ({ ...s, count: (s.count as number) + 1 }));
+            return { newCount: room.getSharedState().count };
+          },
+        },
+      },
+    },
+  },
+});
+```
+
+### Step 2 — Clients: Join, Subscribe, Send
+
+Assume `client` is already initialized with your platform SDK.
+
+<Tabs groupId="sdk-language">
+<TabItem value="js" label="JavaScript" default>
+
+```typescript
+const room = client.room('counter', 'room-1');
+await room.join();
+
+room.state.onSharedChange((state) => {
+  console.log('Count:', state.count);
+});
+
+const result = await room.state.send('INCREMENT');
+console.log(result.newCount);
+```
+
+</TabItem>
+<TabItem value="dart" label="Dart/Flutter">
+
+```dart
+final room = client.room('counter', 'room-1');
+await room.join();
+
+room.state.onSharedChange((state, delta) {
+  print('Count: ${state['count']}');
+});
+
+final result = await room.state.send('INCREMENT');
+print(result['newCount']);
+```
+
+</TabItem>
+<TabItem value="swift" label="Swift">
+
+```swift
+let room = client.room(namespace: "counter", id: "room-1")
+try await room.join()
+
+room.state.onSharedChange { state, _ in
+    print("Count:", state["count"] ?? 0)
+}
+
+let result = try await room.state.send("INCREMENT")
+print(result["newCount"] ?? 0)
+```
+
+</TabItem>
+<TabItem value="kotlin" label="Kotlin">
+
+```kotlin
+val room = client.room("counter", "room-1")
+room.join()
+
+room.state.onSharedChange { state, _ ->
+    println("Count: ${state["count"]}")
+}
+
+val result = room.state.send("INCREMENT")
+println(result["newCount"])
+```
+
+</TabItem>
+<TabItem value="java" label="Java">
+
+```java
+RoomClient room = client.room("counter", "room-1");
+room.join().get();
+
+room.state.onSharedChange((state, delta) -> {
+    System.out.println("Count: " + state.get("count"));
+});
+
+Map<String, Object> result = room.state.send("INCREMENT", Map.of()).join();
+System.out.println(result.get("newCount"));
+```
+
+</TabItem>
+<TabItem value="csharp" label="C#">
+
+```csharp
+var room = client.Room("counter", "room-1");
+await room.JoinAsync();
+
+room.State.OnSharedChange((state, delta) => {
+    Console.WriteLine($"Count: {state["count"]}");
+});
+
+var result = await room.State.SendAsync("INCREMENT");
+Console.WriteLine(result["newCount"]);
+```
+
+</TabItem>
+<TabItem value="cpp" label="C++">
+
+```cpp
+auto room = client.room("counter", "room-1");
+room.join();
+
+room.state.on_shared_change([](const nlohmann::json& state, const nlohmann::json&) {
+  std::cout << "Count: " << state.value("count", 0) << std::endl;
+});
+
+room.state.send("INCREMENT", nlohmann::json::object(), [](const nlohmann::json& result) {
+  std::cout << result.value("newCount", 0) << std::endl;
+});
+```
+
+</TabItem>
+</Tabs>
+
+Step 1's `handlers.actions.INCREMENT` runs on the server. `setSharedState` triggers a delta broadcast to **all connected clients** — including Client B, whose `onSharedChange` handler fires automatically.
+
+---
+
+## Three State Areas
+
+<FeatureGrid features={[
+  { icon: "🌍", title: "sharedState", description: "All clients can read. Server writes only. Game board, scores, shared data." },
+  { icon: "👤", title: "playerState", description: "Only the owning player can read. Server writes only. HP, inventory, private hand." },
+  { icon: "🔒", title: "serverState", description: "Server only — never sent to clients. RNG seed, anti-cheat, internal computation." },
+]} />
+
+---
+
+## Client API Overview
+
+| Namespace / Method | Description |
+|--------|-------------|
+| `room.join()` / `room.leave()` | Connect to or leave the room |
+| `room.state.*` | Authoritative actions plus shared / private state reads and subscriptions |
+| `room.meta.*` | Public-safe room metadata, including pre-join fetches |
+| `room.members.*` | Presence list, member join/leave events, and ephemeral member state |
+| `room.signals.*` | Fire-and-forget room events and direct member targeting |
+| `room.media.*` *(alpha)* | Audio/video/screen publish, mute, device, and track state |
+| `room.admin.*` | Moderation controls such as kick, mute, and role changes |
+| `room.session.*` | Errors, reconnect notifications, kicked events, and connection state |
+
+Legacy flat methods such as `room.send(...)`, `room.getSharedState()`, and `room.onMessage(...)` remain available for compatibility, but the unified namespace surface is the recommended shape on the newer client SDKs.
+
+---
+
+## Server Lifecycle
+
+| Hook | When | Notes |
+|------|------|-------|
+| `handlers.lifecycle.onCreate(room, ctx)` | First player joins (room created) | Initialize shared/server state |
+| `handlers.lifecycle.onJoin(sender, room, ctx)` | Each player joins | Initialize player state. Throw to reject. |
+| `handlers.actions[type](payload, room, sender, ctx)` | Client calls `send()` | Process action, mutate state, return result |
+| `handlers.lifecycle.onLeave(sender, room, ctx, reason)` | Player leaves | `reason`: `'leave'` \| `'disconnect'` \| `'kicked'` |
+| `handlers.lifecycle.onDestroy(room, ctx)` | Last player leaves | Persist final results via `ctx.admin.db()` |
+
+---
+
+## No Other BaaS Has This
+
+Room is not a feature you'll find in Firebase, Supabase, Appwrite, or any other BaaS. Server-authoritative real-time state synchronization has traditionally required a separate multiplayer framework — and a separate server to run it on.
+
+| | Colyseus / Hathora | PartyKit / Liveblocks | EdgeBase Room |
+|---|---|---|---|
+| **What it is** | Standalone game server framework | Collaboration SDK | Built-in BaaS feature |
+| **Requires separate infra?** | Yes — dedicated Node.js servers | Yes — separate deployment | No — runs inside your EdgeBase project |
+| **Auth integration** | Build your own | Build your own | Uses EdgeBase Auth (JWT, access rules) |
+| **Database access** | Separate DB needed | Separate DB needed | Direct `ctx.admin.db()` in handlers |
+| **Delta sync** | Manual or schema-based | CRDT-based | Automatic diff-based deltas |
+| **3-tier state** | No (single state) | No | Yes — shared / player / server |
+| **Cost** | Server hosting 24/7 | Per-connection pricing | DO duration only — idle = $0 |
+
+Room gives you a multiplayer backend that shares the same auth, database, and deployment as the rest of your app — no additional infrastructure, no separate billing, no integration glue.
+
+---
+
+## Next Steps
+
+<NextStepCards steps={[
+  { icon: "🧠", title: "State (Room State)", description: "Authoritative shared, private, and server-only room state", href: "state" },
+  { icon: "🏷️", title: "Meta (Room Info)", description: "Lobby-safe metadata and pre-join room summaries", href: "meta" },
+  { icon: "👥", title: "Members (Presence)", description: "Presence, roster sync, and ephemeral member state", href: "members" },
+  { icon: "📡", title: "Signals (Broadcast)", description: "Transient room events, chat, and WebRTC signaling", href: "signals" },
+  { icon: "🎥", title: "Media (Voice/Video)", description: "Audio, video, screen-share, and device state", href: "media" },
+]} />

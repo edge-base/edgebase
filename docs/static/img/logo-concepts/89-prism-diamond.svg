@@ -1,0 +1,22 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g89" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Diamond-shaped prism (rotated square) -->
+  <polygon points="52,28 76,52 52,76 28,52" fill="url(#g89)" opacity="0.5" />
+  <polygon points="52,28 76,52 52,76 28,52" fill="none" stroke="#818cf8" stroke-width="2" />
+  <!-- Spectrum arcing upward and to the right -->
+  <path d="M68,40 Q88,24 108,20" stroke="#3b82f6" stroke-width="3" fill="none" stroke-linecap="round" />
+  <path d="M72,48 Q90,36 108,34" stroke="#6366f1" stroke-width="3" fill="none" stroke-linecap="round" />
+  <path d="M74,56 Q92,50 108,48" stroke="#8b5cf6" stroke-width="3" fill="none" stroke-linecap="round" />
+  <path d="M74,64 Q92,64 108,64" stroke="#a855f7" stroke-width="3" fill="none" stroke-linecap="round" />
+  <path d="M72,72 Q90,78 108,80" stroke="#d946ef" stroke-width="3" fill="none" stroke-linecap="round" />
+  <path d="M68,78 Q88,88 108,96" stroke="#ec4899" stroke-width="3" fill="none" stroke-linecap="round" />
+  <!-- Subtle input -->
+  <line x1="14" y1="52" x2="34" y2="52" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.5" />
+</svg>

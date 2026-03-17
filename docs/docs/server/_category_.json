@@ -1,0 +1,8 @@
+{
+  "label": "Server",
+  "position": 14,
+  "link": {
+    "type": "doc",
+    "id": "server/overview"
+  }
+}

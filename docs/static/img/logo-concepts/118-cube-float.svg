@@ -1,0 +1,31 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g118top" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa" />
+      <stop offset="100%" stop-color="#a78bfa" />
+    </linearGradient>
+    <linearGradient id="g118left" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+    <linearGradient id="g118right" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+    <radialGradient id="g118shadow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#4c1d95" stop-opacity="0.5" />
+      <stop offset="100%" stop-color="#4c1d95" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Ground shadow -->
+  <ellipse cx="64" cy="110" rx="32" ry="7" fill="url(#g118shadow)" />
+  <!-- Floating cube (shifted up) -->
+  <polygon points="64,18 104,38 64,58 24,38" fill="url(#g118top)" />
+  <polygon points="24,38 64,58 64,94 24,74" fill="url(#g118left)" />
+  <polygon points="104,38 64,58 64,94 104,74" fill="url(#g118right)" />
+  <!-- Top highlight -->
+  <polygon points="64,18 104,38 64,58" fill="white" opacity="0.1" />
+  <!-- Crown sparkle -->
+  <polygon points="64,18 74,23 64,28 54,23" fill="white" opacity="0.15" />
+</svg>

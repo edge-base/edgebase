@@ -1,0 +1,188 @@
+---
+sidebar_position: 0
+sidebar_label: Overview
+slug: /storage
+hide_title: true
+---
+import { OverviewHero, FeatureGrid, NextStepCards } from '@site/src/components/OverviewPage';
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+:::caution Beta
+This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::
+
+<OverviewHero
+  title="Storage"
+  tagline="EdgeBase Storage provides file storage built on Cloudflare R2 with $0 egress fees. Upload and download files with per-bucket access rules, generate time-limited signed URLs for secure sharing without authentication, and handle large files with resumable multipart uploads. Attach custom metadata to any file and control access with auth-aware read, write, and delete rules."
+  platforms={["JavaScript", "Dart", "Swift", "Kotlin", "Java", "Scala", "Python", "Go", "PHP", "Rust", "C#", "C++", "Ruby", "Elixir"]}
+/>
+
+---
+
+:::info Control Surface
+- **Access Rules**: [Storage Access Rules](/docs/storage/access-rules) gate bucket reads, uploads, and deletes.
+- **Hooks**: [Storage Hooks](/docs/storage/hooks) validate uploads, restrict downloads, and run file lifecycle side effects.
+- **Triggers**: Storage is not a trigger-based surface.
+- **Handlers**: Inline storage behavior lives under `storage.buckets[name].handlers.hooks` in `edgebase.config.ts`.
+:::
+
+## Features
+
+<FeatureGrid features={[
+  { icon: "📤", title: "Upload / Download", description: "Simple file operations with per-bucket access rules" },
+  { icon: "🔗", title: "Signed URLs", description: "Time-limited access links for secure sharing (no auth required)" },
+  { icon: "📎", title: "Multipart Upload", description: "Resume-capable uploads for large files (state tracked via KV)" },
+  { icon: "🏷️", title: "Metadata", description: "Attach custom key-value metadata to any file" },
+  { icon: "🔒", title: "Access Rules", description: "Per-bucket read, write, delete rules with auth context" },
+  { icon: "🪝", title: "Storage Hooks", description: "Validate uploads, restrict downloads, and run post-upload or delete side effects" },
+]} />
+
+## Quick Example
+
+Assume `client` is already initialized with your platform SDK.
+
+<Tabs groupId="sdk-language">
+<TabItem value="js" label="JavaScript" default>
+
+```typescript
+const result = await client.storage.bucket('photos').upload('photo-001.jpg', file, {
+  customMetadata: { uploadedBy: currentUser.id },
+});
+
+const url = client.storage.bucket('photos').getUrl('photo-001.jpg');
+
+const blob = await client.storage.bucket('photos').download('photo-001.jpg');
+```
+
+</TabItem>
+<TabItem value="dart" label="Dart/Flutter">
+
+```dart
+final bucket = client.storage.bucket('photos');
+
+await bucket.upload(
+  'photo-001.jpg',
+  fileBytes,
+  contentType: 'image/jpeg',
+  customMetadata: {'uploadedBy': currentUser.id},
+);
+
+final url = bucket.getUrl('photo-001.jpg');
+final bytes = await bucket.download('photo-001.jpg');
+```
+
+</TabItem>
+<TabItem value="swift" label="Swift">
+
+```swift
+let bucket = client.storage.bucket("photos")
+
+try await bucket.upload(
+  "photo-001.jpg",
+  data: imageData,
+  contentType: "image/jpeg",
+  customMetadata: ["uploadedBy": currentUser["id"] ?? ""]
+)
+
+let url = bucket.getUrl("photo-001.jpg")
+let data = try await bucket.download("photo-001.jpg")
+```
+
+</TabItem>
+<TabItem value="kotlin" label="Kotlin">
+
+```kotlin
+val bucket = client.storage.bucket("photos")
+
+bucket.upload(
+    "photo-001.jpg",
+    fileBytes,
+    "image/jpeg",
+    mapOf("uploadedBy" to currentUserId)
+)
+
+val url = bucket.getUrl("photo-001.jpg")
+val bytes = bucket.download("photo-001.jpg")
+```
+
+</TabItem>
+<TabItem value="java" label="Java">
+
+```java
+StorageBucket bucket = client.storage().bucket("photos");
+
+bucket.upload("photo-001.jpg", fileBytes, "image/jpeg");
+
+String url = bucket.getUrl("photo-001.jpg");
+byte[] bytes = bucket.download("photo-001.jpg");
+```
+
+</TabItem>
+<TabItem value="csharp" label="C#">
+
+```csharp
+var bucket = client.Storage.Bucket("photos");
+
+await bucket.UploadAsync("photo-001.jpg", fileBytes, "image/jpeg", new() {
+    ["uploadedBy"] = currentUserId,
+});
+
+var url = bucket.GetUrl("photo-001.jpg");
+var bytes = await bucket.DownloadAsync("photo-001.jpg");
+```
+
+</TabItem>
+<TabItem value="cpp" label="C++">
+
+```cpp
+auto bucket = client.storage().bucket("photos");
+
+bucket.upload("photo-001.jpg", data, "image/jpeg");
+
+std::string url = bucket.getUrl("photo-001.jpg");
+auto bytes = bucket.download("photo-001.jpg");
+```
+
+</TabItem>
+</Tabs>
+
+```typescript
+// Signed URL (no auth needed to access)
+const signedUrl = await admin.storage.bucket('photos').createSignedUrl('photo-001.jpg', {
+  expiresIn: '1h',
+});
+```
+
+:::info Admin SDK Coverage
+Server-side storage operations such as signed URL generation and privileged file access are available across all Admin SDKs.
+:::
+
+## Access Rules
+
+```typescript
+// edgebase.config.ts
+storage: {
+  buckets: {
+    photos: {
+      access: {
+        read() { return true },                                                // Public read
+        write(auth) { return auth !== null },                                  // Auth required
+        delete(auth, file) { return auth !== null && auth.id === file.uploadedBy },
+      },
+    },
+  },
+}
+```
+
+## Next Steps
+
+<NextStepCards steps={[
+  { icon: "📤", title: "Upload & Download", description: "Basic file operations, SDK usage", href: "upload-download" },
+  { icon: "🔗", title: "Signed URLs", description: "Time-limited access for secure file sharing", href: "signed-urls" },
+  { icon: "📎", title: "Multipart Upload", description: "Resumable uploads for large files", href: "multipart" },
+  { icon: "🏷️", title: "Metadata", description: "Custom metadata on files", href: "metadata" },
+  { icon: "🔒", title: "Access Rules", description: "Per-bucket read, write, and delete control", href: "access-rules" },
+  { icon: "🪝", title: "Storage Hooks", description: "Validate uploads and run lifecycle side effects", href: "hooks" },
+  { icon: "🧭", title: "SDK Support", description: "Choose Client SDK vs Admin SDK for storage workflows", href: "sdk-support" },
+]} />

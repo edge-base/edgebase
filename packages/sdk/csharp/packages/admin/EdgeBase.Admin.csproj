@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <RootNamespace>EdgeBase.Admin</RootNamespace>
+    <AssemblyName>EdgeBase.Admin</AssemblyName>
+    <Nullable>enable</Nullable>
+    <LangVersion>10.0</LangVersion>
+    <PackageId>dev.edgebase.admin</PackageId>
+    <Version>0.1.0</Version>
+    <Description>EdgeBase Admin SDK for .NET — server-side user management, KV, D1, Vectorize, Push</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\core\EdgeBase.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="tests/**" />
+  </ItemGroup>
+</Project>

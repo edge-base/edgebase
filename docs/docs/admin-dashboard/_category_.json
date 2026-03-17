@@ -1,0 +1,8 @@
+{
+  "label": "Admin Dashboard",
+  "position": 12,
+  "link": {
+    "type": "doc",
+    "id": "admin-dashboard/overview"
+  }
+}

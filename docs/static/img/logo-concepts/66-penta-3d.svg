@@ -1,0 +1,16 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- 3D faceted 5-pointed star - each arm a different shade -->
+  <!-- Top point -->
+  <polygon points="64,18 76,50 52,50" fill="#60a5fa" />
+  <!-- Upper right arm -->
+  <polygon points="76,50 110,50 82,68" fill="#818cf8" />
+  <!-- Lower right arm -->
+  <polygon points="82,68 92,100 64,82" fill="#a855f7" />
+  <!-- Lower left arm -->
+  <polygon points="64,82 36,100 46,68" fill="#c084fc" />
+  <!-- Upper left arm -->
+  <polygon points="46,68 18,50 52,50" fill="#ec4899" />
+  <!-- Center pentagon -->
+  <polygon points="52,50 76,50 82,68 64,82 46,68" fill="#6366f1" />
+</svg>

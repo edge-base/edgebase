@@ -1,0 +1,25 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g116top" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#93c5fd" />
+      <stop offset="100%" stop-color="#c4b5fd" />
+    </linearGradient>
+    <linearGradient id="g116left" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#581c87" />
+    </linearGradient>
+    <linearGradient id="g116right" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#701a75" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Elegant cube - bright top, deep sides -->
+  <polygon points="64,24 104,44 64,64 24,44" fill="url(#g116top)" opacity="0.9" />
+  <polygon points="24,44 64,64 64,104 24,84" fill="url(#g116left)" opacity="0.85" />
+  <polygon points="104,44 64,64 64,104 104,84" fill="url(#g116right)" opacity="0.75" />
+  <!-- Refined top highlight -->
+  <polygon points="64,24 84,34 64,44 44,34" fill="white" opacity="0.12" />
+  <!-- Subtle inner edge -->
+  <polyline points="64,24 64,64" fill="none" stroke="white" stroke-width="0.4" opacity="0.1" />
+</svg>

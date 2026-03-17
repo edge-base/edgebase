@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  ci-node:
+    name: Core CI (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20.19.0', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Docs Verification
+        run: pnpm --filter docs verify
+
+      - name: Shared Unit Tests
+        run: pnpm --dir packages/shared test
+
+      - name: CLI Unit Tests
+        run: pnpm --dir packages/cli test
+
+      - name: Server Unit Tests
+        run: pnpm --dir packages/server test
+
+      - name: Admin Dashboard Tests
+        run: pnpm --dir packages/admin test
+
+  sdk-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python SDK dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install -e './packages/sdk/python[dev]'
+          pip install -e './packages/sdk/python/packages/core'
+          pip install -e './packages/sdk/python/packages/admin'
+
+      - name: Test Python SDK
+        run: |
+          pytest packages/sdk/python/tests/test_sdk.py
+          pytest packages/sdk/python/packages/core/tests/test_core_unit.py
+          pytest packages/sdk/python/packages/admin/tests/test_admin_unit.py
+
+  sdk-swift:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test Swift SDK Core
+        run: swift test
+        working-directory: packages/sdk/swift/packages/core
+
+      - name: Test Swift SDK iOS package
+        run: swift test
+        working-directory: packages/sdk/swift/packages/ios

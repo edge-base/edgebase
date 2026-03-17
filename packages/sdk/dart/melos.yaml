@@ -1,0 +1,3 @@
+name: edgebase_workspace
+packages:
+  - packages/*

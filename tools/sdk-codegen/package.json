@@ -1,0 +1,13 @@
+{
+  "name": "@edgebase/sdk-codegen",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "tsx generate.ts",
+    "verify-path-encoding": "node path-encoding.test.mjs"
+  },
+  "dependencies": {
+    "tsx": "^4.0.0"
+  }
+}

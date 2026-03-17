@@ -1,0 +1,57 @@
+{
+    "name": "@edgebase/auth-ui-react",
+    "version": "0.1.0",
+    "description": "EdgeBase Auth UI for React — pre-built authentication components",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/edgebase/edgebase.git",
+        "directory": "packages/sdk/js/packages/auth-ui-react"
+    },
+    "homepage": "https://edgebase.fun",
+    "bugs": "https://github.com/edgebase/edgebase/issues",
+    "keywords": ["edgebase", "auth", "react", "ui", "authentication"],
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./styles.css": "./dist/styles.css"
+    },
+    "sideEffects": [
+        "*.css"
+    ],
+    "files": [
+        "dist"
+    ],
+    "publishConfig": {
+        "access": "public"
+    },
+    "scripts": {
+        "build": "tsc && cp src/styles.css dist/styles.css",
+        "dev": "tsc --watch",
+        "test": "vitest run",
+        "test:watch": "vitest"
+    },
+    "peerDependencies": {
+        "react": ">=18.0.0",
+        "react-dom": ">=18.0.0"
+    },
+    "dependencies": {
+        "@edgebase/web": "workspace:*"
+    },
+    "devDependencies": {
+        "@types/react": "^18.0.0",
+        "@types/react-dom": "^18.0.0",
+        "@testing-library/jest-dom": "^6.0.0",
+        "@testing-library/react": "^14.0.0",
+        "jsdom": "^24.0.0",
+        "react": "^18.0.0",
+        "react-dom": "^18.0.0",
+        "typescript": "^5.7.0",
+        "vitest": "^2.0.0"
+    }
+}

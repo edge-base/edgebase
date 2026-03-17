@@ -1,0 +1,45 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeBase Logo - Goddess Profile">
+  <defs>
+    <linearGradient id="g11" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+    <linearGradient id="g11glow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1" stop-opacity="0" />
+      <stop offset="100%" stop-color="#ec4899" stop-opacity="0.6" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Elegant side profile bust of goddess -->
+  <!-- Face profile - nose, lips, chin -->
+  <path d="M56,18 Q52,18 50,22 L48,26 Q46,28 48,28 L54,26 Q56,26 56,28 L54,30 Q52,34 50,36 L48,38 Q46,40 48,42 L52,42 Q56,42 58,40 L58,18Z"
+    fill="url(#g11)" />
+  <!-- Back of head + hair flowing -->
+  <path d="M58,18 Q64,14 68,18 Q72,22 70,30 Q68,38 64,42 L58,42 L58,18Z"
+    fill="url(#g11)" opacity="0.8" />
+  <!-- Flowing hair cascading down back -->
+  <path d="M64,42 Q72,44 74,52 Q76,62 70,72 Q66,78 60,80"
+    fill="none" stroke="url(#g11)" stroke-width="3" stroke-linecap="round" opacity="0.6" />
+  <path d="M68,42 Q78,46 80,56 Q82,68 74,78"
+    fill="none" stroke="url(#g11)" stroke-width="2" stroke-linecap="round" opacity="0.4" />
+  <!-- Laurel wreath crown -->
+  <path d="M52,18 Q48,12 52,10 Q56,8 58,12" fill="none" stroke="#818cf8" stroke-width="1.5" />
+  <path d="M58,12 Q60,8 64,10 Q68,12 66,18" fill="none" stroke="#818cf8" stroke-width="1.5" />
+  <!-- Neck + shoulder line -->
+  <path d="M50,42 Q46,48 40,50 L24,54" stroke="url(#g11)" stroke-width="2.5" stroke-linecap="round" fill="none" />
+  <path d="M58,42 Q58,48 56,50 L56,54" stroke="url(#g11)" stroke-width="2.5" stroke-linecap="round" fill="none" />
+  <!-- Extended arm from shoulder pointing right -->
+  <path d="M56,52 Q68,48 82,44 Q92,40 102,36"
+    stroke="url(#g11)" stroke-width="2.5" stroke-linecap="round" fill="none" />
+  <!-- Hand pointing -->
+  <path d="M102,36 L112,32" stroke="url(#g11)" stroke-width="2.5" stroke-linecap="round" />
+  <!-- Fingertip glow / energy burst -->
+  <circle cx="112" cy="32" r="2" fill="white" opacity="0.9" />
+  <circle cx="112" cy="32" r="5" fill="#ec4899" opacity="0.4" />
+  <circle cx="112" cy="32" r="9" fill="#ec4899" opacity="0.15" />
+  <!-- Three data stream lines emanating from pointing direction -->
+  <line x1="14" y1="80" x2="114" y2="80" stroke="url(#g11glow)" stroke-width="2" stroke-linecap="round" />
+  <line x1="14" y1="90" x2="104" y2="90" stroke="url(#g11glow)" stroke-width="2" stroke-linecap="round" opacity="0.7" />
+  <line x1="14" y1="100" x2="94" y2="100" stroke="url(#g11glow)" stroke-width="2" stroke-linecap="round" opacity="0.4" />
+</svg>

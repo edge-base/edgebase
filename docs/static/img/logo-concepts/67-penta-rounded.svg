@@ -1,0 +1,12 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g67" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Rounded thick stroke 5-pointed star -->
+  <polygon points="64,18 76,50 110,50 82,68 92,100 64,82 36,100 46,68 18,50 52,50" fill="none" stroke="url(#g67)" stroke-width="8" stroke-linejoin="round" stroke-linecap="round" />
+</svg>

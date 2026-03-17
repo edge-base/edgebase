@@ -1,0 +1,19 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "outDir": "./dist",
+        "rootDir": "../..",
+        "allowImportingTsExtensions": true,
+        "types": [
+            "@cloudflare/workers-types/2023-07-01"
+        ]
+    },
+    "include": [
+        "src",
+        "../../edgebase.config.ts",
+        "../../functions/**/*.ts"
+    ],
+    "exclude": [
+        "src/__tests__/cli.test.ts"
+    ]
+}

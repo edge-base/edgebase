@@ -1,0 +1,344 @@
+/**
+ * @edgebase/auth-ui-react — Default theme
+ *
+ * CSS-class-based styling with `eb-auth` prefix.
+ * Override by targeting these classes or change classPrefix in config.
+ */
+
+/* ─── Container ─── */
+
+.eb-auth-container {
+  max-width: 400px;
+  margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  color: #1a1a1a;
+}
+
+/* ─── Form ─── */
+
+.eb-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.eb-auth-title {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0 0 4px 0;
+  text-align: center;
+}
+
+.eb-auth-description {
+  font-size: 14px;
+  color: #666;
+  margin: 0;
+  text-align: center;
+}
+
+/* ─── Fields ─── */
+
+.eb-auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.eb-auth-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.eb-auth-input {
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #1a1a1a;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.eb-auth-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.eb-auth-input:disabled {
+  background: #f3f4f6;
+  cursor: not-allowed;
+}
+
+.eb-auth-input-code {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 18px;
+  letter-spacing: 4px;
+  text-align: center;
+}
+
+/* ─── Buttons ─── */
+
+.eb-auth-button {
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.eb-auth-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.eb-auth-button-primary {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.eb-auth-button-primary:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.eb-auth-button-social {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  width: 100%;
+}
+
+.eb-auth-button-social:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+/* Provider-specific colors */
+.eb-auth-button-google {
+  background: #fff;
+  border: 1px solid #d1d5db;
+}
+
+.eb-auth-button-github {
+  background: #24292e;
+  color: #fff;
+  border: none;
+}
+
+.eb-auth-button-github:hover:not(:disabled) {
+  background: #1b1f23;
+}
+
+.eb-auth-button-apple {
+  background: #000;
+  color: #fff;
+  border: none;
+}
+
+.eb-auth-button-apple:hover:not(:disabled) {
+  background: #1a1a1a;
+}
+
+.eb-auth-button-discord {
+  background: #5865f2;
+  color: #fff;
+  border: none;
+}
+
+.eb-auth-button-discord:hover:not(:disabled) {
+  background: #4752c4;
+}
+
+.eb-auth-button-twitter {
+  background: #1da1f2;
+  color: #fff;
+  border: none;
+}
+
+.eb-auth-button-twitter:hover:not(:disabled) {
+  background: #1a91da;
+}
+
+/* ─── Links ─── */
+
+.eb-auth-link {
+  background: none;
+  border: none;
+  color: #3b82f6;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+  text-decoration: none;
+}
+
+.eb-auth-link:hover {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.eb-auth-forgot-link {
+  align-self: flex-end;
+  margin-top: -8px;
+}
+
+/* ─── Toggle (sign-in ↔ sign-up) ─── */
+
+.eb-auth-toggle {
+  font-size: 14px;
+  color: #666;
+  text-align: center;
+  margin: 0;
+}
+
+/* ─── Error ─── */
+
+.eb-auth-error {
+  padding: 10px 12px;
+  font-size: 14px;
+  color: #dc2626;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+}
+
+/* ─── Success ─── */
+
+.eb-auth-success .eb-auth-description {
+  color: #16a34a;
+}
+
+/* ─── Divider ─── */
+
+.eb-auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.eb-auth-divider::before,
+.eb-auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e5e7eb;
+}
+
+/* ─── Social Buttons Layout ─── */
+
+.eb-auth-social {
+  margin-top: 8px;
+}
+
+.eb-auth-social-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ─── Alternative Methods ─── */
+
+.eb-auth-alt-methods {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+/* ─── MFA Actions ─── */
+
+.eb-auth-mfa-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* ─── Loading ─── */
+
+.eb-auth-loading {
+  text-align: center;
+  padding: 32px;
+  color: #666;
+}
+
+/* ─── Dark Mode ─── */
+
+@media (prefers-color-scheme: dark) {
+  .eb-auth-container {
+    color: #f3f4f6;
+  }
+
+  .eb-auth-description {
+    color: #9ca3af;
+  }
+
+  .eb-auth-label {
+    color: #d1d5db;
+  }
+
+  .eb-auth-input {
+    background: #1f2937;
+    border-color: #374151;
+    color: #f3f4f6;
+  }
+
+  .eb-auth-input:focus {
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15);
+  }
+
+  .eb-auth-input:disabled {
+    background: #111827;
+  }
+
+  .eb-auth-button-social {
+    background: #1f2937;
+    color: #d1d5db;
+    border-color: #374151;
+  }
+
+  .eb-auth-button-social:hover:not(:disabled) {
+    background: #374151;
+  }
+
+  .eb-auth-button-google {
+    background: #1f2937;
+    border-color: #374151;
+    color: #d1d5db;
+  }
+
+  .eb-auth-error {
+    color: #f87171;
+    background: #450a0a;
+    border-color: #7f1d1d;
+  }
+
+  .eb-auth-toggle {
+    color: #9ca3af;
+  }
+
+  .eb-auth-divider {
+    color: #6b7280;
+  }
+
+  .eb-auth-divider::before,
+  .eb-auth-divider::after {
+    background: #374151;
+  }
+
+  .eb-auth-alt-methods {
+    border-top-color: #374151;
+  }
+
+  .eb-auth-loading {
+    color: #9ca3af;
+  }
+}

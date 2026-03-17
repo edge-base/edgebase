@@ -1,0 +1,6 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Chunky rounded "e" - like the @ symbol core, very bold -->
+  <path d="M88,68 L44,68 Q44,48 64,48 Q84,48 84,68 Q84,96 60,96 Q36,96 36,68 Q36,36 64,36 Q92,36 92,68 L92,76"
+    fill="none" stroke="#38bdf8" stroke-width="14" stroke-linecap="round" />
+</svg>

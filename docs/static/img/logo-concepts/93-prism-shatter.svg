@@ -1,0 +1,20 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Shattered/faceted prism - multiple triangular facets -->
+  <!-- Main prism shape split into facets -->
+  <polygon points="52,20 38,60 52,56" fill="#3b82f6" opacity="0.6" />
+  <polygon points="52,20 52,56 68,48" fill="#60a5fa" opacity="0.5" />
+  <polygon points="52,56 38,60 28,92" fill="#6366f1" opacity="0.5" />
+  <polygon points="52,56 28,92 56,92" fill="#818cf8" opacity="0.45" />
+  <polygon points="52,56 56,92 78,92" fill="#8b5cf6" opacity="0.4" />
+  <polygon points="52,56 78,92 68,48" fill="#a855f7" opacity="0.45" />
+  <!-- Spectrum beams -->
+  <line x1="68" y1="48" x2="112" y2="26" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" />
+  <line x1="72" y1="56" x2="112" y2="42" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round" />
+  <line x1="76" y1="64" x2="112" y2="58" stroke="#8b5cf6" stroke-width="2.5" stroke-linecap="round" />
+  <line x1="78" y1="72" x2="112" y2="74" stroke="#a855f7" stroke-width="2.5" stroke-linecap="round" />
+  <line x1="78" y1="80" x2="112" y2="90" stroke="#d946ef" stroke-width="2.5" stroke-linecap="round" />
+  <line x1="76" y1="88" x2="112" y2="106" stroke="#ec4899" stroke-width="2.5" stroke-linecap="round" />
+  <!-- Input -->
+  <line x1="14" y1="50" x2="40" y2="50" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.5" />
+</svg>

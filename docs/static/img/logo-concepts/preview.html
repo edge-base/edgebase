@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>EdgeBase Logo Concepts</title>
+<style>
+  body { background: #1e1e2e; color: #cdd6f4; font-family: system-ui, sans-serif; padding: 40px; }
+  h1 { text-align: center; margin-bottom: 40px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 32px; max-width: 1200px; margin: 0 auto; }
+  .card { background: #313244; border-radius: 16px; padding: 24px; text-align: center; transition: transform 0.2s; }
+  .card:hover { transform: translateY(-4px); }
+  .card img { width: 128px; height: 128px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 8px; color: #cba6f7; }
+  .card p { margin: 0; font-size: 14px; opacity: 0.7; }
+  .fav { border: 2px solid #a6e3a1; }
+  .fav h3::before { content: "★ "; color: #a6e3a1; }
+  .sizes { display: flex; gap: 16px; align-items: end; justify-content: center; margin-top: 12px; }
+  .sizes img { margin: 0; }
+</style>
+</head>
+<body>
+<h1>Favorites</h1>
+<div class="grid">
+  <div class="card fav">
+    <img src="08-diamond-layers.svg" alt="Diamond Layers">
+    <h3>08 - Diamond Layers</h3>
+    <p>Stacked 3D diamond shapes, data layers</p>
+    <div class="sizes"><img src="08-diamond-layers.svg" style="width:48px;height:48px"><img src="08-diamond-layers.svg" style="width:32px;height:32px"><img src="08-diamond-layers.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card fav">
+    <img src="19-gem.svg" alt="Gem">
+    <h3>19 - Gem</h3>
+    <p>Two-tone diamond gem</p>
+    <div class="sizes"><img src="19-gem.svg" style="width:48px;height:48px"><img src="19-gem.svg" style="width:32px;height:32px"><img src="19-gem.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card fav">
+    <img src="26-cube-edge.svg" alt="Cube Edge">
+    <h3>26 - Cube Edge</h3>
+    <p>Purple isometric data block</p>
+    <div class="sizes"><img src="26-cube-edge.svg" style="width:48px;height:48px"><img src="26-cube-edge.svg" style="width:32px;height:32px"><img src="26-cube-edge.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card fav">
+    <img src="34-donut.svg" alt="Donut">
+    <h3>34 - Donut</h3>
+    <p>Purple-pink thick ring</p>
+    <div class="sizes"><img src="34-donut.svg" style="width:48px;height:48px"><img src="34-donut.svg" style="width:32px;height:32px"><img src="34-donut.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card fav">
+    <img src="54-diamond-cut.svg" alt="Diamond Cut">
+    <h3>54 - Diamond Cut</h3>
+    <p>Rotated square, hollow center</p>
+    <div class="sizes"><img src="54-diamond-cut.svg" style="width:48px;height:48px"><img src="54-diamond-cut.svg" style="width:32px;height:32px"><img src="54-diamond-cut.svg" style="width:16px;height:16px"></div>
+  </div>
+</div>
+<h1 style="margin-top:60px">New Variations (Geometric / Faceted)</h1>
+<div class="grid">
+  <div class="card">
+    <img src="71-prism-gem.svg" alt="Prism Gem">
+    <h3>71 - Prism Gem</h3>
+    <p>Triangular gem, 4 faceted faces</p>
+    <div class="sizes"><img src="71-prism-gem.svg" style="width:48px;height:48px"><img src="71-prism-gem.svg" style="width:32px;height:32px"><img src="71-prism-gem.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="72-hex-ring.svg" alt="Hex Ring">
+    <h3>72 - Hex Ring</h3>
+    <p>Thick hexagon with hollow center</p>
+    <div class="sizes"><img src="72-hex-ring.svg" style="width:48px;height:48px"><img src="72-hex-ring.svg" style="width:32px;height:32px"><img src="72-hex-ring.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="73-iso-stack.svg" alt="Iso Stack">
+    <h3>73 - Iso Stack</h3>
+    <p>Two stacked isometric cubes</p>
+    <div class="sizes"><img src="73-iso-stack.svg" style="width:48px;height:48px"><img src="73-iso-stack.svg" style="width:32px;height:32px"><img src="73-iso-stack.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="74-shield-gem.svg" alt="Shield Gem">
+    <h3>74 - Shield</h3>
+    <p>Pentagon badge with hollow center</p>
+    <div class="sizes"><img src="74-shield-gem.svg" style="width:48px;height:48px"><img src="74-shield-gem.svg" style="width:32px;height:32px"><img src="74-shield-gem.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="75-arrow-diamond.svg" alt="Arrow Diamond">
+    <h3>75 - Arrow Diamond</h3>
+    <p>Vertical diamond, blue + pink split</p>
+    <div class="sizes"><img src="75-arrow-diamond.svg" style="width:48px;height:48px"><img src="75-arrow-diamond.svg" style="width:32px;height:32px"><img src="75-arrow-diamond.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="76-facet-circle.svg" alt="Facet Circle">
+    <h3>76 - Facet Circle</h3>
+    <p>Octagon ring, gradient fill</p>
+    <div class="sizes"><img src="76-facet-circle.svg" style="width:48px;height:48px"><img src="76-facet-circle.svg" style="width:32px;height:32px"><img src="76-facet-circle.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="77-cube-open.svg" alt="Cube Open">
+    <h3>77 - Cube + Node</h3>
+    <p>Isometric cube with center glow dot</p>
+    <div class="sizes"><img src="77-cube-open.svg" style="width:48px;height:48px"><img src="77-cube-open.svg" style="width:32px;height:32px"><img src="77-cube-open.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="78-tri-stack.svg" alt="Tri Stack">
+    <h3>78 - Tri Stack</h3>
+    <p>Three overlapping triangles, layered</p>
+    <div class="sizes"><img src="78-tri-stack.svg" style="width:48px;height:48px"><img src="78-tri-stack.svg" style="width:32px;height:32px"><img src="78-tri-stack.svg" style="width:16px;height:16px"></div>
+  </div>
+</div>
+<h1 style="margin-top:60px">Refined &amp; Inspired</h1>
+<div class="grid">
+  <div class="card">
+    <img src="79-aurora.svg" alt="Aurora">
+    <h3>79 - Aurora</h3>
+    <p>Flowing light ribbons, elegant curves</p>
+    <div class="sizes"><img src="79-aurora.svg" style="width:48px;height:48px"><img src="79-aurora.svg" style="width:32px;height:32px"><img src="79-aurora.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="80-infinity-gem.svg" alt="Infinity Gem">
+    <h3>80 - Infinity Gem</h3>
+    <p>Two interlocking diamonds, endless</p>
+    <div class="sizes"><img src="80-infinity-gem.svg" style="width:48px;height:48px"><img src="80-infinity-gem.svg" style="width:32px;height:32px"><img src="80-infinity-gem.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="81-crystal-tower.svg" alt="Crystal Tower">
+    <h3>81 - Crystal Tower</h3>
+    <p>Tall elegant gem, faceted faces</p>
+    <div class="sizes"><img src="81-crystal-tower.svg" style="width:48px;height:48px"><img src="81-crystal-tower.svg" style="width:32px;height:32px"><img src="81-crystal-tower.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="82-nested-diamonds.svg" alt="Nested Diamonds">
+    <h3>82 - Nested Diamonds</h3>
+    <p>Ripple broadcast, 3 concentric squares</p>
+    <div class="sizes"><img src="82-nested-diamonds.svg" style="width:48px;height:48px"><img src="82-nested-diamonds.svg" style="width:32px;height:32px"><img src="82-nested-diamonds.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="83-prism-refract.svg" alt="Prism Refract">
+    <h3>83 - Prism Refract</h3>
+    <p>Light splitting through prism</p>
+    <div class="sizes"><img src="83-prism-refract.svg" style="width:48px;height:48px"><img src="83-prism-refract.svg" style="width:32px;height:32px"><img src="83-prism-refract.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="84-orbital.svg" alt="Orbital">
+    <h3>84 - Orbital</h3>
+    <p>Three orbital rings + core sphere</p>
+    <div class="sizes"><img src="84-orbital.svg" style="width:48px;height:48px"><img src="84-orbital.svg" style="width:32px;height:32px"><img src="84-orbital.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="85-peak.svg" alt="Peak">
+    <h3>85 - Peak</h3>
+    <p>Abstract mountain, dual peaks</p>
+    <div class="sizes"><img src="85-peak.svg" style="width:48px;height:48px"><img src="85-peak.svg" style="width:32px;height:32px"><img src="85-peak.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="86-warp.svg" alt="Warp">
+    <h3>86 - Warp</h3>
+    <p>Portal tunnel, nested diamonds converging</p>
+    <div class="sizes"><img src="86-warp.svg" style="width:48px;height:48px"><img src="86-warp.svg" style="width:32px;height:32px"><img src="86-warp.svg" style="width:16px;height:16px"></div>
+  </div>
+</div>
+<h1 style="margin-top:60px">Prism Variations</h1>
+<div class="grid">
+  <div class="card">
+    <img src="87-prism-glow.svg" alt="Prism Glow">
+    <h3>87 - Prism Glow</h3>
+    <p>Glass prism + soft glow, 6-beam spectrum</p>
+    <div class="sizes"><img src="87-prism-glow.svg" style="width:48px;height:48px"><img src="87-prism-glow.svg" style="width:32px;height:32px"><img src="87-prism-glow.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="88-prism-filled.svg" alt="Prism Filled">
+    <h3>88 - Prism Solid</h3>
+    <p>Solid 3-face prism, wide color fan</p>
+    <div class="sizes"><img src="88-prism-filled.svg" style="width:48px;height:48px"><img src="88-prism-filled.svg" style="width:32px;height:32px"><img src="88-prism-filled.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="89-prism-diamond.svg" alt="Prism Diamond">
+    <h3>89 - Prism Diamond</h3>
+    <p>Diamond-shaped prism, curved spectrum</p>
+    <div class="sizes"><img src="89-prism-diamond.svg" style="width:48px;height:48px"><img src="89-prism-diamond.svg" style="width:32px;height:32px"><img src="89-prism-diamond.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="90-prism-minimal.svg" alt="Prism Minimal">
+    <h3>90 - Prism Minimal</h3>
+    <p>Tiny prism, wide elegant beams</p>
+    <div class="sizes"><img src="90-prism-minimal.svg" style="width:48px;height:48px"><img src="90-prism-minimal.svg" style="width:32px;height:32px"><img src="90-prism-minimal.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="91-prism-3d.svg" alt="Prism 3D">
+    <h3>91 - Prism 3D</h3>
+    <p>Isometric 3D prism, depth + spectrum</p>
+    <div class="sizes"><img src="91-prism-3d.svg" style="width:48px;height:48px"><img src="91-prism-3d.svg" style="width:32px;height:32px"><img src="91-prism-3d.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="92-prism-arc.svg" alt="Prism Arc">
+    <h3>92 - Prism Arc</h3>
+    <p>Curved rainbow arc from prism</p>
+    <div class="sizes"><img src="92-prism-arc.svg" style="width:48px;height:48px"><img src="92-prism-arc.svg" style="width:32px;height:32px"><img src="92-prism-arc.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="93-prism-shatter.svg" alt="Prism Shatter">
+    <h3>93 - Prism Shatter</h3>
+    <p>Faceted/shattered glass prism</p>
+    <div class="sizes"><img src="93-prism-shatter.svg" style="width:48px;height:48px"><img src="93-prism-shatter.svg" style="width:32px;height:32px"><img src="93-prism-shatter.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="94-prism-centered.svg" alt="Prism Centered">
+    <h3>94 - Prism Down</h3>
+    <p>Centered prism, spectrum fans downward</p>
+    <div class="sizes"><img src="94-prism-centered.svg" style="width:48px;height:48px"><img src="94-prism-centered.svg" style="width:32px;height:32px"><img src="94-prism-centered.svg" style="width:16px;height:16px"></div>
+  </div>
+</div>
+<h1 style="margin-top:60px">Diamond Layers (08 Variations)</h1>
+<div class="grid">
+  <div class="card fav">
+    <img src="08-diamond-layers.svg" alt="Original">
+    <h3>08 - Original</h3>
+    <p>3 stacked diamonds, blue→indigo→pink</p>
+    <div class="sizes"><img src="08-diamond-layers.svg" style="width:48px;height:48px"><img src="08-diamond-layers.svg" style="width:32px;height:32px"><img src="08-diamond-layers.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="95-layers-tight.svg" alt="Tight">
+    <h3>95 - Tight Stack</h3>
+    <p>Closer spacing, compact feel + shadow</p>
+    <div class="sizes"><img src="95-layers-tight.svg" style="width:48px;height:48px"><img src="95-layers-tight.svg" style="width:32px;height:32px"><img src="95-layers-tight.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="96-layers-4.svg" alt="4 Layers">
+    <h3>96 - Four Layers</h3>
+    <p>4-layer depth, richer gradient</p>
+    <div class="sizes"><img src="96-layers-4.svg" style="width:48px;height:48px"><img src="96-layers-4.svg" style="width:32px;height:32px"><img src="96-layers-4.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="97-layers-glow.svg" alt="Glow">
+    <h3>97 - Glow Layers</h3>
+    <p>Soft glow between layers + center dot</p>
+    <div class="sizes"><img src="97-layers-glow.svg" style="width:48px;height:48px"><img src="97-layers-glow.svg" style="width:32px;height:32px"><img src="97-layers-glow.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="98-layers-wide.svg" alt="Wide">
+    <h3>98 - Wide Flat</h3>
+    <p>Wider/flatter diamonds, horizontal emphasis</p>
+    <div class="sizes"><img src="98-layers-wide.svg" style="width:48px;height:48px"><img src="98-layers-wide.svg" style="width:32px;height:32px"><img src="98-layers-wide.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="99-layers-split.svg" alt="Split">
+    <h3>99 - Split Faces</h3>
+    <p>Distinct left/right face colors per layer</p>
+    <div class="sizes"><img src="99-layers-split.svg" style="width:48px;height:48px"><img src="99-layers-split.svg" style="width:32px;height:32px"><img src="99-layers-split.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="100-layers-hollow.svg" alt="Hollow">
+    <h3>100 - Wireframe</h3>
+    <p>Outline only, connected side lines</p>
+    <div class="sizes"><img src="100-layers-hollow.svg" style="width:48px;height:48px"><img src="100-layers-hollow.svg" style="width:32px;height:32px"><img src="100-layers-hollow.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="101-layers-rising.svg" alt="Rising">
+    <h3>101 - Rising Pyramid</h3>
+    <p>Layers shrink upward, pyramid feel</p>
+    <div class="sizes"><img src="101-layers-rising.svg" style="width:48px;height:48px"><img src="101-layers-rising.svg" style="width:32px;height:32px"><img src="101-layers-rising.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="102-layers-cube.svg" alt="Cube">
+    <h3>102 - DB Blocks</h3>
+    <p>Layers with visible side walls, 3D database</p>
+    <div class="sizes"><img src="102-layers-cube.svg" style="width:48px;height:48px"><img src="102-layers-cube.svg" style="width:32px;height:32px"><img src="102-layers-cube.svg" style="width:16px;height:16px"></div>
+  </div>
+</div>
+<h1 style="margin-top:60px">Polished 08 (Refined)</h1>
+<div class="grid">
+  <div class="card fav">
+    <img src="08-diamond-layers.svg" alt="Original">
+    <h3>08 - Original</h3>
+    <p>Base reference — 3 stacked diamonds</p>
+    <div class="sizes"><img src="08-diamond-layers.svg" style="width:48px;height:48px"><img src="08-diamond-layers.svg" style="width:32px;height:32px"><img src="08-diamond-layers.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="103-polish-vivid.svg" alt="Vivid">
+    <h3>103 - Vivid</h3>
+    <p>More saturated colors, bolder presence</p>
+    <div class="sizes"><img src="103-polish-vivid.svg" style="width:48px;height:48px"><img src="103-polish-vivid.svg" style="width:32px;height:32px"><img src="103-polish-vivid.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="104-polish-facet.svg" alt="Facet">
+    <h3>104 - Facet</h3>
+    <p>Left/right face color distinction per layer</p>
+    <div class="sizes"><img src="104-polish-facet.svg" style="width:48px;height:48px"><img src="104-polish-facet.svg" style="width:32px;height:32px"><img src="104-polish-facet.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="105-polish-gap.svg" alt="Gap">
+    <h3>105 - Gapped</h3>
+    <p>Wider spacing between layers, breathing room</p>
+    <div class="sizes"><img src="105-polish-gap.svg" style="width:48px;height:48px"><img src="105-polish-gap.svg" style="width:32px;height:32px"><img src="105-polish-gap.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="106-polish-tall.svg" alt="Tall">
+    <h3>106 - Tall</h3>
+    <p>Narrower diamonds, sharper vertical feel</p>
+    <div class="sizes"><img src="106-polish-tall.svg" style="width:48px;height:48px"><img src="106-polish-tall.svg" style="width:32px;height:32px"><img src="106-polish-tall.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="107-polish-soft.svg" alt="Soft">
+    <h3>107 - Soft</h3>
+    <p>Softer opacity, premium/elegant feel</p>
+    <div class="sizes"><img src="107-polish-soft.svg" style="width:48px;height:48px"><img src="107-polish-soft.svg" style="width:32px;height:32px"><img src="107-polish-soft.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="108-polish-shadow.svg" alt="Shadow">
+    <h3>108 - Shadow</h3>
+    <p>Drop shadows, floating layers effect</p>
+    <div class="sizes"><img src="108-polish-shadow.svg" style="width:48px;height:48px"><img src="108-polish-shadow.svg" style="width:32px;height:32px"><img src="108-polish-shadow.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="109-polish-edge.svg" alt="Edge">
+    <h3>109 - Edge Lines</h3>
+    <p>Thin bright edge highlights per layer</p>
+    <div class="sizes"><img src="109-polish-edge.svg" style="width:48px;height:48px"><img src="109-polish-edge.svg" style="width:32px;height:32px"><img src="109-polish-edge.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="110-polish-center.svg" alt="Center">
+    <h3>110 - Centered</h3>
+    <p>Vertically centered, subtle ambient glow</p>
+    <div class="sizes"><img src="110-polish-center.svg" style="width:48px;height:48px"><img src="110-polish-center.svg" style="width:32px;height:32px"><img src="110-polish-center.svg" style="width:16px;height:16px"></div>
+  </div>
+</div>
+<h1 style="margin-top:60px">Cube 26 Variations</h1>
+<div class="grid">
+  <div class="card fav">
+    <img src="26-cube-edge.svg" alt="Original">
+    <h3>26 - Original</h3>
+    <p>Base reference — purple isometric cube</p>
+    <div class="sizes"><img src="26-cube-edge.svg" style="width:48px;height:48px"><img src="26-cube-edge.svg" style="width:32px;height:32px"><img src="26-cube-edge.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="111-cube-gradient.svg" alt="Gradient">
+    <h3>111 - Gradient</h3>
+    <p>Blue→indigo→pink across faces</p>
+    <div class="sizes"><img src="111-cube-gradient.svg" style="width:48px;height:48px"><img src="111-cube-gradient.svg" style="width:32px;height:32px"><img src="111-cube-gradient.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="112-cube-glow.svg" alt="Glow">
+    <h3>112 - Glow</h3>
+    <p>Ambient glow + bright top edge lines</p>
+    <div class="sizes"><img src="112-cube-glow.svg" style="width:48px;height:48px"><img src="112-cube-glow.svg" style="width:32px;height:32px"><img src="112-cube-glow.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="113-cube-glass.svg" alt="Glass">
+    <h3>113 - Glass</h3>
+    <p>Translucent glass effect, white reflections</p>
+    <div class="sizes"><img src="113-cube-glass.svg" style="width:48px;height:48px"><img src="113-cube-glass.svg" style="width:32px;height:32px"><img src="113-cube-glass.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="114-cube-luxe.svg" alt="Luxe">
+    <h3>114 - Luxe</h3>
+    <p>Deep rich tones, premium shadow, bright crown</p>
+    <div class="sizes"><img src="114-cube-luxe.svg" style="width:48px;height:48px"><img src="114-cube-luxe.svg" style="width:32px;height:32px"><img src="114-cube-luxe.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="115-cube-neon.svg" alt="Neon">
+    <h3>115 - Neon</h3>
+    <p>Bright neon edge outlines, all edges visible</p>
+    <div class="sizes"><img src="115-cube-neon.svg" style="width:48px;height:48px"><img src="115-cube-neon.svg" style="width:32px;height:32px"><img src="115-cube-neon.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="116-cube-elegant.svg" alt="Elegant">
+    <h3>116 - Elegant</h3>
+    <p>Bright top, deep dark sides, refined contrast</p>
+    <div class="sizes"><img src="116-cube-elegant.svg" style="width:48px;height:48px"><img src="116-cube-elegant.svg" style="width:32px;height:32px"><img src="116-cube-elegant.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="117-cube-gem.svg" alt="Gem">
+    <h3>117 - Gem Cut</h3>
+    <p>Faceted top face, blue-left / purple-right split</p>
+    <div class="sizes"><img src="117-cube-gem.svg" style="width:48px;height:48px"><img src="117-cube-gem.svg" style="width:32px;height:32px"><img src="117-cube-gem.svg" style="width:16px;height:16px"></div>
+  </div>
+  <div class="card">
+    <img src="118-cube-float.svg" alt="Float">
+    <h3>118 - Float</h3>
+    <p>Floating cube with ground shadow + sparkle</p>
+    <div class="sizes"><img src="118-cube-float.svg" style="width:48px;height:48px"><img src="118-cube-float.svg" style="width:32px;height:32px"><img src="118-cube-float.svg" style="width:16px;height:16px"></div>
+  </div>
+</div>
+</body>
+</html>

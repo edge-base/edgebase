@@ -1,0 +1,43 @@
+{
+    "name": "@edgebase/server",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "main": "./src/index.ts",
+    "scripts": {
+        "build": "tsc --noEmit",
+        "lint": "eslint src/ --max-warnings 0",
+        "test": "vitest run --config vitest.unit.config.ts",
+        "test:integration": "./scripts/run-integration-shards.sh",
+        "bench": "vitest run --config vitest.bench.config.ts",
+        "dev": "./scripts/dev.sh",
+        "dev:raw": "wrangler dev",
+        "test:e2e": "vitest run --config vitest.e2e.config.ts"
+    },
+    "dependencies": {
+        "@edgebase/shared": "workspace:*",
+        "@hono/zod-openapi": "^1.2.2",
+        "@simplewebauthn/server": "^10",
+        "bcryptjs": "^3.0.3",
+        "hono": "^4.12.5",
+        "jose": "^6.0.0",
+        "pg": "^8.16.3",
+        "zod": "^4.3.6"
+    },
+    "devDependencies": {
+        "@cloudflare/vitest-pool-workers": "^0.8.71",
+        "@cloudflare/workers-types": "^4.20260305.1",
+        "@stryker-mutator/core": "^8.7.0",
+        "@stryker-mutator/typescript-checker": "^8.7.0",
+        "@stryker-mutator/vitest-runner": "^8.7.0",
+        "@types/bcryptjs": "^3.0.0",
+        "@types/pg": "^8.11.0",
+        "@types/ws": "^8.18.1",
+        "@vitest/coverage-v8": "^3.2.4",
+        "fast-check": "^4.5.3",
+        "typescript": "^5.7.0",
+        "vitest": "^3.0.0",
+        "wrangler": "^4.70.0",
+        "ws": "^8.19.0"
+    }
+}

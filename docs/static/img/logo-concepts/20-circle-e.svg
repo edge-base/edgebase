@@ -1,0 +1,13 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g20" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Circle with a gap that forms an abstract "e" -->
+  <path d="M64,24 A40,40 0 1,1 44,94" fill="none" stroke="url(#g20)" stroke-width="12" stroke-linecap="round" />
+  <!-- Horizontal bar through middle -->
+  <line x1="40" y1="64" x2="88" y2="64" stroke="url(#g20)" stroke-width="12" stroke-linecap="round" />
+</svg>

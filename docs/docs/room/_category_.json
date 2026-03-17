@@ -1,0 +1,8 @@
+{
+  "label": "Room",
+  "position": 7,
+  "link": {
+    "type": "doc",
+    "id": "room/overview"
+  }
+}

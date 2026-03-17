@@ -1,0 +1,13 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Prism with refracted light beams -->
+  <!-- Main triangle prism -->
+  <polygon points="64,20 96,90 32,90" fill="none" stroke="#6366f1" stroke-width="3" />
+  <!-- Refracted beams coming out right side -->
+  <line x1="82" y1="58" x2="112" y2="38" stroke="#3b82f6" stroke-width="3" stroke-linecap="round" />
+  <line x1="86" y1="66" x2="112" y2="58" stroke="#818cf8" stroke-width="3" stroke-linecap="round" />
+  <line x1="88" y1="74" x2="112" y2="74" stroke="#a855f7" stroke-width="3" stroke-linecap="round" />
+  <line x1="86" y1="82" x2="112" y2="90" stroke="#ec4899" stroke-width="3" stroke-linecap="round" />
+  <!-- Input beam -->
+  <line x1="16" y1="64" x2="48" y2="64" stroke="white" stroke-width="2.5" stroke-linecap="round" opacity="0.6" />
+</svg>

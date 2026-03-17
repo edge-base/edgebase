@@ -1,0 +1,7 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Three dots in triangle = minimal distributed nodes -->
+  <circle cx="64" cy="32" r="14" fill="#f43f5e" />
+  <circle cx="36" cy="86" r="14" fill="#fb923c" />
+  <circle cx="92" cy="86" r="14" fill="#fbbf24" />
+</svg>

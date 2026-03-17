@@ -1,0 +1,67 @@
+{
+  "description": "Client wrapper method mapping: operationId → user-friendly method name. Codegen generates forwarding methods that delegate to GeneratedDbApi core methods.",
+  "groups": {
+    "auth": {
+      "doc": "Authentication wrapper methods",
+      "methods": [
+        { "op": "authSignup", "name": "signUp" },
+        { "op": "authSignin", "name": "signIn" },
+        { "op": "authSignout", "name": "signOut" },
+        { "op": "authSigninAnonymous", "name": "signInAnonymously" },
+        { "op": "authSigninMagicLink", "name": "signInWithMagicLink" },
+        { "op": "authVerifyMagicLink", "name": "verifyMagicLink" },
+        { "op": "authSigninPhone", "name": "signInWithPhone" },
+        { "op": "authVerifyPhone", "name": "verifyPhone" },
+        { "op": "authSigninEmailOtp", "name": "signInWithEmailOtp" },
+        { "op": "authVerifyEmailOtp", "name": "verifyEmailOtp" },
+        { "op": "authLinkPhone", "name": "linkWithPhone" },
+        { "op": "authVerifyLinkPhone", "name": "verifyLinkPhone" },
+        { "op": "authLinkEmail", "name": "linkWithEmail" },
+        { "op": "authChangeEmail", "name": "changeEmail" },
+        { "op": "authVerifyEmailChange", "name": "verifyEmailChange" },
+        { "op": "authVerifyEmail", "name": "verifyEmail" },
+        { "op": "authRequestPasswordReset", "name": "requestPasswordReset" },
+        { "op": "authResetPassword", "name": "resetPassword" },
+        { "op": "authChangePassword", "name": "changePassword" },
+        { "op": "authGetMe", "name": "getMe" },
+        { "op": "authUpdateProfile", "name": "updateProfile" },
+        { "op": "authGetSessions", "name": "listSessions" },
+        { "op": "authDeleteSession", "name": "revokeSession" },
+        { "op": "authMfaTotpEnroll", "name": "enrollTotp" },
+        { "op": "authMfaTotpVerify", "name": "verifyTotpEnrollment" },
+        { "op": "authMfaVerify", "name": "verifyTotp" },
+        { "op": "authMfaRecovery", "name": "useRecoveryCode" },
+        { "op": "authMfaTotpDelete", "name": "disableTotp" },
+        { "op": "authMfaFactors", "name": "listFactors" },
+        { "op": "authPasskeysRegisterOptions", "name": "passkeysRegisterOptions" },
+        { "op": "authPasskeysRegister", "name": "passkeysRegister" },
+        { "op": "authPasskeysAuthOptions", "name": "passkeysAuthOptions" },
+        { "op": "authPasskeysAuthenticate", "name": "passkeysAuthenticate" },
+        { "op": "authPasskeysList", "name": "passkeysList" },
+        { "op": "authPasskeysDelete", "name": "passkeysDelete" }
+      ]
+    },
+    "storage": {
+      "doc": "Storage wrapper methods (bucket-scoped)",
+      "methods": [
+        { "op": "deleteFile", "name": "delete" },
+        { "op": "deleteBatch", "name": "deleteMany" },
+        { "op": "checkFileExists", "name": "exists" },
+        { "op": "getFileMetadata", "name": "getMetadata" },
+        { "op": "updateFileMetadata", "name": "updateMetadata" },
+        { "op": "createSignedDownloadUrl", "name": "createSignedUrl" },
+        { "op": "createSignedDownloadUrls", "name": "createSignedUrls" },
+        { "op": "createSignedUploadUrl", "name": "createSignedUploadUrl" },
+        { "op": "createMultipartUpload", "name": "createMultipartUpload" },
+        { "op": "completeMultipartUpload", "name": "completeMultipartUpload" },
+        { "op": "abortMultipartUpload", "name": "abortMultipartUpload" }
+      ]
+    },
+    "analytics": {
+      "doc": "Analytics wrapper methods",
+      "methods": [
+        { "op": "trackEvents", "name": "track" }
+      ]
+    }
+  }
+}

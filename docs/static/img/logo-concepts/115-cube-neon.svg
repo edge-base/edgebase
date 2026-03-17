@@ -1,0 +1,29 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g115top" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+    <linearGradient id="g115left" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+    <linearGradient id="g115right" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Neon glow behind -->
+  <ellipse cx="64" cy="64" rx="38" ry="30" fill="#6366f1" opacity="0.08" />
+  <!-- Cube faces - slightly transparent -->
+  <polygon points="64,24 104,44 64,64 24,44" fill="url(#g115top)" opacity="0.8" />
+  <polygon points="24,44 64,64 64,104 24,84" fill="url(#g115left)" opacity="0.7" />
+  <polygon points="104,44 64,64 64,104 104,84" fill="url(#g115right)" opacity="0.6" />
+  <!-- Bright neon edge lines -->
+  <polyline points="24,44 64,24 104,44" fill="none" stroke="#60a5fa" stroke-width="1.5" opacity="0.7" />
+  <polyline points="24,44 64,64 104,44" fill="none" stroke="#818cf8" stroke-width="1" opacity="0.5" />
+  <polyline points="64,64 64,104" fill="none" stroke="#c084fc" stroke-width="1" opacity="0.5" />
+  <polyline points="24,44 24,84 64,104" fill="none" stroke="#818cf8" stroke-width="0.8" opacity="0.35" />
+  <polyline points="104,44 104,84 64,104" fill="none" stroke="#f0abfc" stroke-width="0.8" opacity="0.35" />
+</svg>

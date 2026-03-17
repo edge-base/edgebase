@@ -1,0 +1,13 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g57" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Outline-only Star of David, thick stroke -->
+  <polygon points="64,18 96,94 32,94" fill="none" stroke="url(#g57)" stroke-width="5" stroke-linejoin="round" />
+  <polygon points="64,110 32,34 96,34" fill="none" stroke="url(#g57)" stroke-width="5" stroke-linejoin="round" />
+</svg>

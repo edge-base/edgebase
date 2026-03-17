@@ -1,0 +1,37 @@
+/**
+ * SDK Error classes
+ * Extends @edgebase/shared EdgeBaseError with SDK-specific error types
+ */
+
+import { EdgeBaseError } from '@edgebase/shared';
+
+export { EdgeBaseError };
+export type { ErrorResponse, FieldError } from '@edgebase/shared';
+
+/**
+ * Parse a server error response into a EdgeBaseError
+ */
+export function parseErrorResponse(status: number, body: unknown): EdgeBaseError {
+  if (
+    body &&
+    typeof body === 'object' &&
+    'message' in body &&
+    typeof (body as Record<string, unknown>).message === 'string'
+  ) {
+    const err = body as Record<string, unknown>;
+    return new EdgeBaseError(
+      status,
+      err.message as string,
+      err.data as Record<string, { code: string; message: string }> | undefined,
+      typeof err.slug === 'string' ? err.slug : undefined,
+    );
+  }
+  return new EdgeBaseError(status, `Request failed with status ${status}`);
+}
+
+/**
+ * Create a network-level error (fetch failures, timeouts, etc.)
+ */
+export function networkError(message: string): EdgeBaseError {
+  return new EdgeBaseError(0, message);
+}

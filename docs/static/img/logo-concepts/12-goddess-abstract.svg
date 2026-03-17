@@ -1,0 +1,38 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeBase Logo - Goddess Abstract">
+  <defs>
+    <linearGradient id="g12" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+    <linearGradient id="g12ray" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Abstract goddess - flowing curves only, very modern -->
+  <!-- Single flowing S-curve representing the figure -->
+  <path d="M44,108 Q44,82 44,72 Q44,56 44,50 Q44,44 50,44 Q56,44 56,38 Q56,28 50,24 Q46,22 48,18 Q52,14 56,18 Q62,22 62,30 Q62,40 56,46 Q50,50 50,56 L50,64"
+    fill="none" stroke="url(#g12)" stroke-width="3" stroke-linecap="round" />
+  <!-- Extended arm - elegant curve sweeping right -->
+  <path d="M50,52 Q60,46 74,40 Q88,34 104,28"
+    fill="none" stroke="url(#g12)" stroke-width="3" stroke-linecap="round" />
+  <!-- Pointing gesture - small flick at end -->
+  <path d="M104,28 Q108,26 112,24"
+    fill="none" stroke="url(#g12)" stroke-width="2.5" stroke-linecap="round" />
+  <!-- Energy/light rays from fingertip -->
+  <line x1="112" y1="24" x2="120" y2="20" stroke="url(#g12ray)" stroke-width="1.5" stroke-linecap="round" />
+  <line x1="112" y1="24" x2="122" y2="24" stroke="url(#g12ray)" stroke-width="1.5" stroke-linecap="round" />
+  <line x1="112" y1="24" x2="118" y2="28" stroke="url(#g12ray)" stroke-width="1.5" stroke-linecap="round" />
+  <!-- Robe flowing - two graceful lines -->
+  <path d="M44,72 Q36,86 28,108" fill="none" stroke="url(#g12)" stroke-width="2.5" stroke-linecap="round" opacity="0.8" />
+  <path d="M50,72 Q56,86 62,108" fill="none" stroke="url(#g12)" stroke-width="2.5" stroke-linecap="round" opacity="0.8" />
+  <!-- Subtle halo/crown -->
+  <path d="M42,16 Q50,8 60,16" fill="none" stroke="#818cf8" stroke-width="1.5" stroke-linecap="round" opacity="0.6" />
+  <!-- Floating data particles around figure -->
+  <circle cx="72" cy="56" r="2" fill="#3b82f6" opacity="0.5" />
+  <circle cx="82" cy="48" r="1.5" fill="#6366f1" opacity="0.4" />
+  <circle cx="92" cy="38" r="2" fill="#8b5cf6" opacity="0.5" />
+  <circle cx="36" cy="64" r="1.5" fill="#3b82f6" opacity="0.3" />
+</svg>

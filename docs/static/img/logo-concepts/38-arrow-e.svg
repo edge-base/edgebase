@@ -1,0 +1,11 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g38" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#22d3ee" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Bold ">" chevron = edge, forward, deploy -->
+  <path d="M36,28 L92,64 L36,100" fill="none" stroke="url(#g38)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

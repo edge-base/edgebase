@@ -1,0 +1,35 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+group = 'dev.edgebase'
+version = '0.1.0'
+java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+tasks.jar {
+    archiveBaseName = 'edgebase-android-java'
+}
+repositories { mavenCentral(); google() }
+def projectPath = { String monorepoPath, String standalonePath ->
+    findProject(monorepoPath) != null ? monorepoPath : standalonePath
+}
+dependencies {
+    api project(projectPath(':packages:core', ':core'))
+    api project(projectPath(':packages:admin', ':admin'))
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.google.code.gson:gson:2.11.0'
+    // Android SDK stubs — provides android.* and gms.tasks.* for compilation on non-Android hosts
+    compileOnly 'com.google.android:android:4.1.1.4'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    // Android stubs needed at test runtime — TurnstileProvider imports android.* at class level
+    // (compileOnly is not available during `gradle test` JVM execution → NoClassDefFoundError)
+    testImplementation 'com.google.android:android:4.1.1.4'
+}
+
+tasks.test {
+    useJUnitPlatform()
+    testLogging { events 'passed', 'skipped', 'failed' }
+}
+publishing {
+    publications { maven(MavenPublication) { from components.java; groupId = 'dev.edgebase'; artifactId = 'edgebase-android-java' } }
+}

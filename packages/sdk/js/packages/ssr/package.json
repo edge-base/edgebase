@@ -1,0 +1,40 @@
+{
+    "name": "@edgebase/ssr",
+    "version": "0.1.0",
+    "description": "EdgeBase SSR helpers — cookie-based token management for server-side rendering",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/edgebase/edgebase.git",
+        "directory": "packages/sdk/js/packages/ssr"
+    },
+    "homepage": "https://edgebase.fun",
+    "bugs": "https://github.com/edgebase/edgebase/issues",
+    "keywords": ["edgebase", "ssr", "server-side-rendering", "cookies", "auth"],
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "sideEffects": false,
+    "files": [
+        "dist"
+    ],
+    "publishConfig": {
+        "access": "public"
+    },
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch"
+    },
+    "dependencies": {
+        "@edgebase/core": "workspace:*"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.0"
+    }
+}

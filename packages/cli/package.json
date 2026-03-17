@@ -1,0 +1,52 @@
+{
+    "name": "@edgebase/cli",
+    "version": "0.1.0",
+    "description": "CLI for EdgeBase — create, develop, and deploy EdgeBase projects",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/edgebase/edgebase.git",
+        "directory": "packages/cli"
+    },
+    "homepage": "https://edgebase.fun",
+    "bugs": "https://github.com/edgebase/edgebase/issues",
+    "keywords": ["edgebase", "cli", "baas", "backend", "cloudflare-workers"],
+    "publishConfig": {
+        "access": "public"
+    },
+    "type": "module",
+    "bin": {
+        "edgebase": "./dist/index.js"
+    },
+    "main": "./dist/index.js",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsc && node ./scripts/copy-assets.mjs",
+        "lint": "eslint src/ --max-warnings 0",
+        "test": "vitest run",
+        "dev": "tsc --watch",
+        "prepack": "pnpm run build"
+    },
+    "engines": {
+        "node": ">=20.19.0"
+    },
+    "dependencies": {
+        "@edgebase/shared": "workspace:*",
+        "chalk": "^5.4.0",
+        "commander": "^13.1.0",
+        "esbuild": "^0.27.3",
+        "jose": "^6.0.0",
+        "ora": "^9.3.0",
+        "pg": "^8.16.3",
+        "tsx": "^4.20.6",
+        "ts-morph": "^27.0.2",
+        "wrangler": "^4.70.0"
+    },
+    "devDependencies": {
+        "@types/node": "^25.2.3",
+        "typescript": "^5.7.0",
+        "vitest": "^3.0.0"
+    }
+}

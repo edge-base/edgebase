@@ -1,0 +1,28 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g114top" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#c084fc" />
+    </linearGradient>
+    <linearGradient id="g114left" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#4c1d95" />
+    </linearGradient>
+    <linearGradient id="g114right" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7" />
+      <stop offset="100%" stop-color="#6b21a8" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Deep luxurious cube -->
+  <polygon points="64,24 104,44 64,64 24,44" fill="url(#g114top)" />
+  <polygon points="24,44 64,64 64,104 24,84" fill="url(#g114left)" />
+  <polygon points="104,44 64,64 64,104 104,84" fill="url(#g114right)" />
+  <!-- Bright top-left edge highlight for premium feel -->
+  <polyline points="24,44 64,24 104,44" fill="none" stroke="#e0e7ff" stroke-width="1" opacity="0.35" />
+  <polyline points="24,44 64,64" fill="none" stroke="#c7d2fe" stroke-width="0.7" opacity="0.2" />
+  <!-- Subtle crown highlight -->
+  <polygon points="64,24 84,34 64,44" fill="white" opacity="0.15" />
+  <!-- Bottom shadow -->
+  <ellipse cx="64" cy="108" rx="30" ry="5" fill="#4c1d95" opacity="0.3" />
+</svg>

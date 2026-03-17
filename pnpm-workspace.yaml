@@ -1,0 +1,7 @@
+packages:
+  - 'packages/*'
+  - 'packages/sdk/*'
+  - 'packages/sdk/js/packages/*'
+  - 'packages/sdk/react-native'
+  - 'packages/plugins/*'
+  - 'docs'

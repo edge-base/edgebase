@@ -1,0 +1,12 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Triangular prism gem - 3 visible faces -->
+  <!-- Left face -->
+  <polygon points="64,18 32,64 64,110" fill="#3b82f6" />
+  <!-- Right face -->
+  <polygon points="64,18 96,64 64,110" fill="#8b5cf6" />
+  <!-- Top facet highlight -->
+  <polygon points="64,18 32,64 96,64" fill="#60a5fa" opacity="0.5" />
+  <!-- Bottom facet -->
+  <polygon points="32,64 96,64 64,110" fill="#ec4899" opacity="0.4" />
+</svg>

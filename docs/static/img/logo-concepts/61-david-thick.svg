@@ -1,0 +1,19 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g61" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Bold/chunky Star of David - thicker arms, more mass -->
+  <!-- Up triangle outer -->
+  <polygon points="64,14 102,100 26,100" fill="url(#g61)" />
+  <!-- Up triangle inner cutout -->
+  <polygon points="64,38 86,88 42,88" fill="#0f172a" />
+  <!-- Down triangle outer -->
+  <polygon points="64,114 26,28 102,28" fill="url(#g61)" opacity="0.8" />
+  <!-- Down triangle inner cutout -->
+  <polygon points="64,90 42,40 86,40" fill="#0f172a" />
+</svg>

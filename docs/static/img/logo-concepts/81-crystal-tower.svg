@@ -1,0 +1,14 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Crystal tower - tall elegant gem rising upward -->
+  <!-- Left face -->
+  <polygon points="64,14 42,54 42,90 64,110" fill="#3b82f6" />
+  <!-- Right face -->
+  <polygon points="64,14 86,54 86,90 64,110" fill="#8b5cf6" />
+  <!-- Top crown facet -->
+  <polygon points="64,14 42,54 64,44 86,54" fill="#60a5fa" />
+  <!-- Center seam highlight -->
+  <line x1="64" y1="14" x2="64" y2="110" stroke="#c084fc" stroke-width="1.5" opacity="0.4" />
+  <!-- Bottom tip glow -->
+  <polygon points="42,90 64,110 86,90 64,96" fill="#ec4899" opacity="0.7" />
+</svg>

@@ -1,0 +1,15 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g80" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Infinity/möbius diamond - two interlocking rhombuses -->
+  <polygon points="64,22 90,50 64,78 38,50" fill="url(#g80)" />
+  <polygon points="64,50 90,78 64,106 38,78" fill="url(#g80)" opacity="0.6" />
+  <!-- Overlap intersection highlight -->
+  <polygon points="64,50 77,64 64,78 51,64" fill="white" opacity="0.12" />
+</svg>

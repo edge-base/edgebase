@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      overflow: hidden;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+  </style>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+</head>
+<body>
+  <div id="cf-turnstile"></div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const siteKey = params.get('siteKey') || '';
+    const action = params.get('action') || 'signup';
+    const appearance = params.get('appearance') || 'interaction-only';
+
+    function post(handler, value) {
+      if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers[handler]) {
+        return;
+      }
+      window.webkit.messageHandlers[handler].postMessage(value);
+    }
+
+    function renderWhenReady() {
+      if (!siteKey) {
+        post('onError', 'missing-site-key');
+        return;
+      }
+
+      if (!window.turnstile) {
+        setTimeout(renderWhenReady, 50);
+        return;
+      }
+
+      window.turnstile.render('#cf-turnstile', {
+        sitekey: siteKey,
+        action,
+        appearance,
+        callback: function(token) {
+          post('onToken', token);
+        },
+        'error-callback': function(error) {
+          post('onError', String(error));
+        },
+        'before-interactive-callback': function() {
+          post('onInteractive', 'show');
+        },
+        'after-interactive-callback': function() {
+          post('onInteractive', 'hide');
+        },
+        'timeout-callback': function() {
+          post('onError', 'timeout');
+        }
+      });
+    }
+
+    renderWhenReady();
+  </script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+group = 'dev.edgebase'
+version = '0.1.0'
+java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+tasks.jar {
+    archiveBaseName = 'edgebase-admin-java'
+}
+repositories { mavenCentral() }
+def projectPath = { String monorepoPath, String standalonePath ->
+    findProject(monorepoPath) != null ? monorepoPath : standalonePath
+}
+dependencies {
+    api project(projectPath(':packages:core', ':core'))
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.google.code.gson:gson:2.11.0'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+tasks.test {
+    useJUnitPlatform()
+    testLogging { events 'passed', 'skipped', 'failed' }
+}
+publishing {
+    publications { maven(MavenPublication) { from components.java; groupId = 'dev.edgebase'; artifactId = 'edgebase-admin-java' } }
+}

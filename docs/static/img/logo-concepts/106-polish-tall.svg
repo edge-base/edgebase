@@ -1,0 +1,22 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g106a" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="g106b" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+    <linearGradient id="g106c" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Taller/narrower diamonds - more vertical, sharper feel -->
+  <polygon points="64,14 96,48 64,62 32,48" fill="url(#g106a)" />
+  <polygon points="64,34 96,68 64,82 32,68" fill="url(#g106b)" opacity="0.85" />
+  <polygon points="64,54 96,88 64,102 32,88" fill="url(#g106c)" opacity="0.7" />
+  <polygon points="64,14 96,48 64,62" fill="white" opacity="0.08" />
+</svg>

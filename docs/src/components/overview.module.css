@@ -1,0 +1,330 @@
+/* ─── Overview Hero (Firebase-style) ──────────────────── */
+
+.overviewHero {
+  margin-bottom: 2rem;
+}
+
+.overviewHeroHeader {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.overviewHeroTitle {
+  font-size: 2.4rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--ifm-heading-color);
+  letter-spacing: -0.01em;
+}
+
+.overviewHeroTagline {
+  font-size: 1rem;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.7;
+  margin: 0;
+  max-width: 720px;
+}
+
+/* ─── Platform Badges ─────────────────────────────────── */
+
+.platformBadges {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.platformBadge {
+  position: relative;
+  display: inline-flex;
+  cursor: default;
+}
+
+.platformBadge::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--ifm-color-emphasis-800);
+  color: var(--ifm-color-emphasis-0);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s;
+}
+
+.platformBadge:hover::after {
+  opacity: 1;
+}
+
+.platformIcon {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+
+[data-theme='dark'] .platformIcon {
+  filter: drop-shadow(0 0 0.5px rgba(255, 255, 255, 0.5));
+}
+
+.platformToken {
+  min-width: 34px;
+  height: 22px;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: #fff;
+  background: linear-gradient(135deg, var(--token-start), var(--token-end));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 6px 16px rgba(15, 23, 42, 0.16);
+}
+
+/* ─── Feature Grid (cards) ────────────────────────────── */
+
+.featureGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin: 1.5rem 0;
+}
+
+.featureGrid[data-columns="2"] {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.featureGridCard {
+  padding: 1.15rem;
+  border-radius: 8px;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.featureGridCard:hover {
+  border-color: var(--ifm-color-emphasis-300);
+  text-decoration: none;
+  color: inherit;
+}
+
+.featureGridIcon {
+  display: block;
+  font-size: 1.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.featureGridTitle {
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.featureGridDesc {
+  font-size: 0.84rem;
+  color: var(--ifm-color-emphasis-600);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ─── Step Path ───────────────────────────────────────── */
+
+.stepPath {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 1.5rem 0;
+  padding-left: 0.25rem;
+}
+
+.stepItem {
+  display: flex;
+  gap: 1rem;
+  position: relative;
+  padding-bottom: 1.5rem;
+}
+
+.stepItem:last-child {
+  padding-bottom: 0;
+}
+
+.stepItem:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: 34px;
+  bottom: 0;
+  width: 1px;
+  background: var(--ifm-color-emphasis-200);
+}
+
+.stepNumber {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--ifm-color-emphasis-200);
+  color: var(--ifm-color-emphasis-700);
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+}
+
+.stepContent {
+  flex: 1;
+  min-width: 0;
+  padding-top: 0.15rem;
+}
+
+.stepTitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0 0 0.2rem;
+}
+
+.stepDesc {
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-600);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.stepCode {
+  display: inline-block;
+  margin-top: 0.4rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  background: var(--ifm-color-emphasis-100);
+  color: var(--ifm-color-emphasis-800);
+  font-family: var(--ifm-font-family-monospace);
+}
+
+/* ─── Next Step Cards ─────────────────────────────────── */
+
+.nextStepGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 0.75rem;
+  margin: 1.5rem 0;
+}
+
+.nextStepCard {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  text-decoration: none;
+  color: inherit;
+}
+
+.nextStepCard:hover {
+  border-color: var(--ifm-color-emphasis-300);
+  text-decoration: none;
+  color: inherit;
+}
+
+.nextStepIcon {
+  font-size: 1.15rem;
+  flex-shrink: 0;
+}
+
+.nextStepBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.nextStepTitle {
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin-bottom: 0.1rem;
+}
+
+.nextStepDesc {
+  font-size: 0.78rem;
+  color: var(--ifm-color-emphasis-600);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.nextStepArrow {
+  font-size: 1rem;
+  color: var(--ifm-color-emphasis-400);
+  flex-shrink: 0;
+}
+
+.nextStepCard:hover .nextStepArrow {
+  color: var(--ifm-color-emphasis-600);
+}
+
+/* ─── Diagram Block ───────────────────────────────────── */
+
+.diagramBlock {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  background: var(--ifm-color-emphasis-100);
+}
+
+.diagramTitle {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ifm-color-emphasis-500);
+  margin-bottom: 0.6rem;
+}
+
+.diagramPre {
+  margin: 0;
+  padding: 0;
+  background: transparent !important;
+  border: none !important;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  color: var(--ifm-color-emphasis-700);
+}
+
+/* ─── Responsive ──────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .overviewHeroHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .featureGrid,
+  .featureGrid[data-columns="2"] {
+    grid-template-columns: 1fr;
+  }
+
+  .nextStepGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .platformToken {
+    min-width: 30px;
+    height: 20px;
+    padding: 0 0.35rem;
+    font-size: 0.62rem;
+  }
+}

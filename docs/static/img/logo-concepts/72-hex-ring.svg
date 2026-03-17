@@ -1,0 +1,13 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g72" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Thick hexagon ring -->
+  <polygon points="64,20 104,42 104,86 64,108 24,86 24,42" fill="url(#g72)" />
+  <polygon points="64,42 84,53 84,75 64,86 44,75 44,53" fill="#0f172a" />
+</svg>

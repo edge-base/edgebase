@@ -1,0 +1,48 @@
+{
+    "name": "edgebase/sdk",
+    "description": "EdgeBase PHP Server SDK \u2014 server-side BaaS client (DECISIONS #117)",
+    "type": "library",
+    "license": "MIT",
+    "version": "0.1.0",
+    "require": {
+        "php": ">=8.1",
+        "ext-curl": "*",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0",
+        "phpstan/phpstan": "^1.10"
+    },
+    "autoload": {
+        "psr-4": {
+            "EdgeBase\\": "src/",
+            "EdgeBase\\Core\\": "packages/core/src/",
+            "EdgeBase\\Admin\\": "packages/admin/src/"
+        },
+        "classmap": [
+            "packages/core/src/Generated/",
+            "packages/core/src/RoomClient.php",
+            "packages/core/src/Subscription.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "EdgeBase\\Tests\\": "tests/",
+            "EdgeBase\\Tests\\Core\\": "packages/core/tests/",
+            "EdgeBase\\Tests\\Admin\\": "packages/admin/tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse src"
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "0.1.x-dev"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}

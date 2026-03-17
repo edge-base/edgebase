@@ -1,0 +1,12 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Abstract mountain peak / upward arrow - aspiration + edge -->
+  <!-- Back peak (pink) -->
+  <polygon points="78,28 108,96 48,96" fill="#ec4899" opacity="0.5" />
+  <!-- Front peak (blue→indigo) - left face -->
+  <polygon points="52,20 52,96 20,96" fill="#3b82f6" />
+  <!-- Front peak - right face -->
+  <polygon points="52,20 88,96 52,96" fill="#6366f1" />
+  <!-- Snow cap / highlight -->
+  <polygon points="52,20 42,44 52,38 62,44" fill="#a5b4fc" opacity="0.5" />
+</svg>

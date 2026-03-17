@@ -1,0 +1,48 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeBase Logo - Cameo Goddess">
+  <defs>
+    <linearGradient id="g14" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+    <linearGradient id="g14bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Cameo-style circular frame -->
+  <circle cx="54" cy="58" r="42" fill="none" stroke="url(#g14)" stroke-width="2.5" />
+  <circle cx="54" cy="58" r="38" fill="url(#g14bg)" />
+  <!-- Profile silhouette inside cameo - classical style -->
+  <!-- Forehead to nose -->
+  <path d="M58,24 Q54,24 52,28 Q50,32 48,36 Q46,38 48,38 L52,36 Q54,36 53,38 L50,44"
+    fill="url(#g14)" />
+  <!-- Lips to chin -->
+  <path d="M50,44 Q48,46 50,48 Q52,50 50,52 L48,56 Q46,60 50,62"
+    fill="url(#g14)" />
+  <!-- Back of head -->
+  <path d="M58,24 Q66,24 68,32 Q70,40 68,50 Q66,58 62,62 L50,62"
+    fill="url(#g14)" />
+  <!-- Elegant updo hair -->
+  <path d="M58,24 Q56,18 60,16 Q66,14 70,18 Q74,22 70,28 Q68,24 66,24"
+    fill="url(#g14)" opacity="0.8" />
+  <!-- Neck -->
+  <path d="M50,62 Q48,66 44,70 L38,76" stroke="url(#g14)" stroke-width="2.5" fill="none" stroke-linecap="round" />
+  <path d="M62,62 Q62,68 60,72 L58,76" stroke="url(#g14)" stroke-width="2.5" fill="none" stroke-linecap="round" />
+  <!-- Shoulder drape inside cameo -->
+  <path d="M38,76 Q30,80 20,84" stroke="url(#g14)" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.6" />
+  <path d="M58,76 Q66,80 76,82" stroke="url(#g14)" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.6" />
+  <!-- Extended arm breaking out of the cameo frame - pointing right -->
+  <path d="M76,82 Q86,76 96,70 Q104,66 112,60"
+    stroke="url(#g14)" stroke-width="3" stroke-linecap="round" fill="none" />
+  <!-- Pointing finger -->
+  <path d="M112,60 L120,56" stroke="url(#g14)" stroke-width="2.5" stroke-linecap="round" />
+  <!-- Glow at tip -->
+  <circle cx="120" cy="56" r="2" fill="white" />
+  <circle cx="120" cy="56" r="5" fill="#ec4899" opacity="0.35" />
+  <!-- Three streaming lines from the point -->
+  <line x1="96" y1="96" x2="120" y2="96" stroke="url(#g14)" stroke-width="2" opacity="0.4" stroke-linecap="round" />
+  <line x1="96" y1="104" x2="114" y2="104" stroke="url(#g14)" stroke-width="2" opacity="0.3" stroke-linecap="round" />
+  <line x1="96" y1="112" x2="108" y2="112" stroke="url(#g14)" stroke-width="2" opacity="0.2" stroke-linecap="round" />
+</svg>

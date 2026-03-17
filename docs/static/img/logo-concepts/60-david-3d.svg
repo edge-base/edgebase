@@ -1,0 +1,12 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- 3D-ish Star of David with each triangle point having its own shade -->
+  <!-- Up triangle: 3 faces -->
+  <polygon points="64,16 82,52 46,52" fill="#60a5fa" />
+  <polygon points="82,52 96,96 64,64" fill="#3b82f6" />
+  <polygon points="46,52 64,64 32,96" fill="#818cf8" />
+  <!-- Down triangle: 3 faces -->
+  <polygon points="64,112 46,76 82,76" fill="#ec4899" />
+  <polygon points="46,76 32,32 64,64" fill="#a855f7" />
+  <polygon points="82,76 64,64 96,32" fill="#c084fc" />
+</svg>

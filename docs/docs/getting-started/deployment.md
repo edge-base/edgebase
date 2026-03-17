@@ -1,0 +1,170 @@
+---
+sidebar_position: 3
+---
+
+# Deployment
+
+EdgeBase supports three deployment modes. The same code runs identically in all environments.
+
+## Cloud Edge
+
+Global serverless deployment on 330+ edge locations.
+
+```bash
+npx edgebase deploy
+```
+
+On first deploy, EdgeBase automatically handles Cloudflare authentication:
+1. Checks if you're logged in via `wrangler whoami`
+2. Opens browser login if needed (no manual `wrangler login` required)
+3. Detects your account ID and configures `wrangler.toml` automatically
+
+| Feature | Detail |
+|---------|--------|
+| Cold start | ~0ms |
+| Scaling | Automatic, global |
+| Cost | $5/month base |
+| Storage egress | $0 |
+| Backup | 30-day PITR |
+
+**Requirements:** Cloudflare account with Workers Paid plan ($5/month, account-level — covers all projects).
+
+:::tip CI/CD
+For non-interactive environments, set `CLOUDFLARE_API_TOKEN` as an environment variable instead.
+:::
+
+## Docker
+
+Container-based self-hosting. Runs the same runtime as edge deployment — identical behavior, full data sovereignty.
+
+```bash
+npx edgebase docker build
+npx edgebase docker run
+```
+
+`docker run` automatically creates `.env.release` with secure random JWT secrets if the file doesn't exist yet. To customize secrets or use an existing file:
+
+```bash
+npx edgebase docker run --env-file .env.release
+```
+
+### `.env.release` Reference
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `JWT_USER_SECRET` | Yes | Signs user authentication tokens (auto-generated) |
+| `JWT_ADMIN_SECRET` | Yes | Signs admin dashboard tokens (auto-generated) |
+| `SERVICE_KEY` | Optional | Server-side API key for [Admin SDKs](/docs/admin-sdk/reference) |
+| `DB_POSTGRES_*_URL` | Optional | PostgreSQL connection string (used by DB blocks or auth configured with `provider: 'postgres'`; legacy `provider: 'neon'` configs still work) |
+
+:::tip
+`JWT_USER_SECRET` and `JWT_ADMIN_SECRET` are auto-generated when you first run `npx edgebase docker run`. You only need to set them manually if you want to keep existing tokens valid across re-deployments.
+:::
+
+Or run the equivalent container command yourself:
+
+```bash
+docker run -v edgebase-data:/data -p 8787:8787 --env-file .env.release edgebase
+```
+
+Or with Docker Compose:
+
+```yaml
+version: '3.8'
+services:
+  edgebase:
+    image: edgebase
+    ports:
+      - '8787:8787'
+    volumes:
+      - edgebase-data:/data
+    environment:
+      - JWT_USER_SECRET=your-secret-key
+      - JWT_ADMIN_SECRET=your-admin-secret-key
+      - SERVICE_KEY=your-service-key
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:8787/api/health']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  edgebase-data:
+```
+
+The same `SERVICE_KEY` is what all Admin SDKs use for server-side access.
+
+| Feature | Detail |
+|---------|--------|
+| Cold start | N/A (always running) |
+| Scaling | Manual (container orchestration) |
+| Cost | VPS cost only (~$5–20/month) |
+| Data | Local SQLite files in Docker volume |
+
+**Requirements:** Docker installed.
+
+## Direct Run
+
+Run directly with Node.js — no Docker, no cloud account needed.
+
+```bash
+npx edgebase dev
+```
+
+| Feature | Detail |
+|---------|--------|
+| Best for | Development, testing, lightweight production |
+| Data | Local filesystem |
+| Requirements | Node.js 20.19+ (24.x recommended) |
+
+## Comparison
+
+| | Edge | Docker | Direct |
+|---|---|---|---|
+| **Command** | `npx edgebase deploy` | `npx edgebase docker run` | `npx edgebase dev` |
+| **Requires** | Cloudflare account | Docker | Node.js only |
+| **Scaling** | Auto global | Manual | Single instance |
+| **Best for** | Production | Self-hosted prod | Dev / lightweight |
+| **Cost** | ~$5–30/month | VPS cost | Free |
+
+## Environment Variables
+
+EdgeBase uses separate files for development and production secrets:
+
+| File | Purpose | Used by |
+|------|---------|---------|
+| `.env.development` | Local dev secrets | `npx edgebase dev` |
+| `.env.release` | Production secrets | `npx edgebase deploy` |
+
+### Edge (Cloudflare Workers)
+
+The simplest approach — put your production secrets in `.env.release` and deploy:
+
+```bash
+# Copy the example template and fill in your production keys
+cp .env.release.example .env.release
+
+# Deploy — secrets are auto-uploaded to Cloudflare
+npx edgebase deploy
+```
+
+Or set secrets manually one at a time:
+
+```bash
+npx edgebase secret set JWT_USER_SECRET
+npx edgebase secret set JWT_ADMIN_SECRET
+```
+
+:::info
+`SERVICE_KEY` is auto-generated on first deploy — you don't need to set it manually.
+:::
+
+### Docker / Direct
+
+```bash
+# Use the env file directly
+npx edgebase docker run --env-file .env.release
+
+# Or pass variables inline
+JWT_USER_SECRET=your-secret npx edgebase dev
+```

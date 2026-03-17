@@ -1,0 +1,33 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeBase Logo - Athena Minimal">
+  <defs>
+    <linearGradient id="g10" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Ultra-minimal goddess - geometric/line art style -->
+  <!-- Head circle -->
+  <circle cx="50" cy="28" r="10" fill="none" stroke="url(#g10)" stroke-width="2.5" />
+  <!-- Helmet crest - single elegant curve -->
+  <path d="M42,20 Q50,8 58,20" fill="none" stroke="url(#g10)" stroke-width="2.5" stroke-linecap="round" />
+  <!-- Body - single flowing line -->
+  <path d="M50,38 L50,72" stroke="url(#g10)" stroke-width="2.5" stroke-linecap="round" />
+  <!-- Shoulders -->
+  <path d="M34,48 L66,48" stroke="url(#g10)" stroke-width="2.5" stroke-linecap="round" />
+  <!-- Right arm - extended pointing -->
+  <path d="M66,48 Q80,40 100,32" stroke="url(#g10)" stroke-width="2.5" stroke-linecap="round" fill="none" />
+  <!-- Pointing hand - small arrow -->
+  <path d="M97,34 L104,30 L100,36" stroke="url(#g10)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <!-- Left arm holding shield/circle (database symbol) -->
+  <path d="M34,48 L28,60" stroke="url(#g10)" stroke-width="2.5" stroke-linecap="round" />
+  <circle cx="26" cy="66" r="8" fill="none" stroke="url(#g10)" stroke-width="2" />
+  <line x1="18" y1="66" x2="34" y2="66" stroke="url(#g10)" stroke-width="1.5" />
+  <!-- Robe - A-line skirt as two lines -->
+  <path d="M50,72 L34,108" stroke="url(#g10)" stroke-width="2.5" stroke-linecap="round" />
+  <path d="M50,72 L66,108" stroke="url(#g10)" stroke-width="2.5" stroke-linecap="round" />
+  <!-- Glow at fingertip -->
+  <circle cx="104" cy="30" r="4" fill="#8b5cf6" opacity="0.4" />
+  <circle cx="104" cy="30" r="2" fill="#c084fc" />
+</svg>

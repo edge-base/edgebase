@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="fvTopL" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa" />
+      <stop offset="100%" stop-color="#818cf8" />
+    </linearGradient>
+    <linearGradient id="fvTopR" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa" />
+      <stop offset="100%" stop-color="#c084fc" />
+    </linearGradient>
+    <linearGradient id="fvLeft" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+    <linearGradient id="fvRight" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7" />
+      <stop offset="100%" stop-color="#db2777" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <polygon points="64,24 104,44 64,64" fill="url(#fvTopR)" />
+  <polygon points="64,24 24,44 64,64" fill="url(#fvTopL)" />
+  <polygon points="24,44 64,64 64,104 24,84" fill="url(#fvLeft)" />
+  <polygon points="104,44 64,64 64,104 104,84" fill="url(#fvRight)" />
+  <polygon points="64,24 84,34 64,38" fill="white" opacity="0.2" />
+</svg>

@@ -1,0 +1,19 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "EdgeBase",
+  "Description": "EdgeBase client SDK plugin for Unreal Engine 5.",
+  "Category": "Online",
+  "CreatedBy": "EdgeBase",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "EdgeBase",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

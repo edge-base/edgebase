@@ -1,0 +1,10 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Upward pointing diamond/arrow - deploy to edge -->
+  <!-- Left half -->
+  <polygon points="64,16 64,112 24,64" fill="#3b82f6" />
+  <!-- Right half -->
+  <polygon points="64,16 64,112 104,64" fill="#ec4899" />
+  <!-- Center line highlight -->
+  <line x1="64" y1="16" x2="64" y2="112" stroke="#6366f1" stroke-width="2" opacity="0.6" />
+</svg>

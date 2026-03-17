@@ -1,0 +1,6 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Shuriken / pinwheel star - angular, dynamic rotation feel -->
+  <path d="M64,16 L72,56 L112,48 L72,64 L112,80 L72,72 L64,112 L56,72 L16,80 L56,64 L16,48 L56,56 Z"
+    fill="#e879f9" />
+</svg>

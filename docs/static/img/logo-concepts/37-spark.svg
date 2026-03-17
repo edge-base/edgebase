@@ -1,0 +1,5 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- 4-point spark/star = instant, serverless, edge speed -->
+  <path d="M64,18 Q68,54 110,64 Q68,74 64,110 Q60,74 18,64 Q60,54 64,18Z" fill="#fbbf24" />
+</svg>

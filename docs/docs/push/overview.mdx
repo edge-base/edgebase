@@ -1,0 +1,118 @@
+---
+id: overview
+title: Overview
+sidebar_label: Overview
+slug: /push
+hide_title: true
+sidebar_position: 0
+---
+import { OverviewHero, FeatureGrid, NextStepCards, DiagramBlock } from '@site/src/components/OverviewPage';
+
+:::caution Alpha
+This feature is in **alpha**. APIs and behavior may change without notice. Not recommended for production use.
+:::
+
+<OverviewHero
+  title="Push Notifications"
+  tagline="EdgeBase Push manages the complete push token lifecycle on the backend — the part every team rebuilds from scratch. Device tokens are mapped to user IDs with multi-device routing (up to 10 devices per user), automatic token refresh, deduplication, and cleanup of invalid tokens. Add topic-based subscriptions and broadcast messaging on top. Just call send() with a user ID and payload — EdgeBase resolves all devices and delivers through FCM."
+  platforms={["Android", "iOS", "macOS", "Web", "Flutter", "React Native", "Unity", "Unreal"]}
+/>
+
+---
+
+:::info Admin SDK Coverage
+Server-side push sending, logs, topic operations, and broadcast are available across all Admin SDKs.
+:::
+
+:::info Control Surface
+- **Access Rules**: [Push Access Rules](/docs/push/access-rules) gate which backend callers can send notifications.
+- **Hooks**: [Push Hooks](/docs/push/hooks) let you rewrite outbound sends or observe delivery results.
+- **Triggers**: Push is not a trigger-based surface.
+- **Handlers**: Inline push behavior lives under `push.handlers.hooks` in `edgebase.config.ts`.
+:::
+
+## Architecture
+
+EdgeBase uses **Firebase Cloud Messaging (FCM)** as the single delivery provider for all platforms. Your client apps use the Firebase SDK to obtain FCM registration tokens, which are then stored and managed by EdgeBase.
+
+<DiagramBlock title="Push Flow">
+{`┌─────────────┐     FCM Token     ┌──────────────┐    FCM HTTP v1    ┌─────┐
+│  Client App  │ ──────────────→  │ EdgeBase      │ ──────────────→  │ FCM │ → Device
+│ (Firebase SDK)│                  │ Server (KV)   │                  │     │
+└─────────────┘                   └──────────────┘                   └─────┘`}
+</DiagramBlock>
+
+**How it works:**
+
+1. **Token Acquisition** — Your client app uses the Firebase SDK to get an FCM registration token.
+2. **Token Registration** — The client SDK sends this token to your EdgeBase server. When `AUTH_DB` is available, tokens are written to the `_push_devices` table in D1 as the primary source of truth, with KV acting as a mirrored cache for fast edge reads. If `AUTH_DB` is not configured, KV is the sole store.
+3. **Sending** — Your backend calls `admin.push.send(userId, payload)`. EdgeBase looks up all devices and sends through FCM.
+4. **Lifecycle** — EdgeBase handles token refresh, deduplication, and automatic cleanup of invalid tokens.
+
+## Push vs Database Subscriptions and Room
+
+Push is not a WebSocket channel. Database Subscriptions and Room target clients with an active live connection. Push targets registered devices through FCM and is meant for alerts that should arrive even when the app is backgrounded or not currently connected.
+
+For the full comparison, see [Choosing Live Features](/docs/guides/choosing-live-features).
+
+## Key Features
+
+<FeatureGrid features={[
+  { icon: "📱", title: "Multi-Device Management", description: "Up to 10 devices per user. All devices receive notifications. Stale tokens are cleaned up when FCM returns 404/410/UNREGISTERED during a send attempt." },
+  { icon: "📌", title: "Topic Messaging", description: "Subscribe devices to topics (news, sports) and send to all subscribers at once." },
+  { icon: "📢", title: "Broadcast", description: "Send to every registered device. All tokens auto-subscribe to the 'all' topic." },
+  { icon: "🔒", title: "Access Rules", description: "Control which backend callers can send notifications through the server surface" },
+  { icon: "🪝", title: "Push Hooks", description: "Rewrite outbound sends or observe delivery results before and after the provider call" },
+  { icon: "📋", title: "Push Logs", description: "24-hour send logs with status (sent, failed, removed) and error details for debugging." },
+  { icon: "💾", title: "Token Caching", description: "Client SDKs cache tokens locally. Server requests only fire when the token actually changes." },
+  { icon: "🚪", title: "Auto-Unregister", description: "On sign out, the SDK automatically unregisters the device token before clearing the session." },
+]} />
+
+## What You Don't Have to Build
+
+Push notification delivery (FCM/APNs) is well-documented. The hard part is everything around it — the backend infrastructure that maps users to tokens across devices, handles token churn, and cleans up stale registrations. This is what EdgeBase manages for you:
+
+| Without EdgeBase | With EdgeBase |
+|---|---|
+| Build a `user_tokens` table, handle schema migrations | `client.push.registerToken()` — stored in KV automatically |
+| Write token refresh logic (FCM tokens expire/rotate) | Automatic — SDK detects changes and re-registers |
+| Handle multi-device (user signs in on phone + tablet) | Built-in — up to 10 devices per user, all receive notifications |
+| Detect and remove invalid tokens (uninstalled apps) | Automatic — invalid tokens are cleaned up on failed sends |
+| Deduplicate tokens (same device, multiple sign-ins) | Automatic — `deviceId`-based deduplication |
+| Build topic subscription management | `client.push.subscribeTopic('news')` — one line |
+| Build send-to-user API (resolve userId → all device tokens) | `admin.push.send(userId, payload)` — resolves all devices |
+| Set up logging for delivery debugging | Built-in 24h push logs with status and error details |
+
+This is typically 200–500 lines of backend code that every team writes from scratch. EdgeBase eliminates it entirely.
+
+## Token Storage
+
+Push tokens use a **dual-write strategy** when `AUTH_DB` is available:
+
+- **D1 (`AUTH_DB._push_devices`)** — The primary source of truth. Token registrations, updates, and deletions are written here first.
+- **Cloudflare KV** — A mirrored cache for fast edge-cached reads at send time. KV is updated after every D1 write.
+
+If `AUTH_DB` is not configured, KV acts as the sole store.
+
+This dual-write design provides:
+
+- **Durability** — D1 is the authoritative store; KV can be rebuilt from it.
+- **Edge-cached reads** — Token lookups are fast at send time via KV.
+- **No backup contamination** — Invalid tokens in KV don't get restored during database backups.
+
+KV key patterns:
+- `push:user:{userId}` → JSON array of all devices for a user (cache, rebuilt from D1)
+- `push:log:{userId}:{timestamp}` → Send log entries (24h TTL)
+
+Topic subscriptions are managed through FCM directly (via `subscribeToTopic` / `unsubscribeFromTopic`) and are not stored in KV.
+
+## Next Steps
+
+<NextStepCards steps={[
+  { icon: "⚙️", title: "Configuration", description: "Set up Firebase and provide your credentials to EdgeBase", href: "configuration" },
+  { icon: "🔧", title: "Admin SDK", description: "Send push notifications from your backend", href: "admin-sdk" },
+  { icon: "🌐", title: "Client SDK", description: "Web, Flutter, React Native, Swift, Kotlin, Java, Unity, Unreal", href: "client-sdk" },
+  { icon: "🔒", title: "Access Rules", description: "Control who can send notifications from backend surfaces", href: "access-rules" },
+  { icon: "🪝", title: "Push Hooks", description: "Rewrite outbound sends or observe delivery results", href: "hooks" },
+  { icon: "🧭", title: "SDK Support", description: "See which push capabilities belong to device clients vs backend senders", href: "sdk-support" },
+]} />

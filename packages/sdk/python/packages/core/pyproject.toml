@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "edgebase-core"
+version = "0.1.0"
+description = "EdgeBase Core SDK — shared types, HTTP client, table, storage."
+requires-python = ">=3.9"
+license = "MIT"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/edgebase_core"]

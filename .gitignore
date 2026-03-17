@@ -1,0 +1,79 @@
+# Workspace metadata
+.DS_Store
+/.claude
+.idea/
+.vscode/
+*.swp
+
+# Local env and generated config
+.dev.vars
+.dev.vars.*
+.edgebase/
+.env
+.env.*
+.neon
+.wrangler/
+.wrangler.generated.*
+edgebase.config.ts
+edgebase.config.ts.bak
+edgebase.d.ts
+edgebase-schema.lock.json
+wrangler.toml
+!.env.development.example
+!.env.release.example
+
+# JavaScript and TypeScript
+.svelte-kit/
+.turbo/
+.vitest-cache/
+*.tsbuildinfo
+.runs/
+admin-build/
+build/
+coverage/
+dist/
+docs/static/llms*.txt
+docs/static/search-index*.json
+node_modules/
+
+# Language and native caches
+.build/
+.dart_tool/
+.gradle/
+.kotlin/
+.suite-build/
+.suite-build-test/
+__pycache__/
+*.hprof
+.phpunit.result.cache
+bin/
+obj/
+vendor/
+composer.lock
+target/
+Cargo.lock
+
+# C++ SDK generated artifacts
+packages/sdk/cpp/.vs/
+packages/sdk/cpp/Binaries/
+packages/sdk/cpp/DerivedDataCache/
+packages/sdk/cpp/Intermediate/
+packages/sdk/cpp/Saved/
+packages/sdk/cpp/ThirdParty/include/
+packages/sdk/cpp/ThirdParty/lib/
+packages/sdk/cpp/packages/core/tests/build-storage-suite*/
+
+# Playwright
+.playwright/
+
+# Generated test/runtime output
+artifacts/
+dev/
+functions/
+runtime/
+*.log
+erl_crash.dump
+test-results/
+test_out.txt
+unity-hub-crop*.png
+.tmp/

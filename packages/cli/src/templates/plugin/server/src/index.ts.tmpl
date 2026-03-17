@@ -1,0 +1,59 @@
+/**
+ * {{PLUGIN_NAME}} — EdgeBase Plugin
+ *
+ * Define your plugin's tables, functions, and hooks below.
+ *
+ * Usage in edgebase.config.ts:
+ * ```typescript
+ * import { {{PLUGIN_NAME_CAMEL}}Plugin } from '{{PLUGIN_NAME}}';
+ * export default defineConfig({
+ *   plugins: [ {{PLUGIN_NAME_CAMEL}}Plugin({ apiKey: process.env.MY_API_KEY! }) ],
+ * });
+ * ```
+ */
+import { definePlugin } from '@edgebase/plugin-core';
+
+interface {{PLUGIN_NAME_PASCAL}}Config {
+  apiKey: string;
+}
+
+export const {{PLUGIN_NAME_CAMEL}}Plugin = definePlugin<{{PLUGIN_NAME_PASCAL}}Config>({
+  name: '{{PLUGIN_NAME}}',
+  version: '0.1.0',
+  manifest: {
+    description: '{{PLUGIN_NAME}} functionality',
+    configTemplate: {
+      apiKey: 'CHANGE_ME',
+    },
+  },
+
+  tables: {
+    // Example table — rename to match your domain
+    // items: {
+    //   schema: {
+    //     name: { type: 'string', required: true },
+    //     status: { type: 'string', default: 'active' },
+    //   },
+    //   access: {
+    //     read: (auth) => auth !== null,
+    //     insert: (auth) => auth !== null,
+    //   },
+    //   handlers: {
+    //     hooks: {
+    //       beforeInsert: async (_auth, data) => ({ ...data, source: '{{PLUGIN_NAME}}' }),
+    //     },
+    //   },
+    // },
+  },
+
+  functions: {
+    // Example function — rename to match your use case
+    // 'hello': {
+    //   trigger: { type: 'http', method: 'GET', path: '/{{PLUGIN_NAME}}/hello' },
+    //   handler: async (ctx) => {
+    //     const key = ctx.pluginConfig.apiKey;  // typed via {{PLUGIN_NAME_PASCAL}}Config
+    //     return Response.json({ message: 'Hello from {{PLUGIN_NAME}}!' });
+    //   },
+    // },
+  },
+});

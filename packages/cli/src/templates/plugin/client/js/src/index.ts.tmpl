@@ -1,0 +1,68 @@
+/**
+ * {{PLUGIN_NAME}} — JS Client SDK
+ *
+ * Typed client wrapper for {{PLUGIN_NAME}}.
+ * Uses PluginClientFactory pattern from @edgebase/plugin-core.
+ *
+ * ─── Quick Start ───
+ *
+ * ```typescript
+ * import { createClient } from '@edgebase/sdk';
+ * import { createPlugin } from '{{PLUGIN_NAME}}-client';
+ *
+ * const jb = createClient({ url: 'https://my-app.workers.dev' });
+ * const plugin = createPlugin(jb);
+ *
+ * // Call server functions
+ * const result = await plugin.doSomething({ input: 'hello' });
+ *
+ * // Read plugin tables
+ * const items = await plugin.getItems();
+ * ```
+ */
+import type { PluginClientFactory, PluginClientHost } from '@edgebase/plugin-core';
+
+const NS = '{{PLUGIN_NAME}}';
+
+// ─── Types ───
+
+export interface Item {
+  id: string;
+  name: string;
+  status: string;
+}
+
+// ─── Client Interface ───
+
+export interface PluginClient {
+  /**
+   * Example function — replace with your own.
+   * Calls server function: {{PLUGIN_NAME}}/do-something
+   */
+  doSomething(data: { input: string }): Promise<{ result: string }>;
+
+  /**
+   * List items from the plugin's table.
+   * Reads from: {{PLUGIN_NAME}}/items
+   */
+  getItems(): Promise<Item[]>;
+}
+
+// ─── Factory ───
+
+export const createPlugin: PluginClientFactory<PluginClient> = (
+  jb: PluginClientHost,
+): PluginClient => ({
+
+  async doSomething(data) {
+    return (await jb.functions.call(`${NS}/do-something`, data)) as { result: string };
+  },
+
+  async getItems() {
+    const result = await (jb.table(`${NS}/items`) as {
+      list(opts?: Record<string, unknown>): Promise<{ items: Item[] }>;
+    }).list();
+    return result.items;
+  },
+
+});

@@ -1,0 +1,24 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeBase Logo - Diamond Layers">
+  <defs>
+    <linearGradient id="g8a" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="g8b" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+    <linearGradient id="g8c" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <!-- Dark rounded background -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Three stacked diamond/rhombus shapes representing data layers at the edge -->
+  <polygon points="64,18 104,48 64,58 24,48" fill="url(#g8a)" />
+  <polygon points="64,38 104,68 64,78 24,68" fill="url(#g8b)" opacity="0.85" />
+  <polygon points="64,58 104,88 64,98 24,88" fill="url(#g8c)" opacity="0.7" />
+  <!-- Subtle highlight on top facet -->
+  <polygon points="64,18 104,48 64,58" fill="white" opacity="0.08" />
+</svg>

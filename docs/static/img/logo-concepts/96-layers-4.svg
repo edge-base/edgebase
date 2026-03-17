@@ -1,0 +1,27 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g96a" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa" />
+      <stop offset="100%" stop-color="#3b82f6" />
+    </linearGradient>
+    <linearGradient id="g96b" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="g96c" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+    <linearGradient id="g96d" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#f472b6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- 4 layers instead of 3 - richer depth -->
+  <polygon points="64,14 102,38 64,46 26,38" fill="url(#g96a)" />
+  <polygon points="64,30 102,54 64,62 26,54" fill="url(#g96b)" opacity="0.85" />
+  <polygon points="64,46 102,70 64,78 26,70" fill="url(#g96c)" opacity="0.75" />
+  <polygon points="64,62 102,86 64,94 26,86" fill="url(#g96d)" opacity="0.65" />
+  <polygon points="64,14 102,38 64,46" fill="white" opacity="0.08" />
+</svg>

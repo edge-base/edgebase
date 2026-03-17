@@ -1,0 +1,14 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g22" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Two overlapping circles - simple, Mastercard-like but vertical -->
+  <circle cx="64" cy="46" r="26" fill="#3b82f6" opacity="0.85" />
+  <circle cx="64" cy="78" r="26" fill="#ec4899" opacity="0.85" />
+  <!-- Overlap area creates the blend -->
+</svg>

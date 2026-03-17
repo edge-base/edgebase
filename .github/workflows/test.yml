@@ -1,0 +1,604 @@
+name: Test Suite — Server + SDK E2E
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  EDGEBASE_SERVICE_KEY: test-service-key-for-admin
+  SERVICE_KEY: test-service-key-for-admin
+  BASE_URL: http://localhost:8688
+
+jobs:
+  # ─── 1. 서버 단위 테스트 (vitest-pool-workers) ─────────────────────────────
+  server-unit:
+    name: Server Unit Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Build shared package
+        run: pnpm --dir packages/shared build
+        working-directory: .
+
+      - name: Run server unit tests (src/__tests__)
+        run: pnpm vitest run --config vitest.unit.config.ts --coverage
+
+      - name: Run server integration tests (Miniflare)
+        run: pnpm test:integration
+
+
+  # ─── G2: Generated Code Drift Check ────────────────────────────────────────
+  generated-code-check:
+    name: Generated Code Drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate SDK Core
+        run: pnpm dlx tsx tools/sdk-codegen/generate.ts
+
+      - name: Regenerate Smoke Tests
+        run: pnpm dlx tsx tools/smoke-gen/generate-smoke.ts
+
+      - name: Check for drift
+        run: |
+          mapfile -t GENERATED_PATHS < <(node tools/sdk-codegen/list-generated-paths.mjs)
+          git diff --exit-code -- "${GENERATED_PATHS[@]}" || (echo "Generated code is out of date. Run generators and commit." && exit 1)
+
+  # ─── 5. JS SDK 단위 테스트 ──────────────────────────────────────────────────
+  sdk-js-unit:
+    name: JS SDK Unit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared + JS SDK packages
+        run: |
+          pnpm --dir packages/shared build
+          pnpm --dir packages/sdk/js/packages/core build
+          pnpm --dir packages/sdk/js/packages/web build
+          pnpm --dir packages/sdk/js/packages/admin build
+          pnpm --dir packages/sdk/js/packages/ssr build
+
+      - name: JS core unit tests
+        run: pnpm test
+        working-directory: packages/sdk/js/packages/core
+
+      - name: JS web unit tests
+        run: pnpm test
+        working-directory: packages/sdk/js/packages/web
+
+      - name: JS admin unit tests
+        run: pnpm test
+        working-directory: packages/sdk/js/packages/admin
+
+      # Smoke test — verify built entrypoints are valid JS, not .ts (catches packaging regressions)
+      - name: SDK packaging smoke test
+        run: |
+          set -e
+          SDK_BASE="packages/sdk/js/packages"
+
+          for pkg in core web admin ssr; do
+            PKG_DIR="${SDK_BASE}/${pkg}"
+            [ -f "$PKG_DIR/package.json" ] || continue
+
+            # 1) main entrypoint file must exist
+            MAIN=$(node -p "require('./${PKG_DIR}/package.json').main")
+            if [ ! -f "$PKG_DIR/$MAIN" ]; then
+              echo "FAIL: ${pkg} main '${MAIN}' not found"
+              exit 1
+            fi
+
+            # 2) main must point to .js, not .ts
+            case "$MAIN" in
+              *.ts) echo "FAIL: ${pkg} main points to TypeScript source '${MAIN}'"; exit 1 ;;
+            esac
+
+            # 3) exports.".".import must also point to .js
+            IMPORT=$(node -p "require('./${PKG_DIR}/package.json').exports['.'].import")
+            case "$IMPORT" in
+              *.ts) echo "FAIL: ${pkg} exports.import points to TypeScript source '${IMPORT}'"; exit 1 ;;
+            esac
+
+            # 4) entrypoint must be parseable as JS (syntax check)
+            node --check "$PKG_DIR/$MAIN"
+
+            echo "✓ ${pkg}: ${MAIN}"
+          done
+          echo "SDK packaging smoke test passed"
+
+  # ─── 6. Kotlin SDK 단위 테스트 ──────────────────────────────────────────────
+  sdk-kotlin-unit:
+    name: Kotlin SDK Unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Kotlin unit tests
+        run: ./gradlew :core:test
+        working-directory: packages/sdk/kotlin
+
+  # ─── 7. Java SDK 단위 테스트 ────────────────────────────────────────────────
+  sdk-java-unit:
+    name: Java SDK Unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Java unit tests
+        run: gradle test
+        working-directory: packages/sdk/java
+
+  # ─── 8. Dart / Flutter SDK ──────────────────────────────────────────────────
+  sdk-dart-unit:
+    name: Dart SDK Unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Dart core unit
+        run: dart test test/core_unit_test.dart
+        working-directory: packages/sdk/dart/packages/core
+      - name: Dart flutter unit
+        run: flutter test test/flutter_unit_test.dart
+        working-directory: packages/sdk/dart/packages/flutter
+      - name: Dart admin unit
+        run: dart test test/admin_unit_test.dart
+        working-directory: packages/sdk/dart/packages/admin
+
+  # ─── 9. Rust SDK 단위 테스트 ────────────────────────────────────────────────
+  sdk-rust-unit:
+    name: Rust SDK Unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust core unit tests
+        run: cargo test --lib
+        working-directory: packages/sdk/rust/packages/core
+      - name: Rust admin unit tests
+        run: cargo test --lib
+        working-directory: packages/sdk/rust/packages/admin
+
+  # ─── 10. C# SDK 단위 테스트 ─────────────────────────────────────────────────
+  sdk-csharp-unit:
+    name: C# SDK Unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: C# unit tests
+        run: dotnet test tests/ -v normal
+        working-directory: packages/sdk/csharp
+
+  # ─── 11. Go SDK 단위 테스트 ────────────────────────────────────────────────
+  sdk-go-unit:
+    name: Go SDK Unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/sdk/go/go.mod
+      - name: Go unit tests
+        run: go test -tags unit -v ./...
+        working-directory: packages/sdk/go
+
+  # ─── 12. React Native SDK 단위 테스트 ──────────────────────────────────────
+  sdk-react-native-unit:
+    name: React Native SDK Unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: React Native unit tests
+        run: pnpm test
+        working-directory: packages/sdk/react-native
+
+  # ─── 13. Go SDK E2E ─────────────────────────────────────────────────────────
+  sdk-go-e2e:
+    name: Go SDK E2E
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: "1"
+      EDGEBASE_TEST_LOG_PATH: /tmp/edgebase-go-e2e-server.log
+      EDGEBASE_TEST_PID_PATH: /tmp/edgebase-go-e2e-server.pid
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/sdk/go/go.mod
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start EdgeBase test server and run Go E2E
+        run: |
+          bash ./scripts/run-with-pty.sh <<'EOF'
+          set -euo pipefail
+          cleanup() {
+            status=$?
+            if [[ -f "$EDGEBASE_TEST_PID_PATH" ]]; then
+              PID="$(cat "$EDGEBASE_TEST_PID_PATH")"
+              kill "$PID" 2>/dev/null || true
+              pkill -P "$PID" 2>/dev/null || true
+            fi
+            if [[ $status -ne 0 && -f "$EDGEBASE_TEST_LOG_PATH" ]]; then
+              tail -n 200 "$EDGEBASE_TEST_LOG_PATH" || true
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          bash ./scripts/start-test-server.sh
+          bash ./scripts/wait-for-test-server.sh
+          cd packages/sdk/go
+          go test -tags e2e -v ./...
+          EOF
+
+  # ─── 14. Python SDK E2E ─────────────────────────────────────────────────────
+  sdk-python-e2e:
+    name: Python SDK E2E
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: "1"
+      EDGEBASE_TEST_LOG_PATH: /tmp/edgebase-python-e2e-server.log
+      EDGEBASE_TEST_PID_PATH: /tmp/edgebase-python-e2e-server.pid
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Python SDK dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install -e './packages/sdk/python[dev]'
+          pip install -e './packages/sdk/python/packages/core'
+          pip install -e './packages/sdk/python/packages/admin'
+      - name: Start EdgeBase test server and run Python E2E
+        run: |
+          bash ./scripts/run-with-pty.sh <<'EOF'
+          set -euo pipefail
+          cleanup() {
+            status=$?
+            if [[ -f "$EDGEBASE_TEST_PID_PATH" ]]; then
+              PID="$(cat "$EDGEBASE_TEST_PID_PATH")"
+              kill "$PID" 2>/dev/null || true
+              pkill -P "$PID" 2>/dev/null || true
+            fi
+            if [[ $status -ne 0 && -f "$EDGEBASE_TEST_LOG_PATH" ]]; then
+              tail -n 200 "$EDGEBASE_TEST_LOG_PATH" || true
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          bash ./scripts/start-test-server.sh
+          bash ./scripts/wait-for-test-server.sh
+          pytest packages/sdk/python/packages/core/tests/test_core_e2e.py
+          pytest packages/sdk/python/packages/admin/tests/test_admin_e2e.py
+          EOF
+
+  # ─── 15. React Native SDK E2E ───────────────────────────────────────────────
+  sdk-react-native-e2e:
+    name: React Native SDK E2E
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: "1"
+      EDGEBASE_TEST_LOG_PATH: /tmp/edgebase-rn-e2e-server.log
+      EDGEBASE_TEST_PID_PATH: /tmp/edgebase-rn-e2e-server.pid
+      MOCK_FCM_LOG_PATH: /tmp/mock-fcm-rn-e2e.log
+      MOCK_FCM_PID_PATH: /tmp/mock-fcm-rn-e2e.pid
+      MOCK_FCM_PORT: "9099"
+      MOCK_FCM_BASE_URL: http://localhost:9099
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start EdgeBase test server and run React Native E2E
+        run: |
+          bash ./scripts/run-with-pty.sh <<'EOF'
+          set -euo pipefail
+          cleanup() {
+            status=$?
+            if [[ -f "$EDGEBASE_TEST_PID_PATH" ]]; then
+              PID="$(cat "$EDGEBASE_TEST_PID_PATH")"
+              kill "$PID" 2>/dev/null || true
+              pkill -P "$PID" 2>/dev/null || true
+            fi
+            if [[ -f "$MOCK_FCM_PID_PATH" ]]; then
+              PID="$(cat "$MOCK_FCM_PID_PATH")"
+              kill "$PID" 2>/dev/null || true
+              pkill -P "$PID" 2>/dev/null || true
+            fi
+            if [[ $status -ne 0 && -f "$EDGEBASE_TEST_LOG_PATH" ]]; then
+              tail -n 200 "$EDGEBASE_TEST_LOG_PATH" || true
+            fi
+            if [[ $status -ne 0 && -f "$MOCK_FCM_LOG_PATH" ]]; then
+              tail -n 200 "$MOCK_FCM_LOG_PATH" || true
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          bash ./scripts/start-mock-fcm-server.sh
+          bash ./scripts/wait-for-mock-fcm-server.sh
+          bash ./scripts/start-test-server.sh
+          bash ./scripts/wait-for-test-server.sh
+          cd packages/sdk/react-native
+          pnpm test:e2e
+          EOF
+
+  # ─── 16. Swift SDK E2E ──────────────────────────────────────────────────────
+  sdk-swift-e2e:
+    name: Swift SDK E2E
+    runs-on: macos-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: "1"
+      EDGEBASE_TEST_LOG_PATH: /tmp/edgebase-swift-e2e-server.log
+      EDGEBASE_TEST_PID_PATH: /tmp/edgebase-swift-e2e-server.pid
+      EDGEBASE_E2E_HEALTHCHECK_TIMEOUT_MS: "8000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start EdgeBase test server and run Swift E2E
+        run: |
+          bash ./scripts/run-with-pty.sh <<'EOF'
+          set -euo pipefail
+          cleanup() {
+            status=$?
+            if [[ -f "$EDGEBASE_TEST_PID_PATH" ]]; then
+              PID="$(cat "$EDGEBASE_TEST_PID_PATH")"
+              kill "$PID" 2>/dev/null || true
+              pkill -P "$PID" 2>/dev/null || true
+            fi
+            if [[ $status -ne 0 && -f "$EDGEBASE_TEST_LOG_PATH" ]]; then
+              tail -n 200 "$EDGEBASE_TEST_LOG_PATH" || true
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          bash ./scripts/start-test-server.sh
+          bash ./scripts/wait-for-test-server.sh
+          cd packages/sdk/swift/packages/core
+          swift test --filter E2ETests
+          cd ../ios
+          swift test --filter EdgeBaseClientIosE2ETests
+          swift test --filter IosAuthExtendedE2ETests
+          swift test --filter IosDbExtendedE2ETests
+          swift test --filter IosStorageAuthE2ETests
+          swift test --filter IosRoomE2ETests
+          swift test --filter IosSwiftLangE2ETests
+          EOF
+
+  # ─── Mutation Testing (PR only) ─────────────────────────────────────────────
+  mutation-test:
+    name: Mutation Testing
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: packages/server
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Get changed lib files
+        id: changed
+        run: |
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }} -- 'packages/server/src/lib/**/*.ts' | sed 's|packages/server/||' | tr '\n' ',' | sed 's/,$//')
+          echo "files=${CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "Changed files: ${CHANGED}"
+
+      - name: Run Stryker mutation tests
+        if: steps.changed.outputs.files != ''
+        run: pnpm exec stryker run --mutate "${{ steps.changed.outputs.files }}"
+
+      - name: Skip mutation (no lib changes)
+        if: steps.changed.outputs.files == ''
+        run: echo "No lib files changed, skipping mutation testing"
+
+  # ─── Performance Regression (PR only) ──────────────────────────────────────
+  bench:
+    name: Performance Regression
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: packages/server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Build shared package
+        run: pnpm --dir packages/shared build
+        working-directory: .
+
+      - name: Run benchmarks
+        run: pnpm vitest bench --config vitest.bench.config.ts --reporter=json > bench-results.json 2>/dev/null || true
+
+      - name: Check for regressions
+        run: node ../../tools/bench-check.js bench-results.json
+
+  # ─── OpenAPI Spec Stability ────────────────────────────────────────────────
+  openapi-check:
+    name: OpenAPI Spec Check
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    defaults:
+      run:
+        working-directory: packages/server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Build shared package
+        run: pnpm --dir packages/shared build
+        working-directory: .
+
+      - name: Run OpenAPI spec tests
+        run: pnpm vitest run --config vitest.integration.config.ts test/integration/openapi-spec.test.ts
+
+  # ─── Summary ────────────────────────────────────────────────────────────────
+  test-summary:
+    name: Test Summary
+    needs:
+      - server-unit
+      - openapi-check
+      - sdk-js-unit
+      - sdk-kotlin-unit
+      - sdk-java-unit
+      - sdk-dart-unit
+      - sdk-rust-unit
+      - sdk-csharp-unit
+      - sdk-go-unit
+      - sdk-react-native-unit
+      - sdk-go-e2e
+      - sdk-python-e2e
+      - sdk-react-native-e2e
+      - sdk-swift-e2e
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Report
+        run: |
+          echo "=== Test Summary ==="
+          echo "Server Unit: ${{ needs.server-unit.result }}"
+          echo "OpenAPI Check: ${{ needs.openapi-check.result }}"
+          echo "JS SDK Unit: ${{ needs.sdk-js-unit.result }}"
+          echo "Kotlin Unit: ${{ needs.sdk-kotlin-unit.result }}"
+          echo "Java Unit: ${{ needs.sdk-java-unit.result }}"
+          echo "Dart Unit: ${{ needs.sdk-dart-unit.result }}"
+          echo "Rust Unit: ${{ needs.sdk-rust-unit.result }}"
+          echo "C# Unit: ${{ needs.sdk-csharp-unit.result }}"
+          echo "Go Unit: ${{ needs.sdk-go-unit.result }}"
+          echo "React Native Unit: ${{ needs.sdk-react-native-unit.result }}"
+          echo "Go E2E: ${{ needs.sdk-go-e2e.result }}"
+          echo "Python E2E: ${{ needs.sdk-python-e2e.result }}"
+          echo "React Native E2E: ${{ needs.sdk-react-native-e2e.result }}"
+          echo "Swift E2E: ${{ needs.sdk-swift-e2e.result }}"

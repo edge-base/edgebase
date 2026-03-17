@@ -1,0 +1,145 @@
+# ─── Integration Test Wrangler Config ───
+# Miniflare local environment for vitest-pool-workers
+name = "edgebase-test"
+main = "src/index.ts"
+compatibility_date = "2025-02-10"
+compatibility_flags = ["nodejs_compat"]
+
+# ─── Durable Objects ───
+[durable_objects]
+bindings = [
+  { name = "DATABASE", class_name = "DatabaseDO" },
+  { name = "AUTH", class_name = "AuthDO" },
+  { name = "DATABASE_LIVE", class_name = "DatabaseLiveDO" },
+  { name = "ROOMS", class_name = "RoomsDO" },
+  { name = "LOGS", class_name = "LogsDO" },
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DatabaseDO", "AuthDO", "LogsDO"]
+new_classes = ["RoomsDO", "DatabaseLiveDO"]
+
+# ─── R2 (local emulation) ───
+[[r2_buckets]]
+binding = "STORAGE"
+bucket_name = "edgebase-test-storage"
+
+# ─── KV (local emulation) ───
+[[kv_namespaces]]
+binding = "KV"
+id = "test-kv-id"
+
+# ─── D1 (Auth Control Plane,) ───
+[[d1_databases]]
+binding = "AUTH_DB"
+database_name = "edgebase-auth-test"
+database_id = "test-d1-id"
+
+# ─── D1 (Internal Control Plane) ───
+[[d1_databases]]
+binding = "CONTROL_DB"
+database_name = "edgebase-control-test"
+database_id = "test-control-id"
+
+# ─── D1 (Single-Instance Databases) ───
+[[d1_databases]]
+binding = "DB_D1_SHARED"
+database_name = "edgebase-db-shared-test"
+database_id = "test-d1-shared-id"
+
+# ─── User-defined D1 ───
+[[d1_databases]]
+binding = "TEST_D1"
+database_name = "edgebase-user-d1-test"
+database_id = "test-user-d1-id"
+
+# ─── User-defined KV ───
+[[kv_namespaces]]
+binding = "TEST_KV"
+id = "test-user-kv-id"
+
+# ─── Test vars ───
+# Config includes:
+#   - posts: CRUD with FTS5 + refs for expand tests (categoryId, secureRef, deniedRef, authRequiredRef)
+#   - categories: with slug/sortOrder + migrations (migration test)
+#   - articles: shared blog tables in the same DB block
+#   - secure_posts: owner-based rules (access rule test + expand security target)
+#   - denied_notes: get:false (expand deny-all target)
+#   - auth_required_notes: get:"auth != null" (expand auth-required target)
+#   - avatars (storage): public read, auth write, owner delete, 5MB images
+#   - documents (storage): auth read/write/delete, 50MB
+#   - workspace_tasks: dynamic workspace namespace (membership test)
+#   - workspaceIdMembers: membership table (membership test)
+[vars]
+JWT_USER_SECRET = "test-jwt-user-secret-32-chars!!"
+JWT_USER_SECRET_OLD = "old-test-jwt-user-secret-rotated"
+JWT_USER_SECRET_OLD_AT = "2099-01-01T00:00:00.000Z"
+JWT_ADMIN_SECRET = "test-jwt-admin-secret-32-chars!"
+JWT_ADMIN_SECRET_OLD = "old-test-jwt-admin-secret-rotated"
+JWT_ADMIN_SECRET_OLD_AT = "2099-01-01T00:00:00.000Z"
+SERVICE_KEY = "test-service-key-for-admin"
+EDGEBASE_TEST = "1"
+EDGEBASE_USE_TEST_CONFIG = "1"
+# KV namespace allowlist for kv.test.ts
+# 'user-meta' namespace uses TEST_KV binding (defined above in [[kv_namespaces]])
+PUSH_FCM_SERVICE_ACCOUNT = '{"client_email":"test@test-project.iam.gserviceaccount.com","private_key":"-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDJZJ84GgindzG97OM9Wv2OwK/LObZruq48QKklmqnbp0Z1o8jpxXS4mqZAy3bdWSA8uNFQkKHB80Yem9JufzdcBTyC1U2Y0i1AafpzqJIZqlTj/1ZET+/vHnqwQNqvyyW72YDcc6SJOISMfvjRWGzj7EpXvpu7jgyWy+7yzHbf1bjejdLICJ/Ha/rvpHfVgGlheYIOFiOl0FvMBQhlrX6NfvlT1XdaEjSX4ywZ3OXbU3SHO9/qMZzpY9apSXJ1+zFib0iChQMdhqeiNGj/c9nW67kFBuCmu016S3ZHe/ZZ2zOMuvYeL5ZeN7hcJawEJhhncI1MIHUgc+MKygowFXMNAgMBAAECggEAEZPOsb7T8onctY7vZnOCnesDbOFkopJwkqGyIa4WFS3MYIgjCQRK47HbwNwBS+Bzh9k5q6Zz99Gb1SAUhcBkvItYdLLZSvVNLcoSKfYUiljrf9rRVLUFZAFtA+UlMSKx8GtTa+pL+g4Mw5ZxcRQerOX6tx3TydLkFmVGPbrKxU5iL4f5c/T5o+9i7tiWLJRo6PECOy7s3jPs0aP+5Tf0N/fwETyXtdMu4IyDs+ULxRb5e8xh0i+mmzmTSwEKNSqbT45kVuyrGRrE6wIASWNhOi35NGAWZ1+/ZfTqANzAwxnuu/J+83pNRnim4XJJtf+UKsd2br/MDbZvVmxzZANRoQKBgQD8qoo5UQ70NNmIyV80JY1pNwVVlhdTCmBuSszTcWt5zAS8xR+z+nJ32fR+lBSgwL+TzoQ61ywKKup6gvLqUnRINkDnlLO+PwElItIRdDniNtgs/5tr8nO+s0/cZ1fs9OTrVyUimoKd/p6DGppSwwM36kNCMKB86KeDAHDzne52fwKBgQDMDOQMOGNmbgF9U/FCBh8m8/IP/uzpFSLQQRf1hr+ggesEpn2CGgjKid1NMOSR/LzCKfRCrUWglDeL7CQsM8gNmJd39rkwj31dAK+IFfuNCbwIg8Av+/h8QwfGuvXGzhsUB7Np+5BLC+jP1hRWYJYRyxFP140XeqQMZjH6+x3IcwKBgQDniQARdg5WCvgtORtdFex4NktVGq1VE3U6nKEGQjFS83qD4cAjlaW/3qMGO3yLsxXbxKu3n+ZjiuBEVCt2PwkAA3eGv+XWuLW76iTGidNhURDYa4NpcExQvNC6EJmqMuB0KO+GvkBjuChZy88PeFVCsBHiXd0zmZ+nlIftNxSG0QKBgHYhPGEKwBkLtJcO4sw7aQuPDONPzW3/C4GPPcSp9wSAUkQF8wE/+zjuaY0HsjwGGm06BqwXTgjx5dp+ok5ox/d/EKmlz36ag5Q1EmnxeAklypMPW1MsR6YA1F6r3B/1MF3/O1IvDlE0Gts/79Q15It2iZY0jv05xgFbpLHNcWebAoGBAMnP7Swl7dPw4vMftZJXY+8dtafMPLwJFDxXMc1kT3gDJaWz0VRc22Oh6WBI5+QD7LWADX8nyEgqv82SLNIywAHuLCBW+HUA2FaYvGtGb9Wqlcx2EgfoweKred7rtaXmduqXxY4X0zZ8EJtJAp8cpnqEbU+F41qO8fPWR0omcjMa\n-----END PRIVATE KEY-----\n"}'
+
+# ─── Rate Limiting Bindings ───
+[[unsafe.bindings]]
+name = "GLOBAL_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 10000000, period = 60 }
+
+[[unsafe.bindings]]
+name = "COLLECTIONS_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 10000000, period = 60 }
+
+[[unsafe.bindings]]
+name = "STORAGE_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1003"
+simple = { limit = 10000000, period = 60 }
+
+[[unsafe.bindings]]
+name = "FUNCTIONS_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1004"
+simple = { limit = 10000000, period = 60 }
+
+[[unsafe.bindings]]
+name = "AUTH_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1005"
+simple = { limit = 10000000, period = 60 }
+
+[[unsafe.bindings]]
+name = "AUTH_SIGNIN_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1006"
+simple = { limit = 10000000, period = 60 }
+
+[[unsafe.bindings]]
+name = "AUTH_SIGNUP_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1007"
+simple = { limit = 10000000, period = 60 }
+
+[[unsafe.bindings]]
+name = "EVENTS_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1008"
+simple = { limit = 10000000, period = 60 }
+
+# ─── Compile-time defines (esbuild) ───
+# Signals test-build mode so the Worker loads edgebase.test.config.ts
+# instead of the generated root config at startup.
+[define]
+EDGEBASE_TEST_BUILD = "true"
+
+[[services]]
+binding = "SELF"
+service = "edgebase-test"

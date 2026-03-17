@@ -1,0 +1,25 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeBase Logo - Orbit DB">
+  <defs>
+    <linearGradient id="g5" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <!-- Dark rounded background -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Database cylinder core -->
+  <ellipse cx="64" cy="52" rx="20" ry="8" fill="none" stroke="url(#g5)" stroke-width="2.5" />
+  <path d="M44,52 L44,76 Q44,84 64,84 Q84,84 84,76 L84,52" fill="none" stroke="url(#g5)" stroke-width="2.5" />
+  <ellipse cx="64" cy="76" rx="20" ry="8" fill="none" stroke="url(#g5)" stroke-width="2.5" />
+  <!-- Orbit rings representing edge distribution -->
+  <ellipse cx="64" cy="64" rx="44" ry="16" fill="none" stroke="#3b82f6" stroke-width="2" opacity="0.6"
+    transform="rotate(-30 64 64)" />
+  <ellipse cx="64" cy="64" rx="44" ry="16" fill="none" stroke="#ec4899" stroke-width="2" opacity="0.6"
+    transform="rotate(30 64 64)" />
+  <!-- Edge satellite dots -->
+  <circle cx="24" cy="44" r="4" fill="#3b82f6" />
+  <circle cx="104" cy="44" r="4" fill="#ec4899" />
+  <circle cx="24" cy="84" r="4" fill="#ec4899" />
+  <circle cx="104" cy="84" r="4" fill="#3b82f6" />
+</svg>

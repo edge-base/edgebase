@@ -1,0 +1,13 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="cp70">
+      <polygon points="64,18 76,50 110,50 82,68 92,100 64,82 36,100 46,68 18,50 52,50" />
+    </clipPath>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Star split: left blue, right pink -->
+  <g clip-path="url(#cp70)">
+    <rect x="0" y="0" width="64" height="128" fill="#3b82f6" />
+    <rect x="64" y="0" width="64" height="128" fill="#ec4899" />
+  </g>
+</svg>

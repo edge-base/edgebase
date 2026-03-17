@@ -1,0 +1,11 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g21" x1="50%" y1="100%" x2="50%" y2="0%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Simple upward arrow / chevron - "going to the edge" -->
+  <path d="M64,24 L96,64 L76,64 L76,104 L52,104 L52,64 L32,64 Z" fill="url(#g21)" />
+</svg>

@@ -1,0 +1,13 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g50" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- 4-point star with hollow center -->
+  <polygon points="64,14 76,52 114,64 76,76 64,114 52,76 14,64 52,52" fill="url(#g50)" />
+  <polygon points="64,38 70,58 90,64 70,70 64,90 58,70 38,64 58,58" fill="#0f172a" />
+</svg>

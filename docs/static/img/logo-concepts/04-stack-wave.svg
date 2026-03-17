@@ -1,0 +1,25 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeBase Logo - Stack Wave">
+  <defs>
+    <linearGradient id="g4a" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="g4b" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+    <linearGradient id="g4c" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <!-- Dark rounded background -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Three flowing database layers with wave/edge motion -->
+  <path d="M24,42 Q44,30 64,42 Q84,54 104,42 L104,52 Q84,64 64,52 Q44,40 24,52 Z"
+    fill="url(#g4a)" />
+  <path d="M24,58 Q44,46 64,58 Q84,70 104,58 L104,68 Q84,80 64,68 Q44,56 24,68 Z"
+    fill="url(#g4b)" />
+  <path d="M24,74 Q44,62 64,74 Q84,86 104,74 L104,84 Q84,96 64,84 Q44,72 24,84 Z"
+    fill="url(#g4c)" />
+</svg>

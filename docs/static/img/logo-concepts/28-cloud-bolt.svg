@@ -1,0 +1,8 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Minimal cloud + bolt = serverless + speed -->
+  <path d="M40,68 Q26,68 26,56 Q26,44 38,42 Q40,30 54,28 Q68,26 74,38 Q88,36 92,48 Q96,60 84,66 Q86,68 84,68Z"
+    fill="#38bdf8" />
+  <!-- Lightning bolt below cloud -->
+  <polygon points="68,64 54,84 64,84 58,106 78,80 68,80" fill="#fbbf24" />
+</svg>

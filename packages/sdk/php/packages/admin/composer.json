@@ -1,0 +1,31 @@
+{
+    "name": "edgebase/admin",
+    "description": "EdgeBase Admin SDK — server-side admin operations.",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "EdgeBase\\Admin\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "EdgeBase\\Tests\\Admin\\": "tests/"
+        }
+    },
+    "require": {
+        "php": ">=8.1",
+        "edgebase/core": "@dev"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../core"
+        }
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

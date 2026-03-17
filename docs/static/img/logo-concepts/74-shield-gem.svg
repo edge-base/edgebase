@@ -1,0 +1,14 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g74" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Shield/badge shape - pentagon pointing down -->
+  <polygon points="28,24 100,24 100,72 64,108 28,72" fill="url(#g74)" />
+  <!-- Inner cutout -->
+  <polygon points="42,36 86,36 86,66 64,90 42,66" fill="#0f172a" />
+</svg>

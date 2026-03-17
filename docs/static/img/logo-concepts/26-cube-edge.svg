@@ -1,0 +1,10 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Isometric cube = database block at the edge, simple and bold -->
+  <!-- Top face -->
+  <polygon points="64,24 104,44 64,64 24,44" fill="#a78bfa" />
+  <!-- Left face -->
+  <polygon points="24,44 64,64 64,104 24,84" fill="#7c3aed" />
+  <!-- Right face -->
+  <polygon points="104,44 64,64 64,104 104,84" fill="#5b21b6" />
+</svg>

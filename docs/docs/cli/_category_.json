@@ -1,0 +1,8 @@
+{
+  "label": "CLI",
+  "position": 11,
+  "link": {
+    "type": "doc",
+    "id": "cli/overview"
+  }
+}

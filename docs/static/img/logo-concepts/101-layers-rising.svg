@@ -1,0 +1,23 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g101a" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="g101b" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+    <linearGradient id="g101c" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Layers getting smaller as they rise - pyramid feel -->
+  <polygon points="64,68 110,96 64,108 18,96" fill="url(#g101c)" opacity="0.6" />
+  <polygon points="64,40 98,64 64,74 30,64" fill="url(#g101b)" opacity="0.8" />
+  <polygon points="64,16 86,34 64,42 42,34" fill="url(#g101a)" />
+  <!-- Top highlight -->
+  <polygon points="64,16 86,34 64,42" fill="white" opacity="0.1" />
+</svg>

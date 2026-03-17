@@ -1,0 +1,206 @@
+---
+id: overview
+title: Overview
+sidebar_label: Overview
+slug: /analytics
+hide_title: true
+sidebar_position: 0
+---
+import { OverviewHero, FeatureGrid, NextStepCards, DiagramBlock } from '@site/src/components/OverviewPage';
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+:::caution Beta
+This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::
+
+<OverviewHero
+  title="Analytics"
+  tagline="EdgeBase Analytics provides two capabilities in one SDK: automatic request log metrics for monitoring your API usage, and custom event tracking for understanding user behavior. Request logs are collected automatically — zero setup required. Custom events are tracked from your client or server code with a single function call. Query everything programmatically via the Admin SDK or visually in the Admin Dashboard."
+  platforms={["JavaScript", "Dart", "Swift", "Kotlin", "Java", "Scala", "Python", "Go", "PHP", "Rust", "C#", "C++", "Ruby", "Elixir"]}
+/>
+
+---
+
+:::info Admin SDK Coverage
+Analytics querying and event management are available across all Admin SDKs.
+:::
+
+:::info Control Surface
+- **Access Rules**: Analytics does not have a dedicated access-rule layer. Access is controlled by JWT auth, Service Keys, and rate limits.
+- **Hooks**: Analytics does not have a dedicated hook layer.
+- **Triggers**: Analytics does not have a dedicated trigger layer.
+- **Handlers**: Use client and Admin SDK methods such as `track()` and query APIs rather than config handlers.
+:::
+
+## Architecture
+
+EdgeBase Analytics has two data paths: request logs (automatic) and custom events (explicit).
+
+<DiagramBlock title="Analytics Data Flow">
+{`┌──────────────┐                    ┌──────────────┐
+│  Client App   │ ── track() ──→    │  EdgeBase     │ ──→ LogsDO (_events table)
+│  (@edgebase/  │                    │  Server       │
+│   web)        │                    │               │ ← query ── Admin SDK
+└──────────────┘                    │               │ ← query ── Dashboard
+                                     │  Every API    │
+┌──────────────┐                    │  request is   │ ──→ LogsDO (_logs table)
+│  Admin SDK    │ ── track() ──→    │  auto-logged  │     or Analytics Engine
+│  (@edgebase/  │                    └──────────────┘
+│   admin)      │`}
+</DiagramBlock>
+
+**How it works:**
+
+1. **Request Logs (Automatic)** — Every API request is logged with method, path, status, latency, and user info. No code required.
+2. **Custom Events (Explicit)** — Call `analytics.track()` from the Client or Admin SDK to record user actions with custom properties.
+3. **Querying** — Use the Admin SDK to query metrics programmatically, or view them in the Admin Dashboard.
+4. **Storage** — Custom events are stored in LogsDO (SQLite). Request logs use Analytics Engine on Cloud or LogsDO on Docker/self-hosted.
+
+## Key Features
+
+<FeatureGrid features={[
+  { icon: "📊", title: "Request Log Metrics", description: "Automatic API usage metrics: total requests, errors, latency, unique users — with time series, breakdowns, and top endpoints." },
+  { icon: "🎯", title: "Custom Event Tracking", description: "Track any user action with arbitrary key-value properties. Up to 50 properties per event, 100 events per batch." },
+  { icon: "⚡", title: "Browser Optimized", description: "Client SDK batches events (20 per batch or 5s timer) and uses sendBeacon on page unload to prevent data loss." },
+  { icon: "🔍", title: "Flexible Querying", description: "Filter by time range, event name, user ID. Get counts, time series, or top events. Cursor-based pagination for large datasets." },
+  { icon: "🔒", title: "Auth-Aware", description: "Events from authenticated users automatically include their user ID. Anonymous events are also supported, protected by rate limiting." },
+  { icon: "📈", title: "Dashboard Integration", description: "All metrics are available in the Admin Dashboard with interactive charts, filters, and real-time updates." },
+]} />
+
+## What You Don't Have to Build
+
+| Without EdgeBase | With EdgeBase |
+|---|---|
+| Set up a request logging pipeline (ELK, Datadog, etc.) | Automatic — every API call is logged with zero config |
+| Build an event ingestion endpoint with validation | `client.analytics.track('purchase', { plan: 'pro' })` |
+| Handle batching, retry, and page-unload data loss | Built-in — 5s batch timer + sendBeacon fallback |
+| Write SQL queries for time-series aggregation | `admin.analytics.timeSeries({ range: '7d' })` |
+| Build a metrics dashboard from scratch | Admin Dashboard included — charts, filters, export |
+| Manage event data retention and rollup | Automatic — 90-day raw events, daily rollups for historical |
+
+## Quick Example
+
+Assume `client` is already initialized with your platform SDK.
+
+<Tabs groupId="sdk-language">
+<TabItem value="js" label="JavaScript" default>
+
+```typescript
+await client.analytics.track('page_view', { path: '/pricing' });
+await client.analytics.track('button_click', { id: 'signup-cta', variant: 'A' });
+await client.analytics.track('purchase', { plan: 'pro', amount: 29.99 });
+```
+
+</TabItem>
+<TabItem value="dart" label="Dart/Flutter">
+
+```dart
+await client.analytics.track('page_view', {'path': '/pricing'});
+await client.analytics.track('button_click', {
+  'id': 'signup-cta',
+  'variant': 'A',
+});
+await client.analytics.track('purchase', {
+  'plan': 'pro',
+  'amount': 29.99,
+});
+```
+
+</TabItem>
+<TabItem value="swift" label="Swift">
+
+```swift
+try await client.analytics.track("page_view", properties: [
+    "path": "/pricing"
+])
+try await client.analytics.track("button_click", properties: [
+    "id": "signup-cta",
+    "variant": "A"
+])
+try await client.analytics.track("purchase", properties: [
+    "plan": "pro",
+    "amount": 29.99
+])
+```
+
+</TabItem>
+<TabItem value="kotlin" label="Kotlin">
+
+```kotlin
+client.analytics.track("page_view", mapOf("path" to "/pricing"))
+client.analytics.track("button_click", mapOf(
+    "id" to "signup-cta",
+    "variant" to "A"
+))
+client.analytics.track("purchase", mapOf(
+    "plan" to "pro",
+    "amount" to 29.99
+))
+```
+
+</TabItem>
+<TabItem value="java" label="Java">
+
+```java
+client.analytics().track("page_view", Map.of("path", "/pricing"));
+client.analytics().track("button_click", Map.of(
+    "id", "signup-cta",
+    "variant", "A"
+));
+client.analytics().track("purchase", Map.of(
+    "plan", "pro",
+    "amount", 29.99
+));
+```
+
+</TabItem>
+<TabItem value="csharp" label="C#">
+
+```csharp
+await client.Analytics.TrackAsync("page_view", new Dictionary<string, object?> {
+    ["path"] = "/pricing",
+});
+await client.Analytics.TrackAsync("button_click", new Dictionary<string, object?> {
+    ["id"] = "signup-cta",
+    ["variant"] = "A",
+});
+await client.Analytics.TrackAsync("purchase", new Dictionary<string, object?> {
+    ["plan"] = "pro",
+    ["amount"] = 29.99,
+});
+```
+
+</TabItem>
+<TabItem value="cpp" label="C++">
+
+```cpp
+client.analytics().track("page_view", R"({"path":"/pricing"})");
+client.analytics().track("button_click", R"({"id":"signup-cta","variant":"A"})");
+client.analytics().track("purchase", R"({"plan":"pro","amount":29.99})");
+```
+
+</TabItem>
+</Tabs>
+
+```typescript
+// Admin SDK — query metrics from your backend
+import { createAdminClient } from '@edgebase/admin';
+const admin = createAdminClient('https://my-app.edgebase.fun', {
+  serviceKey: process.env.EDGEBASE_SERVICE_KEY,
+});
+
+const overview = await admin.analytics.overview({ range: '7d' });
+console.log(overview.summary.totalRequests);
+
+const events = await admin.analytics.queryEvents({ event: 'purchase', metric: 'count' });
+console.log(events.totalEvents);
+```
+
+## Next Steps
+
+<NextStepCards steps={[
+  { icon: "🌐", title: "Client SDK", description: "Track custom events from the browser with batching and sendBeacon", href: "client-sdk" },
+  { icon: "🔧", title: "Admin SDK", description: "Query request metrics and custom events from your backend", href: "admin-sdk" },
+  { icon: "🧭", title: "SDK Support", description: "See where analytics tracking ends and backend querying begins", href: "sdk-support" },
+]} />

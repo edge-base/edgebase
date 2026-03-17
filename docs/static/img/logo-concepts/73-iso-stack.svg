@@ -1,0 +1,16 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Two stacked isometric cubes -->
+  <!-- Top cube - top -->
+  <polygon points="64,16 96,32 64,48 32,32" fill="#60a5fa" />
+  <!-- Top cube - left -->
+  <polygon points="32,32 64,48 64,68 32,52" fill="#3b82f6" />
+  <!-- Top cube - right -->
+  <polygon points="96,32 64,48 64,68 96,52" fill="#6366f1" />
+  <!-- Bottom cube - top -->
+  <polygon points="64,52 96,68 64,84 32,68" fill="#a855f7" />
+  <!-- Bottom cube - left -->
+  <polygon points="32,68 64,84 64,104 32,88" fill="#8b5cf6" />
+  <!-- Bottom cube - right -->
+  <polygon points="96,68 64,84 64,104 96,88" fill="#ec4899" />
+</svg>

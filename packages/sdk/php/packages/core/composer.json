@@ -1,0 +1,33 @@
+{
+    "name": "edgebase/core",
+    "description": "EdgeBase Core SDK — shared types, HTTP client, table, storage.",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "EdgeBase\\": "src/",
+            "EdgeBase\\Core\\": "src/"
+        },
+        "classmap": ["src/"]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "EdgeBase\\Core\\Tests\\": "tests/"
+        }
+    },
+    "require": {
+        "php": ">=8.1"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0",
+        "edgebase/admin": "@dev"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../admin"
+        }
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

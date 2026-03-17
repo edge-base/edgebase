@@ -1,0 +1,13 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g16" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#ec4899" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#3b82f6" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Flame shape that subtly reads as "e" -->
+  <path d="M64,18 Q82,36 86,56 Q88,68 78,76 Q68,84 56,80 Q66,78 72,70 Q76,64 72,54 Q68,44 54,48 Q42,52 40,68 Q38,84 52,96 Q64,106 80,100 Q96,94 96,74 Q96,50 64,18Z"
+    fill="url(#g16)" />
+</svg>

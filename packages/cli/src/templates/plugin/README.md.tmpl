@@ -1,0 +1,91 @@
+# {{PLUGIN_NAME}}
+
+EdgeBase plugin for {{PLUGIN_DESCRIPTION}}.
+
+## Installation
+
+```bash
+npm install {{PLUGIN_NAME}}         # server
+npm install {{PLUGIN_NAME}}-client  # client SDK (optional)
+```
+
+## Configuration
+
+Add the plugin to your `edgebase.config.ts`:
+
+```typescript
+import { {{PLUGIN_NAME_CAMEL}}Plugin } from '{{PLUGIN_NAME}}';
+
+export default defineConfig({
+  plugins: [
+    {{PLUGIN_NAME_CAMEL}}Plugin({
+      apiKey: process.env.MY_PLUGIN_API_KEY!,
+    }),
+  ],
+});
+```
+
+## Usage
+
+### Client SDK
+
+```typescript
+import { createClient } from '@edgebase/sdk';
+import { createPlugin } from '{{PLUGIN_NAME}}-client';
+
+const jb = createClient({ url: 'https://my-app.workers.dev' });
+const plugin = createPlugin(jb);
+
+// Call plugin functions — fully typed
+const result = await plugin.doSomething({ input: 'hello' });
+
+// Read plugin tables
+const items = await plugin.getItems();
+```
+
+### Server Functions
+
+```typescript
+// Inside another server function — inter-function calls
+const result = await ctx.admin.functions.call('{{PLUGIN_NAME}}/hello', {
+  input: 'hello',
+});
+```
+
+### Access Rules
+
+Tables use EdgeBase access rules. Common patterns:
+
+```typescript
+access: {
+  read: (auth, row) => auth?.id === row.userId,   // Owner only
+  insert: (auth) => auth !== null,                // Any authenticated user
+  update: (auth, row) => auth?.id === row.userId, // Owner only
+  delete: () => false,                            // Nobody
+}
+```
+
+### Plugin Manifest
+
+Put CLI-facing metadata directly in `definePlugin()`:
+
+```typescript
+manifest: {
+  description: 'Short description shown by edgebase plugins list',
+  docsUrl: 'https://example.com/docs/{{PLUGIN_NAME}}',
+  configTemplate: {
+    apiKey: 'CHANGE_ME',
+  },
+}
+```
+
+## Development
+
+```bash
+cd server && npm run dev   # Watch mode (auto-rebuild on changes)
+npx edgebase dev           # Start local dev server
+```
+
+## License
+
+MIT

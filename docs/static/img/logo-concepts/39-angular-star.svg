@@ -1,0 +1,5 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Sharp 4-point star, very angular -->
+  <polygon points="64,16 74,52 112,64 74,76 64,112 54,76 16,64 54,52" fill="#fbbf24" />
+</svg>

@@ -1,0 +1,16 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g24" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f97316" />
+      <stop offset="100%" stop-color="#facc15" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Broken ring = distributed edge, gap = serverless (no single point) -->
+  <path d="M64,24 A40,40 0 0,1 100,52" fill="none" stroke="url(#g24)" stroke-width="10" stroke-linecap="round" />
+  <path d="M104,64 A40,40 0 0,1 88,96" fill="none" stroke="url(#g24)" stroke-width="10" stroke-linecap="round" />
+  <path d="M76,104 A40,40 0 0,1 28,76" fill="none" stroke="url(#g24)" stroke-width="10" stroke-linecap="round" />
+  <path d="M24,64 A40,40 0 0,1 52,28" fill="none" stroke="url(#g24)" stroke-width="10" stroke-linecap="round" />
+  <!-- Small core dot -->
+  <circle cx="64" cy="64" r="6" fill="#facc15" />
+</svg>

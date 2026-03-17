@@ -1,0 +1,20 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeBase Logo - Minimal EB">
+  <defs>
+    <linearGradient id="g7" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <!-- Dark rounded background -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Minimal geometric "EB" monogram -->
+  <!-- E - left side -->
+  <path d="M24,32 L58,32 L58,38 L30,38 L30,60 L54,60 L54,66 L30,66 L30,90 L58,90 L58,96 L24,96 Z"
+    fill="url(#g7)" />
+  <!-- B - right side, modern geometric -->
+  <path d="M66,32 L90,32 Q104,32 104,46 Q104,57 94,60 Q106,63 106,78 Q106,96 90,96 L66,96 Z
+    M72,38 L72,57 L88,57 Q98,57 98,46 Q98,38 88,38 Z
+    M72,63 L72,90 L90,90 Q100,90 100,78 Q100,63 90,63 Z"
+    fill="url(#g7)" fill-rule="evenodd" />
+</svg>

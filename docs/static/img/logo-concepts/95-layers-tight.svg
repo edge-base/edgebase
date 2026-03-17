@@ -1,0 +1,23 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g95a" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="g95b" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+    <linearGradient id="g95c" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Tight stacking - layers closer, more compact feel -->
+  <polygon points="64,20 100,44 64,52 28,44" fill="url(#g95a)" />
+  <polygon points="64,34 100,58 64,66 28,58" fill="url(#g95b)" opacity="0.85" />
+  <polygon points="64,48 100,72 64,80 28,72" fill="url(#g95c)" opacity="0.7" />
+  <!-- Subtle shadow under bottom layer -->
+  <ellipse cx="64" cy="88" rx="30" ry="6" fill="#6366f1" opacity="0.15" />
+</svg>

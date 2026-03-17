@@ -1,0 +1,383 @@
+# EdgeBase JS Web SDK
+
+## Common Patterns
+
+```js
+// Initialize
+import { createClient } from '@edgebase/web'
+const client = createClient('https://my-project.edgebase.fun')
+
+// Auth — currentUser is a PROPERTY, not a method
+const user = client.auth.currentUser   // TokenUser | null
+
+// Auth state — callback receives (user), NOT (event, user)
+const unsub = client.auth.onAuthStateChange((user) => { /* user or null */ })
+
+// Sign up with profile data
+await client.auth.signUp({ email: 'a@b.com', password: 'pass123', data: { displayName: 'June' } })
+
+// Password reset — positional args, NOT object
+await client.auth.requestPasswordReset('user@test.com')
+await client.auth.resetPassword(token, 'newPass123')
+
+// Change password — field is currentPassword, NOT oldPassword
+await client.auth.changePassword({ currentPassword: 'old', newPassword: 'new' })
+
+// DB access — instanceId is positional, NOT named
+const posts = client.db('shared').table('posts')
+const docs = client.db('workspace', 'ws-1').table('docs')
+
+// get() returns ListResult, NOT a single record
+const list = await posts.get()          // { items, total, page, perPage, hasMore, cursor }
+const one = await posts.getOne('id-1')  // single record
+const one2 = await posts.doc('id-1').get()  // same thing
+
+// Batch ops — chain where() first, NOT pass filter as arg
+await posts.where('status', '==', 'old').updateMany({ status: 'archived' })
+await posts.where('status', '==', 'old').deleteMany()
+
+// Signed URLs — expiresIn is a STRING like '1h', NOT a number
+const url = await bucket.createSignedUrl('file.pdf', { expiresIn: '1h' })
+
+// Special field ops
+import { increment, deleteField } from '@edgebase/web'
+await posts.update(id, { views: increment(1), temp: deleteField() })
+
+// Write operations require authenticated user
+```
+
+## createClient
+
+```
+import { createClient } from '@edgebase/web'
+const client = createClient(url, options?: { schema?, databaseLive?: { autoReconnect?, maxReconnectAttempts?, reconnectBaseDelay? } })
+```
+
+## Client Lifecycle
+
+```
+client.destroy()                                 → void (cleanup all resources, subscriptions, timers)
+```
+
+## Auth
+
+```
+client.auth.currentUser                          → TokenUser | null (PROPERTY, not method)
+client.auth.signUp({email, password, data?, locale?, captchaToken?}) → {user, accessToken, refreshToken}
+client.auth.signIn({email, password, captchaToken?})                → AuthResult | {mfaRequired, mfaTicket, factors}
+client.auth.signInAnonymously({captchaToken?}?)                     → AuthResult
+client.auth.signOut()                                                → void
+client.auth.signInWithOAuth(provider, {redirectUrl?, captchaToken?}) → {url}
+client.auth.handleOAuthCallback(url?)                                → AuthResult | null
+client.auth.signInWithMagicLink({email, captchaToken?, redirectUrl?, state?}) → void
+client.auth.verifyMagicLink(token)                                   → AuthResult
+client.auth.signInWithEmailOtp({email})                              → void
+client.auth.verifyEmailOtp({email, code})                            → AuthResult
+client.auth.signInWithPhone({phone})                                 → void
+client.auth.verifyPhone({phone, code})                               → AuthResult
+client.auth.requestPasswordReset(email, {captchaToken?, redirectUrl?, state?}?) → void
+client.auth.resetPassword(token, newPassword)                        → void
+client.auth.changePassword({currentPassword, newPassword})           → AuthResult
+client.auth.changeEmail({newEmail, password, redirectUrl?, state?})  → void
+client.auth.verifyEmailChange(token)                                 → void
+client.auth.updateProfile({displayName?, avatarUrl?, emailVisibility?, locale?}) → TokenUser
+client.auth.updateLocale(locale)                                     → TokenUser
+client.auth.refreshSession()                                         → AuthResult
+client.auth.listSessions()                                           → Session[]
+client.auth.revokeSession(sessionId)                                 → void
+client.auth.onAuthStateChange(cb: (user: TokenUser | null) => void)  → unsubscribe()
+client.auth.requestEmailVerification({redirectUrl?, state?}?)        → void
+client.auth.verifyEmail(token)                                       → void
+client.auth.listIdentities()                                         → {identities, methods}
+client.auth.unlinkIdentity(identityId)                               → {identities, methods}
+client.auth.linkWithEmail({email, password})                         → AuthResult
+client.auth.linkWithPhone({phone})                                   → void
+client.auth.verifyLinkPhone({phone, code})                           → void
+client.auth.linkWithOAuth(provider, {redirectUrl?, state?}?)         → {redirectUrl}
+```
+
+### MFA
+
+```
+client.auth.mfa.enrollTotp()                          → {factorId, secret, qrCodeUri, recoveryCodes}
+client.auth.mfa.verifyTotpEnrollment(factorId, code)  → {ok}
+client.auth.mfa.verifyTotp(mfaTicket, code)            → AuthResult
+client.auth.mfa.useRecoveryCode(mfaTicket, code)       → AuthResult
+client.auth.mfa.disableTotp({password?, code?}?)       → {ok}
+client.auth.mfa.listFactors()                          → {factors}
+```
+
+### Passkeys
+
+```
+client.auth.passkeysRegisterOptions()       → options
+client.auth.passkeysRegister(credential)    → result
+client.auth.passkeysAuthOptions({email?}?)  → options
+client.auth.passkeysAuthenticate(assertion) → AuthResult
+client.auth.passkeysList()                  → list
+client.auth.passkeysDelete(credentialId)    → void
+```
+
+## Database
+
+```
+client.db(namespace: 'shared' | 'workspace' | 'user' | string, instanceId?: string)
+  .table(name)                              → TableRef
+```
+
+### Read
+
+```
+table.getList()                             → {items, total, page, perPage, hasMore, cursor}
+table.get()                                 → same as getList() (NOT get-by-id)
+table.getOne(id)                            → record
+table.doc(id).get()                         → record
+table.getFirst()                            → record | null
+table.count()                               → number
+```
+
+### Query (immutable chaining)
+
+```
+table.where(field, op, value)               → TableRef    ops: == != < <= > >= in not-in contains array-contains
+table.or(q => q.where(...).where(...))      → TableRef    OR conditions
+table.orderBy(field, 'asc'|'desc')          → TableRef
+table.limit(n)                              → TableRef
+table.offset(n)                             → TableRef
+table.page(n)                               → TableRef    1-based
+table.search(query)                         → TableRef
+table.after(cursor)                         → TableRef
+table.before(cursor)                        → TableRef
+```
+
+### Write (require auth)
+
+```
+table.insert(data)                          → record
+table.insertMany(items[])                   → record[]     auto-chunks at 500
+table.update(id, data)                      → record       supports increment(), deleteField()
+table.delete(id)                            → void
+table.upsert(data, {conflictTarget?}?)      → record & {action: 'inserted'|'updated'}
+table.upsertMany(items[], {conflictTarget?}?) → record[]
+table.where(...).updateMany(data)           → {totalProcessed, totalSucceeded, errors}
+table.where(...).deleteMany()               → {totalProcessed, totalSucceeded, errors}
+```
+
+### Special fields
+
+```
+import { increment, deleteField } from '@edgebase/web'
+table.update(id, { views: increment(1), old: deleteField() })
+```
+
+### Doc ref
+
+```
+table.doc(id).get()                         → record
+table.doc(id).update(data)                  → record
+table.doc(id).delete()                      → void
+table.doc(id).onSnapshot(cb: (data, change) => void) → unsubscribe()
+```
+
+## Database Live
+
+```
+table.onSnapshot(cb: (snapshot) => void)                    → unsubscribe()
+table.where(...).onSnapshot(cb)                             → unsubscribe()
+table.doc(id).onSnapshot(cb: (data, change) => void)        → unsubscribe()
+
+snapshot = { items: T[], changes: { added: T[], modified: T[], removed: T[] } }
+change = { changeType: 'added'|'modified'|'removed', data, docId }
+```
+
+## Storage
+
+```
+client.storage.bucket(name)                                 → StorageBucket
+```
+
+### Operations
+
+```
+bucket.upload(key, File|Blob|ArrayBuffer|Uint8Array, {contentType?, customMetadata?, onProgress?, signal?}?) → FileInfo
+bucket.uploadString(key, value, format?: 'raw'|'base64'|'base64url'|'data_url', opts?) → FileInfo
+bucket.download(key, {as?: 'blob'|'arraybuffer'|'stream'|'text'}?)                    → Blob|...
+bucket.getUrl(key)                                          → string (sync)
+bucket.createSignedUrl(key, {expiresIn?: '1h'|'30m'|'7d'}) → string       expiresIn is STRING not number
+bucket.createSignedUrls(keys[], {expiresIn?})               → [{key, url, expiresAt}]
+bucket.createSignedUploadUrl(key, {expiresIn?, maxFileSize?}) → {url, expiresAt, maxFileSize, uploadedBy}
+bucket.getMetadata(key)                                     → FileInfo
+bucket.updateMetadata(key, {customMetadata?, contentType?}) → FileInfo
+bucket.exists(key)                                          → boolean
+bucket.list({prefix?, cursor?, limit?}?)                    → {files: FileInfo[], cursor, truncated}
+bucket.delete(key)                                          → void
+bucket.deleteMany(keys[])                                   → {deleted, failed}
+bucket.resumeUpload(key, uploadId, data, opts?)             → FileInfo
+bucket.getUploadParts(key, uploadId)                        → {uploadId, key, parts: [{partNumber, etag}]}
+
+upload() returns UploadTask (Promise + .cancel() method)
+on resumable upload failure: catch ResumableUploadError {key, uploadId, completedParts, failedPartNumber}
+```
+
+### Convenience (without bucket ref)
+
+```
+client.storage.upload(bucketName, key, data, opts?)         → FileInfo
+client.storage.delete(bucketName, key)                      → void
+client.storage.getUrl(bucketName, key)                      → string
+```
+
+## Room
+
+```
+const room = client.room(namespace, roomId, {autoReconnect?, maxReconnectAttempts?, reconnectBaseDelay?, sendTimeout?}?)
+room.join()                                                 → void
+room.leave()                                                → void
+```
+
+### Members
+
+```
+room.members.list()                         → RoomMember[]
+room.members.onSync(cb)                     → Subscription (.unsubscribe())
+room.members.onJoin(cb)                     → Subscription
+room.members.onLeave(cb: (member, reason: 'leave'|'timeout'|'kicked') => void) → Subscription
+room.members.setState(state)                → void
+room.members.clearState()                   → void
+room.members.onStateChange(cb)              → Subscription
+```
+
+### State
+
+```
+room.state.getShared()                      → Record<string, unknown>
+room.state.getMine()                        → Record<string, unknown>
+room.state.onSharedChange(cb)               → Subscription
+room.state.onMineChange(cb)                 → Subscription
+room.state.send(actionType, payload?)       → Promise<response>
+```
+
+### Signals
+
+```
+room.signals.send(event, payload?, {includeSelf?}?) → void
+room.signals.sendTo(memberId, event, payload?)      → void
+room.signals.on(event, cb: (payload, meta) => void) → Subscription
+room.signals.onAny(cb: (event, payload, meta) => void) → Subscription
+```
+
+### Media
+
+```
+room.media.audio.enable() / disable() / setMuted(bool)
+room.media.video.enable() / disable() / setMuted(bool)
+room.media.screen.start() / stop()
+room.media.list()                           → RoomMediaMember[]
+room.media.devices.switch({audioInputId?, videoInputId?})    → void
+room.media.onTrack(cb)                      → Subscription
+room.media.onTrackRemoved(cb)               → Subscription
+room.media.onStateChange(cb)                → Subscription
+room.media.onDeviceChange(cb)               → Subscription
+```
+
+### Admin (in-room moderation)
+
+```
+room.admin.kick(memberId)                   → void
+room.admin.mute(memberId)                   → void
+room.admin.block(memberId)                  → void
+room.admin.setRole(memberId, role)          → void
+room.admin.disableVideo(memberId)           → void
+room.admin.stopScreenShare(memberId)        → void
+```
+
+### Meta
+
+```
+room.meta.get()                             → Record<string, unknown>
+```
+
+### Realtime (WebRTC) — HTTP Wrappers
+
+```
+room.media.realtime.createSession(payload?) → {sessionId, sessionDescription?}
+room.media.realtime.getIceServers({ttl?}?)  → {iceServers}
+room.media.realtime.addTracks({sessionId, tracks, sessionDescription?}) → {sessionDescription?, tracks?}
+room.media.realtime.renegotiate({sessionId, sessionDescription})        → {sessionDescription?, tracks?}
+room.media.realtime.closeTracks({sessionId, tracks: [{mid}]})           → {sessionDescription?, tracks?}
+```
+
+WebRTC transport (audio/video/screen share) is in the separate `@edgebase/realtime-media` package:
+```
+import { createRealtimeTransport } from '@edgebase/realtime-media';
+const transport = createRealtimeTransport(room, { autoSubscribe: true });
+await transport.connect();
+await transport.enableAudio();
+await transport.enableVideo();
+transport.onRemoteTrack(event => { ... });
+```
+
+### Session
+
+```
+room.session.onConnectionStateChange(cb: (state: 'idle'|'connecting'|'connected'|'reconnecting'|'disconnected') => void)
+room.session.onKicked(cb)                   → Subscription
+room.session.onError(cb)                    → Subscription
+room.session.onReconnect(cb)                → Subscription
+```
+
+## Functions
+
+```
+client.functions.call(name, {method?, body?, query?}?)  → T
+client.functions.get(path, query?)                       → T
+client.functions.post(path, body?)                       → T
+client.functions.put(path, body?)                        → T
+client.functions.patch(path, body?)                      → T
+client.functions.delete(path)                            → T
+```
+
+## Analytics
+
+```
+client.analytics.track(name, properties?: Record<string, string|number|boolean>) → void (batched)
+client.analytics.flush()                    → void
+client.analytics.destroy()                  → void (flush + cleanup)
+```
+
+## Push
+
+```
+client.push.setTokenProvider(provider: () => Promise<string>)  → void
+client.push.register({metadata?}?)                             → void
+client.push.unregister(deviceId?)                              → void
+client.push.subscribeTopic(topic)                              → void
+client.push.unsubscribeTopic(topic)                            → void
+client.push.onMessage(cb: (msg: {title?, body?, data?}) => void)
+client.push.onMessageOpenedApp(cb: (msg) => void)                  → void (notification tap opened app)
+client.push.getPermissionStatus()           → 'granted'|'denied'|'notDetermined'
+client.push.requestPermission()             → 'granted'|'denied'
+```
+
+## Errors
+
+```
+import { EdgeBaseError } from '@edgebase/web'
+EdgeBaseError extends Error {
+  code: number                              // HTTP status code (e.g. 400, 401, 404)
+  message: string
+  slug?: string                             // machine-readable error identifier
+  data?: Record<string, FieldError>         // per-field validation errors
+  status: number                            // getter, alias for code
+}
+```
+
+## Utility
+
+```
+client.setLocale(locale: string | undefined)
+client.getLocale()                          → string | undefined
+client.setContext(ctx)                      → void
+client.getContext()                         → ContextValue
+client.getRoomMetadata(namespace, roomId)   → Record<string, unknown>
+```

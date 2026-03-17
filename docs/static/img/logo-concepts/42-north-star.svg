@@ -1,0 +1,14 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- North star / compass star - 8 points, angular and sharp -->
+  <!-- Main 4 long points -->
+  <polygon points="64,14 70,56 64,64 58,56" fill="#f97316" />
+  <polygon points="114,64 72,70 64,64 72,58" fill="#fb923c" />
+  <polygon points="64,114 58,72 64,64 70,72" fill="#f97316" />
+  <polygon points="14,64 56,58 64,64 56,70" fill="#fb923c" />
+  <!-- 4 short diagonal points -->
+  <polygon points="96,32 72,58 64,64 70,56" fill="#fdba74" />
+  <polygon points="96,96 70,72 64,64 72,70" fill="#fdba74" />
+  <polygon points="32,96 56,70 64,64 58,72" fill="#fdba74" />
+  <polygon points="32,32 58,56 64,64 56,58" fill="#fdba74" />
+</svg>

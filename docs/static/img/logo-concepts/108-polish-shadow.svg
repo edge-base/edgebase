@@ -1,0 +1,25 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g108a" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="g108b" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+    <linearGradient id="g108c" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Drop shadow under each layer for floating effect -->
+  <ellipse cx="64" cy="92" rx="34" ry="6" fill="#1e1b4b" opacity="0.5" />
+  <polygon points="64,58 104,88 64,98 24,88" fill="url(#g108c)" opacity="0.7" />
+  <ellipse cx="64" cy="72" rx="34" ry="5" fill="#1e1b4b" opacity="0.3" />
+  <polygon points="64,38 104,68 64,78 24,68" fill="url(#g108b)" opacity="0.85" />
+  <ellipse cx="64" cy="52" rx="34" ry="4" fill="#1e1b4b" opacity="0.2" />
+  <polygon points="64,18 104,48 64,58 24,48" fill="url(#g108a)" />
+  <polygon points="64,18 104,48 64,58" fill="white" opacity="0.08" />
+</svg>

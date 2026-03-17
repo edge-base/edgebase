@@ -1,0 +1,233 @@
+---
+sidebar_position: 0
+sidebar_label: Overview
+slug: /database
+hide_title: true
+---
+import { OverviewHero, FeatureGrid, NextStepCards } from '@site/src/components/OverviewPage';
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+:::caution Beta
+This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::
+
+<OverviewHero
+  title="Database"
+  tagline="EdgeBase Database defaults to SQLite on D1 and Durable Objects, but single-instance DB blocks can also switch to Neon or PostgreSQL through Hyperdrive-backed bindings. You get CRUD, queries, full-text search, access rules, schema validation, and automatic migrations without managing a separate data layer by hand."
+  platforms={["JavaScript", "Dart", "Swift", "Kotlin", "Java", "Scala", "Python", "Go", "PHP", "Rust", "C#", "C++", "Ruby", "Elixir"]}
+/>
+
+---
+
+:::info Control Surface
+- **Access Rules**: [Database Access Rules](/docs/database/access-rules) gate table reads, writes, deletes, and DB block access.
+- **Hooks**: [Table Hooks](/docs/database/hooks) validate writes, enrich reads, and run inline side effects.
+- **Triggers**: [Database Triggers](/docs/database/triggers) run App Function handlers after insert, update, or delete events.
+- **Handlers**: Inline database behavior lives under `databases[namespace].tables[name].handlers.hooks` in `edgebase.config.ts`.
+:::
+
+## Key Features
+
+<FeatureGrid features={[
+  { icon: "📝", title: "CRUD + Batch", description: "Insert, update, delete, upsert — single or batch" },
+  { icon: "🔍", title: "Queries", description: "Filter (where), sort (orderBy), paginate (offset or cursor-based), OR conditions" },
+  { icon: "✅", title: "Schema Validation", description: "Declarative schema with type checking, required fields, min/max constraints" },
+  { icon: "🔎", title: "Full-Text Search", description: "FTS5 with trigram tokenizer — works with CJK and all languages" },
+  { icon: "⚡", title: "Subscriptions", description: "onSnapshot subscriptions with server-side filtering and automatic delta sync" },
+  { icon: "🔒", title: "Access Rules", description: "Deny-by-default, per-operation rules with auth and resource context" },
+  { icon: "🪝", title: "Table Hooks", description: "Validate writes, enrich reads, and run inline side effects inside the active DB backend" },
+  { icon: "⚙️", title: "Database Triggers", description: "Run server-side code automatically on insert, update, or delete" },
+  { icon: "🔄", title: "Migrations", description: "Lazy migration engine — automatic for additions, explicit SQL for destructive changes" },
+  { icon: "🏢", title: "Multi-Tenancy", description: "DB blocks — single-instance or dynamic (per-ID isolation) with any name you choose" },
+]} />
+
+## DB Blocks
+
+EdgeBase uses **DB blocks** to route SQLite storage. There are two types — **single-instance** (one DB, no instance ID) and **dynamic** (`instance: true`, one DB per ID). The block name is a config key you choose freely; the examples below use `app`, `user`, and `workspace`, but any name works:
+
+<Tabs groupId="sdk-language">
+<TabItem value="js" label="JavaScript" default>
+
+```typescript
+client.db('app')                       // One single-instance DB block (D1 by default)
+client.db('user', userId)              // Per-user isolated DB block
+client.db('workspace', 'ws-456')       // Per-workspace isolated DB block
+```
+
+</TabItem>
+<TabItem value="dart" label="Dart/Flutter">
+
+```dart
+client.db('app');                      // One single-instance DB block (D1 by default)
+client.db('user', userId);             // Per-user isolated DB block
+client.db('workspace', 'ws-456');      // Per-workspace isolated DB block
+```
+
+</TabItem>
+<TabItem value="swift" label="Swift">
+
+```swift
+client.db("app")                       // One single-instance DB block (D1 by default)
+client.db("user", userId)              // Per-user isolated DB block
+client.db("workspace", "ws-456")       // Per-workspace isolated DB block
+```
+
+</TabItem>
+<TabItem value="kotlin" label="Kotlin">
+
+```kotlin
+client.db("app")                       // One single-instance DB block (D1 by default)
+client.db("user", userId)              // Per-user isolated DB block
+client.db("workspace", "ws-456")       // Per-workspace isolated DB block
+```
+
+</TabItem>
+<TabItem value="java" label="Java">
+
+```java
+client.db("app");                      // One single-instance DB block (D1 by default)
+client.db("user", userId);             // Per-user isolated DB block
+client.db("workspace", "ws-456");      // Per-workspace isolated DB block
+```
+
+</TabItem>
+<TabItem value="csharp" label="C#">
+
+```csharp
+client.Db("app");                      // One single-instance DB block (D1 by default)
+client.Db("user", userId);             // Per-user isolated DB block
+client.Db("workspace", "ws-456");      // Per-workspace isolated DB block
+```
+
+</TabItem>
+<TabItem value="cpp" label="C++">
+
+```cpp
+client.db("app");                      // One single-instance DB block (D1 by default)
+client.db("user", userId);             // Per-user isolated DB block
+client.db("workspace", "ws-456");      // Per-workspace isolated DB block
+```
+
+</TabItem>
+</Tabs>
+
+Each DB block is its own backing database. Tables inside the same block can `JOIN` each other because they share one storage engine. Single-instance blocks default to **D1** for globally shared data, can explicitly use **Durable Objects** for single-instance SQLite, or can switch to **Neon/PostgreSQL** when you want centralized PostgreSQL semantics. Dynamic blocks scale out on **Durable Objects** — one isolated SQLite per instance ID.
+
+If you're working locally, you can create the DB block from the Admin Dashboard at `Database -> Tables -> + DB`, or define it manually in config. See [Create Database](/docs/database/create-database), [Defining Tables](/docs/database/defining-tables), and [Admin Dashboard Schema Editor](/docs/admin-dashboard/schema-editor).
+
+## Quick Example
+
+```typescript
+// Define schema
+app: {
+  tables: {
+    posts: {
+      schema: {
+        title: { type: 'string', required: true, max: 200 },
+        content: { type: 'text' },
+        status: { type: 'string', default: 'draft' },
+      },
+      access: {
+        read() { return true },
+        insert(auth) { return auth !== null },
+        update(auth, row) { return auth !== null && auth.id === row.authorId },
+        delete(auth) { return auth !== null && auth.role === 'admin' },
+      },
+    },
+  },
+}
+
+```
+
+Assume `client` is already initialized with your platform SDK.
+
+<Tabs groupId="sdk-language">
+<TabItem value="js" label="JavaScript" default>
+
+```typescript
+const post = await client.db('app').table('posts').insert({
+  title: 'Hello World',
+  content: 'My first post.',
+});
+```
+
+</TabItem>
+<TabItem value="dart" label="Dart/Flutter">
+
+```dart
+final post = await client.db('app').table('posts').insert({
+  'title': 'Hello World',
+  'content': 'My first post.',
+});
+```
+
+</TabItem>
+<TabItem value="swift" label="Swift">
+
+```swift
+let post = try await client.db("app").table("posts").insert([
+    "title": "Hello World",
+    "content": "My first post."
+])
+```
+
+</TabItem>
+<TabItem value="kotlin" label="Kotlin">
+
+```kotlin
+val post = client.db("app").table("posts").insert(mapOf(
+    "title" to "Hello World",
+    "content" to "My first post."
+))
+```
+
+</TabItem>
+<TabItem value="java" label="Java">
+
+```java
+Map<String, Object> post = client.db("app").table("posts").insert(Map.of(
+    "title", "Hello World",
+    "content", "My first post."
+));
+```
+
+</TabItem>
+<TabItem value="csharp" label="C#">
+
+```csharp
+var post = await client.Db("app").Table("posts").InsertAsync(new() {
+    ["title"] = "Hello World",
+    ["content"] = "My first post.",
+});
+```
+
+</TabItem>
+<TabItem value="cpp" label="C++">
+
+```cpp
+auto post = client.db("app").table("posts").insert(R"({
+    "title": "Hello World",
+    "content": "My first post."
+})");
+```
+
+</TabItem>
+</Tabs>
+
+:::info Admin SDK Coverage
+Server-side database operations, raw SQL, and DB block access are available across all Admin SDKs.
+:::
+
+## Next Steps
+
+<NextStepCards steps={[
+  { icon: "💻", title: "Client SDK", description: "CRUD operations, queries, batch, live subscriptions", href: "./database/client-sdk" },
+  { icon: "🔧", title: "Admin SDK", description: "Server-side operations with Service Key (bypasses rules)", href: "./database/admin-sdk" },
+  { icon: "📋", title: "Defining Tables", description: "Type mapping, auto fields, migrations, destructive change detection", href: "./database/defining-tables" },
+  { icon: "🔒", title: "Access Rules", description: "Deny-by-default access control for tables", href: "./database/access-rules" },
+  { icon: "🪝", title: "Table Hooks", description: "Validate writes, enrich reads, and run inline side effects", href: "./database/hooks" },
+  { icon: "⚙️", title: "Database Triggers", description: "Server-side code on data changes", href: "./database/triggers" },
+  { icon: "🔎", title: "Advanced", description: "Upsert, full-text search", href: "./database/advanced" },
+  { icon: "🧭", title: "SDK Support", description: "Choose Client SDK vs Admin SDK for each database capability", href: "./database/sdk-support" },
+]} />

@@ -1,0 +1,89 @@
+{
+  "sdkLanguages": [
+    "JavaScript",
+    "Python",
+    "Dart",
+    "Swift",
+    "Kotlin",
+    "Java",
+    "Scala",
+    "Go",
+    "PHP",
+    "Rust",
+    "C#",
+    "C++",
+    "Ruby",
+    "Elixir"
+  ],
+  "sdkPackageHeadline": "30+",
+  "oauthProviderCount": 14,
+  "oauthFeaturedProviders": [
+    "Google",
+    "GitHub",
+    "Apple"
+  ],
+  "oauthProviderExamples": [
+    "Google",
+    "GitHub",
+    "Apple",
+    "Discord",
+    "Kakao",
+    "Naver"
+  ],
+  "docsEntryPoints": [
+    {
+      "tag": "Why",
+      "title": "Why EdgeBase",
+      "path": "/docs/why-edgebase",
+      "description": "Understand cost, scaling, physical isolation, and why this architecture behaves differently from server-centric BaaS platforms."
+    },
+    {
+      "tag": "Start",
+      "title": "Getting Started",
+      "path": "/docs/getting-started",
+      "description": "Initialize a project, wire up auth and database, and ship your first backend without deciding infrastructure first."
+    },
+    {
+      "tag": "Build",
+      "title": "SDKs",
+      "path": "/docs/sdks",
+      "description": "Choose the right client or admin surface, compare language coverage, and see the runtime verification matrix."
+    },
+    {
+      "tag": "Extend",
+      "title": "Plugins",
+      "path": "/docs/plugins",
+      "description": "Install, configure, or author plugins with lifecycle hooks, config injection, migrations, and runtime APIs."
+    },
+    {
+      "tag": "Operate",
+      "title": "Architecture",
+      "path": "/docs/architecture",
+      "description": "Study request routing, security boundaries, deployment internals, and the control-plane pieces behind the product."
+    },
+    {
+      "tag": "Reference",
+      "title": "API Reference",
+      "path": "/docs/api",
+      "description": "Jump straight to the REST surface for auth, database, storage, database subscriptions, functions, admin, and system endpoints."
+    }
+  ],
+  "deployModes": [
+    "Edge",
+    "Docker",
+    "Node.js"
+  ],
+  "searchContexts": [
+    { "label": "Why EdgeBase", "path": "/docs/why-edgebase" },
+    { "label": "Getting Started", "path": "/docs/getting-started" },
+    { "label": "Authentication", "path": "/docs/authentication" },
+    { "label": "Database", "path": "/docs/database" },
+    { "label": "Room", "path": "/docs/room" },
+    { "label": "Storage", "path": "/docs/storage" },
+    { "label": "Functions", "path": "/docs/functions" },
+    { "label": "Plugins", "path": "/docs/plugins" },
+    { "label": "Architecture", "path": "/docs/architecture" },
+    { "label": "SDKs", "path": "/docs/sdks" },
+    { "label": "API", "path": "/docs/api" }
+  ]
+}

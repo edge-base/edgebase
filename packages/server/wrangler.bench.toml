@@ -1,0 +1,26 @@
+# ─── 벤치마크 전용 Worker 설정 ───
+name = "edgebase-bench"
+main = "src/bench-entry.ts"
+compatibility_date = "2025-02-10"
+compatibility_flags = ["nodejs_compat"]
+
+[durable_objects]
+bindings = [
+  { name = "DATABASE", class_name = "DatabaseDO" },
+  { name = "AUTH", class_name = "AuthDO" },
+  { name = "DATABASE_LIVE", class_name = "DatabaseLiveDO" },
+  { name = "ROOMS", class_name = "RoomsDO" },
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DatabaseDO", "AuthDO"]
+new_classes = ["DatabaseLiveDO", "RoomsDO"]
+
+[[r2_buckets]]
+binding = "STORAGE"
+bucket_name = "edgebase-bench-storage"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "bench-kv-id"

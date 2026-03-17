@@ -1,0 +1,23 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeBase Logo - Shield Edge">
+  <defs>
+    <linearGradient id="g6" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+    <linearGradient id="g6b" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+  </defs>
+  <!-- Dark rounded background -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Shield shape -->
+  <path d="M64,18 L100,34 L100,68 Q100,96 64,110 Q28,96 28,68 L28,34 Z"
+    fill="none" stroke="url(#g6)" stroke-width="3" />
+  <!-- Inner "E" lettermark -->
+  <rect x="44" y="40" width="40" height="4" rx="2" fill="url(#g6)" />
+  <rect x="44" y="40" width="4" height="44" rx="2" fill="url(#g6)" />
+  <rect x="44" y="60" width="32" height="4" rx="2" fill="url(#g6)" />
+  <rect x="44" y="80" width="40" height="4" rx="2" fill="url(#g6)" />
+</svg>

@@ -1,0 +1,23 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g94" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Centered symmetrical prism with spectrum radiating outward -->
+  <!-- Center prism -->
+  <polygon points="64,24 80,72 48,72" fill="url(#g94)" opacity="0.5" />
+  <polygon points="64,24 80,72 48,72" fill="none" stroke="#a5b4fc" stroke-width="1.5" stroke-linejoin="round" opacity="0.6" />
+  <!-- Spectrum radiating downward in a fan -->
+  <line x1="52" y1="72" x2="18" y2="108" stroke="#3b82f6" stroke-width="3" stroke-linecap="round" opacity="0.9" />
+  <line x1="56" y1="72" x2="32" y2="108" stroke="#6366f1" stroke-width="3" stroke-linecap="round" opacity="0.85" />
+  <line x1="60" y1="72" x2="50" y2="108" stroke="#8b5cf6" stroke-width="3" stroke-linecap="round" opacity="0.8" />
+  <line x1="64" y1="72" x2="68" y2="108" stroke="#a855f7" stroke-width="3" stroke-linecap="round" opacity="0.8" />
+  <line x1="68" y1="72" x2="86" y2="108" stroke="#d946ef" stroke-width="3" stroke-linecap="round" opacity="0.85" />
+  <line x1="72" y1="72" x2="104" y2="108" stroke="#ec4899" stroke-width="3" stroke-linecap="round" opacity="0.9" />
+  <!-- Input beam from top -->
+  <line x1="64" y1="8" x2="64" y2="28" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.6" />
+</svg>

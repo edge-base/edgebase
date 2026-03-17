@@ -1,0 +1,10 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Origami bird / paper plane = lightweight, deploy, fly to the edge -->
+  <!-- Main body -->
+  <polygon points="24,70 104,40 64,72" fill="#818cf8" />
+  <!-- Wing -->
+  <polygon points="24,70 104,40 74,100" fill="#6366f1" />
+  <!-- Fold highlight -->
+  <polygon points="64,72 104,40 74,100" fill="#4f46e5" />
+</svg>

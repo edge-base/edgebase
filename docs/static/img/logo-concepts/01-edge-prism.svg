@@ -1,0 +1,21 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeBase Logo - Edge Prism">
+  <defs>
+    <linearGradient id="g1a" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+    <linearGradient id="g1b" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <!-- Dark rounded background -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Prism/Edge shape - three overlapping triangular facets -->
+  <polygon points="64,22 98,72 64,72" fill="url(#g1a)" opacity="0.9" />
+  <polygon points="64,22 30,72 64,72" fill="url(#g1b)" opacity="0.8" />
+  <!-- Database line indicators -->
+  <rect x="32" y="80" width="64" height="3" rx="1.5" fill="#3b82f6" opacity="0.9" />
+  <rect x="38" y="88" width="52" height="3" rx="1.5" fill="#6366f1" opacity="0.7" />
+  <rect x="44" y="96" width="40" height="3" rx="1.5" fill="#8b5cf6" opacity="0.5" />
+</svg>

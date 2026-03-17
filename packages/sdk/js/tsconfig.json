@@ -1,0 +1,30 @@
+{
+    "extends": "../../../tsconfig.base.json",
+    "compilerOptions": {
+        "outDir": "./dist",
+        "rootDir": ".",
+        "baseUrl": ".",
+        "paths": {
+            "@edgebase/core": [
+                "./packages/core/src/index.ts"
+            ],
+            "@edgebase/web": [
+                "./packages/web/src/index.ts"
+            ],
+            "@edgebase/admin": [
+                "./packages/admin/src/index.ts"
+            ]
+        },
+        "lib": [
+            "ES2022",
+            "DOM",
+            "DOM.Iterable"
+        ]
+    },
+    "include": [
+        "src",
+        "packages/core/src",
+        "packages/web/src",
+        "packages/admin/src"
+    ]
+}

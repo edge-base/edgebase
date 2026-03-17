@@ -1,0 +1,7 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Diamond + star hybrid: rotated square with a sharp top spike -->
+  <polygon points="64,14 84,50 110,64 84,78 64,114 44,78 18,64 44,50" fill="#f43f5e" />
+  <!-- Inner cutout to make it feel like a gem/badge -->
+  <polygon points="64,36 76,58 92,64 76,70 64,92 52,70 36,64 52,58" fill="#0f172a" />
+</svg>

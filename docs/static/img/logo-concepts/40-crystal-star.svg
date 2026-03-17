@@ -1,0 +1,12 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Crystal/faceted star - angular with two tones -->
+  <!-- Top-right facet -->
+  <polygon points="64,16 76,56 112,64 64,64" fill="#22d3ee" />
+  <!-- Bottom-right facet -->
+  <polygon points="112,64 76,72 64,112 64,64" fill="#0891b2" />
+  <!-- Bottom-left facet -->
+  <polygon points="64,112 52,72 16,64 64,64" fill="#06b6d4" />
+  <!-- Top-left facet -->
+  <polygon points="16,64 52,56 64,16 64,64" fill="#67e8f9" />
+</svg>

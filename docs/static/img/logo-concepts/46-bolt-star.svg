@@ -1,0 +1,12 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g46" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#f97316" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Bolt merged with star shape - speed + sparkle -->
+  <path d="M64,14 Q68,48 100,38 Q78,58 110,64 Q78,70 100,90 Q68,80 64,114 Q60,80 28,90 Q50,70 18,64 Q50,58 28,38 Q60,48 64,14Z"
+    fill="url(#g46)" />
+</svg>

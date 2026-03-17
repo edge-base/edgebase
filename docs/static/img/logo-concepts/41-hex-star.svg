@@ -1,0 +1,6 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- 6-point star made of two overlapping triangles, angular -->
+  <polygon points="64,18 94,96 34,96" fill="#a78bfa" />
+  <polygon points="64,110 34,32 94,32" fill="#7c3aed" opacity="0.85" />
+</svg>

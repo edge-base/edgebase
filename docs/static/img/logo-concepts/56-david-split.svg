@@ -1,0 +1,6 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Two triangles in contrasting colors -->
+  <polygon points="64,16 98,96 30,96" fill="#3b82f6" />
+  <polygon points="64,112 30,32 98,32" fill="#ec4899" opacity="0.75" />
+</svg>

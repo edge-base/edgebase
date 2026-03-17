@@ -1,0 +1,18 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g19a" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#3b82f6" />
+    </linearGradient>
+    <linearGradient id="g19b" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Diamond gem - two halves -->
+  <polygon points="64,20 96,52 64,108" fill="url(#g19b)" />
+  <polygon points="64,20 32,52 64,108" fill="url(#g19a)" />
+  <!-- Top facet highlight -->
+  <polygon points="64,20 96,52 64,52 32,52" fill="white" opacity="0.1" />
+</svg>

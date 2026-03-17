@@ -1,0 +1,5 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Single bold triangle pointing up = deploy/edge -->
+  <polygon points="64,22 104,98 24,98" fill="#10b981" />
+</svg>

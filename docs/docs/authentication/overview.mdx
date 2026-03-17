@@ -1,0 +1,252 @@
+---
+sidebar_position: 0
+sidebar_label: Overview
+slug: /authentication
+hide_title: true
+---
+import { OverviewHero, FeatureGrid, NextStepCards, DiagramBlock } from '@site/src/components/OverviewPage';
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+:::caution Beta
+This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::
+
+<OverviewHero
+  title="Authentication"
+  tagline="EdgeBase Authentication provides a complete identity solution for your applications. Support email/password, magic link, email OTP, passkeys, phone auth, 14 OAuth providers, anonymous sessions, and MFA out of the box. Sessions are managed via JWT with automatic refresh token rotation, and you can extend every step of the auth flow with backend authentication triggers and delivery hooks."
+  platforms={["JavaScript", "Dart", "Swift", "Kotlin", "Java", "Scala", "Python", "Go", "PHP", "Rust", "C#", "C++", "Ruby", "Elixir"]}
+/>
+
+---
+
+:::info Control Surface
+- **Access Rules**: [Authentication Access Rules](/docs/authentication/access-rules) allow or deny auth actions such as sign-up, sign-in, MFA, OAuth, refresh, and sign-out.
+- **Hooks**: [Authentication Delivery Hooks](/docs/functions/mail-hooks) and the [Authentication Context Hook](/docs/server/enrich-auth) customize outbound email/SMS and request-scoped auth metadata.
+- **Triggers**: [Authentication Triggers](/docs/authentication/hooks) run backend logic during sign-up, sign-in, token refresh, password reset, and account lifecycle events.
+- **Handlers**: Inline authentication behavior lives under `auth.handlers.*` in `edgebase.config.ts`.
+:::
+
+## Auth Methods
+
+<FeatureGrid features={[
+  { icon: "📧", title: "Email & Password", description: "PBKDF2 hashing (100K iterations), email verification support" },
+  { icon: "✨", title: "Magic Link", description: "Passwordless email login — click a link, no password needed" },
+  { icon: "🔢", title: "Email OTP", description: "6-digit passwordless codes delivered by email" },
+  { icon: "🌐", title: "OAuth", description: "Google, GitHub, Apple, Discord, and 10 more providers" },
+  { icon: "🪪", title: "Passkeys", description: "WebAuthn login with biometrics and security keys" },
+  { icon: "📱", title: "Phone / SMS", description: "OTP-based phone login — verify identity with a 6-digit SMS code" },
+  { icon: "👤", title: "Anonymous", description: "Instant sign-in with no credentials — upgradeable to full account later" },
+  { icon: "🔐", title: "Multi-Factor Auth", description: "TOTP-based 2FA with recovery codes for extra account security" },
+]} />
+
+## How Sessions Work
+
+<DiagramBlock title="Session Lifecycle">
+{`Sign In → Access Token (15 min) + Refresh Token (28 days)
+                │
+                ▼
+       Token expires → SDK auto-refreshes using Refresh Token
+                │
+                ▼
+       New Access Token + New Refresh Token (rotation)`}
+</DiagramBlock>
+
+- **Access Token** — Short-lived JWT verified locally (no server round-trip)
+- **Refresh Token** — Long-lived, single-use with rotation grace period for concurrent requests
+- **Multi-tab sync** — Token refresh broadcasts across browser tabs via BroadcastChannel
+
+## Quick Example
+
+Assume `client` is already initialized with your platform SDK.
+
+<Tabs groupId="sdk-language">
+<TabItem value="js" label="JavaScript" default>
+
+```typescript
+const signUpResult = await client.auth.signUp({
+  email: 'user@example.com',
+  password: 'securePassword123',
+});
+
+const session = await client.auth.signIn({
+  email: 'user@example.com',
+  password: 'securePassword123',
+});
+
+const currentUser = client.auth.currentUser;
+
+client.auth.onAuthStateChange((event, nextUser) => {
+  console.log(event, nextUser?.email);
+});
+```
+
+</TabItem>
+<TabItem value="dart" label="Dart/Flutter">
+
+```dart
+final signUp = await client.auth.signUp(
+  email: 'user@example.com',
+  password: 'securePassword123',
+);
+
+final signIn = await client.auth.signIn(
+  email: 'user@example.com',
+  password: 'securePassword123',
+);
+
+final user = client.auth.currentUser;
+
+client.auth.onAuthStateChange((event, currentUser) {
+  print('$event ${currentUser?.email}');
+});
+```
+
+</TabItem>
+<TabItem value="swift" label="Swift">
+
+```swift
+let signUp = try await client.auth.signUp(
+    email: "user@example.com",
+    password: "securePassword123"
+)
+
+let signIn = try await client.auth.signIn(
+    email: "user@example.com",
+    password: "securePassword123"
+)
+
+let user = await client.auth.currentUser()
+
+client.auth.onAuthStateChange { event, currentUser in
+    print(event, currentUser?["email"] ?? "")
+}
+```
+
+</TabItem>
+<TabItem value="kotlin" label="Kotlin">
+
+```kotlin
+val signUp = client.auth.signUp(
+    email = "user@example.com",
+    password = "securePassword123"
+)
+
+val signIn = client.auth.signIn(
+    email = "user@example.com",
+    password = "securePassword123"
+)
+
+val user = client.auth.currentUser() ?: client.auth.getMe()
+
+client.auth.onAuthStateChange { event, currentUser ->
+    println(event + " " + currentUser?.get("email"))
+}
+```
+
+</TabItem>
+<TabItem value="java" label="Java">
+
+```java
+Map<String, Object> signUp = client.auth().signUp(
+    "user@example.com",
+    "securePassword123",
+    Map.of()
+);
+
+Map<String, Object> signIn = client.auth().signIn(
+    "user@example.com",
+    "securePassword123"
+);
+
+Map<String, Object> user = client.auth().currentUser();
+
+client.auth().onAuthStateChange((event, currentUser) -> {
+    System.out.println(event + " " + currentUser.get("email"));
+});
+```
+
+</TabItem>
+<TabItem value="csharp" label="C#">
+
+```csharp
+var signUp = await client.Auth.SignUpAsync(
+    "user@example.com",
+    "securePassword123"
+);
+
+var signIn = await client.Auth.SignInAsync(
+    "user@example.com",
+    "securePassword123"
+);
+
+var user = await client.Auth.GetUserAsync();
+
+client.Auth.OnAuthStateChange += (currentUser) => {
+    Console.WriteLine(currentUser?["email"]);
+};
+```
+
+</TabItem>
+<TabItem value="cpp" label="C++">
+
+```cpp
+auto signUp = client.auth().signUp("user@example.com", "securePassword123");
+auto signIn = client.auth().signIn("user@example.com", "securePassword123");
+
+auto user = client.auth().currentUser();
+
+client.auth().onAuthStateChange([](const std::string& userJson) {
+    std::cout << userJson << std::endl;
+});
+```
+
+</TabItem>
+</Tabs>
+
+## Custom Claims
+
+Attach custom data to user tokens for role-based access:
+
+```typescript
+// Server-side: set custom claims
+await admin.auth.setCustomClaims(userId, {
+  role: 'editor',
+  plan: 'pro',
+});
+
+// Use in access rules:
+// access: { update(auth) { return auth?.custom?.role === 'editor' } }
+```
+
+:::info Server-Side Auth Coverage
+Admin user management, session revocation, and authentication trigger integrations are available across all Admin SDKs.
+:::
+
+## Next Steps
+
+<NextStepCards steps={[
+  { icon: "📧", title: "Email & Password", description: "Sign up, sign in, password reset, email verification", href: "email-password" },
+  { icon: "✨", title: "Magic Link", description: "Passwordless email login — no password required", href: "magic-link" },
+  { icon: "🔢", title: "Email OTP", description: "6-digit passwordless codes sent by email", href: "email-otp" },
+  { icon: "🌐", title: "OAuth", description: "Social login with 14 providers", href: "oauth" },
+  { icon: "🏢", title: "OIDC Federation", description: "Connect Okta, Auth0, Keycloak, and other OIDC providers", href: "oidc-federation" },
+  { icon: "📱", title: "Phone / SMS", description: "OTP-based phone login with SMS verification", href: "phone-auth" },
+  { icon: "👤", title: "Anonymous Auth", description: "Zero-friction sign-in, account upgrading", href: "anonymous" },
+  { icon: "🪪", title: "Passkeys", description: "WebAuthn sign-in and passkey management", href: "passkeys" },
+  { icon: "🔐", title: "Multi-Factor Auth", description: "TOTP-based 2FA with recovery codes", href: "mfa" },
+  { icon: "🔑", title: "Sessions", description: "JWT lifecycle, refresh rotation, multi-tab sync", href: "sessions" },
+  { icon: "📨", title: "Email Change", description: "Two-step verified email updates for signed-in users", href: "email-change" },
+  { icon: "👨‍💼", title: "Admin Users", description: "Server-side user management", href: "admin-users" },
+  { icon: "⛔", title: "Ban & Disable", description: "Lock out compromised or abusive accounts", href: "ban-disable" },
+  { icon: "📥", title: "User Import", description: "Bulk import existing users and credentials", href: "user-import" },
+  { icon: "🔒", title: "Access Rules", description: "Allow or deny auth actions such as sign-up, sign-in, MFA, OAuth, refresh, and sign-out", href: "access-rules" },
+  { icon: "🪝", title: "Authentication Triggers", description: "Run server-side logic during sign-up, sign-in, token refresh, and more", href: "hooks" },
+  { icon: "📨", title: "Authentication Delivery Hooks", description: "Rewrite or block outbound auth email and SMS messages", href: "/docs/functions/mail-hooks" },
+  { icon: "🤖", title: "Captcha", description: "Turnstile integration for bot protection", href: "captcha" },
+  { icon: "🔗", title: "Account Linking", description: "Upgrade anonymous accounts or attach multiple OAuth providers to one user", href: "account-linking" },
+  { icon: "⚠️", title: "Error Codes", description: "Complete auth error reference", href: "error-codes" },
+  { icon: "🔒", title: "Password Policy", description: "Strength rules, HIBP leak detection, hashing", href: "password-policy" },
+  { icon: "📋", title: "Session Management", description: "Session limits, eviction, token rotation, cleanup", href: "session-management" },
+  { icon: "🧭", title: "SDK Support", description: "See which auth capabilities belong to Client SDK vs Admin SDK", href: "sdk-support" },
+]} />

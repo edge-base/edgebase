@@ -1,0 +1,51 @@
+{
+    "name": "@edgebase/sdk",
+    "version": "0.1.0",
+    "description": "EdgeBase SDK — unified JavaScript/TypeScript client for EdgeBase",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/edgebase/edgebase.git",
+        "directory": "packages/sdk/js"
+    },
+    "homepage": "https://edgebase.fun",
+    "bugs": "https://github.com/edgebase/edgebase/issues",
+    "keywords": ["edgebase", "sdk", "baas", "backend", "cloudflare-workers", "database-live"],
+    "type": "module",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "require": "./dist/index.cjs"
+        }
+    },
+    "sideEffects": false,
+    "files": [
+        "dist"
+    ],
+    "publishConfig": {
+        "access": "public"
+    },
+    "scripts": {
+        "build": "tsup",
+        "lint": "eslint src/",
+        "test": "TMPDIR=/tmp vitest run",
+        "test:e2e": "TMPDIR=/tmp pnpm exec vitest run --config packages/core/vitest.config.ts packages/core/test/e2e/core.e2e.test.ts && TMPDIR=/tmp pnpm exec vitest run --config packages/web/vitest.config.ts packages/web/test/e2e/web.e2e.test.ts && TMPDIR=/tmp pnpm exec vitest run --config packages/admin/vitest.config.ts packages/admin/test/e2e/admin.e2e.test.ts",
+        "dev": "tsc --watch"
+    },
+    "dependencies": {
+        "@edgebase/shared": "workspace:*",
+        "@edgebase/core": "workspace:*",
+        "@edgebase/web": "workspace:*",
+        "@edgebase/admin": "workspace:*"
+    },
+    "devDependencies": {
+        "tsup": "^8.0.0",
+        "typescript": "^5.7.0",
+        "vitest": "^3.0.0",
+        "happy-dom": "^16.0.0"
+    }
+}

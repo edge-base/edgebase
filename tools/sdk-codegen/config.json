@@ -1,0 +1,78 @@
+{
+  "specPath": "packages/server/openapi.json",
+  "languages": {
+    "typescript": {
+      "core": "packages/sdk/js/packages/core/src/generated/api-core.ts",
+      "admin": "packages/sdk/js/packages/admin/src/generated/admin-api-core.ts"
+    },
+    "python": {
+      "core": "packages/sdk/python/packages/core/src/edgebase_core/generated/api_core.py",
+      "admin": "packages/sdk/python/packages/admin/src/edgebase_admin/generated/admin_api_core.py",
+      "stripApiPrefix": true
+    },
+    "go": {
+      "core": "packages/sdk/go/generated_api_core.go",
+      "admin": "packages/sdk/go/generated_admin_api_core.go"
+    },
+    "rust": {
+      "core": "packages/sdk/rust/packages/core/src/generated/api_core.rs",
+      "admin": "packages/sdk/rust/packages/admin/src/generated/admin_api_core.rs"
+    },
+    "dart": {
+      "core": "packages/sdk/dart/packages/core/lib/src/generated/api_core.dart",
+      "admin": "packages/sdk/dart/packages/admin/lib/src/generated/admin_api_core.dart",
+      "stripApiPrefix": true
+    },
+    "swift": {
+      "core": "packages/sdk/swift/packages/core/Sources/Generated/ApiCore.swift",
+      "stripApiPrefix": true
+    },
+    "kotlin": {
+      "core": "packages/sdk/kotlin/core/src/commonMain/kotlin/dev/edgebase/sdk/core/generated/ApiCore.kt",
+      "admin": "packages/sdk/kotlin/admin/src/main/kotlin/dev/edgebase/sdk/admin/generated/AdminApiCore.kt",
+      "stripApiPrefix": true
+    },
+    "java": {
+      "core": "packages/sdk/java/packages/core/src/main/java/dev/edgebase/sdk/core/generated/GeneratedDbApi.java",
+      "admin": "packages/sdk/java/packages/admin/src/main/java/dev/edgebase/sdk/admin/generated/GeneratedAdminApi.java",
+      "stripApiPrefix": true
+    },
+    "php": {
+      "core": "packages/sdk/php/packages/core/src/Generated/ApiCore.php",
+      "admin": "packages/sdk/php/packages/core/src/Generated/AdminApiCore.php",
+      "stripApiPrefix": true
+    },
+    "csharp": {
+      "core": "packages/sdk/csharp/packages/core/Generated/ApiCore.cs",
+      "admin": "packages/sdk/csharp/packages/core/Generated/AdminApiCore.cs"
+    },
+    "ruby": {
+      "core": "packages/sdk/ruby/packages/core/lib/edgebase_core/generated/api_core.rb",
+      "admin": "packages/sdk/ruby/packages/admin/lib/edgebase_admin/generated/admin_api_core.rb",
+      "stripApiPrefix": true
+    },
+    "cpp": {
+      "core_header": "packages/sdk/cpp/packages/core/include/edgebase/generated/api_core.h",
+      "core_impl": "packages/sdk/cpp/packages/core/src/generated/api_core.cpp"
+    }
+  },
+  "tagMapping": {
+    "client": "core",
+    "admin": "admin"
+  },
+  "wrappers": {
+    "typescript": "packages/sdk/js/packages/core/src/generated/client-wrappers.ts",
+    "python": "packages/sdk/python/packages/core/src/edgebase_core/generated/client_wrappers.py",
+    "go": "packages/sdk/go/generated_client_wrappers.go",
+    "rust": "packages/sdk/rust/packages/core/src/generated/client_wrappers.rs",
+    "dart": "packages/sdk/dart/packages/core/lib/src/generated/client_wrappers.dart",
+    "swift": "packages/sdk/swift/packages/core/Sources/Generated/ClientWrappers.swift",
+    "kotlin": "packages/sdk/kotlin/core/src/commonMain/kotlin/dev/edgebase/sdk/core/generated/ClientWrappers.kt",
+    "java": "packages/sdk/java/packages/core/src/main/java/dev/edgebase/sdk/core/generated/GeneratedClientWrappers.java",
+    "php": "packages/sdk/php/packages/core/src/Generated/ClientWrappers.php",
+    "csharp": "packages/sdk/csharp/packages/core/Generated/ClientWrappers.cs",
+    "ruby": "packages/sdk/ruby/packages/core/lib/edgebase_core/generated/client_wrappers.rb",
+    "cpp_header": "packages/sdk/cpp/packages/core/include/edgebase/generated/client_wrappers.h",
+    "cpp_impl": "packages/sdk/cpp/packages/core/src/generated/client_wrappers.cpp"
+  }
+}

@@ -1,0 +1,14 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeBase Logo - E Bolt">
+  <defs>
+    <linearGradient id="g3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <!-- Dark rounded background -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Stylized "E" that doubles as a lightning bolt / edge symbol -->
+  <path d="M76,24 L36,24 L36,30 L68,30 L36,60 L36,66 L68,66 L36,96 L36,104 L92,104 L92,96 L56,96 L88,66 L88,60 L56,60 L88,30 L88,24 Z"
+    fill="url(#g3)" />
+</svg>

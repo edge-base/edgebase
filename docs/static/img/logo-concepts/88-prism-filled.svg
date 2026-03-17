@@ -1,0 +1,25 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g88tri" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa" />
+      <stop offset="100%" stop-color="#818cf8" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Solid filled prism with color spectrum emerging -->
+  <!-- Left face -->
+  <polygon points="56,20 28,92 56,72" fill="#3b82f6" opacity="0.6" />
+  <!-- Right face -->
+  <polygon points="56,20 84,92 56,72" fill="#818cf8" opacity="0.6" />
+  <!-- Bottom face -->
+  <polygon points="28,92 84,92 56,72" fill="#6366f1" opacity="0.4" />
+  <!-- Spectrum rays fanning out right -->
+  <polygon points="72,44 114,20 114,32" fill="#3b82f6" opacity="0.8" />
+  <polygon points="74,52 114,36 114,48" fill="#6366f1" opacity="0.75" />
+  <polygon points="76,60 114,52 114,64" fill="#8b5cf6" opacity="0.7" />
+  <polygon points="78,68 114,68 114,80" fill="#a855f7" opacity="0.7" />
+  <polygon points="78,76 114,84 114,96" fill="#d946ef" opacity="0.75" />
+  <polygon points="76,82 114,100 114,110" fill="#ec4899" opacity="0.8" />
+  <!-- Input beam -->
+  <polygon points="14,54 42,58 42,66 14,70" fill="white" opacity="0.25" />
+</svg>

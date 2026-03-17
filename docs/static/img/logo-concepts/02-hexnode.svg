@@ -1,0 +1,33 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeBase Logo - Hex Node">
+  <defs>
+    <linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+  </defs>
+  <!-- Dark rounded background -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#0f172a" />
+  <!-- Outer hexagon (edge network) -->
+  <polygon points="64,20 100,42 100,86 64,108 28,86 28,42"
+    fill="none" stroke="url(#g2)" stroke-width="3" />
+  <!-- Inner hexagon (core) -->
+  <polygon points="64,38 82,51 82,77 64,90 46,77 46,51"
+    fill="url(#g2)" opacity="0.15" />
+  <!-- Center dot - database core -->
+  <circle cx="64" cy="64" r="10" fill="url(#g2)" />
+  <!-- Edge connection lines -->
+  <line x1="64" y1="54" x2="64" y2="20" stroke="url(#g2)" stroke-width="2" opacity="0.5" />
+  <line x1="73" y1="59" x2="100" y2="42" stroke="url(#g2)" stroke-width="2" opacity="0.5" />
+  <line x1="73" y1="69" x2="100" y2="86" stroke="url(#g2)" stroke-width="2" opacity="0.5" />
+  <line x1="64" y1="74" x2="64" y2="108" stroke="url(#g2)" stroke-width="2" opacity="0.5" />
+  <line x1="55" y1="69" x2="28" y2="86" stroke="url(#g2)" stroke-width="2" opacity="0.5" />
+  <line x1="55" y1="59" x2="28" y2="42" stroke="url(#g2)" stroke-width="2" opacity="0.5" />
+  <!-- Edge nodes -->
+  <circle cx="64" cy="20" r="4" fill="#3b82f6" />
+  <circle cx="100" cy="42" r="4" fill="#6366f1" />
+  <circle cx="100" cy="86" r="4" fill="#8b5cf6" />
+  <circle cx="64" cy="108" r="4" fill="#ec4899" />
+  <circle cx="28" cy="86" r="4" fill="#a855f7" />
+  <circle cx="28" cy="42" r="4" fill="#3b82f6" />
+</svg>

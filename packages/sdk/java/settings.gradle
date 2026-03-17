@@ -1,0 +1,3 @@
+rootProject.name = 'edgebase-java-sdk'
+// DECISIONS #122: Core/Android/Admin 패키지 분리
+include ':packages:core', ':packages:android', ':packages:admin'
