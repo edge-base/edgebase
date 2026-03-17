@@ -1,0 +1,343 @@
+---
+sidebar_position: 0
+sidebar_label: Overview
+slug: /functions
+hide_title: true
+---
+
+import { OverviewHero, FeatureGrid, NextStepCards } from '@site/src/components/OverviewPage';
+
+:::caution Beta
+This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::
+
+<OverviewHero
+  title="App Functions"
+  tagline="EdgeBase App Functions let you run server-side code in response to events. Define functions triggered by database changes, expose custom HTTP endpoints, run scheduled tasks with cron expressions, or run authentication triggers to enforce business logic. Functions have full access to the Admin SDK for database operations, storage, push notifications, and more."
+/>
+
+---
+
+:::info Admin Surface Parity
+The `context.admin` surface maps to the same server-side capabilities exposed by all Admin SDKs.
+:::
+
+:::info Control Surface
+- **Access Rules**: App Functions do not have a dedicated access-rule layer. Enforce policy in product-specific access rules or inside your function code.
+- **Hooks**: [Authentication Delivery Hooks](/docs/functions/mail-hooks) live adjacent to App Functions but are configured under `auth.handlers.*`, not in the `functions/` directory.
+- **Triggers**: [Function Trigger Types](/docs/functions/triggers) cover `http`, `db`, `auth`, `schedule`, and `storage`.
+- **Handlers**: Each App Function is a handler, either via named HTTP exports or a default export with `trigger`.
+:::
+
+## File-System Routing
+
+App Functions use file-system routing by default. Each `.ts` file in the `functions/` directory becomes an HTTP endpoint under `/api/functions/*`:
+
+```
+functions/
+  hello.ts                    -> /api/functions/hello
+  users/index.ts              -> /api/functions/users
+  users/[userId].ts           -> /api/functions/users/:userId
+  users/[userId]/profile.ts   -> /api/functions/users/:userId/profile
+  (internal)/sync.ts          -> /api/functions/sync  (parentheses stripped)
+```
+
+### Named Exports = HTTP Methods
+
+Export named constants (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`) to handle specific HTTP methods:
+
+```typescript
+// functions/users/[userId].ts
+import { defineFunction } from '@edgebase/shared';
+
+export const GET = defineFunction(async ({ params, admin }) => {
+  const user = await admin.db('app').table('users').get(params.userId);
+  return Response.json(user);
+});
+
+export const DELETE = defineFunction(async ({ params, admin }) => {
+  await admin.db('app').table('users').delete(params.userId);
+  return Response.json({ deleted: true });
+});
+```
+
+### Dynamic Routes
+
+Use `[param]` in file or directory names to capture URL segments. The captured values are available in `context.params`:
+
+```typescript
+// functions/workspaces/[wsId]/docs/[docId].ts
+// URL: /api/functions/workspaces/ws-123/docs/doc-456
+
+export const GET = defineFunction(async ({ params, admin }) => {
+  // params.wsId = 'ws-123'
+  // params.docId = 'doc-456'
+  return admin.db('workspace', params.wsId).table('documents').get(params.docId);
+});
+```
+
+### Optional `trigger.path` Override
+
+If you need a cleaner public route than the file path provides, use a default export with `trigger.path`:
+
+```typescript
+// functions/reports/top-authors.ts
+export default defineFunction({
+  trigger: { type: 'http', method: 'GET', path: '/analytics/top-authors' },
+  handler: async ({ admin }) => {
+    return admin.sql('app', undefined, 'SELECT 1');
+  },
+});
+```
+
+That function is served at `GET /api/functions/analytics/top-authors`.
+
+---
+
+## Trigger Types
+
+<FeatureGrid
+  features={[
+    {
+      icon: '🗄️',
+      title: 'Database Trigger',
+      description:
+        'Fire after database insert, update, or delete operations. Runs asynchronously via waitUntil().',
+    },
+    {
+      icon: '🌐',
+      title: 'HTTP Trigger',
+      description:
+        'Expose custom endpoints under /api/functions/* with optional captcha protection.',
+    },
+    {
+      icon: '⏰',
+      title: 'Schedule (Cron)',
+      description: 'Run on a schedule — weekly reports, daily cleanups, periodic syncs.',
+    },
+    {
+      icon: '🔐',
+      title: 'Authentication Triggers',
+      description:
+        'Run on beforeSignUp, afterSignIn, onTokenRefresh, and more. Block or extend auth flows.',
+    },
+    {
+      icon: '📦',
+      title: 'Storage Trigger',
+      description:
+        'Fire before or after storage operations — beforeUpload, afterUpload, beforeDelete, afterDelete, beforeDownload, onMetadataUpdate.',
+    },
+  ]}
+  columns={2}
+/>
+
+## Defining a Function
+
+### HTTP Functions (Named Exports)
+
+For HTTP endpoints, export named constants matching HTTP methods:
+
+```typescript
+// functions/send-email.ts -> POST /api/functions/send-email
+import { defineFunction, FunctionError } from '@edgebase/shared';
+
+export const POST = defineFunction(async ({ auth, admin, request }) => {
+  if (!auth) throw new FunctionError('unauthenticated', 'Login required');
+
+  const body = await request.json();
+  await admin.db('app').table('emails').insert({
+    to: body.to,
+    subject: body.subject,
+    userId: auth.id,
+  });
+
+  return Response.json({ sent: true });
+});
+```
+
+### Trigger Functions (Default Export)
+
+For database triggers, schedule triggers, and authentication triggers, use the `default` export with a trigger config:
+
+```typescript
+// functions/onPostCreated.ts
+import { defineFunction } from '@edgebase/shared';
+
+export default defineFunction({
+  trigger: { type: 'db', table: 'posts', event: 'insert' },
+  handler: async ({ data, auth, admin }) => {
+    // data.after -> the newly created post
+    // auth -> current user info
+    // admin -> server SDK instance (full access)
+
+    await admin.db('app').table('activity').insert({
+      type: 'new_post',
+      postId: data.after.id,
+      userId: auth?.id,
+    });
+  },
+});
+```
+
+## Function Context
+
+Every function receives these context objects:
+
+| Context        | Description                                                                                                                   |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `data`         | Trigger-specific data (DB event, HTTP request, etc.)                                                                          |
+| `admin`        | Admin SDK instance — `admin.db('app').table()`, `admin.sql()`, `admin.auth`, `admin.broadcast()`, `admin.functions.call()` |
+| `auth`         | Current user (if authenticated)                                                                                               |
+| `params`       | Dynamic route parameters from `[param]` segments (HTTP functions only)                                                        |
+| `request`      | The incoming HTTP Request object                                                                                              |
+| `storage`      | File storage API (optional, only if R2 binding exists)                                                                        |
+| `analytics`    | Analytics Engine adapter (optional, only if ANALYTICS binding exists)                                                         |
+| `push`         | Push notification API — `push.send()`, `push.sendMany()`, `push.broadcast()`, `push.getTokens()`, `push.getLogs()`, `push.sendToToken()`, `push.sendToTopic()`  |
+| `trigger`      | Trigger metadata — includes `namespace`, `id`, `table`, and `event` (DB triggers)                                             |
+| `pluginConfig` | Plugin-specific configuration (optional, from `config.plugins` section)                                                       |
+
+## Database Trigger
+
+Fires after database CUD operations:
+
+```typescript
+export default defineFunction({
+  trigger: { type: 'db', table: 'orders', event: 'update' },
+  handler: async ({ data }) => {
+    console.log('Before:', data.before);
+    console.log('After:', data.after);
+  },
+});
+```
+
+Database triggers execute asynchronously (`context.waitUntil()`) and do not block API responses.
+
+## HTTP Trigger
+
+Expose custom HTTP endpoints via file-system routing. The file path determines the default URL, and named exports determine the HTTP method:
+
+```typescript
+// functions/stripe-webhook.ts -> POST /api/functions/stripe-webhook
+export const POST = defineFunction(async ({ request, admin }) => {
+  const body = await request.json();
+  await admin.db('app').table('payments').insert({ stripeId: body.id });
+  return Response.json({ received: true });
+});
+```
+
+Multiple methods can be defined in the same file:
+
+```typescript
+// functions/users.ts
+export const GET = defineFunction(async ({ admin }) => {
+  const { items } = await admin.db('app').table('users').list();
+  return Response.json({ items });
+});
+
+export const POST = defineFunction(async ({ request, admin }) => {
+  const body = await request.json();
+  const user = await admin.db('app').table('users').insert(body);
+  return Response.json(user);
+});
+```
+
+You can also override the default route with `trigger.path`:
+
+```typescript
+export default defineFunction({
+  trigger: { type: 'http', method: 'POST', path: '/webhooks/stripe' },
+  handler: async ({ request, admin }) => {
+    const body = await request.json();
+    await admin.db('app').table('payments').insert({ stripeId: body.id });
+    return Response.json({ received: true });
+  },
+});
+```
+
+#### Options
+
+| Option    | Type      | Default | Description                                                      |
+| --------- | --------- | ------- | ---------------------------------------------------------------- |
+| `captcha` | `boolean` | `false` | Require captcha (Turnstile) verification before the handler runs |
+
+**Captcha-protected HTTP function:**
+
+```typescript
+// functions/contact.ts
+export const POST = defineFunction(async ({ request, admin }) => {
+  const body = await request.json();
+  await admin.db('app').table('inquiries').insert({ email: body.email, message: body.message });
+  return Response.json({ ok: true });
+});
+POST.captcha = true; // Requires a valid captcha token
+```
+
+When `captcha: true`, the middleware rejects requests without a valid token (403). See [Captcha Guide](/docs/authentication/captcha) for full details.
+
+## Schedule Trigger (Cron)
+
+Run on a schedule:
+
+```typescript
+export default defineFunction({
+  trigger: { type: 'schedule', cron: '0 9 * * MON' },
+  handler: async ({ admin }) => {
+    const count = await admin.sql(
+      'reports',
+      undefined,
+      "SELECT COUNT(*) as total FROM reports WHERE createdAt > date('now', '-7 days')",
+    );
+    console.log(`Weekly report count: ${count[0].total}`);
+  },
+});
+```
+
+## Authentication Triggers
+
+Run backend logic during authentication events:
+
+```typescript
+export default defineFunction({
+  trigger: { type: 'auth', event: 'beforeSignUp' },
+  handler: async ({ data }) => {
+    const email = String(data?.after?.email ?? '');
+    const domain = email.split('@')[1];
+    if (domain !== 'company.com') {
+      throw new Error('Only company emails allowed');
+    }
+    return { role: 'employee' };
+  },
+});
+```
+
+| Event                 | Timing                       | Can Block? |
+| --------------------- | ---------------------------- | ---------- |
+| `beforeSignUp`        | Before signup                | Yes        |
+| `afterSignUp`         | After signup                 | No         |
+| `beforeSignIn`        | Before login                 | Yes        |
+| `afterSignIn`         | After login                  | No         |
+| `onTokenRefresh`      | On token refresh             | Yes        |
+| `beforePasswordReset` | Before password reset        | Yes        |
+| `afterPasswordReset`  | After password reset         | No         |
+| `beforeSignOut`       | Before sign-out              | Yes        |
+| `afterSignOut`        | After sign-out               | No         |
+| `onDeleteAccount`     | On account deletion          | No         |
+| `onEmailVerified`     | After email is verified      | No         |
+
+Blocking authentication triggers have a 5-second timeout. If exceeded, the operation is rejected with 403 `hook-rejected`.
+
+:::note `onTokenRefresh` exception
+`onTokenRefresh` is an exception to the 403 rejection rule. If the hook fails or times out, the token refresh proceeds without hook claims instead of being rejected. This prevents a broken hook from locking users out of their sessions.
+:::
+
+## Next Steps
+
+<NextStepCards
+  steps={[
+    { icon: '🌐', title: 'Client SDK', description: 'Call HTTP App Functions from your app with auth headers attached', href: 'client-sdk' },
+    { icon: '⚙️', title: 'Function Trigger Types', description: 'Understand HTTP, db, auth, and schedule trigger surfaces', href: 'triggers' },
+    { icon: '🧰', title: 'Context API', description: 'Learn what admin, auth, params, request, and storage mean inside a function', href: 'context-api' },
+    { icon: '⚠️', title: 'Error Handling', description: 'Return structured errors and map them cleanly into SDK failures', href: 'error-handling' },
+    { icon: '🧭', title: 'SDK Support', description: 'See how App Functions differ as a client call surface vs backend call surface', href: 'sdk-support' },
+  ]}
+/>

@@ -68,9 +68,9 @@ packages/sdk/cpp/packages/core/tests/build-storage-suite*/
 
 # Generated test/runtime output
 artifacts/
-dev/
-functions/
-runtime/
+/dev/
+/functions/
+/runtime/
 *.log
 erl_crash.dump
 test-results/

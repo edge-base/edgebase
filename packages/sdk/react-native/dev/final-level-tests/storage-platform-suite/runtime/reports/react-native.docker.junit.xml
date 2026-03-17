@@ -1,0 +1,260 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="88" failures="0" errors="0" time="1.055">
+    <testsuite name="test/e2e/rn.e2e.test.ts" timestamp="2026-03-09T05:22:01.897Z" hostname="junes-Mac-Studio.local" tests="88" failures="0" errors="0" skipped="79" time="0.301">
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Auth &gt; signup → accessToken + user.id 반환" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Auth &gt; signin → accessToken + refreshToken 반환" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Auth &gt; signout → 성공" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Auth &gt; refresh → 새 accessToken 발급" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Auth &gt; signup+signin+signout full chain" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Auth &gt; anonymous auth → user.isAnonymous" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Auth &gt; wrong password → 401 또는 400" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Auth &gt; duplicate signup → 에러" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Auth &gt; signup with data → user metadata 저장" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Auth &gt; change-password → 새 비밀번호로 signin 가능" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Auth &gt; sessions list → 배열 반환" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Auth &gt; updateProfile → displayName 변경" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — DB CRUD &gt; insert → id 반환" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — DB CRUD &gt; getOne → 레코드 반환" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — DB CRUD &gt; update → 변경 반영" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — DB CRUD &gt; delete → getOne 에러" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — DB CRUD &gt; insert+get+update+delete full chain" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — DB CRUD &gt; insert → createdAt 필드 존재" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — DB CRUD &gt; update → updatedAt 필드 변경" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Filter &gt; where == 필터" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Filter &gt; orderBy + limit ≤ N" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Filter &gt; count() → 숫자" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Filter &gt; where + orderBy + limit 조합" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Filter &gt; where != 필터" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Filter &gt; where contains 필터" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Filter &gt; offset pagination" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Filter &gt; count with filter" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Filter &gt; or() 필터" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Filter &gt; cursor pagination (after)" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Filter &gt; search (FTS)" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Golden Query &gt; filter&gt;=10 + sort:desc + limit=3 → [40,30,20]" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Golden Query &gt; cursor pagination with filter → no overlap" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Golden Query &gt; CRUD round-trip: insert → getOne → update → delete → verify 404" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Storage &gt; upload + download" time="0.069">
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Storage &gt; upload + getUrl → URL 포함 bucket + key" time="0.017">
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Storage &gt; upload + list → 파일 목록에 포함" time="0.028">
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Storage &gt; upload + delete → 삭제 성공" time="0.021">
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Storage &gt; download as text" time="0.02">
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Storage &gt; uploadString + download" time="0.027">
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Batch &gt; insertMany → N개" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Batch &gt; insertMany → 각 항목에 id 존재" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Batch &gt; insertMany → 빈 배열 → 빈 결과" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Batch &gt; updateMany → where 필터로 일괄 수정" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Batch &gt; deleteMany → where 필터로 일괄 삭제" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Upsert &gt; upsert 신규 → action === &quot;inserted&quot;" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Upsert &gt; upsert 기존 → action === &quot;updated&quot;" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — FieldOps &gt; increment → 숫자 필드 증가" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — FieldOps &gt; increment 음수 → 감소" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — FieldOps &gt; deleteField → 필드 null/삭제" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Error &gt; getOne 없는 id → 에러" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Error &gt; update 없는 id → 에러" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Error &gt; delete 없는 id → 에러" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Error &gt; updateMany without where → 에러" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Error &gt; deleteMany without where → 에러" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — AsyncStorage 세션 (언어특화) &gt; signup → refreshToken을 AsyncStorage에 저장 후 복원" time="0.047">
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — AsyncStorage 세션 (언어특화) &gt; signout → AsyncStorage refreshToken 삭제 시뮬레이션" time="0">
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — AsyncStorage 세션 (언어특화) &gt; TokenManager 복원 → AsyncStorage 기반 user 복구" time="0.072">
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Realtime (구조 검증) &gt; auth 후 TokenManager에 토큰 설정 → onSnapshot 구독 가능" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Room (구조 검증) &gt; auth 후 room.join() 가능" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Room (구조 검증) &gt; room.leave() → state 초기화" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push (구조 검증) &gt; PushClient 생성 → register 에러 (토큰 프로바이더 미설정)" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push (구조 검증) &gt; PushClient setTokenProvider → register 호출 시도" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push (구조 검증) &gt; PushClient message dispatch 체인" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — createClient 통합 &gt; createClient + auth.signUp → user 확인" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — createClient 통합 &gt; createClient + auth.signIn → token 설정" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — createClient 통합 &gt; createClient + auth.signOut → user null" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — createClient 통합 &gt; createClient + onAuthStateChange → signup/signout 이벤트" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — createClient 통합 &gt; createClient → db().table() CRUD" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Lifecycle (시뮬레이션) &gt; LifecycleManager: background→foreground 사이클" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — DocRef &gt; doc(id).get() → 레코드 반환" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — DocRef &gt; doc(id).update() → 변경 반영" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — DocRef &gt; doc(id).delete() → getOne 에러" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — ListResult 구조 &gt; getList() → items 배열 포함" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — ListResult 구조 &gt; getList() → total/page/perPage 또는 hasMore/cursor 존재" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — ListResult 구조 &gt; 빈 결과 → items === []" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push Client &gt; signup for push" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push Client &gt; push.register → 200" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push Client &gt; push.subscribeTopic → 200" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push Client &gt; push.unsubscribeTopic → 200" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push Client &gt; push.unregister → 200" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push Full Flow &gt; setup: signup → accessToken + userId" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push Full Flow &gt; clear mock FCM store" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push Full Flow &gt; client register → 200" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push Full Flow &gt; admin send(userId) → sent:1, mock FCM receives correct token/payload" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push Full Flow &gt; admin sendToTopic → mock FCM receives topic &quot;news&quot;" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push Full Flow &gt; admin broadcast → mock FCM receives topic &quot;all&quot;" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push Full Flow &gt; client unregister → 200" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/e2e/rn.e2e.test.ts" name="RN E2E — Push Full Flow &gt; admin getTokens → items empty after unregister" time="0">
+            <skipped/>
+        </testcase>
+    </testsuite>
+</testsuites>

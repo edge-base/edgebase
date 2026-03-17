@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="9" failures="1" errors="0" time="0.032351958">
+    <testsuite name="test/web-storage.e2e.test.ts" timestamp="2026-03-09T05:22:01.820Z" hostname="junes-Mac-Studio.local" tests="9" failures="1" errors="0" skipped="8" time="0.032351958">
+        <testcase classname="test/web-storage.e2e.test.ts" name="js-web:storage with_auth &gt; upload_download_roundtrip_with_auth" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/web-storage.e2e.test.ts" name="js-web:storage with_auth &gt; upload + list_with_prefix" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/web-storage.e2e.test.ts" name="js-web:storage with_auth &gt; upload + delete_file" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/web-storage.e2e.test.ts" name="js-web:storage with_auth &gt; storage_signed_url" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/web-storage.e2e.test.ts" name="js-web:storage with_auth &gt; storage_metadata" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/web-storage.e2e.test.ts" name="js-web:storage with_auth &gt; storage_uploadString" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/web-storage.e2e.test.ts" name="js-web:storage with_auth &gt; storage_getUrl contains bucket and key" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/web-storage.e2e.test.ts" name="js-web:storage with_auth &gt; storage_nonexistent_throws" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/web-storage.e2e.test.ts" name="test/web-storage.e2e.test.ts" time="0.032351958">
+            <system-err>
+AggregateError: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7) {
+  code: &apos;ECONNREFUSED&apos;,
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:8688
+        at createConnectionError (node:net:1652:14)
+        at afterConnectMultiple (node:net:1682:16) {
+      errno: -61,
+      code: &apos;ECONNREFUSED&apos;,
+      syscall: &apos;connect&apos;,
+      address: &apos;::1&apos;,
+      port: 8688
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:8688
+        at createConnectionError (node:net:1652:14)
+        at afterConnectMultiple (node:net:1682:16) {
+      errno: -61,
+      code: &apos;ECONNREFUSED&apos;,
+      syscall: &apos;connect&apos;,
+      address: &apos;127.0.0.1&apos;,
+      port: 8688
+    }
+  ]
+}
+
+AggregateError: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7) {
+  code: &apos;ECONNREFUSED&apos;,
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:8688
+        at createConnectionError (node:net:1652:14)
+        at afterConnectMultiple (node:net:1682:16) {
+      errno: -61,
+      code: &apos;ECONNREFUSED&apos;,
+      syscall: &apos;connect&apos;,
+      address: &apos;::1&apos;,
+      port: 8688
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:8688
+        at createConnectionError (node:net:1652:14)
+        at afterConnectMultiple (node:net:1682:16) {
+      errno: -61,
+      code: &apos;ECONNREFUSED&apos;,
+      syscall: &apos;connect&apos;,
+      address: &apos;127.0.0.1&apos;,
+      port: 8688
+    }
+  ]
+}
+AggregateError: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7) {
+  code: &apos;ECONNREFUSED&apos;,
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:8688
+        at createConnectionError (node:net:1652:14)
+        at afterConnectMultiple (node:net:1682:16) {
+      errno: -61,
+      code: &apos;ECONNREFUSED&apos;,
+      syscall: &apos;connect&apos;,
+      address: &apos;::1&apos;,
+      port: 8688
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:8688
+        at createConnectionError (node:net:1652:14)
+        at afterConnectMultiple (node:net:1682:16) {
+      errno: -61,
+      code: &apos;ECONNREFUSED&apos;,
+      syscall: &apos;connect&apos;,
+      address: &apos;127.0.0.1&apos;,
+      port: 8688
+    }
+  ]
+}
+
+            </system-err>
+            <failure message="Network error: Failed to execute &quot;fetch()&quot; on &quot;Window&quot; with URL &quot;http://localhost:8688/api/auth/signup&quot;: " type="EdgeBaseError">
+EdgeBaseError: Network error: Failed to execute &quot;fetch()&quot; on &quot;Window&quot; with URL &quot;http://localhost:8688/api/auth/signup&quot;: 
+ ❯ networkError packages/core/src/errors.ts:35:10
+ ❯ HttpClient.request packages/core/src/http.ts:126:13
+ ❯ AuthClient.signUp packages/web/src/auth.ts:225:20
+ ❯ test/web-storage.e2e.test.ts:29:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: +0 }
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>
