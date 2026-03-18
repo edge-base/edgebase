@@ -99,6 +99,9 @@ jobs:
           elif [ "$status" = "3" ]; then
             outcome="skip"
             reason="no-supported-projects"
+          elif grep -Eiq 'SNYK-CODE-0005|snyk code is not enabled|not supported for your current organization|activate snyk code' snyk-code.log; then
+            outcome="skip"
+            reason="code-not-enabled"
           elif grep -Eiq 'test limit|rate limit|too many requests|quota|payment required|unauthorized|forbidden|authentication failed|failed to authenticate|access denied|service unavailable|temporarily unavailable|organization .* not found' snyk-code.log; then
             outcome="skip"
             reason="platform-or-access-rejection"
@@ -108,11 +111,17 @@ jobs:
           echo "reason=$reason" >> "$GITHUB_OUTPUT"
 
       - name: Upload Snyk Code SARIF
+        id: code_upload
+        continue-on-error: true
         if: steps.token.outputs.configured == 'true' && always() && hashFiles('snyk-code.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: snyk-code.sarif
           category: snyk-code
+
+      - name: Warn when Snyk Code SARIF upload fails
+        if: steps.token.outputs.configured == 'true' && always() && steps.code_upload.outcome == 'failure'
+        run: echo "::warning title=Snyk Code SARIF upload failed::The Snyk Code scan ran, but GitHub code scanning could not ingest the SARIF upload. Review the upload step log for details."
 
       - name: Report skipped Snyk Code scan
         if: steps.token.outputs.configured == 'true' && steps.code_result.outputs.outcome == 'skip'
@@ -284,12 +293,37 @@ jobs:
           echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
           echo "reason=$reason" >> "$GITHUB_OUTPUT"
 
+      - name: Check Snyk Open Source SARIF run count
+        id: oss_sarif
+        if: steps.token.outputs.configured == 'true' && always() && hashFiles('snyk-open-source.sarif') != ''
+        shell: bash
+        run: |
+          runs=$(jq '.runs | length' snyk-open-source.sarif)
+          echo "runs=$runs" >> "$GITHUB_OUTPUT"
+
+          if [ "$runs" -le 20 ]; then
+            echo "uploadable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "uploadable=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload Snyk Open Source SARIF
-        if: steps.token.outputs.configured == 'true' && always() && hashFiles('snyk-open-source.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        id: oss_upload
+        continue-on-error: true
+        if: steps.token.outputs.configured == 'true' && always() && hashFiles('snyk-open-source.sarif') != '' && steps.oss_sarif.outputs.uploadable == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: snyk-open-source.sarif
           category: snyk-open-source
+
+      - name: Report skipped Snyk Open Source SARIF upload
+        if: steps.token.outputs.configured == 'true' && always() && steps.oss_sarif.outputs.uploadable == 'false'
+        run: echo "::notice title=Snyk SARIF upload skipped::GitHub code scanning accepts up to 20 SARIF runs per upload, but Snyk produced ${{
+          steps.oss_sarif.outputs.runs }}. The dependency scan still ran and the job result reflects the scan outcome."
+
+      - name: Warn when Snyk Open Source SARIF upload fails
+        if: steps.token.outputs.configured == 'true' && always() && steps.oss_upload.outcome == 'failure'
+        run: echo "::warning title=Snyk Open Source SARIF upload failed::The Snyk dependency scan ran, but GitHub code scanning could not ingest the SARIF upload. Review the upload step log for details."
 
       - name: Report skipped Snyk dependency scan
         if: steps.token.outputs.configured == 'true' && steps.oss_result.outputs.outcome == 'skip'
