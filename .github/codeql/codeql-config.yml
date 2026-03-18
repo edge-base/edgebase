@@ -1,0 +1,16 @@
+name: "EdgeBase CodeQL Config"
+
+query-filters:
+  # Test fixtures use dummy cryptographic keys — not real secrets.
+  - exclude:
+      tags: contain: "correctness/hardcoded-credentials"
+
+  # CLI tool runs on the developer's own machine; TOCTOU file-system races
+  # are not exploitable in this threat model.
+  - exclude:
+      id: js/file-system-race
+
+  # Almost all hits are in project-local .edgebase/ dirs (not os.tmpdir()).
+  # The single real tmpdir usage (dev.ts) already uses O_EXCL correctly.
+  - exclude:
+      id: js/insecure-temporary-file

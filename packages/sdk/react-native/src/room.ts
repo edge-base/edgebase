@@ -104,8 +104,11 @@ export interface RoomMediaDeviceChange {
 
 // ─── Helpers ───
 
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 function deepSet(obj: Record<string, unknown>, path: string, value: unknown): void {
   const parts = path.split('.');
+  if (parts.some((p) => UNSAFE_KEYS.has(p))) return;
   let current: any = obj;
   for (let i = 0; i < parts.length - 1; i++) {
     const key = parts[i];

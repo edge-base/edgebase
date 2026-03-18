@@ -11,6 +11,6 @@ String? platformEnvironmentValue(String key) {
 
 http.Client createDefaultHttpClient(Duration timeout) {
   final client = BrowserClient();
-  client.withCredentials = true;
+  client.withCredentials = false;
   return client;
 }

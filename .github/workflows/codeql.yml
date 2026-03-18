@@ -106,6 +106,7 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Initialize CodeQL
         if: matrix.build_mode != ''
@@ -114,6 +115,7 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build_mode }}
           queries: security-extended
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Build Go SDK
         if: matrix.language == 'go'
