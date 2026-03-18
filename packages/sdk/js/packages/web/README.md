@@ -37,6 +37,8 @@ It is designed for apps that need:
 
 If you need privileged or server-only access, use [`@edge-base/admin`](https://www.npmjs.com/package/@edge-base/admin) instead.
 
+EdgeBase is an open-source edge-native BaaS that runs on Edge, Docker, and Node.js. If you want the full platform, CLI, docs, and the rest of the public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
+
 > Beta: the package is already usable, but some APIs may still evolve before general availability.
 
 ## Documentation Map

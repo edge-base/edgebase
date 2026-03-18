@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "edgebase"
-version = "0.1.2"
+version = "0.1.3"
 description = "Python SDK for EdgeBase — Backend as a Service"
 readme = "README.md"
 license = "MIT"

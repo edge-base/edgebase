@@ -15,7 +15,7 @@ plugins {
 
 allprojects {
     group = "dev.edgebase"
-    version = "0.1.2"
+    version = "0.1.3"
 }
 
 // Pin JVM toolchain to JDK 17 across all subprojects.

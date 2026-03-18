@@ -36,6 +36,8 @@ It is a good fit when you want:
 
 This package is for React in browser-oriented apps. It is not the admin SDK, and it is not a React Native package.
 
+EdgeBase is an open-source edge-native BaaS that runs on Edge, Docker, and Node.js. If you want the full platform, CLI, docs, and the rest of the public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
+
 > Beta: the package is already usable, but some APIs and components may still evolve before general availability.
 
 ## Documentation Map

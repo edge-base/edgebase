@@ -1,6 +1,8 @@
 <p align="center">
-  <h1 align="center">EdgeBase</h1>
+  <img src="docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="80" />
 </p>
+
+<h1 align="center">EdgeBase</h1>
 
 <p align="center">
   <b>100x cheaper than Firebase. ~0ms cold starts. Near-unlimited scale.</b><br>
@@ -16,7 +18,7 @@
 
 <p align="center">
   Auth · Database · Realtime · Storage · Functions · Admin UI<br>
-  Same app, same behavior — local, self-hosted, or global edge
+  Same app across local, self-hosted, and global edge
 </p>
 
 ---
@@ -32,7 +34,7 @@ npx edgebase docker run         # Self-host with Docker
 npx edgebase deploy             # Deploy globally on Cloudflare
 ```
 
-Same code, same behavior — choose your runtime, switch when you need to.
+Same codebase, familiar workflow — choose your runtime, switch when you need to.
 
 `npm create edgebase@latest` now starts from a blank app data model: auth, storage, and a sample health function are scaffolded, and dependencies are installed automatically. In local dev, the API runs on `http://localhost:8787` and the Admin Dashboard opens on `http://localhost:8787/admin`.
 

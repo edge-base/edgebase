@@ -1,6 +1,6 @@
 allprojects {
     group = "dev.edgebase"
-    version = "0.1.2"
+    version = "0.1.3"
 }
 
 subprojects {

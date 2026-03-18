@@ -1,6 +1,6 @@
 name: edgebase_admin
 description: EdgeBase Admin SDK — server-side admin operations.
-version: 0.1.2
+version: 0.1.3
 homepage: https://github.com/edge-base/edgebase
 repository: https://github.com/edge-base/edgebase/tree/main/packages/sdk/dart/packages/admin
 
