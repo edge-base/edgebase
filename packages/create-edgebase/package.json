@@ -10,13 +10,19 @@
     },
     "homepage": "https://edgebase.fun",
     "bugs": "https://github.com/edge-base/edgebase/issues",
-    "keywords": ["edgebase", "create-edgebase", "scaffold", "cli"],
+    "keywords": [
+        "edgebase",
+        "create-edgebase",
+        "scaffold",
+        "cli"
+    ],
     "type": "module",
     "bin": {
         "create-edgebase": "./bin/create-edgebase.js"
     },
     "files": [
-        "bin"
+        "bin",
+        "llms.txt"
     ],
     "publishConfig": {
         "access": "public"

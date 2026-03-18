@@ -10,7 +10,12 @@
     },
     "homepage": "https://edgebase.fun",
     "bugs": "https://github.com/edge-base/edgebase/issues",
-    "keywords": ["edgebase", "shared", "config", "functions"],
+    "keywords": [
+        "edgebase",
+        "shared",
+        "config",
+        "functions"
+    ],
     "publishConfig": {
         "access": "public"
     },

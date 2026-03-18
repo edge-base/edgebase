@@ -10,7 +10,13 @@
     },
     "homepage": "https://edgebase.fun",
     "bugs": "https://github.com/edge-base/edgebase/issues",
-    "keywords": ["edgebase", "auth", "react", "ui", "authentication"],
+    "keywords": [
+        "edgebase",
+        "auth",
+        "react",
+        "ui",
+        "authentication"
+    ],
     "type": "module",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
@@ -25,7 +31,8 @@
         "*.css"
     ],
     "files": [
-        "dist"
+        "dist",
+        "llms.txt"
     ],
     "publishConfig": {
         "access": "public"

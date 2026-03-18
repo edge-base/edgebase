@@ -10,7 +10,13 @@
     },
     "homepage": "https://edgebase.fun",
     "bugs": "https://github.com/edge-base/edgebase/issues",
-    "keywords": ["edgebase", "cli", "baas", "backend", "cloudflare-workers"],
+    "keywords": [
+        "edgebase",
+        "cli",
+        "baas",
+        "backend",
+        "cloudflare-workers"
+    ],
     "publishConfig": {
         "access": "public"
     },
@@ -20,7 +26,8 @@
     },
     "main": "./dist/index.js",
     "files": [
-        "dist"
+        "dist",
+        "llms.txt"
     ],
     "scripts": {
         "build": "tsc && node ./scripts/copy-assets.mjs",

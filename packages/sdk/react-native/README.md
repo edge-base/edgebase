@@ -1,76 +1,166 @@
-# @edgebase-fun/react-native
+<h1 align="center">@edgebase-fun/react-native</h1>
 
-EdgeBase SDK for React Native — **iOS, Android, and Web (React Native Web)** support.
+<p align="center">
+  <b>React Native SDK for EdgeBase</b><br>
+  Auth, database, realtime, rooms, storage, analytics, and push for iOS, Android, and React Native Web
+</p>
 
-> Shared client model with `@edgebase-fun/web`, with React Native-specific storage, lifecycle, and OAuth wiring.
+<p align="center">
+  <a href="https://www.npmjs.com/package/@edgebase-fun/react-native"><img src="https://img.shields.io/npm/v/%40edgebase-fun%2Freact-native?color=brightgreen" alt="npm"></a>&nbsp;
+  <a href="https://edgebase.fun/docs/getting-started/quickstart"><img src="https://img.shields.io/badge/docs-mobile-blue" alt="Docs"></a>&nbsp;
+  <a href="https://github.com/edge-base/edgebase/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+</p>
+
+<p align="center">
+  iOS · Android · React Native Web · Deep links · AppState lifecycle
+</p>
+
+<p align="center">
+  <a href="https://edgebase.fun/docs/getting-started/quickstart"><b>Quickstart</b></a> ·
+  <a href="https://edgebase.fun/docs/authentication"><b>Authentication</b></a> ·
+  <a href="https://edgebase.fun/docs/database/client-sdk"><b>Database Client SDK</b></a> ·
+  <a href="https://edgebase.fun/docs/room/client-sdk"><b>Room Client SDK</b></a> ·
+  <a href="https://edgebase.fun/docs/push/client-sdk"><b>Push Client SDK</b></a>
+</p>
+
+---
+
+`@edgebase-fun/react-native` brings the EdgeBase client model to React Native environments.
+
+It keeps the familiar browser SDK shape while adding the pieces mobile apps need:
+
+- `AsyncStorage` token persistence
+- deep-link based OAuth callbacks
+- `AppState` lifecycle handling
+- React Native friendly push registration
+- Turnstile support through `react-native-webview`
+
+If you are building a browser-only app, use [`@edgebase-fun/web`](https://www.npmjs.com/package/@edgebase-fun/web) instead.
+
+> Beta: the package is already usable, but some APIs may still evolve before general availability.
+
+## Documentation Map
+
+- [Quickstart](https://edgebase.fun/docs/getting-started/quickstart)
+  Project creation and local development
+- [Authentication](https://edgebase.fun/docs/authentication)
+  Email/password, OAuth, MFA, sessions, captcha
+- [Database Client SDK](https://edgebase.fun/docs/database/client-sdk)
+  Query and mutation patterns that also apply on React Native
+- [Room Client SDK](https://edgebase.fun/docs/room/client-sdk)
+  Presence, signals, state, and media-ready room flows
+- [Push Client SDK](https://edgebase.fun/docs/push/client-sdk)
+  General client push concepts
+
+## For AI Coding Assistants
+
+This package ships with an `llms.txt` file for AI-assisted React Native integration.
+
+You can find it:
+
+- after install: `node_modules/@edgebase-fun/react-native/llms.txt`
+- in the repository: [llms.txt](https://github.com/edge-base/edgebase/blob/main/packages/sdk/react-native/llms.txt)
+
+Use it when you want an agent to:
+
+- set up `createClient()` with the right React Native adapters
+- handle deep-link OAuth callbacks correctly
+- wire push registration without guessing native token APIs
+- avoid accidentally using browser-only assumptions like `localStorage`
 
 ## Installation
 
 ```bash
-npm install @edgebase-fun/react-native @react-native-async-storage/async-storage react-native-webview
+npm install @edgebase-fun/react-native @react-native-async-storage/async-storage
 ```
 
-For iOS:
+If you want Turnstile-based captcha, also install:
+
+```bash
+npm install react-native-webview
+```
+
+For iOS, remember to install pods:
+
 ```bash
 cd ios && pod install
 ```
 
 ## Quick Start
 
-```typescript
+```ts
 import { createClient } from '@edgebase-fun/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Linking, AppState } from 'react-native';
+import { AppState, Linking } from 'react-native';
 
 const client = createClient('https://your-project.edgebase.fun', {
-  storage: AsyncStorage,   // Refresh Token persistence
-  linking: Linking,        // OAuth deep link support
-  appState: AppState,      // Auto lifecycle management
+  storage: AsyncStorage,
+  linking: Linking,
+  appState: AppState,
 });
 
-// Auth
-await client.auth.signUp({ email: 'user@test.com', password: 'pass123' });
-await client.auth.signIn({ email: 'user@test.com', password: 'pass123' });
-await client.auth.signOut();
-
-client.auth.onAuthStateChange((user) => {
-  console.log('Auth state:', user);
+await client.auth.signIn({
+  email: 'june@example.com',
+  password: 'pass1234',
 });
 
-// CRUD
-const posts = await client.db('shared').table('posts')
-  .where('status', '==', 'published')
+const posts = await client
+  .db('app')
+  .table('posts')
+  .where('published', '==', true)
   .getList();
-await client.db('shared').table('posts').insert({ title: 'Hello' });
 
-// Storage
-const bucket = client.storage.bucket('avatars');
-await bucket.upload('me.jpg', file);
-const url = bucket.getUrl('me.jpg');
+console.log(posts.items);
 ```
 
-## OAuth Sign-in (Deep Link)
+## Core API
 
-```typescript
-// 1. Configure deep link scheme in app.json / Info.plist / AndroidManifest.xml
-// 2. Sign in with provider:
-client.auth.signInWithOAuth('google', { redirectUrl: 'myapp://auth/callback' });
+Once you create a client, these are the main surfaces you will use:
 
-// 3. Handle callback in your navigation setup:
+- `client.auth`
+  Mobile-friendly auth with deep-link OAuth support
+- `client.db(namespace, id?)`
+  Query and mutate data
+- `client.storage`
+  Upload files and resolve URLs
+- `client.functions`
+  Call app functions
+- `client.room(namespace, roomId, options?)`
+  Join realtime rooms
+- `client.push`
+  Register device tokens and listen for app messages
+- `client.analytics`
+  Track client analytics
+
+## OAuth With Deep Links
+
+```ts
+client.auth.signInWithOAuth('google', {
+  redirectUrl: 'myapp://auth/callback',
+});
+
 Linking.addEventListener('url', async ({ url }) => {
   const result = await client.auth.handleOAuthCallback(url);
-  if (result) console.log('OAuth success:', result.user);
+  if (result) {
+    console.log('OAuth success:', result.user);
+  }
 });
 ```
 
-## Captcha (Turnstile)
+In React Native, the app is responsible for registering the deep link scheme in the platform configuration.
+
+## Turnstile Captcha
 
 ```tsx
-import { TurnstileWebView, useTurnstile } from '@edgebase-fun/react-native';
+import { Button } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { TurnstileWebView, useTurnstile } from '@edgebase-fun/react-native';
 
 function SignUpScreen() {
-  const captcha = useTurnstile({ baseUrl: 'https://your-project.edgebase.fun', action: 'signup' });
+  const captcha = useTurnstile({
+    baseUrl: 'https://your-project.edgebase.fun',
+    action: 'signup',
+  });
 
   return (
     <>
@@ -78,15 +168,22 @@ function SignUpScreen() {
         <TurnstileWebView
           siteKey={captcha.siteKey}
           action="signup"
-          appearance="always"
-          testID="signup-captcha"
           WebViewComponent={WebView}
           onToken={captcha.onToken}
           onError={captcha.onError}
           onInteractive={captcha.onInteractive}
         />
       )}
-      <Button title="Sign Up" onPress={() => client.auth.signUp({ email, password, captchaToken: captcha.token ?? undefined })} />
+      <Button
+        title="Sign Up"
+        onPress={() =>
+          void client.auth.signUp({
+            email: 'june@example.com',
+            password: 'pass1234',
+            captchaToken: captcha.token ?? undefined,
+          })
+        }
+      />
     </>
   );
 }
@@ -94,60 +191,40 @@ function SignUpScreen() {
 
 ## Push Notifications
 
-```typescript
+```ts
 import messaging from '@react-native-firebase/messaging';
 
-// Set token provider (once, at app startup)
 client.push.setTokenProvider(async () => ({
   token: await messaging().getToken(),
-  platform: 'android', // or 'ios'
+  platform: 'android',
 }));
 
-// Register device
 await client.push.register();
 
-// Listen for foreground messages
-client.push.onMessage((msg) => {
-  console.log('Foreground push:', msg.title, msg.body);
-});
-
-// Bridge FCM messages to SDK
-messaging().onMessage(async (remote) => {
-  client.push._dispatchForegroundMessage({
-    title: remote.notification?.title,
-    body: remote.notification?.body,
-    data: remote.data,
-  });
+const unsubscribe = client.push.onMessage((message) => {
+  console.log(message.title, message.body);
 });
 ```
 
+You bridge native push providers into the SDK. The SDK does not hard-depend on Firebase Messaging.
+
 ## Lifecycle Management
 
-Lifecycle management starts automatically when `appState` is provided to `createClient`.
+When you pass `appState` to `createClient()`, the SDK automatically coordinates mobile lifecycle behavior:
 
-- **Background / Inactive**: WebSocket disconnected → saves battery
-- **Foreground**: Token refreshed + WebSocket reconnected
+- background/inactive: disconnect realtime transports to reduce battery and network use
+- foreground: refresh auth state and reconnect realtime transports
 
 ## Platform Differences vs `@edgebase-fun/web`
 
 | Feature | Web | React Native |
-|---|---|---|
-| Token Storage | `localStorage` | `AsyncStorage` (async) |
-| OAuth Redirect | `window.location.href` | `Linking.openURL()` |
-| Multi-tab sync | `BroadcastChannel` | N/A (single process) |
-| Captcha | Inline JS DOM | `react-native-webview` |
-| Push | Web Push / VAPID | FCM / APNs via provider |
-| Lifecycle | `visibilitychange` | `AppState` |
+| --- | --- | --- |
+| Token storage | `localStorage` | `AsyncStorage` |
+| OAuth redirect | browser redirect | `Linking.openURL()` + deep-link callback |
+| Lifecycle | document visibility | `AppState` |
+| Captcha | DOM-based widget | `react-native-webview` |
+| Push | web push | native token provider integration |
 
-## Database Live
+## License
 
-Use `db().table().onSnapshot()` for database live subscriptions:
-
-```typescript
-client
-  .db('shared')
-  .table('posts')
-  .onSnapshot((change) => {
-    console.log(change.changeType, change.data);
-  });
-```
+MIT

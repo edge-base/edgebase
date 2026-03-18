@@ -10,7 +10,13 @@
     },
     "homepage": "https://edgebase.fun",
     "bugs": "https://github.com/edge-base/edgebase/issues",
-    "keywords": ["edgebase", "sdk", "baas", "backend", "cloudflare-workers"],
+    "keywords": [
+        "edgebase",
+        "sdk",
+        "baas",
+        "backend",
+        "cloudflare-workers"
+    ],
     "type": "module",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",

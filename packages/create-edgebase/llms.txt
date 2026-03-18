@@ -1,0 +1,72 @@
+# create-edgebase
+
+Use this file as a quick-reference contract for AI coding assistants working with `create-edgebase`.
+
+## Package Boundary
+
+`create-edgebase` is the bootstrap package behind `npm create edgebase@latest`.
+
+It is not the long-lived runtime CLI package. After scaffolding, day-to-day commands come from the local `@edgebase-fun/cli` install inside the generated project.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/create-edgebase/README.md
+- Quickstart: https://edgebase.fun/docs/getting-started/quickstart
+- CLI overview: https://edgebase.fun/docs/cli
+- CLI workflows: https://edgebase.fun/docs/cli/workflows
+
+## Canonical Examples
+
+### Create a new dedicated project
+
+```bash
+npm create edgebase@latest my-app
+```
+
+### Add EdgeBase inside an existing frontend project
+
+```bash
+cd your-frontend-project
+npm create edgebase@latest edgebase
+```
+
+### Scaffold without auto-starting dev
+
+```bash
+npm create edgebase@latest my-app -- --no-dev
+```
+
+### Scaffold without opening the browser
+
+```bash
+npm create edgebase@latest my-app -- --no-open
+```
+
+### Automation without install
+
+```bash
+EDGEBASE_CREATE_SKIP_INSTALL=1 npm create edgebase@latest my-app -- --no-dev
+```
+
+## Behavior Notes
+
+- scaffolds a project by delegating to `@edgebase-fun/cli init`
+- installs local dependencies unless `EDGEBASE_CREATE_SKIP_INSTALL=1`
+- starts `npm run dev` unless `--no-dev` is passed
+- forwards `--no-open` to the local development flow
+- merges EdgeBase entries into existing `package.json` and `.gitignore` files instead of replacing them wholesale
+
+## Common Mistakes
+
+- use `npm create edgebase@latest`, not `npm edgebase`
+- do not treat `create-edgebase` as the package you use for ongoing commands
+- if integrating into an existing repo, prefer a dedicated subdirectory like `edgebase/`
+- use `-- --no-dev` after the project name because flags after `npm create` are forwarded through npm
+
+## Quick Reference
+
+```text
+npm create edgebase@latest my-app             -> scaffold, install, start dev
+npm create edgebase@latest my-app -- --no-dev -> scaffold, install, do not start dev
+npm create edgebase@latest my-app -- --no-open -> scaffold, install, start dev without opening browser
+```

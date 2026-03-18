@@ -10,7 +10,12 @@
     },
     "homepage": "https://edgebase.fun",
     "bugs": "https://github.com/edge-base/edgebase/issues",
-    "keywords": ["edgebase", "runtime", "server", "cloudflare-workers"],
+    "keywords": [
+        "edgebase",
+        "runtime",
+        "server",
+        "cloudflare-workers"
+    ],
     "publishConfig": {
         "access": "public"
     },

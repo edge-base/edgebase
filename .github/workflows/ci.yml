@@ -9,6 +9,19 @@ on:
   workflow_dispatch:
 
 jobs:
+  release-version-check:
+    name: Release Version Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Check lockstep release versions
+        run: node ./scripts/check-release-versions.mjs
+
   ci-node:
     name: Core CI (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest

@@ -1,6 +1,6 @@
 {
     "name": "edgebase/sdk",
-    "description": "EdgeBase PHP Server SDK \u2014 server-side BaaS client (DECISIONS #117)",
+    "description": "EdgeBase PHP Server SDK — server-side BaaS client (DECISIONS #117)",
     "type": "library",
     "license": "MIT",
     "version": "0.1.0",

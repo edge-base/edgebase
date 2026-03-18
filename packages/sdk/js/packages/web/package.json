@@ -10,7 +10,13 @@
     },
     "homepage": "https://edgebase.fun",
     "bugs": "https://github.com/edge-base/edgebase/issues",
-    "keywords": ["edgebase", "sdk", "web", "database-live", "baas"],
+    "keywords": [
+        "edgebase",
+        "sdk",
+        "web",
+        "database-live",
+        "baas"
+    ],
     "type": "module",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",

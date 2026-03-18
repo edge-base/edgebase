@@ -10,7 +10,11 @@
     },
     "homepage": "https://edgebase.fun",
     "bugs": "https://github.com/edge-base/edgebase/issues",
-    "keywords": ["edgebase", "plugins", "plugin-api"],
+    "keywords": [
+        "edgebase",
+        "plugins",
+        "plugin-api"
+    ],
     "publishConfig": {
         "access": "public"
     },
@@ -19,7 +23,8 @@
     "types": "./dist/index.d.ts",
     "sideEffects": false,
     "files": [
-        "dist"
+        "dist",
+        "llms.txt"
     ],
     "exports": {
         ".": {

@@ -14,7 +14,10 @@
         "lint:turbo": "turbo run lint",
         "test:turbo": "turbo run test",
         "dev:turbo": "turbo run dev",
-        "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\""
+        "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+        "release:sync": "node ./scripts/sync-release-versions.mjs",
+        "release:check": "node ./scripts/check-release-versions.mjs",
+        "release:set": "node ./scripts/set-release-version.mjs"
     },
     "devDependencies": {
         "@eslint/js": "^9.39.2",

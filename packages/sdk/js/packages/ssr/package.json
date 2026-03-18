@@ -10,7 +10,13 @@
     },
     "homepage": "https://edgebase.fun",
     "bugs": "https://github.com/edge-base/edgebase/issues",
-    "keywords": ["edgebase", "ssr", "server-side-rendering", "cookies", "auth"],
+    "keywords": [
+        "edgebase",
+        "ssr",
+        "server-side-rendering",
+        "cookies",
+        "auth"
+    ],
     "type": "module",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
@@ -22,7 +28,8 @@
     },
     "sideEffects": false,
     "files": [
-        "dist"
+        "dist",
+        "llms.txt"
     ],
     "publishConfig": {
         "access": "public"
