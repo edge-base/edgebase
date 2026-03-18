@@ -18,12 +18,18 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'com.google.code.gson:gson:2.11.0'
     // Android SDK stubs — provides android.* and gms.tasks.* for compilation on non-Android hosts
-    compileOnly 'com.google.android:android:4.1.1.4'
+    compileOnly('com.google.android:android:4.1.1.4') {
+        exclude group: 'org.json', module: 'json'
+    }
+    compileOnly 'org.json:json:20231013'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     // Android stubs needed at test runtime — TurnstileProvider imports android.* at class level
     // (compileOnly is not available during `gradle test` JVM execution → NoClassDefFoundError)
-    testImplementation 'com.google.android:android:4.1.1.4'
+    testImplementation('com.google.android:android:4.1.1.4') {
+        exclude group: 'org.json', module: 'json'
+    }
+    testImplementation 'org.json:json:20231013'
 }
 
 tasks.test {
