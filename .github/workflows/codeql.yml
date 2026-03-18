@@ -61,7 +61,7 @@ jobs:
           - label: Rust
             language: rust
             os: ubuntu-latest
-            build_mode: manual
+            build_mode: none
           - label: Swift
             language: swift
             os: macos-latest
@@ -70,21 +70,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Initialize CodeQL
-        if: matrix.build_mode == ''
-        uses: github/codeql-action/init@v4
-        with:
-          languages: ${{ matrix.language }}
-          queries: security-extended
-
-      - name: Initialize CodeQL
-        if: matrix.build_mode != ''
-        uses: github/codeql-action/init@v4
-        with:
-          languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build_mode }}
-          queries: security-extended
 
       - name: Set up Go
         if: matrix.language == 'go'
@@ -115,6 +100,21 @@ jobs:
         if: matrix.language == 'rust'
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Initialize CodeQL
+        if: matrix.build_mode == ''
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - name: Initialize CodeQL
+        if: matrix.build_mode != ''
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build_mode }}
+          queries: security-extended
+
       - name: Build Go SDK
         if: matrix.language == 'go'
         working-directory: packages/sdk/go
@@ -141,7 +141,7 @@ jobs:
           dotnet build packages/unity/tests/EdgeBase.Unity.Tests.csproj -v minimal
 
       - name: Build Rust SDKs
-        if: matrix.language == 'rust'
+        if: matrix.language == 'rust' && matrix.build_mode == 'manual'
         working-directory: packages/sdk/rust
         run: cargo check --workspace --all-targets
 

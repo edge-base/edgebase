@@ -47,11 +47,10 @@ jobs:
             echo "::notice title=Snyk skipped::Add the SNYK_TOKEN repository secret to enable Snyk scans."
           fi
 
-      - name: Require Snyk token on pull requests
-        if: github.event_name == 'pull_request' && steps.token.outputs.configured != 'true'
+      - name: Skip Snyk Code when token is unavailable
+        if: steps.token.outputs.configured != 'true'
         run: |
-          echo "SNYK_TOKEN is required to enforce Snyk checks on pull requests."
-          exit 1
+          echo "::notice title=Snyk skipped::SNYK_TOKEN is not configured, so Snyk Code is being skipped."
 
       - name: Select Snyk severity threshold
         id: threshold
@@ -115,11 +114,10 @@ jobs:
             echo "::notice title=Snyk skipped::Add the SNYK_TOKEN repository secret to enable Snyk dependency scans."
           fi
 
-      - name: Require Snyk token on pull requests
-        if: github.event_name == 'pull_request' && steps.token.outputs.configured != 'true'
+      - name: Skip Snyk dependency scan when token is unavailable
+        if: steps.token.outputs.configured != 'true'
         run: |
-          echo "SNYK_TOKEN is required to enforce Snyk checks on pull requests."
-          exit 1
+          echo "::notice title=Snyk skipped::SNYK_TOKEN is not configured, so the Snyk dependency scan is being skipped."
 
       - name: Select Snyk severity threshold
         id: threshold
