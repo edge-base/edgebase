@@ -365,6 +365,8 @@ function buildSharedShimPackageJson(): string {
         '.': {
           types: './src/index.ts',
           import: './src/index.ts',
+          default: './src/index.ts',
+          require: './src/index.ts',
         },
       },
     },

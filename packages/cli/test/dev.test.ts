@@ -140,6 +140,8 @@ describe('Runtime config scaffold', () => {
         '.': {
           import: './src/index.ts',
           types: './src/index.ts',
+          default: './src/index.ts',
+          require: './src/index.ts',
         },
       },
     });
