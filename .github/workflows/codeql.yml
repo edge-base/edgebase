@@ -1,0 +1,155 @@
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+    types:
+      - opened
+      - synchronize
+      - reopened
+  schedule:
+    - cron: '0 18 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: GitHub Actions
+            language: actions
+            os: ubuntu-latest
+            build_mode: ''
+          - label: JavaScript / TypeScript
+            language: javascript-typescript
+            os: ubuntu-latest
+            build_mode: ''
+          - label: Python
+            language: python
+            os: ubuntu-latest
+            build_mode: ''
+          - label: Go
+            language: go
+            os: ubuntu-latest
+            build_mode: manual
+          - label: Java / Kotlin
+            language: java-kotlin
+            os: ubuntu-latest
+            build_mode: manual
+          - label: C#
+            language: csharp
+            os: ubuntu-latest
+            build_mode: manual
+          - label: Rust
+            language: rust
+            os: ubuntu-latest
+            build_mode: manual
+          - label: Swift
+            language: swift
+            os: macos-latest
+            build_mode: manual
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        if: matrix.build_mode == ''
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - name: Initialize CodeQL
+        if: matrix.build_mode != ''
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build_mode }}
+          queries: security-extended
+
+      - name: Set up Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/sdk/go/go.mod
+
+      - name: Set up Java
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        if: matrix.language == 'java-kotlin'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Set up .NET
+        if: matrix.language == 'csharp'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Rust
+        if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Go SDK
+        if: matrix.language == 'go'
+        working-directory: packages/sdk/go
+        run: go build ./...
+
+      - name: Build Java SDKs
+        if: matrix.language == 'java-kotlin'
+        working-directory: packages/sdk/java
+        run: gradle :packages:core:assemble :packages:android:assemble :packages:admin:assemble
+
+      - name: Build Kotlin SDKs
+        if: matrix.language == 'java-kotlin'
+        working-directory: packages/sdk/kotlin
+        run: ./gradlew :core:compileCommonMainKotlinMetadata :core:compileKotlinJvm :client:compileCommonMainKotlinMetadata :client:compileKotlinJvm :admin:compileKotlin
+
+      - name: Build C# SDKs
+        if: matrix.language == 'csharp'
+        working-directory: packages/sdk/csharp
+        run: |
+          dotnet build src/EdgeBase.csproj -v minimal
+          dotnet build packages/admin/EdgeBase.Admin.csproj -v minimal
+          dotnet build packages/unity/EdgeBase.Unity.csproj -v minimal
+          dotnet build tests/EdgeBase.Tests.csproj -v minimal
+          dotnet build packages/unity/tests/EdgeBase.Unity.Tests.csproj -v minimal
+
+      - name: Build Rust SDKs
+        if: matrix.language == 'rust'
+        working-directory: packages/sdk/rust
+        run: cargo check --workspace --all-targets
+
+      - name: Build Swift SDKs
+        if: matrix.language == 'swift'
+        run: |
+          swift build --package-path packages/sdk/swift/packages/core
+          swift build --package-path packages/sdk/swift/packages/ios
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4

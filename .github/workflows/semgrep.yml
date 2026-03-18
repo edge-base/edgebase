@@ -1,0 +1,95 @@
+name: Semgrep
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+    types:
+      - opened
+      - synchronize
+      - reopened
+  schedule:
+    - cron: '30 18 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: semgrep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    container:
+      image: semgrep/semgrep
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Semgrep scan
+        id: semgrep_scan
+        continue-on-error: true
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        run: |
+          if [ -n "$SEMGREP_APP_TOKEN" ]; then
+            semgrep ci --metrics=off --json-output=semgrep.json --sarif-output=semgrep.sarif
+          else
+            semgrep scan --config auto --metrics=off --json-output=semgrep.json --sarif-output=semgrep.sarif
+          fi
+
+      - name: Upload Semgrep SARIF
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+      - name: Fail if Semgrep report generation failed
+        if: steps.semgrep_scan.outcome == 'failure' && hashFiles('semgrep.json') == ''
+        run: |
+          echo "Semgrep scan did not produce semgrep.json."
+          exit 1
+
+      - name: Block PR on high-severity Semgrep findings
+        if: github.event_name == 'pull_request'
+        run: |
+          python - <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          results = json.loads(Path("semgrep.json").read_text()).get("results", [])
+          blocking = []
+          for result in results:
+              extra = result.get("extra", {})
+              metadata = extra.get("metadata", {})
+              severity = str(extra.get("severity", "")).upper()
+              impact = str(metadata.get("impact", "")).upper()
+              if severity in {"CRITICAL", "HIGH", "ERROR"} or impact in {"CRITICAL", "HIGH"}:
+                  start = result.get("start", {}) or {}
+                  line = start.get("line", "?")
+                  blocking.append(f"{result.get('path')}:{line} {result.get('check_id')} [{impact or severity}]")
+
+          if blocking:
+              print("Blocking Semgrep findings (high or higher):")
+              for item in blocking[:20]:
+                  print(item)
+              remaining = len(blocking) - 20
+              if remaining > 0:
+                  print(f"... and {remaining} more")
+              sys.exit(1)
+
+          print("No Semgrep findings at high or higher severity.")
+          PY

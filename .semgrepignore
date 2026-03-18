@@ -1,0 +1,7 @@
+:include .gitignore
+
+# Tracked fixtures, generated artifacts, and vendored third-party code.
+dev/**
+packages/sdk/cpp/**/build/**
+packages/sdk/kotlin/kotlin-js-store/**
+packages/sdk/php/**/vendor/**

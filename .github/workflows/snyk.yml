@@ -1,0 +1,222 @@
+name: Snyk
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+    types:
+      - opened
+      - synchronize
+      - reopened
+  schedule:
+    - cron: '0 19 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: snyk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  snyk-code:
+    name: Code Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Snyk token
+        id: token
+        run: |
+          if [ -n "$SNYK_TOKEN" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Snyk skipped::Add the SNYK_TOKEN repository secret to enable Snyk scans."
+          fi
+
+      - name: Require Snyk token on pull requests
+        if: github.event_name == 'pull_request' && steps.token.outputs.configured != 'true'
+        run: |
+          echo "SNYK_TOKEN is required to enforce Snyk checks on pull requests."
+          exit 1
+
+      - name: Select Snyk severity threshold
+        id: threshold
+        if: steps.token.outputs.configured == 'true'
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "value=high" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=medium" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Snyk CLI
+        if: steps.token.outputs.configured == 'true'
+        uses: snyk/actions/setup@master
+
+      - name: Run Snyk Code
+        id: code_scan
+        if: steps.token.outputs.configured == 'true'
+        continue-on-error: true
+        run: snyk code test --severity-threshold=${{ steps.threshold.outputs.value }} --sarif-file-output=snyk-code.sarif
+
+      - name: Upload Snyk Code SARIF
+        if: steps.token.outputs.configured == 'true' && always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: snyk-code.sarif
+          category: snyk-code
+
+      - name: Report Snyk Code findings
+        if: steps.token.outputs.configured == 'true' && github.event_name != 'pull_request' && steps.code_scan.outcome == 'failure'
+        run: echo "::warning title=Snyk Code reported findings::Review the uploaded SARIF results in GitHub Security."
+
+      - name: Block PR on Snyk Code findings
+        if: steps.token.outputs.configured == 'true' && github.event_name == 'pull_request' && steps.code_scan.outcome == 'failure'
+        run: |
+          echo "Snyk Code found high-severity issues or the scan failed."
+          exit 1
+
+  snyk-open-source:
+    name: Open Source Dependencies
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Snyk token
+        id: token
+        run: |
+          if [ -n "$SNYK_TOKEN" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Snyk skipped::Add the SNYK_TOKEN repository secret to enable Snyk dependency scans."
+          fi
+
+      - name: Require Snyk token on pull requests
+        if: github.event_name == 'pull_request' && steps.token.outputs.configured != 'true'
+        run: |
+          echo "SNYK_TOKEN is required to enforce Snyk checks on pull requests."
+          exit 1
+
+      - name: Select Snyk severity threshold
+        id: threshold
+        if: steps.token.outputs.configured == 'true'
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "value=high" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=medium" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Snyk CLI
+        if: steps.token.outputs.configured == 'true'
+        uses: snyk/actions/setup@master
+
+      - name: Set up pnpm
+        if: steps.token.outputs.configured == 'true'
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        if: steps.token.outputs.configured == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Set up Python
+        if: steps.token.outputs.configured == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Go
+        if: steps.token.outputs.configured == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/sdk/go/go.mod
+
+      - name: Set up Java
+        if: steps.token.outputs.configured == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        if: steps.token.outputs.configured == 'true'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Set up .NET
+        if: steps.token.outputs.configured == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Rust
+        if: steps.token.outputs.configured == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore .NET package graphs
+        if: steps.token.outputs.configured == 'true'
+        working-directory: packages/sdk/csharp
+        run: |
+          dotnet restore src/EdgeBase.csproj
+          dotnet restore packages/admin/EdgeBase.Admin.csproj
+          dotnet restore packages/unity/EdgeBase.Unity.csproj
+          dotnet restore tests/EdgeBase.Tests.csproj
+          dotnet restore packages/unity/tests/EdgeBase.Unity.Tests.csproj
+
+      - name: Run Snyk Open Source
+        id: oss_scan
+        if: steps.token.outputs.configured == 'true'
+        continue-on-error: true
+        run: >
+          snyk test
+          --all-projects
+          --detection-depth=6
+          --exclude=dev,node_modules,vendor,build,.build,dist,coverage,target,bin,obj,artifacts,.dart_tool
+          --prune-repeated-subdependencies
+          --severity-threshold=${{ steps.threshold.outputs.value }}
+          --sarif-file-output=snyk-open-source.sarif
+
+      - name: Upload Snyk Open Source SARIF
+        if: steps.token.outputs.configured == 'true' && always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: snyk-open-source.sarif
+          category: snyk-open-source
+
+      - name: Report Snyk dependency findings
+        if: steps.token.outputs.configured == 'true' && github.event_name != 'pull_request' && steps.oss_scan.outcome == 'failure'
+        run: echo "::warning title=Snyk dependency scan reported findings::Review the uploaded SARIF results in GitHub Security."
+
+      - name: Block PR on Snyk dependency findings
+        if: steps.token.outputs.configured == 'true' && github.event_name == 'pull_request' && steps.oss_scan.outcome == 'failure'
+        run: |
+          echo "Snyk Open Source found high-severity issues or the scan failed."
+          exit 1
