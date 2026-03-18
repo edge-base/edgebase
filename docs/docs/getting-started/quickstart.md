@@ -77,7 +77,7 @@ npm install @edgebase/react-native
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/melodysdreamj/edgebase-swift", from: "0.1.0")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.1.0")
 ]
 ```
 

@@ -5,11 +5,11 @@
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "https://github.com/edgebase/edgebase.git",
+        "url": "https://github.com/edge-base/edgebase.git",
         "directory": "packages/sdk/js/packages/admin"
     },
     "homepage": "https://edgebase.fun",
-    "bugs": "https://github.com/edgebase/edgebase/issues",
+    "bugs": "https://github.com/edge-base/edgebase/issues",
     "keywords": ["edgebase", "sdk", "admin", "baas", "server-side"],
     "type": "module",
     "main": "./dist/index.js",

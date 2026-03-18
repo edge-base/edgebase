@@ -25,7 +25,7 @@ If you need the current checked-in certification evidence and how to read it, se
 | [Java](#java) | Client + Admin | Android, JVM | `edgebase-android-java` | `edgebase-admin-java` |
 | [Scala](#scala) | Admin only | JVM, Play, Akka, Pekko | — | `edgebase-admin-scala` |
 | [Python](#python) | Admin only | Server, Scripts, ML | — | `edgebase-admin` |
-| [Go](#go) | Admin only | Server, Microservices | — | `github.com/edgebase/sdk-go` |
+| [Go](#go) | Admin only | Server, Microservices | — | `github.com/edge-base/sdk-go` |
 | [PHP](#php) | Admin only | Server, WordPress, Laravel | — | `edgebase/admin` |
 | [Rust](#rust) | Admin only | Server, CLI, Systems | — | `edgebase-admin` |
 | [C#](#c-unity--net) | Client + Admin | Unity, .NET | Source copy / Unity plugin | NuGet |
@@ -120,7 +120,7 @@ final admin = AdminEdgeBase(
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/melodysdreamj/edgebase-swift", from: "0.1.0")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.1.0")
 ]
 ```
 
@@ -270,13 +270,13 @@ admin = AdminClient(
 > Admin SDK only. Requires a Service Key.
 
 ```bash
-go get github.com/edgebase/sdk-go
+go get github.com/edge-base/sdk-go
 ```
 
 ```go
 import (
     "os"
-    edgebase "github.com/edgebase/sdk-go"
+    edgebase "github.com/edge-base/sdk-go"
 )
 
 admin := edgebase.NewAdminClient("https://your-project.edgebase.fun", os.Getenv("EDGEBASE_SERVICE_KEY"))

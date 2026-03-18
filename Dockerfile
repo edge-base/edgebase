@@ -9,9 +9,14 @@ WORKDIR /app
 # Some workspace packages live below nested paths (for example packages/plugins/*),
 # so install must see the full packages tree to link dependencies correctly.
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json ./
-COPY edgebase.config.ts ./edgebase.config.ts
-COPY functions/ ./functions/
+COPY scripts/ ./scripts/
 COPY packages/ packages/
+
+# The public monorepo does not commit a project-local edgebase.config.ts or
+# root functions/ tree. Package the framework with empty placeholders and let
+# runtime callers inject EDGEBASE_CONFIG or mount their own project files.
+RUN mkdir -p functions && \
+    printf 'const config = {};\n\nexport default config;\n' > edgebase.config.ts
 
 # Docker self-hosting should use generated-config or EDGEBASE_CONFIG, not local
 # Wrangler state or the repository's test-only config shim.
@@ -44,6 +49,7 @@ COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/turbo.json ./turbo.json
 COPY --from=builder /app/tsconfig.base.json ./tsconfig.base.json
+COPY --from=builder /app/scripts ./scripts
 RUN pnpm install --frozen-lockfile --prod && \
     mkdir -p /app/node_modules/@edgebase && \
     ln -sfn ../../packages/shared /app/node_modules/@edgebase/shared

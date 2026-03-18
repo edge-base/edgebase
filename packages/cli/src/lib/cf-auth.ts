@@ -177,9 +177,6 @@ export function checkWranglerAuth(projectDir: string): CloudflareAuth | null {
       if (match) {
         accountId = match.id;
         accountName = match.name;
-      } else {
-        // toml has an id but it's not in the accounts — use it anyway
-        accountId = tomlId;
       }
     }
   }

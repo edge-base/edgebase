@@ -101,7 +101,7 @@ admin = AdminClient(
 <TabItem value="go" label="Go">
 
 ```go
-import edgebase "github.com/edgebase/sdk-go"
+import edgebase "github.com/edge-base/sdk-go"
 
 admin := edgebase.NewAdminClient("https://my-app.edgebase.fun", os.Getenv("EDGEBASE_SERVICE_KEY"))
 ```

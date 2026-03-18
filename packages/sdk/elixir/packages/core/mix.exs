@@ -28,7 +28,7 @@ defmodule EdgeBaseCore.MixProject do
   defp package do
     [
       licenses: ["MIT"],
-      links: %{"Repository" => "https://github.com/edgebase/edgebase"}
+      links: %{"Repository" => "https://github.com/edge-base/edgebase"}
     ]
   end
 end

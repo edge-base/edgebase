@@ -100,7 +100,7 @@ admin = AdminClient(
 ```go
 import (
     "os"
-    edgebase "github.com/edgebase/sdk-go"
+    edgebase "github.com/edge-base/sdk-go"
 )
 
 admin := edgebase.NewAdminClient("https://my-edgebase-server.com", os.Getenv("EDGEBASE_SERVICE_KEY"))

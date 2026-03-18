@@ -1,8 +1,8 @@
 name: edgebase
 description: EdgeBase Flutter/Dart SDK — 오픈소스 Global Edge BaaS
 version: 0.1.0
-homepage: https://github.com/melodysdreamj/edgebase
-repository: https://github.com/melodysdreamj/edgebase/tree/main/packages/sdk/dart
+homepage: https://github.com/edge-base/edgebase
+repository: https://github.com/edge-base/edgebase/tree/main/packages/sdk/dart
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

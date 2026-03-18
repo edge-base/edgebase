@@ -1,0 +1,77 @@
+name: Feature request
+description: Suggest an improvement, new capability, or developer experience change
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion.
+
+        The best requests explain the problem clearly, not just the proposed
+        solution. Tell us what you are trying to accomplish and why.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the project would this affect?
+      options:
+        - Server
+        - CLI
+        - Admin Dashboard
+        - Docs
+        - JavaScript SDK
+        - Other SDK
+        - Build or CI
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to do? What is hard or missing today?
+      placeholder: Describe the workflow, limitation, or pain point.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What would you like to see?
+      placeholder: Describe the API, UX, docs change, or behavior you want.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried, competing approaches, or why the current behavior is not enough.
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Expected impact
+      description: Who benefits and how?
+      placeholder: This would help teams who ...
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Related issues, examples, mockups, or prior art.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues before opening this request.
+          required: true
+        - label: I described the problem or use case, not only the solution.
+          required: true

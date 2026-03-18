@@ -48,7 +48,7 @@ admin = create_admin_client(
 <TabItem value="go" label="Go">
 
 ```go
-import edgebase "github.com/edgebase/sdk-go"
+import edgebase "github.com/edge-base/sdk-go"
 
 admin, err := edgebase.NewAdminClient(
     "https://your-project.edgebase.fun",

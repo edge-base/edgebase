@@ -8,7 +8,7 @@ Server-only SDK for EdgeBase — authenticated with a Service Key.
 ```go
 import (
     "os"
-    edgebase "github.com/edgebase/sdk-go"
+    edgebase "github.com/edge-base/sdk-go"
 )
 
 admin := edgebase.NewAdminClient("https://your-project.edgebase.fun", os.Getenv("EDGEBASE_SERVICE_KEY"))

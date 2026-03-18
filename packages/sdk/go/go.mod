@@ -1,3 +1,3 @@
-module github.com/edgebase/sdk-go
+module github.com/edge-base/sdk-go
 
 go 1.22

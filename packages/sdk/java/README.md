@@ -1,6 +1,6 @@
 # EdgeBase Java SDK
 
-The **official Java SDK** for [EdgeBase](https://github.com/edgebase/edgebase) — Open source backend in one command.
+The **official Java SDK** for [EdgeBase](https://github.com/edge-base/edgebase) — Open source backend in one command.
 
 ## Installation
 

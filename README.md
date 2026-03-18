@@ -3,20 +3,20 @@
 </p>
 
 <p align="center">
-  <b>100x cheaper. 100x faster than Firebase & Supabase.</b><br>
-  As easy as PocketBase — scales like nothing else.
+  <b>100x cheaper. ~0ms cold starts. Near-unlimited scale.</b><br>
+  Open-source edge-native BaaS that runs on Edge, Docker, and Node.js
 </p>
 
 <p align="center">
-  <a href="https://github.com/melodysdreamj/edgebase/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>&nbsp;
+  <a href="https://github.com/edge-base/edgebase/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>&nbsp;
   <a href="https://www.npmjs.com/package/edgebase"><img src="https://img.shields.io/npm/v/edgebase.svg?color=brightgreen" alt="npm"></a>&nbsp;
-  <a href="https://github.com/melodysdreamj/edgebase/stargazers"><img src="https://img.shields.io/github/stars/melodysdreamj/edgebase?style=social" alt="GitHub Stars"></a>&nbsp;
-  <a href="https://github.com/melodysdreamj/edgebase/actions"><img src="https://img.shields.io/github/actions/workflow/status/melodysdreamj/edgebase/ci.yml?branch=main&label=CI" alt="CI"></a>
+  <a href="https://github.com/edge-base/edgebase/stargazers"><img src="https://img.shields.io/github/stars/edge-base/edgebase?style=social" alt="GitHub Stars"></a>&nbsp;
+  <a href="https://github.com/edge-base/edgebase/actions"><img src="https://img.shields.io/github/actions/workflow/status/edge-base/edgebase/ci.yml?branch=main&label=CI" alt="CI"></a>
 </p>
 
 <p align="center">
-  <b>The first BaaS built natively on serverless edge.</b><br>
-  Database · Auth · DB Subscriptions · Storage · Functions · KV · D1 · Vectorize · Admin UI
+  Auth · Database · Realtime · Storage · Functions · Admin UI<br>
+  Same app, same behavior — local, self-hosted, or global edge
 </p>
 
 ---
@@ -27,20 +27,20 @@
 npx edgebase init my-app
 cd my-app
 
-npx edgebase dev                # Local — develop and test instantly
-npx edgebase docker run         # Docker — self-host with full data ownership
-npx edgebase deploy             # Edge  — deploy globally, ~0ms cold start
+npx edgebase dev                # Local dev + Admin Dashboard
+npx edgebase docker run         # Self-host with Docker
+npx edgebase deploy             # Deploy globally on Cloudflare
 ```
 
-Same code, same behavior — pick your runtime, switch anytime.
+Same code, same behavior — choose your runtime, switch when you need to.
 
 `edgebase init` now starts from a blank app data model: auth, storage, and a sample health function are scaffolded, but no default `posts` table is created for you. In local dev, the API runs on `http://localhost:8787` and the Admin Dashboard opens on `http://localhost:5180/admin`.
 
----
+Guides: [Quickstart](https://edgebase.fun/docs/getting-started/quickstart) · [Configuration](https://edgebase.fun/docs/getting-started/configuration) · [Deployment](https://edgebase.fun/docs/getting-started/deployment) · [Self-Hosting](https://edgebase.fun/docs/getting-started/self-hosting) · [Admin Dashboard](https://edgebase.fun/docs/admin-dashboard)
 
 ## Why EdgeBase?
 
-### Why 100x cheaper?
+### Why Can It Be Much Cheaper?
 
 | Component | Firebase | Supabase | Appwrite | **EdgeBase** |
 |---|---|---|---|---|
@@ -79,7 +79,7 @@ How is $0 possible? These aren't discounts — the infrastructure that generates
 
 </details>
 
-### Why 100x faster?
+### Why Can It Be Faster?
 
 "Runs on the edge" alone is marketing. What matters is **what actually completes at the edge** — see [Architecture](#architecture) below. Auth, DB reads, and file serves resolve locally at 300+ locations. Only writes and realtime need a single hop. Cold starts are ~0ms (V8 isolates, not containers).
 
@@ -246,6 +246,8 @@ app: {
 
 ## Code Examples
 
+More examples: [SDK Overview](https://edgebase.fun/docs/sdks) · [API Reference](https://edgebase.fun/docs/api) · [CLI](https://edgebase.fun/docs/cli)
+
 ```typescript
 import { createClient } from '@edgebase/web';
 
@@ -401,6 +403,8 @@ client.db("app").table("posts").onSnapshot(result -> {
 ---
 
 ## Features
+
+Deep dives: [Database](https://edgebase.fun/docs/database) · [Authentication](https://edgebase.fun/docs/authentication) · [Storage](https://edgebase.fun/docs/storage) · [App Functions](https://edgebase.fun/docs/functions) · [Room](https://edgebase.fun/docs/room) · [Push](https://edgebase.fun/docs/push) · [Analytics](https://edgebase.fun/docs/analytics) · [Architecture](https://edgebase.fun/docs/architecture)
 
 - **Database** — SQLite with relational queries, JOIN, FTS5 full-text search (CJK support), views, batch operations, upsert, atomic `increment`/`deleteField`. PostgreSQL (Neon) with a single config change.
 - **Auth** — Email/password, Email OTP, Passkeys (WebAuthn), 13 OAuth providers + OIDC, anonymous, MFA/TOTP, ban/disable — zero per-user cost

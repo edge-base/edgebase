@@ -1,0 +1,101 @@
+name: Bug report
+description: Report a reproducible bug in EdgeBase
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug report.
+
+        Please include enough detail for someone unfamiliar with your setup to
+        reproduce the issue quickly.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the project is affected?
+      options:
+        - Server
+        - CLI
+        - Admin Dashboard
+        - Docs
+        - JavaScript SDK
+        - Other SDK
+        - Build or CI
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: A clear and concise description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Share the exact steps, commands, requests, or config needed to reproduce the issue.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Send ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: What happened instead? Include full error text if possible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Share versions and runtime details.
+      placeholder: |
+        - EdgeBase version:
+        - Node.js version:
+        - OS:
+        - Deployment mode: Edge / Docker / Direct
+        - Package manager:
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Logs, screenshots, stack traces, sample config, or related links.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues before opening this report.
+          required: true
+        - label: I included reproduction steps and relevant version information.
+          required: true
+        - label: I understand that security vulnerabilities should be reported privately to security@edgebase.fun.
+          required: true

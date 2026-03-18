@@ -552,7 +552,7 @@ https://github.com/firebase/firebase-ios-sdk
 3. Add EdgeBase SDK:
 
 ```
-https://github.com/melodysdreamj/edgebase-swift
+https://github.com/edge-base/edgebase-swift
 ```
 
 Use the current `0.1.0` release of the Swift package and import the `EdgeBase` module in your app target.

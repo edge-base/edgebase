@@ -231,7 +231,7 @@ import (
     "context"
     "os"
 
-    edgebase "github.com/edgebase/sdk-go"
+    edgebase "github.com/edge-base/sdk-go"
 )
 
 ctx := context.Background()
@@ -473,7 +473,7 @@ import (
     "context"
     "os"
 
-    edgebase "github.com/edgebase/sdk-go"
+    edgebase "github.com/edge-base/sdk-go"
 )
 
 ctx := context.Background()
@@ -788,7 +788,7 @@ import (
     "context"
     "os"
 
-    edgebase "github.com/edgebase/sdk-go"
+    edgebase "github.com/edge-base/sdk-go"
 )
 
 ctx := context.Background()

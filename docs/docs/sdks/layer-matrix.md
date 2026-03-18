@@ -35,7 +35,7 @@ For the latest certified behavior across `dev`, `docker`, and `deployed`, see [S
 | C# | `EdgeBase.Core` | `EdgeBase.Unity` | `EdgeBase.Admin` | Full split in repo |
 | C++ *(alpha)* | `packages/core` | `packages/unreal` | No dedicated package | Unreal wrapper over shared C++ core |
 | Python | `edgebase-core` | No dedicated package | `edgebase-admin` | Root `edgebase` package is a combined entrypoint, but there is no separate client-only package |
-| Go | Embedded | No dedicated package | `github.com/edgebase/sdk-go` | Single server-only SDK |
+| Go | Embedded | No dedicated package | `github.com/edge-base/sdk-go` | Single server-only SDK |
 | PHP | `edgebase/core` | No dedicated package | `edgebase/admin` | Server-only split |
 | Rust | `edgebase-core` | No dedicated package | `edgebase-admin` | Server-only split |
 | Ruby | `edgebase_core` | No dedicated package | `edgebase_admin` | Server-only split |
@@ -184,7 +184,7 @@ The admin layer is the service-key surface for server-side code, bypassing acces
 | C# | `EdgeBase.Admin` | `packages/sdk/csharp/packages/admin` | Dedicated admin package in repo |
 | C++ | No dedicated package | `packages/sdk/cpp` | No admin SDK |
 | Python | `edgebase-admin` | `packages/sdk/python/packages/admin` | Split admin package exists; root `edgebase` package is combined |
-| Go | `github.com/edgebase/sdk-go` | `packages/sdk/go` | Single server-only SDK |
+| Go | `github.com/edge-base/sdk-go` | `packages/sdk/go` | Single server-only SDK |
 | PHP | `edgebase/admin` | `packages/sdk/php/packages/admin` | Dedicated admin package |
 | Rust | `edgebase-admin` | `packages/sdk/rust/packages/admin` | Dedicated admin crate |
 | Ruby | `edgebase_admin` | `packages/sdk/ruby/packages/admin` | Dedicated admin gem |

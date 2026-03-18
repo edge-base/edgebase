@@ -103,7 +103,7 @@ describe('normalizeCloudflareDeployManifest', () => {
 });
 
 describe('mergeDestroyResources', () => {
-  it('promotes wrangler-declared R2 buckets into managed destroy targets', () => {
+  it('preserves unmanaged R2 buckets recorded in the manifest', () => {
     const resources = destroyInternals.mergeDestroyResources(
       {
         version: 2,
@@ -135,7 +135,7 @@ bucket_name = "example-worker-storage"
       name: 'example-worker-storage',
       binding: 'STORAGE',
       id: 'example-worker-storage',
-      managed: true,
+      managed: false,
       source: 'existing',
       metadata: {},
     });
@@ -228,5 +228,46 @@ id = "hd-abc123"
     expect(hdResources).toHaveLength(1);
     expect(vecResources[0]?.source).toBe('created');
     expect(hdResources[0]?.source).toBe('created');
+  });
+
+  it('normalizes wrangler placeholder D1 and KV identifiers', () => {
+    const resources = destroyInternals.mergeDestroyResources(
+      {
+        version: 2,
+        deployedAt: '2026-03-10T00:00:00.000Z',
+        accountId: 'abc123',
+        worker: { name: 'example-worker', url: 'https://example-worker.workers.dev' },
+        resources: [],
+      },
+      `
+name = "example-worker"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "local"
+
+[[d1_databases]]
+binding = "AUTH_DB"
+database_name = "edgebase-auth"
+database_id = "local"
+`,
+    );
+
+    expect(resources).toContainEqual({
+      type: 'kv_namespace',
+      name: 'internal',
+      binding: 'KV',
+      id: undefined,
+      managed: true,
+      source: 'wrangler',
+    });
+    expect(resources).toContainEqual({
+      type: 'd1_database',
+      name: 'auth',
+      binding: 'AUTH_DB',
+      id: undefined,
+      managed: true,
+      source: 'wrangler',
+    });
   });
 });

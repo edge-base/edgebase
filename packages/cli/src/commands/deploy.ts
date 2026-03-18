@@ -549,7 +549,7 @@ function provisionR2Buckets(
           name: bucket.bucketName,
           binding: bucket.binding,
           id: bucket.bucketName,
-          managed: existingRecord?.managed ?? true,
+          managed: existingRecord?.managed ?? false,
           source: existingRecord?.source ?? 'existing',
           metadata: bucket.jurisdiction ? { jurisdiction: bucket.jurisdiction } : undefined,
         });

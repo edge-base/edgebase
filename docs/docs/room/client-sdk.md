@@ -63,7 +63,7 @@ flutter pub get
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/melodysdreamj/edgebase-swift", from: "0.1.0")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.1.0")
 ]
 ```
 
@@ -108,7 +108,7 @@ dotnet add package EdgeBase
 ```cmake
 FetchContent_Declare(
   edgebase
-  GIT_REPOSITORY https://github.com/edgebase/edgebase-cpp.git
+  GIT_REPOSITORY https://github.com/edge-base/edgebase-cpp.git
   GIT_TAG v0.1.0
 )
 FetchContent_MakeAvailable(edgebase)

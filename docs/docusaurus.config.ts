@@ -43,7 +43,7 @@ const config: Config = {
   url: 'https://edgebase.fun',
   baseUrl: '/',
 
-  organizationName: 'melodysdreamj',
+  organizationName: 'edge-base',
   projectName: 'edgebase',
 
   onBrokenLinks: 'throw',
@@ -74,7 +74,7 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
-          editUrl: 'https://github.com/melodysdreamj/edgebase/tree/main/docs/',
+          editUrl: 'https://github.com/edge-base/edgebase/tree/main/docs/',
         },
         blog: false,
         theme: {
@@ -172,7 +172,7 @@ const config: Config = {
           position: 'right',
         },
         {
-          href: 'https://github.com/melodysdreamj/edgebase',
+          href: 'https://github.com/edge-base/edgebase',
           label: 'GitHub',
           position: 'right',
         },
@@ -208,9 +208,9 @@ const config: Config = {
         {
           title: 'Community',
           items: [
-            { label: 'GitHub', href: 'https://github.com/melodysdreamj/edgebase' },
+            { label: 'GitHub', href: 'https://github.com/edge-base/edgebase' },
             { label: 'Discord', href: 'https://discord.gg/edgebase' },
-            { label: 'Issues', href: 'https://github.com/melodysdreamj/edgebase/issues' },
+            { label: 'Issues', href: 'https://github.com/edge-base/edgebase/issues' },
           ],
         },
         {
@@ -220,7 +220,7 @@ const config: Config = {
             { label: 'FAQ', to: '/docs/faq' },
             {
               label: 'Contributing',
-              href: 'https://github.com/melodysdreamj/edgebase/blob/main/CONTRIBUTING.md',
+              href: 'https://github.com/edge-base/edgebase/blob/main/CONTRIBUTING.md',
             },
             { label: 'Self-Hosting', to: '/docs/getting-started/self-hosting' },
           ],

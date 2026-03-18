@@ -98,7 +98,7 @@ EdgeBase provides SDKs for **14 languages**:
 | **Scala (JVM)** | `dev.edgebase:edgebase-admin-scala` | Maven Central |
 | **Python** | `edgebase` | PyPI |
 | **C# (Unity/.NET)** | `EdgeBase` | NuGet / source copy |
-| **Go** | `github.com/edgebase/sdk-go` | Go Modules |
+| **Go** | `github.com/edge-base/sdk-go` | Go Modules |
 | **PHP** | `edgebase/sdk` | Packagist |
 | **Rust** | `edgebase-admin` | crates.io |
 | **C++ (Unreal)** | Source distribution | GitHub Releases |

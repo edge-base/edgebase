@@ -2,6 +2,12 @@
 
 Thank you for your interest in contributing to EdgeBase! This guide will help you get started.
 
+## Community Guidelines
+
+- Follow the [Code of Conduct](./CODE_OF_CONDUCT.md) in all project spaces
+- Use the issue templates for bug reports and feature requests
+- Use the pull request template to summarize your change and testing
+
 ## Getting Started
 
 1. **Fork** the repository
@@ -85,7 +91,8 @@ test(auth): add OAuth flow integration test
 
 ## Reporting Issues
 
-- Use [GitHub Issues](https://github.com/melodysdreamj/edgebase/issues)
+- Use [GitHub Issues](https://github.com/edge-base/edgebase/issues)
+- Choose the issue template that best matches your report
 - Include reproduction steps, expected vs actual behavior
 - For security issues, email **security@edgebase.fun** instead
 

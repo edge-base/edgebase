@@ -1,6 +1,6 @@
 // EdgeBase Dart SDK — basic usage example.
 //
-// See https://github.com/melodysdreamj/edgebase for documentation.
+// See https://github.com/edge-base/edgebase for documentation.
 
 // ignore_for_file: unused_local_variable, avoid_print
 import 'package:edgebase/edgebase.dart';

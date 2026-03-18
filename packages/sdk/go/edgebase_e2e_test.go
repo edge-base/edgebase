@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	edgebase "github.com/edgebase/sdk-go"
+	edgebase "github.com/edge-base/sdk-go"
 )
 
 var counter atomic.Uint64

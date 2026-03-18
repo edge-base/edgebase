@@ -4,7 +4,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import chalk from 'chalk';
-import { ensureCloudflareAuth } from '../lib/cf-auth.js';
+import { ensureCloudflareAuth, resolveApiToken } from '../lib/cf-auth.js';
 import {
   getCloudflareDeployManifestPath,
   readCloudflareDeployManifest,
@@ -73,7 +73,7 @@ function mergeDestroyResources(
         name: bucket.bucketName,
         binding: bucket.binding,
         id: bucket.bucketName,
-        managed: true,
+        managed: existing?.managed ?? true,
         source: existing?.source ?? 'wrangler',
         metadata: {
           ...(existing?.metadata ?? {}),
@@ -88,18 +88,19 @@ function mergeDestroyResources(
 
     for (const db of wranglerConfig.d1Databases) {
       if (existingBindings.has(`d1_database:${db.binding}`)) continue;
+      const normalizedId = normalizeWranglerResourceId(db.databaseId);
       const key = resourceKey({
         type: 'd1_database',
-        name: db.databaseName,
+        name: deriveWranglerD1ResourceName(db.binding, db.databaseName),
         binding: db.binding,
-        id: db.databaseId,
+        id: normalizedId,
       });
       if (!merged.has(key)) {
         merged.set(key, {
           type: 'd1_database',
-          name: db.databaseName,
+          name: deriveWranglerD1ResourceName(db.binding, db.databaseName),
           binding: db.binding,
-          id: db.databaseId,
+          id: normalizedId,
           managed: true,
           source: 'wrangler',
         });
@@ -108,18 +109,19 @@ function mergeDestroyResources(
 
     for (const kv of wranglerConfig.kvNamespaces) {
       if (existingBindings.has(`kv_namespace:${kv.binding}`)) continue;
+      const normalizedId = normalizeWranglerResourceId(kv.id);
       const key = resourceKey({
         type: 'kv_namespace',
-        name: kv.binding,
+        name: deriveWranglerKvName(kv.binding),
         binding: kv.binding,
-        id: kv.id,
+        id: normalizedId,
       });
       if (!merged.has(key)) {
         merged.set(key, {
           type: 'kv_namespace',
-          name: kv.binding,
+          name: deriveWranglerKvName(kv.binding),
           binding: kv.binding,
-          id: kv.id,
+          id: normalizedId,
           managed: true,
           source: 'wrangler',
         });
@@ -187,6 +189,32 @@ function extractExecErrorMessage(error: unknown): string {
   // Wrangler may append a log-file path as the last line — prefer the last meaningful line.
   const lines = full.split('\n').filter(Boolean);
   return lines.at(-1) ?? full;
+}
+
+function isPlaceholderCloudflareId(value: string | undefined): boolean {
+  if (!value) return false;
+  return /^(local|placeholder)$/i.test(value) || /^YOUR_[A-Z0-9_]+$/i.test(value);
+}
+
+function normalizeWranglerResourceId(value: string | undefined): string | undefined {
+  return value && !isPlaceholderCloudflareId(value) ? value : undefined;
+}
+
+function deriveWranglerD1ResourceName(binding: string, databaseName: string): string {
+  if (binding === 'AUTH_DB') return 'auth';
+  if (binding === 'CONTROL_DB') return 'control';
+  if (binding.startsWith('DB_D1_')) {
+    return binding.slice('DB_D1_'.length).toLowerCase().replace(/_/g, '-');
+  }
+
+  return databaseName
+    .replace(/^edgebase-db-/, '')
+    .replace(/^edgebase-/, '');
+}
+
+function deriveWranglerKvName(binding: string): string {
+  if (binding === 'KV') return 'internal';
+  return binding.toLowerCase().replace(/^kv[_-]?/i, '').replace(/_/g, '-') || binding;
 }
 
 function runWrangler(
@@ -277,6 +305,24 @@ async function deleteTurnstileWidget(
 
   if (!response.ok) {
     throw new Error(`Turnstile delete failed (${response.status}): ${await response.text()}`);
+  }
+}
+
+async function deleteD1Database(
+  accountId: string,
+  apiToken: string,
+  databaseId: string,
+): Promise<void> {
+  const response = await fetchWithTimeout(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${apiToken}` },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`D1 delete failed (${response.status}): ${await response.text()}`);
   }
 }
 
@@ -445,7 +491,15 @@ export const destroyCommand = new Command('destroy')
 
     const cfAuth = options.dryRun ? null : await ensureCloudflareAuth(projectDir, isTTY);
     const accountId = manifest?.accountId || cfAuth?.accountId || '';
-    const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+    const apiToken = options.dryRun
+      ? undefined
+      : (() => {
+          try {
+            return resolveApiToken().token;
+          } catch {
+            return process.env.CLOUDFLARE_API_TOKEN;
+          }
+        })();
     const serviceKey = resolveOptionalServiceKey({ serviceKey: options.serviceKey });
     const result: DestroyResult = { deleted: [], skipped: [], failures: [] };
 
@@ -522,16 +576,41 @@ export const destroyCommand = new Command('destroy')
     for (const type of orderedTypes) {
       for (const resource of resources.filter((entry) => entry.type === type)) {
         const label = `${type} ${resource.binding ?? resource.name}`;
-        await runDeleteStep(label, !!options.dryRun, result, () => {
+        await runDeleteStep(label, !!options.dryRun, result, async () => {
           if (resource.type === 'kv_namespace') {
-            const args = resource.id
-              ? ['wrangler', 'kv', 'namespace', 'delete', '--namespace-id', resource.id, '-y']
-              : ['wrangler', 'kv', 'namespace', 'delete', `${workerName}-${resource.binding ?? resource.name}`, '-y'];
-            runWrangler(projectDir, args);
+            if (resource.id) {
+              runWrangler(projectDir, ['wrangler', 'kv', 'namespace', 'delete', '--namespace-id', resource.id, '-y']);
+              return;
+            }
+
+            const candidateNames = [
+              resource.binding,
+              resource.name,
+              workerName && resource.binding ? `${workerName}-${resource.binding}` : undefined,
+            ].filter((value, index, all): value is string => !!value && all.indexOf(value) === index);
+
+            let lastError: unknown = null;
+            for (const candidate of candidateNames) {
+              try {
+                runWrangler(projectDir, ['wrangler', 'kv', 'namespace', 'delete', candidate, '-y']);
+                return;
+              } catch (error) {
+                const full = extractExecErrorFull(error);
+                if (isAlreadyDeletedError(full)) return;
+                lastError = error;
+              }
+            }
+
+            throw lastError ?? new Error(`Could not delete KV namespace "${resource.binding ?? resource.name}".`);
             return;
           }
 
           if (resource.type === 'd1_database') {
+            if (resource.id && accountId && apiToken && !isPlaceholderCloudflareId(resource.id)) {
+              await deleteD1Database(accountId, apiToken, resource.id);
+              return;
+            }
+
             const deleteName = resolveManagedD1DeleteName(workerName, resource, d1List);
             try {
               runWrangler(projectDir, ['wrangler', 'd1', 'delete', deleteName, '-y']);
