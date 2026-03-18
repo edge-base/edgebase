@@ -121,7 +121,7 @@ Run directly through the EdgeBase CLI (which starts `wrangler dev`) on a machine
 
 ```bash
 # Clone or initialize a EdgeBase project
-npx edgebase init my-project
+npm create edgebase@latest my-project
 cd my-project
 
 # Start the local workerd runtime

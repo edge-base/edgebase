@@ -30,7 +30,8 @@
     "scripts": {
         "build": "tsc",
         "dev": "tsc --watch",
-        "test": "vitest run test/unit/"
+        "test": "vitest run test/unit/",
+        "prepack": "pnpm run build"
     },
     "dependencies": {
         "@codemirror/lang-html": "^6.4.11",

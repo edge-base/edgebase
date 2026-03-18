@@ -1,10 +1,26 @@
 {
     "name": "@edgebase/plugin-core",
     "version": "0.1.0",
-    "private": true,
+    "description": "EdgeBase plugin authoring helpers and public plugin contracts",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/edge-base/edgebase.git",
+        "directory": "packages/plugins/core"
+    },
+    "homepage": "https://edgebase.fun",
+    "bugs": "https://github.com/edge-base/edgebase/issues",
+    "keywords": ["edgebase", "plugins", "plugin-api"],
+    "publishConfig": {
+        "access": "public"
+    },
     "type": "module",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
+    "sideEffects": false,
+    "files": [
+        "dist"
+    ],
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
@@ -12,7 +28,8 @@
         }
     },
     "scripts": {
-        "build": "tsc"
+        "build": "tsc",
+        "prepack": "pnpm run build"
     },
     "dependencies": {
         "@edgebase/shared": "workspace:*"

@@ -34,7 +34,8 @@
         "lint": "eslint src/",
         "test": "TMPDIR=/tmp vitest run",
         "test:e2e": "TMPDIR=/tmp pnpm exec vitest run --config packages/core/vitest.config.ts packages/core/test/e2e/core.e2e.test.ts && TMPDIR=/tmp pnpm exec vitest run --config packages/web/vitest.config.ts packages/web/test/e2e/web.e2e.test.ts && TMPDIR=/tmp pnpm exec vitest run --config packages/admin/vitest.config.ts packages/admin/test/e2e/admin.e2e.test.ts",
-        "dev": "tsc --watch"
+        "dev": "tsc --watch",
+        "prepack": "pnpm run build"
     },
     "dependencies": {
         "@edgebase/shared": "workspace:*",

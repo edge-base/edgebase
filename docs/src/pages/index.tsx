@@ -61,7 +61,7 @@ function HeroSection() {
         Database · Auth · Storage · Functions · Room · Admin UI — all built in.
       </p>
       <div className="hero-code">
-        <code>npx edgebase init my-app</code>
+        <code>npm create edgebase@latest my-app</code>
       </div>
       <div className="hero-buttons">
         <Link className="hero-btn hero-btn-primary" to="/docs/getting-started/quickstart">

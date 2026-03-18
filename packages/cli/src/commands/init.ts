@@ -2,11 +2,12 @@ import { Command } from 'commander';
 import { randomBytes } from 'node:crypto';
 import { writeFileSync, mkdirSync, existsSync, chmodSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
 import { deriveProjectSlug, ensureLocalWranglerToml, ensureRuntimeScaffold } from '../lib/runtime-scaffold.js';
 
 /**
- * `npx edgebase init [dir]` — Project scaffolding.
+ * `edgebase init [dir]` — Project scaffolding.
  * Creates edgebase.config.ts, functions/ directory, env files, and .gitignore.
  */
 export const initCommand = new Command('init')
@@ -18,6 +19,7 @@ export const initCommand = new Command('init')
     const projectDir = resolve(dir);
     const localCliEntry = resolveLocalCliEntry(projectDir);
     const edgebaseBin = localCliEntry ? `node ${localCliEntry}` : 'npx edgebase';
+    const needsPublishedPackages = localCliEntry === null;
 
     console.log(chalk.blue('⚡ Initializing EdgeBase project...'));
     console.log();
@@ -103,11 +105,20 @@ export const initCommand = new Command('init')
     if (!existsSync(packageJsonPath)) {
       writeFileSync(
         packageJsonPath,
-        PACKAGE_JSON_TEMPLATE(deriveProjectSlug(projectDir), localCliEntry),
+        PACKAGE_JSON_TEMPLATE(deriveProjectSlug(projectDir), localCliEntry, needsPublishedPackages),
       );
       console.log(chalk.green('  ✓'), 'package.json');
     } else {
-      console.log(chalk.yellow('  ⏭'), 'package.json (already exists)');
+      const packageJsonChanged = ensureScaffoldPackageJson(
+        packageJsonPath,
+        deriveProjectSlug(projectDir),
+        localCliEntry,
+        needsPublishedPackages,
+      );
+      console.log(
+        packageJsonChanged ? chalk.green('  ✓') : chalk.yellow('  ⏭'),
+        packageJsonChanged ? 'package.json (updated)' : 'package.json (already exists)',
+      );
     }
 
     const wranglerPath = join(projectDir, 'wrangler.toml');
@@ -136,13 +147,25 @@ export const initCommand = new Command('init')
     if (!options.dev) {
       console.log(chalk.bold('Next steps:'));
       console.log(`  1. Edit ${chalk.cyan('edgebase.config.ts')} to define your schema and auth settings`);
-      console.log(`  2. Run ${chalk.cyan(`'${edgebaseBin} dev'`)} to start the local development server`);
-      console.log(`  3. Open the Admin Dashboard to explore your API`);
-      console.log(`  4. Read the docs: ${chalk.cyan('https://edgebase.fun/docs/getting-started/quickstart')}`);
+      if (needsPublishedPackages && shouldShowInstallStep()) {
+        console.log(`  2. Run ${chalk.cyan(`'npm install'`)} to install the local EdgeBase CLI`);
+        console.log(`  3. Run ${chalk.cyan(`'${edgebaseBin} dev'`)} to start the local development server`);
+        console.log(`  4. Open the Admin Dashboard to explore your API`);
+        console.log(`  5. Read the docs: ${chalk.cyan('https://edgebase.fun/docs/getting-started/quickstart')}`);
+      } else if (needsPublishedPackages) {
+        console.log(`  2. Run ${chalk.cyan(`'${edgebaseBin} dev'`)} to start the local development server`);
+        console.log(`  3. Open the Admin Dashboard to explore your API`);
+        console.log(`  4. Read the docs: ${chalk.cyan('https://edgebase.fun/docs/getting-started/quickstart')}`);
+      } else {
+        console.log(`  2. Run ${chalk.cyan(`'${edgebaseBin} dev'`)} to start the local development server`);
+        console.log(`  3. Open the Admin Dashboard to explore your API`);
+        console.log(`  4. Read the docs: ${chalk.cyan('https://edgebase.fun/docs/getting-started/quickstart')}`);
+      }
       console.log();
       console.log(chalk.dim('When you\'re ready for production:'));
-      console.log(`  5. Set ${chalk.cyan('release: true')} in edgebase.config.ts`);
-      console.log(`  6. Run ${chalk.cyan(`'${edgebaseBin} deploy'`)} to deploy to Cloudflare`);
+      const publishedInstallStep = needsPublishedPackages && shouldShowInstallStep();
+      console.log(`  ${publishedInstallStep ? '6' : '5'}. Set ${chalk.cyan('release: true')} in edgebase.config.ts`);
+      console.log(`  ${publishedInstallStep ? '7' : '6'}. Run ${chalk.cyan(`'${edgebaseBin} deploy'`)} to deploy to Cloudflare`);
       return;
     }
 
@@ -343,31 +366,188 @@ function toPosixPath(path: string): string {
   return path.replace(/\\/g, '/');
 }
 
-const PACKAGE_JSON_TEMPLATE = (name: string, localCliEntry: string | null) => {
-  const edgebaseBin = localCliEntry ? `node ${localCliEntry}` : 'npx edgebase';
-
-  return `{
-  "name": ${JSON.stringify(name)},
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "${edgebaseBin} dev",
-    "deploy": "${edgebaseBin} deploy",
-    "typegen": "${edgebaseBin} typegen"
-  },
-  "engines": {
-    "node": "^22.0.0 || ^24.0.0"
+function readPackageJsonFromUrl(relativePath: string): Record<string, unknown> | null {
+  try {
+    const packageJsonPath = fileURLToPath(new URL(relativePath, import.meta.url));
+    return JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return null;
   }
 }
-`;
+
+function resolveScaffoldDependencyVersion(packageName: string): string {
+  const cliPackageJson = readPackageJsonFromUrl('../../package.json');
+  const cliVersion = typeof cliPackageJson?.version === 'string' ? cliPackageJson.version : '0.1.0';
+  const cliDependencies = typeof cliPackageJson?.dependencies === 'object' && cliPackageJson.dependencies !== null
+    ? cliPackageJson.dependencies as Record<string, string>
+    : {};
+
+  const declaredVersion = cliDependencies[packageName];
+  if (typeof declaredVersion === 'string' && !declaredVersion.startsWith('workspace:')) {
+    return /^\d+\.\d+\.\d+(?:[-+].+)?$/.test(declaredVersion)
+      ? `^${declaredVersion}`
+      : declaredVersion;
+  }
+
+  if (packageName === '@edgebase/shared') {
+    const sharedPackageJson = readPackageJsonFromUrl('../../../shared/package.json');
+    if (typeof sharedPackageJson?.version === 'string') {
+      return `^${sharedPackageJson.version}`;
+    }
+  }
+
+  return `^${cliVersion}`;
+}
+
+const PACKAGE_JSON_TEMPLATE = (
+  name: string,
+  localCliEntry: string | null,
+  needsPublishedPackages: boolean,
+) => {
+  return `${JSON.stringify(buildPackageJsonObject(name, localCliEntry, needsPublishedPackages), null, 2)}\n`;
 };
 
+function buildPackageJsonObject(
+  name: string,
+  localCliEntry: string | null,
+  needsPublishedPackages: boolean,
+): {
+  name: string;
+  private: true;
+  type: 'module';
+  scripts: Record<string, string>;
+  engines: { node: string };
+  devDependencies?: Record<string, string>;
+} {
+  const scriptPrefix = localCliEntry ? `node ${localCliEntry}` : 'edgebase';
+  const packageJson: {
+    name: string;
+    private: true;
+    type: 'module';
+    scripts: Record<string, string>;
+    engines: { node: string };
+    devDependencies?: Record<string, string>;
+  } = {
+    name,
+    private: true,
+    type: 'module',
+    scripts: {
+      dev: `${scriptPrefix} dev`,
+      deploy: `${scriptPrefix} deploy`,
+      typegen: `${scriptPrefix} typegen`,
+    },
+    engines: {
+      node: '^22.0.0 || ^24.0.0',
+    },
+  };
+
+  if (needsPublishedPackages) {
+    packageJson.devDependencies = {
+      '@edgebase/cli': resolveScaffoldDependencyVersion('@edgebase/cli'),
+      '@edgebase/shared': resolveScaffoldDependencyVersion('@edgebase/shared'),
+    };
+  }
+
+  return packageJson;
+}
+
 // ─── Env File Templates ───
+
+function shouldShowInstallStep(): boolean {
+  return process.env.EDGEBASE_BOOTSTRAP_WRAPPER !== '1';
+}
+
+function ensureScaffoldPackageJson(
+  packageJsonPath: string,
+  name: string,
+  localCliEntry: string | null,
+  needsPublishedPackages: boolean,
+): boolean {
+  let existing: Record<string, unknown>;
+
+  try {
+    existing = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return false;
+  }
+
+  const generated = buildPackageJsonObject(name, localCliEntry, needsPublishedPackages);
+  let changed = false;
+
+  if (existing.name === undefined) {
+    existing.name = generated.name;
+    changed = true;
+  }
+
+  if (existing.private === undefined) {
+    existing.private = generated.private;
+    changed = true;
+  }
+
+  if (existing.type === undefined) {
+    existing.type = generated.type;
+    changed = true;
+  }
+
+  const existingScripts = ensureStringMap(existing, 'scripts');
+  for (const [key, value] of Object.entries(generated.scripts ?? {})) {
+    if (existingScripts[key] === undefined) {
+      existingScripts[key] = value;
+      changed = true;
+    }
+  }
+
+  const existingEngines = ensureStringMap(existing, 'engines');
+  if (generated.engines?.node && existingEngines.node === undefined) {
+    existingEngines.node = generated.engines.node;
+    changed = true;
+  }
+
+  if (needsPublishedPackages) {
+    const existingDependencies = ensureStringMap(existing, 'dependencies');
+    const existingDevDependencies = ensureStringMap(existing, 'devDependencies');
+    const existingPeerDependencies = ensureStringMap(existing, 'peerDependencies');
+    const existingOptionalDependencies = ensureStringMap(existing, 'optionalDependencies');
+
+    for (const [key, value] of Object.entries(generated.devDependencies ?? {})) {
+      if (
+        existingDependencies[key] === undefined
+        && existingDevDependencies[key] === undefined
+        && existingPeerDependencies[key] === undefined
+        && existingOptionalDependencies[key] === undefined
+      ) {
+        existingDevDependencies[key] = value;
+        changed = true;
+      }
+    }
+  }
+
+  if (!changed) {
+    return false;
+  }
+
+  writeFileSync(packageJsonPath, `${JSON.stringify(existing, null, 2)}\n`, 'utf-8');
+  return true;
+}
+
+function ensureStringMap(
+  target: Record<string, unknown>,
+  key: string,
+): Record<string, string> {
+  const current = target[key];
+  if (current && typeof current === 'object' && !Array.isArray(current)) {
+    return current as Record<string, string>;
+  }
+
+  const next: Record<string, string> = {};
+  target[key] = next;
+  return next;
+}
 
 const ENV_DEVELOPMENT_TEMPLATE = `# EdgeBase Development Environment Variables
 # This file is git-ignored. Copy from .env.development.example to get started.
 #
-# JWT secrets below are auto-generated by \`npx edgebase init\`.
+# JWT secrets below are auto-generated by EdgeBase project scaffolding.
 # Add any development/test API keys below.
 
 JWT_USER_SECRET=
@@ -384,7 +564,7 @@ JWT_ADMIN_SECRET=
 const ENV_RELEASE_TEMPLATE = `# EdgeBase Production Environment Variables
 # This file is git-ignored. Copy from .env.release.example to get started.
 #
-# On \`npx edgebase deploy\`, these are auto-synced to Cloudflare Secrets.
+# On \`edgebase deploy\`, these are auto-synced to Cloudflare Secrets.
 # SERVICE_KEY is auto-managed by the deploy pipeline — do not include it here.
 
 JWT_USER_SECRET=

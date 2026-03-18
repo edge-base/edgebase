@@ -13,7 +13,7 @@
  * 9. Edge Cases
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer as createNetServer } from 'node:net';
@@ -143,6 +143,27 @@ describe('Runtime config scaffold', () => {
         },
       },
     });
+  });
+
+  it('does not rewrite a generated shared shim into a self-referential link on repeat runs', () => {
+    const workspaceRoot = join(tmpDir, 'workspace');
+    const projectDir = join(workspaceRoot, 'apps', 'edgebase');
+    const workspaceShared = join(workspaceRoot, 'node_modules', '@edgebase', 'shared');
+    mkdirSync(join(projectDir), { recursive: true });
+    mkdirSync(join(workspaceShared, 'src'), { recursive: true });
+    writeFileSync(join(workspaceRoot, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
+    writeFileSync(join(workspaceShared, 'src', 'index.ts'), 'export const shared = true;\n');
+
+    ensureProjectSharedPackageLink(projectDir);
+    ensureProjectSharedPackageLink(projectDir);
+
+    const projectSharedSrc = join(projectDir, 'node_modules', '@edgebase', 'shared', 'src');
+    expect(readFileSync(join(projectDir, 'node_modules', '@edgebase', 'shared', '.edgebase-shim'), 'utf-8')).toContain(
+      'edgebase-shared-shim',
+    );
+    const linkedSharedSrc = readlinkSync(projectSharedSrc);
+    expect(linkedSharedSrc).not.toBe(projectSharedSrc);
+    expect(existsSync(join(linkedSharedSrc, 'index.ts'))).toBe(true);
   });
 
   it('adds the workspace root as a shared-package link target when running inside a monorepo', () => {

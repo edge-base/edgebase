@@ -30,6 +30,8 @@ npm install -g @edgebase/cli
 Or run it without a global install:
 
 ```bash
+npm create edgebase@latest my-app
+cd my-app
 npx edgebase <command>
 ```
 
@@ -47,12 +49,12 @@ npx edgebase <command>
 ### Start a new project
 
 ```bash
-npx edgebase init my-app
+npm create edgebase@latest my-app
 cd my-app
 npx edgebase dev
 ```
 
-`init` scaffolds the project and, unless you pass `--no-dev`, immediately boots local development and opens the admin dashboard.
+`create-edgebase` scaffolds the project, installs the local CLI dependencies, and, unless you pass `--no-dev`, immediately boots local development and opens the admin dashboard.
 
 ### Ship to Cloudflare
 

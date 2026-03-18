@@ -33,6 +33,7 @@
         "node": ">=20.19.0"
     },
     "dependencies": {
+        "@edgebase/server": "workspace:*",
         "@edgebase/shared": "workspace:*",
         "chalk": "^5.4.0",
         "commander": "^13.1.0",

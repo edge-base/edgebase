@@ -4,7 +4,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import chalk from 'chalk';
-import { ensureCloudflareAuth, resolveApiToken } from '../lib/cf-auth.js';
+import { ensureCloudflareAuth, ensureWranglerToml, resolveApiToken } from '../lib/cf-auth.js';
 import {
   getCloudflareDeployManifestPath,
   readCloudflareDeployManifest,
@@ -256,6 +256,75 @@ async function wipeManagedStorageBucket(workerUrl: string, serviceKey: string): 
   return typeof payload.deleted === 'number' ? payload.deleted : 0;
 }
 
+async function listStorageBucketObjects(
+  workerUrl: string,
+  serviceKey: string,
+  bucketName: string,
+  cursor?: string,
+): Promise<{ keys: string[]; cursor: string | null }> {
+  const query = new URLSearchParams({ limit: '1000' });
+  if (cursor) {
+    query.set('cursor', cursor);
+  }
+
+  const response = await fetchWithTimeout(
+    `${workerUrl.replace(/\/$/, '')}/admin/api/data/storage/buckets/${encodeURIComponent(bucketName)}/objects?${query.toString()}`,
+    {
+      headers: { 'X-EdgeBase-Service-Key': serviceKey },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`storage list failed (${response.status}): ${await response.text()}`);
+  }
+
+  const payload = await response.json() as {
+    objects?: Array<{ key?: unknown }>;
+    cursor?: unknown;
+  };
+
+  return {
+    keys: (payload.objects ?? [])
+      .map((entry) => (typeof entry.key === 'string' ? entry.key : null))
+      .filter((entry): entry is string => Boolean(entry)),
+    cursor: typeof payload.cursor === 'string' && payload.cursor.length > 0 ? payload.cursor : null,
+  };
+}
+
+async function wipeStorageBucketViaAdmin(
+  workerUrl: string,
+  serviceKey: string,
+  bucketName: string,
+): Promise<number> {
+  let deleted = 0;
+  let cursor: string | null = null;
+
+  do {
+    const page = await listStorageBucketObjects(workerUrl, serviceKey, bucketName, cursor ?? undefined);
+    for (const key of page.keys) {
+      const response = await fetchWithTimeout(
+        `${workerUrl.replace(/\/$/, '')}/admin/api/data/storage/buckets/${encodeURIComponent(bucketName)}/objects/${encodeURIComponent(key)}`,
+        {
+          method: 'DELETE',
+          headers: { 'X-EdgeBase-Service-Key': serviceKey },
+        },
+      );
+
+      if (!response.ok && response.status !== 404) {
+        throw new Error(`storage object delete failed (${response.status}): ${await response.text()}`);
+      }
+
+      if (response.ok) {
+        deleted += 1;
+      }
+    }
+
+    cursor = page.cursor;
+  } while (cursor);
+
+  return deleted;
+}
+
 async function listTurnstileWidgets(
   accountId: string,
   apiToken: string,
@@ -377,7 +446,11 @@ function formatDestroyPlan(workerName: string, resources: CloudflareResourceReco
 }
 
 function isAlreadyDeletedError(message: string): boolean {
-  return /not.?found|does not exist|couldn't find|could not find|no such/i.test(message);
+  return /not.?found|does not exist|couldn't find|could not find|could not be found|no such/i.test(message);
+}
+
+function isR2BucketNotEmptyError(message: string): boolean {
+  return /bucket.+not empty|bucket you tried to delete.+not empty|\[code:\s*10008\]/i.test(message);
 }
 
 async function runDeleteStep(
@@ -410,6 +483,8 @@ function isManagedResource(resource: CloudflareResourceRecord): boolean {
 
 export const _internals = {
   mergeDestroyResources,
+  isAlreadyDeletedError,
+  isR2BucketNotEmptyError,
 };
 
 function resolveProjectDir(): string {
@@ -490,7 +565,12 @@ export const destroyCommand = new Command('destroy')
     }
 
     const cfAuth = options.dryRun ? null : await ensureCloudflareAuth(projectDir, isTTY);
-    const accountId = manifest?.accountId || cfAuth?.accountId || '';
+    if (!options.dryRun && cfAuth?.accountId) {
+      ensureWranglerToml(projectDir, cfAuth.accountId);
+    }
+    const accountId = !isPlaceholderCloudflareId(manifest?.accountId)
+      ? (manifest?.accountId ?? '')
+      : (cfAuth?.accountId ?? '');
     const apiToken = options.dryRun
       ? undefined
       : (() => {
@@ -541,6 +621,22 @@ export const destroyCommand = new Command('destroy')
         } catch (error) {
           const full = extractExecErrorFull(error);
           if (isAlreadyDeletedError(full)) return;
+          if (
+            resource.binding === 'STORAGE'
+            && workerUrl
+            && serviceKey
+            && isR2BucketNotEmptyError(full)
+          ) {
+            await wipeStorageBucketViaAdmin(workerUrl, serviceKey, resource.name);
+            try {
+              runWrangler(projectDir, args, { input: 'y\n' });
+              return;
+            } catch (retryError) {
+              const retryFull = extractExecErrorFull(retryError);
+              if (isAlreadyDeletedError(retryFull)) return;
+              throw retryError;
+            }
+          }
           if (resource.binding === 'STORAGE' && (!workerUrl || !serviceKey)) {
             throw new Error(
               `${extractExecErrorMessage(error)}. Set --url/EDGEBASE_URL and --service-key/EDGEBASE_SERVICE_KEY if the bucket is not empty.`,

@@ -30,7 +30,8 @@
     "scripts": {
         "build": "tsc",
         "dev": "tsc --watch",
-        "test": "tsc --noEmit && vitest run test/unit/"
+        "test": "tsc --noEmit && vitest run test/unit/",
+        "prepack": "pnpm run build"
     },
     "dependencies": {
         "@edgebase/core": "workspace:*"

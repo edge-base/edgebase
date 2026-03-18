@@ -331,6 +331,6 @@ client.databaseLive.onError((error) => {
 ## Still Stuck?
 
 - Check the dev server terminal for detailed error messages.
-- Open the Admin Dashboard at `http://localhost:5180/admin` to inspect tables, users, and logs.
+- Open the Admin Dashboard at `http://localhost:8787/admin` to inspect tables, users, and logs.
 - Review the [Configuration](/docs/getting-started/configuration) page for config structure.
 - See the [FAQ](/docs/faq) for additional common questions.

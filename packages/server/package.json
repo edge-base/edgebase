@@ -1,9 +1,26 @@
 {
     "name": "@edgebase/server",
     "version": "0.1.0",
-    "private": true,
+    "description": "EdgeBase runtime assets consumed by the EdgeBase CLI",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/edge-base/edgebase.git",
+        "directory": "packages/server"
+    },
+    "homepage": "https://edgebase.fun",
+    "bugs": "https://github.com/edge-base/edgebase/issues",
+    "keywords": ["edgebase", "runtime", "server", "cloudflare-workers"],
+    "publishConfig": {
+        "access": "public"
+    },
     "type": "module",
     "main": "./src/index.ts",
+    "files": [
+        "src",
+        "admin-build",
+        "openapi.json"
+    ],
     "scripts": {
         "build": "tsc --noEmit",
         "lint": "eslint src/ --max-warnings 0",
@@ -12,7 +29,8 @@
         "bench": "vitest run --config vitest.bench.config.ts",
         "dev": "./scripts/dev.sh",
         "dev:raw": "wrangler dev",
-        "test:e2e": "vitest run --config vitest.e2e.config.ts"
+        "test:e2e": "vitest run --config vitest.e2e.config.ts",
+        "prepack": "pnpm --dir ../admin build && pnpm run build && node ./scripts/copy-admin-build.mjs"
     },
     "dependencies": {
         "@edgebase/shared": "workspace:*",

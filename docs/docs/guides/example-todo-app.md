@@ -19,11 +19,11 @@ By the end of this guide you will have:
 ## 1. Create the Project
 
 ```bash
-npx edgebase init todo-app
+npm create edgebase@latest todo-app
 cd todo-app
 ```
 
-The dev server starts automatically and the Admin Dashboard opens at `http://localhost:5180/admin`.
+The dev server starts automatically and the Admin Dashboard opens at `http://localhost:8787/admin`.
 
 ## 2. Define the Schema
 

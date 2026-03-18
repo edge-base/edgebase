@@ -1,0 +1,30 @@
+{
+    "name": "create-edgebase",
+    "version": "0.1.0",
+    "description": "Bootstrap a new EdgeBase project",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/edge-base/edgebase.git",
+        "directory": "packages/create-edgebase"
+    },
+    "homepage": "https://edgebase.fun",
+    "bugs": "https://github.com/edge-base/edgebase/issues",
+    "keywords": ["edgebase", "create-edgebase", "scaffold", "cli"],
+    "type": "module",
+    "bin": {
+        "create-edgebase": "./bin/create-edgebase.js"
+    },
+    "files": [
+        "bin"
+    ],
+    "publishConfig": {
+        "access": "public"
+    },
+    "engines": {
+        "node": ">=20.19.0"
+    },
+    "dependencies": {
+        "@edgebase/cli": "workspace:*"
+    }
+}

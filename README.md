@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="https://github.com/edge-base/edgebase/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>&nbsp;
-  <a href="https://www.npmjs.com/package/edgebase"><img src="https://img.shields.io/npm/v/edgebase.svg?color=brightgreen" alt="npm"></a>&nbsp;
+  <a href="https://www.npmjs.com/package/create-edgebase"><img src="https://img.shields.io/npm/v/create-edgebase.svg?color=brightgreen" alt="npm"></a>&nbsp;
   <a href="https://github.com/edge-base/edgebase/stargazers"><img src="https://img.shields.io/github/stars/edge-base/edgebase?style=social" alt="GitHub Stars"></a>&nbsp;
   <a href="https://github.com/edge-base/edgebase/actions"><img src="https://img.shields.io/github/actions/workflow/status/edge-base/edgebase/ci.yml?branch=main&label=CI" alt="CI"></a>
 </p>
@@ -24,7 +24,7 @@
 ## Get Started in 30 Seconds
 
 ```bash
-npx edgebase init my-app
+npm create edgebase@latest my-app
 cd my-app
 
 npx edgebase dev                # Local dev + Admin Dashboard
@@ -34,7 +34,7 @@ npx edgebase deploy             # Deploy globally on Cloudflare
 
 Same code, same behavior — choose your runtime, switch when you need to.
 
-`edgebase init` now starts from a blank app data model: auth, storage, and a sample health function are scaffolded, but no default `posts` table is created for you. In local dev, the API runs on `http://localhost:8787` and the Admin Dashboard opens on `http://localhost:5180/admin`.
+`npm create edgebase@latest` now starts from a blank app data model: auth, storage, and a sample health function are scaffolded, dependencies are installed automatically, and no default `posts` table is created for you. In local dev, the API runs on `http://localhost:8787` and the Admin Dashboard opens on `http://localhost:8787/admin`.
 
 Guides: [Quickstart](https://edgebase.fun/docs/getting-started/quickstart) · [Configuration](https://edgebase.fun/docs/getting-started/configuration) · [Deployment](https://edgebase.fun/docs/getting-started/deployment) · [Self-Hosting](https://edgebase.fun/docs/getting-started/self-hosting) · [Admin Dashboard](https://edgebase.fun/docs/admin-dashboard)
 
@@ -407,7 +407,7 @@ client.db("app").table("posts").onSnapshot(result -> {
 Deep dives: [Database](https://edgebase.fun/docs/database) · [Authentication](https://edgebase.fun/docs/authentication) · [Storage](https://edgebase.fun/docs/storage) · [App Functions](https://edgebase.fun/docs/functions) · [Room](https://edgebase.fun/docs/room) · [Push](https://edgebase.fun/docs/push) · [Analytics](https://edgebase.fun/docs/analytics) · [Architecture](https://edgebase.fun/docs/architecture)
 
 - **Database** — SQLite with relational queries, JOIN, FTS5 full-text search (CJK support), views, batch operations, upsert, atomic `increment`/`deleteField`. PostgreSQL (Neon) with a single config change.
-- **Auth** — Email/password, Email OTP, Passkeys (WebAuthn), 13 OAuth providers + OIDC, anonymous, MFA/TOTP, ban/disable — zero per-user cost
+- **Auth** — Email/password, Email OTP, Passkeys (WebAuthn), 14 OAuth providers + OIDC, anonymous, MFA/TOTP, ban/disable — zero per-user cost
 - **Database Subscriptions** — WebSocket live queries via `onSnapshot`, server-side filters — Hibernation API for $0 idle cost
 - **Storage** — R2-based file storage with $0 egress, signed URLs, multipart upload
 - **Functions** — DB triggers, HTTP endpoints, cron schedules, auth hooks, enrichAuth

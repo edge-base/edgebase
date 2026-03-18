@@ -551,7 +551,7 @@ export const devCommand = new Command('dev')
       raiseCliError({
         code: 'dev_config_not_found',
         message: 'edgebase.config.ts not found.',
-        hint: 'Run `npx edgebase init` first.',
+        hint: 'Run `npm create edgebase@latest my-app` first.',
       });
     }
 

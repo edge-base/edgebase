@@ -203,7 +203,7 @@ export const typegenCommand = new Command('typegen')
       raiseCliError({
         code: 'typegen_config_not_found',
         message: 'edgebase.config.ts not found.',
-        hint: 'Run `npx edgebase init` to create a project first.',
+        hint: 'Run `npm create edgebase@latest my-app` to create a project first.',
       });
     }
 

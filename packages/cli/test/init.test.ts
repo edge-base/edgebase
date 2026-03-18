@@ -104,6 +104,40 @@ describe('CLI: init command', () => {
     expect(process.cwd()).toBe(originalCwd);
   });
 
+  it('should merge EdgeBase scripts and dependencies into an existing package.json', async () => {
+    const { initCommand } = await import('../src/commands/init.js');
+
+    writeFileSync(
+      join(testDir, 'package.json'),
+      JSON.stringify({
+        name: 'existing-app',
+        private: true,
+        type: 'module',
+        scripts: {
+          test: 'vitest',
+        },
+      }, null, 2),
+    );
+
+    await initCommand.parseAsync([testDir, '--no-dev'], { from: 'user' });
+
+    const packageJson = JSON.parse(readFileSync(join(testDir, 'package.json'), 'utf-8')) as {
+      name: string;
+      scripts: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+
+    expect(packageJson.name).toBe('existing-app');
+    expect(packageJson.scripts.test).toBe('vitest');
+    expect(packageJson.scripts.dev).toBe('edgebase dev');
+    expect(packageJson.scripts.deploy).toBe('edgebase deploy');
+    expect(packageJson.scripts.typegen).toBe('edgebase typegen');
+    expect(packageJson.devDependencies).toMatchObject({
+      '@edgebase/cli': '^0.1.0',
+      '@edgebase/shared': '^0.1.0',
+    });
+  });
+
   it('should forward --no-open to dev when auto-starting', async () => {
     const { initCommand } = await import('../src/commands/init.js');
 
@@ -163,8 +197,10 @@ describe('CLI: init command', () => {
     const runtimeAdminIndex = readFileSync(join(testDir, '.edgebase', 'runtime', 'server', 'admin-build', 'index.html'), 'utf-8');
 
     expect(packageJson).toContain(`"name": "${basename(testDir)}"`);
-    expect(packageJson).toContain('"dev": "npx edgebase dev"');
-    expect(packageJson).toContain('"deploy": "npx edgebase deploy"');
+    expect(packageJson).toContain('"dev": "edgebase dev"');
+    expect(packageJson).toContain('"deploy": "edgebase deploy"');
+    expect(packageJson).toContain('"@edgebase/cli": "^0.1.0"');
+    expect(packageJson).toContain('"@edgebase/shared": "^0.1.0"');
     expect(wranglerToml).toContain(`name = "${basename(testDir)}"`);
     expect(wranglerToml).toContain('main = ".edgebase/runtime/server/src/index.ts"');
     expect(wranglerToml).toContain('directory = ".edgebase/runtime/server/admin-build"');
@@ -212,5 +248,6 @@ describe('CLI: init command', () => {
     expect(packageJson).toContain('"dev": "node ../../../../packages/cli/dist/index.js dev"');
     expect(packageJson).toContain('"deploy": "node ../../../../packages/cli/dist/index.js deploy"');
     expect(packageJson).toContain('"typegen": "node ../../../../packages/cli/dist/index.js typegen"');
+    expect(packageJson).not.toContain('"devDependencies"');
   });
 });

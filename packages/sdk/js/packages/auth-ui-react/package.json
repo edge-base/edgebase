@@ -34,7 +34,8 @@
         "build": "tsc && cp src/styles.css dist/styles.css",
         "dev": "tsc --watch",
         "test": "vitest run",
-        "test:watch": "vitest"
+        "test:watch": "vitest",
+        "prepack": "pnpm run build"
     },
     "peerDependencies": {
         "react": ">=18.0.0",

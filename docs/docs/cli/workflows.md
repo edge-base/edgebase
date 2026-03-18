@@ -15,14 +15,14 @@ This page is organized by real tasks instead of by command name.
 Create a project:
 
 ```bash
-npx edgebase init my-app
+npm create edgebase@latest my-app
 ```
 
 Useful variants:
 
 ```bash
-npx edgebase init my-app --no-dev
-npx edgebase init my-app --no-dev --no-open
+npm create edgebase@latest my-app -- --no-dev
+npm create edgebase@latest my-app -- --no-dev --no-open
 ```
 
 Then run local development:
@@ -32,7 +32,7 @@ cd my-app
 npx edgebase dev
 ```
 
-By default, local dev runs the API on `http://localhost:8787` and opens the Admin Dashboard on `http://localhost:5180/admin`.
+By default, local dev runs the API on `http://localhost:8787` and opens the Admin Dashboard on `http://localhost:8787/admin`.
 
 Common `dev` patterns:
 

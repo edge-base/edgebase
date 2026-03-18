@@ -17,8 +17,8 @@ import { resolveWranglerTool } from './wrangler.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_ROOT = resolve(__dirname, '../../../..');
-const SERVER_RUNTIME_SOURCE = resolve(__dirname, '../../../server/src');
-const ADMIN_BUILD_SOURCES = [
+const MONOREPO_SERVER_RUNTIME_SOURCE = resolve(__dirname, '../../../server/src');
+const MONOREPO_ADMIN_BUILD_SOURCES = [
   resolve(__dirname, '../../../admin/build'),
   resolve(__dirname, '../../../server/admin-build'),
 ];
@@ -26,17 +26,6 @@ const CLI_NODE_MODULES_SOURCE = resolve(__dirname, '../../node_modules');
 const WORKSPACE_NODE_MODULES_SOURCE = resolve(WORKSPACE_ROOT, 'node_modules');
 const SERVER_NODE_MODULES_SOURCE = resolve(__dirname, '../../../server/node_modules');
 const MONOREPO_SHARED_SOURCE = resolve(__dirname, '../../../shared');
-const RUNTIME_NODE_MODULES_SOURCES = [
-  SERVER_NODE_MODULES_SOURCE,
-  CLI_NODE_MODULES_SOURCE,
-  WORKSPACE_NODE_MODULES_SOURCE,
-];
-const SHARED_PACKAGE_SOURCES = [
-  resolve(CLI_NODE_MODULES_SOURCE, '@edgebase/shared'),
-  resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase/shared'),
-  resolve(SERVER_NODE_MODULES_SOURCE, '@edgebase/shared'),
-  MONOREPO_SHARED_SOURCE,
-];
 export { deriveProjectSlug, INTERNAL_D1_BINDINGS } from './project-runtime.js';
 
 export function getRuntimeRoot(projectDir: string): string {
@@ -55,11 +44,11 @@ export function ensureRuntimeScaffold(projectDir: string): void {
   const runtimeRoot = getRuntimeRoot(projectDir);
   mkdirSync(runtimeRoot, { recursive: true });
 
-  copyRuntimeDir(SERVER_RUNTIME_SOURCE, getRuntimeServerSrcDir(projectDir));
+  copyRuntimeDir(resolveServerRuntimeSource(projectDir), getRuntimeServerSrcDir(projectDir));
   const adminBuildDir = getRuntimeAdminBuildDir(projectDir);
-  copyRuntimeDir(resolveAdminBuildSource(), adminBuildDir);
+  copyRuntimeDir(resolveAdminBuildSource(projectDir), adminBuildDir);
   normalizeAdminBuildBase(adminBuildDir);
-  ensureRuntimeNodeModulesLink(runtimeRoot);
+  ensureRuntimeNodeModulesLink(projectDir, runtimeRoot);
   ensureProjectSharedPackageLink(projectDir);
   writeRuntimeConfigShim(projectDir);
   writeRuntimeTestConfigShim(projectDir);
@@ -144,14 +133,38 @@ function copyRuntimeDir(source: string, target: string): void {
   });
 }
 
-function resolveAdminBuildSource(): string {
-  for (const candidate of ADMIN_BUILD_SOURCES) {
+function resolveServerRuntimeSource(projectDir: string): string {
+  const candidates = dedupeCandidates([
+    join(projectDir, 'node_modules', '@edgebase', 'server', 'src'),
+    resolve(CLI_NODE_MODULES_SOURCE, '@edgebase/server', 'src'),
+    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase/server', 'src'),
+    MONOREPO_SERVER_RUNTIME_SOURCE,
+  ]);
+
+  for (const candidate of candidates) {
+    if (existsSync(join(candidate, 'index.ts'))) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`Runtime scaffold source is missing. Checked: ${candidates.join(', ')}`);
+}
+
+function resolveAdminBuildSource(projectDir: string): string {
+  const candidates = dedupeCandidates([
+    join(projectDir, 'node_modules', '@edgebase', 'server', 'admin-build'),
+    resolve(CLI_NODE_MODULES_SOURCE, '@edgebase/server', 'admin-build'),
+    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase/server', 'admin-build'),
+    ...MONOREPO_ADMIN_BUILD_SOURCES,
+  ]);
+
+  for (const candidate of candidates) {
     if (existsSync(join(candidate, 'index.html'))) {
       return candidate;
     }
   }
 
-  throw new Error(`Admin build source is missing. Checked: ${ADMIN_BUILD_SOURCES.join(', ')}`);
+  throw new Error(`Admin build source is missing. Checked: ${candidates.join(', ')}`);
 }
 
 function normalizeAdminBuildBase(adminBuildDir: string): void {
@@ -170,8 +183,8 @@ function normalizeAdminBuildBase(adminBuildDir: string): void {
   }
 }
 
-function ensureRuntimeNodeModulesLink(runtimeRoot: string): void {
-  const source = resolveRuntimeNodeModulesSource();
+function ensureRuntimeNodeModulesLink(projectDir: string, runtimeRoot: string): void {
+  const source = resolveRuntimeNodeModulesSource(projectDir);
   if (!source) return;
 
   const target = join(runtimeRoot, 'node_modules');
@@ -185,7 +198,7 @@ function ensureRuntimeNodeModulesLink(runtimeRoot: string): void {
 }
 
 export function ensureProjectSharedPackageLink(projectDir: string): void {
-  const source = resolveSharedPackageSource();
+  const source = resolveSharedPackageSource(projectDir);
   if (!source) return;
 
   for (const root of resolveSharedPackageLinkRoots(projectDir)) {
@@ -193,8 +206,8 @@ export function ensureProjectSharedPackageLink(projectDir: string): void {
   }
 }
 
-function resolveRuntimeNodeModulesSource(): string | null {
-  return resolveRuntimeNodeModulesSourceFromCandidates(RUNTIME_NODE_MODULES_SOURCES);
+function resolveRuntimeNodeModulesSource(projectDir: string): string | null {
+  return resolveRuntimeNodeModulesSourceFromCandidates(getRuntimeNodeModulesCandidates(projectDir));
 }
 
 export function resolveRuntimeNodeModulesSourceFromCandidates(candidates: string[]): string | null {
@@ -207,8 +220,8 @@ export function resolveRuntimeNodeModulesSourceFromCandidates(candidates: string
   return null;
 }
 
-function resolveSharedPackageSource(): string | null {
-  return resolveSharedPackageSourceFromCandidates(SHARED_PACKAGE_SOURCES);
+function resolveSharedPackageSource(projectDir: string): string | null {
+  return resolveSharedPackageSourceFromCandidates(getSharedPackageSourceCandidates(projectDir));
 }
 
 export function resolveSharedPackageSourceFromCandidates(candidates: string[]): string | null {
@@ -219,6 +232,29 @@ export function resolveSharedPackageSourceFromCandidates(candidates: string[]): 
   }
 
   return null;
+}
+
+function getRuntimeNodeModulesCandidates(projectDir: string): string[] {
+  return dedupeCandidates([
+    SERVER_NODE_MODULES_SOURCE,
+    CLI_NODE_MODULES_SOURCE,
+    WORKSPACE_NODE_MODULES_SOURCE,
+    join(projectDir, 'node_modules'),
+  ]);
+}
+
+function getSharedPackageSourceCandidates(projectDir: string): string[] {
+  return dedupeCandidates([
+    resolve(CLI_NODE_MODULES_SOURCE, '@edgebase/shared'),
+    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase/shared'),
+    resolve(SERVER_NODE_MODULES_SOURCE, '@edgebase/shared'),
+    MONOREPO_SHARED_SOURCE,
+    join(projectDir, 'node_modules', '@edgebase', 'shared'),
+  ]);
+}
+
+function dedupeCandidates(candidates: string[]): string[] {
+  return Array.from(new Set(candidates));
 }
 
 export function resolveSharedPackageLinkRoots(projectDir: string): string[] {
@@ -233,8 +269,13 @@ export function resolveSharedPackageLinkRoots(projectDir: string): string[] {
 function ensureSharedPackageLinkAtRoot(rootDir: string, source: string): void {
   const target = join(rootDir, 'node_modules', '@edgebase', 'shared');
   const markerPath = join(target, '.edgebase-shim');
+  const normalizedSource = resolve(source);
+  const normalizedTarget = resolve(target);
 
   if (existsSync(target)) {
+    if (normalizedSource === normalizedTarget) {
+      return;
+    }
     try {
       const stat = lstatSync(target);
       if (stat.isSymbolicLink()) {

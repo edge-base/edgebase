@@ -21,6 +21,7 @@ const {
   parseHyperdriveListOutput,
   resolveAdminUrlFromRuntime,
   resolveReleaseSecretVars,
+  resolveExistingR2BucketRecord,
 } = _internals;
 
 let tmpDir: string;
@@ -125,6 +126,40 @@ describe('provider classification', () => {
       { id: '9def174e0c9c444685b8c773d076ce4b', name: 'edgebase-db-shared' },
       { id: '0ee0b621f3ab4b9dae1734f95c27ef8a', name: 'edgebase-auth' },
     ]);
+  });
+});
+
+describe('resolveExistingR2BucketRecord', () => {
+  it('normalizes stale existing buckets back to unmanaged ownership', () => {
+    expect(
+      resolveExistingR2BucketRecord({
+        type: 'r2_bucket',
+        name: 'edgebase-storage',
+        binding: 'STORAGE',
+        id: 'edgebase-storage',
+        managed: true,
+        source: 'existing',
+      }),
+    ).toEqual({
+      managed: false,
+      source: 'existing',
+    });
+  });
+
+  it('preserves ownership for buckets the suite originally created', () => {
+    expect(
+      resolveExistingR2BucketRecord({
+        type: 'r2_bucket',
+        name: 'suite-storage',
+        binding: 'STORAGE',
+        id: 'suite-storage',
+        managed: true,
+        source: 'created',
+      }),
+    ).toEqual({
+      managed: true,
+      source: 'created',
+    });
   });
 });
 

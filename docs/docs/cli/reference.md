@@ -74,10 +74,11 @@ Long-running commands still treat `Ctrl+C` as an immediate cancellation. If a us
 ### `init`
 
 ```bash
-npx edgebase init [dir]
+npm create edgebase@latest <dir>
+npm create edgebase@latest <dir> -- --no-dev
 ```
 
-Scaffold a new project, optionally auto-start local development, and open the admin dashboard unless `--no-open` is passed.
+Scaffold a new project, optionally auto-start local development, and open the admin dashboard unless `--no-open` is passed. `create-edgebase` installs the local CLI dependencies for you before handing the project back.
 
 ### `dev`
 

@@ -10,13 +10,13 @@ EdgeBase ships with a built-in Admin Dashboard at `/admin` for local and product
 
 ## Access
 
-- Local: `http://localhost:5180/admin`
+- Local: `http://localhost:8787/admin`
 - Self-hosted: `https://your-domain.com/admin`
 - Edge deployment: `https://your-project.edgebase.fun/admin`
 
 ## First Login
 
-1. Start EdgeBase (`npx edgebase init` or `npx edgebase dev` — both open the dashboard automatically).
+1. Start EdgeBase (`npm create edgebase@latest my-app` or `npx edgebase dev` — both open the dashboard automatically).
 2. Create the first admin account.
 3. Sign in and verify tables/users/storage views.
 

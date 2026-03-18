@@ -1,10 +1,27 @@
 {
     "name": "@edgebase/shared",
     "version": "0.1.0",
-    "private": true,
+    "description": "EdgeBase shared helpers for config, functions, and runtime contracts",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/edge-base/edgebase.git",
+        "directory": "packages/shared"
+    },
+    "homepage": "https://edgebase.fun",
+    "bugs": "https://github.com/edge-base/edgebase/issues",
+    "keywords": ["edgebase", "shared", "config", "functions"],
+    "publishConfig": {
+        "access": "public"
+    },
     "type": "module",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
+    "sideEffects": false,
+    "files": [
+        "dist",
+        "src"
+    ],
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
@@ -14,7 +31,8 @@
     "scripts": {
         "build": "tsc",
         "lint": "eslint src/ --max-warnings 0",
-        "test": "vitest run"
+        "test": "vitest run",
+        "prepack": "pnpm run build"
     },
     "devDependencies": {
         "typescript": "^5.7.0",

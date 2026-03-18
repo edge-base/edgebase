@@ -355,6 +355,7 @@ export const _internals = {
   inspectAuthEnv,
   collectAuthEnvWarnings,
   copyDevelopmentAuthProviderToRelease,
+  resolveExistingR2BucketRecord,
 };
 
 // ─── KV/D1/Vectorize Auto-Provisioning ───
@@ -501,6 +502,22 @@ function dedupeManifestResources(resources: CloudflareResourceRecord[]): Cloudfl
   return Array.from(seen.values());
 }
 
+function resolveExistingR2BucketRecord(
+  existingRecord: CloudflareResourceRecord | null | undefined,
+): Pick<CloudflareResourceRecord, 'managed' | 'source'> {
+  if (existingRecord?.source === 'created') {
+    return {
+      managed: existingRecord.managed ?? true,
+      source: 'created',
+    };
+  }
+
+  return {
+    managed: false,
+    source: existingRecord?.source ?? 'existing',
+  };
+}
+
 function provisionR2Buckets(
   projectDir: string,
   previousManifest: ReturnType<typeof readCloudflareDeployManifest>,
@@ -536,21 +553,22 @@ function provisionR2Buckets(
         name: bucket.bucketName,
         binding: bucket.binding,
         id: bucket.bucketName,
-        managed: existingRecord?.managed ?? true,
+        managed: true,
         source: 'created',
         metadata: bucket.jurisdiction ? { jurisdiction: bucket.jurisdiction } : undefined,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (isR2BucketAlreadyExistsError(msg)) {
+        const ownership = resolveExistingR2BucketRecord(existingRecord);
         console.log(chalk.dim(`  R2 '${bucket.binding}': already exists → ${bucket.bucketName}`));
         resources.push({
           type: 'r2_bucket',
           name: bucket.bucketName,
           binding: bucket.binding,
           id: bucket.bucketName,
-          managed: existingRecord?.managed ?? false,
-          source: existingRecord?.source ?? 'existing',
+          managed: ownership.managed,
+          source: ownership.source,
           metadata: bucket.jurisdiction ? { jurisdiction: bucket.jurisdiction } : undefined,
         });
         continue;
@@ -1206,7 +1224,7 @@ export const deployCommand = new Command('deploy')
       raiseCliError({
         code: 'deploy_config_not_found',
         message: 'edgebase.config.ts not found.',
-        hint: 'Run `npx edgebase init` first.',
+        hint: 'Run `npm create edgebase@latest my-app` first.',
       });
     }
 

@@ -3,6 +3,16 @@
     "version": "0.1.0",
     "description": "EdgeBase React Native SDK — iOS, Android, Web support",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/edge-base/edgebase.git",
+        "directory": "packages/sdk/react-native"
+    },
+    "homepage": "https://edgebase.fun",
+    "bugs": "https://github.com/edge-base/edgebase/issues",
+    "publishConfig": {
+        "access": "public"
+    },
     "type": "module",
     "main": "./dist/index.cjs",
     "module": "./dist/index.js",
@@ -22,7 +32,8 @@
         "test": "vitest run",
         "test:e2e": "vitest run --config vitest.e2e.config.ts",
         "test:watch": "vitest",
-        "type-check": "tsc --noEmit"
+        "type-check": "tsc --noEmit",
+        "prepack": "pnpm run build"
     },
     "dependencies": {
         "@edgebase/core": "workspace:*"

@@ -103,6 +103,18 @@ describe('normalizeCloudflareDeployManifest', () => {
 });
 
 describe('mergeDestroyResources', () => {
+  it('treats Cloudflare "could not be found" responses as already deleted', () => {
+    expect(
+      destroyInternals.isAlreadyDeletedError('A request to the Cloudflare API failed: could not be found'),
+    ).toBe(true);
+  });
+
+  it('detects non-empty R2 bucket deletion conflicts', () => {
+    expect(
+      destroyInternals.isR2BucketNotEmptyError('The bucket you tried to delete (storage) is not empty [code: 10008]'),
+    ).toBe(true);
+  });
+
   it('preserves unmanaged R2 buckets recorded in the manifest', () => {
     const resources = destroyInternals.mergeDestroyResources(
       {

@@ -12,11 +12,11 @@ Get EdgeBase running in under 5 minutes.
 ## 1. Create and Start
 
 ```bash
-npx edgebase init my-app
+npm create edgebase@latest my-app
 ```
 
-That's it — one command. `init` scaffolds the project, starts the dev server, and opens the Admin Dashboard in your browser automatically.
-If you only want the files without starting a persistent session, use `npx edgebase init my-app --no-dev`.
+That's it — one command. `create-edgebase` scaffolds the project, installs the local EdgeBase packages, starts the dev server, and opens the Admin Dashboard in your browser automatically.
+If you only want the files without starting a persistent session, use `npm create edgebase@latest my-app -- --no-dev`.
 
 The scaffolded project structure:
 
