@@ -199,7 +199,7 @@ function generateDevSecret(): string {
 
 // ─── Templates ───
 
-const CONFIG_TEMPLATE = `import { defineConfig } from '@edgebase-fun/shared';
+const CONFIG_TEMPLATE = `import { defineConfig } from '@edge-base/shared';
 import { rateLimiting } from './config/rate-limits';
 
 export default defineConfig({
@@ -321,7 +321,7 @@ const RATE_LIMITS_TEMPLATE = `export const rateLimiting = {
 } as const;
 `;
 
-const EXAMPLE_FUNCTION_TEMPLATE = `import { defineFunction } from '@edgebase-fun/shared';
+const EXAMPLE_FUNCTION_TEMPLATE = `import { defineFunction } from '@edge-base/shared';
 
 export const GET = defineFunction(async () => {
   return Response.json({ ok: true });
@@ -397,7 +397,7 @@ function resolveScaffoldDependencyVersion(packageName: string): string {
       : declaredVersion;
   }
 
-  if (packageName === '@edgebase-fun/shared') {
+  if (packageName === '@edge-base/shared') {
     const sharedPackageJson = readPackageJsonFromUrl('../../../shared/package.json');
     if (typeof sharedPackageJson?.version === 'string') {
       return `^${sharedPackageJson.version}`;
@@ -451,8 +451,8 @@ function buildPackageJsonObject(
 
   if (needsPublishedPackages) {
     packageJson.devDependencies = {
-      '@edgebase-fun/cli': resolveScaffoldDependencyVersion('@edgebase-fun/cli'),
-      '@edgebase-fun/shared': resolveScaffoldDependencyVersion('@edgebase-fun/shared'),
+      '@edge-base/cli': resolveScaffoldDependencyVersion('@edge-base/cli'),
+      '@edge-base/shared': resolveScaffoldDependencyVersion('@edge-base/shared'),
     };
   }
 

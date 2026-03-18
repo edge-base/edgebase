@@ -12,7 +12,7 @@ import { npmCommand } from '../lib/npm.js';
 
 type PackageManager = 'pnpm' | 'yarn' | 'npm';
 
-const EDGEBASE_PACKAGE_PREFIX = '@edgebase-fun/';
+const EDGEBASE_PACKAGE_PREFIX = '@edge-base/';
 const LEGACY_EDGEBASE_PACKAGES = new Set(['edgebase']);
 
 export function detectPackageManager(cwd: string): PackageManager {

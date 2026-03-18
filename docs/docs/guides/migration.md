@@ -35,7 +35,7 @@ Migrate from Firebase or Supabase to EdgeBase.
 2. **Auth:** OAuth providers config is similar; update redirect URLs
 3. **Data:** Export Firestore → JSON → import via `admin.table().insertMany()`
 4. **Rules:** Convert Firestore rules to EdgeBase rule expressions
-5. **SDK:** Replace `firebase` imports with `@edgebase-fun/web`
+5. **SDK:** Replace `firebase` imports with `@edge-base/web`
 
 ## From Supabase
 

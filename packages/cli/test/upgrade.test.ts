@@ -156,13 +156,13 @@ describe('findInstalledEdgeBasePackages', () => {
   it('finds scoped EdgeBase dependencies across dependency sections', () => {
     writeFileSync(join(tmpDir, 'package.json'), JSON.stringify({
       dependencies: {
-        '@edgebase-fun/web': '^0.1.0',
+        '@edge-base/web': '^0.1.0',
       },
       devDependencies: {
-        '@edgebase-fun/cli': '^0.1.0',
+        '@edge-base/cli': '^0.1.0',
       },
       optionalDependencies: {
-        '@edgebase-fun/shared': '^0.1.0',
+        '@edge-base/shared': '^0.1.0',
       },
       peerDependencies: {
         react: '^19.0.0',
@@ -170,9 +170,9 @@ describe('findInstalledEdgeBasePackages', () => {
     }, null, 2));
 
     expect(findInstalledEdgeBasePackages(tmpDir)).toEqual([
-      '@edgebase-fun/cli',
-      '@edgebase-fun/shared',
-      '@edgebase-fun/web',
+      '@edge-base/cli',
+      '@edge-base/shared',
+      '@edge-base/web',
     ]);
   });
 
@@ -180,12 +180,12 @@ describe('findInstalledEdgeBasePackages', () => {
     writeFileSync(join(tmpDir, 'package.json'), JSON.stringify({
       dependencies: {
         edgebase: '^0.1.0',
-        '@edgebase-fun/web': '^0.1.0',
+        '@edge-base/web': '^0.1.0',
       },
     }, null, 2));
 
     expect(findInstalledEdgeBasePackages(tmpDir)).toEqual([
-      '@edgebase-fun/web',
+      '@edge-base/web',
       'edgebase',
     ]);
   });
@@ -204,55 +204,55 @@ describe('buildUpdateCommand', () => {
   }
 
   it('builds npm install command with @latest', () => {
-    expectInvocation(buildUpdateCommand('npm', ['@edgebase-fun/web']), {
+    expectInvocation(buildUpdateCommand('npm', ['@edge-base/web']), {
       command: 'npm',
-      args: ['install', '@edgebase-fun/web@latest'],
-      display: 'npm install @edgebase-fun/web@latest',
+      args: ['install', '@edge-base/web@latest'],
+      display: 'npm install @edge-base/web@latest',
     });
   });
 
   it('builds pnpm add command with @latest', () => {
-    expectInvocation(buildUpdateCommand('pnpm', ['@edgebase-fun/web']), {
+    expectInvocation(buildUpdateCommand('pnpm', ['@edge-base/web']), {
       command: 'pnpm',
-      args: ['add', '@edgebase-fun/web@latest'],
-      display: 'pnpm add @edgebase-fun/web@latest',
+      args: ['add', '@edge-base/web@latest'],
+      display: 'pnpm add @edge-base/web@latest',
     });
   });
 
   it('builds yarn add command with @latest', () => {
-    expectInvocation(buildUpdateCommand('yarn', ['@edgebase-fun/web']), {
+    expectInvocation(buildUpdateCommand('yarn', ['@edge-base/web']), {
       command: 'yarn',
-      args: ['add', '@edgebase-fun/web@latest'],
-      display: 'yarn add @edgebase-fun/web@latest',
+      args: ['add', '@edge-base/web@latest'],
+      display: 'yarn add @edge-base/web@latest',
     });
   });
 
   it('builds command with specific target version', () => {
-    expectInvocation(buildUpdateCommand('npm', ['@edgebase-fun/web'], '2.0.0'), {
+    expectInvocation(buildUpdateCommand('npm', ['@edge-base/web'], '2.0.0'), {
       command: 'npm',
-      args: ['install', '@edgebase-fun/web@2.0.0'],
-      display: 'npm install @edgebase-fun/web@2.0.0',
+      args: ['install', '@edge-base/web@2.0.0'],
+      display: 'npm install @edge-base/web@2.0.0',
     });
   });
 
   it('handles multiple packages', () => {
-    expectInvocation(buildUpdateCommand('npm', ['@edgebase-fun/web', '@edgebase-fun/cli']), {
+    expectInvocation(buildUpdateCommand('npm', ['@edge-base/web', '@edge-base/cli']), {
       command: 'npm',
-      args: ['install', '@edgebase-fun/web@latest', '@edgebase-fun/cli@latest'],
-      display: 'npm install @edgebase-fun/web@latest @edgebase-fun/cli@latest',
+      args: ['install', '@edge-base/web@latest', '@edge-base/cli@latest'],
+      display: 'npm install @edge-base/web@latest @edge-base/cli@latest',
     });
   });
 
   it('handles multiple packages with target version', () => {
-    expectInvocation(buildUpdateCommand('pnpm', ['@edgebase-fun/web', '@edgebase-fun/cli'], '1.5.0'), {
+    expectInvocation(buildUpdateCommand('pnpm', ['@edge-base/web', '@edge-base/cli'], '1.5.0'), {
       command: 'pnpm',
-      args: ['add', '@edgebase-fun/web@1.5.0', '@edgebase-fun/cli@1.5.0'],
-      display: 'pnpm add @edgebase-fun/web@1.5.0 @edgebase-fun/cli@1.5.0',
+      args: ['add', '@edge-base/web@1.5.0', '@edge-base/cli@1.5.0'],
+      display: 'pnpm add @edge-base/web@1.5.0 @edge-base/cli@1.5.0',
     });
   });
 
   it('handles single package with all managers', () => {
-    const pkg = ['@edgebase-fun/web'];
+    const pkg = ['@edge-base/web'];
     expect(buildUpdateCommand('npm', pkg).display).toContain('npm install');
     expect(buildUpdateCommand('pnpm', pkg).display).toContain('pnpm add');
     expect(buildUpdateCommand('yarn', pkg).display).toContain('yarn add');
@@ -260,11 +260,11 @@ describe('buildUpdateCommand', () => {
 
   it('keeps a malicious target version inside a single literal package arg', () => {
     expectInvocation(
-      buildUpdateCommand('npm', ['@edgebase-fun/web'], '1.2.3 && echo pwned'),
+      buildUpdateCommand('npm', ['@edge-base/web'], '1.2.3 && echo pwned'),
       {
         command: 'npm',
-        args: ['install', '@edgebase-fun/web@1.2.3 && echo pwned'],
-        display: 'npm install @edgebase-fun/web@1.2.3 && echo pwned',
+        args: ['install', '@edge-base/web@1.2.3 && echo pwned'],
+        display: 'npm install @edge-base/web@1.2.3 && echo pwned',
       },
     );
   });

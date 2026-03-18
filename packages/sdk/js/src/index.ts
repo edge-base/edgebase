@@ -1,13 +1,13 @@
 /**
- * @edgebase-fun/sdk — Unified EdgeBase SDK (Client + Admin).
- * Re-exports all public APIs from @edgebase-fun/core, @edgebase-fun/web, and @edgebase-fun/admin.
+ * @edge-base/sdk — Unified EdgeBase SDK (Client + Admin).
+ * Re-exports all public APIs from @edge-base/core, @edge-base/web, and @edge-base/admin.
  */
 
 // Core (shared types, HTTP, Collection, Storage, FieldOps)
-export * from '@edgebase-fun/core';
+export * from '@edge-base/core';
 
 // Client SDK (browser / React Native)
-export * from '@edgebase-fun/web';
+export * from '@edge-base/web';
 
 // Admin SDK (server-side)
-export * from '@edgebase-fun/admin';
+export * from '@edge-base/admin';

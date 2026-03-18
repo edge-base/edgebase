@@ -1,10 +1,10 @@
 # EdgeBase CLI
 
-Use this file as a quick-reference contract for AI coding assistants working with `@edgebase-fun/cli`.
+Use this file as a quick-reference contract for AI coding assistants working with `@edge-base/cli`.
 
 ## Package Boundary
 
-Use `@edgebase-fun/cli` to scaffold, develop, deploy, inspect, and operate EdgeBase projects.
+Use `@edge-base/cli` to scaffold, develop, deploy, inspect, and operate EdgeBase projects.
 
 Do not assume a public unscoped `edgebase` npm package exists. For new projects, use `npm create edgebase@latest`. Inside generated projects, use the local `edgebase` binary through `npx edgebase` or `npm run ...`.
 

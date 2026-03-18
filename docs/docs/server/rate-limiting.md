@@ -22,7 +22,7 @@ If you need exact project-wide counting for hard quotas, billing, or guaranteed 
 ## Configuration
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   rateLimiting: {

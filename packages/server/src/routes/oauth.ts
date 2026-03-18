@@ -9,8 +9,8 @@
  */
 import { OpenAPIHono, createRoute, z, type HonoEnv } from '../lib/hono.js';
 import type { Env } from '../types.js';
-import { EdgeBaseError, getAuthAccess } from '@edgebase-fun/shared';
-import type { AuthAccess } from '@edgebase-fun/shared';
+import { EdgeBaseError, getAuthAccess } from '@edge-base/shared';
+import type { AuthAccess } from '@edge-base/shared';
 import { parseConfig } from '../lib/do-router.js';
 import {
   appendRedirectParams,

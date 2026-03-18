@@ -1,4 +1,4 @@
-<h1 align="center">@edgebase-fun/react-native</h1>
+<h1 align="center">@edge-base/react-native</h1>
 
 <p align="center">
   <b>React Native SDK for EdgeBase</b><br>
@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@edgebase-fun/react-native"><img src="https://img.shields.io/npm/v/%40edgebase-fun%2Freact-native?color=brightgreen" alt="npm"></a>&nbsp;
+  <a href="https://www.npmjs.com/package/@edge-base/react-native"><img src="https://img.shields.io/npm/v/%40edge-base%2Freact-native?color=brightgreen" alt="npm"></a>&nbsp;
   <a href="https://edgebase.fun/docs/getting-started/quickstart"><img src="https://img.shields.io/badge/docs-mobile-blue" alt="Docs"></a>&nbsp;
   <a href="https://github.com/edge-base/edgebase/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </p>
@@ -25,7 +25,7 @@
 
 ---
 
-`@edgebase-fun/react-native` brings the EdgeBase client model to React Native environments.
+`@edge-base/react-native` brings the EdgeBase client model to React Native environments.
 
 It keeps the familiar browser SDK shape while adding the pieces mobile apps need:
 
@@ -35,7 +35,7 @@ It keeps the familiar browser SDK shape while adding the pieces mobile apps need
 - React Native friendly push registration
 - Turnstile support through `react-native-webview`
 
-If you are building a browser-only app, use [`@edgebase-fun/web`](https://www.npmjs.com/package/@edgebase-fun/web) instead.
+If you are building a browser-only app, use [`@edge-base/web`](https://www.npmjs.com/package/@edge-base/web) instead.
 
 > Beta: the package is already usable, but some APIs may still evolve before general availability.
 
@@ -58,7 +58,7 @@ This package ships with an `llms.txt` file for AI-assisted React Native integrat
 
 You can find it:
 
-- after install: `node_modules/@edgebase-fun/react-native/llms.txt`
+- after install: `node_modules/@edge-base/react-native/llms.txt`
 - in the repository: [llms.txt](https://github.com/edge-base/edgebase/blob/main/packages/sdk/react-native/llms.txt)
 
 Use it when you want an agent to:
@@ -71,7 +71,7 @@ Use it when you want an agent to:
 ## Installation
 
 ```bash
-npm install @edgebase-fun/react-native @react-native-async-storage/async-storage
+npm install @edge-base/react-native @react-native-async-storage/async-storage
 ```
 
 If you want Turnstile-based captcha, also install:
@@ -89,7 +89,7 @@ cd ios && pod install
 ## Quick Start
 
 ```ts
-import { createClient } from '@edgebase-fun/react-native';
+import { createClient } from '@edge-base/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Linking } from 'react-native';
 
@@ -154,7 +154,7 @@ In React Native, the app is responsible for registering the deep link scheme in 
 ```tsx
 import { Button } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { TurnstileWebView, useTurnstile } from '@edgebase-fun/react-native';
+import { TurnstileWebView, useTurnstile } from '@edge-base/react-native';
 
 function SignUpScreen() {
   const captcha = useTurnstile({
@@ -215,7 +215,7 @@ When you pass `appState` to `createClient()`, the SDK automatically coordinates 
 - background/inactive: disconnect realtime transports to reduce battery and network use
 - foreground: refresh auth state and reconnect realtime transports
 
-## Platform Differences vs `@edgebase-fun/web`
+## Platform Differences vs `@edge-base/web`
 
 | Feature | Web | React Native |
 | --- | --- | --- |

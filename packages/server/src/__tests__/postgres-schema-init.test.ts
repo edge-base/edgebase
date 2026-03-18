@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { TableConfig } from '@edgebase-fun/shared';
+import type { TableConfig } from '@edge-base/shared';
 import { resolvePgInitOrder } from '../lib/postgres-schema-init.js';
 
 afterEach(async () => {

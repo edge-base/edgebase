@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 import { buildInternalHandlerContext } from '../lib/internal-request.js';
 import type { Env } from '../types.js';
 

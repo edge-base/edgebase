@@ -1754,14 +1754,14 @@ export interface PluginManifest {
  * @example
  * ```typescript
  * // In edgebase.config.ts:
- * import { stripePlugin } from '@edgebase-fun/plugin-stripe';
+ * import { stripePlugin } from '@edge-base/plugin-stripe';
  * export default defineConfig({
  *   plugins: [ stripePlugin({ secretKey: process.env.STRIPE_SECRET_KEY! }) ],
  * });
  * ```
  */
 export interface PluginInstance {
-  /** Plugin unique name (e.g. '@edgebase-fun/plugin-stripe'). Used for namespacing. */
+  /** Plugin unique name (e.g. '@edge-base/plugin-stripe'). Used for namespacing. */
   name: string;
   /** Public plugin contract version used for compatibility checks. */
   pluginApiVersion: number;
@@ -2086,7 +2086,7 @@ export function defineConfig(config: EdgeBaseConfig): EdgeBaseConfig {
         throw new Error(
           `Plugin '${p.name}' targets pluginApiVersion '${String(p.pluginApiVersion)}', ` +
             `but this EdgeBase build requires '${CURRENT_PLUGIN_API_VERSION}'. ` +
-            `Rebuild the plugin against the current @edgebase-fun/plugin-core version.`,
+            `Rebuild the plugin against the current @edge-base/plugin-core version.`,
         );
       }
       if (seen.has(p.name)) throw new Error(`Duplicate plugin: '${p.name}'.`);

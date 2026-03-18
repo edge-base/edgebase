@@ -24,7 +24,7 @@ If you are trying to understand **which command to use when**, start with [CLI W
 ## Install
 
 ```bash
-npm install -g @edgebase-fun/cli
+npm install -g @edge-base/cli
 ```
 
 Or run it without a global install:

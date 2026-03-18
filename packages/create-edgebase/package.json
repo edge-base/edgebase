@@ -1,6 +1,6 @@
 {
     "name": "create-edgebase",
-    "version": "0.1.0",
+    "version": "0.1.2",
     "description": "Bootstrap a new EdgeBase project",
     "license": "MIT",
     "repository": {
@@ -31,6 +31,6 @@
         "node": ">=20.19.0"
     },
     "dependencies": {
-        "@edgebase-fun/cli": "workspace:*"
+        "@edge-base/cli": "workspace:*"
     }
 }

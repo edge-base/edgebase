@@ -137,9 +137,9 @@ npx edgebase typegen
 
 ## Related Packages
 
-- [`@edgebase-fun/cli`](https://www.npmjs.com/package/@edgebase-fun/cli)
+- [`@edge-base/cli`](https://www.npmjs.com/package/@edge-base/cli)
   The underlying CLI package used after project creation
-- [`@edgebase-fun/web`](https://www.npmjs.com/package/@edgebase-fun/web)
+- [`@edge-base/web`](https://www.npmjs.com/package/@edge-base/web)
   Browser SDK for your app code
 
 ## License

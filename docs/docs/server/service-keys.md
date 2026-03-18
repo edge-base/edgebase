@@ -15,7 +15,7 @@ A Service Key is **any string you choose** (e.g. `my-super-secret-key-123`). The
 ### 1. Define Keys in Config
 
 ```typescript title="edgebase.config.ts"
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   serviceKeys: {
@@ -50,7 +50,7 @@ Production secrets in `.env.release` are uploaded automatically when you run `np
 Service Keys authenticate the [Admin SDK](/docs/sdks/client-vs-server). Pass the same string you stored as a secret:
 
 ```typescript
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 
 const admin = createAdminClient('https://your-worker.workers.dev', {
   serviceKey: process.env.SERVICE_KEY_BACKEND, // The string you chose

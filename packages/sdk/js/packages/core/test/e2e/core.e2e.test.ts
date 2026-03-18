@@ -1,5 +1,5 @@
 /**
- * @edgebase-fun/core + @edgebase-fun/admin — E2E 테스트
+ * @edge-base/core + @edge-base/admin — E2E 테스트
  *
  * wrangler dev --port 8688 로컬 서버 필요
  *
@@ -200,7 +200,7 @@ describe('E2E core — upsert', () => {
 
 describe('E2E core — fieldOps', () => {
   it('increment → viewCount 증가', async () => {
-    const { increment } = await import('@edgebase-fun/core');
+    const { increment } = await import('@edge-base/core');
     const created = await admin.db('shared').table('posts').insert({ title: `${PREFIX}-inc`, viewCount: 0 });
     const id = (created as any).id;
     createdIds.push(id);
@@ -209,7 +209,7 @@ describe('E2E core — fieldOps', () => {
   });
 
   it('deleteField → 필드 null/삭제', async () => {
-    const { deleteField } = await import('@edgebase-fun/core');
+    const { deleteField } = await import('@edge-base/core');
     const created = await admin.db('shared').table('posts').insert({ title: `${PREFIX}-del-field`, extra: 'to-delete' });
     const id = (created as any).id;
     createdIds.push(id);
@@ -542,7 +542,7 @@ describe('E2E core — Storage', () => {
 
 describe('E2E core — FieldOps extended', () => {
   it('increment with decimal', async () => {
-    const { increment } = await import('@edgebase-fun/core');
+    const { increment } = await import('@edge-base/core');
     const r = await admin.db('shared').table('posts').insert({ title: `${PREFIX}-inc-dec`, score: 10 });
     const id = (r as any).id;
     createdIds.push(id);
@@ -551,7 +551,7 @@ describe('E2E core — FieldOps extended', () => {
   });
 
   it('increment with negative value', async () => {
-    const { increment } = await import('@edgebase-fun/core');
+    const { increment } = await import('@edge-base/core');
     const r = await admin.db('shared').table('posts').insert({ title: `${PREFIX}-inc-neg`, viewCount: 100 });
     const id = (r as any).id;
     createdIds.push(id);
@@ -560,7 +560,7 @@ describe('E2E core — FieldOps extended', () => {
   });
 
   it('multiple increments in sequence', async () => {
-    const { increment } = await import('@edgebase-fun/core');
+    const { increment } = await import('@edge-base/core');
     const r = await admin.db('shared').table('posts').insert({ title: `${PREFIX}-inc-multi`, viewCount: 0 });
     const id = (r as any).id;
     createdIds.push(id);
@@ -570,7 +570,7 @@ describe('E2E core — FieldOps extended', () => {
   });
 
   it('deleteField on multiple fields', async () => {
-    const { deleteField } = await import('@edgebase-fun/core');
+    const { deleteField } = await import('@edge-base/core');
     const r = await admin.db('shared').table('posts').insert({
       title: `${PREFIX}-delf-multi`,
       extra1: 'a',

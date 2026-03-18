@@ -1,5 +1,5 @@
 /**
- * @edgebase-fun/react-native — 단위 테스트
+ * @edge-base/react-native — 단위 테스트
  *
  * 테스트 대상:
  *   - src/token-manager.ts (RN TokenManager)
@@ -10,7 +10,7 @@
  *   - src/push.ts (PushClient)
  *   - src/lifecycle.ts (LifecycleManager)
  *   - src/match-filter.ts (matchesFilter)
- *   - @edgebase-fun/core: TableRef, OrBuilder, StorageBucket, EdgeBaseError, FieldOps
+ *   - @edge-base/core: TableRef, OrBuilder, StorageBucket, EdgeBaseError, FieldOps
  *
  * 실행: cd packages/sdk/react-native && npx vitest run
  *
@@ -26,7 +26,7 @@ import { RoomClient } from '../../src/room';
 import { PushClient } from '../../src/push';
 import { LifecycleManager } from '../../src/lifecycle';
 import { matchesFilter } from '../../src/match-filter';
-import { EdgeBaseError, increment, deleteField, OrBuilder } from '@edgebase-fun/core';
+import { EdgeBaseError, increment, deleteField, OrBuilder } from '@edge-base/core';
 import { createClient, ClientEdgeBase } from '../../src/client';
 import * as api from '../../src/index';
 

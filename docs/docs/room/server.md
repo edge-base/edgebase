@@ -20,7 +20,7 @@ The `ctx.admin` examples in this guide map to the same server-side capabilities 
 ## Room Configuration
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   rooms: {
@@ -561,7 +561,7 @@ Metadata is accessible without authentication. Never include tokens, emails, or 
 ## Full Example
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   rooms: {

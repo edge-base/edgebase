@@ -19,7 +19,7 @@
  */
 import { OpenAPIHono, createRoute, z, type HonoEnv } from '../lib/hono.js';
 import type { Env } from '../types.js';
-import { EdgeBaseError } from '@edgebase-fun/shared';
+import { EdgeBaseError } from '@edge-base/shared';
 import { validateKey, buildConstraintCtx, resolveServiceKeyCandidate } from '../lib/service-key.js';
 import {
   ensureAuthSchema,

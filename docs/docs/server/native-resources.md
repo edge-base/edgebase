@@ -52,7 +52,7 @@ A globally distributed key-value store for caching, session data, and configurat
 ### Config
 
 ```typescript title="edgebase.config.ts"
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   kv: {
@@ -130,7 +130,7 @@ Headers: X-EdgeBase-Service-Key: <key>
 <TabItem value="ts" label="TypeScript" default>
 
 ```typescript
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 
 const admin = createAdminClient('https://your-app.example.com', {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY!,
@@ -334,7 +334,7 @@ A full SQL database built on SQLite. Unlike the built-in Durable Object collecti
 ### Config
 
 ```typescript title="edgebase.config.ts"
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   d1: {
@@ -365,7 +365,7 @@ Headers: X-EdgeBase-Service-Key: <key>
 <TabItem value="ts" label="TypeScript" default>
 
 ```typescript
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 
 const admin = createAdminClient('https://your-app.example.com', {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY!,
@@ -590,7 +590,7 @@ A vector search index for building semantic search, retrieval-augmented generati
 ### Config
 
 ```typescript title="edgebase.config.ts"
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   vectorize: {
@@ -679,7 +679,7 @@ Headers: X-EdgeBase-Service-Key: <key>
 <TabItem value="ts" label="TypeScript" default>
 
 ```typescript
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 
 const admin = createAdminClient('https://your-app.example.com', {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY!,
@@ -906,7 +906,7 @@ Inside [App Functions](/docs/functions), native resources are available through 
 
 ```typescript
 // functions/recommend.ts
-import { defineFunction } from '@edgebase-fun/shared';
+import { defineFunction } from '@edge-base/shared';
 
 export default defineFunction({
   trigger: { type: 'http', method: 'GET', path: '/recommendations' },

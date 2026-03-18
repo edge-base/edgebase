@@ -1,6 +1,6 @@
 {
-    "name": "@edgebase-fun/server",
-    "version": "0.1.0",
+    "name": "@edge-base/server",
+    "version": "0.1.2",
     "description": "EdgeBase runtime assets consumed by the EdgeBase CLI",
     "license": "MIT",
     "repository": {
@@ -38,7 +38,7 @@
         "prepack": "pnpm --dir ../admin build && pnpm run build && node ./scripts/copy-admin-build.mjs"
     },
     "dependencies": {
-        "@edgebase-fun/shared": "workspace:*",
+        "@edge-base/shared": "workspace:*",
         "@hono/zod-openapi": "^1.2.2",
         "@simplewebauthn/server": "^10",
         "bcryptjs": "^3.0.3",

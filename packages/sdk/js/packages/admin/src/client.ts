@@ -1,24 +1,24 @@
 /**
- * @edgebase-fun/admin — Admin/Server-side EdgeBase SDK (Node.js / Edge Functions / Dart Frog)
+ * @edge-base/admin — Admin/Server-side EdgeBase SDK (Node.js / Edge Functions / Dart Frog)
  *
  * @example External server (url + serviceKey required):
- * import { createAdminClient } from '@edgebase-fun/admin';
+ * import { createAdminClient } from '@edge-base/admin';
  * const admin = createAdminClient('https://my-app.edgebase.fun', {
  *   serviceKey: process.env.EDGEBASE_SERVICE_KEY,
  * });
  * const post = await admin.db('shared').table('posts').insert({ title: 'Hello' });
  *
  * @example App Functions (auto-detects url + serviceKey from env):
- * import { createAdminClient } from '@edgebase-fun/admin';
+ * import { createAdminClient } from '@edge-base/admin';
  * const admin = createAdminClient();
  */
 
-import { HttpClient } from '@edgebase-fun/core';
-import { ContextManager } from '@edgebase-fun/core';
-import { DbRef } from '@edgebase-fun/core';
-import { StorageClient } from '@edgebase-fun/core';
-import { FunctionsClient } from '@edgebase-fun/core';
-import { DefaultDbApi, HttpClientAdapter } from '@edgebase-fun/core';
+import { HttpClient } from '@edge-base/core';
+import { ContextManager } from '@edge-base/core';
+import { DbRef } from '@edge-base/core';
+import { StorageClient } from '@edge-base/core';
+import { FunctionsClient } from '@edge-base/core';
+import { DefaultDbApi, HttpClientAdapter } from '@edge-base/core';
 import { DefaultAdminApi } from './generated/admin-api-core.js';
 import { AdminAuthClient } from './admin-auth.js';
 import { KvClient } from './kv.js';

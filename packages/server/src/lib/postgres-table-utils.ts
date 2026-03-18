@@ -1,4 +1,4 @@
-import type { SchemaField, TableConfig } from '@edgebase-fun/shared';
+import type { SchemaField, TableConfig } from '@edge-base/shared';
 import { buildEffectiveSchema } from './schema.js';
 import { generateId } from './uuid.js';
 

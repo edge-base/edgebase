@@ -1,11 +1,11 @@
 /**
- * core/unit/table.test.ts — JS SDK @edgebase-fun/core TableRef 단위 테스트
+ * core/unit/table.test.ts — JS SDK @edge-base/core TableRef 단위 테스트
  *
  * 실제 서버(wrangler dev --local :8688)로 fetch — no mock
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createClient } from '@edgebase-fun/web';
-import { increment, deleteField } from '@edgebase-fun/core';
+import { createClient } from '@edge-base/web';
+import { increment, deleteField } from '@edge-base/core';
 
 const SERVER = 'http://localhost:8688';
 const SK = 'test-service-key-for-admin';

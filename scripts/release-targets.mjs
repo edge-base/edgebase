@@ -3,6 +3,20 @@ export const RELEASE_VERSION_SOURCE = {
   field: 'version',
 };
 
+export const NPM_PUBLISH_TARGET_IDS = [
+  'shared',
+  'plugin-core',
+  'server',
+  'core-js',
+  'web-js',
+  'admin-js',
+  'ssr-js',
+  'auth-ui-react',
+  'react-native',
+  'cli',
+  'create-edgebase',
+];
+
 export const RELEASE_TARGETS = [
   // Public npm packages
   {
@@ -14,70 +28,70 @@ export const RELEASE_TARGETS = [
   },
   {
     id: 'cli',
-    name: '@edgebase-fun/cli',
+    name: '@edge-base/cli',
     ecosystem: 'npm',
     path: 'packages/cli/package.json',
     strategy: 'json-version',
   },
   {
     id: 'plugin-core',
-    name: '@edgebase-fun/plugin-core',
+    name: '@edge-base/plugin-core',
     ecosystem: 'npm',
     path: 'packages/plugins/core/package.json',
     strategy: 'json-version',
   },
   {
     id: 'shared',
-    name: '@edgebase-fun/shared',
+    name: '@edge-base/shared',
     ecosystem: 'npm',
     path: 'packages/shared/package.json',
     strategy: 'json-version',
   },
   {
     id: 'server',
-    name: '@edgebase-fun/server',
+    name: '@edge-base/server',
     ecosystem: 'npm',
     path: 'packages/server/package.json',
     strategy: 'json-version',
   },
   {
     id: 'core-js',
-    name: '@edgebase-fun/core',
+    name: '@edge-base/core',
     ecosystem: 'npm',
     path: 'packages/sdk/js/packages/core/package.json',
     strategy: 'json-version',
   },
   {
     id: 'web-js',
-    name: '@edgebase-fun/web',
+    name: '@edge-base/web',
     ecosystem: 'npm',
     path: 'packages/sdk/js/packages/web/package.json',
     strategy: 'json-version',
   },
   {
     id: 'admin-js',
-    name: '@edgebase-fun/admin',
+    name: '@edge-base/admin',
     ecosystem: 'npm',
     path: 'packages/sdk/js/packages/admin/package.json',
     strategy: 'json-version',
   },
   {
     id: 'ssr-js',
-    name: '@edgebase-fun/ssr',
+    name: '@edge-base/ssr',
     ecosystem: 'npm',
     path: 'packages/sdk/js/packages/ssr/package.json',
     strategy: 'json-version',
   },
   {
     id: 'auth-ui-react',
-    name: '@edgebase-fun/auth-ui-react',
+    name: '@edge-base/auth-ui-react',
     ecosystem: 'npm',
     path: 'packages/sdk/js/packages/auth-ui-react/package.json',
     strategy: 'json-version',
   },
   {
     id: 'react-native',
-    name: '@edgebase-fun/react-native',
+    name: '@edge-base/react-native',
     ecosystem: 'npm',
     path: 'packages/sdk/react-native/package.json',
     strategy: 'json-version',

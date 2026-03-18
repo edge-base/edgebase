@@ -1,5 +1,5 @@
 /**
- * admin.e2e.test.ts — JS SDK @edgebase-fun/admin E2E 테스트
+ * admin.e2e.test.ts — JS SDK @edge-base/admin E2E 테스트
  *
  * AdminEdgeBase 기능:
  *   - db(ns).table(name).CRUD — Service Key 자동 주입
@@ -13,7 +13,7 @@
  * 실제 서버(wrangler dev --local :8688)에 HTTP 요청
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 
 const SERVER = 'http://localhost:8688';
 const SK = 'test-service-key-for-admin';

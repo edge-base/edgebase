@@ -7,8 +7,8 @@
  *   await admin.push.sendMany(['u1', 'u2'], { title: 'News' });
  *   const logs = await admin.push.getLogs('userId');
  */
-import type { HttpClient } from '@edgebase-fun/core';
-import { HttpClientAdapter } from '@edgebase-fun/core';
+import type { HttpClient } from '@edge-base/core';
+import { HttpClientAdapter } from '@edge-base/core';
 import { DefaultAdminApi } from './generated/admin-api-core.js';
 
 // ─── Types ───

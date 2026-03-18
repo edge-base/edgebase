@@ -8,7 +8,7 @@
  * 토픽 구독은 모바일: 클라이언트 직접, 웹: 서버 경유 FCM IID API.
  */
 
-import type { PushConfig } from '@edgebase-fun/shared';
+import type { PushConfig } from '@edge-base/shared';
 import type { Env } from '../types.js';
 
 // ─── Interfaces ───

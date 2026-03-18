@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { PluginInstance } from '@edgebase-fun/shared';
+import type { PluginInstance } from '@edge-base/shared';
 import { buildManagedD1DatabaseName, extractWranglerWorkerName } from './managed-resource-names.js';
 
 export interface ProvisionedBinding {
@@ -97,7 +97,7 @@ function ensureManagedAssetsBlock(
  * Merge plugin tables into the user's config databases (in-memory).
  * Plugins declare tables in their PluginInstance; CLI adds them to the target DB block.
  *
- * Plugin tables are namespaced: `plugin.name/tableName` (e.g. '@edgebase-fun/plugin-stripe/customers').
+ * Plugin tables are namespaced: `plugin.name/tableName` (e.g. '@edge-base/plugin-stripe/customers').
  */
 export function mergePluginTables(
   databases: Record<string, { tables?: Record<string, unknown> }>,

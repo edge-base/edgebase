@@ -22,7 +22,7 @@ Place a `_middleware.ts` file in any directory under `functions/` to run code be
 
 ```typescript
 // functions/_middleware.ts (applies to ALL functions)
-import { defineFunction, FunctionError } from '@edgebase-fun/shared';
+import { defineFunction, FunctionError } from '@edge-base/shared';
 
 export default defineFunction(async ({ auth }) => {
   if (!auth) {

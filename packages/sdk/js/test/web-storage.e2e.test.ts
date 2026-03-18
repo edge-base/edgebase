@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createClient } from '@edgebase-fun/web';
+import { createClient } from '@edge-base/web';
 
 function resolveBaseUrl() {
   const candidate = process.env['BASE_URL'];

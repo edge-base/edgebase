@@ -1,5 +1,5 @@
 /**
- * @edgebase-fun/core — 단위 테스트
+ * @edge-base/core — 단위 테스트
  *
  * 테스트 대상: src/table.ts, src/field-ops.ts, src/errors.ts, src/context.ts
  *

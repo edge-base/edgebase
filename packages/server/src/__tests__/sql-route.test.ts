@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpenAPIHono, type HonoEnv } from '../lib/hono.js';
 import { sqlRoute } from '../routes/sql.js';
 import { setConfig } from '../lib/do-router.js';
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 import type { Env } from '../types.js';
 import { executeDoSql } from '../lib/do-sql.js';
 

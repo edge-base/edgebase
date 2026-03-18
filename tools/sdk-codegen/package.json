@@ -1,5 +1,5 @@
 {
-  "name": "@edgebase-fun/sdk-codegen",
+  "name": "@edge-base/sdk-codegen",
   "version": "0.1.0",
   "private": true,
   "type": "module",

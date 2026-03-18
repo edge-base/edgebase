@@ -1,5 +1,5 @@
-import type { ContextManager, IDatabaseLiveSubscriber } from '@edgebase-fun/core';
-import { EdgeBaseError } from '@edgebase-fun/core';
+import type { ContextManager, IDatabaseLiveSubscriber } from '@edge-base/core';
+import { EdgeBaseError } from '@edge-base/core';
 import type { TokenManager, TokenUser } from './token-manager.js';
 import { refreshAccessToken } from './auth-refresh.js';
 

@@ -17,7 +17,7 @@ All service-key-backed server features described in this section are available a
 All server behavior is defined in `edgebase.config.ts`:
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   release: false,           // Set true for production (deny-by-default)

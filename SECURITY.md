@@ -12,7 +12,7 @@ If you discover a security vulnerability in EdgeBase, please report it responsib
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email us at **security@edgebase.fun** with:
+Instead, please email us at **edgebase52@gmail.com** with:
 
 1. A description of the vulnerability
 2. Steps to reproduce the issue

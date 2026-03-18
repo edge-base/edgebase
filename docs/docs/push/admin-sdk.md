@@ -28,7 +28,7 @@ Initialize the Admin SDK with your **Service Key**.
 <TabItem value="ts" label="TypeScript" default>
 
 ```typescript
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 
 const admin = createAdminClient('https://my-edgebase-server.com', {
     serviceKey: process.env.EDGEBASE_SERVICE_KEY

@@ -1,10 +1,10 @@
 /**
- * @edgebase-fun/web — Client-side EdgeBase SDK (browser / mobile / React Native).
+ * @edge-base/web — Client-side EdgeBase SDK (browser / mobile / React Native).
  *: 독립 패키지
  *
  * Usage:
  * ```ts
- * import { createClient } from '@edgebase-fun/web';
+ * import { createClient } from '@edge-base/web';
  * const client = createClient('https://my-app.edgebase.fun');
  * ```
  */
@@ -61,4 +61,4 @@ export {
 export { ClientAnalytics } from './analytics.js';
 
 // Errors (re-exported for convenience)
-export { EdgeBaseError } from '@edgebase-fun/core';
+export { EdgeBaseError, ResumableUploadError } from '@edge-base/core';

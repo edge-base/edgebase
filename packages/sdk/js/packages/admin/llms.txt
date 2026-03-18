@@ -1,12 +1,12 @@
 # EdgeBase JS Admin SDK
 
-Use this file as a quick-reference contract for AI coding assistants working with `@edgebase-fun/admin`.
+Use this file as a quick-reference contract for AI coding assistants working with `@edge-base/admin`.
 
 ## Package Boundary
 
-Use `@edgebase-fun/admin` in trusted server-side environments only.
+Use `@edge-base/admin` in trusted server-side environments only.
 
-Do not ship this package to browsers or untrusted clients. If code runs in the browser, use `@edgebase-fun/web`. If code runs on the server but should act as the current cookie-authenticated user, use `@edgebase-fun/ssr`.
+Do not ship this package to browsers or untrusted clients. If code runs in the browser, use `@edge-base/web`. If code runs on the server but should act as the current cookie-authenticated user, use `@edge-base/ssr`.
 
 ## Source Of Truth
 
@@ -22,7 +22,7 @@ Do not ship this package to browsers or untrusted clients. If code runs in the b
 ### Create an admin client
 
 ```ts
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 
 const admin = createAdminClient(process.env.EDGEBASE_URL!, {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY,
@@ -98,8 +98,8 @@ const overview = await admin.analytics.overview({ range: '7d' });
 
 ## Common Mistakes
 
-- do not use `@edgebase-fun/admin` in client-side React or browser bundles
-- do not use `@edgebase-fun/admin` when you want access rules to run as the current signed-in user; use `@edgebase-fun/ssr` instead
+- do not use `@edge-base/admin` in client-side React or browser bundles
+- do not use `@edge-base/admin` when you want access rules to run as the current signed-in user; use `@edge-base/ssr` instead
 - do not pass instance ids as named objects; use `db(namespace, id?)`
 - `createAdminClient()` without explicit args is mainly for server environments where `EDGEBASE_URL` and `EDGEBASE_SERVICE_KEY` are already available
 - `admin.sql(query)` defaults to the shared single-instance database block

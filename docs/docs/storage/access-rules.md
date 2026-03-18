@@ -180,7 +180,7 @@ For [multipart uploads](/docs/storage/multipart), the `write` rule is re-evaluat
 Requests authenticated with a Service Key bypass all storage access rules:
 
 ```typescript
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 
 const admin = createAdminClient('https://api.example.com', {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY,

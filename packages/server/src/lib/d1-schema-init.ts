@@ -10,7 +10,7 @@
  *
  * Called once per Worker lifetime per namespace (cached in memory set).
  */
-import type { TableConfig, MigrationConfig } from '@edgebase-fun/shared';
+import type { TableConfig, MigrationConfig } from '@edge-base/shared';
 import {
   META_TABLE_DDL,
   generateTableDDL,
@@ -21,7 +21,7 @@ import {
   buildEffectiveSchema,
   computeSchemaHashSync,
 } from './schema.js';
-import type { SchemaField } from '@edgebase-fun/shared';
+import type { SchemaField } from '@edge-base/shared';
 
 // Track initialized namespaces to avoid redundant checks per Worker process.
 const _initialized = new Set<string>();

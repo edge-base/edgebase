@@ -8,7 +8,7 @@
  * No D1/KV reads in the request hot path.
  */
 
-import type { EdgeBaseConfig, ServiceKeyEntry } from '@edgebase-fun/shared';
+import type { EdgeBaseConfig, ServiceKeyEntry } from '@edge-base/shared';
 import type { Env } from '../types.js';
 import { isIpInCidr } from './cidr.js';
 import { getTrustedClientIp } from './client-ip.js';

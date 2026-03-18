@@ -6,7 +6,7 @@ Use this file as a quick-reference contract for AI coding assistants working wit
 
 `create-edgebase` is the bootstrap package behind `npm create edgebase@latest`.
 
-It is not the long-lived runtime CLI package. After scaffolding, day-to-day commands come from the local `@edgebase-fun/cli` install inside the generated project.
+It is not the long-lived runtime CLI package. After scaffolding, day-to-day commands come from the local `@edge-base/cli` install inside the generated project.
 
 ## Source Of Truth
 
@@ -50,7 +50,7 @@ EDGEBASE_CREATE_SKIP_INSTALL=1 npm create edgebase@latest my-app -- --no-dev
 
 ## Behavior Notes
 
-- scaffolds a project by delegating to `@edgebase-fun/cli init`
+- scaffolds a project by delegating to `@edge-base/cli init`
 - installs local dependencies unless `EDGEBASE_CREATE_SKIP_INSTALL=1`
 - starts `npm run dev` unless `--no-dev` is passed
 - forwards `--no-open` to the local development flow

@@ -6,15 +6,15 @@ import {
   deleteField as unifiedDeleteField,
   increment as unifiedIncrement,
 } from '../src/index.js';
-import { EdgeBaseError, deleteField, increment } from '@edgebase-fun/core';
-import { createAdminClient } from '@edgebase-fun/admin';
-import { createClient } from '@edgebase-fun/web';
+import { EdgeBaseError, deleteField, increment } from '@edge-base/core';
+import { createAdminClient } from '@edge-base/admin';
+import { createClient } from '@edge-base/web';
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('@edgebase-fun/sdk unified exports', () => {
+describe('@edge-base/sdk unified exports', () => {
   it('re-exports the core field operation helpers without wrapping them', () => {
     expect(unifiedIncrement).toBe(increment);
     expect(unifiedDeleteField).toBe(deleteField);

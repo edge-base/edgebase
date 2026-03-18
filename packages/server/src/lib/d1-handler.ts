@@ -23,8 +23,8 @@ import type {
   HookCtx,
   SchemaField,
   DbBlock,
-} from '@edgebase-fun/shared';
-import { EdgeBaseError, getTableAccess, getTableHooks } from '@edgebase-fun/shared';
+} from '@edge-base/shared';
+import { EdgeBaseError, getTableAccess, getTableHooks } from '@edge-base/shared';
 import { parseConfig, getD1BindingName } from './do-router.js';
 import { ensureD1Schema } from './d1-schema-init.js';
 import {

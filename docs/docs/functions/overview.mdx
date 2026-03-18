@@ -48,7 +48,7 @@ Export named constants (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`) to handle speci
 
 ```typescript
 // functions/users/[userId].ts
-import { defineFunction } from '@edgebase-fun/shared';
+import { defineFunction } from '@edge-base/shared';
 
 export const GET = defineFunction(async ({ params, admin }) => {
   const user = await admin.db('app').table('users').get(params.userId);
@@ -139,7 +139,7 @@ For HTTP endpoints, export named constants matching HTTP methods:
 
 ```typescript
 // functions/send-email.ts -> POST /api/functions/send-email
-import { defineFunction, FunctionError } from '@edgebase-fun/shared';
+import { defineFunction, FunctionError } from '@edge-base/shared';
 
 export const POST = defineFunction(async ({ auth, admin, request }) => {
   if (!auth) throw new FunctionError('unauthenticated', 'Login required');
@@ -161,7 +161,7 @@ For database triggers, schedule triggers, and authentication triggers, use the `
 
 ```typescript
 // functions/onPostCreated.ts
-import { defineFunction } from '@edgebase-fun/shared';
+import { defineFunction } from '@edge-base/shared';
 
 export default defineFunction({
   trigger: { type: 'db', table: 'posts', event: 'insert' },

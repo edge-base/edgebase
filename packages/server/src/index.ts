@@ -9,7 +9,7 @@ import { authMiddleware } from './middleware/auth.js';
 import { rulesMiddleware } from './middleware/rules.js';
 
 import { loggerMiddleware } from './middleware/logger.js';
-import { EdgeBaseError } from '@edgebase-fun/shared';
+import { EdgeBaseError } from '@edge-base/shared';
 import { SERVER_VERSION } from './lib/version.js';
 import { healthRoute } from './routes/health.js';
 import { tablesRoute } from './routes/tables.js';

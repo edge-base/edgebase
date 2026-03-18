@@ -16,7 +16,7 @@ A DB trigger fires **after** a CUD (Create/Update/Delete) operation completes. T
 
 ```typescript
 // functions/onPostCreated.ts
-import { defineFunction } from '@edgebase-fun/shared';
+import { defineFunction } from '@edge-base/shared';
 
 export default defineFunction({
   trigger: { type: 'db', table: 'posts', event: 'insert' },

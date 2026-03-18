@@ -1,12 +1,12 @@
 # EdgeBase React Auth UI
 
-Use this file as a quick-reference contract for AI coding assistants working with `@edgebase-fun/auth-ui-react`.
+Use this file as a quick-reference contract for AI coding assistants working with `@edge-base/auth-ui-react`.
 
 ## Package Boundary
 
-Use `@edgebase-fun/auth-ui-react` for React auth components in browser-oriented apps.
+Use `@edge-base/auth-ui-react` for React auth components in browser-oriented apps.
 
-It must be paired with `@edgebase-fun/web`. Do not pass an admin or SSR client to `AuthProvider`. Do not use this package for React Native.
+It must be paired with `@edge-base/web`. Do not pass an admin or SSR client to `AuthProvider`. Do not use this package for React Native.
 
 ## Source Of Truth
 
@@ -23,9 +23,9 @@ It must be paired with `@edgebase-fun/web`. Do not pass an admin or SSR client t
 ### Basic provider setup
 
 ```tsx
-import { createClient } from '@edgebase-fun/web';
-import { AuthProvider, AuthForm } from '@edgebase-fun/auth-ui-react';
-import '@edgebase-fun/auth-ui-react/styles.css';
+import { createClient } from '@edge-base/web';
+import { AuthProvider, AuthForm } from '@edge-base/auth-ui-react';
+import '@edge-base/auth-ui-react/styles.css';
 
 const client = createClient('https://your-project.edgebase.fun');
 
@@ -57,7 +57,7 @@ export function LoginScreen() {
 ### Read auth state
 
 ```tsx
-import { useAuth } from '@edgebase-fun/auth-ui-react';
+import { useAuth } from '@edge-base/auth-ui-react';
 
 function HeaderActions() {
   const { user, loading, signOut } = useAuth();
@@ -71,10 +71,10 @@ function HeaderActions() {
 
 ## Hard Rules
 
-- `AuthProvider` requires a `client` created with `@edgebase-fun/web`
+- `AuthProvider` requires a `client` created with `@edge-base/web`
 - `useAuthContext()` must be used inside `<AuthProvider>`
 - `useAuth()` returns `{ user, loading, signOut }`
-- importing `@edgebase-fun/auth-ui-react/styles.css` is optional, but available
+- importing `@edge-base/auth-ui-react/styles.css` is optional, but available
 - default `classPrefix` is `eb-auth`
 - supported `defaultView` values are:
   - `sign_in`
@@ -90,7 +90,7 @@ function HeaderActions() {
 ## Common Mistakes
 
 - do not create a new EdgeBase client inside every render; create it once and pass it to `AuthProvider`
-- do not pass `@edgebase-fun/admin` or `@edgebase-fun/ssr` clients to `AuthProvider`
+- do not pass `@edge-base/admin` or `@edge-base/ssr` clients to `AuthProvider`
 - `AuthForm` returns `null` when a user is already signed in
 - `useAuthContext()` throws if used outside the provider
 - `onSuccess` is a UI callback; routing and redirect behavior are still your job

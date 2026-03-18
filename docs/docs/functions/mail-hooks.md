@@ -19,7 +19,7 @@ Use them to modify or block verification emails, password reset emails, magic li
 ## Email Hook
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   email: {

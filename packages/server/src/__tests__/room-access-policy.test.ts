@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineConfig, type AuthContext } from '@edgebase-fun/shared';
+import { defineConfig, type AuthContext } from '@edge-base/shared';
 import { setConfig } from '../lib/do-router.js';
 import { OpenAPIHono, type HonoEnv } from '../lib/hono.js';
 import { roomRoute } from '../routes/room.js';

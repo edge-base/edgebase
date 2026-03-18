@@ -1,5 +1,5 @@
 /**
- * @edgebase-fun/admin — Property-based E2E 테스트
+ * @edge-base/admin — Property-based E2E 테스트
  *
  * fast-check으로 SDK .where() 결과 === HTTP 직접 호출 결과 검증.
  * SDK가 쿼리 파라미터를 올바르게 전달하는지 랜덤 조합으로 확인.

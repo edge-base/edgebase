@@ -1,5 +1,5 @@
 /**
- * @edgebase-fun/admin — 단위 테스트
+ * @edge-base/admin — 단위 테스트
  *
  * 테스트 대상: src/client.ts (AdminEdgeBase), src/kv.ts (KvClient)
  *

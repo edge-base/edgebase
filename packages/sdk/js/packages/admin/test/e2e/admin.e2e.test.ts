@@ -1,5 +1,5 @@
 /**
- * @edgebase-fun/admin — E2E 테스트
+ * @edge-base/admin — E2E 테스트
  *
  * wrangler dev --port 8688 실서버 필요
  *

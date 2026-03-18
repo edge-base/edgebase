@@ -1,7 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { Env } from '../types.js';
-import { EdgeBaseError } from '@edgebase-fun/shared';
+import { EdgeBaseError } from '@edge-base/shared';
 import { normalizeDatabaseError } from '../lib/errors.js';
 
 type HonoEnv = { Bindings: Env };

@@ -1,12 +1,12 @@
 # EdgeBase Plugin Core
 
-Use this file as a quick-reference contract for AI coding assistants working with `@edgebase-fun/plugin-core`.
+Use this file as a quick-reference contract for AI coding assistants working with `@edge-base/plugin-core`.
 
 ## Package Boundary
 
-Use `@edgebase-fun/plugin-core` for authoring installable EdgeBase plugins.
+Use `@edge-base/plugin-core` for authoring installable EdgeBase plugins.
 
-Do not use it for regular application code. For browser apps use `@edgebase-fun/web`. For trusted server code use `@edgebase-fun/admin`. For SSR cookie helpers use `@edgebase-fun/ssr`.
+Do not use it for regular application code. For browser apps use `@edge-base/web`. For trusted server code use `@edge-base/admin`. For SSR cookie helpers use `@edge-base/ssr`.
 
 ## Source Of Truth
 
@@ -21,7 +21,7 @@ Do not use it for regular application code. For browser apps use `@edgebase-fun/
 ### Define a plugin
 
 ```ts
-import { definePlugin } from '@edgebase-fun/plugin-core';
+import { definePlugin } from '@edge-base/plugin-core';
 
 interface MyPluginConfig {
   apiKey: string;
@@ -68,7 +68,7 @@ hooks: {
 ### Use mock context in tests
 
 ```ts
-import { createMockContext } from '@edgebase-fun/plugin-core';
+import { createMockContext } from '@edge-base/plugin-core';
 
 const ctx = createMockContext({
   pluginConfig: { apiKey: 'test-key' },

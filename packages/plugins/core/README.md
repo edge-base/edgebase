@@ -1,4 +1,4 @@
-<h1 align="center">@edgebase-fun/plugin-core</h1>
+<h1 align="center">@edge-base/plugin-core</h1>
 
 <p align="center">
   <b>Public plugin authoring API for EdgeBase</b><br>
@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@edgebase-fun/plugin-core"><img src="https://img.shields.io/npm/v/%40edgebase-fun%2Fplugin-core?color=brightgreen" alt="npm"></a>&nbsp;
+  <a href="https://www.npmjs.com/package/@edge-base/plugin-core"><img src="https://img.shields.io/npm/v/%40edge-base%2Fplugin-core?color=brightgreen" alt="npm"></a>&nbsp;
   <a href="https://edgebase.fun/docs/plugins/creating-plugins"><img src="https://img.shields.io/badge/docs-plugins-blue" alt="Docs"></a>&nbsp;
   <a href="https://github.com/edge-base/edgebase/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </p>
@@ -20,7 +20,7 @@
 
 ---
 
-`@edgebase-fun/plugin-core` is the package plugin authors use to build installable EdgeBase plugins.
+`@edge-base/plugin-core` is the package plugin authors use to build installable EdgeBase plugins.
 
 It gives you:
 
@@ -50,7 +50,7 @@ This package ships with an `llms.txt` file for AI-assisted plugin development.
 
 You can find it:
 
-- after install: `node_modules/@edgebase-fun/plugin-core/llms.txt`
+- after install: `node_modules/@edge-base/plugin-core/llms.txt`
 - in the repository: [llms.txt](https://github.com/edge-base/edgebase/blob/main/packages/plugins/core/llms.txt)
 
 Use it when you want an agent to:
@@ -63,26 +63,26 @@ Use it when you want an agent to:
 ## Installation
 
 ```bash
-npm install @edgebase-fun/plugin-core
+npm install @edge-base/plugin-core
 ```
 
 If you want a starter layout, you can scaffold one with the CLI:
 
 ```bash
-npx --package @edgebase-fun/cli edgebase create-plugin my-plugin
+npx --package @edge-base/cli edgebase create-plugin my-plugin
 ```
 
 ## Quick Start
 
 ```ts
-import { definePlugin } from '@edgebase-fun/plugin-core';
+import { definePlugin } from '@edge-base/plugin-core';
 
 interface StripeConfig {
   secretKey: string;
 }
 
 export const stripePlugin = definePlugin<StripeConfig>({
-  name: '@edgebase-fun/plugin-stripe',
+  name: '@edge-base/plugin-stripe',
   version: '0.1.0',
   tables: {
     customers: {
@@ -117,7 +117,7 @@ export const stripePlugin = definePlugin<StripeConfig>({
 
 ## Typical Plugin Capabilities
 
-With `@edgebase-fun/plugin-core`, a plugin can contribute:
+With `@edge-base/plugin-core`, a plugin can contribute:
 
 - tables
 - functions
@@ -131,7 +131,7 @@ With `@edgebase-fun/plugin-core`, a plugin can contribute:
 Use `createMockContext()` when you want to test handlers without running a full EdgeBase project:
 
 ```ts
-import { createMockContext } from '@edgebase-fun/plugin-core';
+import { createMockContext } from '@edge-base/plugin-core';
 
 const ctx = createMockContext({
   pluginConfig: { secretKey: 'test-key' },
@@ -156,9 +156,9 @@ Do **not** use this package for:
 
 For those, use:
 
-- [`@edgebase-fun/web`](https://www.npmjs.com/package/@edgebase-fun/web)
-- [`@edgebase-fun/ssr`](https://www.npmjs.com/package/@edgebase-fun/ssr)
-- [`@edgebase-fun/admin`](https://www.npmjs.com/package/@edgebase-fun/admin)
+- [`@edge-base/web`](https://www.npmjs.com/package/@edge-base/web)
+- [`@edge-base/ssr`](https://www.npmjs.com/package/@edge-base/ssr)
+- [`@edge-base/admin`](https://www.npmjs.com/package/@edge-base/admin)
 
 ## License
 

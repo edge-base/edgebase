@@ -1,4 +1,4 @@
-import { EdgeBaseError, type EdgeBaseConfig } from '@edgebase-fun/shared';
+import { EdgeBaseError, type EdgeBaseConfig } from '@edge-base/shared';
 import type { Env } from '../types.js';
 import { callDO, getDbDoName, getD1BindingName, shouldRouteToD1 } from './do-router.js';
 import { ensureD1Schema } from './d1-schema-init.js';

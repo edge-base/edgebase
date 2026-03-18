@@ -30,8 +30,8 @@ import {
   parseConfig,
   shouldRouteToD1,
 } from '../lib/do-router.js';
-import type { AuthContext, TableRules, DbLevelRules } from '@edgebase-fun/shared';
-import { EdgeBaseError, getDbAccess, getTableAccess } from '@edgebase-fun/shared';
+import type { AuthContext, TableRules, DbLevelRules } from '@edge-base/shared';
+import { EdgeBaseError, getDbAccess, getTableAccess } from '@edge-base/shared';
 import { handleD1Request } from '../lib/d1-handler.js';
 import { handlePgRequest } from '../lib/postgres-handler.js';
 import { buildInternalHandlerContext } from '../lib/internal-request.js';
@@ -359,7 +359,7 @@ function buildDbRuleCtx(
   config: ReturnType<typeof parseConfig>,
   currentNamespace: string,
   currentDbId: string | undefined,
-): import('@edgebase-fun/shared').DbRuleCtx {
+): import('@edge-base/shared').DbRuleCtx {
   return {
     db: {
       async get(table, id) {

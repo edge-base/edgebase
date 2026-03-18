@@ -41,9 +41,9 @@ Legacy flat methods still exist as compatibility fallbacks, so older examples an
 <TabItem value="js" label="JavaScript" default>
 
 ```bash
-npm install @edgebase-fun/web
+npm install @edge-base/web
 # React Native:
-npm install @edgebase-fun/react-native
+npm install @edge-base/react-native
 ```
 
 </TabItem>
@@ -132,8 +132,8 @@ Rooms are identified by a **namespace** and a **room ID**. Ensure the user is au
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-import { createClient } from '@edgebase-fun/web';
-// React Native: import { createClient } from '@edgebase-fun/react-native';
+import { createClient } from '@edge-base/web';
+// React Native: import { createClient } from '@edge-base/react-native';
 
 const client = createClient('https://your-project.edgebase.fun');
 // ... authenticate first ...

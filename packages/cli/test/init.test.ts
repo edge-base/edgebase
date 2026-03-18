@@ -9,6 +9,11 @@ vi.mock('../src/commands/dev.js', () => ({
   devCommand: { parseAsync: mockParseAsync },
 }));
 
+const CLI_PACKAGE = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
+) as { version: string };
+const EXPECTED_PUBLIC_VERSION = `^${CLI_PACKAGE.version}`;
+
 describe('CLI: init command', () => {
   let testDir: string;
   let originalCwd: string;
@@ -45,7 +50,7 @@ describe('CLI: init command', () => {
     expect(existsSync(join(testDir, '.gitignore'))).toBe(true);
     expect(existsSync(join(testDir, 'package.json'))).toBe(true);
     expect(existsSync(join(testDir, 'wrangler.toml'))).toBe(true);
-    expect(existsSync(join(testDir, 'node_modules', '@edgebase-fun', 'shared', 'package.json'))).toBe(true);
+    expect(existsSync(join(testDir, 'node_modules', '@edge-base', 'shared', 'package.json'))).toBe(true);
     expect(existsSync(join(testDir, '.edgebase', 'runtime', 'server', 'src', 'index.ts'))).toBe(true);
     expect(existsSync(join(testDir, '.edgebase', 'runtime', 'server', 'src', 'generated-config.ts'))).toBe(true);
     expect(existsSync(join(testDir, '.edgebase', 'runtime', 'server', 'edgebase.test.config.ts'))).toBe(true);
@@ -133,8 +138,8 @@ describe('CLI: init command', () => {
     expect(packageJson.scripts.deploy).toBe('edgebase deploy');
     expect(packageJson.scripts.typegen).toBe('edgebase typegen');
     expect(packageJson.devDependencies).toMatchObject({
-      '@edgebase-fun/cli': '^0.1.0',
-      '@edgebase-fun/shared': '^0.1.0',
+      '@edge-base/cli': EXPECTED_PUBLIC_VERSION,
+      '@edge-base/shared': EXPECTED_PUBLIC_VERSION,
     });
   });
 
@@ -221,8 +226,8 @@ describe('CLI: init command', () => {
     expect(packageJson).toContain(`"name": "${basename(testDir)}"`);
     expect(packageJson).toContain('"dev": "edgebase dev"');
     expect(packageJson).toContain('"deploy": "edgebase deploy"');
-    expect(packageJson).toContain('"@edgebase-fun/cli": "^0.1.0"');
-    expect(packageJson).toContain('"@edgebase-fun/shared": "^0.1.0"');
+    expect(packageJson).toContain(`"@edge-base/cli": "${EXPECTED_PUBLIC_VERSION}"`);
+    expect(packageJson).toContain(`"@edge-base/shared": "${EXPECTED_PUBLIC_VERSION}"`);
     expect(wranglerToml).toContain(`name = "${basename(testDir)}"`);
     expect(wranglerToml).toContain('main = ".edgebase/runtime/server/src/index.ts"');
     expect(wranglerToml).toContain('directory = ".edgebase/runtime/server/admin-build"');

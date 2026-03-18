@@ -1,6 +1,6 @@
 {
     "name": "edgebase",
-    "version": "0.1.0",
+    "version": "0.1.2",
     "type": "module",
     "private": true,
     "scripts": {
@@ -17,7 +17,8 @@
         "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
         "release:sync": "node ./scripts/sync-release-versions.mjs",
         "release:check": "node ./scripts/check-release-versions.mjs",
-        "release:set": "node ./scripts/set-release-version.mjs"
+        "release:set": "node ./scripts/set-release-version.mjs",
+        "release:npm": "node ./dev/release/publish-npm-release.mjs"
     },
     "devDependencies": {
         "@eslint/js": "^9.39.2",

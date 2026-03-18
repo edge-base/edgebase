@@ -1,12 +1,12 @@
 # EdgeBase JS Web SDK
 
-Use this file as a quick-reference contract for AI coding assistants working with `@edgebase-fun/web`.
+Use this file as a quick-reference contract for AI coding assistants working with `@edge-base/web`.
 
 ## Package Boundary
 
-Use `@edgebase-fun/web` for browser and untrusted client environments.
+Use `@edge-base/web` for browser and untrusted client environments.
 
-Do not use this package for privileged server-side work that needs admin access, raw SQL, or trusted secrets. Use `@edgebase-fun/admin` for that. Use `@edgebase-fun/ssr` when you specifically need SSR cookie helpers.
+Do not use this package for privileged server-side work that needs admin access, raw SQL, or trusted secrets. Use `@edge-base/admin` for that. Use `@edge-base/ssr` when you specifically need SSR cookie helpers.
 
 ## Source Of Truth
 
@@ -50,7 +50,7 @@ This is a recommendation, not a requirement. Separate repos or a different subdi
 ### Create a client
 
 ```ts
-import { createClient } from '@edgebase-fun/web';
+import { createClient } from '@edge-base/web';
 
 const client = createClient('https://your-project.edgebase.fun');
 ```
@@ -142,7 +142,7 @@ room.leave();
 ### Update special fields
 
 ```ts
-import { deleteField, increment } from '@edgebase-fun/web';
+import { deleteField, increment } from '@edge-base/web';
 
 await client
   .db('app')
@@ -171,7 +171,7 @@ await client
 
 ```js
 // Initialize
-import { createClient } from '@edgebase-fun/web'
+import { createClient } from '@edge-base/web'
 const client = createClient('https://my-project.edgebase.fun')
 
 // Auth — currentUser is a PROPERTY, not a method
@@ -207,7 +207,7 @@ await posts.where('status', '==', 'old').deleteMany()
 const url = await bucket.createSignedUrl('file.pdf', { expiresIn: '1h' })
 
 // Special field ops
-import { increment, deleteField } from '@edgebase-fun/web'
+import { increment, deleteField } from '@edge-base/web'
 await posts.update(id, { views: increment(1), temp: deleteField() })
 
 // Write operations require authenticated user
@@ -216,7 +216,7 @@ await posts.update(id, { views: increment(1), temp: deleteField() })
 ### createClient
 
 ```
-import { createClient } from '@edgebase-fun/web'
+import { createClient } from '@edge-base/web'
 const client = createClient(url, options?: { schema?, databaseLive?: { autoReconnect?, maxReconnectAttempts?, reconnectBaseDelay? } })
 ```
 
@@ -333,7 +333,7 @@ table.where(...).deleteMany()               → Promise<{totalProcessed, totalSu
 #### Special fields
 
 ```
-import { increment, deleteField } from '@edgebase-fun/web'
+import { increment, deleteField } from '@edge-base/web'
 table.update(id, { views: increment(1), old: deleteField() })
 ```
 
@@ -474,7 +474,7 @@ room.media.realtime.renegotiate({sessionId, sessionDescription})        → Prom
 room.media.realtime.closeTracks({sessionId, tracks: [{mid}]})           → Promise<{sessionDescription?, tracks?}>
 ```
 
-For higher-level WebRTC transport, use the built-in room transport or the `RoomRealtimeMediaTransport` export from `@edgebase-fun/web`:
+For higher-level WebRTC transport, use the built-in room transport or the `RoomRealtimeMediaTransport` export from `@edge-base/web`:
 ```
 const transport = room.media.realtime.transport({ autoSubscribe: true });
 await transport.connect();
@@ -528,7 +528,7 @@ client.push.requestPermission()             → Promise<'granted'|'denied'>
 ### Errors
 
 ```
-import { EdgeBaseError } from '@edgebase-fun/web'
+import { EdgeBaseError } from '@edge-base/web'
 EdgeBaseError extends Error {
   code: number                              // HTTP status code (e.g. 400, 401, 404)
   message: string

@@ -18,7 +18,7 @@ If you need the current checked-in certification evidence and how to read it, se
 
 | SDK | Type | Platform | Client Package | Admin Package |
 |-----|------|----------|:--------------:|:-------------:|
-| [JavaScript/TypeScript](#javascripttypescript) | Client + Admin | Web, Node.js, Deno, Bun, React Native | `@edgebase-fun/web` · `@edgebase-fun/react-native` | `@edgebase-fun/admin` |
+| [JavaScript/TypeScript](#javascripttypescript) | Client + Admin | Web, Node.js, Deno, Bun, React Native | `@edge-base/web` · `@edge-base/react-native` | `@edge-base/admin` |
 | [Dart/Flutter](#dartflutter) | Client + Admin | iOS, Android, Web | `edgebase_flutter` | `edgebase_admin` |
 | [Swift](#swift) | Client only | iOS, macOS | Swift PM | — |
 | [Kotlin](#kotlin) | Client + Admin | Android, iOS, JVM | KMP module | `edgebase-admin-kotlin` |
@@ -51,11 +51,11 @@ The public docs separate "what exists" from "what is continuously certified." Pa
 <TabItem value="client" label="Client SDK" default>
 
 ```bash
-npm install @edgebase-fun/web
+npm install @edge-base/web
 ```
 
 ```typescript
-import { createClient } from '@edgebase-fun/web';
+import { createClient } from '@edge-base/web';
 
 const client = createClient('https://your-project.edgebase.fun');
 ```
@@ -64,11 +64,11 @@ const client = createClient('https://your-project.edgebase.fun');
 <TabItem value="admin" label="Admin SDK">
 
 ```bash
-npm install @edgebase-fun/admin
+npm install @edge-base/admin
 ```
 
 ```typescript
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 
 const admin = createAdminClient('https://your-project.edgebase.fun', {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY,
@@ -232,14 +232,14 @@ val admin = AdminEdgeBase(
 
 ### JavaScript — React Native
 
-> For React Native apps, use the dedicated `@edgebase-fun/react-native` package instead of `@edgebase-fun/web`. It keeps the same mental model, but requires explicit async storage wiring and uses React Native lifecycle integrations.
+> For React Native apps, use the dedicated `@edge-base/react-native` package instead of `@edge-base/web`. It keeps the same mental model, but requires explicit async storage wiring and uses React Native lifecycle integrations.
 
 ```bash
-npm install @edgebase-fun/react-native @react-native-async-storage/async-storage
+npm install @edge-base/react-native @react-native-async-storage/async-storage
 ```
 
 ```typescript
-import { createClient } from '@edgebase-fun/react-native';
+import { createClient } from '@edge-base/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const client = createClient('https://your-project.edgebase.fun', {

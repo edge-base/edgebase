@@ -1,20 +1,20 @@
 /**
- * @edgebase-fun/web — Client-side EdgeBase SDK (browser / React Native / mobile)
+ * @edge-base/web — Client-side EdgeBase SDK (browser / React Native / mobile)
  *
  * @example
- * import { createClient } from '@edgebase-fun/web';
+ * import { createClient } from '@edge-base/web';
  * const client = createClient('https://my-app.edgebase.fun');
  * await client.auth.signUp({ email: 'user@test.com', password: 'pass123' });
  * const posts = await client.db('shared').table('posts').where('status', '==', 'published').get();
  */
 
-import { HttpClient } from '@edgebase-fun/core';
-import { ContextManager } from '@edgebase-fun/core';
-import type { ContextValue } from '@edgebase-fun/core';
-import { DbRef } from '@edgebase-fun/core';
-import { StorageClient } from '@edgebase-fun/core';
-import { FunctionsClient } from '@edgebase-fun/core';
-import { DefaultDbApi, HttpClientAdapter, PublicHttpClientAdapter } from '@edgebase-fun/core';
+import { HttpClient } from '@edge-base/core';
+import { ContextManager } from '@edge-base/core';
+import type { ContextValue } from '@edge-base/core';
+import { DbRef } from '@edge-base/core';
+import { StorageClient } from '@edge-base/core';
+import { FunctionsClient } from '@edge-base/core';
+import { DefaultDbApi, HttpClientAdapter, PublicHttpClientAdapter } from '@edge-base/core';
 import { DatabaseLiveClient, type DatabaseLiveOptions } from './database-live.js';
 import type { RoomOptions } from './room.js';
 import { RoomClient } from './room.js';

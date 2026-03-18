@@ -30,7 +30,7 @@ The dev server starts automatically and the Admin Dashboard opens at `http://loc
 Open `edgebase.config.ts` and replace the contents with:
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   databases: {
@@ -107,7 +107,7 @@ In a separate terminal, create a frontend directory and install the JavaScript S
 mkdir -p frontend
 cd frontend
 npm init -y
-npm install @edgebase-fun/web
+npm install @edge-base/web
 ```
 
 ## 4. Build the Frontend
@@ -178,7 +178,7 @@ Create `frontend/index.html`:
   </div>
 
   <script type="module">
-    import { createClient } from '@edgebase-fun/web';
+    import { createClient } from '@edge-base/web';
 
     const client = createClient('http://localhost:8787');
     const todos = client.db('app').table('todos');

@@ -21,7 +21,7 @@ This is different from database, storage, database subscription, room, or push a
 ## Configuration
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   auth: {

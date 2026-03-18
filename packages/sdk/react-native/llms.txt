@@ -1,12 +1,12 @@
 # EdgeBase React Native SDK
 
-Use this file as a quick-reference contract for AI coding assistants working with `@edgebase-fun/react-native`.
+Use this file as a quick-reference contract for AI coding assistants working with `@edge-base/react-native`.
 
 ## Package Boundary
 
-Use `@edgebase-fun/react-native` for React Native apps on iOS, Android, and React Native Web.
+Use `@edge-base/react-native` for React Native apps on iOS, Android, and React Native Web.
 
-Do not assume browser-only APIs like `localStorage`, `window.location`, or DOM-based captcha widgets. For browser apps use `@edgebase-fun/web`.
+Do not assume browser-only APIs like `localStorage`, `window.location`, or DOM-based captcha widgets. For browser apps use `@edge-base/web`.
 
 ## Source Of Truth
 
@@ -22,7 +22,7 @@ Do not assume browser-only APIs like `localStorage`, `window.location`, or DOM-b
 ### Create a client
 
 ```ts
-import { createClient } from '@edgebase-fun/react-native';
+import { createClient } from '@edge-base/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Linking } from 'react-native';
 
@@ -75,7 +75,7 @@ await client.push.register();
 
 ```tsx
 import { WebView } from 'react-native-webview';
-import { TurnstileWebView, useTurnstile } from '@edgebase-fun/react-native';
+import { TurnstileWebView, useTurnstile } from '@edge-base/react-native';
 
 const captcha = useTurnstile({
   baseUrl: 'https://your-project.edgebase.fun',
@@ -108,7 +108,7 @@ const captcha = useTurnstile({
 - do not call `push.register()` before configuring a token provider
 - do not assume `react-native-webview` is available unless you install it
 - do not assume `app` or `shared` are reserved namespace names; they are examples from project config
-- if you need browser-only code, use `@edgebase-fun/web` instead
+- if you need browser-only code, use `@edge-base/web` instead
 
 ## Quick Reference
 

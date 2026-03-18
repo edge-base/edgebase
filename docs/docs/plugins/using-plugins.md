@@ -9,7 +9,7 @@ sidebar_position: 1
 Plugins are standard npm packages. Install them like any other dependency:
 
 ```bash
-npm install @edgebase-fun/plugin-stripe
+npm install @edge-base/plugin-stripe
 ```
 
 ## Configuration
@@ -17,8 +17,8 @@ npm install @edgebase-fun/plugin-stripe
 Import the plugin's factory function and add it to the `plugins` array in `edgebase.config.ts`:
 
 ```typescript title="edgebase.config.ts"
-import { defineConfig } from '@edgebase-fun/shared';
-import { stripePlugin } from '@edgebase-fun/plugin-stripe';
+import { defineConfig } from '@edge-base/shared';
+import { stripePlugin } from '@edge-base/plugin-stripe';
 
 export default defineConfig({
   plugins: [
@@ -46,10 +46,10 @@ Store sensitive values (API keys, secrets) in `.env.development` / `.env.release
 Add multiple plugins to the array. They are processed in order:
 
 ```typescript title="edgebase.config.ts"
-import { defineConfig } from '@edgebase-fun/shared';
-import { stripePlugin } from '@edgebase-fun/plugin-stripe';
-import { analyticsPlugin } from '@edgebase-fun/plugin-analytics';
-import { emailPlugin } from '@edgebase-fun/plugin-email';
+import { defineConfig } from '@edge-base/shared';
+import { stripePlugin } from '@edge-base/plugin-stripe';
+import { analyticsPlugin } from '@edge-base/plugin-analytics';
+import { emailPlugin } from '@edge-base/plugin-email';
 
 export default defineConfig({
   plugins: [
@@ -109,9 +109,9 @@ Shows all configured plugins with their manifest metadata, injected tables, func
 ### Removing a Plugin
 
 1. Remove it from `edgebase.config.ts`
-2. Uninstall the package: `npm uninstall @edgebase-fun/plugin-stripe`
+2. Uninstall the package: `npm uninstall @edge-base/plugin-stripe`
 3. Redeploy: `npx edgebase deploy`
-4. Remove plugin-owned data: `npx edgebase plugins cleanup @edgebase-fun/plugin-stripe`
+4. Remove plugin-owned data: `npx edgebase plugins cleanup @edge-base/plugin-stripe`
 
 `plugins cleanup` deletes namespaced plugin tables plus plugin migration metadata stored in the internal control-plane D1 (`CONTROL_DB`). On Cloudflare Edge, pass `--account-id` and `--api-token` if the plugin ever wrote to dynamic Durable Object instances; otherwise the CLI can only clean currently known namespaces.
 
@@ -123,8 +123,8 @@ Some plugins provide optional client SDK wrappers for typed frontend access:
 
 ```typescript
 // Client-side (e.g. in a React app)
-import { createClient } from '@edgebase-fun/web';
-import { createStripePlugin } from '@edgebase-fun/plugin-stripe/client';
+import { createClient } from '@edge-base/web';
+import { createStripePlugin } from '@edge-base/plugin-stripe/client';
 
 const client = createClient({ baseUrl: 'https://your-project.edgebase.app' });
 const stripe = createStripePlugin(client);

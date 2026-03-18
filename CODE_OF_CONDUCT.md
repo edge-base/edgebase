@@ -37,7 +37,7 @@ This Code of Conduct applies to:
 ## Reporting
 
 If you experience or witness behavior that violates this Code of Conduct,
-please report it privately to the maintainers at `security@edgebase.fun`.
+please report it privately to the maintainers at `edgebase52@gmail.com`.
 
 When possible, include:
 

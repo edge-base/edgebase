@@ -23,7 +23,7 @@ import {
   type RoomServerAPI,
   type RoomSender,
   type RoomHandlerContext,
-} from '@edgebase-fun/shared';
+} from '@edge-base/shared';
 import { parseConfig as getGlobalConfig } from '../lib/do-router.js';
 import { resolveAuthContextFromToken } from '../middleware/auth.js';
 import { buildFunctionContext } from '../lib/functions.js';

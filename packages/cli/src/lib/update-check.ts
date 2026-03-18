@@ -16,7 +16,7 @@ import { isQuiet } from './cli-context.js';
 import { npmCommand } from './npm.js';
 
 const CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
-const UPDATE_CHECK_PACKAGE_NAME = '@edgebase-fun/cli';
+const UPDATE_CHECK_PACKAGE_NAME = '@edge-base/cli';
 
 interface UpdateCache {
   latest: string;

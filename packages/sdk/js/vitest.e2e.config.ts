@@ -20,9 +20,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@edgebase-fun/core': resolve(__dirname, 'packages/core/src/index.ts'),
-      '@edgebase-fun/web': resolve(__dirname, 'packages/web/src/index.ts'),
-      '@edgebase-fun/admin': resolve(__dirname, 'packages/admin/src/index.ts'),
+      '@edge-base/core': resolve(__dirname, 'packages/core/src/index.ts'),
+      '@edge-base/web': resolve(__dirname, 'packages/web/src/index.ts'),
+      '@edge-base/admin': resolve(__dirname, 'packages/admin/src/index.ts'),
     },
   },
 });

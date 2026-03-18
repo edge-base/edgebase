@@ -7,7 +7,7 @@
  * - deleteField(): field = NULL
  */
 import type { FieldOperator } from './validation.js';
-import { EdgeBaseError } from '@edgebase-fun/shared';
+import { EdgeBaseError } from '@edge-base/shared';
 
 interface SetClause {
   /** SQL fragment for SET clause, e.g. "viewCount" = COALESCE("viewCount", 0) + ? */

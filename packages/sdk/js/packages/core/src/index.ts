@@ -1,5 +1,5 @@
 /**
- * @edgebase-fun/core — Shared modules used by both Client and Admin SDKs.
+ * @edge-base/core — Shared modules used by both Client and Admin SDKs.
  *: Core 모듈 (Client + Admin 공통)
  *
  * Modules: HttpClient, TableRef, StorageClient, FieldOps, Context, Errors, Types

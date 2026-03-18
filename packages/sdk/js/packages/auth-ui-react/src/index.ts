@@ -1,11 +1,11 @@
 /**
- * @edgebase-fun/auth-ui-react — Headless React authentication UI components.
+ * @edge-base/auth-ui-react — Headless React authentication UI components.
  *
  * Usage:
  * ```tsx
- * import { createClient } from '@edgebase-fun/web';
- * import { AuthProvider, AuthForm } from '@edgebase-fun/auth-ui-react';
- * import '@edgebase-fun/auth-ui-react/styles.css'; // optional default theme
+ * import { createClient } from '@edge-base/web';
+ * import { AuthProvider, AuthForm } from '@edge-base/auth-ui-react';
+ * import '@edge-base/auth-ui-react/styles.css'; // optional default theme
  *
  * const client = createClient('https://my-app.edgebase.fun');
  *

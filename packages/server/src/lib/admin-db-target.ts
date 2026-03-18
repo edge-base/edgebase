@@ -3,7 +3,7 @@ import type {
   AdminInstanceDiscoveryContext,
   AdminInstanceDiscoveryOption,
   EdgeBaseConfig,
-} from '@edgebase-fun/shared';
+} from '@edge-base/shared';
 import { executeD1Sql } from './d1-sql.js';
 import { executeDoSql } from './do-sql.js';
 import { getD1BindingName, shouldRouteToD1 } from './do-router.js';

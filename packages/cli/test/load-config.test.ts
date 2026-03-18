@@ -70,7 +70,7 @@ export default {
     expect(tableNames).toContain('posts');
   });
 
-  it('loads typed config files that import @edgebase-fun/shared without falling back to regex', () => {
+  it('loads typed config files that import @edge-base/shared without falling back to regex', () => {
     const configDir = join(tmpDir, 'config');
     mkdirSync(configDir, { recursive: true });
     writeFileSync(
@@ -90,7 +90,7 @@ export const rateLimiting = {
     writeFileSync(
       configFile,
       `
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 import { rateLimiting } from './config/rate-limits';
 
 export default defineConfig({
@@ -115,19 +115,17 @@ export default defineConfig({
       'utf-8',
     );
 
-    const result = loadConfigSafe(configFile, tmpDir);
+    const result = loadConfigSafe(configFile, tmpDir, { allowRegexFallback: false });
 
     expect(result.databases).toBeDefined();
-    if ('release' in result) {
-      expect(result.release).toBe(true);
-      expect(result.cors).toEqual({ origin: ['http://localhost:5174'] });
-      expect(result.rateLimiting).toEqual({
-        global: {
-          requests: 42,
-          windowSec: 60,
-        },
-      });
-    }
+    expect(result.release).toBe(true);
+    expect(result.cors).toEqual({ origin: ['http://localhost:5174'] });
+    expect(result.rateLimiting).toEqual({
+      global: {
+        requests: 42,
+        windowSec: 60,
+      },
+    });
   });
 });
 

@@ -1,4 +1,4 @@
-<h1 align="center">@edgebase-fun/web</h1>
+<h1 align="center">@edge-base/web</h1>
 
 <p align="center">
   <b>Browser SDK for EdgeBase</b><br>
@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@edgebase-fun/web"><img src="https://img.shields.io/npm/v/%40edgebase-fun%2Fweb?color=brightgreen" alt="npm"></a>&nbsp;
+  <a href="https://www.npmjs.com/package/@edge-base/web"><img src="https://img.shields.io/npm/v/%40edge-base%2Fweb?color=brightgreen" alt="npm"></a>&nbsp;
   <a href="https://edgebase.fun/docs/database/client-sdk"><img src="https://img.shields.io/badge/docs-client_sdk-blue" alt="Docs"></a>&nbsp;
   <a href="https://github.com/edge-base/edgebase/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </p>
@@ -24,7 +24,7 @@
 
 ---
 
-`@edgebase-fun/web` is the main client SDK for browser environments.
+`@edge-base/web` is the main client SDK for browser environments.
 
 It is designed for apps that need:
 
@@ -35,7 +35,7 @@ It is designed for apps that need:
 - storage uploads and file URLs
 - client-side function calls, analytics, and web push
 
-If you need privileged or server-only access, use [`@edgebase-fun/admin`](https://www.npmjs.com/package/@edgebase-fun/admin) instead.
+If you need privileged or server-only access, use [`@edge-base/admin`](https://www.npmjs.com/package/@edge-base/admin) instead.
 
 > Beta: the package is already usable, but some APIs may still evolve before general availability.
 
@@ -73,7 +73,7 @@ Use it when you want an agent or code assistant to:
 
 You can find it:
 
-- in this package after install: `node_modules/@edgebase-fun/web/llms.txt`
+- in this package after install: `node_modules/@edge-base/web/llms.txt`
 - in the repository: [llms.txt](https://github.com/edge-base/edgebase/blob/main/packages/sdk/js/packages/web/llms.txt)
 
 For deeper behavioral details, pair `llms.txt` with the docs linked above.
@@ -82,7 +82,7 @@ For deeper behavioral details, pair `llms.txt` with the docs linked above.
 
 Most browser SDKs stop at auth + CRUD.
 
-`@edgebase-fun/web` is meant to be the single browser entry point for the whole EdgeBase app surface:
+`@edge-base/web` is meant to be the single browser entry point for the whole EdgeBase app surface:
 
 | Capability | Included |
 |---|---|
@@ -98,7 +98,7 @@ Most browser SDKs stop at auth + CRUD.
 ## Installation
 
 ```bash
-npm install @edgebase-fun/web
+npm install @edge-base/web
 ```
 
 Starting a brand new project?
@@ -146,7 +146,7 @@ The main thing we recommend is avoiding scaffolding directly into an existing ap
 ## Quick Start
 
 ```ts
-import { createClient } from '@edgebase-fun/web';
+import { createClient } from '@edge-base/web';
 
 const client = createClient('https://your-project.edgebase.fun');
 
@@ -330,11 +330,11 @@ Read more: [Room Client SDK](https://edgebase.fun/docs/room/client-sdk)
 
 | Package | Use it when |
 |---|---|
-| `@edgebase-fun/web` | You are in the browser or another untrusted client runtime |
-| `@edgebase-fun/admin` | You need trusted server/admin access |
-| `@edgebase-fun/ssr` | You want cookie-based SSR helpers for frameworks like Next.js |
-| `@edgebase-fun/auth-ui-react` | You want headless React auth UI built on top of the web SDK |
-| `@edgebase-fun/react-native` | You are building a React Native app |
+| `@edge-base/web` | You are in the browser or another untrusted client runtime |
+| `@edge-base/admin` | You need trusted server/admin access |
+| `@edge-base/ssr` | You want cookie-based SSR helpers for frameworks like Next.js |
+| `@edge-base/auth-ui-react` | You want headless React auth UI built on top of the web SDK |
+| `@edge-base/react-native` | You are building a React Native app |
 
 ## Docs
 

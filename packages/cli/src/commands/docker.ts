@@ -153,7 +153,7 @@ function hasEdgeBasePackageMarker(dir: string): boolean {
       return true;
     }
 
-    return ['edgebase', '@edgebase-fun/cli', '@edgebase-fun/shared'].some(
+    return ['edgebase', '@edge-base/cli', '@edge-base/shared'].some(
       (name) => typeof dependencies[name] === 'string',
     );
   } catch {

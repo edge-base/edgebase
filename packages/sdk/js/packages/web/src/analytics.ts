@@ -14,7 +14,7 @@
  *   // Manual flush if needed
  *   await client.analytics.flush();
  */
-import { ApiPaths, type HttpClient, type GeneratedDbApi } from '@edgebase-fun/core';
+import { ApiPaths, type HttpClient, type GeneratedDbApi } from '@edge-base/core';
 
 interface QueuedEvent {
   name: string;

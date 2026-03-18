@@ -17,7 +17,7 @@ Use `FunctionError` for application-level failures that should become an HTTP re
 Throw `FunctionError` in your function handlers to return structured error responses:
 
 ```typescript
-import { FunctionError } from '@edgebase-fun/shared';
+import { FunctionError } from '@edge-base/shared';
 
 export const POST = defineFunction(async ({ auth, admin }) => {
   if (!auth) {
@@ -110,7 +110,7 @@ Response:
 Errors thrown by functions are caught as `EdgeBaseError` in the client SDK:
 
 ```typescript
-import { EdgeBaseError } from '@edgebase-fun/web';
+import { EdgeBaseError } from '@edge-base/web';
 
 try {
   await client.functions.post('create-order', { items: [] });

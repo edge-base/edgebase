@@ -3,7 +3,7 @@
     "description": "EdgeBase PHP Server SDK — server-side BaaS client (DECISIONS #117)",
     "type": "library",
     "license": "MIT",
-    "version": "0.1.0",
+    "version": "0.1.2",
     "require": {
         "php": ">=8.1",
         "ext-curl": "*",

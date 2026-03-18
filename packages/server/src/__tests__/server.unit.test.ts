@@ -22,7 +22,7 @@ import {
   validateUpdate,
   isFieldOperator,
 } from '../lib/validation.js';
-import { EdgeBaseError } from '@edgebase-fun/shared';
+import { EdgeBaseError } from '@edge-base/shared';
 
 // ─── A. op-parser.ts ──────────────────────────────────────────────────────────
 

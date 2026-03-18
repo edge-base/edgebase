@@ -33,7 +33,7 @@ Client token registration and unregistration do **not** trigger push hooks.
 ## Configuration
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   push: {

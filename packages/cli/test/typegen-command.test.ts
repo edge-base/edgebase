@@ -43,7 +43,7 @@ describe('typegen command', () => {
     writeFileSync(
       join(testDir, 'edgebase.config.ts'),
       `
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   databases: {
@@ -85,7 +85,7 @@ export default defineConfig({
     writeFileSync(
       join(testDir, 'edgebase.config.ts'),
       `
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   databases: {

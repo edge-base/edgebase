@@ -23,7 +23,7 @@ Admin Auth is available in all Admin SDKs. See [Admin SDK](../sdks/client-vs-ser
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 
 const admin = createAdminClient('https://my-app.edgebase.fun', {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY,

@@ -9,7 +9,7 @@ Use EdgeBase as the backend for your Next.js app with full SSR support.
 ## Installation
 
 ```bash
-npm install @edgebase-fun/web @edgebase-fun/ssr
+npm install @edge-base/web @edge-base/ssr
 ```
 
 ## Environment Variables
@@ -25,24 +25,24 @@ NEXT_PUBLIC_EDGEBASE_URL=https://your-project.edgebase.fun
 
 ### Browser Client
 
-For client-side components (`'use client'`), use `@edgebase-fun/web`:
+For client-side components (`'use client'`), use `@edge-base/web`:
 
 ```typescript
 // lib/edgebase-client.ts
 'use client';
 
-import { createClient } from '@edgebase-fun/web';
+import { createClient } from '@edge-base/web';
 
 export const client = createClient(process.env.NEXT_PUBLIC_EDGEBASE_URL!);
 ```
 
 ### SSR Client (App Router)
 
-For Server Components and Route Handlers, use `@edgebase-fun/ssr`:
+For Server Components and Route Handlers, use `@edge-base/ssr`:
 
 ```typescript
 // lib/edgebase-server.ts
-import { createServerClient } from '@edgebase-fun/ssr';
+import { createServerClient } from '@edge-base/ssr';
 import { cookies } from 'next/headers';
 
 export async function createEdgeBaseServer() {
@@ -78,7 +78,7 @@ The same `EDGEBASE_SERVICE_KEY` can be used from any Admin SDK.
 
 ```typescript
 // lib/edgebase-admin.ts
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 
 export const admin = createAdminClient(process.env.EDGEBASE_URL!, {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY,
@@ -130,7 +130,7 @@ Interactive components use the browser client:
 'use client';
 
 import { client } from '@/lib/edgebase-client';
-import { increment } from '@edgebase-fun/core';
+import { increment } from '@edge-base/core';
 
 export function LikeButton({ postId }: { postId: string }) {
   const handleLike = async () => {
@@ -210,7 +210,7 @@ Handle OAuth redirects server-side using the SSR client:
 ```typescript
 // app/auth/callback/route.ts
 import { NextResponse } from 'next/server';
-import { createServerClient } from '@edgebase-fun/ssr';
+import { createServerClient } from '@edge-base/ssr';
 import { cookies } from 'next/headers';
 
 export async function GET(request: Request) {
@@ -244,7 +244,7 @@ Protect routes and refresh tokens in Next.js middleware:
 // middleware.ts
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { createServerClient } from '@edgebase-fun/ssr';
+import { createServerClient } from '@edge-base/ssr';
 
 export async function middleware(request: NextRequest) {
   const response = NextResponse.next();
@@ -361,7 +361,7 @@ For the Pages Router, create a cookie wrapper for `getServerSideProps`:
 
 ```typescript
 // lib/edgebase-pages.ts
-import { createServerClient } from '@edgebase-fun/ssr';
+import { createServerClient } from '@edge-base/ssr';
 import type { GetServerSidePropsContext } from 'next';
 import { serialize, parse } from 'cookie';
 

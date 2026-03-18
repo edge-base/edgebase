@@ -126,11 +126,11 @@ describe('Runtime config scaffold', () => {
     expect(registry).toContain('rebuildCompiledRoutes()');
   });
 
-  it('writes an ESM-resolvable @edgebase-fun/shared shim for config evaluation', () => {
+  it('writes an ESM-resolvable @edge-base/shared shim for config evaluation', () => {
     ensureProjectSharedPackageLink(tmpDir);
 
     const packageJson = readFileSync(
-      join(tmpDir, 'node_modules', '@edgebase-fun', 'shared', 'package.json'),
+      join(tmpDir, 'node_modules', '@edge-base', 'shared', 'package.json'),
       'utf-8',
     );
     expect(JSON.parse(packageJson)).toMatchObject({
@@ -150,7 +150,7 @@ describe('Runtime config scaffold', () => {
   it('does not rewrite a generated shared shim into a self-referential link on repeat runs', () => {
     const workspaceRoot = join(tmpDir, 'workspace');
     const projectDir = join(workspaceRoot, 'apps', 'edgebase');
-    const workspaceShared = join(workspaceRoot, 'node_modules', '@edgebase-fun', 'shared');
+    const workspaceShared = join(workspaceRoot, 'node_modules', '@edge-base', 'shared');
     mkdirSync(join(projectDir), { recursive: true });
     mkdirSync(join(workspaceShared, 'src'), { recursive: true });
     writeFileSync(join(workspaceRoot, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
@@ -159,8 +159,8 @@ describe('Runtime config scaffold', () => {
     ensureProjectSharedPackageLink(projectDir);
     ensureProjectSharedPackageLink(projectDir);
 
-    const projectSharedSrc = join(projectDir, 'node_modules', '@edgebase-fun', 'shared', 'src');
-    expect(readFileSync(join(projectDir, 'node_modules', '@edgebase-fun', 'shared', '.edgebase-shim'), 'utf-8')).toContain(
+    const projectSharedSrc = join(projectDir, 'node_modules', '@edge-base', 'shared', 'src');
+    expect(readFileSync(join(projectDir, 'node_modules', '@edge-base', 'shared', '.edgebase-shim'), 'utf-8')).toContain(
       'edgebase-shared-shim',
     );
     const linkedSharedSrc = readlinkSync(projectSharedSrc);

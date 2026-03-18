@@ -1,4 +1,4 @@
-import { EdgeBaseError } from '@edgebase-fun/core';
+import { EdgeBaseError } from '@edge-base/core';
 
 interface RefreshResponse {
   accessToken?: string;

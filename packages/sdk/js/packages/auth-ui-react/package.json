@@ -1,6 +1,6 @@
 {
-    "name": "@edgebase-fun/auth-ui-react",
-    "version": "0.1.0",
+    "name": "@edge-base/auth-ui-react",
+    "version": "0.1.2",
     "description": "EdgeBase Auth UI for React — pre-built authentication components",
     "license": "MIT",
     "repository": {
@@ -49,7 +49,7 @@
         "react-dom": ">=18.0.0"
     },
     "dependencies": {
-        "@edgebase-fun/web": "workspace:*"
+        "@edge-base/web": "workspace:*"
     },
     "devDependencies": {
         "@types/react": "^18.0.0",

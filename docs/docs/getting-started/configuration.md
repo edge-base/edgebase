@@ -59,7 +59,7 @@ Block names like `app`, `workspace`, `user`, `store`, `guild` are just examples 
 All table definitions live inside the `databases` object. Each key in `databases` defines a **DB block** -- an isolated namespace that routes either to D1 (single-instance) or to Durable Objects + SQLite (dynamic / explicitly isolated).
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   databases: {
@@ -1017,7 +1017,7 @@ App Functions are defined in the `functions/` directory, not in the config file.
 Add first-party or community plugins:
 
 ```typescript
-import { stripePlugin } from '@edgebase-fun/plugin-stripe';
+import { stripePlugin } from '@edge-base/plugin-stripe';
 
 export default defineConfig({
   plugins: [stripePlugin({ secretKey: process.env.STRIPE_SECRET_KEY! })],

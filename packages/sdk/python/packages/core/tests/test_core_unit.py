@@ -1,5 +1,5 @@
 """
-@edgebase-fun/core Python SDK — 단위 테스트
+@edge-base/core Python SDK — 단위 테스트
 
 테스트 대상:
   - edgebase_core.table.TableRef (immutable query builder)

@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <b>100x cheaper. ~0ms cold starts. Near-unlimited scale.</b><br>
+  <b>100x cheaper than Firebase. ~0ms cold starts. Near-unlimited scale.</b><br>
   Open-source edge-native BaaS that runs on Edge, Docker, and Node.js
 </p>
 
@@ -34,7 +34,7 @@ npx edgebase deploy             # Deploy globally on Cloudflare
 
 Same code, same behavior — choose your runtime, switch when you need to.
 
-`npm create edgebase@latest` now starts from a blank app data model: auth, storage, and a sample health function are scaffolded, dependencies are installed automatically, and no default `posts` table is created for you. In local dev, the API runs on `http://localhost:8787` and the Admin Dashboard opens on `http://localhost:8787/admin`.
+`npm create edgebase@latest` now starts from a blank app data model: auth, storage, and a sample health function are scaffolded, and dependencies are installed automatically. In local dev, the API runs on `http://localhost:8787` and the Admin Dashboard opens on `http://localhost:8787/admin`.
 
 Guides: [Quickstart](https://edgebase.fun/docs/getting-started/quickstart) · [Configuration](https://edgebase.fun/docs/getting-started/configuration) · [Deployment](https://edgebase.fun/docs/getting-started/deployment) · [Self-Hosting](https://edgebase.fun/docs/getting-started/self-hosting) · [Admin Dashboard](https://edgebase.fun/docs/admin-dashboard)
 
@@ -46,7 +46,7 @@ I did not build EdgeBase because existing BaaS products were bad. I built it out
 
 Firebase pioneered the modern BaaS experience and still deserves respect, but its pricing can become hard to justify as usage grows. Supabase gave the community a real gift with an open-source BaaS that made this space more accessible and more transparent, but self-hosting was still operationally complex, some capabilities differ between the open-source and hosted versions, and at scale its hosted pricing is not dramatically different from Firebase. PocketBase made getting started feel unusually elegant, but for larger production systems the upgrade path can become harder than it first appears.
 
-I built EdgeBase to keep the simplicity that made those tools compelling while removing the tradeoffs that kept surfacing in practice. Thanks to Miniflare, it can still start with the kind of immediacy that made PocketBase feel elegant. And thanks to Cloudflare Durable Objects and serverless PostgreSQL options like Neon, it can grow toward planet-scale workloads without forcing a rewrite. It was designed from day one for serverless compute rather than adapted to it later. That is why Cloudflare is a first-class runtime for EdgeBase, and why its low cost, near-zero cold starts, and near-unlimited scale all come from the same architectural decision.
+I built EdgeBase to keep the simplicity that made those tools compelling while removing the tradeoffs that kept surfacing in practice. Thanks to Miniflare, it can still start with the kind of immediacy that made PocketBase feel elegant. And thanks to Cloudflare Durable Objects and serverless PostgreSQL options like Neon, it can grow toward planet-scale workloads without forcing a rewrite. It was designed from day one for serverless compute rather than adapted to it later. That is why Cloudflare is a first-class runtime for EdgeBase, and why its low cost, near-zero cold starts, and near-unlimited scale all come from the same architectural decision. EdgeBase is my answer to that question — and I hope it becomes yours too.
 
 ### Why Can It Be Much Cheaper?
 
@@ -257,7 +257,7 @@ app: {
 More examples: [SDK Overview](https://edgebase.fun/docs/sdks) · [API Reference](https://edgebase.fun/docs/api) · [CLI](https://edgebase.fun/docs/cli)
 
 ```typescript
-import { createClient } from '@edgebase-fun/web';
+import { createClient } from '@edge-base/web';
 
 const client = createClient('http://localhost:8787');
 
@@ -469,7 +469,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Security
 
-If you discover a security vulnerability, please email **security@edgebase.fun** instead of opening a public issue.
+If you discover a security vulnerability, please email **edgebase52@gmail.com** instead of opening a public issue.
+Automated security checks also run in CI via CodeQL, Semgrep, and Snyk.
 
 ## License
 

@@ -13,7 +13,7 @@ import type {
   SchemaField,
   IndexConfig,
   FkReference,
-} from '@edgebase-fun/shared';
+} from '@edge-base/shared';
 
 // ─── Type Mapping ───
 

@@ -8,8 +8,8 @@ export default defineConfig({
       // token-manager.js / token-manager (no ext) → token-manager.ts (RN TokenManager)
       '../src/token-manager.js': path.resolve(__dirname, 'src/token-manager.ts'),
       '../src/token-manager': path.resolve(__dirname, 'src/token-manager.ts'),
-      '@edgebase-fun/shared': path.resolve(__dirname, '../../shared/src/index.ts'),
-      '@edgebase-fun/core': path.resolve(__dirname, '../js/packages/core/src/index.ts'),
+      '@edge-base/shared': path.resolve(__dirname, '../../shared/src/index.ts'),
+      '@edge-base/core': path.resolve(__dirname, '../js/packages/core/src/index.ts'),
     },
   },
   test: {

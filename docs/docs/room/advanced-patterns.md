@@ -25,7 +25,7 @@ Games typically split data between shared state (the board, scores, turn order) 
 ### Server Configuration
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   rooms: {

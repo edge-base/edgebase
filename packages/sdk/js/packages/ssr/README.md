@@ -1,4 +1,4 @@
-<h1 align="center">@edgebase-fun/ssr</h1>
+<h1 align="center">@edge-base/ssr</h1>
 
 <p align="center">
   <b>Server-side auth and data helpers for EdgeBase</b><br>
@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@edgebase-fun/ssr"><img src="https://img.shields.io/npm/v/%40edgebase-fun%2Fssr?color=brightgreen" alt="npm"></a>&nbsp;
+  <a href="https://www.npmjs.com/package/@edge-base/ssr"><img src="https://img.shields.io/npm/v/%40edge-base%2Fssr?color=brightgreen" alt="npm"></a>&nbsp;
   <a href="https://edgebase.fun/docs/sdks/nextjs"><img src="https://img.shields.io/badge/docs-ssr-blue" alt="Docs"></a>&nbsp;
   <a href="https://github.com/edge-base/edgebase/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </p>
@@ -23,7 +23,7 @@
 
 ---
 
-`@edgebase-fun/ssr` is the package you use when server-side code should run as the current signed-in user via cookies.
+`@edge-base/ssr` is the package you use when server-side code should run as the current signed-in user via cookies.
 
 It is built for:
 
@@ -33,7 +33,7 @@ It is built for:
 - SSR middleware and request handlers
 - cookie-based session transfer between server and browser code
 
-If you are writing browser code, use [`@edgebase-fun/web`](https://www.npmjs.com/package/@edgebase-fun/web). If you need privileged admin access from the server, use [`@edgebase-fun/admin`](https://www.npmjs.com/package/@edgebase-fun/admin).
+If you are writing browser code, use [`@edge-base/web`](https://www.npmjs.com/package/@edge-base/web). If you need privileged admin access from the server, use [`@edge-base/admin`](https://www.npmjs.com/package/@edge-base/admin).
 
 > Beta: the package is already usable, but some APIs may still evolve before general availability.
 
@@ -54,7 +54,7 @@ This package ships with an `llms.txt` file for AI-assisted SSR integration.
 
 You can find it:
 
-- after install: `node_modules/@edgebase-fun/ssr/llms.txt`
+- after install: `node_modules/@edge-base/ssr/llms.txt`
 - in the repository: [llms.txt](https://github.com/edge-base/edgebase/blob/main/packages/sdk/js/packages/ssr/llms.txt)
 
 Use it when you want an agent to:
@@ -67,19 +67,19 @@ Use it when you want an agent to:
 ## Installation
 
 ```bash
-npm install @edgebase-fun/ssr
+npm install @edge-base/ssr
 ```
 
 Most SSR apps also use the browser SDK alongside it:
 
 ```bash
-npm install @edgebase-fun/web @edgebase-fun/ssr
+npm install @edge-base/web @edge-base/ssr
 ```
 
 ## Quick Start
 
 ```ts
-import { createServerClient } from '@edgebase-fun/ssr';
+import { createServerClient } from '@edge-base/ssr';
 import { cookies } from 'next/headers';
 
 export async function createEdgeBaseServer() {
@@ -144,7 +144,7 @@ That makes it easy to adapt to framework-specific cookie stores while keeping on
 
 ## OAuth And Session Transfer
 
-On the server, `@edgebase-fun/ssr` is especially useful for:
+On the server, `@edge-base/ssr` is especially useful for:
 
 - reading the current session from cookies
 - writing tokens after a server-side OAuth callback
@@ -166,9 +166,9 @@ console.log(session.accessToken);
 
 | Package | Use it for |
 | --- | --- |
-| `@edgebase-fun/web` | Browser components and client-side auth flows |
-| `@edgebase-fun/ssr` | Server-side code acting as the current signed-in user via cookies |
-| `@edgebase-fun/admin` | Trusted server-side code with Service Key access |
+| `@edge-base/web` | Browser components and client-side auth flows |
+| `@edge-base/ssr` | Server-side code acting as the current signed-in user via cookies |
+| `@edge-base/admin` | Trusted server-side code with Service Key access |
 
 ## License
 

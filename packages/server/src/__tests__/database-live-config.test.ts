@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { EdgeBaseConfig } from '@edgebase-fun/shared';
+import type { EdgeBaseConfig } from '@edge-base/shared';
 import {
   DEFAULT_DB_LIVE_AUTH_TIMEOUT_MS,
   DEFAULT_DB_LIVE_BATCH_THRESHOLD,

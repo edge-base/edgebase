@@ -97,5 +97,5 @@ body:
           required: true
         - label: I included reproduction steps and relevant version information.
           required: true
-        - label: I understand that security vulnerabilities should be reported privately to security@edgebase.fun.
+        - label: I understand that security vulnerabilities should be reported privately to edgebase52@gmail.com.
           required: true

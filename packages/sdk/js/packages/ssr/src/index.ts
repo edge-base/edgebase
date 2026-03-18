@@ -1,12 +1,12 @@
 /**
- * @edgebase-fun/ssr — Server-side rendering helpers for EdgeBase.
+ * @edge-base/ssr — Server-side rendering helpers for EdgeBase.
  *
  * Provides cookie-based token management for SSR frameworks
  * (Next.js, Nuxt, SvelteKit, Remix, etc.).
  *
  * Usage:
  * ```ts
- * import { createServerClient } from '@edgebase-fun/ssr';
+ * import { createServerClient } from '@edge-base/ssr';
  *
  * const client = createServerClient('https://my-app.edgebase.fun', {
  *   cookies: {
@@ -31,8 +31,8 @@ export { CookieTokenManager } from './cookie-token-manager.js';
 export type { CookieStore, CookieOptions, ServerClientOptions } from './types.js';
 
 // Re-export core types for convenience
-export type { ITokenPair } from '@edgebase-fun/core';
-export { EdgeBaseError } from '@edgebase-fun/core';
+export type { ITokenPair } from '@edge-base/core';
+export { EdgeBaseError } from '@edge-base/core';
 
 // ─── Factory ───
 

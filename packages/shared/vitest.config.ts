@@ -6,7 +6,7 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     server: {
       deps: {
-        inline: [/@edgebase\//],
+        inline: [/@edge-base\//],
       },
     },
   },

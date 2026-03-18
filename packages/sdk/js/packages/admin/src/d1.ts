@@ -5,8 +5,8 @@
  *   const admin = createAdminClient(url, { serviceKey });
  *   const rows = await admin.d1('analytics').exec('SELECT * FROM events WHERE type = ?', ['pageview']);
  */
-import type { HttpClient } from '@edgebase-fun/core';
-import { HttpClientAdapter } from '@edgebase-fun/core';
+import type { HttpClient } from '@edge-base/core';
+import { HttpClientAdapter } from '@edge-base/core';
 import { DefaultAdminApi } from './generated/admin-api-core.js';
 
 export class D1Client {

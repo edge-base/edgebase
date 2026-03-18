@@ -23,8 +23,8 @@ import type {
   MigrationConfig,
   HookCtx,
   AuthContext,
-} from '@edgebase-fun/shared';
-import { EdgeBaseError, getTableAccess, getTableHooks } from '@edgebase-fun/shared';
+} from '@edge-base/shared';
+import { EdgeBaseError, getTableAccess, getTableHooks } from '@edge-base/shared';
 import {
   META_TABLE_DDL,
   generateTableDDL,

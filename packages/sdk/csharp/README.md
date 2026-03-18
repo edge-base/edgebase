@@ -181,6 +181,6 @@ await _jb.Storage.Bucket("screenshots").UploadAsync("round1.png", png, "image/pn
 ## 서버 기능이 필요하다면
 
 게임 서버(Node.js, Go 등)에서 아래 SDK를 사용하세요:
-- **Node.js**: `createAdminClient()` from `@edgebase-fun/admin`
+- **Node.js**: `createAdminClient()` from `@edge-base/admin`
 - **Go**: `edgebase.NewAdminClient(url, serviceKey)`
 - **Python**: `EdgeBaseServer(url, service_key=)`

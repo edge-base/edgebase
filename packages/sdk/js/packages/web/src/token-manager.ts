@@ -4,7 +4,7 @@
  *: BroadcastChannel leader election for tab-safe refresh
  */
 
-import { EdgeBaseError } from '@edgebase-fun/core';
+import { EdgeBaseError } from '@edge-base/core';
 import { createBrowserStorage } from './browser-storage.js';
 
 /** Token pair returned from auth endpoints */

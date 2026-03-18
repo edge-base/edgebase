@@ -136,9 +136,9 @@ function copyRuntimeDir(source: string, target: string): void {
 
 function resolveServerRuntimeSource(projectDir: string): string {
   const candidates = dedupeCandidates([
-    join(projectDir, 'node_modules', '@edgebase-fun', 'server', 'src'),
-    resolve(CLI_NODE_MODULES_SOURCE, '@edgebase-fun/server', 'src'),
-    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase-fun/server', 'src'),
+    join(projectDir, 'node_modules', '@edge-base', 'server', 'src'),
+    resolve(CLI_NODE_MODULES_SOURCE, '@edge-base/server', 'src'),
+    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edge-base/server', 'src'),
     MONOREPO_SERVER_RUNTIME_SOURCE,
   ]);
 
@@ -153,9 +153,9 @@ function resolveServerRuntimeSource(projectDir: string): string {
 
 function resolveAdminBuildSource(projectDir: string): string {
   const candidates = dedupeCandidates([
-    join(projectDir, 'node_modules', '@edgebase-fun', 'server', 'admin-build'),
-    resolve(CLI_NODE_MODULES_SOURCE, '@edgebase-fun/server', 'admin-build'),
-    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase-fun/server', 'admin-build'),
+    join(projectDir, 'node_modules', '@edge-base', 'server', 'admin-build'),
+    resolve(CLI_NODE_MODULES_SOURCE, '@edge-base/server', 'admin-build'),
+    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edge-base/server', 'admin-build'),
     ...MONOREPO_ADMIN_BUILD_SOURCES,
   ]);
 
@@ -246,10 +246,10 @@ function getRuntimeNodeModulesCandidates(projectDir: string): string[] {
 
 function getSharedPackageSourceCandidates(projectDir: string): string[] {
   return dedupeCandidates([
-    join(projectDir, 'node_modules', '@edgebase-fun', 'shared'),
-    resolve(CLI_NODE_MODULES_SOURCE, '@edgebase-fun/shared'),
-    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase-fun/shared'),
-    resolve(SERVER_NODE_MODULES_SOURCE, '@edgebase-fun/shared'),
+    join(projectDir, 'node_modules', '@edge-base', 'shared'),
+    resolve(CLI_NODE_MODULES_SOURCE, '@edge-base/shared'),
+    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edge-base/shared'),
+    resolve(SERVER_NODE_MODULES_SOURCE, '@edge-base/shared'),
     MONOREPO_SHARED_SOURCE,
   ]);
 }
@@ -268,7 +268,7 @@ export function resolveSharedPackageLinkRoots(projectDir: string): string[] {
 }
 
 function ensureSharedPackageLinkAtRoot(rootDir: string, source: string): void {
-  const target = join(rootDir, 'node_modules', '@edgebase-fun', 'shared');
+  const target = join(rootDir, 'node_modules', '@edge-base', 'shared');
   const markerPath = join(target, '.edgebase-shim');
   const normalizedSource = resolve(source);
   const normalizedTarget = resolve(target);
@@ -356,7 +356,7 @@ function readExistingSymlinkTarget(target: string): string | null {
 function buildSharedShimPackageJson(): string {
   return `${JSON.stringify(
     {
-      name: '@edgebase-fun/shared',
+      name: '@edge-base/shared',
       private: true,
       type: 'module',
       main: './src/index.ts',

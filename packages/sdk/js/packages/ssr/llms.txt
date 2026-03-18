@@ -1,12 +1,12 @@
 # EdgeBase JS SSR SDK
 
-Use this file as a quick-reference contract for AI coding assistants working with `@edgebase-fun/ssr`.
+Use this file as a quick-reference contract for AI coding assistants working with `@edge-base/ssr`.
 
 ## Package Boundary
 
-Use `@edgebase-fun/ssr` for server-side code that should act as the current cookie-authenticated user.
+Use `@edge-base/ssr` for server-side code that should act as the current cookie-authenticated user.
 
-Do not use it for browser bundles or client-side sign-in UI. Use `@edgebase-fun/web` there. Do not use it for Service Key admin work; use `@edgebase-fun/admin`.
+Do not use it for browser bundles or client-side sign-in UI. Use `@edge-base/web` there. Do not use it for Service Key admin work; use `@edge-base/admin`.
 
 ## Source Of Truth
 
@@ -21,7 +21,7 @@ Do not use it for browser bundles or client-side sign-in UI. Use `@edgebase-fun/
 ### Create a server client
 
 ```ts
-import { createServerClient } from '@edgebase-fun/ssr';
+import { createServerClient } from '@edge-base/ssr';
 
 const client = createServerClient(process.env.EDGEBASE_URL!, {
   cookies: {
@@ -77,10 +77,10 @@ client.clearSession();
 ## Common Mistakes
 
 - do not call browser-only auth methods like `client.auth.signIn()` here; this package does not expose them
-- do not use `@edgebase-fun/ssr` in client components
+- do not use `@edge-base/ssr` in client components
 - do not confuse `getUser()` with a server-side verification call; it decodes the cookie token payload
-- if you need privileged admin access or Service Key behavior, use `@edgebase-fun/admin`
-- if you need browser auth state listeners or realtime UI, use `@edgebase-fun/web`
+- if you need privileged admin access or Service Key behavior, use `@edge-base/admin`
+- if you need browser auth state listeners or realtime UI, use `@edge-base/web`
 
 ## Quick Reference
 

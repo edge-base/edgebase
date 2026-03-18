@@ -16,7 +16,7 @@ import {
   hookRejectedError,
   normalizeDatabaseError,
 } from '../lib/errors.js';
-import { EdgeBaseError } from '@edgebase-fun/shared';
+import { EdgeBaseError } from '@edge-base/shared';
 
 // ─── A. EdgeBaseError 구조 ─────────────────────────────────────────────────────
 

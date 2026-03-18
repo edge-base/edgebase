@@ -6,7 +6,7 @@
  * (Next.js cookies(), Nuxt useCookie, etc.).
  */
 
-import type { ITokenManager, ITokenPair } from '@edgebase-fun/core';
+import type { ITokenManager, ITokenPair } from '@edge-base/core';
 import type { CookieStore, CookieOptions } from './types.js';
 
 const ACCESS_TOKEN_COOKIE = 'eb_access_token';

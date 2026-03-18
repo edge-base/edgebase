@@ -1,4 +1,4 @@
-<h1 align="center">@edgebase-fun/auth-ui-react</h1>
+<h1 align="center">@edge-base/auth-ui-react</h1>
 
 <p align="center">
   <b>Pre-built React authentication UI for EdgeBase</b><br>
@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@edgebase-fun/auth-ui-react"><img src="https://img.shields.io/npm/v/%40edgebase-fun%2Fauth-ui-react?color=brightgreen" alt="npm"></a>&nbsp;
+  <a href="https://www.npmjs.com/package/@edge-base/auth-ui-react"><img src="https://img.shields.io/npm/v/%40edge-base%2Fauth-ui-react?color=brightgreen" alt="npm"></a>&nbsp;
   <a href="https://edgebase.fun/docs/authentication"><img src="https://img.shields.io/badge/docs-auth-blue" alt="Docs"></a>&nbsp;
   <a href="https://github.com/edge-base/edgebase/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </p>
@@ -25,7 +25,7 @@
 
 ---
 
-`@edgebase-fun/auth-ui-react` adds ready-to-use React auth components on top of [`@edgebase-fun/web`](https://www.npmjs.com/package/@edgebase-fun/web).
+`@edge-base/auth-ui-react` adds ready-to-use React auth components on top of [`@edge-base/web`](https://www.npmjs.com/package/@edge-base/web).
 
 It is a good fit when you want:
 
@@ -59,20 +59,20 @@ This package ships with an `llms.txt` file for AI-assisted React auth integratio
 
 You can find it:
 
-- after install: `node_modules/@edgebase-fun/auth-ui-react/llms.txt`
+- after install: `node_modules/@edge-base/auth-ui-react/llms.txt`
 - in the repository: [llms.txt](https://github.com/edge-base/edgebase/blob/main/packages/sdk/js/packages/auth-ui-react/llms.txt)
 
 Use it when you want an agent to:
 
 - wrap the app with `AuthProvider` correctly
-- pair this package with `@edgebase-fun/web` instead of `admin` or `ssr`
+- pair this package with `@edge-base/web` instead of `admin` or `ssr`
 - choose between `AuthForm`, individual components, and `useAuth()`
 - avoid guessing config field names or default views
 
 ## Installation
 
 ```bash
-npm install @edgebase-fun/web @edgebase-fun/auth-ui-react
+npm install @edge-base/web @edge-base/auth-ui-react
 ```
 
 Make sure your app already has React and React DOM.
@@ -80,9 +80,9 @@ Make sure your app already has React and React DOM.
 ## Quick Start
 
 ```tsx
-import { createClient } from '@edgebase-fun/web';
-import { AuthProvider, AuthForm } from '@edgebase-fun/auth-ui-react';
-import '@edgebase-fun/auth-ui-react/styles.css';
+import { createClient } from '@edge-base/web';
+import { AuthProvider, AuthForm } from '@edge-base/auth-ui-react';
+import '@edge-base/auth-ui-react/styles.css';
 
 const client = createClient('https://your-project.edgebase.fun');
 
@@ -119,7 +119,7 @@ export function LoginScreen() {
 If you want your own UI while still using the provided auth state hook:
 
 ```tsx
-import { useAuth } from '@edgebase-fun/auth-ui-react';
+import { useAuth } from '@edge-base/auth-ui-react';
 
 function HeaderActions() {
   const { user, loading, signOut } = useAuth();
@@ -159,7 +159,7 @@ You have two good options:
 1. import the default stylesheet:
 
 ```tsx
-import '@edgebase-fun/auth-ui-react/styles.css';
+import '@edge-base/auth-ui-react/styles.css';
 ```
 
 2. keep the components headless-first and target the generated CSS classes using your own design system
@@ -170,10 +170,10 @@ The generated classes use the configured prefix, so the default form class names
 
 | Package | Use it for |
 | --- | --- |
-| `@edgebase-fun/web` | The underlying browser SDK and auth client |
-| `@edgebase-fun/auth-ui-react` | Pre-built React auth components on top of the web SDK |
-| `@edgebase-fun/ssr` | Cookie-based server-side auth handling |
-| `@edgebase-fun/admin` | Trusted server-side admin tasks |
+| `@edge-base/web` | The underlying browser SDK and auth client |
+| `@edge-base/auth-ui-react` | Pre-built React auth components on top of the web SDK |
+| `@edge-base/ssr` | Cookie-based server-side auth handling |
+| `@edge-base/admin` | Trusted server-side admin tasks |
 
 ## License
 

@@ -6,7 +6,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseConfig, setConfig } from '../lib/do-router.js';
-import type { EdgeBaseConfig } from '@edgebase-fun/shared';
+import type { EdgeBaseConfig } from '@edge-base/shared';
 import {
   parseProcessEnvConfig,
   resolveStartupConfig,

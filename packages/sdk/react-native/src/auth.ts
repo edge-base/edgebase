@@ -1,5 +1,5 @@
 /**
- * Auth client for React Native — API parity with @edgebase-fun/web AuthClient.
+ * Auth client for React Native — API parity with @edge-base/web AuthClient.
  *: onAuthStateChange
  *: signInAnonymously
  *: signUp with data
@@ -12,7 +12,7 @@
  * - Captcha is handled via TurnstileWebView component (see turnstile.tsx)
  */
 
-import type { HttpClient, GeneratedDbApi } from '@edgebase-fun/core';
+import type { HttpClient, GeneratedDbApi } from '@edge-base/core';
 import type { TokenManager, TokenUser, AuthStateChangeHandler } from './token-manager.js';
 
 // ─── Types ───

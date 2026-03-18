@@ -5,7 +5,7 @@
 import { OpenAPIHono, createRoute, type HonoEnv } from '../lib/hono.js';
 import { parseConfig } from '../lib/do-router.js';
 import { validateKey, buildConstraintCtx } from '../lib/service-key.js';
-import { EdgeBaseError } from '@edgebase-fun/shared';
+import { EdgeBaseError } from '@edge-base/shared';
 import { zodDefaultHook, jsonResponseSchema, errorResponseSchema } from '../lib/schemas.js';
 
 

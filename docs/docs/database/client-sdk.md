@@ -24,7 +24,7 @@ Database operations from the client (browser, mobile, game engine). All operatio
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-import { createClient } from '@edgebase-fun/web';
+import { createClient } from '@edge-base/web';
 
 const client = createClient('https://my-app.edgebase.fun');
 ```
@@ -218,7 +218,7 @@ All SDK methods **throw on failure** — there is no `{ data, error }` return pa
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-import { EdgeBaseError } from '@edgebase-fun/core';
+import { EdgeBaseError } from '@edge-base/core';
 
 try {
   await client.db('app').table('posts').getOne('nonexistent');
@@ -734,7 +734,7 @@ await client.db('app').table('posts').update('record-id', {
 ### Field Operators
 
 ```typescript
-import { increment, deleteField } from '@edgebase-fun/core';
+import { increment, deleteField } from '@edge-base/core';
 
 await client.db('app').table('posts').update('record-id', {
   views: increment(1),           // Atomic increment

@@ -40,13 +40,13 @@ EdgeBase Analytics has two data paths: request logs (automatic) and custom event
 <DiagramBlock title="Analytics Data Flow">
 {`┌──────────────┐                    ┌──────────────┐
 │  Client App   │ ── track() ──→    │  EdgeBase     │ ──→ LogsDO (_events table)
-│  (@edgebase-fun/  │                    │  Server       │
+│  (@edge-base/  │                    │  Server       │
 │   web)        │                    │               │ ← query ── Admin SDK
 └──────────────┘                    │               │ ← query ── Dashboard
                                      │  Every API    │
 ┌──────────────┐                    │  request is   │ ──→ LogsDO (_logs table)
 │  Admin SDK    │ ── track() ──→    │  auto-logged  │     or Analytics Engine
-│  (@edgebase-fun/  │                    └──────────────┘
+│  (@edge-base/  │                    └──────────────┘
 │   admin)      │`}
 </DiagramBlock>
 
@@ -185,7 +185,7 @@ client.analytics().track("purchase", R"({"plan":"pro","amount":29.99})");
 
 ```typescript
 // Admin SDK — query metrics from your backend
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 const admin = createAdminClient('https://my-app.edgebase.fun', {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY,
 });

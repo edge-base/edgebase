@@ -16,7 +16,7 @@ import {
   matchesScope,
   buildConstraintCtx,
 } from '../lib/service-key.js';
-import type { ServiceKeyEntry } from '@edgebase-fun/shared';
+import type { ServiceKeyEntry } from '@edge-base/shared';
 
 // ─── A. generateServiceKey ────────────────────────────────────────────────────
 

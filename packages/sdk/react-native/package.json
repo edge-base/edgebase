@@ -1,6 +1,6 @@
 {
-    "name": "@edgebase-fun/react-native",
-    "version": "0.1.0",
+    "name": "@edge-base/react-native",
+    "version": "0.1.2",
     "description": "EdgeBase React Native SDK — iOS, Android, Web support",
     "license": "MIT",
     "repository": {
@@ -37,7 +37,7 @@
         "prepack": "pnpm run build"
     },
     "dependencies": {
-        "@edgebase-fun/core": "workspace:*"
+        "@edge-base/core": "workspace:*"
     },
     "peerDependencies": {
         "react": ">=18.0.0",

@@ -51,14 +51,14 @@ function HeroSection() {
     <section className="hero-section">
       <p className="hero-badge">Open Source · MIT License</p>
       <h1 className="hero-title">
-        100× cheaper. 100× faster
+        100× cheaper than Firebase.
         <br />
-        than Firebase & Supabase.
+        ~0ms cold starts at the edge.
       </h1>
       <p className="hero-tagline">
-        Infinite scaling — without changing a line of code.
+        Open-source edge-native BaaS for Database, Auth, Storage, Functions, Room, and Admin UI.
         <br />
-        Database · Auth · Storage · Functions · Room · Admin UI — all built in.
+        Same app, same behavior — local, self-hosted, or global edge.
       </p>
       <div className="hero-code">
         <code>npm create edgebase@latest my-app</code>

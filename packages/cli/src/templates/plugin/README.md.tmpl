@@ -6,7 +6,7 @@ EdgeBase plugin for {{PLUGIN_DESCRIPTION}}.
 
 ```bash
 npm install {{PLUGIN_NAME}}                         # server plugin
-npm install {{PLUGIN_NAME}}-client @edgebase-fun/web  # optional typed web client
+npm install {{PLUGIN_NAME}}-client @edge-base/web  # optional typed web client
 ```
 
 ## Configuration
@@ -30,7 +30,7 @@ export default defineConfig({
 ### Client SDK
 
 ```typescript
-import { createClient } from '@edgebase-fun/web';
+import { createClient } from '@edge-base/web';
 import { createPlugin } from '{{PLUGIN_NAME}}-client';
 
 const client = createClient('https://my-app.edgebase.fun');

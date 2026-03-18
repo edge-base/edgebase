@@ -1,6 +1,6 @@
 // EdgeBase error types.
 //
-// Mirrors `@edgebase-fun/sdk` error hierarchy.
+// Mirrors `@edge-base/sdk` error hierarchy.
 
 class EdgeBaseError implements Exception {
   final String message;

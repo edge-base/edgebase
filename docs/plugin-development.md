@@ -25,7 +25,7 @@ my-plugin/
 ## 2. Server Plugin 작성
 
 ```typescript
-import { definePlugin } from '@edgebase-fun/plugin-core';
+import { definePlugin } from '@edge-base/plugin-core';
 
 interface MyPluginConfig {
   apiKey: string;
@@ -106,7 +106,7 @@ export const myPlugin = definePlugin<MyPluginConfig>({
 ## 3. 앱에 설치
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 import { myPlugin } from 'my-plugin';
 
 export default defineConfig({
@@ -124,7 +124,7 @@ export default defineConfig({
 ## 4. Client SDK 작성
 
 ```typescript
-import type { PluginClientFactory } from '@edgebase-fun/plugin-core';
+import type { PluginClientFactory } from '@edge-base/plugin-core';
 
 export interface MyPluginClient {
   process(data: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -157,7 +157,7 @@ manifest: {
 ## 6. 유닛 테스트
 
 ```typescript
-import { createMockContext } from '@edgebase-fun/plugin-core';
+import { createMockContext } from '@edge-base/plugin-core';
 
 const ctx = createMockContext<MyPluginConfig>({
   auth: { id: 'user-1', email: 'user@test.dev' },

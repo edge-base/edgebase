@@ -19,7 +19,7 @@ Use **authentication triggers** for App Functions that run on auth lifecycle eve
 :::
 
 ```typescript
-import { defineFunction } from '@edgebase-fun/shared';
+import { defineFunction } from '@edge-base/shared';
 
 export default defineFunction({
   trigger: { type: 'auth', event: 'afterSignUp' },
@@ -91,7 +91,7 @@ Blocking triggers can reject the operation by throwing. Non-blocking triggers ru
 ### Reject a Signup
 
 ```typescript
-import { defineFunction, FunctionError } from '@edgebase-fun/shared';
+import { defineFunction, FunctionError } from '@edge-base/shared';
 
 export default defineFunction({
   trigger: { type: 'auth', event: 'beforeSignUp' },
@@ -107,7 +107,7 @@ export default defineFunction({
 ### Create a Profile After Signup
 
 ```typescript
-import { defineFunction } from '@edgebase-fun/shared';
+import { defineFunction } from '@edge-base/shared';
 
 export default defineFunction({
   trigger: { type: 'auth', event: 'afterSignUp' },
@@ -128,7 +128,7 @@ export default defineFunction({
 `onTokenRefresh` is the only authentication trigger whose return value is fed back into token generation.
 
 ```typescript
-import { defineFunction } from '@edgebase-fun/shared';
+import { defineFunction } from '@edge-base/shared';
 
 export default defineFunction({
   trigger: { type: 'auth', event: 'onTokenRefresh' },
@@ -155,7 +155,7 @@ The returned object overrides stored `customClaims` keys with the same name for 
 ### Revoke Sessions After Password Reset
 
 ```typescript
-import { defineFunction } from '@edgebase-fun/shared';
+import { defineFunction } from '@edge-base/shared';
 
 export default defineFunction({
   trigger: { type: 'auth', event: 'afterPasswordReset' },
@@ -176,7 +176,7 @@ export default defineFunction({
 ### Audit Sign-Out
 
 ```typescript
-import { defineFunction } from '@edgebase-fun/shared';
+import { defineFunction } from '@edge-base/shared';
 
 export default defineFunction({
   trigger: { type: 'auth', event: 'afterSignOut' },
@@ -196,7 +196,7 @@ export default defineFunction({
 ### Clean Up External Systems on Account Deletion
 
 ```typescript
-import { defineFunction } from '@edgebase-fun/shared';
+import { defineFunction } from '@edge-base/shared';
 
 export default defineFunction({
   trigger: { type: 'auth', event: 'onDeleteAccount' },

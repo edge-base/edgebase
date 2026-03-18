@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { defineConfig } from '@edgebase-fun/shared';
-import { EdgeBaseError } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
+import { EdgeBaseError } from '@edge-base/shared';
 import { setConfig } from '../lib/do-router.js';
 import { OpenAPIHono, type HonoEnv } from '../lib/hono.js';
 import { authMiddleware } from '../middleware/auth.js';

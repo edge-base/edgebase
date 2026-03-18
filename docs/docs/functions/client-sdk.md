@@ -17,8 +17,8 @@ Call App Functions from the client SDK with auth headers injected automatically.
 
 ## Supported Client SDKs
 
-- JavaScript (`@edgebase-fun/web`)
-- React Native (`@edgebase-fun/react-native`)
+- JavaScript (`@edge-base/web`)
+- React Native (`@edge-base/react-native`)
 - Dart / Flutter
 - Swift
 - Kotlin
@@ -32,7 +32,7 @@ Call App Functions from the client SDK with auth headers injected automatically.
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-import { createClient } from '@edgebase-fun/web';
+import { createClient } from '@edge-base/web';
 
 const client = createClient('https://my-app.edgebase.fun');
 ```
@@ -366,7 +366,7 @@ export const GET = defineFunction(async ({ auth, admin }) => {
 App Function failures are surfaced through the SDK as `EdgeBaseError`.
 
 ```typescript
-import { EdgeBaseError } from '@edgebase-fun/web';
+import { EdgeBaseError } from '@edge-base/web';
 
 try {
   await client.functions.post('orders', { items: [] });

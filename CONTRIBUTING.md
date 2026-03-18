@@ -94,7 +94,7 @@ test(auth): add OAuth flow integration test
 - Use [GitHub Issues](https://github.com/edge-base/edgebase/issues)
 - Choose the issue template that best matches your report
 - Include reproduction steps, expected vs actual behavior
-- For security issues, email **security@edgebase.fun** instead
+- For security issues, email **edgebase52@gmail.com** instead
 
 ## License
 

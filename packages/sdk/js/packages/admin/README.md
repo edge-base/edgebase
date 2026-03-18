@@ -1,4 +1,4 @@
-<h1 align="center">@edgebase-fun/admin</h1>
+<h1 align="center">@edge-base/admin</h1>
 
 <p align="center">
   <b>Trusted server-side SDK for EdgeBase</b><br>
@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@edgebase-fun/admin"><img src="https://img.shields.io/npm/v/%40edgebase-fun%2Fadmin?color=brightgreen" alt="npm"></a>&nbsp;
+  <a href="https://www.npmjs.com/package/@edge-base/admin"><img src="https://img.shields.io/npm/v/%40edge-base%2Fadmin?color=brightgreen" alt="npm"></a>&nbsp;
   <a href="https://edgebase.fun/docs/database/admin-sdk"><img src="https://img.shields.io/badge/docs-admin_sdk-blue" alt="Docs"></a>&nbsp;
   <a href="https://github.com/edge-base/edgebase/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </p>
@@ -24,7 +24,7 @@
 
 ---
 
-`@edgebase-fun/admin` is the trusted server-side SDK for EdgeBase.
+`@edge-base/admin` is the trusted server-side SDK for EdgeBase.
 
 Use it when you need:
 
@@ -35,7 +35,7 @@ Use it when you need:
 - push and analytics from secure environments
 - server-to-server function calls
 
-If code runs in a browser, use [`@edgebase-fun/web`](https://www.npmjs.com/package/@edgebase-fun/web) instead. If code runs on the server but should act as the current signed-in user through cookies, use [`@edgebase-fun/ssr`](https://www.npmjs.com/package/@edgebase-fun/ssr).
+If code runs in a browser, use [`@edge-base/web`](https://www.npmjs.com/package/@edge-base/web) instead. If code runs on the server but should act as the current signed-in user through cookies, use [`@edge-base/ssr`](https://www.npmjs.com/package/@edge-base/ssr).
 
 > Beta: the package is already usable, but some APIs may still evolve before general availability.
 
@@ -58,7 +58,7 @@ This package ships with an `llms.txt` file for AI-assisted server SDK usage.
 
 You can find it:
 
-- after install: `node_modules/@edgebase-fun/admin/llms.txt`
+- after install: `node_modules/@edge-base/admin/llms.txt`
 - in the repository: [llms.txt](https://github.com/edge-base/edgebase/blob/main/packages/sdk/js/packages/admin/llms.txt)
 
 Use it when you want an agent to:
@@ -71,13 +71,13 @@ Use it when you want an agent to:
 ## Installation
 
 ```bash
-npm install @edgebase-fun/admin
+npm install @edge-base/admin
 ```
 
 ## Quick Start
 
 ```ts
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 
 const admin = createAdminClient(process.env.EDGEBASE_URL!, {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY,
@@ -96,7 +96,7 @@ console.log(posts);
 Inside EdgeBase App Functions, you can also rely on environment detection:
 
 ```ts
-import { createAdminClient } from '@edgebase-fun/admin';
+import { createAdminClient } from '@edge-base/admin';
 
 const admin = createAdminClient();
 ```
@@ -204,9 +204,9 @@ Read more:
 
 | Package | Use it for |
 | --- | --- |
-| `@edgebase-fun/web` | Browser and untrusted client code |
-| `@edgebase-fun/ssr` | Server-side code acting as the current cookie-authenticated user |
-| `@edgebase-fun/admin` | Trusted server-side code with Service Key access |
+| `@edge-base/web` | Browser and untrusted client code |
+| `@edge-base/ssr` | Server-side code acting as the current cookie-authenticated user |
+| `@edge-base/admin` | Trusted server-side code with Service Key access |
 
 ## License
 

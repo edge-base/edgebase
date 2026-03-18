@@ -12,7 +12,7 @@
  *   - KV counter with expirationTtl: 60s
  */
 import { OpenAPIHono, createRoute, z, type HonoEnv } from '../lib/hono.js';
-import type { RoomNamespaceConfig } from '@edgebase-fun/shared';
+import type { RoomNamespaceConfig } from '@edge-base/shared';
 import type { Context } from 'hono';
 import { parseConfig } from '../lib/do-router.js';
 import { resolveRoomRuntime } from '../lib/room-runtime.js';

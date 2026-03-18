@@ -15,7 +15,7 @@ The block names used in these patterns (`user`, `workspace`, `app`, `vendor`, `c
 A note-taking or todo app where each user has their own private data.
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   databases: {
@@ -76,7 +76,7 @@ export default defineConfig({
 A project management tool where companies have workspaces with team members.
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   databases: {
@@ -165,7 +165,7 @@ export default defineConfig({
 A social app where posts are public but personal data is private.
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   databases: {
@@ -247,7 +247,7 @@ export default defineConfig({
 A platform where vendors sell products and manage orders.
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   databases: {
@@ -337,7 +337,7 @@ export default defineConfig({
 A real-time messaging app with channels and direct messages.
 
 ```typescript
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
   databases: {

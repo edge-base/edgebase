@@ -7,8 +7,8 @@ export default defineConfig({
     alias: {
       '../src/token-manager.js': path.resolve(__dirname, 'src/token-manager.ts'),
       '../src/token-manager': path.resolve(__dirname, 'src/token-manager.ts'),
-      '@edgebase-fun/shared': path.resolve(__dirname, '../../shared/src/index.ts'),
-      '@edgebase-fun/core': path.resolve(__dirname, '../js/packages/core/src/index.ts'),
+      '@edge-base/shared': path.resolve(__dirname, '../../shared/src/index.ts'),
+      '@edge-base/core': path.resolve(__dirname, '../js/packages/core/src/index.ts'),
     },
   },
   test: {

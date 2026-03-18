@@ -11,8 +11,8 @@ import path from 'path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@edgebase-fun/sdk': path.resolve(__dirname, '../sdk/js/src/index.ts'),
-      '@edgebase-fun/web': path.resolve(__dirname, '../sdk/js/packages/web/src/index.ts'),
+      '@edge-base/sdk': path.resolve(__dirname, '../sdk/js/src/index.ts'),
+      '@edge-base/web': path.resolve(__dirname, '../sdk/js/packages/web/src/index.ts'),
     },
   },
   test: {

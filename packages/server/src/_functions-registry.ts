@@ -3,7 +3,7 @@
  * DO NOT EDIT — regenerated on each deploy/dev runtime.
  * Repository fallback build: no project-local user functions are bundled.
  */
-import type { AuthTrigger, FunctionDefinition, StorageTrigger } from '@edgebase-fun/shared';
+import type { AuthTrigger, FunctionDefinition, StorageTrigger } from '@edge-base/shared';
 import { registerFunction, registerMiddleware, rebuildCompiledRoutes } from './lib/functions.js';
 import { parseConfig } from './lib/do-router.js';
 import { RoomsDO } from './durable-objects/rooms-do.js';

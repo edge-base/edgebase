@@ -1,4 +1,4 @@
-import { EdgeBaseError } from '@edgebase-fun/shared';
+import { EdgeBaseError } from '@edge-base/shared';
 import { parseConfig } from './do-router.js';
 import type { Env } from '../types.js';
 

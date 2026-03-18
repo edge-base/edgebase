@@ -3,14 +3,14 @@
  *: Access Token in memory, Refresh Token in persistent storage
  *: onAuthStateChange
  *
- * Key differences from @edgebase-fun/web TokenManager:
+ * Key differences from @edge-base/web TokenManager:
  * - Uses AsyncStorage instead of localStorage (async reads/writes)
  * - No BroadcastChannel (no multi-tab in RN)
  * - No storage event listener (RN has no cross-tab concept)
  * - Simpler: single-tab, single-process model
  */
 
-import { EdgeBaseError } from '@edgebase-fun/core';
+import { EdgeBaseError } from '@edge-base/core';
 
 // ─── AsyncStorage adapter interface ───
 

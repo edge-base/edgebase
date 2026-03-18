@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defineConfig } from '@edgebase-fun/shared';
+import { defineConfig } from '@edge-base/shared';
 import {
   appendRedirectParams,
   buildEmailActionUrl,

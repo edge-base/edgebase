@@ -1,6 +1,6 @@
 [package]
 name = "edgebase-admin"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 description = "EdgeBase Admin SDK — server-side admin operations"
 license = "MIT"
