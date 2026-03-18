@@ -3,8 +3,8 @@
  *
  * Usage:
  * ```tsx
- * import { createClient } from '@edgebase/web';
- * import { AuthProvider } from '@edgebase/auth-ui-react';
+ * import { createClient } from '@edgebase-fun/web';
+ * import { AuthProvider } from '@edgebase-fun/auth-ui-react';
  *
  * const client = createClient('https://my-app.edgebase.fun');
  *
@@ -18,7 +18,7 @@
  * ```
  */
 import React, { createContext, useContext, useMemo } from 'react';
-import type { ClientEdgeBase } from '@edgebase/web';
+import type { ClientEdgeBase } from '@edgebase-fun/web';
 
 export interface AuthUIConfig {
   /** OAuth providers to show (e.g., ['google', 'github', 'apple']) */

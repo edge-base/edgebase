@@ -9,6 +9,7 @@
   import { getAnalyticsTimeFormatter, type AnalyticsRange } from '$lib/analytics-range';
   import { toastError } from '$lib/stores/toast.svelte';
   import PageShell from '$lib/components/layout/PageShell.svelte';
+  import { adminDashboardAnalyticsDocs } from '$lib/docs-links';
   import MetricCard from '$lib/components/charts/MetricCard.svelte';
   import TimeChart from '$lib/components/charts/TimeChart.svelte';
   import DistributionBar from '$lib/components/charts/DistributionBar.svelte';
@@ -155,7 +156,7 @@
   });
 </script>
 
-<PageShell title="Analytics" description="API traffic and performance overview">
+<PageShell title="Analytics" description="API traffic and performance overview" docsHref={adminDashboardAnalyticsDocs}>
   {#snippet actions()}
     <div class="analytics-actions">
       <div class="analytics-actions__ranges">

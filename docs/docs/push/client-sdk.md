@@ -25,7 +25,7 @@ All platforms follow the same pattern: **inject a token provider** → **registe
 2. Install dependencies:
 
 ```bash
-npm install firebase @edgebase/web
+npm install firebase @edgebase-fun/web
 ```
 
 ## Setup
@@ -94,7 +94,7 @@ self.addEventListener('notificationclick', (event) => {
 ### 3. Set Token Provider
 
 ```typescript
-import { createClient } from '@edgebase/web';
+import { createClient } from '@edgebase-fun/web';
 
 const client = createClient('https://my-app.edgebase.fun');
 

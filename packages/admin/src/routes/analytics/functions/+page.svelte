@@ -7,6 +7,7 @@
   import { api } from '$lib/api';
   import { toastError } from '$lib/stores/toast.svelte';
   import PageShell from '$lib/components/layout/PageShell.svelte';
+  import { adminDashboardAnalyticsDocs } from '$lib/docs-links';
   import MetricCard from '$lib/components/charts/MetricCard.svelte';
   import TimeChart from '$lib/components/charts/TimeChart.svelte';
   import DistributionBar from '$lib/components/charts/DistributionBar.svelte';
@@ -86,7 +87,7 @@
   );
 </script>
 
-<PageShell title="Functions Analytics" description="Serverless function execution and performance metrics">
+<PageShell title="Functions Analytics" description="Serverless function execution and performance metrics" docsHref={adminDashboardAnalyticsDocs}>
   {#snippet actions()}
     <div class="range-selector">
       {#each ranges as r}

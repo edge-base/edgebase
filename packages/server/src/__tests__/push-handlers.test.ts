@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 import { setConfig } from '../lib/do-router.js';
 import { OpenAPIHono, type HonoEnv } from '../lib/hono.js';
 import { pushRoute } from '../routes/push.js';

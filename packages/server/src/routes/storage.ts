@@ -31,11 +31,11 @@ import { OpenAPIHono, createRoute, z, type HonoEnv } from '../lib/hono.js';
 import type { Env } from '../types.js';
 import { parseConfig } from '../lib/do-router.js';
 import { resolveRootServiceKey, validateKey, timingSafeEqual, type ConstraintContext } from '../lib/service-key.js';
-import { EdgeBaseError } from '@edgebase/shared';
+import { EdgeBaseError } from '@edgebase-fun/shared';
 import { hookRejectedError } from '../lib/errors.js';
 import { getTrustedClientIp } from '../lib/client-ip.js';
 import { zodDefaultHook, jsonResponseSchema, errorResponseSchema } from '../lib/schemas.js';
-import type { StorageBucketConfig, StorageHooks, StorageHookCtx, AuthContext, R2FileMeta, WriteFileMeta, StorageTrigger } from '@edgebase/shared';
+import type { StorageBucketConfig, StorageHooks, StorageHookCtx, AuthContext, R2FileMeta, WriteFileMeta, StorageTrigger } from '@edgebase-fun/shared';
 import {
   getFunctionsByTrigger,
   buildFunctionKvProxy,

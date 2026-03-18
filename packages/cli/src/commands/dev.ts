@@ -1231,7 +1231,7 @@ async function checkSchemaChanges(
 
     const authProvider = (configJson.auth as { provider?: string } | undefined)?.provider;
     const currentSnapshot = buildSnapshot(
-      databases as Record<string, import('@edgebase/shared').DbBlock>,
+      databases as Record<string, import('@edgebase-fun/shared').DbBlock>,
       authProvider,
     );
     const savedSnapshot = loadSnapshot(projectDir);

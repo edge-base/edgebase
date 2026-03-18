@@ -8,8 +8,8 @@
  *
  * Note: Vectorize is Cloudflare Edge-only. In local/Docker, the server returns stub responses.
  */
-import type { HttpClient } from '@edgebase/core';
-import { HttpClientAdapter } from '@edgebase/core';
+import type { HttpClient } from '@edgebase-fun/core';
+import { HttpClientAdapter } from '@edgebase-fun/core';
 import { DefaultAdminApi } from './generated/admin-api-core.js';
 
 export interface VectorSearchOptions {

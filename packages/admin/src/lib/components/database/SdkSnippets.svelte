@@ -63,7 +63,7 @@
 
 		const snippets: Record<string, Record<string, string>> = {
 			javascript: {
-				query: `import { createClient } from '@edgebase/web';
+				query: `import { createClient } from '@edgebase-fun/web';
 
 const client = createClient('YOUR_URL');
 

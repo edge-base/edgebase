@@ -1,5 +1,5 @@
-import { EdgeBaseError } from '@edgebase/shared';
-import type { ErrorResponse, FieldError } from '@edgebase/shared';
+import { EdgeBaseError } from '@edgebase-fun/shared';
+import type { ErrorResponse, FieldError } from '@edgebase-fun/shared';
 
 /**
  * Create a validation error (400).

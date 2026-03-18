@@ -37,7 +37,7 @@ describe('renameBackingTable', () => {
   });
 
   it('renames the physical table for static namespaces via the worker SQL route', async () => {
-    writeConfig(`import { defineConfig } from '@edgebase/shared';
+    writeConfig(`import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   databases: {
@@ -83,7 +83,7 @@ export default defineConfig({
   });
 
   it('treats a missing physical table as a no-op so config-only tables can still be renamed', async () => {
-    writeConfig(`import { defineConfig } from '@edgebase/shared';
+    writeConfig(`import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   databases: {
@@ -113,7 +113,7 @@ export default defineConfig({
   });
 
   it('fails closed for dynamic namespaces instead of pretending the rename is global', async () => {
-    writeConfig(`import { defineConfig } from '@edgebase/shared';
+    writeConfig(`import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   databases: {
@@ -149,7 +149,7 @@ describe('auth settings sidecar', () => {
   });
 
   it('writes enabled oauth providers to the targeted env file', async () => {
-    writeConfig(`import { defineConfig } from '@edgebase/shared';
+    writeConfig(`import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   auth: {

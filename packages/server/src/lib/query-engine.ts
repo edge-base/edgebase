@@ -10,8 +10,8 @@
  *   - 'sqlite' (default): ? bind params, INSTR() for contains
  *   - 'postgres': $1,$2 bind params, ILIKE for contains
  */
-import type { FilterOperator, SortDirection } from '@edgebase/shared';
-import { EdgeBaseError } from '@edgebase/shared';
+import type { FilterOperator, SortDirection } from '@edgebase-fun/shared';
+import { EdgeBaseError } from '@edgebase-fun/shared';
 
 // ─── Types ───
 

@@ -1,5 +1,5 @@
 /**
- * @edgebase/web — 단위 테스트
+ * @edgebase-fun/web — 단위 테스트
  *
  * 테스트 대상: src/token-manager.ts (TokenManager), src/match-filter.ts
  *
@@ -370,7 +370,7 @@ import { RoomClient, type RoomOptions } from '../../src/room.js';
 import { RoomRealtimeMediaTransport } from '../../src/room-realtime-media.js';
 import { matchesFilter } from '../../src/match-filter.js';
 import { ClientAnalytics } from '../../src/analytics.js';
-import { HttpClient, ContextManager, EdgeBaseError } from '@edgebase/core';
+import { HttpClient, ContextManager, EdgeBaseError } from '@edgebase-fun/core';
 
 // ─── E. TokenManager — expired token handling ────────────────────────────────
 

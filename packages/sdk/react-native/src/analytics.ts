@@ -1,4 +1,4 @@
-import type { GeneratedDbApi } from '@edgebase/core';
+import type { GeneratedDbApi } from '@edgebase-fun/core';
 
 type AnalyticsProperties = Record<string, string | number | boolean>;
 

@@ -20,7 +20,7 @@ import { parseDuration } from '../lib/jwt.js';
 import { parseDuration as parseStorageDuration } from '../routes/storage.js';
 import { timingSafeEqual } from '../lib/service-key.js';
 import { validateScopedKey } from '../lib/service-key.js';
-import type { ServiceKeyEntry } from '@edgebase/shared';
+import type { ServiceKeyEntry } from '@edgebase-fun/shared';
 
 // ─── Helpers ───
 

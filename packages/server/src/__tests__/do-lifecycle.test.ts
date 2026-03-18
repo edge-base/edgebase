@@ -14,7 +14,7 @@ import {
   getTablesInNamespace,
   findTableNamespace,
 } from '../lib/do-router.js';
-import type { EdgeBaseConfig } from '@edgebase/shared';
+import type { EdgeBaseConfig } from '@edgebase-fun/shared';
 
 // ─── A. getDbDoName ────────────────────────────────────────────────────────────
 

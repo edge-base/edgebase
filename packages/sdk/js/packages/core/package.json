@@ -1,5 +1,5 @@
 {
-    "name": "@edgebase/core",
+    "name": "@edgebase-fun/core",
     "version": "0.1.0",
     "description": "EdgeBase core SDK — platform-agnostic client for auth, database, storage, and functions",
     "license": "MIT",
@@ -34,7 +34,7 @@
         "prepack": "pnpm run build"
     },
     "dependencies": {
-        "@edgebase/shared": "workspace:*"
+        "@edgebase-fun/shared": "workspace:*"
     },
     "devDependencies": {
         "typescript": "^5.7.0",

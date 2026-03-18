@@ -11,7 +11,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@edgebase/shared': resolve(__dirname, '../../../../shared/src/index.ts'),
+      '@edgebase-fun/shared': resolve(__dirname, '../../../../shared/src/index.ts'),
     },
   },
 });

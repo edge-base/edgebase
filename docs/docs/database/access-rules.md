@@ -285,7 +285,7 @@ If you need to scope queries to only accessible rows, add explicit filters in th
 Requests authenticated with a Service Key bypass all access rules. This is designed for server-to-server communication:
 
 ```typescript
-import { createAdminClient } from '@edgebase/admin';
+import { createAdminClient } from '@edgebase-fun/admin';
 
 const admin = createAdminClient('https://api.example.com', {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY,  // Server-side only!

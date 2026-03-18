@@ -1,6 +1,7 @@
 {
-    "name": "@edgebase/sdk",
+    "name": "@edgebase-fun/sdk",
     "version": "0.1.0",
+    "private": true,
     "description": "EdgeBase SDK — unified JavaScript/TypeScript client for EdgeBase",
     "license": "MIT",
     "repository": {
@@ -38,10 +39,10 @@
         "prepack": "pnpm run build"
     },
     "dependencies": {
-        "@edgebase/shared": "workspace:*",
-        "@edgebase/core": "workspace:*",
-        "@edgebase/web": "workspace:*",
-        "@edgebase/admin": "workspace:*"
+        "@edgebase-fun/shared": "workspace:*",
+        "@edgebase-fun/core": "workspace:*",
+        "@edgebase-fun/web": "workspace:*",
+        "@edgebase-fun/admin": "workspace:*"
     },
     "devDependencies": {
         "tsup": "^8.0.0",

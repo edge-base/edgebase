@@ -5,6 +5,9 @@ description: Practical patterns for multiplayer games, collaborative editing, pr
 sidebar_label: Advanced Patterns
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # Advanced Patterns
 
 :::caution Beta
@@ -22,7 +25,7 @@ Games typically split data between shared state (the board, scores, turn order) 
 ### Server Configuration
 
 ```typescript
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   rooms: {
@@ -149,6 +152,9 @@ export default defineConfig({
 
 ### Client Usage
 
+<Tabs groupId="sdk-language">
+<TabItem value="js" label="JavaScript" default>
+
 ```typescript
 const room = client.room('game', 'lobby-42');
 await room.join();
@@ -174,6 +180,167 @@ room.signals.on('turn_skipped', (data) => {
 // Place a piece
 await room.state.send('PLACE_PIECE', { index: 4 });
 ```
+
+</TabItem>
+<TabItem value="dart" label="Dart/Flutter">
+
+```dart
+final room = client.room('game', 'lobby-42');
+await room.join();
+
+room.state.onSharedChange((state, delta) {
+  renderBoard(state['board']);
+  highlightCurrentTurn(state['turn']);
+  updatePlayerList(state['players']);
+});
+
+room.state.onMineChange((state, delta) {
+  renderHand(state['hand']);
+  renderHP(state['hp']);
+});
+
+room.signals.on('turn_skipped', (payload, meta) {
+  showToast("${payload['userId']}'s turn was skipped");
+});
+
+await room.state.send('PLACE_PIECE', {'index': 4});
+```
+
+</TabItem>
+<TabItem value="swift" label="Swift">
+
+```swift
+let room = client.room(namespace: "game", id: "lobby-42")
+try await room.join()
+
+room.state.onSharedChange { state, _ in
+    renderBoard(state["board"])
+    highlightCurrentTurn(state["turn"])
+    updatePlayerList(state["players"])
+}
+
+room.state.onMineChange { state, _ in
+    renderHand(state["hand"])
+    renderHP(state["hp"])
+}
+
+room.signals.on("turn_skipped") { payload, _ in
+    if let data = payload as? [String: Any], let userId = data["userId"] {
+        showToast("\(userId)'s turn was skipped")
+    }
+}
+
+try await room.state.send("PLACE_PIECE", payload: ["index": 4])
+```
+
+</TabItem>
+<TabItem value="kotlin" label="Kotlin">
+
+```kotlin
+val room = client.room("game", "lobby-42")
+room.join()
+
+room.state.onSharedChange { state, _ ->
+    renderBoard(state["board"])
+    highlightCurrentTurn(state["turn"])
+    updatePlayerList(state["players"])
+}
+
+room.state.onMineChange { state, _ ->
+    renderHand(state["hand"])
+    renderHP(state["hp"])
+}
+
+room.signals.on("turn_skipped") { payload, _ ->
+    val userId = (payload as? Map<*, *>)?.get("userId")
+    showToast("$userId's turn was skipped")
+}
+
+room.state.send("PLACE_PIECE", mapOf("index" to 4))
+```
+
+</TabItem>
+<TabItem value="java" label="Java">
+
+```java
+RoomClient room = client.room("game", "lobby-42");
+room.join().join();
+
+room.state.onSharedChange((state, delta) -> {
+    renderBoard(state.get("board"));
+    highlightCurrentTurn(state.get("turn"));
+    updatePlayerList(state.get("players"));
+});
+
+room.state.onMineChange((state, delta) -> {
+    renderHand(state.get("hand"));
+    renderHP(state.get("hp"));
+});
+
+room.signals.on("turn_skipped", (payload, meta) -> {
+    Map<String, Object> data = (Map<String, Object>) payload;
+    showToast(data.get("userId") + "'s turn was skipped");
+});
+
+room.state.send("PLACE_PIECE", Map.of("index", 4)).join();
+```
+
+</TabItem>
+<TabItem value="csharp" label="C#/Unity">
+
+```csharp
+var room = client.Room("game", "lobby-42");
+await room.Join();
+
+room.State.OnSharedChange((state, delta) =>
+{
+    RenderBoard(state["board"]);
+    HighlightCurrentTurn(state["turn"]);
+    UpdatePlayerList(state["players"]);
+});
+
+room.State.OnMineChange((state, delta) =>
+{
+    RenderHand(state["hand"]);
+    RenderHP(state["hp"]);
+});
+
+room.Signals.On("turn_skipped", (payload, meta) =>
+{
+    var data = (Dictionary<string, object?>)payload!;
+    ShowToast($"{data["userId"]}'s turn was skipped");
+});
+
+await room.State.Send("PLACE_PIECE", new Dictionary<string, object?> { ["index"] = 4 });
+```
+
+</TabItem>
+<TabItem value="cpp" label="C++/Unreal">
+
+```cpp
+auto room = client.room("game", "lobby-42");
+room->join();
+
+room->state.on_shared_change([](const json& state, const json&) {
+    render_board(state["board"]);
+    highlight_current_turn(state["turn"]);
+    update_player_list(state["players"]);
+});
+
+room->state.on_mine_change([](const json& state, const json&) {
+    render_hand(state["hand"]);
+    render_hp(state["hp"]);
+});
+
+room->signals.on("turn_skipped", [](const json& payload, const json&) {
+    show_toast(payload.value("userId", "") + std::string("'s turn was skipped"));
+});
+
+room->state.send("PLACE_PIECE", {{"index", 4}}, [](const json&) {}, [](const std::string&) {});
+```
+
+</TabItem>
+</Tabs>
 
 ### Key Takeaways
 
@@ -270,6 +437,9 @@ rooms: {
 
 ### Client Usage
 
+<Tabs groupId="sdk-language">
+<TabItem value="js" label="JavaScript" default>
+
 ```typescript
 const room = client.room('document', 'doc-abc');
 await room.join();
@@ -302,6 +472,220 @@ await room.state.send('UPDATE_SECTION', {
 });
 await room.state.send('UNLOCK_SECTION', { sectionId: 'intro' });
 ```
+
+</TabItem>
+<TabItem value="dart" label="Dart/Flutter">
+
+```dart
+final room = client.room('document', 'doc-abc');
+await room.join();
+
+room.state.onSharedChange((state, delta) {
+  renderDocument(state['sections'], state['sectionOrder']);
+  renderLockIndicators(state['locks']);
+});
+
+room.members.onSync((members) {
+  renderCollaboratorAvatars(members);
+});
+
+room.members.onStateChange((member, state) {
+  renderCursor(member['memberId'], state['cursor']);
+});
+
+// Call this from your pointer-move handler
+await room.members.setState({
+  'cursor': {'x': 120, 'y': 48},
+});
+
+await room.state.send('LOCK_SECTION', {'sectionId': 'intro'});
+await room.state.send('UPDATE_SECTION', {
+  'sectionId': 'intro',
+  'content': 'Updated introduction text...',
+});
+await room.state.send('UNLOCK_SECTION', {'sectionId': 'intro'});
+```
+
+</TabItem>
+<TabItem value="swift" label="Swift">
+
+```swift
+let room = client.room(namespace: "document", id: "doc-abc")
+try await room.join()
+
+room.state.onSharedChange { state, _ in
+    renderDocument(state["sections"], state["sectionOrder"])
+    renderLockIndicators(state["locks"])
+}
+
+room.members.onSync { members in
+    renderCollaboratorAvatars(members)
+}
+
+room.members.onStateChange { member, state in
+    renderCursor(member["memberId"], state["cursor"])
+}
+
+// Call this from your pointer-move handler
+try await room.members.setState([
+    "cursor": ["x": 120, "y": 48],
+])
+
+try await room.state.send("LOCK_SECTION", payload: ["sectionId": "intro"])
+try await room.state.send("UPDATE_SECTION", payload: [
+    "sectionId": "intro",
+    "content": "Updated introduction text...",
+])
+try await room.state.send("UNLOCK_SECTION", payload: ["sectionId": "intro"])
+```
+
+</TabItem>
+<TabItem value="kotlin" label="Kotlin">
+
+```kotlin
+val room = client.room("document", "doc-abc")
+room.join()
+
+room.state.onSharedChange { state, _ ->
+    renderDocument(state["sections"], state["sectionOrder"])
+    renderLockIndicators(state["locks"])
+}
+
+room.members.onSync { members ->
+    renderCollaboratorAvatars(members)
+}
+
+room.members.onStateChange { member, state ->
+    renderCursor(member["memberId"], state["cursor"])
+}
+
+// Call this from your pointer-move handler
+room.members.setState(
+    mapOf("cursor" to mapOf("x" to 120, "y" to 48)),
+)
+
+room.state.send("LOCK_SECTION", mapOf("sectionId" to "intro"))
+room.state.send(
+    "UPDATE_SECTION",
+    mapOf(
+        "sectionId" to "intro",
+        "content" to "Updated introduction text...",
+    ),
+)
+room.state.send("UNLOCK_SECTION", mapOf("sectionId" to "intro"))
+```
+
+</TabItem>
+<TabItem value="java" label="Java">
+
+```java
+RoomClient room = client.room("document", "doc-abc");
+room.join().join();
+
+room.state.onSharedChange((state, delta) -> {
+    renderDocument(state.get("sections"), state.get("sectionOrder"));
+    renderLockIndicators(state.get("locks"));
+});
+
+room.members.onSync(members -> {
+    renderCollaboratorAvatars(members);
+});
+
+room.members.onStateChange((member, state) -> {
+    renderCursor(member.get("memberId"), state.get("cursor"));
+});
+
+// Call this from your pointer-move handler
+room.members.setState(Map.of("cursor", Map.of("x", 120, "y", 48))).join();
+
+room.state.send("LOCK_SECTION", Map.of("sectionId", "intro")).join();
+room.state.send(
+    "UPDATE_SECTION",
+    Map.of(
+        "sectionId", "intro",
+        "content", "Updated introduction text..."
+    )
+).join();
+room.state.send("UNLOCK_SECTION", Map.of("sectionId", "intro")).join();
+```
+
+</TabItem>
+<TabItem value="csharp" label="C#/Unity">
+
+```csharp
+var room = client.Room("document", "doc-abc");
+await room.Join();
+
+room.State.OnSharedChange((state, delta) =>
+{
+    RenderDocument(state["sections"], state["sectionOrder"]);
+    RenderLockIndicators(state["locks"]);
+});
+
+room.Members.OnSync(members =>
+{
+    RenderCollaboratorAvatars(members);
+});
+
+room.Members.OnStateChange((member, state) =>
+{
+    RenderCursor(member["memberId"], state["cursor"]);
+});
+
+// Call this from your pointer-move handler
+await room.Members.SetState(new Dictionary<string, object?>
+{
+    ["cursor"] = new Dictionary<string, object?> { ["x"] = 120, ["y"] = 48 },
+});
+
+await room.State.Send("LOCK_SECTION", new Dictionary<string, object?> { ["sectionId"] = "intro" });
+await room.State.Send("UPDATE_SECTION", new Dictionary<string, object?>
+{
+    ["sectionId"] = "intro",
+    ["content"] = "Updated introduction text...",
+});
+await room.State.Send("UNLOCK_SECTION", new Dictionary<string, object?> { ["sectionId"] = "intro" });
+```
+
+</TabItem>
+<TabItem value="cpp" label="C++/Unreal">
+
+```cpp
+auto room = client.room("document", "doc-abc");
+room->join();
+
+room->state.on_shared_change([](const json& state, const json&) {
+    render_document(state["sections"], state["sectionOrder"]);
+    render_lock_indicators(state["locks"]);
+});
+
+room->members.on_sync([](const json& members) {
+    render_collaborator_avatars(members);
+});
+
+room->members.on_state_change([](const json& member, const json& state) {
+    render_cursor(member["memberId"], state["cursor"]);
+});
+
+// Call this from your pointer-move handler
+room->members.set_state(
+    {{"cursor", {{"x", 120}, {"y", 48}}}},
+    []() {},
+    [](const std::string&) {}
+);
+
+room->state.send("LOCK_SECTION", {{"sectionId", "intro"}}, [](const json&) {}, [](const std::string&) {});
+room->state.send(
+    "UPDATE_SECTION",
+    {{"sectionId", "intro"}, {"content", "Updated introduction text..."}},
+    [](const json&) {},
+    [](const std::string&) {}
+);
+room->state.send("UNLOCK_SECTION", {{"sectionId", "intro"}}, [](const json&) {}, [](const std::string&) {});
+```
+
+</TabItem>
+</Tabs>
 
 ---
 

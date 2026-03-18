@@ -1,9 +1,9 @@
 /**
- * @edgebase/core — Abstract interfaces for decoupling Core from Client/Admin.
+ * @edgebase-fun/core — Abstract interfaces for decoupling Core from Client/Admin.
  *: Core must not depend on Client or Admin modules.
  *
  * These interfaces define the contracts that Client-side implementations fulfill.
- * Core modules use these types instead of importing directly from @edgebase/web.
+ * Core modules use these types instead of importing directly from @edgebase-fun/web.
  */
 
 /** Token pair returned from auth refresh. */
@@ -30,7 +30,7 @@ export interface IDbChange<T = Record<string, unknown>> {
 
 /**
  * Abstract database-live subscriber for table snapshot.
- * Implemented by @edgebase/web's DatabaseLiveClient.
+ * Implemented by @edgebase-fun/web's DatabaseLiveClient.
  */
 export interface IDatabaseLiveSubscriber {
   onSnapshot<T>(
@@ -44,7 +44,7 @@ export interface IDatabaseLiveSubscriber {
 
 /**
  * Abstract filter matching function.
- * Implemented by @edgebase/web's matchesFilter.
+ * Implemented by @edgebase-fun/web's matchesFilter.
  */
 export type FilterMatchFn = (
   doc: Record<string, unknown>,

@@ -14,7 +14,7 @@ import {
   RATE_LIMIT_DEFAULTS,
   rateLimitMiddleware,
 } from '../middleware/rate-limit.js';
-import type { EdgeBaseConfig } from '@edgebase/shared';
+import type { EdgeBaseConfig } from '@edgebase-fun/shared';
 import { setConfig } from '../lib/do-router.js';
 
 // ─── parseWindow ───

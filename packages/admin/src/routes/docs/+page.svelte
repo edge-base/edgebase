@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { apiReferenceDocs } from '$lib/docs-links';
 	import { buildScalarHtml } from '$lib/api-docs';
 	import { ADMIN_AUTH_STORAGE_KEY } from '$lib/stores/auth';
 	import { getAdminApiOrigin } from '$lib/runtime-config';
@@ -27,7 +28,7 @@
 	});
 </script>
 
-<PageShell title="API Docs" description="Interactive OpenAPI documentation for your EdgeBase instance">
+<PageShell title="API Docs" description="Interactive OpenAPI documentation for your EdgeBase instance" docsHref={apiReferenceDocs}>
 	<div class="api-docs">
 		{#if loading}
 			<div class="loading-state">Loading API documentation...</div>

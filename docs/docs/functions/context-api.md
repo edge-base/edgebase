@@ -429,7 +429,7 @@ interface TriggerContext {
 
 ```typescript
 // functions/onPostChange.ts
-import { defineFunction } from '@edgebase/shared';
+import { defineFunction } from '@edgebase-fun/shared';
 
 export default defineFunction({
   trigger: { type: 'db', table: 'posts', event: 'update' },
@@ -455,7 +455,7 @@ The original HTTP `Request` object. Available for all trigger types, though most
 
 ```typescript
 // functions/webhook.ts
-import { defineFunction } from '@edgebase/shared';
+import { defineFunction } from '@edgebase-fun/shared';
 
 export const POST = defineFunction(async (context) => {
   const body = await context.request.json();
@@ -493,7 +493,7 @@ A complete function using multiple context APIs:
 
 ```typescript
 // functions/processOrder.ts
-import { defineFunction } from '@edgebase/shared';
+import { defineFunction } from '@edgebase-fun/shared';
 
 export default defineFunction({
   trigger: { type: 'db', table: 'orders', event: 'insert' },

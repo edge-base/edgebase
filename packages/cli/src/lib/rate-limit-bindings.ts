@@ -1,4 +1,4 @@
-import type { EdgeBaseConfig, RateLimitingConfig } from '@edgebase/shared';
+import type { EdgeBaseConfig, RateLimitingConfig } from '@edgebase-fun/shared';
 
 export type BuiltInRateLimitGroup =
   | 'global'

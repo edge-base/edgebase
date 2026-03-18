@@ -22,7 +22,7 @@ import {
 import { copyFileSync, readFileSync, writeFileSync, renameSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { SchemaField, FieldType, IndexConfig, FkReference, DbProvider } from '@edgebase/shared';
+import type { SchemaField, FieldType, IndexConfig, FkReference, DbProvider } from '@edgebase-fun/shared';
 
 // ─── Types ───
 

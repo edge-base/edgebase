@@ -10,7 +10,7 @@
  *
  * Called once per Worker lifetime per namespace/config signature.
  */
-import type { TableConfig, MigrationConfig, SchemaField } from '@edgebase/shared';
+import type { TableConfig, MigrationConfig, SchemaField } from '@edgebase-fun/shared';
 import {
   type PostgresExecutor,
   withPostgresConnection,

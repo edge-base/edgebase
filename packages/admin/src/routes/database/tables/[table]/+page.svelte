@@ -14,6 +14,7 @@
 	import { devInfoStore } from '$lib/stores/devInfo';
 	import { toastError, toastSuccess } from '$lib/stores/toast.svelte';
 	import { normalizeInstanceId } from '$lib/database-target';
+	import { databaseDocs } from '$lib/docs-links';
 	import {
 		getRecentInstances,
 		rememberRecentInstance,
@@ -487,6 +488,14 @@
 					<path d="M6 4H8.5V12H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 				</svg>
 				ERD
+			</a>
+			<a href={databaseDocs} class="erd-link" target="_blank" rel="noreferrer" title="Open database docs">
+				<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+					<path d="M3 2H10L13 5V14H3V2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+					<path d="M10 2V5H13" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+					<path d="M6 8H10M6 10.5H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+				</svg>
+				Docs
 			</a>
 			{#if upgradeBlockedReason()}
 				<div class="table-header__hint">

@@ -8,7 +8,7 @@
  * If token present but JWT_USER_SECRET not configured → returns 401 (fail-closed,).
  */
 import type { Context, Next } from 'hono';
-import { getAuthEnrichHandler, type AuthContext as SharedAuthContext } from '@edgebase/shared';
+import { getAuthEnrichHandler, type AuthContext as SharedAuthContext } from '@edgebase-fun/shared';
 import type { Env } from '../types.js';
 import {
   verifyAccessToken,

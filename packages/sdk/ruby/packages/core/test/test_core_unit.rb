@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 #
-# @edgebase/core Ruby SDK — unit tests
+# @edgebase-fun/core Ruby SDK — unit tests
 #
 # Test targets:
 #   - EdgebaseCore::TableRef (immutable query builder)

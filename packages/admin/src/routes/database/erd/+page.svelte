@@ -3,6 +3,7 @@
 	import { base } from '$app/paths';
 	import { schemaStore, type NamespaceDef, type TableDef } from '$lib/stores/schema';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { adminDashboardSchemaDocs } from '$lib/docs-links';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 
 	interface TableField {
@@ -818,6 +819,7 @@
 <PageShell
 	title="Schema ERD"
 	description="Database blocks come directly from edgebase.config.ts, including provider and single vs per-tenant topology."
+	docsHref={adminDashboardSchemaDocs}
 >
 	{#if databaseBlocks.length === 0}
 		<EmptyState title="No databases" description="Define database blocks in your config to see the ERD." />

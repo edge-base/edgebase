@@ -1,5 +1,5 @@
 {
-    "name": "@edgebase/admin",
+    "name": "@edgebase-fun/admin",
     "version": "0.1.0",
     "description": "EdgeBase admin SDK — server-side client for user management, database admin, and analytics",
     "license": "MIT",
@@ -35,7 +35,7 @@
     },
     "dependencies": {
         "@codemirror/lang-html": "^6.4.11",
-        "@edgebase/core": "workspace:*"
+        "@edgebase-fun/core": "workspace:*"
     },
     "devDependencies": {
         "fast-check": "^4.5.3",

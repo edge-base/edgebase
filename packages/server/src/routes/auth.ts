@@ -6,13 +6,13 @@
  */
 import { OpenAPIHono, createRoute, z, type HonoEnv } from '../lib/hono.js';
 import type { Env } from '../types.js';
-import { EdgeBaseError, getAuthAccess, getAuthHandlers } from '@edgebase/shared';
+import { EdgeBaseError, getAuthAccess, getAuthHandlers } from '@edgebase-fun/shared';
 import type {
   AuthAccess,
   AuthTrigger, EmailConfig, EmailTemplateOverrides, EmailSubjectOverrides,
   EmailOtpConfig, MagicLinkConfig, MailType, MailHookCtx, MfaConfig,
   PasskeysConfig, PasswordPolicyConfig, SmsConfig, SmsHookCtx, SmsType,
-} from '@edgebase/shared';
+} from '@edgebase-fun/shared';
 import type { AuthContext } from '../middleware/auth.js';
 import {
   validateKey,

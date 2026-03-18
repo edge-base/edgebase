@@ -18,8 +18,8 @@
  * All push delivery goes through FCM only. iOS/Android/Web all use FCM Registration Tokens.
  */
 import { OpenAPIHono, createRoute, z, type HonoEnv } from '../lib/hono.js';
-import { getPushAccess, getPushHandlers } from '@edgebase/shared';
-import type { AuthContext, PushHookCtx, PushSendInput, PushSendOutput } from '@edgebase/shared';
+import { getPushAccess, getPushHandlers } from '@edgebase-fun/shared';
+import type { AuthContext, PushHookCtx, PushSendInput, PushSendOutput } from '@edgebase-fun/shared';
 import type { Env } from '../types.js';
 import { getD1BindingName, parseConfig, shouldRouteToD1 } from '../lib/do-router.js';
 import { validateKey, buildConstraintCtx } from '../lib/service-key.js';

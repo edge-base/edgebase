@@ -21,7 +21,7 @@ import { parseConfig } from '../lib/do-router.js';
 import { resolveRootServiceKey } from '../lib/service-key.js';
 import type { AuthContext } from '../lib/functions.js';
 import { captchaMiddleware } from '../middleware/captcha-verify.js';
-import { FunctionError } from '@edgebase/shared';
+import { FunctionError } from '@edgebase-fun/shared';
 
 function isFunctionErrorLike(
   value: unknown,
@@ -134,7 +134,7 @@ functionsRoute.all('/:functionName{.+}', async (c) => {
     }
 
     // Cloudflare/local dev can bundle user functions with a second copy of
-    // @edgebase/shared, so instanceof is not reliable across that boundary.
+    // @edgebase-fun/shared, so instanceof is not reliable across that boundary.
     if (isFunctionErrorLike(err)) {
       const status = err.httpStatus ?? err.status ?? 500;
       const body =

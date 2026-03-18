@@ -112,7 +112,7 @@ HTTP functions use file-system routing by default. The file path determines the 
 
 ```typescript
 // functions/orders/[orderId].ts -> /api/functions/orders/:orderId
-import { defineFunction, FunctionError } from '@edgebase/shared';
+import { defineFunction, FunctionError } from '@edgebase-fun/shared';
 
 export const GET = defineFunction(async ({ params, admin, auth }) => {
   if (!auth) throw new FunctionError('unauthenticated', 'Login required');
@@ -175,7 +175,7 @@ export default defineFunction({
 ```
 
 ```typescript
-import { defineFunction, FunctionError } from '@edgebase/shared';
+import { defineFunction, FunctionError } from '@edgebase-fun/shared';
 
 export default defineFunction({
   trigger: { type: 'storage', event: 'beforeUpload' },

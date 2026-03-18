@@ -1,6 +1,6 @@
 // HTTP client for EdgeBase API communication.
 //
-// Mirrors `@edgebase/sdk` HttpClient — handles auth headers, JSON
+// Mirrors `@edgebase-fun/sdk` HttpClient — handles auth headers, JSON
 // serialization, error parsing, and automatic 401 retry with token refresh.
 
 import 'dart:async';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 import { dumpNamespaceTables } from '../lib/namespace-dump.js';
 
 describe('namespace dump helpers', () => {

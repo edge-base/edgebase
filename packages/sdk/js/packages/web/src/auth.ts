@@ -5,7 +5,7 @@
  *: signUp with data
  */
 
-import type { HttpClient, GeneratedDbApi } from '@edgebase/core';
+import type { HttpClient, GeneratedDbApi } from '@edgebase-fun/core';
 import type { TokenManager, TokenUser, AuthStateChangeHandler } from './token-manager.js';
 import { resolveCaptchaToken } from './turnstile.js';
 

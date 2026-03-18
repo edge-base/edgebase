@@ -5,8 +5,8 @@ EdgeBase plugin for {{PLUGIN_DESCRIPTION}}.
 ## Installation
 
 ```bash
-npm install {{PLUGIN_NAME}}         # server
-npm install {{PLUGIN_NAME}}-client  # client SDK (optional)
+npm install {{PLUGIN_NAME}}                         # server plugin
+npm install {{PLUGIN_NAME}}-client @edgebase-fun/web  # optional typed web client
 ```
 
 ## Configuration
@@ -30,11 +30,11 @@ export default defineConfig({
 ### Client SDK
 
 ```typescript
-import { createClient } from '@edgebase/sdk';
+import { createClient } from '@edgebase-fun/web';
 import { createPlugin } from '{{PLUGIN_NAME}}-client';
 
-const jb = createClient({ url: 'https://my-app.workers.dev' });
-const plugin = createPlugin(jb);
+const client = createClient('https://my-app.edgebase.fun');
+const plugin = createPlugin(client);
 
 // Call plugin functions — fully typed
 const result = await plugin.doSomething({ input: 'hello' });

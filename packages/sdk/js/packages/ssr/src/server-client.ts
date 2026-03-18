@@ -6,7 +6,7 @@
  *
  * Usage:
  * ```ts
- * import { createServerClient } from '@edgebase/ssr';
+ * import { createServerClient } from '@edgebase-fun/ssr';
  * const client = createServerClient('https://my-app.edgebase.fun', {
  *   cookies: cookieStore,
  * });
@@ -23,8 +23,8 @@ import {
   ContextManager,
   DefaultDbApi,
   HttpClientAdapter,
-} from '@edgebase/core';
-import type { ITokenPair } from '@edgebase/core';
+} from '@edgebase-fun/core';
+import type { ITokenPair } from '@edgebase-fun/core';
 import { CookieTokenManager } from './cookie-token-manager.js';
 import type { ServerClientOptions } from './types.js';
 

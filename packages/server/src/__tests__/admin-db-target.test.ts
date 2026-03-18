@@ -1,4 +1,4 @@
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 import { describe, expect, it, vi } from 'vitest';
 import {
   executeAdminDbQuery,

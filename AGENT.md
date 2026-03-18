@@ -50,7 +50,7 @@ Start with the narrowest relevant test target, then expand if the change touches
 pnpm --filter cli test
 
 # Admin dashboard tests
-pnpm --filter @edgebase/dashboard test
+pnpm --filter @edgebase-fun/dashboard test
 
 # Server unit tests
 pnpm --dir packages/server test

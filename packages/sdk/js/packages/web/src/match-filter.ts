@@ -1,4 +1,4 @@
-import type { FilterTuple } from '@edgebase/core';
+import type { FilterTuple } from '@edgebase-fun/core';
 
 /**
  * Client-side filter matching for Database Live subscriptions.

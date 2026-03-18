@@ -29,7 +29,7 @@ Access rules always run **before** hooks. If a rule rejects the operation, hooks
 
 ```typescript
 // edgebase.config.ts
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   storage: {

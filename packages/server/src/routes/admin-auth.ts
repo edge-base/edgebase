@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z, type HonoEnv } from '../lib/hono.js';
-import { EdgeBaseError } from '@edgebase/shared';
+import { EdgeBaseError } from '@edgebase-fun/shared';
 import { zodDefaultHook, jsonResponseSchema, errorResponseSchema } from '../lib/schemas.js';
 import { validateKey, buildConstraintCtx, extractBearerToken, resolveServiceKeyCandidate } from '../lib/service-key.js';
 import { parsePagination } from '../lib/pagination.js';

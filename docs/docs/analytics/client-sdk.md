@@ -23,8 +23,8 @@ Platform-specific delivery behavior differs by SDK.
 
 ## Supported Client SDKs
 
-- JavaScript (`@edgebase/web`)
-- React Native (`@edgebase/react-native`)
+- JavaScript (`@edgebase-fun/web`)
+- React Native (`@edgebase-fun/react-native`)
 - Dart / Flutter
 - Swift
 - Kotlin
@@ -38,7 +38,7 @@ Platform-specific delivery behavior differs by SDK.
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-import { createClient } from '@edgebase/web';
+import { createClient } from '@edgebase-fun/web';
 
 const client = createClient('https://my-app.edgebase.fun');
 ```

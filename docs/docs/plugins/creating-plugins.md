@@ -49,13 +49,13 @@ Create a new directory and init:
 ```bash
 mkdir my-plugin && cd my-plugin
 npm init -y
-npm install @edgebase/plugin-core
+npm install @edgebase-fun/plugin-core
 ```
 
 Now create `src/index.ts`:
 
 ```typescript title="src/index.ts"
-import { definePlugin } from '@edgebase/plugin-core';
+import { definePlugin } from '@edgebase-fun/plugin-core';
 
 export const myPlugin = definePlugin({
   name: 'my-plugin',
@@ -78,7 +78,7 @@ export const myPlugin = definePlugin({
 ### How Users Install Your Plugin
 
 ```typescript title="edgebase.config.ts (user's project)"
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 import { myPlugin } from 'my-plugin';
 
 export default defineConfig({
@@ -102,7 +102,7 @@ const items = await client.db('app').table('my-plugin/items').getList();
 Most plugins need configuration from the user (API keys, feature flags, etc.). Use a TypeScript generic to get type safety:
 
 ```typescript title="src/index.ts"
-import { definePlugin } from '@edgebase/plugin-core';
+import { definePlugin } from '@edgebase-fun/plugin-core';
 
 // highlight-start
 // 1. Define what config your plugin needs
@@ -606,10 +606,10 @@ await ctx.admin.push.broadcast({ title: 'Announcement' });
 
 ## Testing Your Plugin
 
-`@edgebase/plugin-core` provides `createMockContext()` for unit testing — no server needed:
+`@edgebase-fun/plugin-core` provides `createMockContext()` for unit testing — no server needed:
 
 ```typescript
-import { createMockContext } from '@edgebase/plugin-core';
+import { createMockContext } from '@edgebase-fun/plugin-core';
 import { myPlugin } from '../src/index.js';
 
 describe('my-plugin', () => {
@@ -658,7 +658,7 @@ describe('my-plugin', () => {
 If your plugin has HTTP functions, you can provide a typed client wrapper:
 
 ```typescript title="client/js/src/index.ts"
-import type { PluginClientFactory } from '@edgebase/plugin-core';
+import type { PluginClientFactory } from '@edgebase-fun/plugin-core';
 
 // Define the client interface
 interface MyPluginClient {
@@ -680,7 +680,7 @@ export const createMyPlugin: PluginClientFactory<MyPluginClient> = (client) => (
 Users get a clean, typed API:
 
 ```typescript
-import { createClient } from '@edgebase/web';
+import { createClient } from '@edgebase-fun/web';
 import { createMyPlugin } from 'my-plugin/client';
 
 const client = createClient({ baseUrl: '...' });
@@ -740,10 +740,10 @@ CLI-facing metadata now lives in `definePlugin({ manifest: ... })`, not in `pack
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "dependencies": {
-    "@edgebase/plugin-core": "^0.1.0"
+    "@edgebase-fun/plugin-core": "^0.1.0"
   },
   "peerDependencies": {
-    "@edgebase/shared": "^0.1.0"
+    "@edgebase-fun/shared": "^0.1.0"
   }
 }
 ```
@@ -765,7 +765,7 @@ That's it — official and community plugins use the same workflow. No special r
 Here's everything together — a real-world payment plugin with tables, functions, authentication hooks, storage hooks, and migrations:
 
 ```typescript title="server/src/index.ts"
-import { definePlugin } from '@edgebase/plugin-core';
+import { definePlugin } from '@edgebase-fun/plugin-core';
 
 interface PaymentConfig {
   secretKey: string;

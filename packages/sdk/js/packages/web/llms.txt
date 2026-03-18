@@ -1,10 +1,177 @@
 # EdgeBase JS Web SDK
 
-## Common Patterns
+Use this file as a quick-reference contract for AI coding assistants working with `@edgebase-fun/web`.
+
+## Package Boundary
+
+Use `@edgebase-fun/web` for browser and untrusted client environments.
+
+Do not use this package for privileged server-side work that needs admin access, raw SQL, or trusted secrets. Use `@edgebase-fun/admin` for that. Use `@edgebase-fun/ssr` when you specifically need SSR cookie helpers.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/js/packages/web/README.md
+- Quickstart: https://edgebase.fun/docs/getting-started/quickstart
+- Client SDK docs: https://edgebase.fun/docs/database/client-sdk
+- Database subscriptions: https://edgebase.fun/docs/database/subscriptions
+- Authentication: https://edgebase.fun/docs/authentication
+- Room client SDK: https://edgebase.fun/docs/room/client-sdk
+- Functions client SDK: https://edgebase.fun/docs/functions/client-sdk
+
+If code examples, docs, and assumptions disagree, prefer the current package API and official docs over guessed patterns.
+
+Async methods below are shown with their real `Promise<...>` return types. In example code, `await` them unless the method is explicitly synchronous.
+
+## Recommended Project Layout
+
+If adding EdgeBase to an existing frontend project, a good default is:
+
+```text
+your-frontend-project/
+  package.json
+  src/
+  edgebase/
+    edgebase.config.ts
+    functions/
+    package.json
+```
+
+Typical setup:
+
+```bash
+cd your-frontend-project
+npm create edgebase@latest edgebase
+```
+
+This is a recommendation, not a requirement. Separate repos or a different subdirectory name are also valid.
+
+## Canonical Examples
+
+### Create a client
+
+```ts
+import { createClient } from '@edgebase-fun/web';
+
+const client = createClient('https://your-project.edgebase.fun');
+```
+
+### Sign in and react to auth changes
+
+```ts
+await client.auth.signIn({
+  email: 'june@example.com',
+  password: 'pass1234',
+});
+
+const user = client.auth.currentUser;
+
+const unsubscribeAuth = client.auth.onAuthStateChange((nextUser) => {
+  console.log('auth changed:', nextUser);
+});
+```
+
+### Query data from a single-instance block
+
+```ts
+type Post = {
+  id: string;
+  title: string;
+  published: boolean;
+};
+
+const posts = await client
+  .db('app')
+  .table<Post>('posts')
+  .where('published', '==', true)
+  .orderBy('title', 'asc')
+  .limit(20)
+  .getList();
+```
+
+### Query data from an instance database
+
+```ts
+const docs = await client
+  .db('workspace', 'ws-1')
+  .table('docs')
+  .getList();
+```
+
+### Subscribe to live updates
+
+```ts
+const unsubscribe = client
+  .db('app')
+  .table('posts')
+  .onSnapshot((change) => {
+    console.log(change.changeType, change.data);
+  });
+```
+
+### Upload a file and create a signed URL
+
+```ts
+const bucket = client.storage.bucket('avatars');
+
+await bucket.upload('me.jpg', file);
+
+const signedUrl = await bucket.createSignedUrl('me.jpg', {
+  expiresIn: '1h',
+});
+```
+
+### Call a function
+
+```ts
+const result = await client.functions.post('contact/send', {
+  email: 'june@example.com',
+  message: 'Hello from the browser',
+});
+```
+
+### Join a room
+
+```ts
+const room = client.room('game', 'lobby-1');
+
+await room.join();
+
+room.leave();
+```
+
+### Update special fields
+
+```ts
+import { deleteField, increment } from '@edgebase-fun/web';
+
+await client
+  .db('app')
+  .table('posts')
+  .update('post-1', {
+    views: increment(1),
+    temporaryField: deleteField(),
+  });
+```
+
+## Common Mistakes
+
+- `client.auth.currentUser` is a property, not a method
+- `client.auth.onAuthStateChange()` callback receives `(user)`, not `(event, user)`
+- `client.db(namespace, id?)` uses a positional instance id, not a named object
+- database block names like `app`, `shared`, and `workspace` are examples, not reserved keywords
+- `table.get()` returns a list result, not a single document
+- `table.getOne(id)` or `table.doc(id).get()` returns a single document
+- write operations require an authenticated user
+- `requestPasswordReset()` takes the email as the first positional argument
+- `changePassword()` expects `currentPassword`, not `oldPassword`
+- `createSignedUrl()` expects `expiresIn` as a string like `'1h'`, not a number
+- batch updates and deletes are chained from filters, for example `table.where(...).updateMany(...)`
+
+## Quick Reference
 
 ```js
 // Initialize
-import { createClient } from '@edgebase/web'
+import { createClient } from '@edgebase-fun/web'
 const client = createClient('https://my-project.edgebase.fun')
 
 // Auth — currentUser is a PROPERTY, not a method
@@ -40,103 +207,103 @@ await posts.where('status', '==', 'old').deleteMany()
 const url = await bucket.createSignedUrl('file.pdf', { expiresIn: '1h' })
 
 // Special field ops
-import { increment, deleteField } from '@edgebase/web'
+import { increment, deleteField } from '@edgebase-fun/web'
 await posts.update(id, { views: increment(1), temp: deleteField() })
 
 // Write operations require authenticated user
 ```
 
-## createClient
+### createClient
 
 ```
-import { createClient } from '@edgebase/web'
+import { createClient } from '@edgebase-fun/web'
 const client = createClient(url, options?: { schema?, databaseLive?: { autoReconnect?, maxReconnectAttempts?, reconnectBaseDelay? } })
 ```
 
-## Client Lifecycle
+### Client Lifecycle
 
 ```
 client.destroy()                                 → void (cleanup all resources, subscriptions, timers)
 ```
 
-## Auth
+### Auth
 
 ```
 client.auth.currentUser                          → TokenUser | null (PROPERTY, not method)
-client.auth.signUp({email, password, data?, locale?, captchaToken?}) → {user, accessToken, refreshToken}
-client.auth.signIn({email, password, captchaToken?})                → AuthResult | {mfaRequired, mfaTicket, factors}
-client.auth.signInAnonymously({captchaToken?}?)                     → AuthResult
-client.auth.signOut()                                                → void
+client.auth.signUp({email, password, data?, locale?, captchaToken?}) → Promise<AuthResult>
+client.auth.signIn({email, password, captchaToken?})                → Promise<AuthResult | {mfaRequired, mfaTicket, factors}>
+client.auth.signInAnonymously({captchaToken?}?)                     → Promise<AuthResult>
+client.auth.signOut()                                                → Promise<void>
 client.auth.signInWithOAuth(provider, {redirectUrl?, captchaToken?}) → {url}
-client.auth.handleOAuthCallback(url?)                                → AuthResult | null
-client.auth.signInWithMagicLink({email, captchaToken?, redirectUrl?, state?}) → void
-client.auth.verifyMagicLink(token)                                   → AuthResult
-client.auth.signInWithEmailOtp({email})                              → void
-client.auth.verifyEmailOtp({email, code})                            → AuthResult
-client.auth.signInWithPhone({phone})                                 → void
-client.auth.verifyPhone({phone, code})                               → AuthResult
-client.auth.requestPasswordReset(email, {captchaToken?, redirectUrl?, state?}?) → void
-client.auth.resetPassword(token, newPassword)                        → void
-client.auth.changePassword({currentPassword, newPassword})           → AuthResult
-client.auth.changeEmail({newEmail, password, redirectUrl?, state?})  → void
-client.auth.verifyEmailChange(token)                                 → void
-client.auth.updateProfile({displayName?, avatarUrl?, emailVisibility?, locale?}) → TokenUser
-client.auth.updateLocale(locale)                                     → TokenUser
-client.auth.refreshSession()                                         → AuthResult
-client.auth.listSessions()                                           → Session[]
-client.auth.revokeSession(sessionId)                                 → void
+client.auth.handleOAuthCallback(url?)                                → Promise<AuthResult | null>
+client.auth.signInWithMagicLink({email, captchaToken?, redirectUrl?, state?}) → Promise<void>
+client.auth.verifyMagicLink(token)                                   → Promise<AuthResult>
+client.auth.signInWithEmailOtp({email})                              → Promise<void>
+client.auth.verifyEmailOtp({email, code})                            → Promise<AuthResult>
+client.auth.signInWithPhone({phone, captchaToken?})                  → Promise<void>
+client.auth.verifyPhone({phone, code})                               → Promise<AuthResult>
+client.auth.requestPasswordReset(email, {captchaToken?, redirectUrl?, state?}?) → Promise<void>
+client.auth.resetPassword(token, newPassword)                        → Promise<void>
+client.auth.changePassword({currentPassword, newPassword})           → Promise<AuthResult>
+client.auth.changeEmail({newEmail, password, redirectUrl?, state?})  → Promise<void>
+client.auth.verifyEmailChange(token)                                 → Promise<void>
+client.auth.updateProfile({displayName?, avatarUrl?, emailVisibility?, locale?}) → Promise<TokenUser>
+client.auth.updateLocale(locale)                                     → Promise<TokenUser>
+client.auth.refreshSession()                                         → Promise<AuthResult>
+client.auth.listSessions()                                           → Promise<Session[]>
+client.auth.revokeSession(sessionId)                                 → Promise<void>
 client.auth.onAuthStateChange(cb: (user: TokenUser | null) => void)  → unsubscribe()
-client.auth.requestEmailVerification({redirectUrl?, state?}?)        → void
-client.auth.verifyEmail(token)                                       → void
-client.auth.listIdentities()                                         → {identities, methods}
-client.auth.unlinkIdentity(identityId)                               → {identities, methods}
-client.auth.linkWithEmail({email, password})                         → AuthResult
-client.auth.linkWithPhone({phone})                                   → void
-client.auth.verifyLinkPhone({phone, code})                           → void
-client.auth.linkWithOAuth(provider, {redirectUrl?, state?}?)         → {redirectUrl}
+client.auth.requestEmailVerification({redirectUrl?, state?}?)        → Promise<void>
+client.auth.verifyEmail(token)                                       → Promise<void>
+client.auth.listIdentities()                                         → Promise<{identities, methods}>
+client.auth.unlinkIdentity(identityId)                               → Promise<{identities, methods}>
+client.auth.linkWithEmail({email, password})                         → Promise<AuthResult>
+client.auth.linkWithPhone({phone})                                   → Promise<void>
+client.auth.verifyLinkPhone({phone, code})                           → Promise<void>
+client.auth.linkWithOAuth(provider, {redirectUrl?, state?}?)         → Promise<{redirectUrl}>
 ```
 
-### MFA
+#### MFA
 
 ```
-client.auth.mfa.enrollTotp()                          → {factorId, secret, qrCodeUri, recoveryCodes}
-client.auth.mfa.verifyTotpEnrollment(factorId, code)  → {ok}
-client.auth.mfa.verifyTotp(mfaTicket, code)            → AuthResult
-client.auth.mfa.useRecoveryCode(mfaTicket, code)       → AuthResult
-client.auth.mfa.disableTotp({password?, code?}?)       → {ok}
-client.auth.mfa.listFactors()                          → {factors}
+client.auth.mfa.enrollTotp()                          → Promise<{factorId, secret, qrCodeUri, recoveryCodes}>
+client.auth.mfa.verifyTotpEnrollment(factorId, code)  → Promise<{ok: true}>
+client.auth.mfa.verifyTotp(mfaTicket, code)            → Promise<AuthResult>
+client.auth.mfa.useRecoveryCode(mfaTicket, code)       → Promise<AuthResult>
+client.auth.mfa.disableTotp({password?, code?}?)       → Promise<{ok: true}>
+client.auth.mfa.listFactors()                          → Promise<{factors}>
 ```
 
-### Passkeys
+#### Passkeys
 
 ```
-client.auth.passkeysRegisterOptions()       → options
-client.auth.passkeysRegister(credential)    → result
-client.auth.passkeysAuthOptions({email?}?)  → options
-client.auth.passkeysAuthenticate(assertion) → AuthResult
-client.auth.passkeysList()                  → list
-client.auth.passkeysDelete(credentialId)    → void
+client.auth.passkeysRegisterOptions()       → Promise<unknown>
+client.auth.passkeysRegister(credential)    → Promise<unknown>
+client.auth.passkeysAuthOptions({email?}?)  → Promise<unknown>
+client.auth.passkeysAuthenticate(assertion) → Promise<AuthResult>
+client.auth.passkeysList()                  → Promise<unknown>
+client.auth.passkeysDelete(credentialId)    → Promise<unknown>
 ```
 
-## Database
+### Database
 
 ```
 client.db(namespace: 'shared' | 'workspace' | 'user' | string, instanceId?: string)
   .table(name)                              → TableRef
 ```
 
-### Read
+#### Read
 
 ```
-table.getList()                             → {items, total, page, perPage, hasMore, cursor}
-table.get()                                 → same as getList() (NOT get-by-id)
-table.getOne(id)                            → record
-table.doc(id).get()                         → record
-table.getFirst()                            → record | null
-table.count()                               → number
+table.getList()                             → Promise<{items, total, page, perPage, hasMore, cursor}>
+table.get()                                 → Promise<{items, total, page, perPage, hasMore, cursor}> (NOT get-by-id)
+table.getOne(id)                            → Promise<record>
+table.doc(id).get()                         → Promise<record>
+table.getFirst()                            → Promise<record | null>
+table.count()                               → Promise<number>
 ```
 
-### Query (immutable chaining)
+#### Query (immutable chaining)
 
 ```
 table.where(field, op, value)               → TableRef    ops: == != < <= > >= in not-in contains array-contains
@@ -150,36 +317,36 @@ table.after(cursor)                         → TableRef
 table.before(cursor)                        → TableRef
 ```
 
-### Write (require auth)
+#### Write (require auth)
 
 ```
-table.insert(data)                          → record
-table.insertMany(items[])                   → record[]     auto-chunks at 500
-table.update(id, data)                      → record       supports increment(), deleteField()
-table.delete(id)                            → void
-table.upsert(data, {conflictTarget?}?)      → record & {action: 'inserted'|'updated'}
-table.upsertMany(items[], {conflictTarget?}?) → record[]
-table.where(...).updateMany(data)           → {totalProcessed, totalSucceeded, errors}
-table.where(...).deleteMany()               → {totalProcessed, totalSucceeded, errors}
+table.insert(data)                          → Promise<record>
+table.insertMany(items[])                   → Promise<record[]>     auto-chunks at 500
+table.update(id, data)                      → Promise<record>       supports increment(), deleteField()
+table.delete(id)                            → Promise<void>
+table.upsert(data, {conflictTarget?}?)      → Promise<record & {action: 'inserted'|'updated'}>
+table.upsertMany(items[], {conflictTarget?}?) → Promise<record[]>
+table.where(...).updateMany(data)           → Promise<{totalProcessed, totalSucceeded, errors}>
+table.where(...).deleteMany()               → Promise<{totalProcessed, totalSucceeded, errors}>
 ```
 
-### Special fields
+#### Special fields
 
 ```
-import { increment, deleteField } from '@edgebase/web'
+import { increment, deleteField } from '@edgebase-fun/web'
 table.update(id, { views: increment(1), old: deleteField() })
 ```
 
-### Doc ref
+#### Doc ref
 
 ```
-table.doc(id).get()                         → record
-table.doc(id).update(data)                  → record
-table.doc(id).delete()                      → void
+table.doc(id).get()                         → Promise<record>
+table.doc(id).update(data)                  → Promise<record>
+table.doc(id).delete()                      → Promise<void>
 table.doc(id).onSnapshot(cb: (data, change) => void) → unsubscribe()
 ```
 
-## Database Live
+### Database Live
 
 ```
 table.onSnapshot(cb: (snapshot) => void)                    → unsubscribe()
@@ -190,64 +357,64 @@ snapshot = { items: T[], changes: { added: T[], modified: T[], removed: T[] } }
 change = { changeType: 'added'|'modified'|'removed', data, docId }
 ```
 
-## Storage
+### Storage
 
 ```
 client.storage.bucket(name)                                 → StorageBucket
 ```
 
-### Operations
+#### Operations
 
 ```
-bucket.upload(key, File|Blob|ArrayBuffer|Uint8Array, {contentType?, customMetadata?, onProgress?, signal?}?) → FileInfo
-bucket.uploadString(key, value, format?: 'raw'|'base64'|'base64url'|'data_url', opts?) → FileInfo
-bucket.download(key, {as?: 'blob'|'arraybuffer'|'stream'|'text'}?)                    → Blob|...
+bucket.upload(key, File|Blob|ArrayBuffer|Uint8Array, {contentType?, customMetadata?, onProgress?, signal?}?) → UploadTask<FileInfo>
+bucket.uploadString(key, value, format?: 'raw'|'base64'|'base64url'|'data_url', opts?) → UploadTask<FileInfo>
+bucket.download(key, {as?: 'blob'|'arraybuffer'|'stream'|'text'}?)                    → Promise<Blob|...>
 bucket.getUrl(key)                                          → string (sync)
-bucket.createSignedUrl(key, {expiresIn?: '1h'|'30m'|'7d'}) → string       expiresIn is STRING not number
-bucket.createSignedUrls(keys[], {expiresIn?})               → [{key, url, expiresAt}]
-bucket.createSignedUploadUrl(key, {expiresIn?, maxFileSize?}) → {url, expiresAt, maxFileSize, uploadedBy}
-bucket.getMetadata(key)                                     → FileInfo
-bucket.updateMetadata(key, {customMetadata?, contentType?}) → FileInfo
-bucket.exists(key)                                          → boolean
-bucket.list({prefix?, cursor?, limit?}?)                    → {files: FileInfo[], cursor, truncated}
-bucket.delete(key)                                          → void
-bucket.deleteMany(keys[])                                   → {deleted, failed}
-bucket.resumeUpload(key, uploadId, data, opts?)             → FileInfo
-bucket.getUploadParts(key, uploadId)                        → {uploadId, key, parts: [{partNumber, etag}]}
+bucket.createSignedUrl(key, {expiresIn?: '1h'|'30m'|'7d'}) → Promise<string>       expiresIn is STRING not number
+bucket.createSignedUrls(keys[], {expiresIn?})               → Promise<Array<{key, url, expiresAt}>>
+bucket.createSignedUploadUrl(key, {expiresIn?, maxFileSize?}) → Promise<{url, expiresAt, maxFileSize, uploadedBy}>
+bucket.getMetadata(key)                                     → Promise<FileInfo>
+bucket.updateMetadata(key, {customMetadata?, contentType?}) → Promise<FileInfo>
+bucket.exists(key)                                          → Promise<boolean>
+bucket.list({prefix?, cursor?, limit?}?)                    → Promise<{files: FileInfo[], cursor, truncated}>
+bucket.delete(key)                                          → Promise<void>
+bucket.deleteMany(keys[])                                   → Promise<{deleted, failed}>
+bucket.resumeUpload(key, uploadId, data, opts?)             → UploadTask<FileInfo>
+bucket.getUploadParts(key, uploadId)                        → Promise<{uploadId, key, parts: [{partNumber, etag}]}>
 
 upload() returns UploadTask (Promise + .cancel() method)
 on resumable upload failure: catch ResumableUploadError {key, uploadId, completedParts, failedPartNumber}
 ```
 
-### Convenience (without bucket ref)
+#### Convenience (without bucket ref)
 
 ```
-client.storage.upload(bucketName, key, data, opts?)         → FileInfo
-client.storage.delete(bucketName, key)                      → void
+client.storage.upload(bucketName, key, data, opts?)         → UploadTask<FileInfo>
+client.storage.delete(bucketName, key)                      → Promise<void>
 client.storage.getUrl(bucketName, key)                      → string
 ```
 
-## Room
+### Room
 
 ```
 const room = client.room(namespace, roomId, {autoReconnect?, maxReconnectAttempts?, reconnectBaseDelay?, sendTimeout?}?)
-room.join()                                                 → void
+room.join()                                                 → Promise<void>
 room.leave()                                                → void
 ```
 
-### Members
+#### Members
 
 ```
 room.members.list()                         → RoomMember[]
 room.members.onSync(cb)                     → Subscription (.unsubscribe())
 room.members.onJoin(cb)                     → Subscription
 room.members.onLeave(cb: (member, reason: 'leave'|'timeout'|'kicked') => void) → Subscription
-room.members.setState(state)                → void
-room.members.clearState()                   → void
+room.members.setState(state)                → Promise<void>
+room.members.clearState()                   → Promise<void>
 room.members.onStateChange(cb)              → Subscription
 ```
 
-### State
+#### State
 
 ```
 room.state.getShared()                      → Record<string, unknown>
@@ -257,112 +424,111 @@ room.state.onMineChange(cb)                 → Subscription
 room.state.send(actionType, payload?)       → Promise<response>
 ```
 
-### Signals
+#### Signals
 
 ```
-room.signals.send(event, payload?, {includeSelf?}?) → void
-room.signals.sendTo(memberId, event, payload?)      → void
+room.signals.send(event, payload?, {includeSelf?}?) → Promise<void>
+room.signals.sendTo(memberId, event, payload?)      → Promise<void>
 room.signals.on(event, cb: (payload, meta) => void) → Subscription
 room.signals.onAny(cb: (event, payload, meta) => void) → Subscription
 ```
 
-### Media
+#### Media
 
 ```
-room.media.audio.enable() / disable() / setMuted(bool)
-room.media.video.enable() / disable() / setMuted(bool)
-room.media.screen.start() / stop()
+room.media.audio.enable() / disable() / setMuted(bool)      → Promise<void>
+room.media.video.enable() / disable() / setMuted(bool)      → Promise<void>
+room.media.screen.start() / stop()                          → Promise<void>
 room.media.list()                           → RoomMediaMember[]
-room.media.devices.switch({audioInputId?, videoInputId?})    → void
+room.media.devices.switch({audioInputId?, videoInputId?})    → Promise<void>
 room.media.onTrack(cb)                      → Subscription
 room.media.onTrackRemoved(cb)               → Subscription
 room.media.onStateChange(cb)                → Subscription
 room.media.onDeviceChange(cb)               → Subscription
 ```
 
-### Admin (in-room moderation)
+#### Admin (in-room moderation)
 
 ```
-room.admin.kick(memberId)                   → void
-room.admin.mute(memberId)                   → void
-room.admin.block(memberId)                  → void
-room.admin.setRole(memberId, role)          → void
-room.admin.disableVideo(memberId)           → void
-room.admin.stopScreenShare(memberId)        → void
+room.admin.kick(memberId)                   → Promise<void>
+room.admin.mute(memberId)                   → Promise<void>
+room.admin.block(memberId)                  → Promise<void>
+room.admin.setRole(memberId, role)          → Promise<void>
+room.admin.disableVideo(memberId)           → Promise<void>
+room.admin.stopScreenShare(memberId)        → Promise<void>
 ```
 
-### Meta
+#### Meta
 
 ```
-room.meta.get()                             → Record<string, unknown>
+room.meta.get()                             → Promise<Record<string, unknown>>
 ```
 
-### Realtime (WebRTC) — HTTP Wrappers
+#### Realtime (WebRTC) — HTTP Wrappers
 
 ```
-room.media.realtime.createSession(payload?) → {sessionId, sessionDescription?}
-room.media.realtime.getIceServers({ttl?}?)  → {iceServers}
-room.media.realtime.addTracks({sessionId, tracks, sessionDescription?}) → {sessionDescription?, tracks?}
-room.media.realtime.renegotiate({sessionId, sessionDescription})        → {sessionDescription?, tracks?}
-room.media.realtime.closeTracks({sessionId, tracks: [{mid}]})           → {sessionDescription?, tracks?}
+room.media.realtime.createSession(payload?) → Promise<{sessionId, sessionDescription?}>
+room.media.realtime.getIceServers({ttl?}?)  → Promise<{iceServers}>
+room.media.realtime.addTracks({sessionId, tracks, sessionDescription?}) → Promise<{sessionDescription?, tracks?}>
+room.media.realtime.renegotiate({sessionId, sessionDescription})        → Promise<{sessionDescription?, tracks?}>
+room.media.realtime.closeTracks({sessionId, tracks: [{mid}]})           → Promise<{sessionDescription?, tracks?}>
 ```
 
-WebRTC transport (audio/video/screen share) is in the separate `@edgebase/realtime-media` package:
+For higher-level WebRTC transport, use the built-in room transport or the `RoomRealtimeMediaTransport` export from `@edgebase-fun/web`:
 ```
-import { createRealtimeTransport } from '@edgebase/realtime-media';
-const transport = createRealtimeTransport(room, { autoSubscribe: true });
+const transport = room.media.realtime.transport({ autoSubscribe: true });
 await transport.connect();
 await transport.enableAudio();
 await transport.enableVideo();
 transport.onRemoteTrack(event => { ... });
 ```
 
-### Session
+#### Session
 
 ```
-room.session.onConnectionStateChange(cb: (state: 'idle'|'connecting'|'connected'|'reconnecting'|'disconnected') => void)
+room.session.onConnectionStateChange(cb: (state: 'idle'|'connecting'|'connected'|'reconnecting'|'disconnected'|'auth_lost'|'kicked') => void) → Subscription
 room.session.onKicked(cb)                   → Subscription
 room.session.onError(cb)                    → Subscription
 room.session.onReconnect(cb)                → Subscription
 ```
 
-## Functions
+### Functions
 
 ```
-client.functions.call(name, {method?, body?, query?}?)  → T
-client.functions.get(path, query?)                       → T
-client.functions.post(path, body?)                       → T
-client.functions.put(path, body?)                        → T
-client.functions.patch(path, body?)                      → T
-client.functions.delete(path)                            → T
+client.functions.call(name, {method?, body?, query?}?)  → Promise<T>
+client.functions.get(path, query?)                       → Promise<T>
+client.functions.post(path, body?)                       → Promise<T>
+client.functions.put(path, body?)                        → Promise<T>
+client.functions.patch(path, body?)                      → Promise<T>
+client.functions.delete(path)                            → Promise<T>
 ```
 
-## Analytics
+### Analytics
 
 ```
 client.analytics.track(name, properties?: Record<string, string|number|boolean>) → void (batched)
-client.analytics.flush()                    → void
+client.analytics.flush()                    → Promise<void>
 client.analytics.destroy()                  → void (flush + cleanup)
 ```
 
-## Push
+### Push
 
 ```
 client.push.setTokenProvider(provider: () => Promise<string>)  → void
-client.push.register({metadata?}?)                             → void
-client.push.unregister(deviceId?)                              → void
-client.push.subscribeTopic(topic)                              → void
-client.push.unsubscribeTopic(topic)                            → void
+client.push.register({metadata?}?)                             → Promise<void>
+client.push.unregister(deviceId?)                              → Promise<void>
+client.push.subscribeTopic(topic)                              → Promise<void>
+client.push.unsubscribeTopic(topic)                            → Promise<void>
 client.push.onMessage(cb: (msg: {title?, body?, data?}) => void)
 client.push.onMessageOpenedApp(cb: (msg) => void)                  → void (notification tap opened app)
 client.push.getPermissionStatus()           → 'granted'|'denied'|'notDetermined'
-client.push.requestPermission()             → 'granted'|'denied'
+client.push.requestPermission()             → Promise<'granted'|'denied'>
 ```
 
-## Errors
+### Errors
 
 ```
-import { EdgeBaseError } from '@edgebase/web'
+import { EdgeBaseError } from '@edgebase-fun/web'
 EdgeBaseError extends Error {
   code: number                              // HTTP status code (e.g. 400, 401, 404)
   message: string
@@ -372,12 +538,12 @@ EdgeBaseError extends Error {
 }
 ```
 
-## Utility
+### Utility
 
 ```
 client.setLocale(locale: string | undefined)
 client.getLocale()                          → string | undefined
 client.setContext(ctx)                      → void
 client.getContext()                         → ContextValue
-client.getRoomMetadata(namespace, roomId)   → Record<string, unknown>
+client.getRoomMetadata(namespace, roomId)   → Promise<Record<string, unknown>>
 ```

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TableConfig } from '@edgebase/shared';
+import type { TableConfig } from '@edgebase-fun/shared';
 import {
   escapePgIdentifier,
   filterToPgSchemaColumns,

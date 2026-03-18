@@ -5,6 +5,7 @@
 	import { downloadBlob } from '$lib/download';
 	import { devInfoStore } from '$lib/stores/devInfo';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { adminDashboardDocs } from '$lib/docs-links';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -252,7 +253,7 @@
 	}
 </script>
 
-<PageShell title="Project Info" description="Environment and resource overview with admin account controls">
+<PageShell title="Project Info" description="Environment and resource overview with admin account controls" docsHref={adminDashboardDocs}>
 	{#snippet actions()}
 		<Button variant="secondary" size="sm" onclick={downloadConfig}>Download Config Snapshot</Button>
 	{/snippet}

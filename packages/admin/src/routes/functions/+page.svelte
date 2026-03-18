@@ -3,6 +3,7 @@
 	import { api } from '$lib/api';
 	import { toastError, toastSuccess } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { functionsDocs } from '$lib/docs-links';
 	import Button from '$lib/components/ui/Button.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 
@@ -144,7 +145,7 @@
 	}
 </script>
 
-<PageShell title="Functions" description="Execute and test your App Functions">
+<PageShell title="Functions" description="Execute and test your App Functions" docsHref={functionsDocs}>
 	<div class="fn-layout">
 		<!-- Function List -->
 		<div class="fn-sidebar">

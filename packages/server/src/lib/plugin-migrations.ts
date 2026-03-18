@@ -12,7 +12,7 @@
  */
 
 import type { Env } from '../types.js';
-import type { EdgeBaseConfig, PluginInstance } from '@edgebase/shared';
+import type { EdgeBaseConfig, PluginInstance } from '@edgebase-fun/shared';
 import { parseConfig } from './do-router.js';
 import { executePostgresQuery } from './postgres-executor.js';
 import { getProviderBindingName } from './postgres-executor.js';

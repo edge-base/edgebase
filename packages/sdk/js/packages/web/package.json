@@ -1,5 +1,5 @@
 {
-    "name": "@edgebase/web",
+    "name": "@edgebase-fun/web",
     "version": "0.1.0",
     "description": "EdgeBase web SDK — browser client with database-live subscriptions, room, and auth persistence",
     "license": "MIT",
@@ -22,7 +22,8 @@
     },
     "sideEffects": false,
     "files": [
-        "dist"
+        "dist",
+        "llms.txt"
     ],
     "publishConfig": {
         "access": "public"
@@ -34,7 +35,7 @@
         "prepack": "pnpm run build"
     },
     "dependencies": {
-        "@edgebase/core": "workspace:*"
+        "@edgebase-fun/core": "workspace:*"
     },
     "devDependencies": {
         "typescript": "^5.7.0",

@@ -1,11 +1,11 @@
 /**
- * web.e2e.test.ts — JS SDK @edgebase/web E2E 테스트
+ * web.e2e.test.ts — JS SDK @edgebase-fun/web E2E 테스트
  *
  * 실제 서버(wrangler dev --local :8688)에 HTTP 요청
  * 브라우저 환경 vitest happy-dom
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createClient } from '@edgebase/web';
+import { createClient } from '@edgebase-fun/web';
 
 const SERVER = 'http://localhost:8688';
 

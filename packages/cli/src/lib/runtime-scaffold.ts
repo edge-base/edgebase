@@ -6,6 +6,7 @@ import {
   readFileSync,
   readlinkSync,
   rmSync,
+  unlinkSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -136,8 +137,8 @@ function copyRuntimeDir(source: string, target: string): void {
 function resolveServerRuntimeSource(projectDir: string): string {
   const candidates = dedupeCandidates([
     join(projectDir, 'node_modules', '@edgebase', 'server', 'src'),
-    resolve(CLI_NODE_MODULES_SOURCE, '@edgebase/server', 'src'),
-    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase/server', 'src'),
+    resolve(CLI_NODE_MODULES_SOURCE, '@edgebase-fun/server', 'src'),
+    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase-fun/server', 'src'),
     MONOREPO_SERVER_RUNTIME_SOURCE,
   ]);
 
@@ -153,8 +154,8 @@ function resolveServerRuntimeSource(projectDir: string): string {
 function resolveAdminBuildSource(projectDir: string): string {
   const candidates = dedupeCandidates([
     join(projectDir, 'node_modules', '@edgebase', 'server', 'admin-build'),
-    resolve(CLI_NODE_MODULES_SOURCE, '@edgebase/server', 'admin-build'),
-    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase/server', 'admin-build'),
+    resolve(CLI_NODE_MODULES_SOURCE, '@edgebase-fun/server', 'admin-build'),
+    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase-fun/server', 'admin-build'),
     ...MONOREPO_ADMIN_BUILD_SOURCES,
   ]);
 
@@ -245,9 +246,9 @@ function getRuntimeNodeModulesCandidates(projectDir: string): string[] {
 
 function getSharedPackageSourceCandidates(projectDir: string): string[] {
   return dedupeCandidates([
-    resolve(CLI_NODE_MODULES_SOURCE, '@edgebase/shared'),
-    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase/shared'),
-    resolve(SERVER_NODE_MODULES_SOURCE, '@edgebase/shared'),
+    resolve(CLI_NODE_MODULES_SOURCE, '@edgebase-fun/shared'),
+    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase-fun/shared'),
+    resolve(SERVER_NODE_MODULES_SOURCE, '@edgebase-fun/shared'),
     MONOREPO_SHARED_SOURCE,
     join(projectDir, 'node_modules', '@edgebase', 'shared'),
   ]);
@@ -279,7 +280,7 @@ function ensureSharedPackageLinkAtRoot(rootDir: string, source: string): void {
     try {
       const stat = lstatSync(target);
       if (stat.isSymbolicLink()) {
-        rmSync(target, { recursive: true, force: true });
+        unlinkSync(target);
       } else if (!existsSync(markerPath)) {
         return;
       }
@@ -311,13 +312,34 @@ function findWorkspaceRoot(startDir: string): string | null {
 }
 
 function ensureDirectorySymlink(source: string, target: string): void {
+  const normalizedSource = resolve(source);
   const currentLink = readExistingSymlinkTarget(target);
-  if (currentLink === source) return;
-  if (currentLink !== null || existsSync(target)) {
+  if (currentLink === normalizedSource) return;
+  if (currentLink !== null) {
+    unlinkSync(target);
+  } else if (existsSync(target)) {
     rmSync(target, { recursive: true, force: true });
   }
 
-  symlinkSync(source, target, process.platform === 'win32' ? 'junction' : 'dir');
+  try {
+    symlinkSync(normalizedSource, target, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw error;
+    }
+
+    const retryLink = readExistingSymlinkTarget(target);
+    if (retryLink === normalizedSource) {
+      return;
+    }
+
+    if (retryLink !== null) {
+      unlinkSync(target);
+    } else {
+      rmSync(target, { recursive: true, force: true });
+    }
+    symlinkSync(normalizedSource, target, process.platform === 'win32' ? 'junction' : 'dir');
+  }
 }
 
 function readExistingSymlinkTarget(target: string): string | null {
@@ -334,7 +356,7 @@ function readExistingSymlinkTarget(target: string): string | null {
 function buildSharedShimPackageJson(): string {
   return `${JSON.stringify(
     {
-      name: '@edgebase/shared',
+      name: '@edgebase-fun/shared',
       private: true,
       type: 'module',
       main: './src/index.ts',

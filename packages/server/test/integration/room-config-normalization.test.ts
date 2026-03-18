@@ -8,7 +8,7 @@
  *   - Rejects top-level legacy aliases (onCreate, onJoin, etc.)
  */
 import { describe, it, expect } from 'vitest';
-import { materializeConfig } from '@edgebase/shared';
+import { materializeConfig } from '@edgebase-fun/shared';
 
 // ─── 1. Legacy → Canonical Auto-Migration ───
 

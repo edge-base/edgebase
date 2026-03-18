@@ -1,5 +1,5 @@
 /**
- * @edgebase/core — FunctionsClient unit tests.
+ * @edgebase-fun/core — FunctionsClient unit tests.
  *
  * Tests:
  *   - FunctionsClient.call: URL construction, method routing, body/query forwarding

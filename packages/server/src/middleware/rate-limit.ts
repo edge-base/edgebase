@@ -1,6 +1,6 @@
 import type { MiddlewareHandler } from 'hono';
 import type { Env } from '../types.js';
-import type { EdgeBaseConfig } from '@edgebase/shared';
+import type { EdgeBaseConfig } from '@edgebase-fun/shared';
 import {
   buildKeymap,
   extractBearerToken,

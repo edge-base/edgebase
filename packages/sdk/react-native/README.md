@@ -1,13 +1,13 @@
-# @edgebase/react-native
+# @edgebase-fun/react-native
 
 EdgeBase SDK for React Native — **iOS, Android, and Web (React Native Web)** support.
 
-> Shared client model with `@edgebase/web`, with React Native-specific storage, lifecycle, and OAuth wiring.
+> Shared client model with `@edgebase-fun/web`, with React Native-specific storage, lifecycle, and OAuth wiring.
 
 ## Installation
 
 ```bash
-npm install @edgebase/react-native @react-native-async-storage/async-storage react-native-webview
+npm install @edgebase-fun/react-native @react-native-async-storage/async-storage react-native-webview
 ```
 
 For iOS:
@@ -18,7 +18,7 @@ cd ios && pod install
 ## Quick Start
 
 ```typescript
-import { createClient } from '@edgebase/react-native';
+import { createClient } from '@edgebase-fun/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Linking, AppState } from 'react-native';
 
@@ -66,7 +66,7 @@ Linking.addEventListener('url', async ({ url }) => {
 ## Captcha (Turnstile)
 
 ```tsx
-import { TurnstileWebView, useTurnstile } from '@edgebase/react-native';
+import { TurnstileWebView, useTurnstile } from '@edgebase-fun/react-native';
 import { WebView } from 'react-native-webview';
 
 function SignUpScreen() {
@@ -128,7 +128,7 @@ Lifecycle management starts automatically when `appState` is provided to `create
 - **Background / Inactive**: WebSocket disconnected → saves battery
 - **Foreground**: Token refreshed + WebSocket reconnected
 
-## Platform Differences vs `@edgebase/web`
+## Platform Differences vs `@edgebase-fun/web`
 
 | Feature | Web | React Native |
 |---|---|---|

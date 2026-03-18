@@ -1,5 +1,5 @@
 /**
- * @edgebase/react-native — E2E 테스트
+ * @edgebase-fun/react-native — E2E 테스트
  *
  * wrangler dev --port 8688 실서버 필요
  *
@@ -704,7 +704,7 @@ describe('RN E2E — Upsert', () => {
 
 describe('RN E2E — FieldOps', () => {
   it('increment → 숫자 필드 증가', async () => {
-    const { increment } = await import('@edgebase/core');
+    const { increment } = await import('@edgebase-fun/core');
     const r = await admin.db('shared').table('posts').insert({ title: `${PREFIX}-rn-inc`, viewCount: 10 });
     const id = (r as any).id;
     createdIds.push(id);
@@ -713,7 +713,7 @@ describe('RN E2E — FieldOps', () => {
   });
 
   it('increment 음수 → 감소', async () => {
-    const { increment } = await import('@edgebase/core');
+    const { increment } = await import('@edgebase-fun/core');
     const r = await admin.db('shared').table('posts').insert({ title: `${PREFIX}-rn-dec`, viewCount: 20 });
     const id = (r as any).id;
     createdIds.push(id);
@@ -722,7 +722,7 @@ describe('RN E2E — FieldOps', () => {
   });
 
   it('deleteField → 필드 null/삭제', async () => {
-    const { deleteField } = await import('@edgebase/core');
+    const { deleteField } = await import('@edgebase-fun/core');
     const r = await admin.db('shared').table('posts').insert({ title: `${PREFIX}-rn-delfld`, extra: 'temp' });
     const id = (r as any).id;
     createdIds.push(id);
@@ -835,7 +835,7 @@ describe('RN E2E — DatabaseLive (구조 검증)', () => {
     const { accessToken, refreshToken } = await signupRes.json() as any;
     const { TokenManager } = await import('../../src/token-manager');
     const { DatabaseLiveClient } = await import('../../src/database-live');
-    const { ContextManager } = await import('@edgebase/core');
+    const { ContextManager } = await import('@edgebase-fun/core');
 
     const storage = (() => {
       const store = new Map<string, string>();

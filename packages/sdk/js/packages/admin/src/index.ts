@@ -1,10 +1,10 @@
 /**
- * @edgebase/admin — Admin/Server-side EdgeBase SDK (Node.js / Edge Functions).
+ * @edgebase-fun/admin — Admin/Server-side EdgeBase SDK (Node.js / Edge Functions).
  *: 독립 패키지
  *
  * Usage:
  * ```ts
- * import { createAdminClient } from '@edgebase/admin';
+ * import { createAdminClient } from '@edgebase-fun/admin';
  * const admin = createAdminClient('https://my-app.edgebase.fun', { serviceKey: '...' });
  * ```
  */

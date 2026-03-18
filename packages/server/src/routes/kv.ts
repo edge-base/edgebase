@@ -12,7 +12,7 @@
  * Flow: Server SDK → POST /api/kv/:namespace → Worker → KV binding → JSON
  */
 import { OpenAPIHono, createRoute, z, type HonoEnv } from '../lib/hono.js';
-import { EdgeBaseError } from '@edgebase/shared';
+import { EdgeBaseError } from '@edgebase-fun/shared';
 import { parseConfig } from '../lib/do-router.js';
 import { validateKey, buildConstraintCtx } from '../lib/service-key.js';
 import { zodDefaultHook, kvBodySchema, jsonResponseSchema, errorResponseSchema } from '../lib/schemas.js';

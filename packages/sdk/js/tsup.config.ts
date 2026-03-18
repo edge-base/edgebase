@@ -12,6 +12,6 @@ export default defineConfig({
   outDir: 'dist',
   target: 'es2022',
   // All workspace sub-packages are bundled inline so the published
-  // @edgebase/sdk is fully self-contained (no peer dependencies at runtime).
-  noExternal: ['@edgebase/core', '@edgebase/web', '@edgebase/admin', '@edgebase/shared'],
+  // @edgebase-fun/sdk is fully self-contained (no peer dependencies at runtime).
+  noExternal: ['@edgebase-fun/core', '@edgebase-fun/web', '@edgebase-fun/admin', '@edgebase-fun/shared'],
 });

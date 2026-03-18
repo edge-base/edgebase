@@ -7,7 +7,7 @@
  * ```
  */
 import { useState, useEffect, useCallback } from 'react';
-import type { TokenUser } from '@edgebase/web';
+import type { TokenUser } from '@edgebase-fun/web';
 import { useAuthContext } from '../context.js';
 
 export interface UseAuthReturn {

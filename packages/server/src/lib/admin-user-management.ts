@@ -1,4 +1,4 @@
-import { EdgeBaseError } from '@edgebase/shared';
+import { EdgeBaseError } from '@edgebase-fun/shared';
 import type { AuthDb } from './auth-db-adapter.js';
 import {
   confirmEmail,

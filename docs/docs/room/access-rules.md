@@ -13,7 +13,7 @@ Rooms use explicit room-level access checks under `rooms[namespace].access`.
 ## Configuration
 
 ```typescript
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   rooms: {

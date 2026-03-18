@@ -5,6 +5,7 @@
 	import { toastError, addToast } from '$lib/stores/toast.svelte';
 	import { devInfoStore } from '$lib/stores/devInfo';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { emailDocs } from '$lib/docs-links';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
@@ -217,7 +218,7 @@
 	}
 </script>
 
-<PageShell title="Email Templates" description="Customize authentication email templates and subjects">
+<PageShell title="Email Templates" description="Customize authentication email templates and subjects" docsHref={emailDocs}>
 	{#snippet actions()}
 		<a href="{base}/auth/settings">
 			<Button variant="ghost" size="sm">Auth Settings</Button>

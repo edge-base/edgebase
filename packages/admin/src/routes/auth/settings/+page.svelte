@@ -6,6 +6,7 @@
 	import { addToast, toastError } from '$lib/stores/toast.svelte';
 	import { devInfoStore, loadDevInfo } from '$lib/stores/devInfo';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { authDocs } from '$lib/docs-links';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
@@ -408,7 +409,7 @@
 	});
 </script>
 
-<PageShell title="Auth Settings" description="Manage authentication methods and OAuth providers">
+<PageShell title="Auth Settings" description="Manage authentication methods and OAuth providers" docsHref={authDocs}>
 	{#snippet actions()}
 		<a href="{base}/auth">
 			<Button variant="ghost" size="sm">Back to Users</Button>

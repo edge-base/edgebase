@@ -129,12 +129,17 @@ export const initCommand = new Command('init')
       console.log(chalk.yellow('  ⏭'), 'wrangler.toml (already exists)');
     }
 
-    // Create .gitignore entry
     const gitignorePath = join(projectDir, '.gitignore');
-    if (!existsSync(gitignorePath)) {
-      writeFileSync(gitignorePath, GITIGNORE_TEMPLATE);
-      console.log(chalk.green('  ✓'), '.gitignore');
-    }
+    const hadGitignore = existsSync(gitignorePath);
+    const gitignoreChanged = ensureScaffoldGitignore(gitignorePath);
+    console.log(
+      gitignoreChanged ? chalk.green('  ✓') : chalk.yellow('  ⏭'),
+      !hadGitignore
+        ? '.gitignore'
+        : gitignoreChanged
+          ? '.gitignore (updated)'
+          : '.gitignore (already exists)',
+    );
 
     ensureRuntimeScaffold(projectDir);
     console.log(chalk.green('  ✓'), '.edgebase/runtime scaffold');
@@ -194,7 +199,7 @@ function generateDevSecret(): string {
 
 // ─── Templates ───
 
-const CONFIG_TEMPLATE = `import { defineConfig } from '@edgebase/shared';
+const CONFIG_TEMPLATE = `import { defineConfig } from '@edgebase-fun/shared';
 import { rateLimiting } from './config/rate-limits';
 
 export default defineConfig({
@@ -316,24 +321,27 @@ const RATE_LIMITS_TEMPLATE = `export const rateLimiting = {
 } as const;
 `;
 
-const EXAMPLE_FUNCTION_TEMPLATE = `import { defineFunction } from '@edgebase/shared';
+const EXAMPLE_FUNCTION_TEMPLATE = `import { defineFunction } from '@edgebase-fun/shared';
 
 export const GET = defineFunction(async () => {
   return Response.json({ ok: true });
 });
 `;
 
-const GITIGNORE_TEMPLATE = `node_modules/
-dist/
-.wrangler/
-.wrangler.generated.*
-.dev.vars
-.env.development
-.env.release
-.edgebase/
-edgebase.d.ts
-*.local
-`;
+const GITIGNORE_RULES = [
+  'node_modules/',
+  'dist/',
+  '.wrangler/',
+  '.wrangler.generated.*',
+  '.dev.vars',
+  '.env.development',
+  '.env.release',
+  '.edgebase/',
+  'edgebase.d.ts',
+  '*.local',
+] as const;
+
+const GITIGNORE_TEMPLATE = `${GITIGNORE_RULES.join('\n')}\n`;
 
 function resolveLocalCliEntry(projectDir: string): string | null {
   let currentDir = resolve(projectDir);
@@ -389,7 +397,7 @@ function resolveScaffoldDependencyVersion(packageName: string): string {
       : declaredVersion;
   }
 
-  if (packageName === '@edgebase/shared') {
+  if (packageName === '@edgebase-fun/shared') {
     const sharedPackageJson = readPackageJsonFromUrl('../../../shared/package.json');
     if (typeof sharedPackageJson?.version === 'string') {
       return `^${sharedPackageJson.version}`;
@@ -443,8 +451,8 @@ function buildPackageJsonObject(
 
   if (needsPublishedPackages) {
     packageJson.devDependencies = {
-      '@edgebase/cli': resolveScaffoldDependencyVersion('@edgebase/cli'),
-      '@edgebase/shared': resolveScaffoldDependencyVersion('@edgebase/shared'),
+      '@edgebase-fun/cli': resolveScaffoldDependencyVersion('@edgebase-fun/cli'),
+      '@edgebase-fun/shared': resolveScaffoldDependencyVersion('@edgebase-fun/shared'),
     };
   }
 
@@ -527,6 +535,30 @@ function ensureScaffoldPackageJson(
   }
 
   writeFileSync(packageJsonPath, `${JSON.stringify(existing, null, 2)}\n`, 'utf-8');
+  return true;
+}
+
+function ensureScaffoldGitignore(gitignorePath: string): boolean {
+  if (!existsSync(gitignorePath)) {
+    writeFileSync(gitignorePath, GITIGNORE_TEMPLATE, 'utf-8');
+    return true;
+  }
+
+  const existing = readFileSync(gitignorePath, 'utf-8');
+  const existingRules = new Set(
+    existing
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0),
+  );
+  const missingRules = GITIGNORE_RULES.filter((rule) => !existingRules.has(rule));
+
+  if (missingRules.length === 0) {
+    return false;
+  }
+
+  const prefix = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
+  writeFileSync(gitignorePath, `${existing}${prefix}${missingRules.join('\n')}\n`, 'utf-8');
   return true;
 }
 

@@ -150,7 +150,7 @@ If a multipart upload fails mid-way, the SDK throws a `ResumableUploadError` con
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-import { ResumableUploadError } from '@edgebase/client';
+import { ResumableUploadError } from '@edgebase-fun/client';
 
 try {
   await bucket.upload('large-video.mp4', file, {

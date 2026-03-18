@@ -28,7 +28,7 @@ import {
   queryParamsSchema, listResponseSchema, recordResponseSchema,
   jsonResponseSchema, errorResponseSchema, zodDefaultHook,
 } from '../lib/schemas.js';
-import type { AuthContext } from '@edgebase/shared';
+import type { AuthContext } from '@edgebase-fun/shared';
 import { handlePgRequest } from '../lib/postgres-handler.js';
 import { handleD1Request } from '../lib/d1-handler.js';
 

@@ -162,10 +162,10 @@ importers:
 
   packages/cli:
     dependencies:
-      '@edgebase/server':
+      '@edgebase-fun/server':
         specifier: workspace:*
         version: link:../server
-      '@edgebase/shared':
+      '@edgebase-fun/shared':
         specifier: workspace:*
         version: link:../shared
       chalk:
@@ -208,13 +208,13 @@ importers:
 
   packages/create-edgebase:
     dependencies:
-      '@edgebase/cli':
+      '@edgebase-fun/cli':
         specifier: workspace:*
         version: link:../cli
 
   packages/plugins/core:
     dependencies:
-      '@edgebase/shared':
+      '@edgebase-fun/shared':
         specifier: workspace:*
         version: link:../../shared
     devDependencies:
@@ -224,16 +224,16 @@ importers:
 
   packages/sdk/js:
     dependencies:
-      '@edgebase/admin':
+      '@edgebase-fun/admin':
         specifier: workspace:*
         version: link:packages/admin
-      '@edgebase/core':
+      '@edgebase-fun/core':
         specifier: workspace:*
         version: link:packages/core
-      '@edgebase/shared':
+      '@edgebase-fun/shared':
         specifier: workspace:*
         version: link:../../shared
-      '@edgebase/web':
+      '@edgebase-fun/web':
         specifier: workspace:*
         version: link:packages/web
     devDependencies:
@@ -255,7 +255,7 @@ importers:
       '@codemirror/lang-html':
         specifier: ^6.4.11
         version: 6.4.11
-      '@edgebase/core':
+      '@edgebase-fun/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -271,7 +271,7 @@ importers:
 
   packages/sdk/js/packages/auth-ui-react:
     dependencies:
-      '@edgebase/web':
+      '@edgebase-fun/web':
         specifier: workspace:*
         version: link:../web
     devDependencies:
@@ -305,7 +305,7 @@ importers:
 
   packages/sdk/js/packages/core:
     dependencies:
-      '@edgebase/shared':
+      '@edgebase-fun/shared':
         specifier: workspace:*
         version: link:../../../../shared
     devDependencies:
@@ -318,7 +318,7 @@ importers:
 
   packages/sdk/js/packages/ssr:
     dependencies:
-      '@edgebase/core':
+      '@edgebase-fun/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -328,7 +328,7 @@ importers:
 
   packages/sdk/js/packages/web:
     dependencies:
-      '@edgebase/core':
+      '@edgebase-fun/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -341,7 +341,7 @@ importers:
 
   packages/sdk/react-native:
     dependencies:
-      '@edgebase/core':
+      '@edgebase-fun/core':
         specifier: workspace:*
         version: link:../js/packages/core
       '@react-native-async-storage/async-storage':
@@ -375,7 +375,7 @@ importers:
 
   packages/server:
     dependencies:
-      '@edgebase/shared':
+      '@edgebase-fun/shared':
         specifier: workspace:*
         version: link:../shared
       '@hono/zod-openapi':

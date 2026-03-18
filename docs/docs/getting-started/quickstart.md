@@ -54,7 +54,7 @@ The dashboard opens automatically. Use `--no-open` to disable: `npx edgebase dev
 <TabItem value="js" label="JavaScript" default>
 
 ```bash
-npm install @edgebase/web
+npm install @edgebase-fun/web
 ```
 
 </TabItem>
@@ -68,7 +68,7 @@ dart pub add edgebase_flutter
 <TabItem value="react-native" label="React Native">
 
 ```bash
-npm install @edgebase/react-native
+npm install @edgebase-fun/react-native
 ```
 
 </TabItem>
@@ -124,7 +124,7 @@ cmake -B build && cmake --build build
 Add your first DB block to `edgebase.config.ts`:
 
 ```typescript
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 import { rateLimiting } from './config/rate-limits';
 
 export default defineConfig({
@@ -189,7 +189,7 @@ If you prefer, you can do the same thing from the local Admin Dashboard in dev m
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-import { createClient } from '@edgebase/web';
+import { createClient } from '@edgebase-fun/web';
 
 const client = createClient('http://localhost:8787');
 
@@ -239,7 +239,7 @@ final posts = await client.db('app').table('posts')
 <TabItem value="react-native" label="React Native">
 
 ```typescript
-import { createClient } from '@edgebase/react-native';
+import { createClient } from '@edgebase-fun/react-native';
 
 const client = createClient('http://localhost:8787');
 

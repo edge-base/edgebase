@@ -144,7 +144,7 @@ describe('M1.3 벤치마크', () => {
       // This test is a placeholder — actual measurement is done via CLI command
       console.log(`📊 Worker 번들 사이즈: 별도 CLI 명령어로 측정 필요`);
       console.log(`   $ wrangler deploy --dry-run --outdir dist`);
-      console.log(`   현재 M1 시점 의존성: hono (경량), @edgebase/shared`);
+      console.log(`   현재 M1 시점 의존성: hono (경량), @edgebase-fun/shared`);
       console.log(`   M3+ 추가 예정: jose (JWT), access rule parser`);
       expect(true).toBe(true);
     });

@@ -23,7 +23,7 @@ The server-side database API is available in all Admin SDKs.
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-import { createAdminClient } from '@edgebase/admin';
+import { createAdminClient } from '@edgebase-fun/admin';
 
 const admin = createAdminClient('https://my-app.edgebase.fun', {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY,
@@ -232,7 +232,7 @@ All SDK methods **throw on failure** — there is no `{ data, error }` return pa
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-import { EdgeBaseError } from '@edgebase/core';
+import { EdgeBaseError } from '@edgebase-fun/core';
 
 try {
   await admin.db('app').table('posts').getOne('nonexistent');
@@ -934,7 +934,7 @@ await admin.db('app').table('posts').update('record-id', {
 ### Field Operators
 
 ```typescript
-import { increment, deleteField } from '@edgebase/core';
+import { increment, deleteField } from '@edgebase-fun/core';
 
 await admin.db('app').table('posts').update('record-id', {
   views: increment(1),           // Atomic increment
@@ -2193,7 +2193,7 @@ Inside [App Functions](/docs/functions), you can execute raw SQL using `admin.sq
 
 ```typescript
 // functions/analytics.ts
-import { defineFunction } from '@edgebase/shared';
+import { defineFunction } from '@edgebase-fun/shared';
 
 export default defineFunction({
   trigger: { type: 'http', path: '/api/functions/analytics-top-authors', method: 'GET' },

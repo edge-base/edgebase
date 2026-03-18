@@ -25,7 +25,7 @@ Never expose the Service Key in client-side code. It grants full admin access to
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-import { createAdminClient } from '@edgebase/admin';
+import { createAdminClient } from '@edgebase-fun/admin';
 
 const admin = createAdminClient('https://your-project.edgebase.fun', {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY,

@@ -1,9 +1,9 @@
 /**
- * @edgebase/react-native — Full-featured client.
+ * @edgebase-fun/react-native — Full-featured client.
  * All APIs: auth, database-live, storage, push, room, captcha (turnstile), lifecycle
  *
  * @example
- * import { createClient } from '@edgebase/react-native';
+ * import { createClient } from '@edgebase-fun/react-native';
  * import AsyncStorage from '@react-native-async-storage/async-storage';
  * import { Linking, AppState } from 'react-native';
  *
@@ -26,8 +26,8 @@ import {
   ApiPaths,
   FunctionsClient,
   type FilterMatchFn,
-} from '@edgebase/core';
-import type { ContextValue } from '@edgebase/core';
+} from '@edgebase-fun/core';
+import type { ContextValue } from '@edgebase-fun/core';
 import { TokenManager, type AsyncStorageAdapter } from './token-manager.js';
 import { AuthClient, type LinkingAdapter } from './auth.js';
 import { DatabaseLiveClient, type DatabaseLiveOptions } from './database-live.js';

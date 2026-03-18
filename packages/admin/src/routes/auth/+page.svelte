@@ -5,6 +5,7 @@
 	import { api } from '$lib/api';
 	import { toastError, toastSuccess } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { authDocs } from '$lib/docs-links';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
@@ -233,7 +234,7 @@
 	}
 </script>
 
-<PageShell title="Users" description="Manage user accounts">
+<PageShell title="Users" description="Manage user accounts" docsHref={authDocs}>
 	{#snippet actions()}
 		<Button variant="primary" size="sm" onclick={() => (createUserOpen = true)}>+ Create User</Button>
 		<a href="{base}/auth/settings">

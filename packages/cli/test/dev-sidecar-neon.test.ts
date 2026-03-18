@@ -64,7 +64,7 @@ describe('Neon sidecar helpers', () => {
 	});
 
 	it('computes the default env key when creating a Neon-backed database block', async () => {
-		writeConfig(`import { defineConfig } from '@edgebase/shared';
+		writeConfig(`import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   databases: {},
@@ -114,7 +114,7 @@ export default defineConfig({
 	});
 
 	it('computes the default env key when upgrading a D1 database block to Postgres', async () => {
-		writeConfig(`import { defineConfig } from '@edgebase/shared';
+		writeConfig(`import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   databases: {

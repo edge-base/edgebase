@@ -19,12 +19,12 @@ import { OverviewHero, FeatureGrid } from '@site/src/components/OverviewPage';
 Plugins use an **Explicit Import** pattern. You install a plugin package, import its factory function in `edgebase.config.ts`, and call it with your configuration. At build time, the CLI merges plugin tables, functions, and hooks into the project — the server sees a regular EdgeBase app with more stuff.
 
 ```
-npm install @edgebase/plugin-stripe
+npm install @edgebase-fun/plugin-stripe
 ```
 
 ```typescript title="edgebase.config.ts"
-import { defineConfig } from '@edgebase/shared';
-import { stripePlugin } from '@edgebase/plugin-stripe';
+import { defineConfig } from '@edgebase-fun/shared';
+import { stripePlugin } from '@edgebase-fun/plugin-stripe';
 
 export default defineConfig({
   plugins: [

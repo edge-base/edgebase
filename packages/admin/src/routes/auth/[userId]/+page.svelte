@@ -6,6 +6,7 @@
 	import { api } from '$lib/api';
 	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { authDocs } from '$lib/docs-links';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Select from '$lib/components/ui/Select.svelte';
@@ -190,7 +191,7 @@
 	let profileEntries = $derived(Object.entries(profile));
 </script>
 
-<PageShell title="User Detail" description="User ID: {userId}">
+<PageShell title="User Detail" description="User ID: {userId}" docsHref={authDocs}>
 	{#snippet actions()}
 		<a href="{base}/auth">
 			<Button variant="ghost" size="sm">Back to Users</Button>

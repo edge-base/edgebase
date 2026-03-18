@@ -7,6 +7,7 @@
 	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
 	import { downloadBlob } from '$lib/download';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { storageDocs } from '$lib/docs-links';
 	import Button from '$lib/components/ui/Button.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
@@ -277,7 +278,7 @@
 	});
 </script>
 
-<PageShell title={bucket} description="Browse files in this bucket">
+<PageShell title={bucket} description="Browse files in this bucket" docsHref={storageDocs}>
 	{#snippet actions()}
 		<Button variant="primary" size="sm" onclick={() => (uploadOpen = true)}>Upload Files</Button>
 		<a href={`${ADMIN_APP_BASE_PATH}/storage`}>

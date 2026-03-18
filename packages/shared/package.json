@@ -1,5 +1,5 @@
 {
-    "name": "@edgebase/shared",
+    "name": "@edgebase-fun/shared",
     "version": "0.1.0",
     "description": "EdgeBase shared helpers for config, functions, and runtime contracts",
     "license": "MIT",

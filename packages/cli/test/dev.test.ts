@@ -126,7 +126,7 @@ describe('Runtime config scaffold', () => {
     expect(registry).toContain('rebuildCompiledRoutes()');
   });
 
-  it('writes an ESM-resolvable @edgebase/shared shim for config evaluation', () => {
+  it('writes an ESM-resolvable @edgebase-fun/shared shim for config evaluation', () => {
     ensureProjectSharedPackageLink(tmpDir);
 
     const packageJson = readFileSync(

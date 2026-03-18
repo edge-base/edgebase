@@ -133,9 +133,31 @@ describe('CLI: init command', () => {
     expect(packageJson.scripts.deploy).toBe('edgebase deploy');
     expect(packageJson.scripts.typegen).toBe('edgebase typegen');
     expect(packageJson.devDependencies).toMatchObject({
-      '@edgebase/cli': '^0.1.0',
-      '@edgebase/shared': '^0.1.0',
+      '@edgebase-fun/cli': '^0.1.0',
+      '@edgebase-fun/shared': '^0.1.0',
     });
+  });
+
+  it('should append missing EdgeBase ignore rules to an existing .gitignore', async () => {
+    const { initCommand } = await import('../src/commands/init.js');
+
+    writeFileSync(
+      join(testDir, '.gitignore'),
+      ['dist/', 'coverage/', 'custom.env'].join('\n') + '\n',
+    );
+
+    await initCommand.parseAsync([testDir, '--no-dev'], { from: 'user' });
+
+    const gitignore = readFileSync(join(testDir, '.gitignore'), 'utf-8');
+
+    expect(gitignore).toContain('dist/\n');
+    expect(gitignore).toContain('coverage/\n');
+    expect(gitignore).toContain('custom.env\n');
+    expect(gitignore).toContain('node_modules/\n');
+    expect(gitignore).toContain('.env.development\n');
+    expect(gitignore).toContain('.env.release\n');
+    expect(gitignore).toContain('.edgebase/\n');
+    expect(gitignore.match(/^dist\/$/gm)).toHaveLength(1);
   });
 
   it('should forward --no-open to dev when auto-starting', async () => {
@@ -199,8 +221,8 @@ describe('CLI: init command', () => {
     expect(packageJson).toContain(`"name": "${basename(testDir)}"`);
     expect(packageJson).toContain('"dev": "edgebase dev"');
     expect(packageJson).toContain('"deploy": "edgebase deploy"');
-    expect(packageJson).toContain('"@edgebase/cli": "^0.1.0"');
-    expect(packageJson).toContain('"@edgebase/shared": "^0.1.0"');
+    expect(packageJson).toContain('"@edgebase-fun/cli": "^0.1.0"');
+    expect(packageJson).toContain('"@edgebase-fun/shared": "^0.1.0"');
     expect(wranglerToml).toContain(`name = "${basename(testDir)}"`);
     expect(wranglerToml).toContain('main = ".edgebase/runtime/server/src/index.ts"');
     expect(wranglerToml).toContain('directory = ".edgebase/runtime/server/admin-build"');

@@ -191,7 +191,7 @@ export function generateFunctionRegistry(
  * DO NOT EDIT — regenerated on each deploy.
  * Generated at: ${new Date().toISOString()}
  */
-import type { AuthTrigger, FunctionDefinition, StorageTrigger } from '@edgebase/shared';
+import type { AuthTrigger, FunctionDefinition, StorageTrigger } from '@edgebase-fun/shared';
 import { registerFunction, registerMiddleware, wrapMethodExport, rebuildCompiledRoutes } from './lib/functions.js';
 import { parseConfig } from './lib/do-router.js';
 import { RoomsDO } from './durable-objects/rooms-do.js';

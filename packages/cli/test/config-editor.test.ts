@@ -27,7 +27,7 @@ import {
 
 // ─── Fixtures ───
 
-const baseConfig = `import { defineConfig } from '@edgebase/shared';
+const baseConfig = `import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   databases: {
@@ -47,7 +47,7 @@ export default defineConfig({
 `;
 
 /** Config with an index on users for removeIndex tests. */
-const configWithIndex = `import { defineConfig } from '@edgebase/shared';
+const configWithIndex = `import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   databases: {
@@ -69,7 +69,7 @@ export default defineConfig({
 `;
 
 /** Config with FTS on users for setFts removal tests. */
-const configWithFts = `import { defineConfig } from '@edgebase/shared';
+const configWithFts = `import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   databases: {
@@ -88,7 +88,7 @@ export default defineConfig({
 });
 `;
 
-const fourSpaceConfig = `import { defineConfig } from '@edgebase/shared';
+const fourSpaceConfig = `import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
     databases: {
@@ -110,7 +110,7 @@ export default defineConfig({
 const tabConfig = baseConfig.replace(/^( {2,})/gm, (indent) => '\t'.repeat(indent.length / 2));
 const crlfConfig = baseConfig.replace(/\n/g, '\r\n');
 
-const authConfig = `import { defineConfig } from '@edgebase/shared';
+const authConfig = `import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   auth: {

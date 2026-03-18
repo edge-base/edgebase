@@ -2,7 +2,7 @@
  * Field validation engine for table schemas.
  * Validates request body against schema field definitions.
  */
-import type { SchemaField } from '@edgebase/shared';
+import type { SchemaField } from '@edgebase-fun/shared';
 import { buildEffectiveSchema } from './schema.js';
 
 export interface ValidationResult {

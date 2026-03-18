@@ -4,7 +4,7 @@ import {
   type RoomMemberInfo,
   type RoomSender,
   type RoomServerAPI,
-} from '@edgebase/shared';
+} from '@edgebase-fun/shared';
 import {
   createCloudflareRealtimeClient,
   type CloudflareRealtimeCloseTracksRequest,

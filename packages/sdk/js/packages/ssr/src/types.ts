@@ -1,5 +1,5 @@
 /**
- * @edgebase/ssr — Type definitions for cookie-based SSR authentication.
+ * @edgebase-fun/ssr — Type definitions for cookie-based SSR authentication.
  */
 
 /** Options for cookie serialization. */

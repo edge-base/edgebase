@@ -4,14 +4,14 @@ sidebar_position: 3
 
 # Plugin API Reference
 
-All types are exported from `@edgebase/plugin-core`.
+All types are exported from `@edgebase-fun/plugin-core`.
 
 ## definePlugin\<TConfig\>()
 
 Creates a plugin factory function. The factory captures user-provided config via closure and injects it into all handlers as `ctx.pluginConfig`.
 
 ```typescript
-import { definePlugin, EDGEBASE_PLUGIN_API_VERSION } from '@edgebase/plugin-core';
+import { definePlugin, EDGEBASE_PLUGIN_API_VERSION } from '@edgebase-fun/plugin-core';
 
 const myPlugin = definePlugin<MyConfig>(definition);
 // Returns: (userConfig: MyConfig) => PluginInstance
@@ -21,7 +21,7 @@ const myPlugin = definePlugin<MyConfig>(definition);
 
 ```typescript
 interface PluginDefinition<TConfig> {
-  /** Unique plugin name (e.g. '@edgebase/plugin-stripe'). Used for namespacing. */
+  /** Unique plugin name (e.g. '@edgebase-fun/plugin-stripe'). Used for namespacing. */
   name: string;
 
   /** Public plugin contract version. Defaults to the current runtime contract when omitted. */
@@ -77,7 +77,7 @@ The resolved object returned by the factory. This is what goes into `config.plug
 
 ```typescript
 interface PluginInstance {
-  /** Plugin unique name (e.g. '@edgebase/plugin-stripe'). Used for namespacing. */
+  /** Plugin unique name (e.g. '@edgebase-fun/plugin-stripe'). Used for namespacing. */
   name: string;
   /** Public plugin contract version used for compatibility checks. */
   pluginApiVersion: number;
@@ -111,7 +111,7 @@ interface PluginInstance {
 }
 ```
 
-`definePlugin()` automatically injects the current `pluginApiVersion`, so normal plugin authors rarely set it manually. The runtime rejects plugins built against a different public contract. If you ever construct a `PluginInstance` by hand, import `EDGEBASE_PLUGIN_API_VERSION` from `@edgebase/plugin-core`.
+`definePlugin()` automatically injects the current `pluginApiVersion`, so normal plugin authors rarely set it manually. The runtime rejects plugins built against a different public contract. If you ever construct a `PluginInstance` by hand, import `EDGEBASE_PLUGIN_API_VERSION` from `@edgebase-fun/plugin-core`.
 
 ### PluginManifest
 

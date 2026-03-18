@@ -7,6 +7,7 @@
 	import { api } from '$lib/api';
 	import { toastError } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { adminDashboardAnalyticsDocs } from '$lib/docs-links';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Select from '$lib/components/ui/Select.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
@@ -138,7 +139,7 @@
 	}
 </script>
 
-<PageShell title="Event Timeline" description="Browse auth and custom events chronologically">
+<PageShell title="Event Timeline" description="Browse auth and custom events chronologically" docsHref={adminDashboardAnalyticsDocs}>
 	<div class="controls">
 		<div class="controls__fields">
 			<Select

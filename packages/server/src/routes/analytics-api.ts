@@ -6,14 +6,14 @@
  *   POST /api/analytics/track  — Track custom events (JWT / Service Key / anonymous)
  *   GET  /api/analytics/events — Query custom events (Service Key required)
  *
- * This route is consumed by @edgebase/admin and @edgebase/web SDKs.
+ * This route is consumed by @edgebase-fun/admin and @edgebase-fun/web SDKs.
  * The admin dashboard uses /admin/api/data/analytics instead (separate auth).
  */
 import { OpenAPIHono, createRoute, z, type HonoEnv } from '../lib/hono.js';
 import type { Env } from '../types.js';
 import { parseConfig } from '../lib/do-router.js';
 import { validateKey, buildConstraintCtx, resolveServiceKeyCandidate } from '../lib/service-key.js';
-import { EdgeBaseError } from '@edgebase/shared';
+import { EdgeBaseError } from '@edgebase-fun/shared';
 import { zodDefaultHook, trackEventsBodySchema, jsonResponseSchema, errorResponseSchema } from '../lib/schemas.js';
 import { executeAnalyticsQuery, resolveAnalyticsGroupBy } from '../lib/analytics-query.js';
 

@@ -1,17 +1,17 @@
 /**
- * @edgebase/plugin-core — Plugin definition API for EdgeBase.
+ * @edgebase-fun/plugin-core — Plugin definition API for EdgeBase.
  *
  * Explicit import pattern — plugins are factory functions that return PluginInstance.
  *
  * @example
  * ```typescript
- * // Plugin author (e.g. @edgebase/plugin-stripe/server/src/index.ts)
- * import { definePlugin } from '@edgebase/plugin-core';
+ * // Plugin author (e.g. @edgebase-fun/plugin-stripe/server/src/index.ts)
+ * import { definePlugin } from '@edgebase-fun/plugin-core';
  *
  * interface StripeConfig { secretKey: string; webhookSecret: string; currency?: string }
  *
  * export const stripePlugin = definePlugin<StripeConfig>({
- *   name: '@edgebase/plugin-stripe',
+ *   name: '@edgebase-fun/plugin-stripe',
  *   tables: { customers: { schema: { ... } } },
  *   functions: {
  *     'create-checkout': {
@@ -28,14 +28,14 @@
  * });
  *
  * // App developer (edgebase.config.ts)
- * import { stripePlugin } from '@edgebase/plugin-stripe';
+ * import { stripePlugin } from '@edgebase-fun/plugin-stripe';
  * export default defineConfig({
  *   plugins: [ stripePlugin({ secretKey: process.env.STRIPE_SECRET_KEY! }) ],
  * });
  * ```
  */
 
-import { CURRENT_PLUGIN_API_VERSION } from '@edgebase/shared';
+import { CURRENT_PLUGIN_API_VERSION } from '@edgebase-fun/shared';
 import type {
   PluginInstance,
   PluginManifest,
@@ -45,9 +45,9 @@ import type {
   AuthTrigger,
   StorageTrigger,
   DbProvider,
-} from '@edgebase/shared';
+} from '@edgebase-fun/shared';
 
-export { CURRENT_PLUGIN_API_VERSION as EDGEBASE_PLUGIN_API_VERSION } from '@edgebase/shared';
+export { CURRENT_PLUGIN_API_VERSION as EDGEBASE_PLUGIN_API_VERSION } from '@edgebase-fun/shared';
 
 // ─── Plugin Table Proxy (matches server TableProxy 1:1) ───
 
@@ -400,7 +400,7 @@ export interface PluginHooks<TConfig = Record<string, unknown>> {
 // ─── Plugin Definition ───
 
 export interface PluginDefinition<TConfig = Record<string, unknown>> {
-  /** Plugin unique name (e.g. '@edgebase/plugin-stripe'). */
+  /** Plugin unique name (e.g. '@edgebase-fun/plugin-stripe'). */
   name: string;
   /**
    * Public plugin contract version.
@@ -456,7 +456,7 @@ export interface PluginDefinition<TConfig = Record<string, unknown>> {
  * @example
  * ```typescript
  * export const stripePlugin = definePlugin<{ secretKey: string }>({
- *   name: '@edgebase/plugin-stripe',
+ *   name: '@edgebase-fun/plugin-stripe',
  *   tables: { customers: { schema: { ... } } },
  *   functions: {
  *     'create-checkout': {
@@ -547,7 +547,7 @@ export function definePlugin<TConfig>(
  *
  * @example
  * ```typescript
- * import { createMockContext } from '@edgebase/plugin-core';
+ * import { createMockContext } from '@edgebase-fun/plugin-core';
  *
  * const ctx = createMockContext({
  *   auth: { id: 'user-1' },
@@ -762,13 +762,13 @@ export function createMockContext<TConfig = Record<string, unknown>>(options?: {
  *
  * @example
  * ```typescript
- * import type { PluginClientFactory } from '@edgebase/plugin-core';
+ * import type { PluginClientFactory } from '@edgebase-fun/plugin-core';
  *
  * interface StripeClient { createCheckout(params: CheckoutParams): Promise<CheckoutResult>; }
  *
  * export const createStripePlugin: PluginClientFactory<StripeClient> = (client) => ({
  *   async createCheckout(params) {
- *     return client.functions.call('@edgebase/plugin-stripe/create-checkout', params) as Promise<CheckoutResult>;
+ *     return client.functions.call('@edgebase-fun/plugin-stripe/create-checkout', params) as Promise<CheckoutResult>;
  *   },
  * });
  * ```

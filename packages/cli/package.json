@@ -1,5 +1,5 @@
 {
-    "name": "@edgebase/cli",
+    "name": "@edgebase-fun/cli",
     "version": "0.1.0",
     "description": "CLI for EdgeBase — create, develop, and deploy EdgeBase projects",
     "license": "MIT",
@@ -33,8 +33,8 @@
         "node": ">=20.19.0"
     },
     "dependencies": {
-        "@edgebase/server": "workspace:*",
-        "@edgebase/shared": "workspace:*",
+        "@edgebase-fun/server": "workspace:*",
+        "@edgebase-fun/shared": "workspace:*",
         "chalk": "^5.4.0",
         "commander": "^13.1.0",
         "esbuild": "^0.27.3",

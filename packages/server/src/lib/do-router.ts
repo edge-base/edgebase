@@ -8,7 +8,7 @@
  *
  * Constraint: `id` must NOT contain `:` character.
  */
-import { materializeConfig, type EdgeBaseConfig } from '@edgebase/shared';
+import { materializeConfig, type EdgeBaseConfig } from '@edgebase-fun/shared';
 
 const RUNTIME_CONFIG_GLOBAL_KEY = '__EDGEBASE_RUNTIME_CONFIG__';
 

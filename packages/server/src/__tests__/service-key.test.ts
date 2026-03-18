@@ -19,7 +19,7 @@ import {
   resolveServiceKeyCandidate,
 } from '../lib/service-key.js';
 import { getTrustedClientIp } from '../lib/client-ip.js';
-import type { EdgeBaseConfig, ServiceKeyEntry } from '@edgebase/shared';
+import type { EdgeBaseConfig, ServiceKeyEntry } from '@edgebase-fun/shared';
 import type { Env } from '../types.js';
 
 // ─── Helpers ───

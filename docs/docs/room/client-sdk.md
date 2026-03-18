@@ -29,8 +29,10 @@ Two companion namespaces round out the client runtime:
 
 Legacy flat methods such as `room.send(...)`, `room.getSharedState()`, and `room.onMessage(...)` still exist for compatibility. Prefer the unified namespaces when your SDK supports them. See [SDK Support](/docs/room/sdk-support).
 
-:::note Non-JS SDK Surface
-The unified namespace (`room.state.*`, `room.members.*`, etc.) is currently available in the JavaScript/TypeScript SDK. Non-JS SDKs (Dart, Swift, Kotlin, Java, C#, C++) currently use the flat API surface shown in the compatibility tables below.
+:::note Unified Namespace Availability
+The unified namespace surface is available across the JavaScript/TypeScript, Dart, Swift, Kotlin, Java, C#, and C++ Room SDKs. Method names and casing follow each platform's conventions (for example, `room.State.*` in C# and `room->state.*` in C++).
+
+Legacy flat methods still exist as compatibility fallbacks, so older examples and the mapping tables below may still show `room.send(...)`, `room.getSharedState()`, and related APIs.
 :::
 
 ## Installation
@@ -39,9 +41,9 @@ The unified namespace (`room.state.*`, `room.members.*`, etc.) is currently avai
 <TabItem value="js" label="JavaScript" default>
 
 ```bash
-npm install @edgebase/web
+npm install @edgebase-fun/web
 # React Native:
-npm install @edgebase/react-native
+npm install @edgebase-fun/react-native
 ```
 
 </TabItem>
@@ -130,8 +132,8 @@ Rooms are identified by a **namespace** and a **room ID**. Ensure the user is au
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-import { createClient } from '@edgebase/web';
-// React Native: import { createClient } from '@edgebase/react-native';
+import { createClient } from '@edgebase-fun/web';
+// React Native: import { createClient } from '@edgebase-fun/react-native';
 
 const client = createClient('https://your-project.edgebase.fun');
 // ... authenticate first ...

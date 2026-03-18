@@ -18,7 +18,7 @@ import * as configEditor from './config-editor.js';
 import { loadConfigSafe } from './load-config.js';
 import { getDefaultPostgresEnvKey, removeEnvValue, upsertEnvValue } from './neon.js';
 import { execTsxSync } from './node-tools.js';
-import type { EdgeBaseConfig, SchemaField, IndexConfig, DbProvider } from '@edgebase/shared';
+import type { EdgeBaseConfig, SchemaField, IndexConfig, DbProvider } from '@edgebase-fun/shared';
 import { buildSnapshot, saveSnapshot } from './schema-check.js';
 import {
   listAvailableNeonProjects,

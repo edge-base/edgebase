@@ -25,7 +25,7 @@ Analytics querying and event tracking are available in all Admin SDKs.
 <TabItem value="ts" label="TypeScript" default>
 
 ```typescript
-import { createAdminClient } from '@edgebase/admin';
+import { createAdminClient } from '@edgebase-fun/admin';
 
 const admin = createAdminClient('https://my-edgebase-server.com', {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY,

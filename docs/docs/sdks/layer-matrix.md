@@ -26,7 +26,7 @@ For the latest certified behavior across `dev`, `docker`, and `deployed`, see [S
 
 | Language | Core | Client | Admin | Notes |
 | --- | --- | --- | --- | --- |
-| JavaScript / TypeScript | `@edgebase/core` | `@edgebase/web`, `@edgebase/react-native` | `@edgebase/admin` | `@edgebase/ssr` is a separate server-side user-context package |
+| JavaScript / TypeScript | `@edgebase-fun/core` | `@edgebase-fun/web`, `@edgebase-fun/react-native` | `@edgebase-fun/admin` | `@edgebase-fun/ssr` is a separate server-side user-context package |
 | Dart / Flutter | `edgebase_core` | `edgebase_flutter` | `edgebase_admin` | Full split |
 | Kotlin | `:core` | `:client` | `:admin` | KMP core/client, JVM admin |
 | Java | `edgebase-core-java` | `edgebase-android-java` | `edgebase-admin-java` | Split by package |
@@ -66,8 +66,8 @@ Legend:
       </tr>
     </thead>
     <tbody>
-      <tr><td><code>@edgebase/web</code></td><td>—</td><td>—</td><td>✅</td><td>◐</td><td>◐</td><td>✅</td></tr>
-      <tr><td><code>@edgebase/react-native</code></td><td>✅</td><td>✅</td><td>—</td><td>—</td><td>—</td><td>✅</td></tr>
+      <tr><td><code>@edgebase-fun/web</code></td><td>—</td><td>—</td><td>✅</td><td>◐</td><td>◐</td><td>✅</td></tr>
+      <tr><td><code>@edgebase-fun/react-native</code></td><td>✅</td><td>✅</td><td>—</td><td>—</td><td>—</td><td>✅</td></tr>
       <tr><td><code>edgebase_flutter</code></td><td>✅</td><td>✅</td><td>✅</td><td>◐</td><td>◐</td><td>✅</td></tr>
       <tr><td><code>EdgeBase</code> (Swift)</td><td>—</td><td>✅</td><td>✅</td><td>—</td><td>—</td><td>—</td></tr>
       <tr><td><code>:client</code> (Kotlin KMP)</td><td>✅</td><td>✅</td><td>✅</td><td>—</td><td>—</td><td>✅</td></tr>
@@ -79,7 +79,7 @@ Legend:
 </div>
 
 Notes:
-- `@edgebase/web` desktop columns mean browser-hosted runtimes such as Electron renderer processes, not a native desktop-only SDK.
+- `@edgebase-fun/web` desktop columns mean browser-hosted runtimes such as Electron renderer processes, not a native desktop-only SDK.
 - `:client` (Kotlin KMP) uses a no-op JVM captcha provider, so Windows/Linux desktop JVM targets are intentionally not marked supported here.
 - `EdgeBase.Unity` desktop support depends on a supported WebView host. The current macOS path is validated through an embedded `gree/unity-webview` window. Other desktop targets still require a supported host integration or a custom `TurnstileProvider.SetWebViewFactory(...)`.
 - `packages/unreal` uses the built-in browser runtime on supported targets; macOS, Android, and iOS are validated in the current example app flow.
@@ -98,8 +98,8 @@ Legend:
 
 | Client SDK | Token Registration | Permission Helpers | Foreground / Opened-App Callbacks | Topic Subscribe | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `@edgebase/web` | ✅ | ✅ | ✅ | ✅ | Browser + service worker flow through FCM on the web client surface |
-| `@edgebase/react-native` | ✅ | ✅ | ✅ | ✅ | Requires Firebase and React Native host integration |
+| `@edgebase-fun/web` | ✅ | ✅ | ✅ | ✅ | Browser + service worker flow through FCM on the web client surface |
+| `@edgebase-fun/react-native` | ✅ | ✅ | ✅ | ✅ | Requires Firebase and React Native host integration |
 | `edgebase_flutter` | ✅ | ✅ | ✅ | ✅ | Flutter client surface documents registration, callbacks, and topic helpers |
 | `EdgeBase` (Swift) | ✅ | ✅ | ✅ | ✅ | iOS/macOS Apple client surface |
 | `:client` (Kotlin KMP) | ◐ | ◐ | ◐ | ◐ | Native mobile targets are supported; JVM desktop push methods are explicitly no-ops |
@@ -123,7 +123,7 @@ The core layer is the shared low-level surface: HTTP transport, generated API me
 
 | Language | Package / Module | Repo Path | Notes |
 | --- | --- | --- | --- |
-| JavaScript / TypeScript | `@edgebase/core` | `packages/sdk/js/packages/core` | Public low-level package used by web/admin/ssr |
+| JavaScript / TypeScript | `@edgebase-fun/core` | `packages/sdk/js/packages/core` | Public low-level package used by web/admin/ssr |
 | Dart / Flutter | `edgebase_core` | `packages/sdk/dart/packages/core` | Shared package used by Flutter and admin |
 | Kotlin | `:core` | `packages/sdk/kotlin/core` | KMP core module |
 | Java | `edgebase-core-java` | `packages/sdk/java/packages/core` | Shared Java core |
@@ -148,9 +148,9 @@ The client layer is the app-facing SDK intended for browser, mobile, desktop, or
 
 | Language | Package / Module | Repo Path | Notes |
 | --- | --- | --- | --- |
-| JavaScript / TypeScript | `@edgebase/web` | `packages/sdk/js/packages/web` | Browser/client package |
-| JavaScript / TypeScript | `@edgebase/react-native` | `packages/sdk/react-native` | React Native client variant |
-| JavaScript / TypeScript | `@edgebase/ssr` | `packages/sdk/js/packages/ssr` | Server-side user-context package; not an admin SDK |
+| JavaScript / TypeScript | `@edgebase-fun/web` | `packages/sdk/js/packages/web` | Browser/client package |
+| JavaScript / TypeScript | `@edgebase-fun/react-native` | `packages/sdk/react-native` | React Native client variant |
+| JavaScript / TypeScript | `@edgebase-fun/ssr` | `packages/sdk/js/packages/ssr` | Server-side user-context package; not an admin SDK |
 | Dart / Flutter | `edgebase_flutter` | `packages/sdk/dart/packages/flutter` | Flutter client package |
 | Kotlin | `:client` | `packages/sdk/kotlin/client` | KMP client module |
 | Java | `edgebase-android-java` | `packages/sdk/java/packages/android` | Android/JVM client package |
@@ -175,7 +175,7 @@ The admin layer is the service-key surface for server-side code, bypassing acces
 
 | Language | Package / Module | Repo Path | Notes |
 | --- | --- | --- | --- |
-| JavaScript / TypeScript | `@edgebase/admin` | `packages/sdk/js/packages/admin` | Dedicated admin package |
+| JavaScript / TypeScript | `@edgebase-fun/admin` | `packages/sdk/js/packages/admin` | Dedicated admin package |
 | Dart / Flutter | `edgebase_admin` | `packages/sdk/dart/packages/admin` | Dedicated admin package |
 | Kotlin | `:admin` | `packages/sdk/kotlin/admin` | JVM admin module |
 | Java | `edgebase-admin-java` | `packages/sdk/java/packages/admin` | Dedicated admin package |

@@ -9,7 +9,7 @@
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import chalk from 'chalk';
-import type { SchemaField } from '@edgebase/shared';
+import type { SchemaField } from '@edgebase-fun/shared';
 import { raiseCliError, raiseNeedsInput } from './agent-contract.js';
 import { isNonInteractive } from './cli-context.js';
 

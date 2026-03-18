@@ -70,7 +70,7 @@ export default {
     expect(tableNames).toContain('posts');
   });
 
-  it('loads typed config files that import @edgebase/shared without falling back to regex', () => {
+  it('loads typed config files that import @edgebase-fun/shared without falling back to regex', () => {
     const configDir = join(tmpDir, 'config');
     mkdirSync(configDir, { recursive: true });
     writeFileSync(
@@ -90,7 +90,7 @@ export const rateLimiting = {
     writeFileSync(
       configFile,
       `
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 import { rateLimiting } from './config/rate-limits';
 
 export default defineConfig({

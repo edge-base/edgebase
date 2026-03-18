@@ -13,10 +13,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { CURRENT_PLUGIN_API_VERSION, defineConfig } from '@edgebase/shared';
+import { CURRENT_PLUGIN_API_VERSION, defineConfig } from '@edgebase-fun/shared';
 import { getProviderBindingName } from '../lib/postgres-executor.js';
 import { generatePgCreateTableDDL, generatePgTableDDL } from '../lib/schema.js';
-import type { TableConfig } from '@edgebase/shared';
+import type { TableConfig } from '@edgebase-fun/shared';
 
 // ─── A. Config 검증 (defineConfig provider 규칙) ──────────────────────────────
 

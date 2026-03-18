@@ -12,16 +12,39 @@ import { npmCommand } from '../lib/npm.js';
 
 type PackageManager = 'pnpm' | 'yarn' | 'npm';
 
+const EDGEBASE_PACKAGE_PREFIX = '@edgebase-fun/';
+const LEGACY_EDGEBASE_PACKAGES = new Set(['edgebase']);
+
 export function detectPackageManager(cwd: string): PackageManager {
   if (fs.existsSync(path.join(cwd, 'pnpm-lock.yaml'))) return 'pnpm';
   if (fs.existsSync(path.join(cwd, 'yarn.lock'))) return 'yarn';
   return 'npm';
 }
 
-// ─── Version Utilities ───
+export function findInstalledEdgeBasePackages(cwd: string): string[] {
+  const pkgPath = path.join(cwd, 'package.json');
+  if (!fs.existsSync(pkgPath)) return [];
 
-/** The list of EdgeBase packages to upgrade together */
-const EDGEBASE_PACKAGES = ['@edgebase/sdk', 'edgebase'];
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+    peerDependencies?: Record<string, string>;
+    optionalDependencies?: Record<string, string>;
+  };
+
+  const allDependencies = {
+    ...(pkg.dependencies ?? {}),
+    ...(pkg.devDependencies ?? {}),
+    ...(pkg.peerDependencies ?? {}),
+    ...(pkg.optionalDependencies ?? {}),
+  };
+
+  return Object.keys(allDependencies)
+    .filter((name) => name.startsWith(EDGEBASE_PACKAGE_PREFIX) || LEGACY_EDGEBASE_PACKAGES.has(name))
+    .sort();
+}
+
+// ─── Version Utilities ───
 
 export interface VersionInfo {
   current: string;
@@ -172,6 +195,7 @@ export const upgradeCommand = new Command('upgrade')
     async (options: { target?: string; check?: boolean; force?: boolean }) => {
       const cwd = process.cwd();
       const pm = detectPackageManager(cwd);
+      const edgebasePackages = findInstalledEdgeBasePackages(cwd);
 
       console.log(`📦 Package manager: ${pm}`);
       console.log('');
@@ -180,7 +204,7 @@ export const upgradeCommand = new Command('upgrade')
       const versionInfos: Array<{ pkg: string; info: VersionInfo }> = [];
       let hasUpdatable = false;
 
-      for (const pkgName of EDGEBASE_PACKAGES) {
+      for (const pkgName of edgebasePackages) {
         const current = getCurrentVersion(cwd, pkgName);
         if (!current) continue; // Not installed
 

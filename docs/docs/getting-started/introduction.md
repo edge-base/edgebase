@@ -90,7 +90,7 @@ EdgeBase provides SDKs for **14 languages**:
 
 | Language | Package | Registry |
 |---|---|---|
-| **JavaScript/TypeScript** | `@edgebase/web`, `@edgebase/react-native` | npm |
+| **JavaScript/TypeScript** | `@edgebase-fun/web`, `@edgebase-fun/react-native` | npm |
 | **Flutter/Dart** | `edgebase_flutter` | pub.dev |
 | **Swift (iOS)** | `edgebase-swift` | SPM |
 | **Kotlin (Android)** | `dev.edgebase:edgebase-client-kotlin` | Maven Central |

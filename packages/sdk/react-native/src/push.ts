@@ -19,7 +19,7 @@
  * await client.push.register();
  */
 
-import { ApiPaths, type HttpClient, type GeneratedDbApi } from '@edgebase/core';
+import { ApiPaths, type HttpClient, type GeneratedDbApi } from '@edgebase-fun/core';
 import type { AsyncStorageAdapter } from './token-manager.js';
 import { PUSH_TOKEN_CACHE_KEY, PUSH_DEVICE_ID_KEY } from './token-manager.js';
 

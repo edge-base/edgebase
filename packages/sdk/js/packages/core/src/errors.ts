@@ -1,12 +1,12 @@
 /**
  * SDK Error classes
- * Extends @edgebase/shared EdgeBaseError with SDK-specific error types
+ * Extends @edgebase-fun/shared EdgeBaseError with SDK-specific error types
  */
 
-import { EdgeBaseError } from '@edgebase/shared';
+import { EdgeBaseError } from '@edgebase-fun/shared';
 
 export { EdgeBaseError };
-export type { ErrorResponse, FieldError } from '@edgebase/shared';
+export type { ErrorResponse, FieldError } from '@edgebase-fun/shared';
 
 /**
  * Parse a server error response into a EdgeBaseError

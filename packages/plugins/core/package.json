@@ -1,5 +1,5 @@
 {
-    "name": "@edgebase/plugin-core",
+    "name": "@edgebase-fun/plugin-core",
     "version": "0.1.0",
     "description": "EdgeBase plugin authoring helpers and public plugin contracts",
     "license": "MIT",
@@ -32,7 +32,7 @@
         "prepack": "pnpm run build"
     },
     "dependencies": {
-        "@edgebase/shared": "workspace:*"
+        "@edgebase-fun/shared": "workspace:*"
     },
     "devDependencies": {
         "typescript": "^5.7.0"

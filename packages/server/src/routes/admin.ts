@@ -10,8 +10,8 @@
  */
 import { OpenAPIHono, createRoute, z, type HonoEnv } from '../lib/hono.js';
 import type { Env } from '../types.js';
-import { EdgeBaseError, getDbAccess, getTableAccess } from '@edgebase/shared';
-import type { AuthContext } from '@edgebase/shared';
+import { EdgeBaseError, getDbAccess, getTableAccess } from '@edgebase-fun/shared';
+import type { AuthContext } from '@edgebase-fun/shared';
 import {
   signAdminAccessToken,
   signAdminRefreshToken,

@@ -34,7 +34,7 @@ Non-blocking hooks are fire-and-forget — if they throw, the error is logged bu
 
 ```typescript
 // edgebase.config.ts
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   databases: {

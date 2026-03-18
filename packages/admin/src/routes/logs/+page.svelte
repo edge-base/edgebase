@@ -5,6 +5,7 @@
 	import { downloadBlob } from '$lib/download';
 	import { generateCSV } from '$lib/csv';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { adminDashboardAnalyticsDocs } from '$lib/docs-links';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Select from '$lib/components/ui/Select.svelte';
@@ -263,7 +264,7 @@
 	});
 </script>
 
-<PageShell title="Logs" description="View request logs and analytics">
+<PageShell title="Logs" description="View request logs and analytics" docsHref={adminDashboardAnalyticsDocs}>
 	{#snippet actions()}
 		<div class="log-actions">
 			<div class="log-counters">

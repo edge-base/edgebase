@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ensureD1Schema, _resetD1SchemaCache } from '../lib/d1-schema-init.js';
 import { shouldRouteToD1, getD1BindingName } from '../lib/do-router.js';
-import type { TableConfig } from '@edgebase/shared';
+import type { TableConfig } from '@edgebase-fun/shared';
 
 // ─── Mock D1 ─────────────────────────────────────────────────────────────────
 

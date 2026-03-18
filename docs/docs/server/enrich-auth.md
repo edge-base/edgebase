@@ -17,7 +17,7 @@ This is the right place for data such as:
 ## Configuration
 
 ```typescript
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   auth: {

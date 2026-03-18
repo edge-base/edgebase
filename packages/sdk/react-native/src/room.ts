@@ -9,7 +9,7 @@
  *   - namespace + roomId identification (replaces single roomId)
  */
 import type { TokenManager, TokenUser } from './token-manager.js';
-import { EdgeBaseError } from '@edgebase/core';
+import { EdgeBaseError } from '@edgebase-fun/core';
 import { refreshAccessToken } from './auth-refresh.js';
 
 // ─── Types ───

@@ -2,6 +2,7 @@
 	import { base } from '$app/paths';
 	import { devInfoStore } from '$lib/stores/devInfo';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import { databaseDocs } from '$lib/docs-links';
 </script>
 
 <div class="tables-welcome">
@@ -38,6 +39,14 @@
 				<path d="M6 4H8.5V12H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 			</svg>
 			View ERD Diagram
+		</a>
+		<a href={databaseDocs} class="hint-link" target="_blank" rel="noreferrer">
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+				<path d="M3 2H10L13 5V14H3V2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+				<path d="M10 2V5H13" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+				<path d="M6 8H10M6 10.5H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+			</svg>
+			Open Docs
 		</a>
 	</div>
 </div>

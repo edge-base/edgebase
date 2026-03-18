@@ -4,6 +4,7 @@
 	import { toastSuccess, toastError, toastInfo } from '$lib/stores/toast.svelte';
 	import { downloadBlob } from '$lib/download';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { adminDashboardDocs } from '$lib/docs-links';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
@@ -149,7 +150,7 @@
 	}
 </script>
 
-<PageShell title="Backup & Restore" description="Create backups and restore data">
+<PageShell title="Backup & Restore" description="Create backups and restore data" docsHref={adminDashboardDocs}>
 	<div class="backup-layout">
 		<!-- Create Backup -->
 		<div class="card">

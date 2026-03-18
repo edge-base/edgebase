@@ -16,6 +16,7 @@ import { isQuiet } from './cli-context.js';
 import { npmCommand } from './npm.js';
 
 const CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+const UPDATE_CHECK_PACKAGE_NAME = '@edgebase-fun/cli';
 
 interface UpdateCache {
   latest: string;
@@ -93,7 +94,7 @@ export function checkForUpdates(currentVersion: string): void {
 
   try {
     // Query npm registry (3s timeout to avoid blocking)
-    const latest = execFileSync(npmCommand(), ['show', 'edgebase', 'version'], {
+    const latest = execFileSync(npmCommand(), ['show', UPDATE_CHECK_PACKAGE_NAME, 'version'], {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'ignore'],
       timeout: 3000,

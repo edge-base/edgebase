@@ -3,6 +3,7 @@
 	import { api } from '$lib/api';
 	import { toastError } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { adminDashboardAnalyticsDocs } from '$lib/docs-links';
 	import Badge from '$lib/components/ui/Badge.svelte';
 
 	interface ChannelDetail {
@@ -61,7 +62,7 @@
 	});
 </script>
 
-<PageShell title="Live Monitoring" description="Active connections and channels">
+<PageShell title="Live Monitoring" description="Active connections and channels" docsHref={adminDashboardAnalyticsDocs}>
 	{#snippet actions()}
 		<div class="refresh-controls">
 			{#if lastUpdated}

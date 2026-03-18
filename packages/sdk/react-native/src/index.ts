@@ -1,5 +1,5 @@
 /**
- * @edgebase/react-native — Public API
+ * @edgebase-fun/react-native — Public API
  * iOS, Android, Web (React Native Web) 모두 지원
  */
 

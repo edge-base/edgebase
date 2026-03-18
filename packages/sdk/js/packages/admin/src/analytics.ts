@@ -15,8 +15,8 @@
  *   await admin.analytics.track('user_upgraded', { plan: 'pro', amount: 29.99 }, 'user-123');
  *   const events = await admin.analytics.queryEvents({ event: 'user_upgraded', metric: 'count' });
  */
-import type { HttpClient } from '@edgebase/core';
-import { HttpClientAdapter, DefaultDbApi } from '@edgebase/core';
+import type { HttpClient } from '@edgebase-fun/core';
+import { HttpClientAdapter, DefaultDbApi } from '@edgebase-fun/core';
 import { DefaultAdminApi } from './generated/admin-api-core.js';
 
 // ─── Feature 1: Request Log Metric Types ───

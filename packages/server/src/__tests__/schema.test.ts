@@ -37,7 +37,7 @@ import {
 } from '../lib/schema.js';
 import { AUTH_D1_SCHEMA } from '../lib/auth-d1.js';
 import { zodDefaultHook } from '../lib/schemas.js';
-import type { TableConfig } from '@edgebase/shared';
+import type { TableConfig } from '@edgebase-fun/shared';
 
 // ─── A. buildEffectiveSchema ──────────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-import type { EdgeBaseConfig } from '@edgebase/shared';
+import type { EdgeBaseConfig } from '@edgebase-fun/shared';
 
 export const DEFAULT_DB_LIVE_AUTH_TIMEOUT_MS = 5000;
 export const DEFAULT_DB_LIVE_BATCH_THRESHOLD = 10;

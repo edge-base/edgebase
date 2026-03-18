@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import {
   getTableAccess,
   type EdgeBaseConfig,
-} from '@edgebase/shared';
+} from '@edgebase-fun/shared';
 import { verifyAccessToken } from '../lib/jwt.js';
 import { parseConfig as getGlobalConfig } from '../lib/do-router.js';
 import { isDbLiveChannel } from '../lib/database-live-emitter.js';

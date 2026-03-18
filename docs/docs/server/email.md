@@ -9,7 +9,7 @@ EdgeBase uses an external email provider to send transactional emails — verifi
 ## Configuration
 
 ```typescript
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   email: {

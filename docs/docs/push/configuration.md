@@ -149,7 +149,7 @@ After completing the steps above, test with a quick Admin SDK call:
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-import { createAdminClient } from '@edgebase/admin';
+import { createAdminClient } from '@edgebase-fun/admin';
 
 const admin = createAdminClient('https://my-edgebase-server.com', {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY,

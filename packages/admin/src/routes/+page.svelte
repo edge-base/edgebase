@@ -8,6 +8,7 @@
 	import PageShell from '$lib/components/layout/PageShell.svelte';
 	import MetricCard from '$lib/components/charts/MetricCard.svelte';
 	import TimeChart from '$lib/components/charts/TimeChart.svelte';
+	import { adminDashboardDocs } from '$lib/docs-links';
 
 	// ─── Types ───
 
@@ -98,6 +99,7 @@
 		{ label: 'Files', href: `${base}/storage`, icon: '<svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M2 4L8 2L14 4V12L8 14L2 12V4Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M2 4L8 6L14 4" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6V14" stroke="currentColor" stroke-width="1.5"/></svg>' },
 		{ label: 'Analytics', href: `${base}/analytics`, icon: '<svg width="18" height="18" viewBox="0 0 16 16" fill="none"><rect x="2" y="9" width="3" height="5" rx="0.5" stroke="currentColor" stroke-width="1.5"/><rect x="6.5" y="5" width="3" height="9" rx="0.5" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="2" width="3" height="12" rx="0.5" stroke="currentColor" stroke-width="1.5"/></svg>' },
 		{ label: 'Logs', href: `${base}/logs`, icon: '<svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M4 4H12M4 7H10M4 10H12M4 13H8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>' },
+		{ label: 'Docs', href: adminDashboardDocs, external: true, icon: '<svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M3 2H10L13 5V14H3V2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M10 2V5H13" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 8H10M6 10.5H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>' },
 	];
 
 	// ─── Services ───
@@ -115,7 +117,7 @@
 </script>
 
 	{#if ready}
-		<PageShell title="Overview" description="Project dashboard">
+		<PageShell title="Overview" description="Project dashboard" docsHref={adminDashboardDocs}>
 			<!-- Metric Cards -->
 			<div class="overview-metrics">
 			<MetricCard
@@ -218,7 +220,12 @@
 				<h3 class="overview-panel__title">Quick Actions</h3>
 				<div class="overview-actions">
 					{#each quickActions as action}
-						<a href={action.href} class="overview-action">
+						<a
+							href={action.href}
+							class="overview-action"
+							target={action.external ? '_blank' : undefined}
+							rel={action.external ? 'noreferrer' : undefined}
+						>
 							<span class="overview-action__icon">{@html action.icon}</span>
 							<span class="overview-action__label">{action.label}</span>
 							<span class="overview-action__arrow">

@@ -5,6 +5,7 @@
 	import { devInfoStore } from '$lib/stores/devInfo';
 	import { toastError, toastSuccess } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { storageDocs } from '$lib/docs-links';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
@@ -127,7 +128,7 @@
 	}
 </script>
 
-<PageShell title="Storage" description="Manage file storage buckets">
+<PageShell title="Storage" description="Manage file storage buckets" docsHref={storageDocs}>
 	{#snippet actions()}
 		{#if $devInfoStore.devMode}
 			<Button variant="primary" size="sm" onclick={() => {

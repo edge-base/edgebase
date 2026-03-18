@@ -169,8 +169,8 @@ Legend:
       </tr>
     </thead>
     <tbody>
-      <tr><td><code>@edgebase/web</code></td><td>—</td><td>—</td><td>✅</td><td>◐</td><td>◐</td><td>✅</td></tr>
-      <tr><td><code>@edgebase/react-native</code></td><td>✅</td><td>✅</td><td>—</td><td>—</td><td>—</td><td>✅</td></tr>
+      <tr><td><code>@edgebase-fun/web</code></td><td>—</td><td>—</td><td>✅</td><td>◐</td><td>◐</td><td>✅</td></tr>
+      <tr><td><code>@edgebase-fun/react-native</code></td><td>✅</td><td>✅</td><td>—</td><td>—</td><td>—</td><td>✅</td></tr>
       <tr><td><code>edgebase_flutter</code></td><td>✅</td><td>✅</td><td>✅</td><td>◐</td><td>◐</td><td>✅</td></tr>
       <tr><td><code>EdgeBase Swift</code></td><td>—</td><td>✅</td><td>✅</td><td>—</td><td>—</td><td>—</td></tr>
       <tr><td><code>Kotlin KMP client</code></td><td>✅</td><td>✅</td><td>✅</td><td>—</td><td>—</td><td>✅</td></tr>
@@ -182,7 +182,7 @@ Legend:
 </div>
 
 Notes:
-- `@edgebase/web` desktop columns mean browser-hosted runtimes such as Electron renderer processes, not a native desktop-only SDK.
+- `@edgebase-fun/web` desktop columns mean browser-hosted runtimes such as Electron renderer processes, not a native desktop-only SDK.
 - `Kotlin KMP client` uses a no-op JVM captcha provider, so Windows/Linux desktop JVM targets are intentionally not marked supported here.
 - `Unity C#` desktop support depends on a supported WebView host. The current macOS path is validated through an embedded `gree/unity-webview` window. Other desktop targets still require a supported host integration or a custom `TurnstileProvider.SetWebViewFactory(...)`.
 - `Unreal / C++` uses the built-in browser runtime on supported targets; macOS, Android, and iOS are validated in the current example app flow.

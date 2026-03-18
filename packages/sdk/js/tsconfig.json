@@ -5,13 +5,13 @@
         "rootDir": ".",
         "baseUrl": ".",
         "paths": {
-            "@edgebase/core": [
+            "@edgebase-fun/core": [
                 "./packages/core/src/index.ts"
             ],
-            "@edgebase/web": [
+            "@edgebase-fun/web": [
                 "./packages/web/src/index.ts"
             ],
-            "@edgebase/admin": [
+            "@edgebase-fun/admin": [
                 "./packages/admin/src/index.ts"
             ]
         },

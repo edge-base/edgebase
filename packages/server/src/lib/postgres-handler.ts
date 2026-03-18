@@ -22,8 +22,8 @@ import type {
   TableRules,
   HookCtx,
   DbBlock,
-} from '@edgebase/shared';
-import { EdgeBaseError, getTableAccess, getTableHooks } from '@edgebase/shared';
+} from '@edgebase-fun/shared';
+import { EdgeBaseError, getTableAccess, getTableHooks } from '@edgebase-fun/shared';
 import { parseConfig } from './do-router.js';
 import {
   ensureLocalDevPostgresSchema,

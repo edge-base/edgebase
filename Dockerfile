@@ -28,7 +28,7 @@ RUN pnpm install --frozen-lockfile
 # Docker runtime only needs built shared artifacts. The Worker itself runs from
 # source via wrangler dev, and admin static assets are copied from the checked-in
 # packages/admin/build directory in the build context.
-RUN pnpm --filter @edgebase/shared build
+RUN pnpm --filter @edgebase-fun/shared build
 
 # ── Stage 2: Runtime ──
 FROM node:20-slim
@@ -52,7 +52,7 @@ COPY --from=builder /app/tsconfig.base.json ./tsconfig.base.json
 COPY --from=builder /app/scripts ./scripts
 RUN pnpm install --frozen-lockfile --prod && \
     mkdir -p /app/node_modules/@edgebase && \
-    ln -sfn ../../packages/shared /app/node_modules/@edgebase/shared
+    ln -sfn ../../packages/shared /app/node_modules/@edgebase-fun/shared
 
 # Create non-root user for security (with home directory for wrangler config)
 RUN addgroup --system edgebase && adduser --system --ingroup edgebase --home /home/edgebase edgebase

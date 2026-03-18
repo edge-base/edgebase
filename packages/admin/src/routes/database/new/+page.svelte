@@ -3,6 +3,7 @@
 	import { base } from '$app/paths';
 	import { api } from '$lib/api';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { adminDashboardSchemaDocs } from '$lib/docs-links';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import { devInfoStore } from '$lib/stores/devInfo';
@@ -224,7 +225,7 @@
 	}
 </script>
 
-<PageShell title="Create Database" description="Add a new DB block to edgebase.config.ts">
+<PageShell title="Create Database" description="Add a new DB block to edgebase.config.ts" docsHref={adminDashboardSchemaDocs}>
 	<div class="create-page">
 		{#if error}
 			<div class="create-error">{error}</div>

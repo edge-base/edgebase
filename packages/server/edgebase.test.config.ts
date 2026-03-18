@@ -22,7 +22,7 @@
  *   documents  — auth read/write/delete
  *   files      — public read, auth write/delete
  */
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 import { definePlugin } from '../plugins/core/src/index.ts';
 
 const mockFcmBaseUrl =

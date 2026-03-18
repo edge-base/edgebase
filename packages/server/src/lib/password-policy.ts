@@ -4,7 +4,7 @@
  * HIBP: Uses k-anonymity (first 5 chars of SHA-1 hash) to check if password has been leaked.
  * Fail-open: If the HIBP API is unavailable, the password is accepted (no false negatives).
  */
-import type { PasswordPolicyConfig } from '@edgebase/shared';
+import type { PasswordPolicyConfig } from '@edgebase-fun/shared';
 
 export interface PasswordValidationResult {
   valid: boolean;

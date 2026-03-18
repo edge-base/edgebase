@@ -98,7 +98,7 @@ The Admin SDK exposes a top-level `sql(...)` helper across every Admin SDK.
 <TabItem value="ts" label="TypeScript" default>
 
 ```typescript
-import { createAdminClient } from '@edgebase/admin';
+import { createAdminClient } from '@edgebase-fun/admin';
 
 const admin = createAdminClient('https://your-app.example.com', {
   serviceKey: process.env.EDGEBASE_SERVICE_KEY!,
@@ -328,7 +328,7 @@ rows =
 
 ```typescript
 // functions/generateReport.ts
-import { defineFunction } from '@edgebase/shared';
+import { defineFunction } from '@edgebase-fun/shared';
 
 export default defineFunction({
   trigger: { type: 'http', method: 'GET', path: '/report/top-authors' },

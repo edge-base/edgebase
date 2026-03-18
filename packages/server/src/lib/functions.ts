@@ -15,7 +15,7 @@
 // because TypeScript treats the global ambient type and the module
 // export as distinct types (Request.headers missing getSetCookie, etc.).
 import * as authService from './auth-d1-service.js';
-import type { EdgeBaseConfig } from '@edgebase/shared';
+import type { EdgeBaseConfig } from '@edgebase-fun/shared';
 import type {
   FunctionDefinition,
   FunctionTrigger,
@@ -24,7 +24,7 @@ import type {
   StorageTrigger,
   ScheduleTrigger,
   HttpTrigger,
-} from '@edgebase/shared';
+} from '@edgebase-fun/shared';
 import { getDbDoName, getD1BindingName, callDO, shouldRouteToD1 } from './do-router.js';
 import { executeDoSql } from './do-sql.js';
 import { D1AuthDb, type AuthDb } from './auth-db-adapter.js';
@@ -85,7 +85,7 @@ export interface AdminAuthContext {
  * AdminEdgeBase-shaped context object injected as context.admin.
  *
  * Matches the external AdminEdgeBase API surface — table, storage, auth, sql, broadcast.
- * Built internally via HTTP fetch to the current Worker URL (no @edgebase/sdk import needed).
+ * Built internally via HTTP fetch to the current Worker URL (no @edgebase-fun/sdk import needed).
  */
 export interface FunctionAdminContext {
   /** Cross-DO table access — rules bypassed, Service Key authenticated. */

@@ -1,4 +1,4 @@
-import { materializeConfig, type EdgeBaseConfig } from '@edgebase/shared';
+import { materializeConfig, type EdgeBaseConfig } from '@edgebase-fun/shared';
 
 function hasConfigContent(config: unknown): config is EdgeBaseConfig {
   return Boolean(

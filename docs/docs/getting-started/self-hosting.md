@@ -164,7 +164,7 @@ Without `trustSelfHostedProxy: true`, self-hosted deployments will treat request
 :::
 
 ```typescript title="edgebase.config.ts"
-import { defineConfig } from '@edgebase/shared';
+import { defineConfig } from '@edgebase-fun/shared';
 
 export default defineConfig({
   trustSelfHostedProxy: true,

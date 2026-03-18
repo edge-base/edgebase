@@ -3,6 +3,7 @@
 	import { api } from '$lib/api';
 	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { pushDocs } from '$lib/docs-links';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -113,7 +114,7 @@
 	}
 </script>
 
-<PageShell title="Push Notifications" description="Manage push tokens, test sends, and view logs">
+<PageShell title="Push Notifications" description="Manage push tokens, test sends, and view logs" docsHref={pushDocs}>
 	<Tabs {tabs} bind:activeTab />
 
 	<div class="tab-content">

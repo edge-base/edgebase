@@ -4,8 +4,8 @@
  *: Service Key
  */
 
-import type { HttpClient } from '@edgebase/core';
-import { EdgeBaseError, HttpClientAdapter } from '@edgebase/core';
+import type { HttpClient } from '@edgebase-fun/core';
+import { EdgeBaseError, HttpClientAdapter } from '@edgebase-fun/core';
 import { DefaultAdminApi } from './generated/admin-api-core.js';
 
 export interface UserRecord {

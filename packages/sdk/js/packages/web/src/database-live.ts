@@ -1,6 +1,6 @@
 import type { TokenManager, TokenUser } from './token-manager.js';
-import type { ContextManager, IDatabaseLiveSubscriber } from '@edgebase/core';
-import { EdgeBaseError } from '@edgebase/core';
+import type { ContextManager, IDatabaseLiveSubscriber } from '@edgebase-fun/core';
+import { EdgeBaseError } from '@edgebase-fun/core';
 import { refreshAccessToken } from './auth-refresh.js';
 
 export type ChangeType = 'added' | 'modified' | 'removed';

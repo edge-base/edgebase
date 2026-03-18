@@ -25,7 +25,7 @@ Place authentication trigger files in the `functions/` directory:
 
 ```typescript
 // functions/restrict-company-domain.ts
-import { defineFunction, FunctionError } from '@edgebase/shared';
+import { defineFunction, FunctionError } from '@edgebase-fun/shared';
 
 export default defineFunction({
   trigger: { type: 'auth', event: 'beforeSignUp' },
@@ -65,7 +65,7 @@ export default defineFunction({
 ## Create a Profile After Signup
 
 ```typescript
-import { defineFunction } from '@edgebase/shared';
+import { defineFunction } from '@edgebase-fun/shared';
 
 export default defineFunction({
   trigger: { type: 'auth', event: 'afterSignUp' },
@@ -86,7 +86,7 @@ export default defineFunction({
 `onTokenRefresh` is the only authentication trigger whose return value is fed back into token generation.
 
 ```typescript
-import { defineFunction } from '@edgebase/shared';
+import { defineFunction } from '@edgebase-fun/shared';
 
 export default defineFunction({
   trigger: { type: 'auth', event: 'onTokenRefresh' },

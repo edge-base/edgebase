@@ -1,5 +1,5 @@
 {
-    "name": "@edgebase/ssr",
+    "name": "@edgebase-fun/ssr",
     "version": "0.1.0",
     "description": "EdgeBase SSR helpers — cookie-based token management for server-side rendering",
     "license": "MIT",
@@ -33,7 +33,7 @@
         "prepack": "pnpm run build"
     },
     "dependencies": {
-        "@edgebase/core": "workspace:*"
+        "@edgebase-fun/core": "workspace:*"
     },
     "devDependencies": {
         "typescript": "^5.7.0"

@@ -6,8 +6,8 @@
  *   await admin.kv('cache').set('key', 'value', { ttl: 300 });
  *   const val = await admin.kv('cache').get('key');
  */
-import type { HttpClient } from '@edgebase/core';
-import { HttpClientAdapter } from '@edgebase/core';
+import type { HttpClient } from '@edgebase-fun/core';
+import { HttpClientAdapter } from '@edgebase-fun/core';
 import { DefaultAdminApi } from './generated/admin-api-core.js';
 
 export class KvClient {
