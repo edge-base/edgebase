@@ -10,10 +10,9 @@ import 'generated/admin_api_core.dart';
 
 /// Client for push notification operations.
 class PushClient {
-  final HttpClient _http;
   late final GeneratedAdminApi _core;
 
-  PushClient(this._http) : _core = GeneratedAdminApi(_http);
+  PushClient(HttpClient http) : _core = GeneratedAdminApi(http);
 
   /// Send a push notification to a single user's devices.
   Future<Map<String, dynamic>> send(

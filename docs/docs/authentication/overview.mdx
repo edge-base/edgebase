@@ -97,8 +97,8 @@ final signIn = await client.auth.signIn(
 
 final user = client.auth.currentUser;
 
-client.auth.onAuthStateChange((event, currentUser) {
-  print('$event ${currentUser?.email}');
+client.auth.onAuthStateChange.listen((currentUser) {
+  print(currentUser?.email);
 });
 ```
 

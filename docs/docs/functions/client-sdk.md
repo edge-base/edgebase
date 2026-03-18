@@ -41,7 +41,7 @@ const client = createClient('https://my-app.edgebase.fun');
 <TabItem value="dart" label="Dart/Flutter">
 
 ```dart
-import 'package:edgebase_flutter/edgebase.dart';
+import 'package:edgebase_flutter/edgebase_flutter.dart';
 
 final client = ClientEdgeBase('https://my-app.edgebase.fun');
 ```

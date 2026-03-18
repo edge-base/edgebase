@@ -21,5 +21,20 @@ tasks.test {
     testLogging { events 'passed', 'skipped', 'failed' }
 }
 publishing {
-    publications { maven(MavenPublication) { from components.java; groupId = 'dev.edgebase'; artifactId = 'edgebase-core-java' } }
+    publications {
+        maven(MavenPublication) {
+            from components.java
+            groupId = 'dev.edgebase'
+            artifactId = 'edgebase-core-java'
+            pom {
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'https://opensource.org/license/mit'
+                        distribution = 'repo'
+                    }
+                }
+            }
+        }
+    }
 }

@@ -18,7 +18,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:test/test.dart';
-import 'package:edgebase_flutter/edgebase.dart';
+import 'package:edgebase_flutter/edgebase_flutter.dart';
 import 'package:edgebase_core/src/context_manager.dart';
 import 'package:edgebase_flutter/src/auth_client.dart';
 import 'package:edgebase_flutter/src/database_live_client.dart';

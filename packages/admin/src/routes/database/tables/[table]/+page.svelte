@@ -6,7 +6,6 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import RecordsTab from '$lib/components/database/RecordsTab.svelte';
-	import TableSqlTab from '$lib/components/database/TableSqlTab.svelte';
 	import SchemaTab from '$lib/components/database/SchemaTab.svelte';
 	import RulesTab from '$lib/components/database/RulesTab.svelte';
 	import SdkSnippets from '$lib/components/database/SdkSnippets.svelte';
@@ -34,6 +33,7 @@
 		orgName: string;
 	};
 	type UpgradeStepState = 'done' | 'active' | 'pending';
+	type TableSqlTabModule = typeof import('$lib/components/database/TableSqlTab.svelte');
 
 	let tableName = $derived($page.params.table ?? '');
 	let tableDef = $derived(($schemaStore.schema[tableName] as TableDef | undefined) ?? undefined);
@@ -77,6 +77,7 @@
 	let neonProjectsLoaded = $state(false);
 	let neonProjectsError = $state('');
 	let selectedNeonProjectId = $state('');
+	let tableSqlTabModulePromise = $state<Promise<TableSqlTabModule> | null>(null);
 	let isDevMode = $derived($devInfoStore.devMode);
 
 	$effect(() => {
@@ -168,6 +169,17 @@
 	$effect(() => {
 		if (canUpgradeFromD1() && !neonProjectsLoaded && !neonProjectsLoading) {
 			void loadNeonProjects();
+		}
+	});
+
+	function ensureTableSqlTabLoaded(): Promise<TableSqlTabModule> {
+		tableSqlTabModulePromise ??= import('$lib/components/database/TableSqlTab.svelte');
+		return tableSqlTabModulePromise;
+	}
+
+	$effect(() => {
+		if (activeTab === 'query') {
+			void ensureTableSqlTabLoaded();
 		}
 	});
 
@@ -316,6 +328,9 @@
 	}
 
 	function setTab(tab: TableTab) {
+		if (tab === 'query') {
+			void ensureTableSqlTabLoaded();
+		}
 		void updateSearchParams((params) => {
 			if (tab === 'records') {
 				params.delete('tab');
@@ -758,11 +773,21 @@
 					<p>{emptyStateDescription(instanceDiscovery, 'query')}</p>
 				</div>
 			{:else}
-				<TableSqlTab
-					{tableName}
-					{namespace}
-					instanceId={selectedInstanceId}
-				/>
+				{#await ensureTableSqlTabLoaded()}
+					<div class="tab-loading">Loading query tools...</div>
+				{:then module}
+					{@const TableSqlTab = module.default}
+					<TableSqlTab
+						{tableName}
+						{namespace}
+						instanceId={selectedInstanceId}
+					/>
+				{:catch err}
+					<div class="target-empty">
+						<h3>Query tools unavailable</h3>
+						<p>{err instanceof Error ? err.message : 'Failed to load query tools.'}</p>
+					</div>
+				{/await}
 			{/if}
 		{:else if activeTab === 'schema'}
 			<SchemaTab {tableName} />
@@ -1237,6 +1262,12 @@
 
 	.tab-content {
 		flex: 1;
+	}
+
+	.tab-loading {
+		padding: var(--space-5);
+		font-size: 13px;
+		color: var(--color-text-secondary);
 	}
 
 	.target-empty {

@@ -15,21 +15,13 @@ dependencies:
   http_parser: ^4.0.0
   web_socket_channel: ^3.0.0
   shared_preferences: ^2.2.0
-  edgebase_core:
-    path: ./packages/core
-  edgebase_flutter:
-    path: ./packages/flutter
+  edgebase_core: ^0.1.2
+  edgebase_flutter: ^0.1.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
   test: ^1.26.3
-
-dependency_overrides:
-  edgebase_core:
-    path: ./packages/core
   edgebase_admin:
     path: ./packages/admin
-  edgebase_flutter:
-    path: ./packages/flutter

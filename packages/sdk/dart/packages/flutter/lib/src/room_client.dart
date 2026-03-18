@@ -160,7 +160,6 @@ class RoomClient {
   StreamSubscription<dynamic>? _subscription;
   bool _connected = false;
   bool _authenticated = false;
-  bool _joined = false;
   bool _intentionallyLeft = false;
   bool _waitingForAuth = false;
   bool _joinRequested = false;
@@ -306,7 +305,6 @@ class RoomClient {
     _channel = null;
     _connected = false;
     _authenticated = false;
-    _joined = false;
     _joinRequested = false;
     _waitingForAuth = false;
     _sharedState = {};
@@ -751,7 +749,6 @@ class RoomClient {
           'lastPlayerState': _playerState,
           'lastPlayerVersion': _playerVersion,
         });
-        _joined = true;
         if (!(_authCompleter?.isCompleted ?? true)) {
           _authCompleter?.complete();
         }
@@ -1134,7 +1131,6 @@ class RoomClient {
   void _onDisconnected() {
     _connected = false;
     _authenticated = false;
-    _joined = false;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
     _setConnectionState('disconnected');
@@ -1198,7 +1194,6 @@ class RoomClient {
         _connected = false;
         _authenticated = false;
         _waitingForAuth = _joinRequested;
-        _joined = false;
         _setConnectionState('auth_lost');
         unawaited(
           Future<void>.delayed(_roomExplicitLeaveCloseDelay, () async {

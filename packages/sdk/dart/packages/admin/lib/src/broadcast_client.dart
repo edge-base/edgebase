@@ -11,10 +11,9 @@ import 'generated/admin_api_core.dart';
 
 /// Client for server-side DatabaseLive broadcast.
 class BroadcastClient {
-  final HttpClient _http;
   late final GeneratedAdminApi _core;
 
-  BroadcastClient(this._http) : _core = GeneratedAdminApi(_http);
+  BroadcastClient(HttpClient http) : _core = GeneratedAdminApi(http);
 
   /// Broadcast a message to a DatabaseLive channel from the server.
   ///

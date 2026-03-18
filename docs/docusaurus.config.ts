@@ -9,7 +9,7 @@ const siteMetadata = require('./site-metadata.json') as {
 const config: Config = {
   title: 'EdgeBase',
   tagline: 'The Open-Source Backend That Runs Everywhere',
-  favicon: 'img/favicon.svg',
+  favicon: 'img/logo-icon.svg',
 
   future: {
     v4: true,
@@ -122,7 +122,7 @@ const config: Config = {
       title: 'EdgeBase',
       logo: {
         alt: 'EdgeBase Logo',
-        src: 'img/logo.svg',
+        src: 'img/logo-icon.svg',
       },
       items: [
         {

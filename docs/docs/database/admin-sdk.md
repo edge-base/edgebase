@@ -804,7 +804,7 @@ const result = await admin.db('app').table('posts')
 
 ```dart
 final result = await admin.db('app').table('posts')
-    .orderBy('createdAt', desc: true)
+    .orderBy('createdAt', direction: 'desc')
     .limit(20)
     .getList();
 ```
@@ -1359,7 +1359,7 @@ const sorted = await admin.db('app').table('posts')
 
 ```dart
 final latest = await admin.db('app').table('posts')
-    .orderBy('createdAt', desc: true)
+    .orderBy('createdAt', direction: 'desc')
     .getList();
 ```
 

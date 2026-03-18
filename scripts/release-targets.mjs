@@ -17,6 +17,16 @@ export const NPM_PUBLISH_TARGET_IDS = [
   'create-edgebase',
 ];
 
+export const DART_PUBLISH_TARGET_IDS = [
+  'dart-core',
+  'dart-admin',
+  'dart-flutter',
+];
+
+export const DART_OPTIONAL_PUBLISH_TARGET_IDS = [
+  'dart-sdk',
+];
+
 export const RELEASE_TARGETS = [
   // Public npm packages
   {
@@ -127,6 +137,7 @@ export const RELEASE_TARGETS = [
     ecosystem: 'dart',
     path: 'packages/sdk/dart/pubspec.yaml',
     strategy: 'yaml-version',
+    publishTool: 'flutter',
   },
   {
     id: 'dart-core',
@@ -134,6 +145,7 @@ export const RELEASE_TARGETS = [
     ecosystem: 'dart',
     path: 'packages/sdk/dart/packages/core/pubspec.yaml',
     strategy: 'yaml-version',
+    publishTool: 'dart',
   },
   {
     id: 'dart-admin',
@@ -141,6 +153,7 @@ export const RELEASE_TARGETS = [
     ecosystem: 'dart',
     path: 'packages/sdk/dart/packages/admin/pubspec.yaml',
     strategy: 'yaml-version',
+    publishTool: 'dart',
   },
   {
     id: 'dart-flutter',
@@ -148,6 +161,7 @@ export const RELEASE_TARGETS = [
     ecosystem: 'dart',
     path: 'packages/sdk/dart/packages/flutter/pubspec.yaml',
     strategy: 'yaml-version',
+    publishTool: 'flutter',
   },
 
   // Rust

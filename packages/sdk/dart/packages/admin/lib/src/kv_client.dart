@@ -10,11 +10,10 @@ import 'generated/admin_api_core.dart';
 
 /// Client for a user-defined KV namespace.
 class KvClient {
-  final HttpClient _http;
   final GeneratedAdminApi _core;
   final String _namespace;
 
-  KvClient(this._http, this._namespace) : _core = GeneratedAdminApi(_http);
+  KvClient(HttpClient http, this._namespace) : _core = GeneratedAdminApi(http);
 
   /// Get a value by key. Returns null if not found.
   Future<String?> get(String key) async {

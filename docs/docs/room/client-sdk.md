@@ -52,7 +52,7 @@ npm install @edge-base/react-native
 ```yaml
 # pubspec.yaml
 dependencies:
-  edgebase_flutter: ^0.1.0
+  edgebase_flutter: ^0.1.2
 ```
 
 ```bash
@@ -152,7 +152,7 @@ room.leave();
 <TabItem value="dart" label="Dart/Flutter">
 
 ```dart
-import 'package:edgebase_flutter/edgebase.dart';
+import 'package:edgebase_flutter/edgebase_flutter.dart';
 
 final client = ClientEdgeBase('https://your-project.edgebase.fun');
 // ... authenticate first ...

@@ -14,7 +14,7 @@ dart pub add edgebase_flutter
 
 The `edgebase_flutter` package includes platform-specific optimizations:
 
-- **Secure token storage** via `flutter_secure_storage` (Keychain on iOS, EncryptedSharedPreferences on Android)
+- **Default refresh-token persistence** via `shared_preferences`, or a custom `TokenStorage`
 - **Automatic token refresh** on app launch and background-to-foreground transitions
 - **WebSocket reconnection** with exponential backoff for realtime subscriptions
 
@@ -23,7 +23,7 @@ The `edgebase_flutter` package includes platform-specific optimizations:
 Create a single client instance and reuse it throughout your app. A common pattern is to initialize it in `main.dart` or a dependency injection setup:
 
 ```dart
-import 'package:edgebase_flutter/edgebase.dart';
+import 'package:edgebase_flutter/edgebase_flutter.dart';
 
 // Create once, use everywhere
 final client = ClientEdgeBase('https://your-project.edgebase.fun');
@@ -40,7 +40,9 @@ Avoid creating multiple `ClientEdgeBase` instances — each one opens its own We
 await client.auth.signUp(SignUpOptions(email: 'user@example.com', password: 'password'));
 
 // Sign in
-await client.auth.signIn(email: 'user@example.com', password: 'password');
+await client.auth.signIn(
+  SignInOptions(email: 'user@example.com', password: 'password'),
+);
 
 // Sign out
 await client.auth.signOut();
@@ -54,10 +56,10 @@ final user = client.auth.currentUser;
 Use `onAuthStateChange` to reactively navigate between login and home screens. This fires on sign-in, sign-out, and token refresh:
 
 ```dart
-client.auth.onAuthStateChange((event, user) {
-  if (event == AuthEvent.signedIn) {
+client.auth.onAuthStateChange.listen((user) {
+  if (user != null) {
     // Navigate to home
-  } else if (event == AuthEvent.signedOut) {
+  } else {
     // Navigate to login
   }
 });
@@ -67,19 +69,19 @@ client.auth.onAuthStateChange((event, user) {
 If you set up auth state listeners in a `StatefulWidget`, **unsubscribe in `dispose()`** to avoid memory leaks and `setState()` calls on unmounted widgets:
 
 ```dart
-late final Function() _unsubAuth;
+late final StreamSubscription<TokenUser?> _authSub;
 
 @override
 void initState() {
   super.initState();
-  _unsubAuth = client.auth.onAuthStateChange((event, user) {
+  _authSub = client.auth.onAuthStateChange.listen((user) {
     setState(() { /* update UI */ });
   });
 }
 
 @override
 void dispose() {
-  _unsubAuth();
+  _authSub.cancel();
   super.dispose();
 }
 ```
@@ -99,7 +101,7 @@ final post = await client.db('app').table('posts').insert({
 // Query
 final posts = await client.db('app').table('posts')
     .where('status', '==', 'published')
-    .orderBy('createdAt', desc: true)
+    .orderBy('createdAt', direction: 'desc')
     .limit(20)
     .getList();
 
@@ -144,22 +146,22 @@ class LivePostsWidget extends StatefulWidget {
 
 class _LivePostsWidgetState extends State<LivePostsWidget> {
   final List<Map<String, dynamic>> _posts = [];
-  Function()? _unsub;
+  StreamSubscription<DbChange>? _sub;
 
   @override
   void initState() {
     super.initState();
-    _unsub = client.db('app').table('posts').onSnapshot((change) {
+    _sub = client.db('app').table('posts').onSnapshot().listen((change) {
       setState(() {
         switch (change.changeType) {
-          case 'added':
+          case 'create':
             _posts.add(change.data!);
             break;
-          case 'modified':
+          case 'update':
             final idx = _posts.indexWhere((p) => p['id'] == change.docId);
             if (idx >= 0) _posts[idx] = change.data!;
             break;
-          case 'removed':
+          case 'delete':
             _posts.removeWhere((p) => p['id'] == change.docId);
             break;
         }
@@ -169,7 +171,7 @@ class _LivePostsWidgetState extends State<LivePostsWidget> {
 
   @override
   void dispose() {
-    _unsub?.call();  // ← Always clean up!
+    _sub?.cancel();
     super.dispose();
   }
 
@@ -195,24 +197,30 @@ class OnlineUsersWidget extends StatefulWidget {
 
 class _OnlineUsersWidgetState extends State<OnlineUsersWidget> {
   List<Map<String, dynamic>> _users = [];
-  late final room;
+  late final RoomClient room;
+  RoomSubscription? _joinSub;
+  RoomSubscription? _leaveSub;
 
   @override
   void initState() {
     super.initState();
     room = client.room('presence', 'online-users');
-    room.connect();
-    room.members.setState({'name': 'Jane', 'status': 'active'});
-    room.members.onJoin((member) {
-      setState(() => _users = room.members.getAll());
+    room.join().then((_) async {
+      await room.members.setState({'name': 'Jane', 'status': 'active'});
+      setState(() => _users = room.members.list());
     });
-    room.members.onLeave((member) {
-      setState(() => _users = room.members.getAll());
+    _joinSub = room.members.onJoin((member) {
+      setState(() => _users = room.members.list());
+    });
+    _leaveSub = room.members.onLeave((member) {
+      setState(() => _users = room.members.list());
     });
   }
 
   @override
   void dispose() {
+    _joinSub?.cancel();
+    _leaveSub?.cancel();
     room.leave();
     super.dispose();
   }
@@ -232,9 +240,9 @@ Every subscription or listener created in `initState()` **must** be cleaned up i
 
 | Resource | Subscribe | Clean up |
 |----------|-----------|----------|
-| Auth state | `client.auth.onAuthStateChange(...)` | Call the returned `Function()` |
-| DB snapshot | `client.db(...).table(...).onSnapshot(...)` | Call the returned `Function()` |
-| Presence | `presence.track(...)` | `presence.untrack()` |
+| Auth state | `client.auth.onAuthStateChange.listen(...)` | Cancel the `StreamSubscription` |
+| DB snapshot | `client.db(...).table(...).onSnapshot().listen(...)` | Cancel the `StreamSubscription` |
+| Room membership | `room.members.onJoin(...)` / `room.members.onLeave(...)` | Cancel the returned `RoomSubscription` and call `room.leave()` |
 
 Forgetting to dispose will cause memory leaks and `setState() called after dispose()` errors.
 
@@ -243,15 +251,15 @@ Forgetting to dispose will cause memory leaks and `setState() called after dispo
 The SDK automatically handles:
 - **Token refresh** when the app returns from background
 - **WebSocket reconnection** with exponential backoff after network interruption
-- **Secure token persistence** across app restarts via `flutter_secure_storage`
+- **Refresh-token persistence** across app restarts via the default `shared_preferences` storage or a custom `TokenStorage`
 
 You don't need to manually manage reconnection or token storage.
 
 ## Offline Support
 
-The Flutter SDK caches the auth token in secure storage (`flutter_secure_storage`). Token refresh happens automatically on app launch — users stay signed in across app restarts without re-entering credentials.
+The Flutter SDK persists the refresh token by default and refreshes access tokens automatically on app launch, so users stay signed in across app restarts without re-entering credentials.
 
 :::info Platform Notes
-- **iOS**: Tokens are stored in Keychain (persists across app reinstalls unless Keychain is cleared)
-- **Android**: Tokens are stored in EncryptedSharedPreferences (cleared on app uninstall)
+- If you need stronger guarantees, provide a custom `TokenStorage`
+- A custom storage adapter is often a good choice when you already standardize on your own secure storage layer
 :::

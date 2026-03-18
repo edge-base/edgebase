@@ -1,3 +1,9 @@
+## 0.1.2
+
+- Added `edgebase_core`, `edgebase_admin`, and `edgebase_flutter` package documentation
+- Added package-level `llms.txt` guidance for AI coding assistants
+- Updated package metadata for public publishing
+
 ## 0.1.0
 
 - Initial release

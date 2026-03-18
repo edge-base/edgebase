@@ -33,7 +33,7 @@ const client = createClient('https://my-app.edgebase.fun');
 <TabItem value="dart" label="Dart/Flutter">
 
 ```dart
-import 'package:edgebase_flutter/edgebase.dart';
+import 'package:edgebase_flutter/edgebase_flutter.dart';
 
 final client = ClientEdgeBase('https://my-app.edgebase.fun');
 ```
@@ -661,7 +661,7 @@ const result = await client.db('app').table('posts')
 
 ```dart
 final result = await client.db('app').table('posts')
-    .orderBy('createdAt', desc: true)
+    .orderBy('createdAt', direction: 'desc')
     .limit(20)
     .getList();
 ```
@@ -1003,7 +1003,7 @@ const sorted = await client.db('app').table('posts')
 
 ```dart
 final latest = await client.db('app').table('posts')
-    .orderBy('createdAt', desc: true)
+    .orderBy('createdAt', direction: 'desc')
     .getList();
 ```
 

@@ -238,9 +238,9 @@ client.auth.onAuthStateChange((event, user) => {
 <TabItem value="dart" label="Dart/Flutter">
 
 ```dart
-client.auth.onAuthStateChange((event, user) {
-  if (event == AuthEvent.signedIn) {
-    print('User signed in: ${user?.email}');
+client.auth.onAuthStateChange.listen((user) {
+  if (user != null) {
+    print('User signed in: ${user.email}');
   }
 });
 ```

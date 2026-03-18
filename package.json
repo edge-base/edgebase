@@ -18,7 +18,8 @@
         "release:sync": "node ./scripts/sync-release-versions.mjs",
         "release:check": "node ./scripts/check-release-versions.mjs",
         "release:set": "node ./scripts/set-release-version.mjs",
-        "release:npm": "node ./dev/release/publish-npm-release.mjs"
+        "release:npm": "node ./dev/release/publish-npm-release.mjs",
+        "release:pub": "node ./dev/release/publish-pub-release.mjs"
     },
     "devDependencies": {
         "@eslint/js": "^9.39.2",

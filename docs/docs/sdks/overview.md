@@ -88,7 +88,7 @@ dart pub add edgebase_flutter
 ```
 
 ```dart
-import 'package:edgebase_flutter/edgebase.dart';
+import 'package:edgebase_flutter/edgebase_flutter.dart';
 
 final client = ClientEdgeBase('https://your-project.edgebase.fun');
 ```

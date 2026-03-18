@@ -13,11 +13,10 @@ import 'generated/admin_api_core.dart';
 
 /// Client for a user-defined Vectorize index.
 class VectorizeClient {
-  final HttpClient _http;
   final GeneratedAdminApi _core;
   final String _index;
 
-  VectorizeClient(this._http, this._index) : _core = GeneratedAdminApi(_http);
+  VectorizeClient(HttpClient http, this._index) : _core = GeneratedAdminApi(http);
 
   /// Insert or update vectors.
   /// Returns mutation result with `ok`, optional `count` and `mutationId`.
@@ -58,7 +57,7 @@ class VectorizeClient {
     if (returnValues != null) body['returnValues'] = returnValues;
     if (returnMetadata != null) body['returnMetadata'] = returnMetadata;
     final res = await _core.vectorizeOperation(_index, body);
-    if (res is Map && res['matches'] is List) {
+    if (res is Map<Object?, Object?> && res['matches'] is List) {
       return (res['matches'] as List).cast<Map<String, dynamic>>();
     }
     return [];
@@ -83,7 +82,7 @@ class VectorizeClient {
     if (returnValues != null) body['returnValues'] = returnValues;
     if (returnMetadata != null) body['returnMetadata'] = returnMetadata;
     final res = await _core.vectorizeOperation(_index, body);
-    if (res is Map && res['matches'] is List) {
+    if (res is Map<Object?, Object?> && res['matches'] is List) {
       return (res['matches'] as List).cast<Map<String, dynamic>>();
     }
     return [];
@@ -95,7 +94,7 @@ class VectorizeClient {
       'action': 'getByIds',
       'ids': ids,
     });
-    if (res is Map && res['vectors'] is List) {
+    if (res is Map<Object?, Object?> && res['vectors'] is List) {
       return (res['vectors'] as List).cast<Map<String, dynamic>>();
     }
     return [];

@@ -113,11 +113,11 @@ class AdminListUsersResult {
 
 /// Admin Auth client — server-side user management.
 class AdminAuthClient {
-  final HttpClient _client;
   final GeneratedAdminApi _core;
   final bool _hasServiceKey;
 
-  AdminAuthClient(this._client, this._hasServiceKey) : _core = GeneratedAdminApi(_client);
+  AdminAuthClient(HttpClient client, this._hasServiceKey)
+      : _core = GeneratedAdminApi(client);
 
   void _ensureServiceKey() {
     if (!_hasServiceKey) {

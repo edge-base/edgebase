@@ -8,6 +8,7 @@
     <PackageId>dev.edgebase.admin</PackageId>
     <Version>0.1.0</Version>
     <Description>EdgeBase Admin SDK for .NET — server-side user management, KV, D1, Vectorize, Push</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="8.0.5" />

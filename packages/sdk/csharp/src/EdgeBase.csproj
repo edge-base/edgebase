@@ -5,6 +5,7 @@
     <AssemblyName>EdgeBase</AssemblyName>
     <Nullable>enable</Nullable>
     <LangVersion>10.0</LangVersion>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../packages/core/EdgeBase.Core.csproj" />

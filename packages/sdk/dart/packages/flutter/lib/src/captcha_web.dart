@@ -3,15 +3,16 @@
 /// Loads Cloudflare Turnstile JS SDK directly in the browser DOM,
 /// renders invisible widget, and shows centered modal overlay if interactive
 /// challenge is needed. Mirrors JS SDK turnstile.ts behavior.
-// ignore_for_file: avoid_web_libraries_in_flutter
+// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use, undefined_function, undefined_shown_name
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
-import 'dart:js' as js;
-import 'dart:js_util' as js_util;
 import 'package:edgebase_core/src/http_client.dart' as core;
 import 'package:edgebase_core/src/generated/api_core.dart';
+import 'package:js/js.dart' show allowInterop;
+import 'package:js/js_util.dart'
+    show callMethod, getProperty, hasProperty, jsify;
 
 const _turnstileScriptUrl =
     'https://challenges.cloudflare.com/turnstile/v0/api.js';
@@ -61,7 +62,7 @@ bool _scriptLoaded = false;
 Completer<void>? _scriptLoadCompleter;
 
 Future<void> _loadTurnstileScript() async {
-  if (_scriptLoaded && js_util.hasProperty(html.window, 'turnstile')) return;
+  if (_scriptLoaded && hasProperty(html.window, 'turnstile')) return;
   if (_scriptLoadCompleter != null) return _scriptLoadCompleter!.future;
 
   _scriptLoadCompleter = Completer<void>();
@@ -98,7 +99,7 @@ Future<void> _loadTurnstileScript() async {
 }
 
 Future<void> _waitForTurnstile() async {
-  while (!js_util.hasProperty(html.window, 'turnstile')) {
+  while (!hasProperty(html.window, 'turnstile')) {
     await Future.delayed(const Duration(milliseconds: 50));
   }
 }
@@ -129,8 +130,8 @@ Future<String> _getCaptchaToken(String siteKey, String action,
   void cleanup() {
     if (widgetId != null) {
       try {
-        final turnstile = js_util.getProperty(html.window, 'turnstile');
-        js_util.callMethod(turnstile, 'remove', [widgetId]);
+        final turnstile = getProperty(html.window, 'turnstile');
+        callMethod(turnstile, 'remove', [widgetId]);
       } catch (_) {}
     }
     overlay.remove();
@@ -143,32 +144,32 @@ Future<String> _getCaptchaToken(String siteKey, String action,
     }
   });
 
-  final turnstile = js_util.getProperty(html.window, 'turnstile');
-  widgetId = js_util.callMethod(turnstile, 'render', [
+  final turnstile = getProperty(html.window, 'turnstile');
+  widgetId = callMethod(turnstile, 'render', [
     container,
-    js_util.jsify({
+    jsify({
       'sitekey': siteKey,
       'action': action,
       'appearance': 'interaction-only',
-      'callback': js.allowInterop((String token) {
+      'callback': allowInterop((String token) {
         timer.cancel();
         cleanup();
         if (!completer.isCompleted) completer.complete(token);
       }),
-      'error-callback': js.allowInterop((dynamic error) {
+      'error-callback': allowInterop((dynamic error) {
         timer.cancel();
         cleanup();
         if (!completer.isCompleted) {
           completer.completeError(Exception('Turnstile error: $error'));
         }
       }),
-      'before-interactive-callback': js.allowInterop(() {
+      'before-interactive-callback': allowInterop(() {
         overlay.style.display = 'flex';
       }),
-      'after-interactive-callback': js.allowInterop(() {
+      'after-interactive-callback': allowInterop(() {
         overlay.style.display = 'none';
       }),
-      'timeout-callback': js.allowInterop(() {
+      'timeout-callback': allowInterop(() {
         timer.cancel();
         cleanup();
         if (!completer.isCompleted) {

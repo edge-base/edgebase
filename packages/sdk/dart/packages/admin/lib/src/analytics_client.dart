@@ -82,7 +82,7 @@ class AnalyticsClient {
 
 Map<String, dynamic> _asMap(dynamic value) {
   if (value is Map<String, dynamic>) return value;
-  if (value is Map) {
+  if (value is Map<Object?, Object?>) {
     return value.map((key, entry) => MapEntry(key.toString(), entry));
   }
   return <String, dynamic>{};
@@ -91,7 +91,7 @@ Map<String, dynamic> _asMap(dynamic value) {
 List<Map<String, dynamic>> _extractList(dynamic value) {
   if (value is! List) return const [];
   return value
-      .whereType<Map>()
+      .whereType<Map<Object?, Object?>>()
       .map((item) => item.map((key, entry) => MapEntry(key.toString(), entry)))
       .toList(growable: false);
 }

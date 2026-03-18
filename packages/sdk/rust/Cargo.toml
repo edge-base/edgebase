@@ -2,6 +2,7 @@
 name = "edgebase-sdk"
 version = "0.1.2"
 edition = "2021"
+license = "MIT"
 # Workspace root package — provides integration test targets (tests/e2e.rs, tests/e2e_room.rs)
 
 [workspace]

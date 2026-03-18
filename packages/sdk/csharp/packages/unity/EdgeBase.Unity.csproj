@@ -8,6 +8,7 @@
     <PackageId>dev.edgebase.unity</PackageId>
     <Version>0.1.0</Version>
     <Description>EdgeBase Unity Client SDK</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../core/EdgeBase.Core.csproj" />

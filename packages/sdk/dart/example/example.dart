@@ -7,7 +7,7 @@ import 'package:edgebase/edgebase.dart';
 
 Future<void> main() async {
   // ─── Initialize ───
-  final client = EdgeBase('https://my-app.edgebase.fun');
+  final client = EdgeBase.client('https://my-app.edgebase.fun');
 
   // ─── Auth: Sign Up ───
   final result = await client.auth.signUp(SignUpOptions(
@@ -40,9 +40,10 @@ Future<void> main() async {
 
   // Read with query builder (immutable)
   final posts = await client
+      .db('shared')
       .table('posts')
       .where('status', '==', 'published')
-      .orderBy('createdAt', 'desc')
+      .orderBy('createdAt', direction: 'desc')
       .limit(20)
       .get();
   print('Found ${posts.total ?? 0} posts');

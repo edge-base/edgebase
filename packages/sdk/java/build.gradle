@@ -40,6 +40,15 @@ publishing {
             groupId = 'dev.edgebase'
             artifactId = 'edgebase-sdk-java'
             version = project.version
+            pom {
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'https://opensource.org/license/mit'
+                        distribution = 'repo'
+                    }
+                }
+            }
         }
     }
 }

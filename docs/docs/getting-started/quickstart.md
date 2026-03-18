@@ -214,7 +214,7 @@ const posts = await client.db('app').table('posts')
 <TabItem value="dart" label="Dart/Flutter">
 
 ```dart
-import 'package:edgebase_flutter/edgebase.dart';
+import 'package:edgebase_flutter/edgebase_flutter.dart';
 
 final client = ClientEdgeBase('http://localhost:8787');
 
@@ -230,7 +230,7 @@ await client.db('app').table('posts').insert({
 // Query records
 final posts = await client.db('app').table('posts')
     .where('title', 'contains', 'Hello')
-    .orderBy('createdAt', desc: true)
+    .orderBy('createdAt', direction: 'desc')
     .limit(10)
     .getList();
 ```

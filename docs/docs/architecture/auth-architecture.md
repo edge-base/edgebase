@@ -191,7 +191,7 @@ All SDKs (JavaScript, Dart, Swift, Kotlin, Python) proactively refresh the Acces
 |---|---|---|
 | Web (JavaScript) | Memory | localStorage (with BroadcastChannel tab sync) |
 | Node.js | Memory | Memory |
-| Flutter (Dart) | Memory | `flutter_secure_storage` |
+| Flutter (Dart) | Memory | `shared_preferences` by default, or custom `TokenStorage` |
 | Swift (iOS) | Memory | Keychain Services |
 | Kotlin (Android) | Memory | EncryptedSharedPreferences |
 | Python | Memory | Memory (optional file storage) |

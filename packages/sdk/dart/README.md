@@ -15,9 +15,9 @@ Open-source Global Edge BaaS SDK for Dart/Flutter.
 ## Getting Started
 
 ```dart
-import 'package:edgebase_flutter/edgebase.dart';
+import 'package:edgebase/edgebase.dart';
 
-final client = ClientEdgeBase('https://your-app.edgebase.fun');
+final client = EdgeBase.client('https://your-app.edgebase.fun');
 
 // Sign up
 await client.auth.signUp(SignUpOptions(
@@ -28,7 +28,7 @@ await client.auth.signUp(SignUpOptions(
 // Query records
 final posts = await client.db('shared').table('posts')
     .where('status', '==', 'published')
-    .orderBy('createdAt', 'desc')
+    .orderBy('createdAt', direction: 'desc')
     .limit(20)
     .getList();
 
@@ -61,7 +61,9 @@ class FlutterTokenStorage implements TokenStorage {
 
 final client = ClientEdgeBase(
   'https://your-app.edgebase.fun',
-  tokenStorage: FlutterTokenStorage(),
+  options: EdgeBaseClientOptions(
+    tokenStorage: FlutterTokenStorage(),
+  ),
 );
 ```
 

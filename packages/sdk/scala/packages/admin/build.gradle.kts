@@ -33,6 +33,15 @@ publishing {
             from(components["java"])
             groupId = "dev.edgebase"
             artifactId = "edgebase-admin-scala"
+            pom {
+                licenses {
+                    license {
+                        name.set("MIT License")
+                        url.set("https://opensource.org/license/mit")
+                        distribution.set("repo")
+                    }
+                }
+            }
         }
     }
 }

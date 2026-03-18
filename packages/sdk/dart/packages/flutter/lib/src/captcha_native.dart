@@ -110,7 +110,7 @@ class _TurnstileBrowser extends InAppBrowser {
   _TurnstileBrowser(this._completer);
 
   @override
-  void onWebViewCreated() {
+  void onBrowserCreated() {
     webViewController?.addJavaScriptHandler(
       handlerName: 'onToken',
       callback: (args) {

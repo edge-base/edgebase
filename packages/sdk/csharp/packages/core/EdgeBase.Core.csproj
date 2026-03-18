@@ -8,6 +8,7 @@
     <PackageId>dev.edgebase.core</PackageId>
     <Version>0.1.0</Version>
     <Description>EdgeBase Core SDK — shared types and utilities</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
