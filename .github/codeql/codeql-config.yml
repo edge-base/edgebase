@@ -3,7 +3,7 @@ name: "EdgeBase CodeQL Config"
 query-filters:
   # Test fixtures use dummy cryptographic keys — not real secrets.
   - exclude:
-      tags: contain: "correctness/hardcoded-credentials"
+      tags: /correctness\/hardcoded-credentials/
 
   # CLI tool runs on the developer's own machine; TOCTOU file-system races
   # are not exploitable in this threat model.
