@@ -45,7 +45,7 @@ describe('CLI: init command', () => {
     expect(existsSync(join(testDir, '.gitignore'))).toBe(true);
     expect(existsSync(join(testDir, 'package.json'))).toBe(true);
     expect(existsSync(join(testDir, 'wrangler.toml'))).toBe(true);
-    expect(existsSync(join(testDir, 'node_modules', '@edgebase', 'shared', 'package.json'))).toBe(true);
+    expect(existsSync(join(testDir, 'node_modules', '@edgebase-fun', 'shared', 'package.json'))).toBe(true);
     expect(existsSync(join(testDir, '.edgebase', 'runtime', 'server', 'src', 'index.ts'))).toBe(true);
     expect(existsSync(join(testDir, '.edgebase', 'runtime', 'server', 'src', 'generated-config.ts'))).toBe(true);
     expect(existsSync(join(testDir, '.edgebase', 'runtime', 'server', 'edgebase.test.config.ts'))).toBe(true);

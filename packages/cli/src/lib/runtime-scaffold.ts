@@ -136,7 +136,7 @@ function copyRuntimeDir(source: string, target: string): void {
 
 function resolveServerRuntimeSource(projectDir: string): string {
   const candidates = dedupeCandidates([
-    join(projectDir, 'node_modules', '@edgebase', 'server', 'src'),
+    join(projectDir, 'node_modules', '@edgebase-fun', 'server', 'src'),
     resolve(CLI_NODE_MODULES_SOURCE, '@edgebase-fun/server', 'src'),
     resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase-fun/server', 'src'),
     MONOREPO_SERVER_RUNTIME_SOURCE,
@@ -153,7 +153,7 @@ function resolveServerRuntimeSource(projectDir: string): string {
 
 function resolveAdminBuildSource(projectDir: string): string {
   const candidates = dedupeCandidates([
-    join(projectDir, 'node_modules', '@edgebase', 'server', 'admin-build'),
+    join(projectDir, 'node_modules', '@edgebase-fun', 'server', 'admin-build'),
     resolve(CLI_NODE_MODULES_SOURCE, '@edgebase-fun/server', 'admin-build'),
     resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase-fun/server', 'admin-build'),
     ...MONOREPO_ADMIN_BUILD_SOURCES,
@@ -246,11 +246,11 @@ function getRuntimeNodeModulesCandidates(projectDir: string): string[] {
 
 function getSharedPackageSourceCandidates(projectDir: string): string[] {
   return dedupeCandidates([
+    join(projectDir, 'node_modules', '@edgebase-fun', 'shared'),
     resolve(CLI_NODE_MODULES_SOURCE, '@edgebase-fun/shared'),
     resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edgebase-fun/shared'),
     resolve(SERVER_NODE_MODULES_SOURCE, '@edgebase-fun/shared'),
     MONOREPO_SHARED_SOURCE,
-    join(projectDir, 'node_modules', '@edgebase', 'shared'),
   ]);
 }
 
@@ -268,7 +268,7 @@ export function resolveSharedPackageLinkRoots(projectDir: string): string[] {
 }
 
 function ensureSharedPackageLinkAtRoot(rootDir: string, source: string): void {
-  const target = join(rootDir, 'node_modules', '@edgebase', 'shared');
+  const target = join(rootDir, 'node_modules', '@edgebase-fun', 'shared');
   const markerPath = join(target, '.edgebase-shim');
   const normalizedSource = resolve(source);
   const normalizedTarget = resolve(target);
