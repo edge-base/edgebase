@@ -2,6 +2,7 @@ jdk:
   - openjdk17
 
 install:
-  - cd packages/sdk/java && gradle :packages:core:publishToMavenLocal :packages:admin:publishToMavenLocal :packages:android:publishToMavenLocal --no-daemon
-  - cd packages/sdk/kotlin && ./gradlew :core:publishJvmPublicationToMavenLocal :client:publishJvmPublicationToMavenLocal :admin:publishToMavenLocal --no-daemon
-  - cd packages/sdk/scala && gradle :packages:core:publishToMavenLocal :packages:admin:publishToMavenLocal --no-daemon
+  - sdk install gradle 9.2.1 && sdk use gradle 9.2.1
+  - (cd packages/sdk/java && JITPACK=1 VERSION=$VERSION gradle :packages:core:publishToMavenLocal :packages:admin:publishToMavenLocal :packages:android:publishToMavenLocal --no-daemon)
+  - (cd packages/sdk/kotlin && JITPACK=1 VERSION=$VERSION ./gradlew :core:publishJvmPublicationToMavenLocal :client:publishJvmPublicationToMavenLocal :admin:publishMavenPublicationToMavenLocal --no-daemon)
+  - (cd packages/sdk/scala && JITPACK=1 VERSION=$VERSION gradle :packages:core:publishToMavenLocal :packages:admin:publishToMavenLocal --no-daemon)
