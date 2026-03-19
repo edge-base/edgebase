@@ -23,3 +23,7 @@ dev_dependencies:
     path: ../admin
   flutter_test:
     sdk: flutter
+
+dependency_overrides:
+  edgebase_core:
+    path: ../core

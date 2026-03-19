@@ -13,3 +13,7 @@ dependencies:
 
 dev_dependencies:
   test: ^1.25.0
+
+dependency_overrides:
+  edgebase_core:
+    path: ../core

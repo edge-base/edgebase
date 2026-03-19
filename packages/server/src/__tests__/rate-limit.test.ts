@@ -12,6 +12,7 @@ import {
   parseWindow,
   FixedWindowCounter,
   RATE_LIMIT_DEFAULTS,
+  RATE_LIMIT_DEV_DEFAULTS,
   rateLimitMiddleware,
 } from '../middleware/rate-limit.js';
 import type { EdgeBaseConfig } from '@edge-base/shared';
@@ -44,13 +45,13 @@ describe('parseWindow', () => {
 describe('getLimit', () => {
   it('returns defaults when config is undefined', () => {
     const result = getLimit(undefined, 'db');
-    expect(result).toEqual(RATE_LIMIT_DEFAULTS['db']);
+    expect(result).toEqual(RATE_LIMIT_DEV_DEFAULTS['db']);
   });
 
   it('returns defaults when rateLimiting is not set', () => {
     const config = {} as EdgeBaseConfig;
     const result = getLimit(config, 'db');
-    expect(result).toEqual(RATE_LIMIT_DEFAULTS['db']);
+    expect(result).toEqual(RATE_LIMIT_DEV_DEFAULTS['db']);
   });
 
   it('returns defaults for unknown group', () => {
@@ -84,7 +85,7 @@ describe('getLimit', () => {
         db: undefined,
       },
     } as EdgeBaseConfig;
-    expect(getLimit(config, 'db')).toEqual(RATE_LIMIT_DEFAULTS['db']);
+    expect(getLimit(config, 'db')).toEqual(RATE_LIMIT_DEV_DEFAULTS['db']);
   });
 });
 

@@ -1,6 +1,6 @@
 //! Auto-generated admin API Core — DO NOT EDIT.
 //! Regenerate: npx tsx tools/sdk-codegen/generate.ts
-//! Source: openapi.json (0.1.3)
+//! Source: openapi.json (0.1.0)
 
 use crate::Error;
 use crate::HttpClient;
