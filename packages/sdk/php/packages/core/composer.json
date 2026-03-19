@@ -3,6 +3,12 @@
     "description": "EdgeBase Core SDK — shared types, HTTP client, table, storage.",
     "type": "library",
     "license": "MIT",
+    "homepage": "https://edgebase.fun/docs/sdks",
+    "support": {
+        "homepage": "https://edgebase.fun/docs/sdks",
+        "issues": "https://github.com/edge-base/edgebase/issues",
+        "source": "https://github.com/edge-base/edgebase"
+    },
     "autoload": {
         "psr-4": {
             "EdgeBase\\": "src/",

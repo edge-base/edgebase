@@ -1,0 +1,151 @@
+name: PHP Split Repo Sync
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+    paths:
+      - packages/sdk/php/packages/core/**
+      - packages/sdk/php/packages/admin/**
+      - scripts/prepare-php-split-package.mjs
+      - scripts/sync-php-split-repo.sh
+      - .github/workflows/php-split-sync.yml
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which package to sync
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - core
+          - admin
+      sync_mode:
+        description: Sync branch or tag
+        required: false
+        default: branch
+        type: choice
+        options:
+          - branch
+          - tag
+      tag_name:
+        description: Tag name to mirror when sync_mode=tag
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: php-split-sync-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync PHP split repo (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: core
+            prefix: packages/sdk/php/packages/core
+            default_repo: edge-base/edgebase-php-core
+          - target: admin
+            prefix: packages/sdk/php/packages/admin
+            default_repo: edge-base/edgebase-php-admin
+
+    steps:
+      - name: Check split push token
+        env:
+          EDGEBASE_SPLIT_PUSH_TOKEN: ${{ secrets.EDGEBASE_SPLIT_PUSH_TOKEN }}
+        run: |
+          if [[ -z "${EDGEBASE_SPLIT_PUSH_TOKEN}" ]]; then
+            echo "::error::Missing secret EDGEBASE_SPLIT_PUSH_TOKEN."
+            echo "::error::Create a PAT or GitHub App token with contents:write access to the split repositories."
+            exit 1
+          fi
+
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.sync_mode == 'tag' && github.event.inputs.tag_name || github.ref }}
+
+      - name: Configure sync target
+        id: config
+        env:
+          INPUT_TARGET: ${{ github.event.inputs.target }}
+          INPUT_SYNC_MODE: ${{ github.event.inputs.sync_mode }}
+          INPUT_TAG_NAME: ${{ github.event.inputs.tag_name }}
+          TARGET: ${{ matrix.target }}
+          DEFAULT_REPO: ${{ matrix.default_repo }}
+          PHP_CORE_SPLIT_REPO: ${{ vars.PHP_CORE_SPLIT_REPO }}
+          PHP_ADMIN_SPLIT_REPO: ${{ vars.PHP_ADMIN_SPLIT_REPO }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_REF_TYPE: ${{ github.ref_type }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          requested_target="${INPUT_TARGET:-all}"
+          if [[ "$requested_target" != "all" && "$requested_target" != "$TARGET" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          case "$TARGET" in
+            core)
+              destination_repo="${PHP_CORE_SPLIT_REPO:-$DEFAULT_REPO}"
+              ;;
+            admin)
+              destination_repo="${PHP_ADMIN_SPLIT_REPO:-$DEFAULT_REPO}"
+              ;;
+            *)
+              echo "::error::Unsupported target ${TARGET}"
+              exit 1
+              ;;
+          esac
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            sync_mode="${INPUT_SYNC_MODE:-branch}"
+            if [[ "$sync_mode" == "tag" ]]; then
+              ref_name="${INPUT_TAG_NAME:-}"
+              if [[ -z "$ref_name" ]]; then
+                echo "::error::workflow_dispatch tag sync requires tag_name."
+                exit 1
+              fi
+            else
+              ref_name="main"
+            fi
+          else
+            if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+              sync_mode="tag"
+              ref_name="$GITHUB_REF_NAME"
+            else
+              sync_mode="branch"
+              ref_name="main"
+            fi
+          fi
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "destination_repo=$destination_repo" >> "$GITHUB_OUTPUT"
+          echo "sync_mode=$sync_mode" >> "$GITHUB_OUTPUT"
+          echo "ref_name=$ref_name" >> "$GITHUB_OUTPUT"
+
+      - name: Sync split repository
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          EDGEBASE_SPLIT_PUSH_TOKEN: ${{ secrets.EDGEBASE_SPLIT_PUSH_TOKEN }}
+        run: |
+          chmod +x ./scripts/sync-php-split-repo.sh
+          ./scripts/sync-php-split-repo.sh \
+            "${{ matrix.target }}" \
+            "${{ matrix.prefix }}" \
+            "${{ steps.config.outputs.destination_repo }}" \
+            "${{ steps.config.outputs.sync_mode }}" \
+            "${{ steps.config.outputs.ref_name }}" \
+            "${EDGEBASE_SPLIT_PUSH_TOKEN}"
