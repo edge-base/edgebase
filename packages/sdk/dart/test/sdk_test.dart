@@ -132,7 +132,7 @@ void main() {
 
     test('cursor + offset 동시 사용 → StateError', () {
       expect(
-        () => table.after('cursor').offset(2).get(),
+        () => table.after('cursor').offset(2).getList(),
         throwsA(isA<StateError>()),
       );
     });
@@ -199,8 +199,8 @@ void main() {
       expect(status, 404);
     });
 
-    test('get() → items 배열', () async {
-      final result = await postsTable.limit(5).get();
+    test('getList() → items 배열', () async {
+      final result = await postsTable.limit(5).getList();
       expect(result.items, isA<List>());
     });
 
@@ -209,7 +209,7 @@ void main() {
       final post = await postsTable.insert({'title': 'Dart-filter-$suffix'});
       cleanupIds.add(post['id'] as String);
 
-      final result = await postsTable.where('id', '==', post['id']).get();
+      final result = await postsTable.where('id', '==', post['id']).getList();
       expect(result.items.any((p) => p['id'] == post['id']), isTrue);
     });
 
@@ -306,9 +306,9 @@ void main() {
     });
 
     test('after(cursor) → 다른 페이지', () async {
-      final page1 = await postsTable.limit(2).get();
+      final page1 = await postsTable.limit(2).getList();
       if (page1.cursor == null) return;
-      final page2 = await postsTable.limit(2).after(page1.cursor!).get();
+      final page2 = await postsTable.limit(2).after(page1.cursor!).getList();
       for (final item1 in page1.items) {
         expect(page2.items.any((i) => i['id'] == item1['id']), isFalse);
       }

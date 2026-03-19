@@ -335,7 +335,7 @@ class TableRef {
 
     // CRUD
 
-    ListResult get() {
+    ListResult getList() {
         String path = searchQuery != null ? basePath() + "/search" : basePath();
         Map<String, String> query = buildQuery();
         if (searchQuery != null)
@@ -355,11 +355,6 @@ class TableRef {
                 data.has("perPage") && !data.get("perPage").isJsonNull() ? data.get("perPage").getAsInt() : null,
                 data.has("hasMore") && !data.get("hasMore").isJsonNull() ? data.get("hasMore").getAsBoolean() : null,
                 data.has("cursor") && !data.get("cursor").isJsonNull() ? data.get("cursor").getAsString() : null);
-    }
-
-    /** Alias for {@link #get()} — matches JS SDK naming convention. */
-    ListResult getList() {
-        return get();
     }
 
     JsonObject getOne(String id) {

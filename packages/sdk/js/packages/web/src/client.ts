@@ -5,7 +5,7 @@
  * import { createClient } from '@edge-base/web';
  * const client = createClient('https://my-app.edgebase.fun');
  * await client.auth.signUp({ email: 'user@test.com', password: 'pass123' });
- * const posts = await client.db('shared').table('posts').where('status', '==', 'published').get();
+ * const posts = await client.db('shared').table('posts').where('status', '==', 'published').getList();
  */
 
 import { HttpClient, EdgeBaseError } from '@edge-base/core';
@@ -43,7 +43,7 @@ export interface JuneClientOptions {
  *
  * @example
  * const client = createClient('https://my-app.edgebase.fun');
- * const posts = await client.db('shared').table('posts').where('status', '==', 'published').get();
+ * const posts = await client.db('shared').table('posts').where('status', '==', 'published').getList();
  */
 export class ClientEdgeBase {
   readonly auth: AuthClient;
@@ -281,13 +281,13 @@ export class ClientEdgeBase {
    *
    * @example
    * // Static shared DB (id omitted)
-   * const posts = await client.db('shared').table('posts').get();
+   * const posts = await client.db('shared').table('posts').getList();
    *
    * // Dynamic workspace DB
-   * const docs = await client.db('workspace', 'ws-456').table('documents').get();
+   * const docs = await client.db('workspace', 'ws-456').table('documents').getList();
    *
    * // Per-user DB
-   * const notes = await client.db('user', userId).table('notes').get();
+   * const notes = await client.db('user', userId).table('notes').getList();
    */
   db(namespace: string, id?: string): DbRef {
     return new DbRef(this.core, namespace, id, this.databaseLive, matchesFilter);

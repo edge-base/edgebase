@@ -6,7 +6,7 @@
 // Usage:
 //   final client = EdgeBase.client('https://my-project.edgebase.fun');
 //   await client.auth.signUp(SignUpOptions(email: 'a@b.com', password: 'pass'));
-//   final posts = await client.db('shared').table('posts').get();
+//   final posts = await client.db('shared').table('posts').getList();
 
 import 'package:edgebase_core/src/http_client.dart';
 import 'package:edgebase_core/src/context_manager.dart';
@@ -40,7 +40,7 @@ typedef JuneClientOptions = EdgeBaseClientOptions;
 /// Usage:
 ///   final client = EdgeBase.client('https://my-project.edgebase.fun');
 ///   await client.auth.signUp(SignUpOptions(email: 'a@b.com', password: 'pass'));
-///   final posts = await client.db('shared').table('posts').get();
+///   final posts = await client.db('shared').table('posts').getList();
 class ClientEdgeBase {
   final HttpClient _httpClient;
   final GeneratedDbApi _dbApi;

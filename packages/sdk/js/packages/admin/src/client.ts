@@ -48,8 +48,8 @@ export interface JuneAdminClientOptions {
  * Does NOT expose: auth, database-live, presence, channel (client-only).
  *
  * @example
- * const posts = await admin.db('shared').table('posts').get();
- * const docs = await admin.db('workspace', 'ws-456').table('documents').get();
+ * const posts = await admin.db('shared').table('posts').getList();
+ * const docs = await admin.db('workspace', 'ws-456').table('documents').getList();
  */
 export class AdminEdgeBase {
   /** Admin user management. */
@@ -89,13 +89,13 @@ export class AdminEdgeBase {
    *
    * @example
    * // Static shared DB (id omitted)
-   * const posts = await admin.db('shared').table('posts').get();
+   * const posts = await admin.db('shared').table('posts').getList();
    *
    * // Dynamic workspace DB
-   * const docs = await admin.db('workspace', 'ws-456').table('documents').get();
+   * const docs = await admin.db('workspace', 'ws-456').table('documents').getList();
    *
    * // Per-user DB
-   * const notes = await admin.db('user', 'user-123').table('notes').get();
+   * const notes = await admin.db('user', 'user-123').table('notes').getList();
    */
   db(namespace: string, id?: string): DbRef {
     return new DbRef(this.core, namespace, id, undefined, undefined, this.httpClient);

@@ -55,8 +55,7 @@ bucket.upload("user-1.jpg", file_bytes, content_type="image/jpeg")
 
 - do not expect a top-level `EdgeBaseServer` or `AdminClient` here; those live in higher-level packages
 - `TableRef(http, namespace, instance_id, table_name)` requires the low-level HTTP client as its first argument
-- `table.get()` returns a `ListResult`, not a single record
-- use `table.get_one(id)` or `table.doc(id).get()` for a single record
+- `table.get()` does not exist; use `table.get_list()` for multiple records or `table.get_one(id)` / `table.doc(id).get()` for a single record
 - `StorageClient` requires an initialized `HttpClient`
 - `PushClient` exists in this package, but most applications should access push through `edgebase-admin` or `edgebase`
 - `increment` and `delete_field` are aliases from `FieldOps`

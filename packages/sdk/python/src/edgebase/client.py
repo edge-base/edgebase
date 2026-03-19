@@ -15,10 +15,10 @@ Usage::
     admin.admin_auth.set_custom_claims('user-id', {'role': 'pro'})
 
     # Database (Service Key bypasses access rules) — #133 §2
-    posts = admin.db('shared').table('posts').where('status', '==', 'published').get()
+    posts = admin.db('shared').table('posts').where('status', '==', 'published').get_list()
 
     # Per-workspace DB
-    docs = admin.db('workspace', 'ws-456').table('documents').get()
+    docs = admin.db('workspace', 'ws-456').table('documents').get_list()
 
     # Raw SQL (#136 §11)
     rows = admin.sql('shared', None, 'SELECT id, title FROM posts WHERE published = ?', [1])

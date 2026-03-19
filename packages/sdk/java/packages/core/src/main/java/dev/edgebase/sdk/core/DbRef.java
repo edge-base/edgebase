@@ -1,7 +1,7 @@
 // EdgeBase Java SDK — DbRef: namespace-scoped database block reference.
 //
 // Decision #133: db(namespace, instanceId) -> DbRef -> table(name) -> TableRef
-// Mirrors the pattern: client.db("shared").table("posts").get()
+// Mirrors the pattern: client.db("shared").table("posts").getList()
 //
 // All HTTP calls delegate to GeneratedDbApi (generated core).
 // No hardcoded API paths or withDbPath() — the core handles URL construction.

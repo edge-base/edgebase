@@ -3,7 +3,7 @@
 // Usage:
 //   final admin = AdminEdgeBase('https://my-app.edgebase.fun', serviceKey: 'sk-...');
 //   final user = await admin.adminAuth.createUser(email: '...', password: '...');
-//   final rows = await admin.db('shared').table('posts').get();
+//   final rows = await admin.db('shared').table('posts').getList();
 //
 //: Client/server split. #122: Server→Admin rename.
 
@@ -31,7 +31,7 @@ import 'analytics_client.dart';
 /// ```dart
 /// final admin = AdminEdgeBase('https://my-app.edgebase.fun', serviceKey: 'sk-...');
 /// await admin.adminAuth.createUser(email: 'foo@example.com', password: 'pass123');
-/// final result = await admin.db('shared').table('posts').get();
+/// final result = await admin.db('shared').table('posts').getList();
 /// ```
 class AdminEdgeBase {
   late final HttpClient _httpClient;

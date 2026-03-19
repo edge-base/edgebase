@@ -359,11 +359,6 @@ impl TableRef {
         }
     }
 
-    /// Alias for get_list() to match SDK parity across runtimes.
-    pub async fn get(&self) -> Result<Value, Error> {
-        self.get_list().await
-    }
-
     /// Get the first record matching the current query conditions.
     /// Returns `Ok(Value::Null)` if no records match.
     pub async fn get_first(&self) -> Result<Value, Error> {

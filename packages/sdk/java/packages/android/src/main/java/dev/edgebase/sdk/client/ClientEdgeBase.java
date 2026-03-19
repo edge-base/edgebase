@@ -24,7 +24,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * <pre>{@code
  * ClientEdgeBase client = EdgeBase.client("https://my-app.edgebase.fun");
  * client.auth().signUp("user@test.com", "pass123");
- * var posts = client.db("shared").table("posts").get();
+ * var posts = client.db("shared").table("posts").getList();
  * }</pre>
  */
 public class ClientEdgeBase {

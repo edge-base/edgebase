@@ -67,8 +67,8 @@ describe('js-admin:db — CRUD', () => {
     expect(post.title).toBe('Admin SDK Updated');
   });
 
-  it('admin.db().table().get() → items 배열', async () => {
-    const result = await admin.db('shared').table('posts').limit(5).get();
+  it('admin.db().table().getList() → items 배열', async () => {
+    const result = await admin.db('shared').table('posts').limit(5).getList();
     expect(Array.isArray(result.items)).toBe(true);
   });
 

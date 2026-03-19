@@ -34,7 +34,7 @@ public final class DbRef: @unchecked Sendable {
 /// ```swift
 /// let client = EdgeBaseClient("https://my-app.edgebase.fun")
 /// let user = try await client.auth.signUp(email: "test@example.com", password: "pass123")
-/// let posts = try await client.db("shared").table("posts").get()
+/// let posts = try await client.db("shared").table("posts").getList()
 /// ```
 public final class EdgeBaseClient: @unchecked Sendable {
     public let baseUrl: String
@@ -86,8 +86,8 @@ public final class EdgeBaseClient: @unchecked Sendable {
     ///
     /// Usage:
     /// ```swift
-    /// let posts = try await client.db("shared").table("posts").get()
-    /// let docs  = try await client.db("workspace", instanceId: "ws-456").table("documents").get()
+    /// let posts = try await client.db("shared").table("posts").getList()
+    /// let docs  = try await client.db("workspace", instanceId: "ws-456").table("documents").getList()
     /// ```
     public func db(_ namespace: String, instanceId: String? = nil) -> DbRef {
         return DbRef(core, databaseLive: databaseLive, namespace: namespace, instanceId: instanceId)

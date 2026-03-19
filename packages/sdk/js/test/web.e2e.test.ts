@@ -168,8 +168,8 @@ describe('js-web:db — TableRef via client.db()', () => {
     expect(post.title).toBe('Web SDK Updated');
   });
 
-  it('get() 리스트 → items 배열', async () => {
-    const result = await client.db('shared').table('posts').limit(5).get();
+  it('getList() 리스트 → items 배열', async () => {
+    const result = await client.db('shared').table('posts').limit(5).getList();
     expect(Array.isArray(result.items)).toBe(true);
   });
 
@@ -177,7 +177,7 @@ describe('js-web:db — TableRef via client.db()', () => {
     if (!postId) return;
     const result = await client.db('shared').table<any>('posts')
       .where('id', '==', postId)
-      .get();
+      .getList();
     expect(result.items.some((i: any) => i.id === postId)).toBe(true);
   });
 
@@ -188,7 +188,7 @@ describe('js-web:db — TableRef via client.db()', () => {
     });
     ids.push(created.id);
 
-    const result = await client.db('shared').table<any>('posts').search('준규').get();
+    const result = await client.db('shared').table<any>('posts').search('준규').getList();
     expect(result.items.some((item: any) => item.id === created.id)).toBe(true);
   });
 
@@ -219,8 +219,8 @@ describe('js-web:db — TableRef via client.db()', () => {
   });
 
   it('offset/page pagination', async () => {
-    const r1 = await client.db('shared').table('posts').limit(2).offset(0).get();
-    const r2 = await client.db('shared').table('posts').limit(2).offset(2).get();
+    const r1 = await client.db('shared').table('posts').limit(2).offset(0).getList();
+    const r2 = await client.db('shared').table('posts').limit(2).offset(2).getList();
     for (const item of r1.items) {
       expect(r2.items.some((i: any) => i.id === (item as any).id)).toBe(false);
     }
@@ -300,9 +300,9 @@ describe('js-web:db — cursor pagination', () => {
   });
 
   it('after(cursor) → 커서 이후 레코드', async () => {
-    const page1 = await client.db('shared').table<any>('posts').limit(2).get();
+    const page1 = await client.db('shared').table<any>('posts').limit(2).getList();
     if (!page1.cursor) return;
-    const page2 = await client.db('shared').table<any>('posts').limit(2).after(page1.cursor).get();
+    const page2 = await client.db('shared').table<any>('posts').limit(2).after(page1.cursor).getList();
     for (const item of page1.items) {
       expect(page2.items.some((i: any) => i.id === item.id)).toBe(false);
     }
@@ -314,7 +314,7 @@ describe('js-web:db — cursor pagination', () => {
         .limit(2)
         .offset(1)
         .after('some-cursor')
-        .get();
+        .getList();
       expect(false).toBe(true);
     } catch (err: any) {
       expect(err.status ?? 400).toBe(400);
@@ -344,7 +344,7 @@ describe('js-web:db — OR filter', () => {
   it('or() → 두 조건 중 하나 매칭', async () => {
     const result = await client.db('shared').table<any>('posts')
       .or(q => q.where('title', '==', 'OR One').where('title', '==', 'OR Two'))
-      .get();
+      .getList();
     const titles = result.items.map((i: any) => i.title);
     expect(titles.includes('OR One') || titles.includes('OR Two')).toBe(true);
   });

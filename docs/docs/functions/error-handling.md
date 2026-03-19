@@ -28,7 +28,7 @@ export const POST = defineFunction(async ({ auth, admin }) => {
     throw new FunctionError('permission-denied', 'Admin access required');
   }
 
-  const user = await admin.db('app').table('users').get(auth.id);
+  const user = await admin.db('app').table('users').getOne(auth.id);
   if (!user) {
     throw new FunctionError('not-found', 'User not found');
   }

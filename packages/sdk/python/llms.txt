@@ -94,8 +94,7 @@ matches = admin.vectorize("embeddings").search([0.1, 0.2, 0.3], top_k=5)
 - `admin.storage` is a property, not a method
 - `admin.push` is a property, not a method
 - `db(namespace, instance_id=None)` uses an optional positional instance id
-- `table.get()` returns a `ListResult`, not a single record
-- use `table.get_one(id)` or `table.doc(id).get()` for a single record
+- `table.get()` does not exist; use `table.get_list()` for lists or `table.get_one(id)` / `table.doc(id).get()` for a single record
 - `TableRef.on_snapshot()` raises unless a database-live transport is attached; `EdgeBaseServer` does not wire one by default
 - `create_signed_upload_url(path, expires_in=...)` expects seconds as an `int`
 - this package does not expose `functions()` or `analytics()` helpers; use `edgebase-admin` for those surfaces
@@ -117,7 +116,6 @@ admin.admin_auth.revoke_all_sessions(user_id)                # None
 
 # Database
 admin.db("shared").table("posts").get_list()                 # ListResult
-admin.db("shared").table("posts").get()                      # ListResult
 admin.db("shared").table("posts").get_one("id-1")           # dict
 admin.db("shared").table("posts").get_first()               # dict | None
 admin.db("shared").table("posts").insert(record)            # dict

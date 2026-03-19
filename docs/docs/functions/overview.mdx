@@ -51,7 +51,7 @@ Export named constants (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`) to handle speci
 import { defineFunction } from '@edge-base/shared';
 
 export const GET = defineFunction(async ({ params, admin }) => {
-  const user = await admin.db('app').table('users').get(params.userId);
+  const user = await admin.db('app').table('users').getOne(params.userId);
   return Response.json(user);
 });
 
@@ -72,7 +72,7 @@ Use `[param]` in file or directory names to capture URL segments. The captured v
 export const GET = defineFunction(async ({ params, admin }) => {
   // params.wsId = 'ws-123'
   // params.docId = 'doc-456'
-  return admin.db('workspace', params.wsId).table('documents').get(params.docId);
+  return admin.db('workspace', params.wsId).table('documents').getOne(params.docId);
 });
 ```
 

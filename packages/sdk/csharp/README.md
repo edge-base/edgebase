@@ -93,9 +93,8 @@ public class GameManager : MonoBehaviour
 
 | 메서드 | 반환 | 설명 |
 |---|---|---|
-| `.GetAsync()` | `ListResult` | 목록 조회 (Items/Total/Cursor) |
+| `.GetListAsync()` | `ListResult` | 목록 조회 (Items/Total/Cursor) |
 | `.GetOneAsync(id)` | `Dictionary` | 단건 조회 |
-| `.GetAsync(id)` | `Dictionary` | 단건 조회 (별칭) |
 | `.InsertAsync(data)` | `Dictionary` | 생성 |
 | `.UpdateAsync(id, data)` | `Dictionary` | 수정 (PATCH) |
 | `.DeleteAsync(id)` | `Dictionary` | 삭제 |
@@ -168,7 +167,7 @@ var score = await _jb.Collection("scores").InsertAsync(new() {
 var top = await _jb.Collection("scores")
     .OrderBy("score", "desc")
     .Limit(10)
-    .GetAsync();
+    .GetListAsync();
 
 foreach (var item in top.Items)
     Debug.Log($"Score: {item["score"]}");

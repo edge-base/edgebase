@@ -159,7 +159,6 @@ await client
 - `client.auth.onAuthStateChange()` callback receives `(user)`, not `(event, user)`
 - `client.db(namespace, id?)` uses a positional instance id, not a named object
 - database block names like `app`, `shared`, and `workspace` are examples, not reserved keywords
-- `table.get()` returns a list result, not a single document
 - `table.getOne(id)` or `table.doc(id).get()` returns a single document
 - write operations require an authenticated user
 - `requestPasswordReset()` takes the email as the first positional argument
@@ -194,8 +193,8 @@ await client.auth.changePassword({ currentPassword: 'old', newPassword: 'new' })
 const posts = client.db('shared').table('posts')
 const docs = client.db('workspace', 'ws-1').table('docs')
 
-// get() returns ListResult, NOT a single record
-const list = await posts.get()          // { items, total, page, perPage, hasMore, cursor }
+// Read
+const list = await posts.getList()      // { items, total, page, perPage, hasMore, cursor }
 const one = await posts.getOne('id-1')  // single record
 const one2 = await posts.doc('id-1').get()  // same thing
 
@@ -296,7 +295,6 @@ client.db(namespace: 'shared' | 'workspace' | 'user' | string, instanceId?: stri
 
 ```
 table.getList()                             → Promise<{items, total, page, perPage, hasMore, cursor}>
-table.get()                                 → Promise<{items, total, page, perPage, hasMore, cursor}> (NOT get-by-id)
 table.getOne(id)                            → Promise<record>
 table.doc(id).get()                         → Promise<record>
 table.getFirst()                            → Promise<record | null>

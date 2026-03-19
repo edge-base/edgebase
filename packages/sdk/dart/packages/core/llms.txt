@@ -80,7 +80,6 @@ await posts.doc('post-1').update({
 ## Hard Rules
 
 - `DbRef(api, namespace, instanceId: ...)` uses a named `instanceId` parameter in Dart
-- `table.get()` is an alias for `getList()`, not a single-document fetch
 - `table.getOne(id)` or `table.doc(id).get()` returns a single document
 - `updateMany(...)` and `deleteMany()` require at least one `where(...)` filter
 - `StorageClient.bucket(name).upload(...)` expects `Uint8List`
@@ -94,7 +93,6 @@ await posts.doc('post-1').update({
 
 - do not treat `edgebase_core` as the default app SDK unless you truly need low-level primitives
 - do not use JS-style positional instance ids; use `instanceId: 'ws-1'`
-- do not assume `table.get()` returns one document
 - do not call `updateMany()` or `deleteMany()` without a filter chain first
 - do not pass a plain `List<int>` to `bucket.upload(...)`; wrap it as `Uint8List` or use `storage.upload(...)`
 - do not use `'1h'` for `createSignedUrl(..., expiresIn: ...)`; Dart storage APIs expect integer seconds
@@ -108,7 +106,6 @@ GeneratedDbApi(httpClient)                                               -> Gene
 DbRef(api, namespace, { instanceId?, databaseLive? })                    -> DbRef
 db.table(name)                                                           -> TableRef
 table.getList()                                                          -> Future<ListResult<Map<String, dynamic>>>
-table.get()                                                              -> Future<ListResult<Map<String, dynamic>>>
 table.getOne(id)                                                         -> Future<Map<String, dynamic>>
 table.insert(data)                                                       -> Future<Map<String, dynamic>>
 table.doc(id).update(data)                                               -> Future<Map<String, dynamic>>

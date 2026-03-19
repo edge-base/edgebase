@@ -30,7 +30,7 @@ import java.util.Map;
  *
  * <pre>{@code
  * AdminEdgeBase admin = EdgeBase.admin("https://my-app.edgebase.fun", "sk-...");
- * admin.db("shared").table("posts").get();
+ * admin.db("shared").table("posts").getList();
  * admin.adminAuth().createUser(Map.of("email", "...", "password", "..."));
  * }</pre>
  */

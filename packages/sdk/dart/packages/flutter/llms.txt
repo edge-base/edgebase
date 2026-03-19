@@ -180,7 +180,6 @@ await client.push.register(metadata: {
 - `room.join()` is async, but `room.leave()` is synchronous
 - `room.members.onSync(...)`, `room.members.onJoin(...)`, `room.members.onLeave(...)`, `room.signals.on(...)`, and `room.signals.onAny(...)` return `RoomSubscription`
 - `room.signals.send(...)` and `room.members.setState(...)` return `Future<void>`
-- `table.get()` is an alias for `getList()`, not a single-document fetch
 - `table.getOne(id)` or `table.doc(id).get()` returns a single document
 - storage signed URLs use `expiresIn` as an integer number of seconds like `3600`, not a JS string like `'1h'`
 - `client.push.register()` auto-uses `FirebaseMessaging`; a custom token provider is only for headless or custom-platform integrations

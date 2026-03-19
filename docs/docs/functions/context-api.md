@@ -403,7 +403,7 @@ Dynamic route parameters captured from `[param]` segments in the file path. Only
 export const GET = defineFunction(async ({ params, admin }) => {
   // params.userId = 'abc123'
   // params.postId = 'post-456'
-  const post = await admin.db('app').table('posts').get(params.postId);
+  const post = await admin.db('app').table('posts').getOne(params.postId);
   if (post.authorId !== params.userId) {
     return Response.json({ code: 404, message: 'Post not found.' }, { status: 404 });
   }

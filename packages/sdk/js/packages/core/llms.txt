@@ -98,7 +98,7 @@ const patch = {
 - do not assume `@edge-base/core` exposes `createClient()` or `createAdminClient()`
 - use `HttpClient` plus `DbRef` or `TableRef` when working directly at the low level
 - `DbRef` takes `(namespace, instanceId, httpClient)` with positional instance id
-- `TableRef.get()` and `TableRef.getList()` return list results, not a single document
+- `TableRef.getList()` returns list results, not a single document
 - use `DocRef` or `getOne(id)` for single-record access
 - `StorageClient` is a shared primitive, not a browser-specific wrapper
 - keep Service Keys out of client-side apps even though `HttpClient` technically accepts `serviceKey`
@@ -117,7 +117,7 @@ const patch = {
 new HttpClient({ baseUrl, contextManager, tokenManager?, serviceKey? }) -> HttpClient
 new DbRef(namespace, instanceId, httpClient)                            -> DbRef
 db.table(name)                                                          -> TableRef
-table.get() / table.getList()                                           -> Promise<ListResult<T>>
+table.getList()                                                          -> Promise<ListResult<T>>
 table.getOne(id) / table.doc(id).get()                                  -> Promise<T>
 new StorageClient(httpClient)                                           -> StorageClient
 storage.bucket(name)                                                    -> StorageBucket

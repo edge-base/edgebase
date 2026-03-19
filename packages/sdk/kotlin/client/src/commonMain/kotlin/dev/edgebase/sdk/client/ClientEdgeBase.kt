@@ -21,7 +21,7 @@ import dev.edgebase.sdk.core.generated.GeneratedDbApi
  * ```kotlin
  * val client = ClientEdgeBase("https://my-app.edgebase.fun")
  * client.auth.signUp(email = "user@test.com", password = "pass123")
- * val posts = client.db("shared").table("posts").get()
+ * val posts = client.db("shared").table("posts").getList()
  * ```
  */
 class ClientEdgeBase(

@@ -357,7 +357,7 @@ Server function:
 ```typescript
 export const GET = defineFunction(async ({ auth, admin }) => {
   if (!auth) throw new FunctionError('unauthenticated', 'Login required');
-  return admin.db('app').table('profiles').get(auth.id);
+  return admin.db('app').table('profiles').getOne(auth.id);
 });
 ```
 

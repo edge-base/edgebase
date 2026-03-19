@@ -197,7 +197,7 @@ describe('ContextManager', () => {
 });
 
 describe('TableRef', () => {
-  it('get() aliases getList()', async () => {
+  it('getList() returns list result', async () => {
     const table = new TableRef<{ id: string }>(
       {
         dbSingleListRecords: async () => ({
@@ -210,7 +210,7 @@ describe('TableRef', () => {
       'posts',
     );
 
-    const result = await table.get();
+    const result = await table.getList();
     expect(result.items[0]?.id).toBe('post-1');
     expect(result.total).toBe(1);
   });

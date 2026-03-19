@@ -10,7 +10,7 @@
  * const client = createServerClient('https://my-app.edgebase.fun', {
  *   cookies: cookieStore,
  * });
- * const posts = await client.db('shared').table('posts').get();
+ * const posts = await client.db('shared').table('posts').getList();
  * const health = await client.functions.get('public/health');
  * ```
  */
@@ -73,8 +73,8 @@ export class ServerEdgeBase {
    * Access a database by namespace + optional instance ID.
    *
    * @example
-   * const posts = await client.db('shared').table('posts').get();
-   * const docs = await client.db('workspace', 'ws-456').table('documents').get();
+   * const posts = await client.db('shared').table('posts').getList();
+   * const docs = await client.db('workspace', 'ws-456').table('documents').getList();
    */
   db(namespace: string, id?: string): DbRef {
     return new DbRef(this.core, namespace, id, undefined, undefined);

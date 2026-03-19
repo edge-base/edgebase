@@ -154,7 +154,7 @@ export class ClientEdgeBase {
    * Select a DB block by namespace and optional instance ID (#133 §2).
    *
    * @example
-   * const posts = await client.db('shared').table('posts').where('status', '==', 'published').get();
+   * const posts = await client.db('shared').table('posts').where('status', '==', 'published').getList();
    * client.db('shared').table('posts').onSnapshot((change) => { ... });
    */
   db(namespace: string, instanceId?: string): DbRef {

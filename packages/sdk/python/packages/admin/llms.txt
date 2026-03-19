@@ -102,8 +102,7 @@ matches = admin.vector("embeddings").search([0.1, 0.2, 0.3], top_k=5)
 - `admin.admin_auth` is a property, not a method
 - `admin.storage()`, `admin.functions()`, `admin.analytics()`, and `admin.push()` are methods
 - `admin.db(namespace="shared", instance_id=None)` uses an optional positional instance id
-- `table.get()` returns `ListResult`, not a single record
-- use `table.get_one(id)` or `table.doc(id).get()` for a single record
+- `table.get()` does not exist; use `table.get_list()` for lists or `table.get_one(id)` / `table.doc(id).get()` for a single record
 - `AdminClient.sql(...)` requires a non-empty query string
 - `admin.admin_auth.create_user(...)` accepts optional profile fields via `data=...`
 - `create_signed_upload_url(path, expires_in=...)` expects seconds as an `int`

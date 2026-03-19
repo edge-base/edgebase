@@ -315,7 +315,7 @@ const table = admin.db('app').table('posts');
 const post = await table.insert({ title: 'Hello', body: 'World' });
 
 // Read by ID
-const found = await table.get('post-id');
+const found = await table.getOne('post-id');
 
 // List with filters
 const recent = await table.list({
@@ -341,7 +341,7 @@ table = admin.db('app').table('posts')
 post = table.insert({'title': 'Hello', 'body': 'World'})
 
 # Read by ID
-found = table.get('post-id')
+found = table.get_one('post-id')
 
 # List with filters
 recent = table.list(

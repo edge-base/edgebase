@@ -296,12 +296,12 @@ class TestDbCrud:
         assert status == 404
 
     def test_list(self, admin):
-        result = admin.db("shared").table("posts").limit(5).get()
+        result = admin.db("shared").table("posts").limit(5).get_list()
         assert hasattr(result, "items")
         assert isinstance(result.items, list)
 
     def test_filter(self, admin, test_post):
-        result = admin.db("shared").table("posts").where("id", "==", test_post["id"]).get()
+        result = admin.db("shared").table("posts").where("id", "==", test_post["id"]).get_list()
         ids = [r["id"] for r in result.items]
         assert test_post["id"] in ids
 
@@ -325,7 +325,7 @@ class TestDbCrud:
         raw("DELETE", f"/api/db/shared/tables/posts/{result.record['id']}")
 
     def test_sort_asc(self, admin):
-        result = admin.db("shared").table("posts").order_by("title", "asc").limit(10).get()
+        result = admin.db("shared").table("posts").order_by("title", "asc").limit(10).get_list()
         titles = [r["title"] for r in result.items]
         assert titles == sorted(titles)
 

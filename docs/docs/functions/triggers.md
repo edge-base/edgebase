@@ -116,7 +116,7 @@ import { defineFunction, FunctionError } from '@edge-base/shared';
 
 export const GET = defineFunction(async ({ params, admin, auth }) => {
   if (!auth) throw new FunctionError('unauthenticated', 'Login required');
-  const order = await admin.db('app').table('orders').get(params.orderId);
+  const order = await admin.db('app').table('orders').getOne(params.orderId);
   if (!order) throw new FunctionError('not-found', 'Order not found');
   return Response.json(order);
 });

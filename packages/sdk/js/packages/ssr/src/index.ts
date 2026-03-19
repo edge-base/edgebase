@@ -17,7 +17,7 @@
  * });
  *
  * const user = client.getUser();
- * const posts = await client.db('shared').table('posts').get();
+ * const posts = await client.db('shared').table('posts').getList();
  * ```
  */
 

@@ -556,7 +556,7 @@ Every plugin context (functions, authentication hooks, storage hooks, migrations
 ```typescript
 // ── Tables ──
 await ctx.admin.table('my-plugin/items').insert({ title: 'New item' });
-await ctx.admin.table('my-plugin/items').get('item-id');
+await ctx.admin.table('my-plugin/items').getOne('item-id');
 await ctx.admin.table('my-plugin/items').update('item-id', { done: true });
 await ctx.admin.table('my-plugin/items').delete('item-id');
 await ctx.admin.table('my-plugin/items').list({ limit: 10, filter: [...] });
