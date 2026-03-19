@@ -7,8 +7,8 @@ import TabItem from '@theme/TabItem';
 
 # Signed URLs
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Generate time-limited URLs for private file access and upload workflows.
@@ -102,9 +102,13 @@ url = bucket.create_signed_url('report.pdf', expires_in='1h')
 <TabItem value="go" label="Go">
 
 ```go
-bucket := admin.Storage.Bucket("private")
+import "context"
 
-url, err := bucket.CreateSignedURL("report.pdf", "1h")
+ctx := context.Background()
+bucket := admin.Storage().Bucket("private")
+
+signed, err := bucket.CreateSignedURL(ctx, "report.pdf", "1h")
+// signed["url"] -> "https://your-project.edgebase.fun/api/storage/private/report.pdf?token=..."
 ```
 
 </TabItem>
@@ -239,11 +243,17 @@ results = bucket.create_signed_urls(
 <TabItem value="go" label="Go">
 
 ```go
-bucket := admin.Storage.Bucket("private")
+import "context"
+
+ctx := context.Background()
+bucket := admin.Storage().Bucket("private")
 
 results, err := bucket.CreateSignedURLs(
-    []string{"report-1.pdf", "report-2.pdf", "report-3.pdf"}, "1h",
+    ctx,
+    []string{"report-1.pdf", "report-2.pdf", "report-3.pdf"},
+    "1h",
 )
+// results["items"] or results["files"] contains the signed URL entries
 ```
 
 </TabItem>
@@ -399,10 +409,13 @@ requests.post(signed.url, files={'file': file_data})
 <TabItem value="go" label="Go">
 
 ```go
-bucket := admin.Storage.Bucket("uploads")
+import "context"
 
-signed, err := bucket.CreateSignedUploadURL("large-file.zip", "10m")
-// Upload using signed.URL
+ctx := context.Background()
+bucket := admin.Storage().Bucket("uploads")
+
+signed, err := bucket.CreateSignedUploadURL(ctx, "large-file.zip", 600)
+// Upload using signed["url"]
 ```
 
 </TabItem>

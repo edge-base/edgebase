@@ -535,7 +535,7 @@ export const devCommand = new Command('dev')
   .option('--host <host>', 'Bind wrangler dev to a specific host or IP address')
   .option('--inspector-port <port>', 'Bind wrangler dev inspector to a specific port')
   .option('--isolated [name]', 'Use an isolated local state directory (defaults to the selected port)')
-  .option('--no-open', 'Do not open admin dashboard in browser')
+  .option('--open', 'Open admin dashboard in browser')
   .action(async (options: {
     port: string;
     host?: string;
@@ -561,6 +561,8 @@ export const devCommand = new Command('dev')
       : undefined;
     const resolvedPorts = await reserveDevPorts(preferredPort, preferredInspectorPort);
     const persistence = resolveDevPersistence(projectDir, resolvedPorts.port, options.isolated);
+    const localApiUrl = `http://localhost:${resolvedPorts.port}`;
+    const localAdminUrl = `${localApiUrl}/admin`;
     const generatedDevSecrets = ensureDevJwtSecrets(projectDir);
     if (persistence.persistTo) {
       mkdirSync(persistence.persistTo, { recursive: true });
@@ -572,6 +574,8 @@ export const devCommand = new Command('dev')
     } else {
       console.log(chalk.dim(`  Port: ${resolvedPorts.port}`));
     }
+    console.log(chalk.dim(`  API: ${localApiUrl}`));
+    console.log(chalk.dim(`  Admin: ${localAdminUrl}`));
     if (resolvedPorts.sidecarChanged) {
       console.log(
         chalk.yellow('↪'),
@@ -1036,7 +1040,7 @@ export const devCommand = new Command('dev')
     if (options.open) {
       waitForServer(resolvedPorts.port).then((ready) => {
         if (ready) {
-          const url = `http://localhost:${resolvedPorts.port}/admin`;
+          const url = localAdminUrl;
           console.log(chalk.green('✓'), `Opening ${chalk.cyan(url)}`);
           openBrowser(url);
         }

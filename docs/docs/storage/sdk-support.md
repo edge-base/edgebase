@@ -7,8 +7,8 @@ description: Storage client and admin surface comparison.
 
 # SDK Support
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Storage exposes a broad surface on both the Client SDK and the Admin SDK. The main difference is whether **access rules are enforced** or **bypassed with a Service Key**.

@@ -56,7 +56,7 @@ Uses **Cloudflare Analytics Engine** — a ClickHouse-backed analytics service t
 - Writes data points on every request (fire-and-forget, non-blocking)
 - Uses statistical sampling at high volumes (`_sample_interval` for accurate totals)
 - Retains data for 90 days
-- Costs effectively nothing for most projects (10M writes/month included in $5 Workers Paid plan)
+- Costs effectively nothing for most projects (Free covers low volume; Workers Paid raises included monthly usage)
 
 **Required environment variables** for the dashboard to query Analytics Engine:
 
@@ -111,7 +111,7 @@ Each request logs the following fields:
 | Workers Paid | 10M/month | 1M/month | $5/month (plan) |
 | Overage | — | — | $0.25/1M writes, $1/1M reads |
 
-For most projects, the Workers Paid plan covers all analytics needs.
+Most small projects fit inside the Free tier. Workers Paid mainly increases the included monthly write/read budget.
 
 ### Self-Hosted
 

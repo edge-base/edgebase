@@ -6,12 +6,17 @@
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
+import org.gradle.api.publish.maven.MavenPublication
 
 plugins {
     kotlin("multiplatform")
     kotlin("plugin.serialization")
     id("com.android.library")
+    `maven-publish`
 }
+
+group = rootProject.group
+version = rootProject.version
 
 // Allow overriding build output directory via system property (for sandbox environments).
 // Module-specific property name avoids cross-module collisions in multi-project builds.
@@ -148,5 +153,25 @@ tasks.withType<Test> {
     useJUnitPlatform()
     testLogging {
         events("passed", "failed", "skipped")
+    }
+}
+
+publishing {
+    val isJitPackBuild = !System.getenv("JITPACK").isNullOrBlank()
+    publications.withType<MavenPublication>().configureEach {
+        if (name == "kotlinMultiplatform") {
+            artifactId = "edgebase-core"
+        } else if (name == "jvm") {
+            artifactId = if (isJitPackBuild) "edgebase-core" else "edgebase-core-jvm"
+        }
+        pom {
+            licenses {
+                license {
+                    name.set("MIT License")
+                    url.set("https://opensource.org/license/mit")
+                    distribution.set("repo")
+                }
+            }
+        }
     }
 }

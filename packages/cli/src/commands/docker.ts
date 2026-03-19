@@ -435,7 +435,7 @@ dockerCommand
     if (options.detach) {
       console.log(chalk.green('✓ EdgeBase container started!'));
       console.log();
-      console.log(chalk.dim('  Dashboard:'), chalk.cyan(dashboardUrl));
+      console.log(chalk.dim('  Admin:    '), chalk.cyan(dashboardUrl));
       console.log(chalk.dim('  Health:   '), chalk.cyan(healthUrl));
       console.log();
       printSelfHostingGuide();

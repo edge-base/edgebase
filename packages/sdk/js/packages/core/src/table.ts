@@ -39,6 +39,16 @@ export interface ListResult<T> {
   cursor: string | null;
 }
 
+/** Snapshot delivered by TableRef.onSnapshot() */
+export interface TableSnapshot<T> {
+  items: T[];
+  changes: {
+    added: T[];
+    modified: T[];
+    removed: T[];
+  };
+}
+
 /** Upsert result */
 export interface UpsertResult<T> {
   item: T;
@@ -509,12 +519,7 @@ export class TableRef<T = Record<string, unknown>> {
     };
   }
 
-  /** Alias for getList() to match existing docs and SDK usage. */
-  async get(): Promise<ListResult<T>> {
-    return this.getList();
-  }
-
-  /** Get a single record by ID */
+  /** Get a single record by ID. Use getList() for listing records. */
   async getOne(id: string): Promise<T> {
     return coreGet<T>(this.core, 'get', this.namespace, this.instanceId, this.name, { id, query: {} });
   }
@@ -694,7 +699,7 @@ export class TableRef<T = Record<string, unknown>> {
    *   });
    */
   onSnapshot(
-    callback: (snapshot: { items: T[]; changes: { added: T[]; modified: T[]; removed: T[] } }) => void,
+    callback: (snapshot: TableSnapshot<T>) => void,
     options?: { serverFilter?: boolean },
   ): () => void {
     if (!this.databaseLiveClient) {

@@ -13,5 +13,4 @@ cd "$ROOT_DIR"
 exec pnpm exec tsx packages/cli/src/index.ts dev \
 	--port "$API_PORT" \
 	--host 127.0.0.1 \
-	--isolated "$ISOLATION_LABEL" \
-	--no-open
+	--isolated "$ISOLATION_LABEL"

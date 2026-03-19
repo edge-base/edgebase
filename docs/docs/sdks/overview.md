@@ -120,7 +120,7 @@ final admin = AdminEdgeBase(
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.1.0")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.1.4")
 ]
 ```
 
@@ -138,9 +138,13 @@ let client = EdgeBaseClient("https://your-project.edgebase.fun")
 Kotlin Client SDK is a **Kotlin Multiplatform** module targeting Android, iOS, macOS, JS, and JVM.
 
 ```kotlin
-// build.gradle.kts — add the KMP module dependency
+// build.gradle.kts — add the JitPack repository and dependency
+repositories {
+    maven("https://jitpack.io")
+}
+
 dependencies {
-    implementation("dev.edgebase:edgebase-client-kotlin:0.1.0")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.1.4")
 }
 ```
 
@@ -155,8 +159,12 @@ val client = ClientEdgeBase("https://your-project.edgebase.fun")
 
 ```kotlin
 // build.gradle.kts
+repositories {
+    maven("https://jitpack.io")
+}
+
 dependencies {
-    implementation("dev.edgebase:edgebase-admin-kotlin:0.1.0")
+    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.1.4")
 }
 ```
 
@@ -179,8 +187,12 @@ val admin = AdminEdgeBase(
 
 ```groovy
 // build.gradle
+repositories {
+    maven { url 'https://jitpack.io' }
+}
+
 dependencies {
-    implementation 'dev.edgebase:edgebase-android-java:0.1.0'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.1.4'
 }
 ```
 
@@ -195,8 +207,12 @@ ClientEdgeBase client = EdgeBase.client("https://your-project.edgebase.fun");
 
 ```groovy
 // build.gradle
+repositories {
+    maven { url 'https://jitpack.io' }
+}
+
 dependencies {
-    implementation 'dev.edgebase:edgebase-admin-java:0.1.0'
+    implementation 'com.github.edge-base.edgebase:edgebase-admin-java:v0.1.4'
 }
 ```
 
@@ -218,7 +234,9 @@ AdminEdgeBase admin = EdgeBase.admin(
 
 ```scala
 // build.sbt
-libraryDependencies += "dev.edgebase" % "edgebase-admin-scala" % "0.1.0"
+resolvers += "jitpack" at "https://jitpack.io"
+
+libraryDependencies += "com.github.edge-base.edgebase" % "edgebase-admin-scala" % "v0.1.4"
 ```
 
 ```scala
@@ -257,9 +275,9 @@ pip install edgebase-admin
 
 ```python
 import os
-from edgebase_admin import AdminClient
+from edgebase_admin import create_admin_client
 
-admin = AdminClient(
+admin = create_admin_client(
     'https://your-project.edgebase.fun',
     service_key=os.environ['EDGEBASE_SERVICE_KEY'],
 )
@@ -303,7 +321,7 @@ $admin = new AdminClient('https://your-project.edgebase.fun', getenv('EDGEBASE_S
 ```toml
 # Cargo.toml
 [dependencies]
-edgebase-admin = "0.1"
+edgebase-admin = "0.1.4"
 tokio = "1"
 serde_json = "1"
 ```
@@ -339,7 +357,7 @@ Install via NuGet or reference the project directly.
 using var admin = new EdgeBase.Admin.AdminClient(
     "https://your-project.edgebase.fun", serviceKey);
 var users = await admin.AdminAuth.ListUsersAsync(limit: 50);
-var rows = await admin.SqlAsync("shared", null, "SELECT * FROM posts LIMIT ?", new object[] { 10 });
+var rows = await admin.SqlAsync("shared", "SELECT * FROM posts LIMIT ?", new object[] { 10 });
 await admin.BroadcastAsync("chat", "message", new { text = "hello" });
 ```
 
@@ -395,7 +413,7 @@ admin = EdgebaseAdmin::AdminClient.new(
 # mix.exs
 defp deps do
   [
-    {:edgebase_admin, "~> 0.1.0"}
+    {:edgebase_admin, "~> 0.1.4"}
   ]
 end
 ```

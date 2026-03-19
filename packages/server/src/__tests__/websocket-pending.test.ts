@@ -146,9 +146,9 @@ describe('websocket pending helper functions', () => {
   it('acquires slots until the max pending threshold is reached', async () => {
     const kv = createMockKV();
 
-    await expect(acquirePendingWebSocketSlot(kv, 'ws:pending:127.0.0.1', 2, 30)).resolves.toBe(true);
-    await expect(acquirePendingWebSocketSlot(kv, 'ws:pending:127.0.0.1', 2, 30)).resolves.toBe(true);
-    await expect(acquirePendingWebSocketSlot(kv, 'ws:pending:127.0.0.1', 2, 30)).resolves.toBe(false);
+    await expect(acquirePendingWebSocketSlot(kv, 'ws:pending:127.0.0.1', 2, 60)).resolves.toBe(true);
+    await expect(acquirePendingWebSocketSlot(kv, 'ws:pending:127.0.0.1', 2, 60)).resolves.toBe(true);
+    await expect(acquirePendingWebSocketSlot(kv, 'ws:pending:127.0.0.1', 2, 60)).resolves.toBe(false);
     expect(kv._store.data['ws:pending:127.0.0.1']?.value).toBe('2');
   });
 
@@ -156,7 +156,7 @@ describe('websocket pending helper functions', () => {
     const kv = createMockKV();
     kv._store.data['ws:pending:127.0.0.1'] = { value: '1' };
 
-    await releasePendingWebSocketSlot(kv, 'ws:pending:127.0.0.1', 30);
+    await releasePendingWebSocketSlot(kv, 'ws:pending:127.0.0.1', 60);
 
     expect(kv._store.data['ws:pending:127.0.0.1']).toBeUndefined();
   });

@@ -95,6 +95,7 @@ export type {
   // ─── Functions ───
   FunctionsConfig,
   CloudflareConfig,
+  FunctionContext,
   FunctionDefinition,
   FunctionTrigger,
   FunctionTriggerType,

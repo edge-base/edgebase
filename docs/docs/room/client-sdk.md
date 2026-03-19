@@ -8,8 +8,8 @@ import TabItem from '@theme/TabItem';
 
 # Client SDK
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 In v2 all state mutations happen server-side -- clients can only **read state** and **send actions**. The server mutates state in response to actions via `handlers.actions`.
@@ -52,7 +52,7 @@ npm install @edge-base/react-native
 ```yaml
 # pubspec.yaml
 dependencies:
-  edgebase_flutter: ^0.1.2
+  edgebase_flutter: ^0.1.4
 ```
 
 ```bash
@@ -65,7 +65,7 @@ flutter pub get
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.1.0")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.1.4")
 ]
 ```
 
@@ -76,8 +76,12 @@ Minimum: iOS 15+ / macOS 12+
 
 ```kotlin
 // build.gradle.kts
+repositories {
+    maven("https://jitpack.io")
+}
+
 dependencies {
-    implementation("dev.edgebase:edgebase-client-kotlin:0.1.0")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.1.4")
 }
 ```
 
@@ -88,8 +92,12 @@ Works on Android, JVM, iOS (via Kotlin Multiplatform).
 
 ```groovy
 // build.gradle
+repositories {
+    maven { url 'https://jitpack.io' }
+}
+
 dependencies {
-    implementation 'dev.edgebase:edgebase-android-java:0.1.0'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.1.4'
 }
 ```
 
@@ -111,7 +119,7 @@ dotnet add package EdgeBase
 FetchContent_Declare(
   edgebase
   GIT_REPOSITORY https://github.com/edge-base/edgebase-cpp.git
-  GIT_TAG v0.1.0
+  GIT_TAG v0.1.4
 )
 FetchContent_MakeAvailable(edgebase)
 target_link_libraries(your_target edgebase)

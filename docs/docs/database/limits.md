@@ -4,8 +4,8 @@ sidebar_position: 12
 
 # Limits
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Technical limits for EdgeBase Database. Limits marked **configurable** can be changed in `edgebase.config.ts`. All others are platform constraints.
@@ -14,7 +14,7 @@ Technical limits for EdgeBase Database. Limits marked **configurable** can be ch
 
 | Limit | Value | Notes |
 |-------|-------|-------|
-| Single-instance DB block (default D1) | **10 GB / database** | Cloudflare D1 database size limit |
+| Single-instance DB block (default D1) | **500 MB / database (Free)**, **10 GB / database (Paid)** | Cloudflare D1 database size limit depends on Workers plan |
 | Dynamic DB block (DO-backed SQLite) | **10 GB / instance** | SQLite-backed Durable Object storage limit |
 | Docker / Node.js | Disk-bound | Limited only by available disk space |
 
@@ -37,7 +37,7 @@ These apply when you deploy on Cloudflare Edge.
 
 | Backend | Limit | Value | Notes |
 |---------|-------|-------|-------|
-| D1 | Queries per Worker invocation | **1,000** | Relevant to raw SQL or unusually chatty server-side flows |
+| D1 | Queries per Worker invocation | **50 (Free)**, **1,000 (Paid)** | Relevant to raw SQL or unusually chatty server-side flows |
 | D1 | Simultaneous open connections per Worker invocation | **6** | Relevant to `admin.d1()` or custom SQL usage |
 | D1 / DO SQLite | Max columns per table | **100** | Cloudflare SQLite platform limit |
 | D1 / DO SQLite | Max row or BLOB size | **2 MB** | Includes large JSON/text payloads |

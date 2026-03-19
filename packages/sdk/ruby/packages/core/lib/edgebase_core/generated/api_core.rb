@@ -3,7 +3,7 @@
 # Auto-generated core API Core — DO NOT EDIT.
 #
 # Regenerate: npx tsx tools/sdk-codegen/generate.ts
-# Source: openapi.json (0.1.0)
+# Source: openapi.json (0.1.3)
 
 require "cgi"
 

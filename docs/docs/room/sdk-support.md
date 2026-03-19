@@ -7,8 +7,8 @@ description: Room client and admin surface comparison.
 
 # SDK Support
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Room is the main exception in the product lineup: it has a **first-class client SDK surface**, but **no standalone Admin SDK room surface**. The server half of Room lives in `rooms.*.handlers`.

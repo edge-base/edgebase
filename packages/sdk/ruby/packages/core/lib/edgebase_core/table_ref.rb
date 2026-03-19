@@ -222,8 +222,12 @@ module EdgebaseCore
       )
     end
 
-    def get
-      get_list
+    # Get a single record by ID.
+    def get_one(doc_id)
+      CoreDispatch.core_get(
+        @core, "get", @_namespace, @_instance_id, @_name,
+        doc_id: doc_id, query: {}
+      )
     end
 
     def insert(record)
@@ -244,11 +248,6 @@ module EdgebaseCore
       params = build_query_params
       data = CoreDispatch.core_get(@core, "count", @_namespace, @_instance_id, @_name, query: params)
       data.is_a?(Hash) ? (data["total"] || 0) : 0
-    end
-
-    # Get a single record by ID.
-    def get_one(doc_id)
-      doc(doc_id).get
     end
 
     # Get the first record matching the current query conditions.

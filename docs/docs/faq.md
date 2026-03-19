@@ -144,7 +144,7 @@ See [Scaling & Data Isolation](/docs/why-edgebase/data-isolation) for details.
 
 Yes, auth is free at any scale. Here's how:
 
-1. **Sign-up / sign-in** goes directly to D1 (AUTH_DB), Cloudflare's serverless SQL database, which stores all auth data — users, sessions, OAuth accounts, email tokens. No Durable Object is involved. The Workers Paid plan ($5/mo) includes 25B D1 reads and 50M writes per month — auth is effectively unlimited. If you ever outgrow D1 limits, a single config change switches auth to Neon PostgreSQL — no code modifications needed.
+1. **Sign-up / sign-in** goes directly to D1 (AUTH_DB), Cloudflare's serverless SQL database, which stores all auth data — users, sessions, OAuth accounts, email tokens. No Durable Object is involved. Even the Free plan includes 5M D1 reads and 100K writes per day — enough for most apps. The Workers Paid plan ($5/mo) raises this to 25B reads and 50M writes per month. If you ever outgrow D1 limits, a single config change switches auth to Neon PostgreSQL — no code modifications needed.
 2. **Every subsequent request** verifies the JWT locally in the Worker using cryptographic signature verification. No Durable Object is contacted, no database is queried. This is why auth doesn't scale with user count.
 
 Auth methods: Email/password, Magic Link, Email OTP, Passkeys (WebAuthn), 14 OAuth providers, Phone/SMS, Anonymous, MFA/TOTP. See [Authentication](/docs/authentication).
@@ -222,7 +222,25 @@ Restore: `npx edgebase backup restore --from backup.json`. Works across all thre
 
 ## Is there a free tier?
 
-On **Cloudflare Edge**: Durable Objects require the Workers Paid plan ($5/mo). This is an **account-level** fee — one subscription covers all your Workers, D1, DO, R2, and KV across unlimited projects. So the minimum cost is $5/mo total, regardless of how many EdgeBase projects you run.
+On **Cloudflare Edge**: Yes — you can start on the Cloudflare Free plan. Core EdgeBase services use Workers, Durable Objects, D1, and KV. R2 also has free usage, but Cloudflare requires a separate R2 subscription / billing activation before first use.
+
+<div className="docs-badge-row">
+  <span className="docs-badge docs-badge--free">Free Plan</span>
+  <span className="docs-badge docs-badge--setup">R2 Billing Setup</span>
+</div>
+
+| Resource | Free Plan | Paid Plan ($5/mo) |
+|----------|-----------|-------------------|
+| Workers requests | 100K / day | 10M / month |
+| DO requests | 100K / day | 1M / month (+ overage) |
+| DO SQLite storage | 5 GB total | 5 GB-month (+ overage) |
+| D1 reads | 5M / day | 25B / month |
+| R2 storage | 10 GB | 10 GB (+ overage) |
+| KV reads | 100K / day | 10M / month (+ overage) |
+
+Most EdgeBase features work on the Free plan. In practice, the paid plan is mainly about higher included usage rather than unlocking a separate core feature set.
+
+For higher limits, the Workers Paid plan ($5/mo) is **account-level** — one subscription covers all your Workers, D1, DO, R2, and KV across unlimited projects.
 
 On **Docker / Node.js**: Just the cost of your VPS (~$4–6/mo). No Cloudflare account needed.
 

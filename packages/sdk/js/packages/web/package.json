@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/web",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "EdgeBase web SDK — browser client with database-live subscriptions, room, and auth persistence",
     "license": "MIT",
     "repository": {
@@ -8,7 +8,7 @@
         "url": "https://github.com/edge-base/edgebase.git",
         "directory": "packages/sdk/js/packages/web"
     },
-    "homepage": "https://edgebase.fun",
+    "homepage": "https://github.com/edge-base/edgebase/tree/main/packages/sdk/js/packages/web",
     "bugs": "https://github.com/edge-base/edgebase/issues",
     "keywords": [
         "edgebase",

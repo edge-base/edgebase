@@ -1,6 +1,6 @@
 {
     "name": "edgebase",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "type": "module",
     "private": true,
     "scripts": {
@@ -19,7 +19,9 @@
         "release:check": "node ./scripts/check-release-versions.mjs",
         "release:set": "node ./scripts/set-release-version.mjs",
         "release:npm": "node ./dev/release/publish-npm-release.mjs",
-        "release:pub": "node ./dev/release/publish-pub-release.mjs"
+        "release:pub": "node ./dev/release/publish-pub-release.mjs",
+        "release:pypi": "node ./dev/release/publish-pypi-release.mjs",
+        "release:crates": "node ./dev/release/publish-rust-release.mjs"
     },
     "devDependencies": {
         "@eslint/js": "^9.39.2",

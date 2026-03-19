@@ -404,18 +404,9 @@ public final class TableRef: @unchecked Sendable {
         )
     }
 
-    /// JS-compatible alias that returns the raw list payload shape.
-    /// This keeps one-app scenarios aligned across SDKs while preserving
-    /// `getList()` as the typed Swift-first API.
-    public func get() async throws -> [String: Any] {
-        let result = try await getList()
-        var json: [String: Any] = ["items": result.items]
-        if let total = result.total { json["total"] = total }
-        if let page = result.page { json["page"] = page }
-        if let perPage = result.perPage { json["perPage"] = perPage }
-        if let hasMore = result.hasMore { json["hasMore"] = hasMore }
-        if let cursor = result.cursor { json["cursor"] = cursor }
-        return json
+    /// Get a single record by ID.
+    public func getOne(_ id: String) async throws -> [String: Any] {
+        try await coreGetRecord(core, namespace: namespace, instanceId: instanceId, table: name, recordId: id, query: nil) as! [String: Any]
     }
 
     /// Get record count.
@@ -430,11 +421,6 @@ public final class TableRef: @unchecked Sendable {
     /// Get a single document reference.
     public func doc(_ id: String) -> DocRef {
         DocRef(core, namespace: namespace, instanceId: instanceId, tableName: name, id: id, databaseLive: databaseLive)
-    }
-
-    /// Get a single record by ID — convenience shorthand for doc(id).get().
-    public func getOne(_ id: String) async throws -> [String: Any] {
-        try await doc(id).get()
     }
 
     /// Get the first record matching the current query conditions.

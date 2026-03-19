@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/sdk",
-    "version": "0.1.0",
+    "version": "0.1.4",
     "private": true,
     "description": "EdgeBase SDK — unified JavaScript/TypeScript client for EdgeBase",
     "license": "MIT",
@@ -11,7 +11,14 @@
     },
     "homepage": "https://edgebase.fun",
     "bugs": "https://github.com/edge-base/edgebase/issues",
-    "keywords": ["edgebase", "sdk", "baas", "backend", "cloudflare-workers", "database-live"],
+    "keywords": [
+        "edgebase",
+        "sdk",
+        "baas",
+        "backend",
+        "cloudflare-workers",
+        "database-live"
+    ],
     "type": "module",
     "main": "./dist/index.cjs",
     "module": "./dist/index.js",

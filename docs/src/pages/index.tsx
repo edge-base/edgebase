@@ -122,8 +122,8 @@ function CostSection() {
       <h2>Why 100× Cheaper?</h2>
       <p className="section-subtitle">
         Auth MAU billing and egress are the two biggest cost drivers at scale. EdgeBase removes
-        both, and database subscriptions stay inside DO compute instead of turning into a separate per-recipient
-        bill.
+        both, and database subscriptions stay inside DO compute instead of turning into a separate
+        per-recipient bill.
       </p>
       <div className="comparison-table-wrap">
         <table>
@@ -304,8 +304,7 @@ const features = [
   {
     icon: '🔐',
     title: 'Authentication',
-    description:
-      `Email/password, magic link, phone/SMS, MFA, ${oauthProviderCount} OAuth providers (${siteMetadata.oauthProviderExamples.join(', ')} & more), anonymous auth — $0 forever, no MAU charges.`,
+    description: `Email/password, magic link, phone/SMS, MFA, ${oauthProviderCount} OAuth providers (${siteMetadata.oauthProviderExamples.join(', ')} & more), anonymous auth — $0 forever, no MAU charges.`,
   },
   {
     icon: '⚡',
@@ -338,8 +337,7 @@ function FeaturesSection() {
     <section className="features-section">
       <h2>Everything Built In</h2>
       <p className="section-subtitle">
-        Database · Auth · Storage · Functions · Room · Admin UI — no third-party services
-        needed.
+        Database · Auth · Storage · Functions · Room · Admin UI — no third-party services needed.
       </p>
       <div className="features-grid">
         {features.map((f, i) => (
@@ -409,7 +407,9 @@ function DeploySection() {
 function SDKSection() {
   return (
     <section className="sdk-section">
-      <h2>{siteMetadata.sdkPackageHeadline} SDK packages across {sdkLanguageCount} languages</h2>
+      <h2>
+        {siteMetadata.sdkPackageHeadline} SDK packages across {sdkLanguageCount} languages
+      </h2>
       <p className="section-subtitle">
         Client and admin SDKs generated from the same API contract.
       </p>

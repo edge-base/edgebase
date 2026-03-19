@@ -124,6 +124,16 @@ export class EdgeBaseError extends Error {
     return this.code;
   }
 
+  /** True when the error is a network/connectivity failure (not a server HTTP error). */
+  get isNetworkError(): boolean {
+    return this.code === 0 && this.slug === 'network-error';
+  }
+
+  /** True when the error is an authentication/authorization failure (401/403). */
+  get isAuthError(): boolean {
+    return this.code === 401 || this.code === 403;
+  }
+
   toJSON(): ErrorResponse {
     const response: ErrorResponse = {
       code: this.code,

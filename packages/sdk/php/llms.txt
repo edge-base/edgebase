@@ -1,0 +1,37 @@
+# EdgeBase PHP SDK (`edgebase/sdk`)
+
+`edgebase/sdk` is the broad Composer entry point for the EdgeBase PHP SDKs.
+
+It bundles both the trusted admin surface and the lower-level core primitives. Use the narrower package docs when the user explicitly wants `edgebase/admin` or `edgebase/core`.
+
+The package names `edgebase/sdk`, `edgebase/admin`, and `edgebase/core` are the intended public Composer names, but the current repository layout still needs a Packagist-compatible publish path before those installs work from Packagist.
+
+## Package Boundaries
+
+- `edgebase/sdk`
+  Broad Composer install for PHP server-side usage
+- `edgebase/admin`
+  Trusted Service Key operations such as admin auth, database admin access, SQL, push, analytics, functions, KV, D1, and Vectorize
+- `edgebase/core`
+  Lower-level HTTP client, database refs, storage helpers, field operations, shared errors, and room primitives
+
+## Canonical Guidance
+
+- PHP is server-side only in this repository.
+- Prefer `EdgeBase\Admin\AdminClient` for trusted application code.
+- Keep Service Keys on trusted servers only.
+- Use PHP property and method shapes as implemented, not JavaScript promise-style APIs.
+- Reach for `edgebase/core` only when building wrappers or lower-level integrations.
+
+## Docs
+
+- SDK Overview: https://edgebase.fun/docs/sdks
+- Admin SDK Reference: https://edgebase.fun/docs/admin-sdk/reference
+- Database Admin SDK: https://edgebase.fun/docs/database/admin-sdk
+- Storage: https://edgebase.fun/docs/storage/upload-download
+- Native Resources: https://edgebase.fun/docs/server/native-resources
+
+## Install
+
+- planned public package name: `composer require edgebase/sdk`
+- current repository-first usage: consume this monorepo with Composer path/VCS wiring until Packagist publishing is wired

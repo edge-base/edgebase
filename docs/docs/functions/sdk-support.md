@@ -7,8 +7,8 @@ description: App Functions client and admin call surface comparison.
 
 # SDK Support
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 App Functions are primarily a **server authoring surface**. SDKs do not define functions or triggers; they **call** them.

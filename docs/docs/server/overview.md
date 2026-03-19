@@ -43,7 +43,7 @@ export default defineConfig({
 | **Email** | Transactional email for verification, password reset, invitations |
 | **[Plugins](/docs/plugins)** | Extend EdgeBase with community or custom plugins (see dedicated section) |
 | **Raw SQL** | Direct SQLite access via Admin SDK |
-| **Native Resources** | Access Cloudflare KV, D1, Vectorize bindings directly |
+| **Direct Control** | Access Cloudflare KV, D1, and Vectorize bindings directly |
 
 ## Next Steps
 
@@ -56,4 +56,4 @@ export default defineConfig({
 | [Email](/docs/server/email) | Email providers and templates |
 | [Plugins](/docs/plugins) | Build-time plugin system |
 | [Raw SQL](/docs/server/raw-sql) | Direct SQL queries from Admin SDK |
-| [Native Resources](/docs/server/native-resources) | KV, D1, R2, Vectorize bindings |
+| [Direct Control](/docs/server/native-resources) | KV, D1, and Vectorize bindings |

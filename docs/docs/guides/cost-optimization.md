@@ -11,8 +11,8 @@ Minimize costs when running EdgeBase on Cloudflare.
 | Resource | Free Tier | Paid Plan |
 |----------|-----------|-----------|
 | Workers Requests | 100K/day | 10M/month included |
-| DO Requests | — | 1M/month included |
-| DO Storage | — | 1GB included |
+| DO Requests | 100K/day | 1M/month included |
+| DO Storage | 5 GB total | 5 GB included |
 | R2 Storage | 10GB | 10GB + $0.015/GB |
 | R2 Operations | 1M reads/month | 10M + $0.36/M |
 | R2 Egress | **$0** | **$0** |
@@ -49,7 +49,7 @@ Cloudflare R2 has $0 egress. Serve files (images, videos, PDFs) from R2 instead 
 
 ### 5. D1-Based Auth (Built-in)
 
-Auth operations go directly to D1 (AUTH_DB), with no Durable Object overhead. D1 provides global consistency and the Workers Paid plan includes 25B reads and 50M writes per month — auth is effectively free at any scale with no per-request DO cost. If you outgrow D1 limits, switch to Neon PostgreSQL with a single config change — no code modifications, no migration downtime.
+Auth operations go directly to D1 (AUTH_DB), with no Durable Object overhead. D1 works well on the Free plan for small apps, and the Workers Paid plan raises limits to 25B reads and 50M writes per month. If you outgrow D1 limits, switch to Neon PostgreSQL with a single config change — no code modifications, no migration downtime.
 
 ## Example Monthly Costs
 

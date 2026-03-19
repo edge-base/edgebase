@@ -1,0 +1,156 @@
+# EdgeBase Python SDK
+
+Use this file as a quick-reference contract for AI coding assistants working with the `edgebase` Python package.
+
+## Package Boundary
+
+Use `edgebase` for trusted server-side EdgeBase workloads.
+
+This package is not a browser/mobile client SDK. It does not expose browser-style helpers like `client.auth.sign_in(...)` or `client.collection("posts")`.
+
+`edgebase` is the broader Python package. The public PyPI release line currently centers on `edgebase-admin` and `edgebase-core`, while `edgebase` remains the broader in-repo umbrella package.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/python/README.md
+- SDK overview: https://edgebase.fun/docs/sdks
+- Admin SDK guide: https://edgebase.fun/docs/sdks/client-vs-server
+- Admin SDK reference: https://edgebase.fun/docs/admin-sdk/reference
+- Database admin SDK: https://edgebase.fun/docs/database/admin-sdk
+- Storage: https://edgebase.fun/docs/storage/upload-download
+- Room client SDK: https://edgebase.fun/docs/room/client-sdk
+- Native resources: https://edgebase.fun/docs/server/native-resources
+
+If docs, snippets, and assumptions disagree, prefer the current package API over guessed patterns from another runtime.
+
+## Canonical Examples
+
+### Create a server client
+
+```python
+import os
+
+from edgebase import EdgeBaseServer
+
+admin = EdgeBaseServer(
+    "https://your-project.edgebase.fun",
+    service_key=os.environ["EDGEBASE_SERVICE_KEY"],
+)
+```
+
+### Query a single-instance database
+
+```python
+posts = (
+    admin.db("shared")
+    .table("posts")
+    .where("published", "==", True)
+    .order_by("createdAt", "desc")
+    .limit(20)
+    .get_list()
+)
+```
+
+### Query an instance database
+
+```python
+docs = admin.db("workspace", "ws-1").table("documents").get_list()
+```
+
+### Manage users
+
+```python
+users = admin.admin_auth.list_users(limit=20)
+
+new_user = admin.admin_auth.create_user(
+    "june@example.com",
+    "securePassword",
+    data={"displayName": "June", "role": "editor"},
+)
+```
+
+### Upload a file and create a signed URL
+
+```python
+bucket = admin.storage.bucket("avatars")
+
+bucket.upload("user-1.jpg", file_bytes, content_type="image/jpeg")
+signed = bucket.create_signed_url("user-1.jpg", expires_in="1h")
+```
+
+### Use native resources
+
+```python
+admin.kv("cache").set("homepage", "ready", ttl=300)
+rows = admin.d1("analytics").query("SELECT 1", [])
+matches = admin.vectorize("embeddings").search([0.1, 0.2, 0.3], top_k=5)
+```
+
+## Common Mistakes
+
+- use `EdgeBaseServer(...)` or `EdgeBase(...)`, not a browser-style `create_client(...)`
+- there is no `client.auth` helper in the current `edgebase` package surface
+- there is no `collection("posts")` helper; use `db(namespace).table(name)`
+- `admin.storage` is a property, not a method
+- `admin.push` is a property, not a method
+- `db(namespace, instance_id=None)` uses an optional positional instance id
+- `table.get()` returns a `ListResult`, not a single record
+- use `table.get_one(id)` or `table.doc(id).get()` for a single record
+- `TableRef.on_snapshot()` raises unless a database-live transport is attached; `EdgeBaseServer` does not wire one by default
+- `create_signed_upload_url(path, expires_in=...)` expects seconds as an `int`
+- this package does not expose `functions()` or `analytics()` helpers; use `edgebase-admin` for those surfaces
+
+## Quick Reference
+
+```python
+# Initialize
+admin = EdgeBaseServer(base_url, service_key=service_key)
+
+# Admin auth (property)
+admin.admin_auth.get_user(user_id)                           # dict
+admin.admin_auth.create_user(email, password, data=None)     # dict
+admin.admin_auth.update_user(user_id, data)                  # dict
+admin.admin_auth.delete_user(user_id)                        # dict
+admin.admin_auth.list_users(limit=20, cursor=None)           # dict
+admin.admin_auth.set_custom_claims(user_id, claims)          # None
+admin.admin_auth.revoke_all_sessions(user_id)                # None
+
+# Database
+admin.db("shared").table("posts").get_list()                 # ListResult
+admin.db("shared").table("posts").get()                      # ListResult
+admin.db("shared").table("posts").get_one("id-1")           # dict
+admin.db("shared").table("posts").get_first()               # dict | None
+admin.db("shared").table("posts").insert(record)            # dict
+admin.db("shared").table("posts").update("id-1", data)      # dict
+admin.db("shared").table("posts").delete("id-1")            # dict
+admin.db("shared").table("posts").count()                   # int
+admin.db("shared").table("posts").update_many(data)         # BatchResult
+admin.db("shared").table("posts").delete_many()             # BatchResult
+
+# Storage (property)
+bucket = admin.storage.bucket("avatars")
+bucket.get_url("user-1.jpg")                                # str
+bucket.upload("user-1.jpg", file_bytes, content_type="image/jpeg")   # dict
+bucket.download("user-1.jpg")                               # bytes
+bucket.get_metadata("user-1.jpg")                           # FileInfo
+bucket.update_metadata("user-1.jpg", metadata)              # dict
+bucket.list(prefix="", limit=100, offset=0)                 # list[FileInfo]
+bucket.list_page(prefix="", limit=100, cursor=None)         # FileListResult
+bucket.create_signed_url("user-1.jpg", expires_in="1h")     # SignedUrlResult
+bucket.create_signed_upload_url("large.zip", expires_in=600) # SignedUrlResult
+
+# Native resources
+admin.sql("shared", None, query, params)                    # list
+admin.push.send("user-1", {"title": "Hello", "body": "World"}) # dict
+admin.kv("cache").get("key")                                # str | None
+admin.kv("cache").set("key", "value", ttl=300)              # None
+admin.kv("cache").list(prefix=None, limit=None, cursor=None) # dict
+admin.kv("cache").delete("key")                             # None
+admin.d1("analytics").exec("SELECT 1", [])                  # list
+admin.d1("analytics").query("SELECT 1", [])                 # list
+admin.vectorize("embeddings").search([0.1, 0.2], top_k=5)   # list[dict]
+admin.broadcast("posts", "refresh", {"id": "post-1"})       # None
+
+# Rooms
+room = RoomClient(base_url, "game", "room-1", token_getter=lambda: token)
+```

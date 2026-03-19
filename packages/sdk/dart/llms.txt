@@ -1,0 +1,42 @@
+# EdgeBase Dart SDK (`edgebase`)
+
+`edgebase` is the umbrella Dart package for EdgeBase.
+
+It currently re-exports the Flutter client SDK surface, so client examples should follow `edgebase_flutter` semantics unless the user explicitly asks for a lower-level or server-side package.
+
+## Package Boundaries
+
+- `edgebase`
+  Broad Dart entry point for app code
+- `edgebase_flutter`
+  Main client SDK for Flutter applications
+- `edgebase_core`
+  Low-level primitives such as HTTP, database refs, storage, field ops, and shared errors
+- `edgebase_admin`
+  Trusted server-side SDK that requires a Service Key
+
+## Canonical Guidance
+
+- Prefer `ClientEdgeBase(baseUrl)` for client-side code.
+- Use `client.db(namespace, instanceId: ...)` for database access.
+- Use `client.storage`, `client.functions`, `client.analytics`, and `client.push` from the client surface.
+- Keep Service Keys out of Flutter and client runtimes. Switch to `edgebase_admin` for trusted code.
+- When users ask for lower-level integration work, switch to `edgebase_core` types such as `HttpClient`, `DbRef`, and `StorageClient`.
+
+## Realtime And Rooms
+
+- Database live APIs use streams and are designed for Flutter-friendly reactive flows.
+- Room APIs are client-side realtime features and belong on the Flutter/client path, not in admin examples.
+- Preserve explicit `instanceId` handling for instance databases.
+
+## Docs
+
+- Flutter SDK: https://edgebase.fun/docs/sdks/flutter
+- Database Client SDK: https://edgebase.fun/docs/database/client-sdk
+- Room Client SDK: https://edgebase.fun/docs/room/client-sdk
+- Functions Client SDK: https://edgebase.fun/docs/functions/client-sdk
+- Analytics Client SDK: https://edgebase.fun/docs/analytics/client-sdk
+
+## Install
+
+- `dart pub add edgebase`

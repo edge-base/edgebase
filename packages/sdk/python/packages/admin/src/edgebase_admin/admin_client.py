@@ -61,7 +61,7 @@ class AdminClient:
         service_key: The service key for admin operations.
     """
 
-    def __init__(self, base_url: str, *, service_key: str) -> None:
+    def __init__(self, base_url: str, service_key: str) -> None:
         self._http = HttpClient(base_url, service_key=service_key)
         self._core = GeneratedDbApi(self._http)
         self._admin = GeneratedAdminApi(self._http)
@@ -155,3 +155,11 @@ class AdminClient:
     def destroy(self) -> None:
         """Close the underlying HTTP client."""
         self._http.close()
+
+
+def create_admin_client(base_url: str, service_key: str) -> AdminClient:
+    """Create an AdminClient.
+
+    This helper mirrors the naming used in the public docs and other SDKs.
+    """
+    return AdminClient(base_url, service_key)

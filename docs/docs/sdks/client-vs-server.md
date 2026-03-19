@@ -67,15 +67,20 @@ await admin.auth.revokeAllSessions('user-id');
 <TabItem value="go" label="Go">
 
 ```go
-user, err := admin.AdminAuth.CreateUser(edgebase.CreateUserInput{
-    Email:       "admin@example.com",
-    Password:    "securePassword",
-    DisplayName: "Admin",
-    Role:        "admin",
-})
+import "context"
 
-err = admin.AdminAuth.SetCustomClaims("user-id", map[string]any{"plan": "pro"})
-err = admin.AdminAuth.RevokeAllSessions("user-id")
+ctx := context.Background()
+
+user, err := admin.AdminAuth.CreateUser(ctx, "admin@example.com", "securePassword")
+if err == nil {
+    _, err = admin.AdminAuth.UpdateUser(ctx, user["id"].(string), map[string]interface{}{
+        "displayName": "Admin",
+        "role": "admin",
+    })
+}
+
+err = admin.AdminAuth.SetCustomClaims(ctx, "user-id", map[string]interface{}{"plan": "pro"})
+err = admin.AdminAuth.RevokeAllSessions(ctx, "user-id")
 ```
 
 </TabItem>
@@ -110,8 +115,7 @@ admin.admin_auth().revoke_all_sessions("user-id").await?;
 user = admin.admin_auth.create_user(
     email='admin@example.com',
     password='securePassword',
-    display_name='Admin',
-    role='admin',
+    data={'displayName': 'Admin', 'role': 'admin'},
 )
 
 admin.admin_auth.set_custom_claims('user-id', {'plan': 'pro'})
@@ -226,9 +230,13 @@ const rows = await admin.sql('posts',
 <TabItem value="go" label="Go">
 
 ```go
-rows, err := admin.Sql("posts",
+import "context"
+
+ctx := context.Background()
+
+rows, err := admin.SQL(ctx, "shared", "",
     "SELECT authorId, COUNT(*) as cnt FROM posts GROUP BY authorId ORDER BY cnt DESC LIMIT ?",
-    10,
+    []interface{}{10},
 )
 ```
 
@@ -256,7 +264,7 @@ let rows = admin.sql("posts",
 <TabItem value="python" label="Python">
 
 ```python
-rows = admin.sql('posts',
+rows = admin.sql('shared', None,
     'SELECT authorId, COUNT(*) as cnt FROM posts GROUP BY authorId ORDER BY cnt DESC LIMIT ?',
     [10],
 )
@@ -344,7 +352,11 @@ await admin.broadcast('notifications', 'alert', {
 <TabItem value="go" label="Go">
 
 ```go
-err := admin.Broadcast("notifications", "alert", map[string]any{
+import "context"
+
+ctx := context.Background()
+
+err := admin.Broadcast(ctx, "notifications", "alert", map[string]any{
     "message": "System maintenance in 5 minutes",
 })
 ```
@@ -468,21 +480,21 @@ const results = await admin.vector('embeddings').search(
 
 ```python
 # KV
-await admin.kv("cache").set("key", "value", ttl=300)
-val = await admin.kv("cache").get("key")
-await admin.kv("cache").delete("key")
-keys = await admin.kv("cache").list(prefix="user:")
+admin.kv("cache").set("key", "value", ttl=300)
+val = admin.kv("cache").get("key")
+admin.kv("cache").delete("key")
+keys = admin.kv("cache").list(prefix="user:")
 
 # D1
-rows = await admin.d1("analytics").exec(
+rows = admin.d1("analytics").exec(
     "SELECT * FROM events WHERE type = ?", ["pageview"]
 )
 
 # Vectorize
-await admin.vector("embeddings").upsert([
+admin.vector("embeddings").upsert([
     {"id": "doc-1", "values": [0.1, 0.2], "metadata": {"title": "Hello"}}
 ])
-results = await admin.vector("embeddings").search([0.1, 0.2], top_k=10)
+results = admin.vector("embeddings").search([0.1, 0.2], top_k=10)
 ```
 
 </TabItem>
@@ -690,7 +702,7 @@ results =
 </Tabs>
 
 :::info Local Development
-KV and D1 work fully in local/Docker environments via Miniflare emulation. **Vectorize is Edge-only** — local calls return stub responses with a console warning.
+KV and D1 work in local and Docker environments via Miniflare emulation. Cloudflare does not provide a local Vectorize simulation; Wrangler can use remote bindings, while EdgeBase falls back to stub responses when a Vectorize binding is unavailable.
 :::
 
 ---

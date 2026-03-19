@@ -22,6 +22,8 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.*
 
+private const val SDK_VERSION = "0.1.4"
+
 // MARK: - FilterTuple
 
 /**
@@ -67,7 +69,7 @@ private fun matchesDatabaseLiveChannel(channel: String, change: DbChange, messag
  * Database live client using Ktor WebSocket with automatic reconnection.
  *
  * Authentication is performed via WebSocket message (not HTTP headers):
- * after the WS session opens, we send `{"type":"auth","token":"...","sdkVersion":"0.1.0"}`
+ * after the WS session opens, we send `{"type":"auth","token":"...","sdkVersion":"0.1.4"}`
  * and wait for `auth_success` or `auth_refreshed` before signaling ready.
  */
 internal class DatabaseLiveClient(
@@ -194,7 +196,7 @@ internal class DatabaseLiveClient(
         val authMsg = buildJsonObject {
             put("type", JsonPrimitive("auth"))
             put("token", JsonPrimitive(token))
-            put("sdkVersion", JsonPrimitive("0.1.0"))
+            put("sdkVersion", JsonPrimitive(SDK_VERSION))
         }
         send(Frame.Text(json.encodeToString(JsonElement.serializer(), authMsg)))
 
@@ -329,7 +331,7 @@ internal class DatabaseLiveClient(
             sendMessage(mapOf(
                 "type" to "auth",
                 "token" to token,
-                "sdkVersion" to "0.1.0"
+                "sdkVersion" to SDK_VERSION
             ))
         }
     }

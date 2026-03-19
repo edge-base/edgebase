@@ -53,7 +53,7 @@ EdgeBase doesn't optimize expensive operations — it eliminates the conditions 
 
 ### Authentication: $0
 
-Traditional BaaS charges per-MAU because the server manages sessions per user. EdgeBase issues a JWT on sign-in, then every subsequent request verifies the JWT signature locally (pure cryptography, no network call, no Durable Object hit). Whether you have 100 or 10 million users, the per-request auth cost is the same. The Workers Paid plan ($5/mo) includes 25B D1 reads and 50M writes per month — auth is effectively unlimited. And if you ever outgrow D1 limits, a single config change switches auth to Neon PostgreSQL with no code modifications.
+Traditional BaaS charges per-MAU because the server manages sessions per user. EdgeBase issues a JWT on sign-in, then every subsequent request verifies the JWT signature locally (pure cryptography, no network call, no Durable Object hit). Whether you have 100 or 10 million users, the per-request auth cost is the same. The Free plan already covers small apps, and the Workers Paid plan ($5/mo) raises D1 to 25B reads and 50M writes per month. If you ever outgrow D1 limits, a single config change switches auth to Neon PostgreSQL with no code modifications.
 
 ### Egress: $0
 
@@ -86,21 +86,21 @@ SQLite embedded in each DO eliminates the need for database server provisioning,
 
 ## Cost Comparison: 1M MAU Social App
 
-| Component               | Firebase       | Supabase       | Appwrite       | EdgeBase (Edge)               |
-| ----------------------- | -------------- | -------------- | -------------- | ----------------------------- |
-| **Auth** (1M MAU)       | $4,415         | $2,925         | $2,400         | **$0**                        |
-| **DB Reads** (90M)      | $27            | included       | included       | **$0**                        |
-| **DB Writes** (24M)     | $21.60         | included       | included       | **$0**                        |
-| **DB Deletes** (3M)     | $0.30          | included       | included       | **$0**                        |
-| **DB Storage** (50 GB)  | $7.50          | $5             | included       | **$9**                        |
-| **Compute / Functions** | $125           | $61            | $58            | **$55**                       |
-| **File Storage** (2 TB) | $52            | $40            | $53            | **$80**                       |
-| **Egress** (100 TB)     | $12,000        | $8,978         | $14,700        | **$0**                        |
+| Component                       | Firebase       | Supabase       | Appwrite       | EdgeBase (Edge)               |
+| ------------------------------- | -------------- | -------------- | -------------- | ----------------------------- |
+| **Auth** (1M MAU)               | $4,415         | $2,925         | $2,400         | **$0**                        |
+| **DB Reads** (90M)              | $27            | included       | included       | **$0**                        |
+| **DB Writes** (24M)             | $21.60         | included       | included       | **$0**                        |
+| **DB Deletes** (3M)             | $0.30          | included       | included       | **$0**                        |
+| **DB Storage** (50 GB)          | $7.50          | $5             | included       | **$9**                        |
+| **Compute / Functions**         | $125           | $61            | $58            | **$55**                       |
+| **File Storage** (2 TB)         | $52            | $40            | $53            | **$80**                       |
+| **Egress** (100 TB)             | $12,000        | $8,978         | $14,700        | **$0**                        |
 | **DB Subscriptions** (900M msg) | $5,400         | $2,263         | $630           | **included in Compute (~$7)** |
-| **Room** (mini-game)\*  | $2,700         | $13,500        | $3,800         | **$10**                       |
-| **Base fee**            | —              | $25            | $25            | $5 (account-level)            |
-| **Total**               | **$24,748/mo** | **$27,797/mo** | **$21,666/mo** | **~$159/mo**                  |
-| **Annual**              | **$296,976**   | **$333,564**   | **$259,992**   | **~$1,908**                   |
+| **Room** (mini-game)\*          | $2,700         | $13,500        | $3,800         | **$10**                       |
+| **Base fee**                    | —              | $25            | $25            | $5 (account-level)            |
+| **Total**                       | **$24,748/mo** | **$27,797/mo** | **$21,666/mo** | **~$159/mo**                  |
+| **Annual**                      | **$296,976**   | **$333,564**   | **$259,992**   | **~$1,908**                   |
 
 \* Room (mini-game): No competing BaaS offers ephemeral in-memory rooms. Costs assume DB writes+reads (Firebase), per-recipient message billing (Supabase), or DB reads/writes with bandwidth (Appwrite). EdgeBase Room runs entirely in DO in-memory with no per-message billing, only Duration charges.
 
@@ -178,12 +178,12 @@ EdgeBase achieves deployment flexibility because Cloudflare's `workerd` runtime 
 
 EdgeBase's architecture is not universally better. There are scenarios where other platforms excel:
 
-| Scenario                                        | Better Choice                 | Why                                                                                                                                       |
-| ----------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| PostGIS / geospatial queries                    | Supabase                      | SQLite lacks PostGIS extensions. EdgeBase's PostgreSQL provider gives you Postgres, but PostGIS setup still requires manual configuration.           |
-| Zero-config prototype (1 day)                   | Firebase                      | Unmatched onboarding speed and documentation                                                                                              |
-| Existing PostgreSQL ecosystem                   | Supabase                      | pg_vector, PostGIS, foreign data wrappers, etc. — though EdgeBase's PostgreSQL provider covers most general Postgres use cases.                       |
-| Multi-statement transactions                    | Supabase                      | EdgeBase supports `transactionSync()` only — no `BEGIN`/`COMMIT`                                                                          |
+| Scenario                      | Better Choice | Why                                                                                                                                        |
+| ----------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| PostGIS / geospatial queries  | Supabase      | SQLite lacks PostGIS extensions. EdgeBase's PostgreSQL provider gives you Postgres, but PostGIS setup still requires manual configuration. |
+| Zero-config prototype (1 day) | Firebase      | Unmatched onboarding speed and documentation                                                                                               |
+| Existing PostgreSQL ecosystem | Supabase      | pg_vector, PostGIS, foreign data wrappers, etc. — though EdgeBase's PostgreSQL provider covers most general Postgres use cases.            |
+| Multi-statement transactions  | Supabase      | EdgeBase supports `transactionSync()` only — no `BEGIN`/`COMMIT`                                                                           |
 
 :::tip PostgreSQL Provider
 Cross-tenant analytics, complex SQL JOINs, and datasets exceeding 10 GB are all handled within EdgeBase by switching static DB blocks to `provider: 'postgres'` and supplying a connection-string env key. Dynamic multi-tenant blocks (workspace/user) each have a 10 GB limit per instance, which is rarely reached in practice. If you use Neon, the CLI and dev dashboard can provision that env key for you.

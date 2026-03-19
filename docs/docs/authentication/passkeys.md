@@ -7,8 +7,8 @@ import TabItem from '@theme/TabItem';
 
 # Passkeys (WebAuthn)
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Sign in with biometrics, hardware security keys, or platform authenticators. EdgeBase implements the WebAuthn standard using [SimpleWebAuthn](https://simplewebauthn.dev/) on the server side, with a full registration and authentication flow.

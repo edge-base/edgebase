@@ -119,9 +119,17 @@ defmodule EdgeBaseCore.HttpClient do
   end
 
   defp headers(client, extra_headers) do
+    # Token refresh failed — proceed as unauthenticated
+    token =
+      try do
+        auth_token(client)
+      rescue
+        _ -> nil
+      end
+
     auth_headers =
       []
-      |> maybe_put_header("authorization", auth_token(client))
+      |> maybe_put_header("authorization", token)
       |> maybe_put_header("x-edgebase-service-key", client.service_key)
 
     Enum.map(auth_headers ++ normalize_headers(extra_headers), fn {key, value} ->

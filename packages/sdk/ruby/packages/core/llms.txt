@@ -1,0 +1,88 @@
+# EdgeBase Ruby Core SDK
+
+Use this file as a quick-reference contract for AI coding assistants working with `edgebase_core`.
+
+## Package Boundary
+
+Use `edgebase_core` for low-level EdgeBase building blocks.
+
+This package is shared infrastructure for `edgebase_admin`. Most app code should install `edgebase_admin` instead of using `edgebase_core` directly.
+
+`edgebase_core` does not provide admin auth, push, analytics, KV, D1, or Vectorize helpers.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/ruby/packages/core/README.md
+- SDK Overview: https://edgebase.fun/docs/sdks
+- Database Admin SDK: https://edgebase.fun/docs/database/admin-sdk
+- Storage docs: https://edgebase.fun/docs/storage/upload-download
+
+If docs, snippets, and assumptions disagree, prefer the current package API over guessed patterns from another runtime.
+
+## Canonical Examples
+
+### Build an HTTP client
+
+```ruby
+require "edgebase_core"
+
+client = EdgebaseCore::HttpClient.new(
+  "https://your-project.edgebase.fun",
+  service_key: ENV.fetch("EDGEBASE_SERVICE_KEY")
+)
+```
+
+### Work with storage
+
+```ruby
+storage = EdgebaseCore::StorageClient.new(client)
+bucket = storage.bucket("avatars")
+bucket.upload("user-1.jpg", "binary-data", content_type: "image/jpeg")
+```
+
+### Use field operations
+
+```ruby
+payload = {
+  "views" => EdgebaseCore::FieldOps.increment(1),
+  "legacyField" => EdgebaseCore::FieldOps.delete_field
+}
+```
+
+## Hard Rules
+
+- keep Service Keys on trusted servers only
+- `HttpClient` is synchronous and server-side only
+- `EdgebaseCore::FieldOps.increment()` and `delete_field` return marker hashes for update payloads
+- `DbRef#table` returns a `TableRef`
+- `TableRef#get_list`, `get_one`, and `get_first` are the main read helpers
+- `StorageClient#bucket` returns a `StorageBucket`
+- `StorageBucket#create_signed_upload_url(path, expires_in: 3600)` expects an integer TTL in seconds
+- `StorageBucket#upload_string` accepts raw, base64, base64url, and data URL inputs
+
+## Common Mistakes
+
+- do not use `edgebase_core` when you actually need admin auth or other higher-level server features
+- do not copy JavaScript promise-based examples into Ruby
+- do not assume `TableRef` or `DbRef` are top-level app entry points; they are building blocks
+- do not expose the Service Key through browser code
+
+## Quick Reference
+
+```text
+EdgebaseCore::HttpClient.new(url, service_key:, bearer_token: nil) -> HttpClient
+EdgebaseCore::StorageClient.new(client)                            -> StorageClient
+storage.bucket(name)                                               -> StorageBucket
+EdgebaseCore::FieldOps.increment(value = 1)                       -> Hash
+EdgebaseCore::FieldOps.delete_field                                -> Hash
+db.table(name)                                                     -> TableRef
+table.where(field, op, value)                                      -> TableRef
+table.get_list                                                     -> ListResult
+table.get_one(id)                                                  -> Hash
+table.get_first                                                    -> Hash or nil
+table.doc(id)                                                      -> DocRef
+bucket.upload(path, data, content_type: ...)                       -> Hash
+bucket.download(path)                                               -> String
+bucket.create_signed_url(path, expires_in: "1h")                   -> Hash
+bucket.create_signed_upload_url(path, expires_in: 3600)           -> Hash
+```

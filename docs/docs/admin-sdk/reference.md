@@ -48,9 +48,13 @@ admin = create_admin_client(
 <TabItem value="go" label="Go">
 
 ```go
-import edgebase "github.com/edge-base/sdk-go"
+import (
+    "os"
 
-admin, err := edgebase.NewAdminClient(
+    edgebase "github.com/edge-base/sdk-go"
+)
+
+admin := edgebase.NewAdminClient(
     "https://your-project.edgebase.fun",
     os.Getenv("EDGEBASE_SERVICE_KEY"),
 )
@@ -101,17 +105,24 @@ while cursor:
 <TabItem value="go" label="Go">
 
 ```go
-result, err := admin.AdminAuth.ListUsers(edgebase.ListUsersInput{Limit: 20})
+import "context"
+
+ctx := context.Background()
+
+result, err := admin.AdminAuth.ListUsers(ctx, 20)
+users, _ := result["users"].([]interface{})
 
 // Paginate
-cursor := result.Cursor
+cursor, _ := result["cursor"].(string)
 for cursor != "" {
-    page, err := admin.AdminAuth.ListUsers(edgebase.ListUsersInput{
-        Limit:  20,
-        Cursor: cursor,
-    })
-    users = append(users, page.Users...)
-    cursor = page.Cursor
+    page, err := admin.AdminAuth.ListUsersPage(ctx, 20, cursor)
+    if err != nil {
+        break
+    }
+    if nextUsers, ok := page["users"].([]interface{}); ok {
+        users = append(users, nextUsers...)
+    }
+    cursor, _ = page["cursor"].(string)
 }
 ```
 
@@ -146,8 +157,10 @@ const user = await admin.auth.createUser({
 user = admin.admin_auth.create_user(
     email='jane@example.com',
     password='securePassword',
-    display_name='Jane Doe',
-    role='editor',
+    data={
+        'displayName': 'Jane Doe',
+        'role': 'editor',
+    },
 )
 ```
 
@@ -155,12 +168,12 @@ user = admin.admin_auth.create_user(
 <TabItem value="go" label="Go">
 
 ```go
-user, err := admin.AdminAuth.CreateUser(edgebase.CreateUserInput{
-    Email:       "jane@example.com",
-    Password:    "securePassword",
-    DisplayName: "Jane Doe",
-    Role:        "editor",
-})
+import "context"
+
+ctx := context.Background()
+
+user, err := admin.AdminAuth.CreateUser(ctx, "jane@example.com", "securePassword")
+// Apply optional profile fields later with UpdateUser if needed.
 ```
 
 </TabItem>
@@ -225,10 +238,14 @@ admin.admin_auth.set_custom_claims('user-id', {
 <TabItem value="go" label="Go">
 
 ```go
-err := admin.AdminAuth.SetCustomClaims("user-id", map[string]any{
-    "plan":  "pro",
+import "context"
+
+ctx := context.Background()
+
+err := admin.AdminAuth.SetCustomClaims(ctx, "user-id", map[string]interface{}{
+    "plan": "pro",
     "orgId": "org_123",
-    "tier":  2,
+    "tier": 2,
 })
 ```
 
@@ -278,7 +295,7 @@ notes = admin.db('user', 'user-123').table('notes')
 <TabItem value="go" label="Go">
 
 ```go
-posts := admin.DB("app").Table("posts")
+posts := admin.DB("app", "").Table("posts")
 docs := admin.DB("workspace", "ws-456").Table("documents")
 notes := admin.DB("user", "user-123").Table("notes")
 ```
@@ -344,26 +361,29 @@ table.delete('post-id')
 <TabItem value="go" label="Go">
 
 ```go
-table := admin.DB("app").Table("posts")
+import "context"
+
+ctx := context.Background()
+table := admin.DB("app", "").Table("posts")
 
 // Create
-post, err := table.Insert(map[string]any{"title": "Hello", "body": "World"})
+post, err := table.Insert(ctx, map[string]interface{}{"title": "Hello", "body": "World"})
 
 // Read by ID
-found, err := table.Get("post-id")
+found, err := table.GetOne(ctx, "post-id")
 
 // List with filters
-recent, err := table.List(edgebase.ListOptions{
-    Where:   map[string]any{"published": true},
-    OrderBy: map[string]string{"createdAt": "desc"},
-    Limit:   10,
-})
+recent, err := table.
+    Where("published", "==", true).
+    OrderBy("createdAt", "desc").
+    Limit(10).
+    GetList(ctx)
 
 // Update
-updated, err := table.Update("post-id", map[string]any{"title": "Updated Title"})
+updated, err := table.Update(ctx, "post-id", map[string]interface{}{"title": "Updated Title"})
 
 // Delete
-err = table.Delete("post-id")
+err = table.Delete(ctx, "post-id")
 ```
 
 </TabItem>
@@ -399,9 +419,13 @@ rows = admin.sql(
 <TabItem value="go" label="Go">
 
 ```go
-rows, err := admin.Sql("app", "",
+import "context"
+
+ctx := context.Background()
+
+rows, err := admin.SQL(ctx, "app", "",
     "SELECT authorId, COUNT(*) as cnt FROM posts GROUP BY authorId ORDER BY cnt DESC LIMIT ?",
-    10,
+    []interface{}{10},
 )
 ```
 
@@ -447,37 +471,41 @@ await admin.storage.delete('avatars/user-123.png');
 <TabItem value="python" label="Python">
 
 ```python
+bucket = admin.storage().bucket('avatars')
+
 # Upload a file
-admin.storage.upload('avatars/user-123.png', file_bytes,
-    content_type='image/png')
+bucket.upload('user-123.png', file_bytes, content_type='image/png')
 
 # Get a signed download URL
-url = admin.storage.get_signed_url('avatars/user-123.png', expires_in=3600)
+url = bucket.create_signed_url('user-123.png', expires_in='1h')
 
 # List files
-files = admin.storage.list('avatars/')
+files = bucket.list(prefix='', limit=100, offset=0)
 
 # Delete a file
-admin.storage.delete('avatars/user-123.png')
+bucket.delete('user-123.png')
 ```
 
 </TabItem>
 <TabItem value="go" label="Go">
 
 ```go
+import "context"
+
+ctx := context.Background()
+bucket := admin.Storage().Bucket("avatars")
+
 // Upload a file
-err := admin.Storage.Upload("avatars/user-123.png", fileBytes, edgebase.UploadOptions{
-    ContentType: "image/png",
-})
+uploadResult, err := bucket.Upload(ctx, "user-123.png", fileBytes, "image/png")
 
 // Get a signed download URL
-url, err := admin.Storage.GetSignedURL("avatars/user-123.png", 3600)
+signed, err := bucket.CreateSignedURL(ctx, "user-123.png", "1h")
 
 // List files
-files, err := admin.Storage.List("avatars/")
+files, err := bucket.List(ctx, "", 100, 0)
 
 // Delete a file
-err = admin.Storage.Delete("avatars/user-123.png")
+deleteResult, err := bucket.Delete(ctx, "user-123.png")
 ```
 
 </TabItem>
@@ -503,7 +531,7 @@ const result = await admin.functions.invoke('send-welcome-email', {
 <TabItem value="python" label="Python">
 
 ```python
-result = admin.functions.invoke('send-welcome-email', {
+result = admin.functions().post('send-welcome-email', {
     'userId': 'user-123',
     'template': 'onboarding',
 })
@@ -513,7 +541,11 @@ result = admin.functions.invoke('send-welcome-email', {
 <TabItem value="go" label="Go">
 
 ```go
-result, err := admin.Functions.Invoke("send-welcome-email", map[string]any{
+import "context"
+
+ctx := context.Background()
+
+result, err := admin.Functions().Post(ctx, "send-welcome-email", map[string]interface{}{
     "userId":   "user-123",
     "template": "onboarding",
 })

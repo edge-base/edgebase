@@ -1,3 +1,8 @@
+## 0.1.4
+
+- Synced package metadata and dependency guidance for the 0.1.4 release
+- Refreshed public install references for the current release line
+
 ## 0.1.3
 
 - Updated package docs to explain the EdgeBase project more clearly and link back to the main repository

@@ -1,3 +1,8 @@
+## 0.1.4
+
+- Synced package metadata and install guidance for the 0.1.4 release
+- Refreshed public release references across the Flutter package docs
+
 ## 0.1.3
 
 - Updated package docs to explain the EdgeBase project more clearly and link back to the main repository

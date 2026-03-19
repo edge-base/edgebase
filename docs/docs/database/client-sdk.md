@@ -7,8 +7,8 @@ import TabItem from '@theme/TabItem';
 
 # Client SDK
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Database operations from the client (browser, mobile, game engine). All operations go through [Access Rules](/docs/database/access-rules).

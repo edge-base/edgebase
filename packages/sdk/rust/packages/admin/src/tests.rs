@@ -483,3 +483,33 @@ mod storage_via_edgebase_tests {
         assert_ne!(b1.name, b2.name);
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 11. SQL signature type coverage
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod sql_signature_tests {
+    use crate::edgebase::EdgeBase;
+    use serde_json::json;
+
+    #[test]
+    fn sql_accepts_numeric_params() {
+        let eb = EdgeBase::server("http://localhost:8688", "sk_test").unwrap();
+        let future = eb.sql("shared", None, "SELECT * FROM posts WHERE views > ?", &[10]);
+        drop(future);
+    }
+
+    #[test]
+    fn sql_accepts_json_params() {
+        let eb = EdgeBase::server("http://localhost:8688", "sk_test").unwrap();
+        let params = [json!("published")];
+        let future = eb.sql(
+            "shared",
+            None,
+            "SELECT * FROM posts WHERE status = ?",
+            &params,
+        );
+        drop(future);
+    }
+}

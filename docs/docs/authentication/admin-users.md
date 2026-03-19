@@ -7,8 +7,8 @@ import TabItem from '@theme/TabItem';
 
 # Admin User Management
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Server-side user management via the Service Key. These operations bypass access rules.
@@ -73,10 +73,13 @@ let admin = EdgeBase::server("https://my-app.edgebase.fun", &std::env::var("EDGE
 <TabItem value="python" label="Python">
 
 ```python
-from edgebase_admin import AdminClient
+from edgebase_admin import create_admin_client
 import os
 
-admin = AdminClient('https://my-app.edgebase.fun', service_key=os.environ['EDGEBASE_SERVICE_KEY'])
+admin = create_admin_client(
+    'https://my-app.edgebase.fun',
+    service_key=os.environ['EDGEBASE_SERVICE_KEY'],
+)
 ```
 
 </TabItem>
@@ -227,36 +230,35 @@ await admin.adminAuth.revokeAllSessions('user-id');
 <TabItem value="go" label="Go">
 
 ```go
+import "context"
+
+ctx := context.Background()
+
 // List users
-users, err := admin.AdminAuth.ListUsers(&edgebase.ListUsersOptions{Limit: 50})
+users, err := admin.AdminAuth.ListUsers(ctx, 50)
 
 // Get user
-user, err := admin.AdminAuth.GetUser("user-id")
+user, err := admin.AdminAuth.GetUser(ctx, "user-id")
 
 // Create user
-newUser, err := admin.AdminAuth.CreateUser(edgebase.CreateUserInput{
-    Email:       "admin@example.com",
-    Password:    "securePassword",
-    DisplayName: "Admin User",
-    Role:        "admin",
-})
+newUser, err := admin.AdminAuth.CreateUser(ctx, "admin@example.com", "securePassword")
 
 // Update user
-_, err = admin.AdminAuth.UpdateUser("user-id", edgebase.UpdateUserInput{
-    DisplayName: "New Name",
-    Role:        "moderator",
+_, err = admin.AdminAuth.UpdateUser(ctx, "user-id", map[string]interface{}{
+    "displayName": "New Name",
+    "role": "moderator",
 })
 
 // Delete user
-err = admin.AdminAuth.DeleteUser("user-id")
+err = admin.AdminAuth.DeleteUser(ctx, "user-id")
 
 // Set custom claims
-err = admin.AdminAuth.SetCustomClaims("user-id", map[string]any{
+err = admin.AdminAuth.SetCustomClaims(ctx, "user-id", map[string]interface{}{
     "plan": "pro", "features": []string{"analytics", "export"},
 })
 
 // Revoke all sessions
-err = admin.AdminAuth.RevokeAllSessions("user-id")
+err = admin.AdminAuth.RevokeAllSessions(ctx, "user-id")
 ```
 
 </TabItem>
@@ -340,12 +342,14 @@ user = admin.admin_auth.get_user('user-id')
 new_user = admin.admin_auth.create_user(
     email='admin@example.com',
     password='securePassword',
-    display_name='Admin User',
-    role='admin',
+    data={'displayName': 'Admin User', 'role': 'admin'},
 )
 
 # Update user
-admin.admin_auth.update_user('user-id', display_name='New Name', role='moderator')
+admin.admin_auth.update_user('user-id', {
+    'displayName': 'New Name',
+    'role': 'moderator',
+})
 
 # Delete user
 admin.admin_auth.delete_user('user-id')

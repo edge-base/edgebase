@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/admin",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "EdgeBase admin SDK — server-side client for user management, database admin, and analytics",
     "license": "MIT",
     "repository": {
@@ -8,7 +8,7 @@
         "url": "https://github.com/edge-base/edgebase.git",
         "directory": "packages/sdk/js/packages/admin"
     },
-    "homepage": "https://edgebase.fun",
+    "homepage": "https://github.com/edge-base/edgebase/tree/main/packages/sdk/js/packages/admin",
     "bugs": "https://github.com/edge-base/edgebase/issues",
     "keywords": [
         "edgebase",

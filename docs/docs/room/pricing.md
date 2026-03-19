@@ -4,19 +4,23 @@ sidebar_position: 6
 
 # Pricing
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 EdgeBase Room runs entirely inside a Durable Object's in-memory state. There is no per-message billing — only DO duration charges while the room is active.
 
+:::tip Free Plan
+Room works on the Cloudflare Free plan — no credit card required. Free includes Durable Objects with SQLite: 100K requests/day, 13K GB-s/day, and 5 GB storage.
+:::
+
 ## Edge (Cloudflare)
 
-| Resource | Included (Workers Paid $5/mo) | Overage |
-|----------|-------------------------------|---------|
-| DO requests | 1M / month | $0.15 / million |
-| DO duration | 400K GB-s / month | $12.50 / million GB-s |
-| DO storage | 1 GB | $0.20 / GB |
+| Resource | Free Plan | Workers Paid ($5/mo) | Overage |
+|----------|-----------|-------------------------------|---------|
+| DO requests | 100K / day | 1M / month | $0.15 / million |
+| DO duration | 13K GB-s / day | 400K GB-s / month | $12.50 / million GB-s |
+| DO storage | 5 GB total | 5 GB-month | $0.20 / GB |
 
 ### Why So Cheap?
 

@@ -233,6 +233,60 @@ Check the plugin's documentation for its exact table names.
 3. If using a CI pipeline, set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as environment variables.
 4. Check your `wrangler.toml` for syntax errors. Redeploy after fixing.
 
+### R2 Storage provisioning fails
+
+**Symptom:** `R2 'STORAGE': provisioning failed` with `Please enable R2` or `code: 10042`.
+
+**Fix:** R2 must be enabled in the Cloudflare Dashboard before first deploy:
+<div className="docs-badge-row">
+  <span className="docs-badge docs-badge--free">Free Plan</span>
+  <span className="docs-badge docs-badge--setup">Billing Setup</span>
+</div>
+
+1. Go to **Cloudflare Dashboard → R2 Object Storage → Get Started**.
+2. Complete the one-time R2 subscription / billing activation (free tier includes 10 GB).
+3. Redeploy with `npx edgebase deploy`.
+
+If your app doesn't use file storage, remove `storage` from `edgebase.config.ts` instead.
+
+### Durable Objects migration error (Free plan)
+
+**Symptom:** Deploy fails with `code: 10097` — "you must create a namespace using a `new_sqlite_classes` migration."
+
+**Fix:** The Cloudflare Free plan requires all DO classes to use `new_sqlite_classes` in `wrangler.toml`. Update your `[[migrations]]` section:
+
+```toml
+# Before (fails on Free plan)
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DatabaseDO", "AuthDO"]
+new_classes = ["DatabaseLiveDO", "RoomsDO"]
+
+# After (works on Free plan)
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DatabaseDO", "AuthDO", "DatabaseLiveDO", "RoomsDO"]
+```
+
+:::tip
+EdgeBase CLI v0.1.3+ generates the correct migration format automatically. If you see this error on an older project, update `wrangler.toml` manually as shown above.
+:::
+
+### Vectorize provisioning fails
+
+**Symptom:** `Vectorize 'name': provisioning failed`.
+
+**Fix:** Vectorize includes usage on both Workers Free and Workers Paid plans. If provisioning fails, check your Cloudflare account/product availability and current Vectorize limits. If your app doesn't need vector search, remove `vectorize` from `edgebase.config.ts`.
+
+### Realtime/Calls provisioning fails
+
+**Symptom:** Realtime app or TURN key creation fails during deploy.
+
+**Fix:**
+1. Cloudflare Calls may need to be enabled: **Dashboard → Calls → Get Started**.
+2. If using wrangler OAuth, create a dedicated API token with Calls Write permissions and export as `CLOUDFLARE_API_TOKEN`.
+3. If your app doesn't use realtime features, remove `realtime` from `edgebase.config.ts`.
+
 ### Deploy succeeds but the app returns 500 errors
 
 **Symptom:** `npx edgebase deploy` completes, but requests to the deployed URL return 500.

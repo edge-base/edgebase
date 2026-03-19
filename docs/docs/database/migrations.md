@@ -4,8 +4,8 @@ sidebar_position: 4
 
 # Migrations
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 How EdgeBase handles schema evolution across D1-backed single-instance blocks and large fleets of dynamic Durable Object instances.

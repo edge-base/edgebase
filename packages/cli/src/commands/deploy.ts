@@ -479,6 +479,61 @@ function isR2BucketAlreadyExistsError(message: string): boolean {
   return /bucket.+already exists|already own bucket|bucket named.+already exists/i.test(message);
 }
 
+/**
+ * Diagnose common Cloudflare provisioning errors and return actionable hints.
+ */
+function diagnoseProvisioningError(
+  resourceType: 'R2' | 'D1' | 'KV' | 'Hyperdrive' | 'Vectorize',
+  errorMessage: string,
+): string[] {
+  const hints: string[] = [];
+  // Strip ANSI escape codes before pattern matching
+  const msg = errorMessage.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').toLowerCase();
+
+  // R2 not enabled
+  if (msg.includes('please enable r2') || msg.includes('code: 10042') || (msg.includes('r2') && msg.includes('enable'))) {
+    hints.push('R2 is not enabled on your Cloudflare account.');
+    hints.push('To enable: Cloudflare Dashboard → R2 Object Storage → Get Started');
+    hints.push(`Or remove 'storage' from edgebase.config.ts if your app doesn't need file storage.`);
+    return hints;
+  }
+
+  // Authentication / permission errors
+  if (msg.includes('authentication error') || msg.includes('code: 10000')) {
+    hints.push('Authentication failed — your Cloudflare token may have expired or lack permissions.');
+    hints.push('Try: npx wrangler login');
+    if (resourceType === 'D1') {
+      hints.push('Ensure your API token has D1 edit permissions.');
+    }
+    return hints;
+  }
+
+  // Quota / limit errors
+  if (msg.includes('quota') || msg.includes('limit') || msg.includes('exceeded') || msg.includes('maximum')) {
+    hints.push(`You may have reached the ${resourceType} resource limit on your Cloudflare plan.`);
+    hints.push('Check your plan limits: Cloudflare Dashboard → Workers & Pages → Plans');
+    if (resourceType === 'D1') {
+      hints.push('Free plan allows up to 10 D1 databases. Delete unused databases or upgrade your plan.');
+    }
+    return hints;
+  }
+
+  // Paid plan required
+  if (msg.includes('paid') || msg.includes('upgrade') || msg.includes('subscription')) {
+    hints.push(`${resourceType} may require a paid Workers plan.`);
+    hints.push('Check: Cloudflare Dashboard → Workers & Pages → Plans');
+    return hints;
+  }
+
+  // Network / timeout
+  if (msg.includes('timeout') || msg.includes('timed out') || msg.includes('econnrefused') || msg.includes('network') || msg.includes('fetch failed') || msg.includes('slow network')) {
+    hints.push('Network error — check your internet connection and try again.');
+    return hints;
+  }
+
+  return hints;
+}
+
 function toManifestResourceRecord(binding: ProvisionedBinding): CloudflareResourceRecord {
   return {
     type: binding.type,
@@ -574,6 +629,10 @@ function provisionR2Buckets(
         continue;
       }
       console.log(chalk.red('✗'), `R2 '${bucket.binding}': provisioning failed — ${msg}`);
+      const hints = diagnoseProvisioningError('R2', msg);
+      for (const hint of hints) {
+        console.log(chalk.dim(`    ${hint}`));
+      }
     }
   }
 
@@ -665,6 +724,10 @@ function provisionKvNamespaces(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.log(chalk.red('✗'), `KV '${name}': provisioning failed — ${msg}`);
+        const hints = diagnoseProvisioningError('KV', msg);
+        for (const hint of hints) {
+          console.log(chalk.dim(`    ${hint}`));
+        }
       }
     }
   }
@@ -761,6 +824,10 @@ function provisionD1Databases(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.log(chalk.red('✗'), `D1 '${name}': provisioning failed — ${msg}`);
+        const hints = diagnoseProvisioningError('D1', msg);
+        for (const hint of hints) {
+          console.log(chalk.dim(`    ${hint}`));
+        }
       }
     }
   }
@@ -938,7 +1005,14 @@ function provisionVectorizeIndexes(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.log(chalk.yellow('⚠'), `Vectorize '${name}': provisioning failed — ${msg}`);
-        console.log(chalk.dim('    Vectorize requires a paid Workers plan.'));
+        const vectorizeHints = diagnoseProvisioningError('Vectorize', msg);
+        if (vectorizeHints.length > 0) {
+          for (const hint of vectorizeHints) {
+            console.log(chalk.dim(`    ${hint}`));
+          }
+        } else {
+          console.log(chalk.dim('    Vectorize requires a paid Workers plan.'));
+        }
       }
     }
   }
@@ -1088,6 +1162,10 @@ function provisionProviderHyperdrives(
         chalk.yellow('⚠'),
         `Hyperdrive '${namespace}' (provider): provisioning failed — ${msg}`,
       );
+      const hints = diagnoseProvisioningError('Hyperdrive', msg);
+      for (const hint of hints) {
+        console.log(chalk.dim(`    ${hint}`));
+      }
     }
   }
 
@@ -1200,6 +1278,10 @@ function provisionAuthPostgresHyperdrive(
       }
     }
     console.log(chalk.yellow('⚠'), `Hyperdrive 'auth' (${provider}): provisioning failed — ${msg}`);
+    const hints = diagnoseProvisioningError('Hyperdrive', msg);
+    for (const hint of hints) {
+      console.log(chalk.dim(`    ${hint}`));
+    }
   }
 
   return bindings;
@@ -1745,10 +1827,23 @@ export const deployCommand = new Command('deploy')
     }
 
     if (deployExitCode !== 0) {
+      // Provide resource-specific hints when the final deploy step fails
+      // Strip ANSI escape codes before matching error patterns
+      const outputLower = deployOutput.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').toLowerCase();
+      let deployHint = `Check Cloudflare auth (${wranglerHint(['wrangler', 'whoami'])}), inspect verbose deploy output (${wranglerHint(['wrangler', 'deploy', '--verbose'])}), or re-login (${wranglerHint(['wrangler', 'login'])}).`;
+      if (outputLower.includes('please enable r2') || outputLower.includes('code: 10042')) {
+        deployHint = `R2 is not enabled on your Cloudflare account. Enable it at: Cloudflare Dashboard → R2 Object Storage → Get Started. Or remove 'storage' from edgebase.config.ts if not needed.`;
+      } else if (outputLower.includes('authentication error') || outputLower.includes('code: 10000')) {
+        deployHint = `Authentication failed. Try: ${wranglerHint(['wrangler', 'login'])} to refresh your credentials.`;
+      } else if (outputLower.includes('new_sqlite_classes') || outputLower.includes('code: 10097')) {
+        deployHint = `Durable Objects migration error: Free plan requires all DO classes to use 'new_sqlite_classes' instead of 'new_classes' in wrangler.toml migrations. Update your [[migrations]] section or upgrade to a paid Workers plan.`;
+      } else if (outputLower.includes('quota') || outputLower.includes('exceeded')) {
+        deployHint = `You may have reached a resource limit on your Cloudflare plan. Check: Cloudflare Dashboard → Workers & Pages → Plans.`;
+      }
       raiseCliError({
         code: 'deploy_failed',
         message: `Deploy failed with exit code: ${deployExitCode}`,
-        hint: `Check Cloudflare auth (${wranglerHint(['wrangler', 'whoami'])}), inspect verbose deploy output (${wranglerHint(['wrangler', 'deploy', '--verbose'])}), or re-login (${wranglerHint(['wrangler', 'login'])}).`,
+        hint: deployHint,
         details: {
           exitCode: deployExitCode,
         },

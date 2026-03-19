@@ -4,11 +4,27 @@ build-backend = "hatchling.build"
 
 [project]
 name = "edgebase-admin"
-version = "0.1.3"
-description = "EdgeBase Admin SDK — admin auth, KV, D1, Vectorize."
-requires-python = ">=3.9"
+version = "0.1.4"
+description = "Python admin SDK for EdgeBase service-key workloads"
+readme = "README.md"
+requires-python = ">=3.10"
 license = "MIT"
-dependencies = ["edgebase-core>=0.1.0"]
+authors = [
+    { name = "EdgeBase Team" }
+]
+dependencies = ["edgebase-core>=0.1.4,<0.2.0"]
+
+[project.urls]
+Homepage = "https://github.com/edge-base/edgebase/tree/main/packages/sdk/python/packages/admin"
+Repository = "https://github.com/edge-base/edgebase/tree/main/packages/sdk/python/packages/admin"
+Documentation = "https://edgebase.fun/docs/admin-sdk/reference"
+Issues = "https://github.com/edge-base/edgebase/issues"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/edgebase_admin", "README.md", "llms.txt"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/edgebase_admin"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"llms.txt" = "edgebase_admin/llms.txt"

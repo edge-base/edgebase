@@ -319,9 +319,12 @@ class TableRef:
             cursor=data.get("cursor"),
         )
 
-    def get(self) -> ListResult:
-        """Alias for get_list() to match SDK parity across runtimes."""
-        return self.get_list()
+    def get_one(self, doc_id: str) -> dict[str, Any]:
+        """Get a single record by ID."""
+        return _core_get(
+            self._core, "get", self._namespace, self._instance_id, self._name,
+            doc_id=doc_id, query={},
+        )
 
     def insert(self, record: dict[str, Any]) -> dict[str, Any]:
         return _core_insert(self._core, self._namespace, self._instance_id, self._name, record)
@@ -342,10 +345,6 @@ class TableRef:
         params = self._build_query_params()
         data = _core_get(self._core, "count", self._namespace, self._instance_id, self._name, query=params)
         return data.get("total", 0) if isinstance(data, dict) else 0
-
-    def get_one(self, doc_id: str) -> dict[str, Any]:
-        """Get a single record by ID — convenience shorthand for doc(id).get()."""
-        return self.doc(doc_id).get()
 
     def update(self, doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
         """Update a single record by ID."""

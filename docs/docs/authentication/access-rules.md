@@ -5,8 +5,8 @@ sidebar_label: Access Rules
 
 # Access Rules
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Authentication also has its own access-rule surface.

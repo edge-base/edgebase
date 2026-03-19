@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/server",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "EdgeBase runtime assets consumed by the EdgeBase CLI",
     "license": "MIT",
     "repository": {
@@ -8,7 +8,7 @@
         "url": "https://github.com/edge-base/edgebase.git",
         "directory": "packages/server"
     },
-    "homepage": "https://edgebase.fun",
+    "homepage": "https://github.com/edge-base/edgebase/tree/main/packages/server",
     "bugs": "https://github.com/edge-base/edgebase/issues",
     "keywords": [
         "edgebase",

@@ -4,8 +4,8 @@ sidebar_position: 10
 
 # OAuth Callback Handling
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 When a user signs in with OAuth, EdgeBase redirects them to the provider (Google, GitHub, etc.), and after authorization, the provider redirects back to your EdgeBase server's callback URL. The server exchanges the authorization code for tokens and either redirects back to your app callback URL or returns JSON when no app redirect URL was provided. This guide explains how to handle this flow in different application architectures.

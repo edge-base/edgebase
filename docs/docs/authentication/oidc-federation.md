@@ -7,8 +7,8 @@ import TabItem from '@theme/TabItem';
 
 # OIDC Federation
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Connect any OpenID Connect-compliant identity provider to EdgeBase. Beyond the 14 built-in OAuth providers, OIDC Federation lets you integrate with corporate identity systems (Okta, Auth0, Azure AD, Keycloak, etc.) or any provider that supports the OIDC discovery protocol.

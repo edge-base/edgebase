@@ -4,8 +4,8 @@ sidebar_position: 13
 
 # Pricing
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 EdgeBase Database uses two storage backends on Cloudflare Edge:
@@ -15,29 +15,33 @@ EdgeBase Database uses two storage backends on Cloudflare Edge:
 
 There is still no per-MAU database pricing. You pay only for the Cloudflare infrastructure your block type uses.
 
+:::tip Free Plan
+You can start with Cloudflare's Free plan — no credit card required. Free includes D1 (5M reads/day, 100K writes/day, 5 GB total account storage), Durable Objects with SQLite (100K requests/day, 13K GB-s/day, 5 GB SQLite total), Workers (100K requests/day), and KV (100K reads/day). Enough for demos and small apps.
+:::
+
 ## Single-Instance DB Blocks (D1 Default)
 
-| Resource | Included (Workers Paid $5/mo) | Overage |
-|----------|-------------------------------|---------|
-| D1 row reads | 25B / month | $0.001 / million |
-| D1 row writes | 50M / month | $1.00 / million |
-| D1 storage | 5 GB-month / month | $0.75 / GB-month |
-| Workers requests | 10M / month | $0.30 / million |
-| Workers CPU | 30M ms / month | $0.02 / million ms |
+| Resource | Free Plan | Workers Paid ($5/mo) | Overage |
+|----------|-----------|-------------------------------|---------|
+| D1 row reads | 5M / day | 25B / month | $0.001 / million |
+| D1 row writes | 100K / day | 50M / month | $1.00 / million |
+| D1 storage | 5 GB total / account | First 5 GB included / account | $0.75 / GB-month |
+| Workers requests | 100K / day | 10M / month | $0.30 / million |
+| Workers CPU | 10ms / invocation | 30M ms / month | $0.02 / million ms |
 
 For a typical global `app` block, the main bill is usually **Workers requests/CPU**. D1 read allowance is extremely high, so many CRUD-heavy apps stay inside the included D1 row quota.
 
 ## Dynamic DB Blocks (Durable Objects + SQLite)
 
-| Resource | Included (Workers Paid $5/mo) | Overage |
-|----------|-------------------------------|---------|
-| DO requests | 1M / month | $0.15 / million |
-| DO duration | 400,000 GB-s / month | $12.50 / million GB-s |
-| DO row reads | 25B / month | $0.001 / million |
-| DO row writes | 50M / month | $1.00 / million |
-| DO SQL stored data | 5 GB-month / month | $0.20 / GB-month |
-| Workers requests | 10M / month | $0.30 / million |
-| Workers CPU | 30M ms / month | $0.02 / million ms |
+| Resource | Free Plan | Workers Paid ($5/mo) | Overage |
+|----------|-----------|-------------------------------|---------|
+| DO requests | 100K / day | 1M / month | $0.15 / million |
+| DO duration | 13K GB-s / day | 400,000 GB-s / month | $12.50 / million GB-s |
+| DO row reads | 5M / day | 25B / month | $0.001 / million |
+| DO row writes | 100K / day | 50M / month | $1.00 / million |
+| DO SQL stored data | 5 GB total / account | First 5 GB included / account | $0.20 / GB-month |
+| Workers requests | 100K / day | 10M / month | $0.30 / million |
+| Workers CPU | 10ms / invocation | 30M ms / month | $0.02 / million ms |
 
 Dynamic blocks cost more per hot path because each request hits both the Worker and the target Durable Object, but in return you get physically isolated storage and independent horizontal scaling per user/workspace/tenant.
 
@@ -71,5 +75,5 @@ The $5/mo Workers Paid plan is **per account, not per project**. One subscriptio
 :::
 
 :::info Pricing source
-Prices reflect Cloudflare's published rates as of February 2026. Verify against the [Cloudflare pricing page](https://developers.cloudflare.com/workers/platform/pricing/) before making decisions.
+Prices reflect Cloudflare's published rates as of March 2026. Verify against the [Cloudflare pricing page](https://developers.cloudflare.com/workers/platform/pricing/) before making decisions.
 :::

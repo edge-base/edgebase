@@ -8,7 +8,7 @@ How EdgeBase handles sign-up, sign-in, sessions, and token lifecycle — with ze
 
 ## Design Goals
 
-Traditional BaaS platforms manage sessions per user in a centralized database, leading to per-MAU pricing that scales linearly. EdgeBase stores all auth data in a single **D1 database (AUTH_DB)** — Cloudflare's serverless SQL — achieving global consistency, atomic transactions, and zero per-MAU cost.
+Traditional BaaS platforms manage sessions per user in a centralized database, leading to per-MAU pricing that scales linearly. EdgeBase stores all auth data in a single **D1 database (AUTH_DB)** — Cloudflare's serverless SQL — giving transactional SQL on the primary database and zero per-MAU cost.
 
 ## D1-First Auth Architecture
 
@@ -30,15 +30,15 @@ All auth operations go directly to D1 via `auth-d1-service.ts` (~61 exported fun
 
 | Layer | Storage | Responsibility |
 |---|---|---|
-| **AUTH_DB (D1)** | Cloudflare D1 (global) | All auth data: users, sessions, OAuth, email tokens, MFA, passkeys, public profiles, uniqueness indexes |
+| **AUTH_DB (D1)** | Cloudflare D1 | All auth data: users, sessions, OAuth, email tokens, MFA, passkeys, public profiles, uniqueness indexes |
 
 ### Why D1?
 
-- **Global consistency**: D1 Sessions API provides read-your-own-writes guarantees. A user can sign up and immediately sign in without waiting for replica propagation.
+- **Transactional writes**: D1 gives EdgeBase a simple SQL transaction model for sign-up, session issuance, and token flows.
 - **Atomic transactions**: `db.batch()` enables atomic multi-table operations (e.g., cascade delete user + sessions + OAuth accounts in one transaction).
-- **Zero DO overhead**: No Durable Object request costs. D1 is included in the Workers Paid plan (25B reads, 50M writes/month).
+- **Zero DO overhead**: No Durable Object request costs. D1 works on both Free and Paid plans; Paid raises limits to 25B reads and 50M writes/month.
 - **Simplified architecture**: No shard routing, no cross-DO coordination, no compensation transactions.
-- **Seamless scale-up**: If your platform outgrows D1 limits (10GB storage, 50M writes/month), switch the auth provider to **Neon PostgreSQL** with a single config change — zero code modifications. Storage and throughput limits are effectively removed.
+- **Seamless scale-up**: If your platform outgrows D1 limits on Workers Paid (10 GB per database, 50M writes/month), switch the auth provider to **Neon PostgreSQL** with a single config change — zero code modifications. Storage and throughput limits are effectively removed.
 
 ## Request Flow
 
@@ -97,7 +97,7 @@ Token creation inserts into `_email_tokens` with an expiration timestamp. Verifi
 
 ## D1 Consistency
 
-Auth paths use **D1 Sessions API** to ensure **read-your-own-writes** consistency. This means a user can sign up and immediately sign in without waiting for D1 replica propagation.
+Auth paths run directly against D1. By default, D1 queries execute on the primary database. If you enable D1 read replication in Cloudflare and need sequential consistency across multiple reads, use the D1 Sessions API in lower-level Worker code.
 
 ## Email Normalization
 

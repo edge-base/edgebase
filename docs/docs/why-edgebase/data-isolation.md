@@ -64,10 +64,18 @@ export default defineConfig({
         posts: {
           schema: { title: 'string', body: 'text', authorId: 'string' },
           access: {
-            read(auth, row) { return row.status === 'published' || auth?.id === row.authorId },
-            insert(auth) { return auth !== null },
-            update(auth, row) { return auth?.id === row.authorId },
-            delete(auth, row) { return auth?.role === 'admin' },
+            read(auth, row) {
+              return row.status === 'published' || auth?.id === row.authorId;
+            },
+            insert(auth) {
+              return auth !== null;
+            },
+            update(auth, row) {
+              return auth?.id === row.authorId;
+            },
+            delete(auth, row) {
+              return auth?.role === 'admin';
+            },
           },
         },
       },
@@ -78,16 +86,20 @@ export default defineConfig({
     user: {
       instance: true,
       access: {
-        canCreate(auth, id) { return auth?.id === id },   // only create your own DB
-        access(auth, id) { return auth?.id === id },      // only access your own DB
+        canCreate(auth, id) {
+          return auth?.id === id;
+        }, // only create your own DB
+        access(auth, id) {
+          return auth?.id === id;
+        }, // only access your own DB
       },
       tables: {
-        notes:    { schema: { title: 'string', body: 'text' } },
+        notes: { schema: { title: 'string', body: 'text' } },
         settings: { schema: { theme: 'string', lang: 'string' } },
       },
     },
   },
-})
+});
 ```
 
 ## DB Block Types
@@ -403,6 +415,7 @@ The namespace name in a DB block (the part before `:{id}`) is **fully customizab
 ```
 
 The only requirements are:
+
 - **Static DBs** use a plain name (e.g., `shared`, `global`, `public`)
 - **Dynamic DBs** use the `name:{id}` pattern where `{id}` is supplied by the client at runtime
 - The instance ID must not contain the `:` character (used as a delimiter internally)
@@ -411,11 +424,11 @@ The only requirements are:
 
 Every dynamic DB block supports three access callbacks:
 
-| Rule | When called | Signature |
-|---|---|---|
-| `canCreate` | First access (DO doesn't exist yet) | `(auth, id) => boolean` |
-| `access` | Every request to an existing DO | `(auth, id, ctx?) => boolean \| Promise<boolean>` |
-| `delete` | Admin DO deletion | `(auth, id) => boolean` |
+| Rule        | When called                         | Signature                                         |
+| ----------- | ----------------------------------- | ------------------------------------------------- |
+| `canCreate` | First access (DO doesn't exist yet) | `(auth, id) => boolean`                           |
+| `access`    | Every request to an existing DO     | `(auth, id, ctx?) => boolean \| Promise<boolean>` |
+| `delete`    | Admin DO deletion                   | `(auth, id) => boolean`                           |
 
 `canCreate` defaults to **deny** when undefined — you must explicitly opt in to allow new DB creation. This prevents unbounded DO creation by malicious clients.
 
@@ -426,9 +439,9 @@ Horizontal scaling is the primary architectural advantage of DB blocks. Traditio
 Since each DB instance is a separate Durable Object:
 
 | Active Instances | Writes/sec per DO | Total Writes/sec |
-|---|---|---|
-| 1,000 | 500 | 500,000 |
-| 100,000 | 500 | 50,000,000 |
+| ---------------- | ----------------- | ---------------- |
+| 1,000            | 500               | 500,000          |
+| 100,000          | 500               | 50,000,000       |
 
 No shared locks, no connection pooling, no contention. Each instance handles only its own data.
 
@@ -460,24 +473,24 @@ EdgeBase:
 
 ### Why Not Just RLS?
 
-| Aspect | RLS (Logical) | DB Block (Physical) |
-|---|---|---|
-| Isolation level | Query filter | Separate process + storage |
-| SQL injection risk | Exposes all tenants | Only one tenant accessible |
-| Noisy neighbor | Shared DB = shared performance | Independent performance |
-| Data deletion | Multi-table DELETE | Delete the DO |
-| GDPR proof | Must audit query paths | Structural guarantee |
-| Complexity | Developer must write RLS rules | Explicit `access()` function |
+| Aspect             | RLS (Logical)                  | DB Block (Physical)          |
+| ------------------ | ------------------------------ | ---------------------------- |
+| Isolation level    | Query filter                   | Separate process + storage   |
+| SQL injection risk | Exposes all tenants            | Only one tenant accessible   |
+| Noisy neighbor     | Shared DB = shared performance | Independent performance      |
+| Data deletion      | Multi-table DELETE             | Delete the DO                |
+| GDPR proof         | Must audit query paths         | Structural guarantee         |
+| Complexity         | Developer must write RLS rules | Explicit `access()` function |
 
 ### When to Use Single-Instance vs Dynamic Blocks
 
-| Data type | Recommended type | Example name |
-|---|---|---|
-| Global data (announcements, leaderboard) | Single-instance | `app`, `catalog`, `public` |
-| Personal data (notes, settings, feeds) | Dynamic (per-user) | `user`, `profile`, `account` |
-| Team/workspace data | Dynamic (per-team) | `workspace`, `team`, `org` |
-| Enterprise tenant data | Dynamic (per-tenant) | `tenant`, `company`, `client` |
-| Cross-tenant analytics | Single-instance with `provider: 'postgres'`, or App Functions to aggregate across DOs | `analytics` |
+| Data type                                | Recommended type                                                                      | Example name                  |
+| ---------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------- |
+| Global data (announcements, leaderboard) | Single-instance                                                                       | `app`, `catalog`, `public`    |
+| Personal data (notes, settings, feeds)   | Dynamic (per-user)                                                                    | `user`, `profile`, `account`  |
+| Team/workspace data                      | Dynamic (per-team)                                                                    | `workspace`, `team`, `org`    |
+| Enterprise tenant data                   | Dynamic (per-tenant)                                                                  | `tenant`, `company`, `client` |
+| Cross-tenant analytics                   | Single-instance with `provider: 'postgres'`, or App Functions to aggregate across DOs | `analytics`                   |
 
 Remember: the names in the "Example name" column are just suggestions — pick whatever describes your data best.
 

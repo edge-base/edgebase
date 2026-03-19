@@ -4,10 +4,27 @@ build-backend = "hatchling.build"
 
 [project]
 name = "edgebase-core"
-version = "0.1.3"
-description = "EdgeBase Core SDK — shared types, HTTP client, table, storage."
-requires-python = ">=3.9"
+version = "0.1.4"
+description = "Shared Python core for EdgeBase table, storage, and HTTP primitives"
+readme = "README.md"
+requires-python = ">=3.10"
 license = "MIT"
+authors = [
+    { name = "EdgeBase Team" }
+]
+dependencies = ["httpx>=0.27"]
+
+[project.urls]
+Homepage = "https://github.com/edge-base/edgebase/tree/main/packages/sdk/python/packages/core"
+Repository = "https://github.com/edge-base/edgebase/tree/main/packages/sdk/python/packages/core"
+Documentation = "https://edgebase.fun/docs/database/client-sdk"
+Issues = "https://github.com/edge-base/edgebase/issues"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/edgebase_core", "README.md", "llms.txt"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/edgebase_core"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"llms.txt" = "edgebase_core/llms.txt"

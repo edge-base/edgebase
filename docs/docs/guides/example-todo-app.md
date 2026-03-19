@@ -23,7 +23,7 @@ npm create edgebase@latest todo-app
 cd todo-app
 ```
 
-The dev server starts automatically and the Admin Dashboard opens at `http://localhost:8787/admin`.
+The dev server starts automatically. Open the Admin Dashboard at `http://localhost:8787/admin`.
 
 ## 2. Define the Schema
 

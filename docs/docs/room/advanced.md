@@ -6,8 +6,8 @@ description: State persistence, serverState, reconnect handling, security model,
 
 # Advanced
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 This page covers operational topics: state persistence, the serverState area, reconnect behaviour, security model, cost structure, and limitations.

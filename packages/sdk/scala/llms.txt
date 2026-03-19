@@ -1,0 +1,113 @@
+# EdgeBase Scala SDK
+
+Use this file as a quick-reference contract for AI coding assistants working with the
+public Scala SDK packages in this directory.
+
+## Package Boundary
+
+Use the Scala SDK only in trusted JVM-side code.
+
+The `:packages:core` module provides Scala wrappers for the shared runtime, while
+the `:packages:admin` module exposes the trusted admin SDK for backend code.
+
+## Source Of Truth
+
+- Root README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/scala/README.md
+- Admin README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/scala/packages/admin/README.md
+- SDK Overview: https://edgebase.fun/docs/sdks
+- Admin SDK: https://edgebase.fun/docs/sdks/client-vs-server
+- Admin Users: https://edgebase.fun/docs/authentication/admin-users
+- Database Admin SDK: https://edgebase.fun/docs/database/admin-sdk
+- Push Admin SDK: https://edgebase.fun/docs/push/admin-sdk
+- Analytics Admin SDK: https://edgebase.fun/docs/analytics/admin-sdk
+- Admin SDK Reference: https://edgebase.fun/docs/admin-sdk/reference
+
+## Public Artifacts
+
+- JitPack group: `com.github.edge-base.edgebase`
+- tags are versioned with the leading `v`, for example `v0.1.4`
+- `com.github.edge-base.edgebase:edgebase-core-scala:v0.1.4`
+- `com.github.edge-base.edgebase:edgebase-admin-scala:v0.1.4`
+- do not recommend the root `edgebase-scala` artifact for public installs
+
+## Canonical Examples
+
+### Create an admin client
+
+```scala
+import dev.edgebase.sdk.scala.admin._
+
+val admin = EdgeBase.admin(
+  "https://your-project.edgebase.fun",
+  System.getenv("EDGEBASE_SERVICE_KEY")
+)
+```
+
+### Query a table
+
+```scala
+val posts = admin
+  .db("app")
+  .table("posts")
+  .getList()
+```
+
+### Manage users
+
+```scala
+val created = admin.adminAuth.createUser(Map(
+  "email" -> "june@example.com",
+  "password" -> "pass1234",
+  "displayName" -> "June"
+))
+```
+
+### Execute SQL
+
+```scala
+val rows = admin.sql(
+  "workspace",
+  "ws-1",
+  "SELECT * FROM documents WHERE status = ?",
+  Seq("published")
+)
+```
+
+## Hard Rules
+
+- keep Service Keys on trusted servers only
+- use `admin.adminAuth` for auth, with `admin.auth` as a compatibility alias
+- `db(namespace, instanceId)` is the canonical instance-id form
+- `sql(query)` defaults to the shared namespace, while the overloaded forms support namespace and instance id
+- `broadcast(channel, event, payload?)` is server-side only
+- `edgebase-core-scala` is the Scala wrapper package for the shared runtime
+
+## Common Mistakes
+
+- do not use `edgebase-admin-scala` in browser bundles
+- do not write Java-style method chains when Scala property access is available
+- do not ignore the `admin.auth` alias if existing Scala code already uses it
+- do not expose the Service Key through untrusted clients
+
+## Quick Reference
+
+```text
+EdgeBase.admin(url, serviceKey, projectId?)          -> AdminEdgeBase
+AdminEdgeBase(url, serviceKey, projectId?)           -> AdminEdgeBase
+admin.adminAuth                                      -> AdminAuthClient
+admin.auth                                           -> AdminAuthClient
+admin.storage                                        -> StorageClient
+admin.functions()                                    -> FunctionsClient
+admin.analytics                                      -> AnalyticsClient
+admin.push()                                         -> PushClient
+admin.db(namespace, instanceId?)                     -> DbRef
+admin.sql(query)                                     -> List[Any]
+admin.sql(namespace, query)                          -> List[Any]
+admin.sql(namespace, instanceId, query)              -> List[Any]
+admin.sql(namespace, instanceId, query, params)      -> List[Any]
+admin.broadcast(channel, event, payload?)            -> Unit
+admin.setContext(context)                            -> Unit
+admin.context                                       -> Map[String, Any]
+admin.getContext()                                   -> Map[String, Any]
+admin.destroy()                                     -> Unit
+```

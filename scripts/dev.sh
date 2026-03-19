@@ -108,7 +108,7 @@ trap cleanup EXIT INT TERM
 EDGEBASE_ADMIN_PORT="$ADMIN_PORT" EDGEBASE_SERVER_PORT="$SERVER_PORT" pnpm --filter @edge-base/dashboard run dev &
 DASH_PID=$!
 
-pnpm exec tsx packages/cli/src/index.ts dev --port "$SERVER_PORT" --no-open &
+pnpm exec tsx packages/cli/src/index.ts dev --port "$SERVER_PORT" &
 SERVER_PID=$!
 
 wait "$SERVER_PID"

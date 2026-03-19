@@ -7,8 +7,8 @@ description: Room server configuration — action handlers, lifecycle hooks, sta
 
 # Server Guide
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 All Room settings are defined in `edgebase.config.ts` under the `rooms` key. Each key is a **namespace** (e.g. `'game'`, `'lobby'`), and clients connect with `client.room(namespace, roomId)`.

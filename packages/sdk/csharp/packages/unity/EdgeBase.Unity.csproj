@@ -6,13 +6,20 @@
     <Nullable>enable</Nullable>
     <LangVersion>10.0</LangVersion>
     <PackageId>dev.edgebase.unity</PackageId>
-    <Version>0.1.0</Version>
-    <Description>EdgeBase Unity Client SDK</Description>
+    <Version>0.1.4</Version>
+    <Description>EdgeBase Unity client SDK for .NET Standard 2.1 - auth, database, realtime, rooms, storage, functions, analytics, and push</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://edgebase.fun/docs/database/client-sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/edge-base/edgebase</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../core/EdgeBase.Core.csproj" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="llms.txt" Pack="true" PackagePath="" />
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="tests/**" />

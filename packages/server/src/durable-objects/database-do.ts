@@ -2136,14 +2136,19 @@ export class DatabaseDO extends DurableObject<DOEnv> {
     return null;
   }
 
-  /** Ensure a table exists in this DO (throw if not). */
+  /** Ensure a table exists in this DO, lazily creating it from config if needed. */
   private ensureTableExists(name: string): void {
-    // We rely on the schema init having already created the table
     const tables = [
       ...this.sql(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, name),
     ];
     if (tables.length === 0) {
-      throw notFoundError(`Table "${name}" not found in this DO.`);
+      // Table doesn't exist yet — try to create it lazily from config
+      const config = this.getTableConfig(name);
+      if (config) {
+        this.initTable(name, config);
+      } else {
+        throw notFoundError(`Table "${name}" not found in this DO.`);
+      }
     }
   }
 

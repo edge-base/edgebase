@@ -64,7 +64,7 @@ You can find it:
 Use it when you want an agent to:
 
 - choose the correct bootstrap command
-- understand the `--no-dev` and `--no-open` flags
+- understand the `--no-dev` and `--open` flags
 - scaffold EdgeBase into an existing repo safely
 - avoid confusing `create-edgebase` with the runtime CLI package
 
@@ -93,10 +93,10 @@ That layout is recommended, not required. You can still keep EdgeBase in a separ
 npm create edgebase@latest my-app -- --no-dev
 ```
 
-### Prevent the browser from opening during `dev`
+### Open the browser when `dev` starts
 
 ```bash
-npm create edgebase@latest my-app -- --no-open
+npm create edgebase@latest my-app -- --open
 ```
 
 ### Skip dependency install in automation

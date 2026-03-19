@@ -1,30 +1,36 @@
-# EdgeBase Kotlin Multiplatform SDK
+# EdgeBase Kotlin SDK
 
-Kotlin Multiplatform (KMP) SDK for EdgeBase — Backend as a Service.
+Kotlin SDK for EdgeBase. The source modules in this directory are Kotlin
+Multiplatform, while the current public JitPack path publishes JVM-ready artifacts
+for `:core`, `:client`, and `:admin`.
 
-**Supported targets:** Android, iOS, JS (Browser), JVM (Desktop)
+**Supported targets:** Android, iOS, JS (browser), JVM (desktop/server)
 
 ## Modules
 
 | Module | Artifact | Targets |
-|--------|----------|---------|
-| `:core` | `dev.edgebase:edgebase-core` | All (shared types, Ktor HTTP/WebSocket) |
-| `:client` | `dev.edgebase:edgebase-client` | Android, iOS, JS, JVM |
-| `:admin` | `dev.edgebase:edgebase-admin` | JVM only |
+| --- | --- | --- |
+| `:core` | `com.github.edge-base.edgebase:edgebase-core:v0.1.4` | current JitPack route publishes the JVM variant of the shared runtime |
+| `:client` | `com.github.edge-base.edgebase:edgebase-client:v0.1.4` | current JitPack route publishes the JVM variant of the client runtime |
+| `:admin` | `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.1.4` | JVM only |
+
+If you build from the monorepo directly, depend on the Gradle modules under
+`packages/sdk/kotlin`. That path remains the way to consume the full Android, iOS,
+and JS source modules until the public multiplatform publication flow is finished.
 
 ## Installation
 
 ### Gradle (Kotlin DSL)
 
 ```kotlin
-// Client SDK (Android, iOS, JS, JVM)
-dependencies {
-    implementation("dev.edgebase:edgebase-client:0.2.0")
+repositories {
+    maven("https://jitpack.io")
 }
 
-// Admin SDK (JVM only)
 dependencies {
-    implementation("dev.edgebase:edgebase-admin:0.2.0")
+    implementation("com.github.edge-base.edgebase:edgebase-core:v0.1.4")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.1.4")
+    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.1.4")
 }
 ```
 
@@ -67,6 +73,12 @@ client.destroy()
 - **Analytics**: `client.analytics.track(...)`
 - **DatabaseLive**: WebSocket (Ktor), Presence channels, Broadcast channels
 - **Admin**: Service Key-based user management (JVM only)
+
+## Publication Notes
+
+- JitPack versions use the repository tag, for example `v0.1.4`
+- the public JitPack route validates the JVM publications of `:core` and `:client`
+- the umbrella root artifact `edgebase-kotlin` is intentionally excluded from public installs
 
 ## Requirements
 

@@ -40,6 +40,16 @@ List response:
 { "keys": ["user:1", "user:2"], "cursor": null }
 ```
 
+Delete request:
+```json
+{ "action": "delete", "key": "user:123" }
+```
+
+**Notes**
+
+- KV is eventually consistent and writes to the same key are limited to 1 per second.
+- `ttl` uses KV expiration TTL semantics, so values less than 60 seconds are not supported by Cloudflare KV.
+
 ---
 
 ## D1
@@ -58,6 +68,11 @@ Execute SQL on a user-defined D1 database. The database must be declared in `con
 **Request example:**
 ```json
 { "query": "SELECT * FROM events WHERE type = ? LIMIT 10", "params": ["click"] }
+```
+
+Delete example:
+```json
+{ "query": "DELETE FROM events WHERE created_at < ?", "params": ["2025-01-01"] }
 ```
 
 **Response** `200`:
@@ -80,10 +95,10 @@ Action-based operations on a user-defined Vectorize index. The index must be dec
 
 | Action | Body Fields | Description |
 |---|---|---|
-| `upsert` | `vectors` (array of `{id, values, metadata?}`), `namespace?` | Insert or update vectors |
-| `insert` | `vectors` (array of `{id, values, metadata?}`), `namespace?` | Insert vectors; returns `409` on duplicate ID |
+| `upsert` | `vectors` (array of `{id, values, metadata?}`), `namespace?` | Insert or replace vectors |
+| `insert` | `vectors` (array of `{id, values, metadata?}`), `namespace?` | Insert only new vector IDs |
 | `search` | `vector`, `topK?`, `filter?`, `namespace?`, `returnValues?`, `returnMetadata?` | Similarity search by vector values |
-| `queryById` | `vectorId`, `topK?`, `filter?`, `namespace?`, `returnValues?`, `returnMetadata?` | Similarity search using an existing vector's ID (Vectorize v2 only) |
+| `queryById` | `vectorId`, `topK?`, `filter?`, `namespace?`, `returnValues?`, `returnMetadata?` | Similarity search using an existing vector's ID |
 | `getByIds` | `ids` (string array) | Retrieve vectors by ID |
 | `delete` | `ids` (string array) | Delete vectors by ID |
 | `describe` | *(none)* | Get index info: `vectorCount`, `dimensions`, `metric` |
@@ -98,6 +113,11 @@ Action-based operations on a user-defined Vectorize index. The index must be dec
 { "action": "describe" }
 ```
 
+Delete example:
+```json
+{ "action": "delete", "ids": ["doc-1", "doc-2"] }
+```
+
 **Response** `200`:
 ```json
 {
@@ -106,3 +126,10 @@ Action-based operations on a user-defined Vectorize index. The index must be dec
   "metric": "cosine"
 }
 ```
+
+**Notes**
+
+- Cloudflare Vectorize mutations are asynchronous. `insert`, `upsert`, and `delete` may take a few seconds to appear in queries.
+- Namespace filtering works by default. Filtering on other metadata properties requires metadata indexes in Vectorize.
+- Vectors written before a metadata index exists must be re-upserted before that property becomes filterable.
+- EdgeBase may return a `409` if the underlying `insert` operation surfaces a conflict, but native Cloudflare Vectorize itself treats `insert` as “new IDs only”.

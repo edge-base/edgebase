@@ -2,8 +2,8 @@ plugins {
     id 'java-library'
     id 'maven-publish'
 }
-group = 'dev.edgebase'
-version = '0.1.0'
+group = rootProject.group
+version = rootProject.version
 java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 tasks.jar {
     archiveBaseName = 'edgebase-android-java'
@@ -40,7 +40,7 @@ publishing {
     publications {
         maven(MavenPublication) {
             from components.java
-            groupId = 'dev.edgebase'
+            groupId = project.group.toString()
             artifactId = 'edgebase-android-java'
             pom {
                 licenses {

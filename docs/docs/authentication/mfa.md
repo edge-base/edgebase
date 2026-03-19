@@ -7,8 +7,8 @@ import TabItem from '@theme/TabItem';
 
 # Multi-Factor Authentication (MFA)
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Add an extra layer of security with TOTP-based multi-factor authentication. Users enroll using any authenticator app (Google Authenticator, Authy, 1Password, etc.).

@@ -9,8 +9,8 @@ import DocCardList from '@theme/DocCardList';
 
 # OAuth
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Sign in with third-party providers. EdgeBase supports 14 OAuth providers out of the box.

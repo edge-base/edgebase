@@ -52,14 +52,14 @@ I built EdgeBase to keep the simplicity that made those tools compelling while r
 
 ### Why Can It Be Much Cheaper?
 
-| Component | Firebase | Supabase | Appwrite | **EdgeBase** |
-|---|---|---|---|---|
-| Auth (1M MAU) | $4,415 | $2,925 | $2,400 | **$0** |
-| Egress (100 TB) | $12,000 | $8,978 | $14,700 | **$0** |
-| DB Subscriptions (900M msg) | $5,400 | $2,263 | $630 | **$0** |
-| DB + Compute + Storage | $233 | $131 | $136 | $149 |
-| **Total** | **$22,048/mo** | **$14,297/mo** | **$17,866/mo** | **~$149/mo** |
-| **vs EdgeBase** | **148x more** | **96x more** | **120x more** | **—** |
+| Component                   | Firebase       | Supabase       | Appwrite       | **EdgeBase** |
+| --------------------------- | -------------- | -------------- | -------------- | ------------ |
+| Auth (1M MAU)               | $4,415         | $2,925         | $2,400         | **$0**       |
+| Egress (100 TB)             | $12,000        | $8,978         | $14,700        | **$0**       |
+| DB Subscriptions (900M msg) | $5,400         | $2,263         | $630           | **$0**       |
+| DB + Compute + Storage      | $233           | $131           | $136           | $149         |
+| **Total**                   | **$22,048/mo** | **$14,297/mo** | **$17,866/mo** | **~$149/mo** |
+| **vs EdgeBase**             | **148x more**  | **96x more**   | **120x more**  | **—**        |
 
 > Self-hosted (Docker): **VPS cost only**.
 
@@ -93,71 +93,12 @@ How is $0 possible? These aren't discounts — the infrastructure that generates
 
 "Runs on the edge" alone is marketing. What matters is **what actually completes at the edge** — see [Architecture](#architecture) below. Auth, DB reads, and file serves resolve locally at 300+ locations. Only writes and realtime need a single hop. Cold starts are ~0ms (V8 isolates, not containers).
 
-| | Firebase | Supabase | Appwrite | **EdgeBase** |
-|---|:---:|:---:|:---:|:---:|
-| **Cold start** | Seconds (Cloud Functions) | ~1s (Edge Functions) | ~1s (Docker) | **~0ms (global edge)** |
-| **Edge locations** | Single region | Single region | Single region | **300+ cities** |
+|                    |         Firebase          |       Supabase       |   Appwrite    |      **EdgeBase**      |
+| ------------------ | :-----------------------: | :------------------: | :-----------: | :--------------------: |
+| **Cold start**     | Seconds (Cloud Functions) | ~1s (Edge Functions) | ~1s (Docker)  | **~0ms (global edge)** |
+| **Edge locations** |       Single region       |    Single region     | Single region |    **300+ cities**     |
 
----
-
-## Architecture
-
-```
-[Client] → [Edge Worker — 300+ locations]
-               │
-               ├── Auth (JWT verify)           ← resolved here, no hop
-               ├── DB read (D1 replica)        ← resolved here, no hop
-               ├── File serve (R2)             ← resolved here, no hop
-               │
-               ├── DB write ──→ [D1 primary]          ← single hop
-               ├── Realtime ──→ [Durable Object]      ← single hop
-               └── Instance DB ──→ [DO + SQLite]      ← single hop
-
-Most requests never leave the edge.
-```
-
-<details>
-<summary><b>Component stack</b></summary>
-
-```
-EdgeBase Runtime (workerd)
-Cloud Edge / Docker / Node.js
-
-+-----------+         +------------------------+
-| Worker    | ------> | Durable Objects        |
-| (Hono)    |         | Database DO (SQLite)   |
-| REST API  |         | DB Live DO (WebSocket) |
-| Auth MW   |         | Room DO (Multiplayer)  |
-| Rules     |         +------------------------+
-+-----------+
-
-+-----------+  Users, sessions, OAuth, MFA, passkeys, admin data
-| AUTH_DB   |
-|   (D1)   |
-+-----------+  File storage, $0 egress
-| R2        |
-+-----------+  User-defined KV & D1
-| KV / D1   |
-+-----------+  Vector search (Edge only)
-| Vectorize |
-+-----------+
-```
-
-</details>
-
-Built on [workerd](https://github.com/cloudflare/workerd), Cloudflare's open-source JavaScript runtime. No vendor lock-in — the same runtime powers Edge, Docker, and local dev modes.
-
-| Layer | How It Scales |
-|---|---|
-| **Worker** | Stateless V8 isolates at 300+ edge locations — auth, reads, and file serves resolve locally |
-| **Database** | Each DB block gets its own instance — `posts` and `comments` never compete for the same thread |
-| **Multi-tenant** | `instance: true` → 1,000 workspaces = 1,000 independent SQLite instances |
-| **Auth** | `AUTH_DB` (D1) stores users, sessions, OAuth, MFA, passkeys, and admin data |
-| **DB Subscriptions** | Channel-per-DO + WebSocket Hibernation — idle connections cost $0 memory |
-
----
-
-## Why unlimited scaling?
+### Why Unlimited Scaling?
 
 Every BaaS hits a ceiling. When it does, you "graduate" — rewrite to a custom stack. EdgeBase is designed so that graduation never happens. Instead of funneling all traffic through a single database, it scales two ways:
 
@@ -252,6 +193,67 @@ app: {
 },
 ```
 
+### Why It Also Fits AI Coding
+
+EdgeBase was also designed so the backend contract can live mostly in code, not in dashboard state. Schema, access rules, hooks, functions, and type generation stay in one repo and one TypeScript workflow, so an agent can update the backend in one patch instead of sending you back to a console to recreate part of the same change by hand.
+
+---
+
+## Architecture
+
+```
+[Client] → [Edge Worker — 300+ locations]
+               │
+               ├── Auth (JWT verify)           ← resolved here, no hop
+               ├── DB read (D1 replica)        ← resolved here, no hop
+               ├── File serve (R2)             ← resolved here, no hop
+               │
+               ├── DB write ──→ [D1 primary]          ← single hop
+               ├── Realtime ──→ [Durable Object]      ← single hop
+               └── Instance DB ──→ [DO + SQLite]      ← single hop
+
+Most requests never leave the edge.
+```
+
+<details>
+<summary><b>Component stack</b></summary>
+
+```
+EdgeBase Runtime (workerd)
+Cloud Edge / Docker / Node.js
+
++-----------+         +------------------------+
+| Worker    | ------> | Durable Objects        |
+| (Hono)    |         | Database DO (SQLite)   |
+| REST API  |         | DB Live DO (WebSocket) |
+| Auth MW   |         | Room DO (Multiplayer)  |
+| Rules     |         +------------------------+
++-----------+
+
++-----------+  Users, sessions, OAuth, MFA, passkeys, admin data
+| AUTH_DB   |
+|   (D1)   |
++-----------+  File storage, $0 egress
+| R2        |
++-----------+  User-defined KV & D1
+| KV / D1   |
++-----------+  Vector search (Edge only)
+| Vectorize |
++-----------+
+```
+
+</details>
+
+Built on [workerd](https://github.com/cloudflare/workerd), Cloudflare's open-source JavaScript runtime. No vendor lock-in — the same runtime powers Edge, Docker, and local dev modes.
+
+| Layer                | How It Scales                                                                                  |
+| -------------------- | ---------------------------------------------------------------------------------------------- |
+| **Worker**           | Stateless V8 isolates at 300+ edge locations — auth, reads, and file serves resolve locally    |
+| **Database**         | Each DB block gets its own instance — `posts` and `comments` never compete for the same thread |
+| **Multi-tenant**     | `instance: true` → 1,000 workspaces = 1,000 independent SQLite instances                       |
+| **Auth**             | `AUTH_DB` (D1) stores users, sessions, OAuth, MFA, passkeys, and admin data                    |
+| **DB Subscriptions** | Channel-per-DO + WebSocket Hibernation — idle connections cost $0 memory                       |
+
 ---
 
 ## Code Examples
@@ -276,9 +278,12 @@ const posts = await client
   .getList();
 
 // Database Subscriptions (live)
-client.db('app').table('posts').onSnapshot((result) => {
-  console.log(result.items);
-});
+client
+  .db('app')
+  .table('posts')
+  .onSnapshot((result) => {
+    console.log(result.items);
+  });
 
 // Storage
 await client.storage.bucket('avatars').upload('photo.png', file);
@@ -389,26 +394,26 @@ client.db("app").table("posts").onSnapshot(result -> {
 
 ## At a Glance
 
-| | Firebase | Supabase | PocketBase | **EdgeBase** |
-|---|:---:|:---:|:---:|:---:|
-| **Deploy** | Managed | Managed / Self-host | Self-host | **Edge / Docker / Node** |
-| **Cold start** | Seconds | ~1s | ~0ms | **~0ms** |
-| **Database** | Firestore (NoSQL) | PostgreSQL | SQLite | **SQLite + PostgreSQL** |
-| **Auth cost** (1M MAU) | $4,415 | $2,925 | Free | **Free** |
-| **Egress** | $0.12/GB | $0.09/GB | Server cost | **$0** |
-| **DB Subscriptions** | WebSocket | WebSocket | SSE | **WebSocket** |
-| **Server functions** | Cloud Functions | Edge Functions | --- | **Built-in** |
-| **Full-text search** | --- | pg_trgm | --- | **FTS5** |
-| **Multi-tenancy** | Manual | RLS | Manual | **`instance: true`** |
-| **Self-host** | --- | Docker Compose | Binary | **3 modes** |
-| **Data portability** | --- | pg_dump (manual) | File copy (same env) | **CLI cross-env migration** |
-| **Admin UI** | Console | Studio | Built-in | **Built-in** |
-| **License** | Proprietary | Apache-2.0 | MIT | **MIT** |
-| **KV / D1 / Vector DB** | --- | pgvector | --- | **Native** |
-| **Multiplayer Room** | --- | --- | --- | **Built-in** |
-| **Push Notifications** | FCM only | --- | --- | **Built-in** |
-| **CAPTCHA** | --- | --- | --- | **`captcha: true`** |
-| **Rate limiting** | Manual | Manual | --- | **Built-in (3-layer)** |
+|                         |     Firebase      |      Supabase       |      PocketBase      |        **EdgeBase**         |
+| ----------------------- | :---------------: | :-----------------: | :------------------: | :-------------------------: |
+| **Deploy**              |      Managed      | Managed / Self-host |      Self-host       |  **Edge / Docker / Node**   |
+| **Cold start**          |      Seconds      |         ~1s         |         ~0ms         |          **~0ms**           |
+| **Database**            | Firestore (NoSQL) |     PostgreSQL      |        SQLite        |   **SQLite + PostgreSQL**   |
+| **Auth cost** (1M MAU)  |      $4,415       |       $2,925        |         Free         |          **Free**           |
+| **Egress**              |     $0.12/GB      |      $0.09/GB       |     Server cost      |           **$0**            |
+| **DB Subscriptions**    |     WebSocket     |      WebSocket      |         SSE          |        **WebSocket**        |
+| **Server functions**    |  Cloud Functions  |   Edge Functions    |         ---          |        **Built-in**         |
+| **Full-text search**    |        ---        |       pg_trgm       |         ---          |          **FTS5**           |
+| **Multi-tenancy**       |      Manual       |         RLS         |        Manual        |    **`instance: true`**     |
+| **Self-host**           |        ---        |   Docker Compose    |        Binary        |         **3 modes**         |
+| **Data portability**    |        ---        |  pg_dump (manual)   | File copy (same env) | **CLI cross-env migration** |
+| **Admin UI**            |      Console      |       Studio        |       Built-in       |        **Built-in**         |
+| **License**             |    Proprietary    |     Apache-2.0      |         MIT          |           **MIT**           |
+| **KV / D1 / Vector DB** |        ---        |      pgvector       |         ---          |         **Native**          |
+| **Multiplayer Room**    |        ---        |         ---         |         ---          |        **Built-in**         |
+| **Push Notifications**  |     FCM only      |         ---         |         ---          |        **Built-in**         |
+| **CAPTCHA**             |        ---        |         ---         |         ---          |     **`captcha: true`**     |
+| **Rate limiting**       |      Manual       |       Manual        |         ---          |   **Built-in (3-layer)**    |
 
 ---
 
@@ -427,7 +432,7 @@ Deep dives: [Database](https://edgebase.fun/docs/database) · [Authentication](h
 - **Admin UI** — Built-in dashboard at `/admin`
 - **KV / D1 / Vectorize** — Direct access to Cloudflare native resources
 - **Portable Backup** — CLI cross-environment migration (Edge ↔ Docker ↔ Node.js)
-- **Room** — Server-authoritative multiplayer state, metadata, members, signals, and media in one live session primitive
+- **Room** — Server-authoritative multiplayer state (shared game/app state), metadata (lobby/session info), members (presence), signals (events/pub-sub), and realtime media (voice/video, WebRTC/SFU) in one live session primitive
 - **Push Notifications** — FCM with individual, topic-based, and multicast messaging
 - **Environments** — Strictly isolated `dev` and `release` modes
 - **Plugins** — Build-time plugin system for seamless integration of external logic (Stripe, Image Resizing, etc.)
@@ -437,23 +442,23 @@ Deep dives: [Database](https://edgebase.fun/docs/database) · [Authentication](h
 <details>
 <summary><b>SDKs — 30+ packages across 14 languages</b></summary>
 
-| Language / Platform | Client | Admin |
-|---|:---:|:---:|
-| **JavaScript / TypeScript** | Yes | Yes |
-| **React Native** | Yes | — |
-| **Dart / Flutter** | Yes | Yes |
-| **Swift (iOS)** | Yes | — |
-| **Kotlin (KMP / Android)** | Yes | Yes |
-| **Java (Android)** | Yes | Yes |
-| **C# / Unity** | Yes | Yes |
-| **C++ / Unreal** | Yes | — |
-| **Python** | — | Yes |
-| **Go** | — | Yes |
-| **PHP** | — | Yes |
-| **Rust** | — | Yes |
-| **Ruby** | — | Yes |
-| **Scala** | — | Yes |
-| **Elixir** | — | Yes |
+| Language / Platform         | Client | Admin |
+| --------------------------- | :----: | :---: |
+| **JavaScript / TypeScript** |  Yes   |  Yes  |
+| **React Native**            |  Yes   |   —   |
+| **Dart / Flutter**          |  Yes   |  Yes  |
+| **Swift (iOS)**             |  Yes   |   —   |
+| **Kotlin (KMP / Android)**  |  Yes   |  Yes  |
+| **Java (Android)**          |  Yes   |  Yes  |
+| **C# / Unity**              |  Yes   |  Yes  |
+| **C++ / Unreal**            |  Yes   |   —   |
+| **Python**                  |   —    |  Yes  |
+| **Go**                      |   —    |  Yes  |
+| **PHP**                     |   —    |  Yes  |
+| **Rust**                    |   —    |  Yes  |
+| **Ruby**                    |   —    |  Yes  |
+| **Scala**                   |   —    |  Yes  |
+| **Elixir**                  |   —    |  Yes  |
 
 All SDKs are auto-generated from the same OpenAPI spec. [Browse all SDKs](https://edgebase.fun/docs/sdks) · [Architecture](https://edgebase.fun/docs/sdks/architecture)
 
@@ -468,6 +473,7 @@ All SDKs are auto-generated from the same OpenAPI spec. [Browse all SDKs](https:
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Use [Issues](https://github.com/edge-base/edgebase/issues) for bug reports and actionable feature requests, and [Discussions](https://github.com/edge-base/edgebase/discussions) for questions, ideas, use cases, and broader conversations.
 
 ## Security
 

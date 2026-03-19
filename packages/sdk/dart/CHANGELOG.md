@@ -1,3 +1,8 @@
+## 0.1.4
+
+- Synced SDK package versions and public install references for the 0.1.4 release
+- Refreshed release metadata across the Dart workspace packages
+
 ## 0.1.2
 
 - Added `edgebase_core`, `edgebase_admin`, and `edgebase_flutter` package documentation

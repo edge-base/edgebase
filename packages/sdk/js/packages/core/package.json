@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/core",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "EdgeBase core SDK — platform-agnostic client for auth, database, storage, and functions",
     "license": "MIT",
     "repository": {
@@ -8,7 +8,7 @@
         "url": "https://github.com/edge-base/edgebase.git",
         "directory": "packages/sdk/js/packages/core"
     },
-    "homepage": "https://edgebase.fun",
+    "homepage": "https://github.com/edge-base/edgebase/tree/main/packages/sdk/js/packages/core",
     "bugs": "https://github.com/edge-base/edgebase/issues",
     "keywords": [
         "edgebase",
@@ -28,7 +28,8 @@
     },
     "sideEffects": false,
     "files": [
-        "dist"
+        "dist",
+        "llms.txt"
     ],
     "publishConfig": {
         "access": "public"

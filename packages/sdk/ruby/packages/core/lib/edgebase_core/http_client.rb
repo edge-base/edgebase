@@ -139,12 +139,16 @@ module EdgebaseCore
 
     def auth_headers
       headers = { "Content-Type" => "application/json", "Connection" => "close" }
-      if @bearer_token
-        headers["Authorization"] = "Bearer #{@bearer_token}"
-      end
-      if @service_key
-        headers["X-EdgeBase-Service-Key"] = @service_key
-        headers["Authorization"] = "Bearer #{@service_key}"
+      begin
+        if @bearer_token
+          headers["Authorization"] = "Bearer #{@bearer_token}"
+        end
+        if @service_key
+          headers["X-EdgeBase-Service-Key"] = @service_key
+          headers["Authorization"] = "Bearer #{@service_key}"
+        end
+      rescue StandardError
+        # Token refresh failed — proceed as unauthenticated
       end
       headers
     end

@@ -85,12 +85,12 @@ describe('CLI: init command', () => {
     }
   });
 
-  it('should chdir to project dir and call devCommand (dashboard opens by default)', async () => {
+  it('should chdir to project dir and call devCommand without opening the dashboard by default', async () => {
     const { initCommand } = await import('../src/commands/init.js');
 
     await initCommand.parseAsync([testDir], { from: 'user' });
 
-    // devCommand opens dashboard by default (--no-open to disable)
+    // devCommand keeps the dashboard closed by default.
     expect(mockParseAsync).toHaveBeenCalledWith([], { from: 'user' });
 
     // Verify process.chdir was called (CWD should now be testDir)
@@ -165,12 +165,12 @@ describe('CLI: init command', () => {
     expect(gitignore.match(/^dist\/$/gm)).toHaveLength(1);
   });
 
-  it('should forward --no-open to dev when auto-starting', async () => {
+  it('should forward --open to dev when auto-starting', async () => {
     const { initCommand } = await import('../src/commands/init.js');
 
-    await initCommand.parseAsync([testDir, '--no-open'], { from: 'user' });
+    await initCommand.parseAsync([testDir, '--open'], { from: 'user' });
 
-    expect(mockParseAsync).toHaveBeenCalledWith(['--no-open'], { from: 'user' });
+    expect(mockParseAsync).toHaveBeenCalledWith(['--open'], { from: 'user' });
   });
 
   it('should import the generated rate limit defaults from config/rate-limits.ts', async () => {

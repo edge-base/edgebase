@@ -134,10 +134,33 @@ function toProvisionAuthError(error: unknown, tokenSource: 'env' | 'wrangler_oau
     return new Error('Cloudflare Realtime provisioning failed for an unknown reason.');
   }
 
+  const msg = error.message.toLowerCase();
+
+  // Calls/Realtime not enabled on the account
+  if (msg.includes('not found') || msg.includes('not enabled') || msg.includes('code: 10042') || msg.includes('code: 7000') || msg.includes('does not have access')) {
+    return new Error(
+      'Cloudflare Calls (Realtime) does not appear to be enabled on your account.\n' +
+      '    To enable: Cloudflare Dashboard → Calls → Get Started (beta signup may be required).\n' +
+      '    Or remove "realtime" from edgebase.config.ts if your app doesn\'t need WebSocket/media features.\n' +
+      '    Docs: https://developers.cloudflare.com/calls/',
+    );
+  }
+
+  // Auth token lacks Calls permissions
   if (tokenSource === 'wrangler_oauth' && /authentication error/i.test(error.message)) {
     return new Error(
-      'Cloudflare Calls/Realtime provisioning rejected the current wrangler OAuth token. ' +
-      'Create a Cloudflare API token with Calls Write or Connectivity Admin permissions, export it as CLOUDFLARE_API_TOKEN, and rerun this command.',
+      'Cloudflare Calls/Realtime provisioning rejected the current wrangler OAuth token.\n' +
+      '    Create a Cloudflare API token with Calls Write or Connectivity Admin permissions,\n' +
+      '    export it as CLOUDFLARE_API_TOKEN, and rerun this command.',
+    );
+  }
+
+  // Quota / plan limits
+  if (msg.includes('quota') || msg.includes('limit') || msg.includes('exceeded')) {
+    return new Error(
+      `Cloudflare Calls provisioning failed due to account limits: ${error.message}\n` +
+      '    Check your plan limits: Cloudflare Dashboard → Calls\n' +
+      '    You may need to upgrade your plan or delete unused apps/keys.',
     );
   }
 

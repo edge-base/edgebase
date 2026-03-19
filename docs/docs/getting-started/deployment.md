@@ -23,11 +23,20 @@ On first deploy, EdgeBase automatically handles Cloudflare authentication:
 |---------|--------|
 | Cold start | ~0ms |
 | Scaling | Automatic, global |
-| Cost | $5/month base |
+| Cost | Free to start (paid plan $5/mo for higher limits) |
 | Storage egress | $0 |
 | Backup | 30-day PITR |
 
-**Requirements:** Cloudflare account with Workers Paid plan ($5/month, account-level — covers all projects).
+**Requirements:** Cloudflare account. Core EdgeBase services can start on the Cloudflare Free plan. For higher resource limits, upgrade to the Workers Paid plan ($5/month, account-level — covers all projects).
+
+:::info R2 Storage
+<div className="docs-badge-row">
+  <span className="docs-badge docs-badge--free">Free Plan</span>
+  <span className="docs-badge docs-badge--setup">Billing Setup</span>
+</div>
+
+If your app uses `storage` in `edgebase.config.ts`, you must enable R2 in the Cloudflare Dashboard first: **R2 Object Storage → Get Started**. R2 includes 10 GB of free usage, but Cloudflare still requires a one-time R2 subscription / billing activation before first use.
+:::
 
 :::tip CI/CD
 For non-interactive environments, set `CLOUDFLARE_API_TOKEN` as an environment variable instead.

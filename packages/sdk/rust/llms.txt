@@ -1,0 +1,41 @@
+# EdgeBase Rust SDK Workspace (`edgebase-sdk`)
+
+This directory is the Rust SDK workspace root.
+
+For real application code, prefer the narrower crates:
+
+- `edgebase-admin`
+  Trusted server-side SDK with Service Key access
+- `edgebase-core`
+  Lower-level primitives used by the admin crate and custom integrations
+
+## Canonical Guidance
+
+- Rust is server-side only in this repository.
+- Prefer `edgebase_admin::EdgeBase::server(...)` for trusted application code.
+- Use `edgebase_core` when the user explicitly asks for lower-level tables, storage, or transport primitives.
+- The public crates.io release flow focuses on `edgebase-core` and `edgebase-admin`, not the `edgebase-sdk` workspace root.
+- Keep Service Keys on trusted servers only.
+- Follow Rust async and `serde` conventions rather than JavaScript promise-style examples.
+
+## Package Boundaries
+
+- `edgebase-sdk`
+  Workspace root and release line tracker
+- `edgebase-admin`
+  Admin auth, database admin access, SQL, push, analytics, functions, KV, D1, and Vectorize
+- `edgebase-core`
+  HTTP client, refs, storage helpers, shared errors, and low-level building blocks
+
+## Docs
+
+- SDK Overview: https://edgebase.fun/docs/sdks
+- Admin SDK Reference: https://edgebase.fun/docs/admin-sdk/reference
+- Database Admin SDK: https://edgebase.fun/docs/database/admin-sdk
+- Storage: https://edgebase.fun/docs/storage/upload-download
+- Native Resources: https://edgebase.fun/docs/server/native-resources
+
+## Install
+
+- `cargo add edgebase-admin`
+- `cargo add edgebase-core`

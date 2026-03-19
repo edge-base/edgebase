@@ -6,7 +6,7 @@
  *
  * Supported actions:
  *   upsert   — Insert or replace vectors (write)
- *   insert   — Insert vectors, error on duplicate ID (write)
+ *   insert   — Insert new vectors without replacing existing IDs (write)
  *   search   — Similarity search by vector values (query)
  *   queryById — Similarity search using an existing vector's ID (query, Vectorize v2 only)
  *   getByIds — Retrieve vectors by ID (query)
@@ -17,8 +17,8 @@
  * - Config Allowlist: index must be declared in config.vectorize
  * - Service Key required with scoped validation
  *
- * Note: Vectorize is Cloudflare Edge-only. In local/Docker (Miniflare), the binding
- * will not exist — the route returns a stub response with a warning.
+ * Note: Cloudflare does not provide a local Vectorize simulation. When the binding
+ * is unavailable in EdgeBase local or Docker environments, the route returns a stub response with a warning.
  *
  * Flow: Server SDK → POST /api/vectorize/:index → Worker → Vectorize binding → JSON
  */
@@ -161,7 +161,7 @@ vectorizeRoute.openapi(vectorizeOperation, async (c) => {
   // ─── Binding access ───────────────────────────────────────────────────
 
   // §1 Env type — dynamic binding access via type assertion
-  // §7: Vectorize is Edge-only, Miniflare doesn't support it
+  // §7: Vectorize has no local simulation in Cloudflare. EdgeBase falls back to stubs.
   const bindingName = vectorConfig.binding ?? `VECTORIZE_${nameParam.toUpperCase()}`;
   const binding = (c.env as unknown as Record<string, unknown>)[bindingName] as VectorizeIndex | undefined;
   if (!binding) {

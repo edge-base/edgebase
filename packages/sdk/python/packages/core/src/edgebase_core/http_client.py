@@ -142,11 +142,15 @@ class HttpClient:
             "Content-Type": "application/json",
             "Connection": "close",
         }
-        if self._bearer_token:
-            headers["Authorization"] = f"Bearer {self._bearer_token}"
-        if self._service_key:
-            headers["X-EdgeBase-Service-Key"] = self._service_key
-            headers["Authorization"] = f"Bearer {self._service_key}"
+        try:
+            if self._bearer_token:
+                headers["Authorization"] = f"Bearer {self._bearer_token}"
+            if self._service_key:
+                headers["X-EdgeBase-Service-Key"] = self._service_key
+                headers["Authorization"] = f"Bearer {self._service_key}"
+        except Exception:
+            # Token refresh failed — proceed as unauthenticated
+            pass
         return headers
 
     @staticmethod

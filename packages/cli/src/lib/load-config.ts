@@ -13,6 +13,21 @@ import { join, resolve } from 'node:path';
 import { buildBundleWithEsbuild, execTsxSync } from './node-tools.js';
 import { ensureProjectSharedPackageLink } from './runtime-scaffold.js';
 
+/**
+ * Extract the config JSON from stdout, ignoring any noise before the sentinel.
+ * This prevents console.log in user config files or imported modules from
+ * corrupting the JSON output.
+ */
+function extractConfigFromOutput(raw: string, sentinel: string): string {
+  const idx = raw.lastIndexOf(sentinel);
+  if (idx === -1) {
+    // Fallback: try parsing the last non-empty line (legacy behavior)
+    const lines = raw.trim().split('\n');
+    return lines[lines.length - 1];
+  }
+  return raw.slice(idx + sentinel.length);
+}
+
 function firstUsefulLine(value: string): string | null {
   const lines = value
     .split(/\r?\n/)
@@ -67,8 +82,12 @@ export function loadConfigSafe(
   let esbuildError: string | null = null;
 
   // Strategy 1: tsx eval via temp script (safest, most accurate)
+  //
+  // Uses a unique sentinel prefix so we can reliably extract the JSON config
+  // even if imported modules write to stdout (e.g. console.log in dependencies).
   try {
     const tmpScript = join(tmpDir, '_config_eval.mjs');
+    const sentinel = '__EDGEBASE_CONFIG_JSON__';
     const replacer = stripFns
       ? `(_, v) => typeof v === 'function' ? '__EDGEBASE_FUNCTION__' : v`
       : `undefined`;
@@ -76,14 +95,15 @@ export function loadConfigSafe(
       `const p = ${JSON.stringify(absPath)};`,
       `const mod = await import(p);`,
       `const c = mod.default ?? mod;`,
-      `console.log(JSON.stringify(c, ${replacer}));`,
+      `process.stdout.write(${JSON.stringify(sentinel)} + JSON.stringify(c, ${replacer}));`,
     ].join('\n');
 
     writeFileSync(tmpScript, code, 'utf-8');
     try {
-      const result = execTsxSync([tmpScript], {
+      const raw = execTsxSync([tmpScript], {
         cwd, encoding: 'utf-8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim();
+      });
+      const result = extractConfigFromOutput(raw, sentinel);
       return JSON.parse(result);
     } finally {
       try { unlinkSync(tmpScript); } catch { /* cleanup non-fatal */ }
@@ -99,6 +119,7 @@ export function loadConfigSafe(
     buildBundleWithEsbuild(configPath, tmpBundle, cwd);
 
     const tmpEvalScript = join(tmpDir, '_config_eval2.mjs');
+    const sentinel = '__EDGEBASE_CONFIG_JSON__';
     const replacer = stripFns
       ? `(_, v) => typeof v === 'function' ? '__EDGEBASE_FUNCTION__' : v`
       : `undefined`;
@@ -106,14 +127,15 @@ export function loadConfigSafe(
       `const p = ${JSON.stringify(tmpBundle.replace(/\\/g, '/'))};`,
       `const mod = await import(p);`,
       `const c = mod.default ?? mod;`,
-      `console.log(JSON.stringify(c, ${replacer}));`,
+      `process.stdout.write(${JSON.stringify(sentinel)} + JSON.stringify(c, ${replacer}));`,
     ].join('\n');
     writeFileSync(tmpEvalScript, code, 'utf-8');
 
     try {
-      const result = execFileSync('node', [tmpEvalScript], {
+      const raw = execFileSync('node', [tmpEvalScript], {
         cwd, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim();
+      });
+      const result = extractConfigFromOutput(raw, sentinel);
       return JSON.parse(result);
     } finally {
       try { unlinkSync(tmpBundle); } catch { /* cleanup non-fatal */ }

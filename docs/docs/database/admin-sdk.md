@@ -7,8 +7,8 @@ import TabItem from '@theme/TabItem';
 
 # Admin SDK
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Database operations from the server using a Service Key. All operations **bypass** [Access Rules](/docs/server/access-rules).
@@ -89,9 +89,9 @@ val admin = AdminEdgeBase(
 
 ```python
 import os
-from edgebase_admin import AdminClient
+from edgebase_admin import create_admin_client
 
-admin = AdminClient(
+admin = create_admin_client(
     'https://my-app.edgebase.fun',
     service_key=os.environ['EDGEBASE_SERVICE_KEY'],
 )
@@ -1772,10 +1772,6 @@ posts =
 
 Update all records matching a filter condition:
 
-:::note Go Coverage
-:::
-
-
 <Tabs groupId="sdk-language">
 <TabItem value="js" label="JavaScript" default>
 
@@ -2029,9 +2025,6 @@ await admin.db('app').table('categories').upsertMany(
 - **`insertMany` (≤ 500)** — All-or-nothing (single transaction)
 - **`updateMany / deleteMany`** — Each batch is an independent transaction
 - **`upsertMany` (≤ 500)** — All-or-nothing (single transaction)
-:::
-
-:::note Go SDK
 :::
 
 ---

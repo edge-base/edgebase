@@ -6,8 +6,8 @@ slug: /cli
 
 # CLI
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 The `edgebase` CLI is the front door for the full project lifecycle:
@@ -51,10 +51,10 @@ npx edgebase <command>
 ```bash
 npm create edgebase@latest my-app
 cd my-app
-npx edgebase dev
+npx edgebase dev --open
 ```
 
-`create-edgebase` scaffolds the project, installs the local CLI dependencies, and, unless you pass `--no-dev`, immediately boots local development and opens the admin dashboard.
+`create-edgebase` scaffolds the project, installs the local CLI dependencies, and, unless you pass `--no-dev`, immediately boots local development. Pass `--open` if you also want the admin dashboard opened in your browser.
 
 ### Ship to Cloudflare
 

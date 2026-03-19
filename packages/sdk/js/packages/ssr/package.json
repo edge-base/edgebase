@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/ssr",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "EdgeBase SSR helpers — cookie-based token management for server-side rendering",
     "license": "MIT",
     "repository": {
@@ -8,7 +8,7 @@
         "url": "https://github.com/edge-base/edgebase.git",
         "directory": "packages/sdk/js/packages/ssr"
     },
-    "homepage": "https://edgebase.fun",
+    "homepage": "https://github.com/edge-base/edgebase/tree/main/packages/sdk/js/packages/ssr",
     "bugs": "https://github.com/edge-base/edgebase/issues",
     "keywords": [
         "edgebase",

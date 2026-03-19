@@ -97,9 +97,13 @@ class HttpClient {
       // /api routes do not try to parse the key as a user JWT.
       headers['X-EdgeBase-Service-Key'] = serviceKey!;
     } else if (withAuth) {
-      final token = await tokenManager?.getAccessToken(_refreshToken);
-      if (token != null) {
-        headers['Authorization'] = 'Bearer $token';
+      try {
+        final token = await tokenManager?.getAccessToken(_refreshToken);
+        if (token != null) {
+          headers['Authorization'] = 'Bearer $token';
+        }
+      } catch (_) {
+        // Token refresh failed — proceed as unauthenticated
       }
     }
     if (_locale != null && _locale!.isNotEmpty) {

@@ -38,7 +38,7 @@ Same code, same behavior across all three modes. No vendor lock-in.
 
 ### No Cost Explosion
 
-Start free, scale without fear. No per-user auth charges (Firebase charges $4,415/mo at 1M MAU). No egress fees (R2 = $0). Idle instances cost $0 (DO Hibernation). Start at $5/month on the edge (account-level — covers unlimited projects), or self-host for free.
+Start free, scale without fear. No per-user auth charges (Firebase charges $4,415/mo at 1M MAU). No egress fees (R2 = $0). Idle instances cost $0 (DO Hibernation). Deploy core services to Cloudflare's edge on the Free plan, then scale up with the $5/month paid plan (account-level — covers unlimited projects). Optional products like R2 still need a one-time billing setup before first use. Or self-host for free.
 
 ### 0ms Cold Start
 
@@ -93,10 +93,10 @@ EdgeBase provides SDKs for **14 languages**:
 | **JavaScript/TypeScript** | `@edge-base/web`, `@edge-base/react-native` | npm |
 | **Flutter/Dart** | `edgebase_flutter` | pub.dev |
 | **Swift (iOS)** | `edgebase-swift` | SPM |
-| **Kotlin (Android)** | `dev.edgebase:edgebase-client-kotlin` | Maven Central |
-| **Java (JVM)** | `dev.edgebase:edgebase-android-java` | Maven Central |
-| **Scala (JVM)** | `dev.edgebase:edgebase-admin-scala` | Maven Central |
-| **Python** | `edgebase` | PyPI |
+| **Kotlin (Android/JVM)** | `com.github.edge-base.edgebase:edgebase-client` | JitPack |
+| **Java (JVM)** | `com.github.edge-base.edgebase:edgebase-android-java` | JitPack |
+| **Scala (JVM)** | `com.github.edge-base.edgebase:edgebase-admin-scala` | JitPack |
+| **Python** | `edgebase-admin`, `edgebase-core` | PyPI |
 | **C# (Unity/.NET)** | `EdgeBase` | NuGet / source copy |
 | **Go** | `github.com/edge-base/sdk-go` | Go Modules |
 | **PHP** | `edgebase/sdk` | Packagist |

@@ -6,12 +6,19 @@
     <Nullable>enable</Nullable>
     <LangVersion>10.0</LangVersion>
     <PackageId>dev.edgebase.admin</PackageId>
-    <Version>0.1.0</Version>
-    <Description>EdgeBase Admin SDK for .NET — server-side user management, KV, D1, Vectorize, Push</Description>
+    <Version>0.1.4</Version>
+    <Description>EdgeBase Admin SDK for .NET - server-side auth, SQL, storage, push, analytics, KV, D1, and Vectorize</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://edgebase.fun/docs/database/admin-sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/edge-base/edgebase</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="llms.txt" Pack="true" PackagePath="" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\core\EdgeBase.Core.csproj" />

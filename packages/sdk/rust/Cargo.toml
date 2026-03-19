@@ -1,8 +1,13 @@
 [package]
 name = "edgebase-sdk"
-version = "0.1.3"
+version = "0.1.4"
+description = "Workspace release line for the EdgeBase Rust SDKs"
 edition = "2021"
 license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/edge-base/edgebase/tree/main/packages/sdk/rust"
+repository = "https://github.com/edge-base/edgebase"
+publish = false
 # Workspace root package — provides integration test targets (tests/e2e.rs, tests/e2e_room.rs)
 
 [workspace]

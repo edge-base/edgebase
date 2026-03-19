@@ -146,9 +146,13 @@ public class HttpClient {
             if (serviceKey != null) {
                 requestBuilder.addHeader("X-EdgeBase-Service-Key", serviceKey);
             } else {
-                String token = tokenManager.getAccessToken();
-                if (token != null)
-                    requestBuilder.addHeader("Authorization", "Bearer " + token);
+                try {
+                    String token = tokenManager.getAccessToken();
+                    if (token != null)
+                        requestBuilder.addHeader("Authorization", "Bearer " + token);
+                } catch (Exception ignored) {
+                    // Token refresh failed — proceed as unauthenticated
+                }
             }
             addRequestMetadataHeaders(requestBuilder);
 
@@ -184,9 +188,13 @@ public class HttpClient {
             if (serviceKey != null) {
                 requestBuilder.addHeader("X-EdgeBase-Service-Key", serviceKey);
             } else {
-                String token = tokenManager.getAccessToken();
-                if (token != null)
-                    requestBuilder.addHeader("Authorization", "Bearer " + token);
+                try {
+                    String token = tokenManager.getAccessToken();
+                    if (token != null)
+                        requestBuilder.addHeader("Authorization", "Bearer " + token);
+                } catch (Exception ignored) {
+                    // Token refresh failed — proceed as unauthenticated
+                }
             }
             addRequestMetadataHeaders(requestBuilder);
 
@@ -224,9 +232,13 @@ public class HttpClient {
             if (serviceKey != null) {
                 requestBuilder.addHeader("X-EdgeBase-Service-Key", serviceKey);
             } else {
-                String token = tokenManager.getAccessToken();
-                if (token != null)
-                    requestBuilder.addHeader("Authorization", "Bearer " + token);
+                try {
+                    String token = tokenManager.getAccessToken();
+                    if (token != null)
+                        requestBuilder.addHeader("Authorization", "Bearer " + token);
+                } catch (Exception ignored) {
+                    // Token refresh failed — proceed as unauthenticated
+                }
             }
             addRequestMetadataHeaders(requestBuilder);
 
@@ -248,9 +260,13 @@ public class HttpClient {
             String url = buildUrl(path, null);
             Request.Builder requestBuilder = new Request.Builder().url(url).get();
 
-            String token = tokenManager.getAccessToken();
-            if (token != null)
-                requestBuilder.addHeader("Authorization", "Bearer " + token);
+            try {
+                String token = tokenManager.getAccessToken();
+                if (token != null)
+                    requestBuilder.addHeader("Authorization", "Bearer " + token);
+            } catch (Exception ignored) {
+                // Token refresh failed — proceed as unauthenticated
+            }
             addRequestMetadataHeaders(requestBuilder);
 
             try (Response response = client.newCall(requestBuilder.build()).execute()) {
@@ -351,9 +367,13 @@ public class HttpClient {
                 if (serviceKey != null) {
                     requestBuilder.addHeader("X-EdgeBase-Service-Key", serviceKey);
                 } else {
-                    String token = tokenManager.getAccessToken();
-                    if (token != null)
-                        requestBuilder.addHeader("Authorization", "Bearer " + token);
+                    try {
+                        String token = tokenManager.getAccessToken();
+                        if (token != null)
+                            requestBuilder.addHeader("Authorization", "Bearer " + token);
+                    } catch (Exception ignored) {
+                        // Token refresh failed — proceed as unauthenticated
+                    }
                 }
             }
 

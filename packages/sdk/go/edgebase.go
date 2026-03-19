@@ -4,7 +4,7 @@
 //
 // Usage:
 //
-//	admin, err := edgebase.NewAdminClient("https://my-app.edgebase.fun", os.Getenv("EDGEBASE_SERVICE_KEY"))
+//	admin := edgebase.NewAdminClient("https://my-app.edgebase.fun", os.Getenv("EDGEBASE_SERVICE_KEY"))
 //	posts, err := admin.DB("shared", "").Table("posts").Where("status", "==", "published").GetList(ctx)
 package edgebase
 
@@ -141,6 +141,15 @@ func NewHTTPClient(baseURL, serviceKey string) *HTTPClient {
 	}
 }
 
+// getAccessToken returns the current access token (service key).
+// If retrieval fails, returns empty string for graceful degradation.
+func (c *HTTPClient) getAccessToken() string {
+	defer func() {
+		recover() // Token refresh failed — proceed as unauthenticated
+	}()
+	return c.serviceKey
+}
+
 func (c *HTTPClient) do(ctx context.Context, method, path string, body interface{}) (map[string]interface{}, error) {
 	var bodyReader io.Reader
 	if body != nil {
@@ -156,8 +165,9 @@ func (c *HTTPClient) do(ctx context.Context, method, path string, body interface
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if c.serviceKey != "" {
-		req.Header.Set("X-EdgeBase-Service-Key", c.serviceKey)
+	// Token refresh failed — proceed as unauthenticated
+	if token := c.getAccessToken(); token != "" {
+		req.Header.Set("X-EdgeBase-Service-Key", token)
 	}
 
 	resp, err := c.client.Do(req)
@@ -246,8 +256,9 @@ func (c *HTTPClient) PostMultipart(
 		return nil, err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	if c.serviceKey != "" {
-		req.Header.Set("X-EdgeBase-Service-Key", c.serviceKey)
+	// Token refresh failed — proceed as unauthenticated
+	if token := c.getAccessToken(); token != "" {
+		req.Header.Set("X-EdgeBase-Service-Key", token)
 	}
 
 	resp, err := c.client.Do(req)
@@ -280,8 +291,9 @@ func (c *HTTPClient) GetRaw(ctx context.Context, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if c.serviceKey != "" {
-		req.Header.Set("X-EdgeBase-Service-Key", c.serviceKey)
+	// Token refresh failed — proceed as unauthenticated
+	if token := c.getAccessToken(); token != "" {
+		req.Header.Set("X-EdgeBase-Service-Key", token)
 	}
 
 	resp, err := c.client.Do(req)
@@ -306,8 +318,9 @@ func (c *HTTPClient) Head(ctx context.Context, path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if c.serviceKey != "" {
-		req.Header.Set("X-EdgeBase-Service-Key", c.serviceKey)
+	// Token refresh failed — proceed as unauthenticated
+	if token := c.getAccessToken(); token != "" {
+		req.Header.Set("X-EdgeBase-Service-Key", token)
 	}
 
 	resp, err := c.client.Do(req)
@@ -614,11 +627,6 @@ func (t *TableRef) GetList(ctx context.Context) (*ListResult, error) {
 	}
 
 	return result, nil
-}
-
-// Get is an alias for GetList.
-func (t *TableRef) Get(ctx context.Context) (*ListResult, error) {
-	return t.GetList(ctx)
 }
 
 // GetOne retrieves a single record by ID.

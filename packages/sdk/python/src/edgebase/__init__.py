@@ -1,6 +1,7 @@
 """EdgeBase Python SDK — server-side only."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Optional
 
 
@@ -25,7 +26,10 @@ from edgebase_admin.d1 import D1Client
 from edgebase_admin.vectorize import VectorizeClient
 from edgebase.room import RoomClient, Subscription
 
-__version__ = "0.1.0"
+try:
+    __version__ = version("edgebase")
+except PackageNotFoundError:
+    __version__ = "0.1.4"
 
 __all__ = [
     "EdgeBaseServer",

@@ -1728,10 +1728,22 @@ export type FunctionTrigger =
   | AuthTrigger
   | StorageTrigger;
 
+/** Context object passed to function handlers at runtime. */
+export interface FunctionContext {
+  /** The incoming HTTP request (for HTTP-triggered functions). */
+  request: Request;
+  /** URL path parameters extracted by the router. */
+  params: Record<string, string>;
+  /** Authenticated user info, or null if unauthenticated. */
+  auth: { userId?: string; role?: string } | null;
+  /** Environment variables and secrets. */
+  env: Record<string, unknown>;
+}
+
 export interface FunctionDefinition {
   trigger: FunctionTrigger;
   captcha?: boolean;
-  handler: (context: unknown) => Promise<unknown>;
+  handler: (context: FunctionContext) => Promise<unknown>;
 }
 
 /** Increment when the public plugin contract changes incompatibly. */

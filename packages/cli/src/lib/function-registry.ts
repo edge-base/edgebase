@@ -182,7 +182,7 @@ export function generateFunctionRegistry(
       }
     } else if (fn.hasDefaultExport) {
       imports.push(`import ${safeName}_module from '${importPath}';`);
-      registrations.push(`  registerFunction('${fn.name || '/'}', ${safeName}_module);`);
+      registrations.push(`  registerFunction('${fn.name || '/'}', wrapMethodExport(${safeName}_module, '*'));`);
     }
   }
 

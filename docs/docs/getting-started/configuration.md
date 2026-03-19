@@ -654,6 +654,15 @@ See [Password Policy](/docs/authentication/password-policy) for detailed documen
 
 ## Storage
 
+:::info Prerequisite
+<div className="docs-badge-row">
+  <span className="docs-badge docs-badge--free">Free Plan</span>
+  <span className="docs-badge docs-badge--setup">Billing Setup</span>
+</div>
+
+R2 includes 10 GB of free usage, but Cloudflare requires a separate R2 subscription / billing activation before first use: **R2 Object Storage → Get Started**. If your app doesn't need file storage, omit the `storage` section entirely.
+:::
+
 Configure R2-backed file storage buckets with per-bucket access rules:
 
 ```typescript
@@ -809,7 +818,7 @@ export default defineConfig({
 });
 ```
 
-All native resource APIs require a [Service Key](/docs/server/service-keys). See [Native Resources](/docs/server/native-resources) for full documentation.
+All native resource APIs require a [Service Key](/docs/server/service-keys). See [Direct Control](/docs/server/native-resources) for setup guidance and [Native Resources API](/docs/api/native-resources) for raw HTTP endpoints.
 
 ## Email
 

@@ -4,8 +4,8 @@ sidebar_position: 4
 
 # Room Access Rules
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Rooms use explicit room-level access checks under `rooms[namespace].access`.

@@ -14,7 +14,7 @@ edgebase-admin Python SDK — 단위 테스트
 
 import pytest
 from unittest.mock import MagicMock
-from edgebase_admin.admin_client import AdminClient, DbRef
+from edgebase_admin.admin_client import AdminClient, DbRef, create_admin_client
 from edgebase_admin.analytics import AnalyticsClient
 from edgebase_admin.admin_auth import AdminAuthClient
 from edgebase_admin.d1 import D1Client
@@ -31,6 +31,14 @@ from edgebase_core.table import TableRef
 
 
 class TestAdminClientCreation:
+    def test_create_admin_client_helper(self):
+        admin = create_admin_client("http://localhost:9999", service_key="sk-test")
+        assert isinstance(admin, AdminClient)
+
+    def test_create_admin_client_helper_accepts_positional_service_key(self):
+        admin = create_admin_client("http://localhost:9999", "sk-test")
+        assert isinstance(admin, AdminClient)
+
     def test_admin_client_creates_admin_auth(self):
         admin = AdminClient("http://localhost:9999", service_key="sk-test")
         assert isinstance(admin.admin_auth, AdminAuthClient)

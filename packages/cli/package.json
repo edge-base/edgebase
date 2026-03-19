@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/cli",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "CLI for EdgeBase — create, develop, and deploy EdgeBase projects",
     "license": "MIT",
     "repository": {
@@ -8,7 +8,7 @@
         "url": "https://github.com/edge-base/edgebase.git",
         "directory": "packages/cli"
     },
-    "homepage": "https://edgebase.fun",
+    "homepage": "https://github.com/edge-base/edgebase/tree/main/packages/cli",
     "bugs": "https://github.com/edge-base/edgebase/issues",
     "keywords": [
         "edgebase",

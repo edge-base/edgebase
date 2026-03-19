@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/plugin-core",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "EdgeBase plugin authoring helpers and public plugin contracts",
     "license": "MIT",
     "repository": {
@@ -8,7 +8,7 @@
         "url": "https://github.com/edge-base/edgebase.git",
         "directory": "packages/plugins/core"
     },
-    "homepage": "https://edgebase.fun",
+    "homepage": "https://github.com/edge-base/edgebase/tree/main/packages/plugins/core",
     "bugs": "https://github.com/edge-base/edgebase/issues",
     "keywords": [
         "edgebase",

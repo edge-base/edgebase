@@ -82,7 +82,7 @@ class HttpClient(
                 if (serviceKey != null) {
                     header("X-EdgeBase-Service-Key", serviceKey)
                 } else {
-                    val token = tokenManager.getAccessToken()
+                    val token = try { tokenManager.getAccessToken() } catch (_: Exception) { null }
                     if (token != null) header(HttpHeaders.Authorization, "Bearer $token")
                 }
                 addContextHeaders(this)
@@ -124,7 +124,7 @@ class HttpClient(
                     if (serviceKey != null) {
                         header("X-EdgeBase-Service-Key", serviceKey)
                     } else {
-                        val token = tokenManager.getAccessToken()
+                        val token = try { tokenManager.getAccessToken() } catch (_: Exception) { null }
                         if (token != null) header(HttpHeaders.Authorization, "Bearer $token")
                     }
                 }

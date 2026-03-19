@@ -36,10 +36,10 @@ npm create edgebase@latest edgebase
 npm create edgebase@latest my-app -- --no-dev
 ```
 
-### Scaffold without opening the browser
+### Scaffold and open the browser automatically
 
 ```bash
-npm create edgebase@latest my-app -- --no-open
+npm create edgebase@latest my-app -- --open
 ```
 
 ### Automation without install
@@ -53,7 +53,7 @@ EDGEBASE_CREATE_SKIP_INSTALL=1 npm create edgebase@latest my-app -- --no-dev
 - scaffolds a project by delegating to `@edge-base/cli init`
 - installs local dependencies unless `EDGEBASE_CREATE_SKIP_INSTALL=1`
 - starts `npm run dev` unless `--no-dev` is passed
-- forwards `--no-open` to the local development flow
+- forwards `--open` to the local development flow when requested
 - merges EdgeBase entries into existing `package.json` and `.gitignore` files instead of replacing them wholesale
 
 ## Common Mistakes
@@ -68,5 +68,5 @@ EDGEBASE_CREATE_SKIP_INSTALL=1 npm create edgebase@latest my-app -- --no-dev
 ```text
 npm create edgebase@latest my-app             -> scaffold, install, start dev
 npm create edgebase@latest my-app -- --no-dev -> scaffold, install, do not start dev
-npm create edgebase@latest my-app -- --no-open -> scaffold, install, start dev without opening browser
+npm create edgebase@latest my-app -- --open   -> scaffold, install, start dev and open browser
 ```

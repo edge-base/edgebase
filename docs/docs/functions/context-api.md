@@ -4,8 +4,8 @@ sidebar_position: 4
 
 # Context API
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Every App Function receives a `context` object that provides access to all EdgeBase services: database, authentication, storage, database subscriptions, and more.
@@ -232,7 +232,7 @@ const keys = await kv.list({ prefix: 'page:' });
 
 ## context.admin.d1(database)
 
-Access user-defined D1 databases declared in `config.d1`. Useful for relational data that needs global consistency or cross-region reads.
+Access user-defined D1 databases declared in `config.d1`. Useful for relational SQL workloads such as analytics, logs, and reporting.
 
 ```typescript
 // edgebase.config.ts

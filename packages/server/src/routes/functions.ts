@@ -150,6 +150,14 @@ functionsRoute.all('/:functionName{.+}', async (c) => {
     }
 
     console.error(`[EdgeBase] HTTP function '${matched.route.name}' error:`, err);
-    return c.json({ code: 500, message: 'Function execution failed.' }, 500);
+    const release = parseConfig(c.env)?.release ?? false;
+    return c.json({
+      code: 500,
+      message: 'Function execution failed.',
+      ...(!release && {
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      }),
+    }, 500);
   }
 });

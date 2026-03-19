@@ -7,8 +7,8 @@ import TabItem from '@theme/TabItem';
 
 # Email OTP (Passwordless)
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Email OTP provides passwordless authentication using one-time codes sent via email. Users sign in by entering a 6-digit code instead of a password.

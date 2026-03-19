@@ -10,6 +10,7 @@ use crate::d1::D1Client;
 use crate::functions::FunctionsClient;
 use crate::vectorize::VectorizeClient;
 use crate::push::PushClient;
+use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -94,7 +95,7 @@ impl EdgeBase {
     }
 
     /// Raw SQL query     /// namespace: DB namespace ('shared' | 'workspace' | ...), id: instance ID for dynamic DOs.
-    pub async fn sql(&self, namespace: &str, id: Option<&str>, query: &str, params: &[&str]) -> Result<Value, Error> {
+    pub async fn sql<T: Serialize>(&self, namespace: &str, id: Option<&str>, query: &str, params: &[T]) -> Result<Value, Error> {
         if query.trim().is_empty() {
             return Err(Error::Api {
                 status: 400,
@@ -102,10 +103,11 @@ impl EdgeBase {
             });
         }
 
+        let serialized_params = serde_json::to_value(params)?;
         let mut body = serde_json::json!({
             "namespace": namespace,
             "sql": query,
-            "params": params,
+            "params": serialized_params,
         });
         if let Some(id_val) = id {
             body["id"] = serde_json::Value::String(id_val.to_string());

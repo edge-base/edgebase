@@ -4,8 +4,8 @@ sidebar_position: 1
 
 # CLI Workflows
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 This page is organized by real tasks instead of by command name.
@@ -22,7 +22,7 @@ Useful variants:
 
 ```bash
 npm create edgebase@latest my-app -- --no-dev
-npm create edgebase@latest my-app -- --no-dev --no-open
+npm create edgebase@latest my-app -- --open
 ```
 
 Then run local development:
@@ -32,7 +32,7 @@ cd my-app
 npx edgebase dev
 ```
 
-By default, local dev runs the API on `http://localhost:8787` and opens the Admin Dashboard on `http://localhost:8787/admin`.
+By default, local dev runs the API on `http://localhost:8787`. The Admin Dashboard is available at `http://localhost:8787/admin`, and `--open` will open it in your browser automatically.
 
 Common `dev` patterns:
 
@@ -41,7 +41,7 @@ npx edgebase dev --port 8787
 npx edgebase dev --host 0.0.0.0
 npx edgebase dev --isolated
 npx edgebase dev --isolated qa-session
-npx edgebase dev --no-open
+npx edgebase dev --open
 ```
 
 Use `--isolated` when you need a clean local state directory without disturbing your default dev state.

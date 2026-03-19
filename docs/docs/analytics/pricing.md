@@ -4,11 +4,11 @@ sidebar_position: 4
 
 # Pricing
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
-EdgeBase Analytics runs entirely on Durable Objects (LogsDO) and optionally Analytics Engine — both included in standard Cloudflare Workers pricing. There are no additional per-event charges.
+EdgeBase Analytics runs entirely on Durable Objects (LogsDO) and optionally Analytics Engine — both included in standard Cloudflare Workers pricing. There are no additional per-event charges. Free plan covers smaller workloads; Workers Paid raises the included monthly usage.
 
 ## Edge (Cloudflare)
 
@@ -16,7 +16,7 @@ EdgeBase Analytics runs entirely on Durable Objects (LogsDO) and optionally Anal
 |----------|----------|------|
 | Durable Objects requests | Event writes + queries | $0.15 / million (included in first 1M) |
 | Durable Objects storage | Event data (SQLite) | $0.20 / GB-month (first 1 GB included) |
-| Analytics Engine | Request log metrics (optional) | Free (25M data points/mo included) |
+| Analytics Engine | Request log metrics (optional) | Free tier available; Workers Paid includes 10M writes/month |
 | Workers requests | API endpoint handling | $0.30 / million (10M/mo included) |
 
 ### Example: 100K Events/Day
@@ -43,5 +43,5 @@ EdgeBase Analytics runs entirely on Durable Objects (LogsDO) and optionally Anal
 On Docker, LogsDO runs as an in-process SQLite database. There are no external service charges — analytics storage is part of your server's local disk.
 
 :::info Pricing source
-Durable Objects and Workers pricing reflects Cloudflare's published rates as of February 2026. Analytics Engine is included in the Workers Paid plan at no additional cost.
+Durable Objects, Workers, and Analytics Engine pricing reflects Cloudflare's published rates as of February 2026. Analytics Engine includes both a Free tier and higher Workers Paid limits.
 :::

@@ -1,22 +1,65 @@
 # EdgeBase Java SDK
 
-The **official Java SDK** for [EdgeBase](https://github.com/edge-base/edgebase) — Open source backend in one command.
+Official Java SDK for EdgeBase, published for Gradle and Maven consumers through
+JitPack as three installable artifacts:
+
+- `com.github.edge-base.edgebase:edgebase-core-java:v0.1.4`
+- `com.github.edge-base.edgebase:edgebase-android-java:v0.1.4`
+- `com.github.edge-base.edgebase:edgebase-admin-java:v0.1.4`
+
+The monorepo root `edgebase-sdk-java` artifact is intentionally not part of the
+public JitPack install path. Depend on the split artifacts below.
 
 ## Installation
 
 ### Gradle
+
 ```groovy
-implementation 'dev.edgebase:edgebase-sdk-java:0.1.0'
+repositories {
+    maven { url 'https://jitpack.io' }
+}
+
+dependencies {
+    implementation 'com.github.edge-base.edgebase:edgebase-core-java:v0.1.4'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.1.4'
+    implementation 'com.github.edge-base.edgebase:edgebase-admin-java:v0.1.4'
+}
 ```
 
 ### Maven
+
 ```xml
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+
 <dependency>
-    <groupId>dev.edgebase</groupId>
-    <artifactId>edgebase-sdk-java</artifactId>
-    <version>0.1.0</version>
+    <groupId>com.github.edge-base.edgebase</groupId>
+    <artifactId>edgebase-core-java</artifactId>
+    <version>v0.1.4</version>
+</dependency>
+<dependency>
+    <groupId>com.github.edge-base.edgebase</groupId>
+    <artifactId>edgebase-android-java</artifactId>
+    <version>v0.1.4</version>
+</dependency>
+<dependency>
+    <groupId>com.github.edge-base.edgebase</groupId>
+    <artifactId>edgebase-admin-java</artifactId>
+    <version>v0.1.4</version>
 </dependency>
 ```
+
+## Package Map
+
+| Artifact | Use it for | Main entry points |
+| --- | --- | --- |
+| `edgebase-core-java` | shared primitives | `EdgeBaseFieldOps`, `EdgeBaseError`, `DbRef` |
+| `edgebase-android-java` | client SDK | `dev.edgebase.sdk.client.EdgeBase`, `ClientEdgeBase` |
+| `edgebase-admin-java` | server/admin SDK | `dev.edgebase.sdk.admin.AdminEdgeBase`, `EdgeBase.admin(...)` |
 
 ## Quick Start
 
@@ -29,56 +72,49 @@ import dev.edgebase.sdk.core.EdgeBaseFieldOps;
 import dev.edgebase.sdk.core.ListResult;
 import java.util.Map;
 
-// Initialize
 ClientEdgeBase client = EdgeBase.client("https://my-app.edgebase.fun");
 
-// Auth
 client.auth().signUp("user@example.com", "password123!");
 client.auth().signIn("user@example.com", "password123!");
 
-// CRUD
 Map<String, Object> post = client.db("shared").table("posts").insert(Map.of(
     "title", "Hello World",
     "content", "First post from Java SDK"
 ));
 
-// Query
 ListResult results = client.db("shared").table("posts")
     .where("status", "==", "published")
     .orderBy("createdAt", "desc")
     .limit(20)
     .getList();
 
-// Functions + Analytics
 client.functions().post("welcome-email", Map.of("to", "user@example.com"));
 client.analytics().track("java_example_opened");
 
-// Storage
 client.storage().bucket("avatars").upload("profile.png", imageBytes, "image/png");
 String url = client.storage().bucket("avatars").getUrl("profile.png");
 
-// Cleanup
 client.destroy();
 ```
 
 ### Server SDK (Spring / Ktor / Backend)
 
 ```java
-import dev.edgebase.sdk.*;
+import dev.edgebase.sdk.admin.AdminEdgeBase;
+import dev.edgebase.sdk.client.EdgeBase;
+import java.util.List;
+import java.util.Map;
 
 AdminEdgeBase admin = EdgeBase.admin(
     "https://my-app.edgebase.fun",
     System.getenv("EDGEBASE_SERVICE_KEY")
 );
 
-// Admin Auth
 admin.adminAuth().createUser(Map.of("email", "admin@example.com", "password", "pass123!"));
 Map<String, Object> user = admin.adminAuth().getUser("user-id");
 
-// Raw SQL
 List<Object> rows = admin.sql("posts", "SELECT id, title FROM posts WHERE published = 1");
 
-// Server-side Broadcast
 admin.broadcast("game:room1", "player_joined", Map.of("name", "Alice"));
 ```
 

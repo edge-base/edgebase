@@ -8,8 +8,8 @@ import { OverviewHero, FeatureGrid, NextStepCards } from '@site/src/components/O
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 <OverviewHero
@@ -19,6 +19,15 @@ This feature is in **beta**. Core behavior is stable, but some APIs or configura
 />
 
 ---
+
+:::info Prerequisite
+<div className="docs-badge-row">
+  <span className="docs-badge docs-badge--free">Free Plan</span>
+  <span className="docs-badge docs-badge--setup">Billing Setup</span>
+</div>
+
+R2 must be enabled in the Cloudflare Dashboard before deploying: **R2 Object Storage → Get Started**. R2 includes 10 GB of free usage with $0 egress, but Cloudflare still requires a one-time R2 subscription / billing activation before first use.
+:::
 
 :::info Control Surface
 - **Access Rules**: [Storage Access Rules](/docs/storage/access-rules) gate bucket reads, uploads, and deletes.

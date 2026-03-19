@@ -17,19 +17,8 @@
   ],
   "sdkPackageHeadline": "30+",
   "oauthProviderCount": 14,
-  "oauthFeaturedProviders": [
-    "Google",
-    "GitHub",
-    "Apple"
-  ],
-  "oauthProviderExamples": [
-    "Google",
-    "GitHub",
-    "Apple",
-    "Discord",
-    "Kakao",
-    "Naver"
-  ],
+  "oauthFeaturedProviders": ["Google", "GitHub", "Apple"],
+  "oauthProviderExamples": ["Google", "GitHub", "Apple", "Discord", "Kakao", "Naver"],
   "docsEntryPoints": [
     {
       "tag": "Why",
@@ -68,11 +57,7 @@
       "description": "Jump straight to the REST surface for auth, database, storage, database subscriptions, functions, admin, and system endpoints."
     }
   ],
-  "deployModes": [
-    "Edge",
-    "Docker",
-    "Node.js"
-  ],
+  "deployModes": ["Edge", "Docker", "Node.js"],
   "searchContexts": [
     { "label": "Why EdgeBase", "path": "/docs/why-edgebase" },
     { "label": "Getting Started", "path": "/docs/getting-started" },

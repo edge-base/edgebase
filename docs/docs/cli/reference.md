@@ -4,8 +4,8 @@ sidebar_position: 2
 
 # CLI Reference
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 This page lists the EdgeBase CLI surface by command family. For task-oriented walkthroughs, start with [CLI Workflows](/docs/cli/workflows).
@@ -76,9 +76,10 @@ Long-running commands still treat `Ctrl+C` as an immediate cancellation. If a us
 ```bash
 npm create edgebase@latest <dir>
 npm create edgebase@latest <dir> -- --no-dev
+npm create edgebase@latest <dir> -- --open
 ```
 
-Scaffold a new project, optionally auto-start local development, and open the admin dashboard unless `--no-open` is passed. `create-edgebase` installs the local CLI dependencies for you before handing the project back.
+Scaffold a new project and optionally auto-start local development. Pass `--open` if you want the admin dashboard opened in your browser while the dev server starts. `create-edgebase` installs the local CLI dependencies for you before handing the project back.
 
 ### `dev`
 
@@ -87,6 +88,7 @@ npx edgebase dev
 npx edgebase dev --port 8787
 npx edgebase dev --host 0.0.0.0
 npx edgebase dev --isolated
+npx edgebase dev --open
 ```
 
 Boot the local runtime with config and function hot reload. The default local surface includes the REST API plus the database subscription WebSocket endpoint at `/api/db/subscribe`.

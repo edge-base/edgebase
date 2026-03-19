@@ -1,0 +1,7 @@
+jdk:
+  - openjdk17
+
+install:
+  - cd packages/sdk/java && gradle :packages:core:publishToMavenLocal :packages:admin:publishToMavenLocal :packages:android:publishToMavenLocal --no-daemon
+  - cd packages/sdk/kotlin && ./gradlew :core:publishJvmPublicationToMavenLocal :client:publishJvmPublicationToMavenLocal :admin:publishToMavenLocal --no-daemon
+  - cd packages/sdk/scala && gradle :packages:core:publishToMavenLocal :packages:admin:publishToMavenLocal --no-daemon

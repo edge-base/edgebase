@@ -40,9 +40,12 @@ const admin = createAdminClient('https://my-edgebase-server.com', {
 
 ```python
 import os
-from edgebase_admin import AdminClient
+from edgebase_admin import create_admin_client
 
-admin = AdminClient("https://my-edgebase-server.com", service_key=os.environ["EDGEBASE_SERVICE_KEY"])
+admin = create_admin_client(
+    "https://my-edgebase-server.com",
+    service_key=os.environ["EDGEBASE_SERVICE_KEY"],
+)
 ```
 
 </TabItem>
@@ -188,7 +191,7 @@ console.log(result); // { sent: 2, failed: 0, removed: 0 }
 <TabItem value="python" label="Python">
 
 ```python
-result = admin.push.send("user_123", {
+result = admin.push().send("user_123", {
     "title": "New Message",
     "body": "Alice sent you a photo!",
     "badge": 1
@@ -341,7 +344,7 @@ const result = await admin.push.sendMany(["user_1", "user_2", "user_3"], {
 <TabItem value="python" label="Python">
 
 ```python
-result = admin.push.send_many(["user_1", "user_2", "user_3"], {
+result = admin.push().send_many(["user_1", "user_2", "user_3"], {
     "title": "Server Maintenance",
     "body": "We will be down for 5 minutes."
 })
@@ -472,7 +475,7 @@ const result = await admin.push.sendToToken("fcm-token-abc123...", {
 <TabItem value="python" label="Python">
 
 ```python
-result = admin.push.send_to_token("fcm-token-abc123...", {
+result = admin.push().send_to_token("fcm-token-abc123...", {
     "title": "Silent Sync",
     "silent": True
 })
@@ -485,7 +488,7 @@ result = admin.push.send_to_token("fcm-token-abc123...", {
 result, _ := admin.Push.SendToToken(ctx, "fcm-token-abc123...", map[string]interface{}{
     "title": "Silent Sync",
     "silent": true,
-})
+}, "web")
 ```
 
 </TabItem>
@@ -601,7 +604,7 @@ const result = await admin.push.sendToTopic("news", {
 <TabItem value="python" label="Python">
 
 ```python
-result = admin.push.send_to_topic("news", {
+result = admin.push().send_to_topic("news", {
     "title": "Breaking News",
     "body": "Something important happened!"
 })
@@ -727,7 +730,7 @@ const result = await admin.push.broadcast({
 <TabItem value="python" label="Python">
 
 ```python
-result = admin.push.broadcast({
+result = admin.push().broadcast({
     "title": "App Update",
     "body": "Version 2.0 is now available!"
 })
@@ -872,7 +875,7 @@ console.log(logs);
 <TabItem value="python" label="Python">
 
 ```python
-logs = admin.push.get_logs("user_123", limit=10)
+logs = admin.push().get_logs("user_123", limit=10)
 ```
 
 </TabItem>

@@ -11,8 +11,8 @@ plugins {
     `maven-publish`
 }
 
-group = "dev.edgebase"
-version = "0.1.0"
+group = rootProject.group
+version = rootProject.version
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -39,7 +39,7 @@ publishing {
     publications {
         create<MavenPublication>("maven") {
             from(components["java"])
-            groupId = "dev.edgebase"
+            groupId = project.group.toString()
             artifactId = "edgebase-admin-kotlin"
             pom {
                 licenses {

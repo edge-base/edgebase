@@ -13,9 +13,21 @@ plugins {
     id("com.android.library") version "8.2.0" apply false
 }
 
+val edgebaseReleaseVersion = "0.1.4"
+val edgebaseGroup = if (System.getenv("JITPACK").isNullOrBlank()) {
+    "dev.edgebase"
+} else {
+    "com.github.edge-base.edgebase"
+}
+val edgebaseVersion = if (System.getenv("JITPACK").isNullOrBlank()) {
+    edgebaseReleaseVersion
+} else {
+    System.getenv("VERSION") ?: "v$edgebaseReleaseVersion"
+}
+
 allprojects {
-    group = "dev.edgebase"
-    version = "0.1.3"
+    group = edgebaseGroup
+    version = edgebaseVersion
 }
 
 // Pin JVM toolchain to JDK 17 across all subprojects.

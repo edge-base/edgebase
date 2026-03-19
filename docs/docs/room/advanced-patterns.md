@@ -10,8 +10,8 @@ import TabItem from '@theme/TabItem';
 
 # Advanced Patterns
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 This guide covers real-world patterns built on top of Room's core capabilities: [State](/docs/room/state), [Members](/docs/room/members), and [Signals](/docs/room/signals). Each pattern shows both server-side configuration and client-side usage.

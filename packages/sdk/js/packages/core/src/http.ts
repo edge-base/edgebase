@@ -20,6 +20,9 @@ export class HttpClient {
   private locale?: string;
 
   constructor(options: HttpClientOptions) {
+    if (!options.baseUrl || typeof options.baseUrl !== 'string') {
+      throw new Error(`[EdgeBase] HttpClient requires a valid baseUrl string, got: ${String(options.baseUrl)}`);
+    }
     this.baseUrl = options.baseUrl.replace(/\/$/, ''); // strip trailing slash
     this.serviceKey = options.serviceKey;
     this.tokenManager = options.tokenManager;
@@ -59,13 +62,19 @@ export class HttpClient {
       headers['X-EdgeBase-Service-Key'] = this.serviceKey;
     }
 
-    // Auth token
+    // Auth token — if refresh fails, proceed without auth (graceful degradation)
     if (!skipAuth && this.tokenManager) {
-      const token = await this.tokenManager.getAccessToken((refreshToken) =>
-        this.refreshToken(refreshToken),
-      );
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+      try {
+        const token = await this.tokenManager.getAccessToken((refreshToken) =>
+          this.refreshToken(refreshToken),
+        );
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+      } catch {
+        // Token refresh failed — proceed as unauthenticated.
+        // In release: false mode the server allows anonymous access.
+        // In release: true mode, downstream will return 401 as expected.
       }
     }
 

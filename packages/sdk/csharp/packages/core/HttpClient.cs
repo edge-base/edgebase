@@ -66,9 +66,17 @@ public sealed class JbHttpClient : IDisposable
     {
         if (!string.IsNullOrEmpty(_serviceKey))
             req.Headers.TryAddWithoutValidation("X-EdgeBase-Service-Key", _serviceKey);
-        if (!string.IsNullOrEmpty(_token))
-            req.Headers.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _token);
+        try
+        {
+            var token = GetAccessToken();
+            if (!string.IsNullOrEmpty(token))
+                req.Headers.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        }
+        catch
+        {
+            // Token refresh failed — proceed as unauthenticated
+        }
         if (!string.IsNullOrEmpty(_locale))
             req.Headers.TryAddWithoutValidation("Accept-Language", _locale);
     }
@@ -131,9 +139,17 @@ public sealed class JbHttpClient : IDisposable
             req.SetRequestHeader("X-EdgeBase-Service-Key", _serviceKey);
         }
 
-        if (!string.IsNullOrEmpty(_token))
+        try
         {
-            req.SetRequestHeader("Authorization", $"Bearer {_token}");
+            var token = GetAccessToken();
+            if (!string.IsNullOrEmpty(token))
+            {
+                req.SetRequestHeader("Authorization", $"Bearer {token}");
+            }
+        }
+        catch
+        {
+            // Token refresh failed — proceed as unauthenticated
         }
         if (!string.IsNullOrEmpty(_locale))
         {

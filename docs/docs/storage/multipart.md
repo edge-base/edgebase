@@ -7,8 +7,8 @@ import TabItem from '@theme/TabItem';
 
 # Multipart Upload
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Upload large files in chunks with progress tracking.
@@ -91,9 +91,12 @@ bucket.upload('presentation.mp4', large_file_bytes, content_type='video/mp4')
 <TabItem value="go" label="Go">
 
 ```go
-bucket := admin.Storage.Bucket("videos")
+import "context"
 
-result, err := bucket.Upload("presentation.mp4", largeFileData, "video/mp4")
+ctx := context.Background()
+bucket := admin.Storage().Bucket("videos")
+
+result, err := bucket.Upload(ctx, "presentation.mp4", largeFileData, "video/mp4")
 ```
 
 </TabItem>
@@ -259,14 +262,9 @@ except ResumableUploadError as error:
 </TabItem>
 <TabItem value="go" label="Go">
 
-```go
-result, err := bucket.Upload("large-video.mp4", fileData, "video/mp4")
-if resumeErr, ok := err.(*edgebase.ResumableUploadError); ok {
-    fmt.Printf("Failed at part %d, resuming...\n", resumeErr.FailedPartNumber)
+Go multipart uploads use the same `bucket.Upload(ctx, ...)` API shown above.
 
-    result, err = bucket.ResumeUpload(resumeErr.Key, resumeErr.UploadID, fileData)
-}
-```
+The current Go SDK does not expose resumable helper types such as `ResumableUploadError` or `ResumeUpload`, so if an upload fails you should retry the upload from the beginning for now.
 
 </TabItem>
 <TabItem value="php" label="PHP">

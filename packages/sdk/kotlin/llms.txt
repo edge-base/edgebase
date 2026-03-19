@@ -1,0 +1,119 @@
+# EdgeBase Kotlin Multiplatform SDK
+
+Use this file as a quick-reference contract for AI coding assistants working with the
+public Kotlin Multiplatform SDK packages in this directory.
+
+## Package Boundary
+
+Use the Kotlin SDK only in trusted code.
+
+The `:client` module is for app clients, the `:admin` module is for trusted JVM-side
+service code, and the `:core` module provides the shared KMP runtime used by both.
+
+## Source Of Truth
+
+- Root README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/kotlin/README.md
+- Admin README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/kotlin/admin/README.md
+- SDK Overview: https://edgebase.fun/docs/sdks
+- Admin SDK: https://edgebase.fun/docs/sdks/client-vs-server
+- Admin Users: https://edgebase.fun/docs/authentication/admin-users
+- Database Admin SDK: https://edgebase.fun/docs/database/admin-sdk
+- Push Admin SDK: https://edgebase.fun/docs/push/admin-sdk
+- Analytics Admin SDK: https://edgebase.fun/docs/analytics/admin-sdk
+- Admin SDK Reference: https://edgebase.fun/docs/admin-sdk/reference
+
+## Public Artifacts
+
+- JitPack group: `com.github.edge-base.edgebase`
+- tags are versioned with the leading `v`, for example `v0.1.4`
+- `com.github.edge-base.edgebase:edgebase-core:v0.1.4`
+- `com.github.edge-base.edgebase:edgebase-client:v0.1.4`
+- `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.1.4`
+- the current public JitPack route validates the JVM publications of `:core` and `:client`
+- do not recommend the root `edgebase-kotlin` artifact for public installs
+
+## Canonical Examples
+
+### Create a client
+
+```kotlin
+import dev.edgebase.sdk.client.ClientEdgeBase
+
+val client = ClientEdgeBase("https://your-project.edgebase.fun")
+```
+
+### Query a table
+
+```kotlin
+val posts = client
+    .db("shared")
+    .table("posts")
+    .where("status", "==", "published")
+    .getList()
+```
+
+### Create an admin client
+
+```kotlin
+import dev.edgebase.sdk.admin.AdminEdgeBase
+
+val admin = AdminEdgeBase(
+    "https://your-project.edgebase.fun",
+    serviceKey = System.getenv("EDGEBASE_SERVICE_KEY") ?: error("Missing EDGEBASE_SERVICE_KEY"),
+)
+```
+
+### Manage users
+
+```kotlin
+val created = admin.adminAuth.createUser(
+    email = "june@example.com",
+    password = "pass1234",
+    displayName = "June",
+)
+```
+
+### Execute SQL
+
+```kotlin
+val rows = admin.sql(
+    namespace = "workspace",
+    instanceId = "ws-1",
+    query = "SELECT * FROM documents WHERE status = ?",
+    params = listOf("published"),
+)
+```
+
+## Hard Rules
+
+- keep Service Keys on trusted servers only
+- `admin.adminAuth` is a property, not a method
+- `db(namespace, instanceId = ...)` uses a named `instanceId` parameter in Kotlin
+- `sql(namespace = ..., instanceId = ..., query = ..., params = ...)` is the canonical form
+- `broadcast(channel, event, payload?)` is a server-side suspend function
+- `edgebase-admin-kotlin` is JVM-only
+
+## Common Mistakes
+
+- do not use `edgebase-admin-kotlin` in Android UI code or browser bundles
+- do not copy Java-style `adminAuth()` or JS-style `admin.auth`
+- do not pass instance ids positionally when the code reads better with `instanceId = ...`
+- do not call `sql("select 1")`; Kotlin expects the explicit admin entrypoint signature
+- do not expose the Service Key through mobile or browser clients
+
+## Quick Reference
+
+```text
+ClientEdgeBase(url)                                     -> ClientEdgeBase
+AdminEdgeBase(url, serviceKey, projectId?)              -> AdminEdgeBase
+client.auth                                             -> AuthClient
+client.db(namespace, instanceId?)                       -> DbRef
+client.analytics                                        -> AnalyticsClient
+client.functions                                        -> FunctionsClient
+client.storage                                          -> StorageClient
+admin.adminAuth                                         -> AdminAuthClient
+admin.db(namespace, instanceId?)                        -> DbRef
+admin.sql(namespace, instanceId?, query, params)       -> suspend List<Map<String, Any?>>
+admin.broadcast(channel, event, payload?)              -> suspend Unit
+admin.destroy()                                         -> Unit
+```

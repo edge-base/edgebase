@@ -51,9 +51,12 @@ impl HttpClient {
     fn build_request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
         let url = format!("{}{}", self.base_url, path);
         let mut req = self.client.request(method, &url);
-        if !self.service_key.is_empty() {
-            req = req.header("X-EdgeBase-Service-Key", &self.service_key);
-            req = req.header("Authorization", format!("Bearer {}", self.service_key));
+        // Token refresh failed — proceed as unauthenticated
+        if let Ok(key) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.service_key.clone())) {
+            if !key.is_empty() {
+                req = req.header("X-EdgeBase-Service-Key", &key);
+                req = req.header("Authorization", format!("Bearer {}", key));
+            }
         }
         req
     }
@@ -149,9 +152,12 @@ impl HttpClient {
             .text("key", key.to_string());
         let url = format!("{}{}", self.base_url, path);
         let mut req = self.client.post(&url).multipart(form);
-        if !self.service_key.is_empty() {
-            req = req.header("X-EdgeBase-Service-Key", &self.service_key);
-            req = req.header("Authorization", format!("Bearer {}", self.service_key));
+        // Token refresh failed — proceed as unauthenticated
+        if let Ok(key) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.service_key.clone())) {
+            if !key.is_empty() {
+                req = req.header("X-EdgeBase-Service-Key", &key);
+                req = req.header("Authorization", format!("Bearer {}", key));
+            }
         }
         self.send(req).await
     }

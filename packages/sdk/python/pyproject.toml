@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "edgebase"
-version = "0.1.3"
-description = "Python SDK for EdgeBase — Backend as a Service"
+version = "0.1.4"
+description = "Unified Python SDK for trusted EdgeBase server environments"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -14,9 +14,17 @@ authors = [
 ]
 
 dependencies = [
+    "edgebase-core>=0.1.4,<0.2.0",
+    "edgebase-admin>=0.1.4,<0.2.0",
     "httpx>=0.27",
     "websockets>=12.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/edge-base/edgebase/tree/main/packages/sdk/python"
+Repository = "https://github.com/edge-base/edgebase/tree/main/packages/sdk/python"
+Documentation = "https://edgebase.fun/docs/sdks"
+Issues = "https://github.com/edge-base/edgebase/issues"
 
 [project.optional-dependencies]
 keyring = ["keyring>=25.0"]
@@ -26,10 +34,13 @@ dev = [
 ]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/edgebase"]
+include = ["src/edgebase", "README.md", "llms.txt"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/edgebase"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"llms.txt" = "edgebase/llms.txt"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

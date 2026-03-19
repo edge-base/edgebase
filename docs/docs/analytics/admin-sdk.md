@@ -9,8 +9,8 @@ import TabItem from '@theme/TabItem';
 
 # Admin SDK — Querying Analytics
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 The Admin SDK provides two analytics capabilities: querying **request log metrics** (automatic API usage data) and managing **custom events** (track + query). All endpoints require a **Service Key**.
@@ -86,9 +86,9 @@ val admin = AdminEdgeBase(
 
 ```python
 import os
-from edgebase_admin import AdminClient
+from edgebase_admin import create_admin_client
 
-admin = AdminClient(
+admin = create_admin_client(
     "https://my-edgebase-server.com",
     service_key=os.environ["EDGEBASE_SERVICE_KEY"],
 )
@@ -228,7 +228,7 @@ println(data("breakdown"))
 <TabItem value="python" label="Python">
 
 ```python
-data = admin.analytics.overview(range="7d")
+data = admin.analytics().overview(range="7d")
 print(data["summary"])
 print(data["breakdown"])
 ```
@@ -240,7 +240,7 @@ print(data["breakdown"])
 import "context"
 
 ctx := context.Background()
-data, _ := admin.Analytics.Overview(ctx, map[string]string{"range": "7d"})
+data, _ := admin.Analytics().Overview(ctx, map[string]string{"range": "7d"})
 fmt.Println(data["summary"])
 fmt.Println(data["breakdown"])
 ```
@@ -397,9 +397,9 @@ admin.analytics.trackBatch(Seq(
 <TabItem value="python" label="Python">
 
 ```python
-admin.analytics.track("user_upgraded", {"plan": "pro", "amount": 29.99}, user_id="user_123")
+admin.analytics().track("user_upgraded", {"plan": "pro", "amount": 29.99}, user_id="user_123")
 
-admin.analytics.track_batch([
+admin.analytics().track_batch([
     {"name": "email_sent", "properties": {"template": "welcome"}, "userId": "user_123"},
     {"name": "cron_completed", "properties": {"job": "cleanup", "duration": 1200}},
 ])
@@ -412,12 +412,12 @@ admin.analytics.track_batch([
 import "context"
 
 ctx := context.Background()
-_ = admin.Analytics.Track(ctx, "user_upgraded", map[string]interface{}{
+_ = admin.Analytics().Track(ctx, "user_upgraded", map[string]interface{}{
     "plan": "pro",
     "amount": 29.99,
 }, "user_123")
 
-_ = admin.Analytics.TrackBatch(ctx, []edgebase.AnalyticsEvent{
+_ = admin.Analytics().TrackBatch(ctx, []edgebase.AnalyticsEvent{
     {Name: "email_sent", Properties: map[string]interface{}{"template": "welcome"}, UserID: "user_123"},
     {Name: "cron_completed", Properties: map[string]interface{}{"job": "cleanup", "duration": 1200}},
 })
@@ -575,7 +575,7 @@ println(result)
 <TabItem value="python" label="Python">
 
 ```python
-result = admin.analytics.query_events(metric="list", event="purchase", range="7d", limit="20")
+result = admin.analytics().query_events(metric="list", event="purchase", range="7d", limit=20)
 print(result["events"])
 ```
 
@@ -586,7 +586,7 @@ print(result["events"])
 import "context"
 
 ctx := context.Background()
-result, _ := admin.Analytics.QueryEvents(ctx, map[string]string{
+result, _ := admin.Analytics().QueryEvents(ctx, map[string]string{
     "metric": "list",
     "event": "purchase",
     "range": "7d",

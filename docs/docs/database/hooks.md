@@ -4,8 +4,8 @@ sidebar_position: 9
 
 # Table Hooks
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Define inline hooks on tables to intercept CRUD operations and enrich query results.

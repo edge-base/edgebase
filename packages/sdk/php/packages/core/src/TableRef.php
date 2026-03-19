@@ -256,14 +256,8 @@ class TableRef
         return ListResult::fromArray(is_array($data) ? $data : []);
     }
 
-    /** Alias for getList() to match SDK parity across runtimes. */
-    public function get(): ListResult
-    {
-        return $this->getList();
-    }
-
     /**
-     * Fetch a single document by ID.
+     * Get a single record by ID.
      * @return array<string, mixed>
      */
     public function getOne(string $id): array

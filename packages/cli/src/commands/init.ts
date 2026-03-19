@@ -14,7 +14,7 @@ export const initCommand = new Command('init')
   .description('Initialize a new EdgeBase project')
   .argument('[dir]', 'Project directory', '.')
   .option('--no-dev', 'Skip automatically starting the dev server after scaffolding')
-  .option('--no-open', 'Do not open the Admin Dashboard when auto-starting the dev server')
+  .option('--open', 'Open the Admin Dashboard when auto-starting the dev server')
   .action(async (dir: string, options: { dev: boolean; open: boolean }) => {
     const projectDir = resolve(dir);
     const localCliEntry = resolveLocalCliEntry(projectDir);
@@ -189,7 +189,7 @@ export const initCommand = new Command('init')
     // Run dev in the project directory (same process, no redundant npx spawn)
     process.chdir(projectDir);
     const { devCommand } = await import('./dev.js');
-    const devArgs = options.open ? [] : ['--no-open'];
+    const devArgs = options.open ? ['--open'] : [];
     await devCommand.parseAsync(devArgs, { from: 'user' });
   });
 
@@ -243,19 +243,18 @@ export default defineConfig({
     emailAuth: true,
   },
 
-  storage: {
-    buckets: {
-      uploads: {
-        // Uses the generated STORAGE R2 binding by default.
-        // Add access policies here when ready for production:
-        // access: {
-        //   read: () => true,
-        //   write: (auth) => auth !== null,
-        //   delete: (auth) => auth !== null,
-        // },
-      },
-    },
-  },
+  // Uncomment to enable R2 file storage (requires R2 enabled in Cloudflare Dashboard):
+  // storage: {
+  //   buckets: {
+  //     uploads: {
+  //       access: {
+  //         read: () => true,
+  //         write: (auth) => auth !== null,
+  //         delete: (auth) => auth !== null,
+  //       },
+  //     },
+  //   },
+  // },
 
   serviceKeys: {
     keys: [

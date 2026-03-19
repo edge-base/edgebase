@@ -427,8 +427,19 @@ class TableRef<T> {
     );
   }
 
-  /// Alias for getList() to match SDK parity across runtimes.
-  Future<ListResult<Map<String, dynamic>>> get() => getList();
+  /// Get a single record by ID.
+  Future<Map<String, dynamic>> getOne(String id) async {
+    final json = await _coreGet(
+      _core,
+      'get',
+      _namespace,
+      _instanceId,
+      name,
+      id: id,
+      query: {},
+    ) as Map<String, dynamic>;
+    return json;
+  }
 
   /// Get record count.
   Future<int> count() async {
@@ -443,9 +454,6 @@ class TableRef<T> {
     ) as Map<String, dynamic>;
     return json['total'] as int;
   }
-
-  /// Get a single record by ID — convenience shorthand for doc(id).get().
-  Future<Map<String, dynamic>> getOne(String id) => doc(id).get();
 
   /// Get the first record matching the current query conditions.
   /// Returns null if no records match.

@@ -129,7 +129,7 @@ Even with multiple layers, this architecture is for abuse mitigation, not exact 
 
 WebSocket connections present a unique challenge: the upgrade happens before authentication, so an attacker could open thousands of unauthenticated connections to overwhelm the DatabaseLiveDO.
 
-EdgeBase prevents this with a **KV-based pending connection counter** at the Worker level:
+EdgeBase adds a **best-effort pending-connection gate** before handing a WebSocket off to the target runtime:
 
 ```
 WebSocket upgrade request
@@ -137,14 +137,14 @@ WebSocket upgrade request
   ▼
 KV: ws:pending:{ip}
   │
-  ├─ Count < 5 → Increment counter, allow upgrade
+  ├─ Count < 5 → Try to reserve a short-lived slot, allow upgrade
   │                 │
   │                 ▼
   │              DatabaseLiveDO
   │                 │
-  │                 ├─ Auth succeeds → Decrement counter
+  │                 ├─ Auth succeeds → Release slot
   │                 └─ Auth fails/timeout → Connection closed
-  │                                         (counter auto-expires)
+  │                                         (slot eventually expires)
   │
   └─ Count >= 5 → 429 Too Many Requests (upgrade rejected)
 ```
@@ -153,15 +153,23 @@ KV: ws:pending:{ip}
 |---|---|
 | Max pending connections per IP | 5 |
 | KV key | `ws:pending:{ip}` |
-| TTL | 10 seconds |
+| TTL | 60 seconds on Cloudflare-compatible KV |
 
-### Why KV Instead of Rate Limiting Binding?
+### Why Not Treat KV As An Exact Counter?
 
-The Rate Limiting Binding's `limit()` API is a **one-way counter** (increment only). WebSocket pending tracking requires a **bidirectional counter** — increment on connection, decrement on successful auth. KV allows direct read/write of the counter value.
+The Rate Limiting Binding's `limit()` API is a **one-way counter** (increment only). Pending WebSocket tracking needs a short-lived reservation concept instead of a simple monotonic counter.
+
+Workers KV is only a coarse guardrail here:
+
+- KV is eventually consistent.
+- Writes to the same key are limited to 1 per second.
+- Expiration TTL must be at least 60 seconds.
+
+That makes this a conservative, best-effort gate rather than a strongly consistent distributed counter. If you need exact hot per-IP counters, move that state into Durable Objects or another strongly consistent store.
 
 ### Self-Healing
 
-The 10-second TTL on the KV key means the counter automatically resets even if the decrement fails (server crash, network error). No cleanup logic is needed — stale counters simply expire.
+The short KV TTL means pending slots eventually clear even if a release step is missed because of a crash or abrupt disconnect. That keeps the protection lightweight without permanent cleanup state.
 
 ## Service Key Rate Limit Policy
 

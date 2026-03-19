@@ -16,7 +16,7 @@ EdgeBase ships with a built-in Admin Dashboard at `/admin` for local and product
 
 ## First Login
 
-1. Start EdgeBase (`npm create edgebase@latest my-app` or `npx edgebase dev` — both open the dashboard automatically).
+1. Start EdgeBase (`npm create edgebase@latest my-app` or `npx edgebase dev`). Use `npx edgebase dev --open` if you want the browser to open automatically.
 2. Create the first admin account.
 3. Sign in and verify tables/users/storage views.
 

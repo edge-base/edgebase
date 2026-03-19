@@ -6,12 +6,19 @@
     <Nullable>enable</Nullable>
     <LangVersion>10.0</LangVersion>
     <PackageId>dev.edgebase.core</PackageId>
-    <Version>0.1.0</Version>
-    <Description>EdgeBase Core SDK — shared types and utilities</Description>
+    <Version>0.1.4</Version>
+    <Description>EdgeBase Core SDK for .NET - low-level HTTP, database, storage, push, and field-operation primitives</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://edgebase.fun/docs/database/client-sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/edge-base/edgebase</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="llms.txt" Pack="true" PackagePath="" />
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="tests/**" />

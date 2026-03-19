@@ -7,8 +7,8 @@ import TabItem from '@theme/TabItem';
 
 # Phone / SMS
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Phone number authentication via one-time SMS codes — users verify their identity with a 6-digit OTP sent to their phone.

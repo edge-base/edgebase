@@ -27,4 +27,4 @@ if [[ ! -f "$ROOT_DIR/edgebase.config.ts" ]]; then
 fi
 
 cd "$ROOT_DIR"
-exec pnpm exec tsx packages/cli/src/index.ts dev --no-open "$@"
+exec pnpm exec tsx packages/cli/src/index.ts dev "$@"

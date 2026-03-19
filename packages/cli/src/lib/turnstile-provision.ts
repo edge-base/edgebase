@@ -141,11 +141,28 @@ export async function provisionTurnstile(
       createResult?.errors?.map((e: { message: string }) => e.message).join(', ') ??
       'unknown error';
     console.log(chalk.yellow('⚠'), `Turnstile widget creation failed: ${errors}`);
+    diagnoseTurnstileError(errors);
     return null;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.log(chalk.yellow('⚠'), `Turnstile provisioning failed: ${msg}`);
+    diagnoseTurnstileError(msg);
     return null;
+  }
+}
+
+function diagnoseTurnstileError(errorMessage: string): void {
+  const msg = errorMessage.toLowerCase();
+  if (msg.includes('not enabled') || msg.includes('not found') || msg.includes('code: 10042')) {
+    console.log(chalk.dim('    Turnstile may not be enabled on your Cloudflare account.'));
+    console.log(chalk.dim('    To enable: Cloudflare Dashboard → Turnstile → Get Started'));
+    console.log(chalk.dim('    Or remove "captcha" from edgebase.config.ts if not needed.'));
+  } else if (msg.includes('authentication') || msg.includes('unauthorized') || msg.includes('forbidden')) {
+    console.log(chalk.dim('    Your API token may lack Turnstile permissions.'));
+    console.log(chalk.dim('    Ensure CLOUDFLARE_API_TOKEN has Account → Turnstile → Edit permissions.'));
+  } else if (msg.includes('quota') || msg.includes('limit')) {
+    console.log(chalk.dim('    You may have reached the Turnstile widget limit on your plan.'));
+    console.log(chalk.dim('    Check: Cloudflare Dashboard → Turnstile'));
   }
 }
 

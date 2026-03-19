@@ -180,7 +180,7 @@ class DatabaseLiveClient implements core.DatabaseLiveClient {
     _channel!.sink.add(jsonEncode({
       'type': 'auth',
       'token': token,
-      'sdkVersion': '0.1.0',
+      'sdkVersion': '0.1.4',
       if (ctx.isNotEmpty) 'context': ctx,
     }));
 
@@ -470,7 +470,7 @@ class DatabaseLiveClient implements core.DatabaseLiveClient {
     _channel!.sink.add(jsonEncode({
       'type': 'auth',
       'token': token,
-      'sdkVersion': '0.1.0',
+      'sdkVersion': '0.1.4',
       if (ctx.isNotEmpty) 'context': ctx,
     }));
   }

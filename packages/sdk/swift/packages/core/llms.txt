@@ -1,0 +1,56 @@
+# EdgeBaseCore
+
+Use this file as a quick-reference contract for AI coding assistants working with the
+Swift shared core package.
+
+## Package Boundary
+
+Use `EdgeBaseCore` only as a shared dependency for the higher-level Swift package.
+
+This package does not provide the `EdgeBaseClient` or `EdgeBaseServerClient`
+entrypoints.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/swift/packages/core/README.md
+- Root README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/swift/README.md
+- SDK Overview: https://edgebase.fun/docs/sdks
+
+## Public Package
+
+- `EdgeBaseCore`
+
+## Canonical Examples
+
+### Import the package
+
+```swift
+import EdgeBaseCore
+```
+
+### Error handling
+
+```swift
+do {
+    // shared core call
+} catch let error as EdgeBaseError {
+    print(error.statusCode)
+}
+```
+
+## Hard Rules
+
+- do not use this package as the app-facing entrypoint
+- keep Service Key workflows in the higher-level package
+- prefer the higher-level package for auth, push, analytics, and room features
+
+## Quick Reference
+
+```text
+HttpClient      -> shared HTTP client
+TableRef        -> query builder
+DbRef           -> namespace reference
+StorageClient   -> storage wrapper
+EdgeBaseError   -> error type
+FieldOps        -> atomic field helpers
+```

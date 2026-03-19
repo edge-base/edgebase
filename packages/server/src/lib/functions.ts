@@ -286,6 +286,17 @@ export interface FunctionContext {
   request: Request;
   auth: AuthContext | null;
   /**
+   * Convenience shortcut to `admin.db()`.
+   * Access database tables directly without going through `admin`.
+   *
+   * @example
+   * // Static DB
+   * await context.db('shared').table('posts').list()
+   * // Dynamic DB
+   * await context.db('workspace', 'ws-456').table('documents').list()
+   */
+  db: FunctionAdminContext['db'];
+  /**
    * Server-side EdgeBase admin client (§5,).
    * Use context.admin.db(namespace, id?).table(name) for all DB access.
    *
@@ -353,6 +364,16 @@ function getRegistryName(key: string, def: FunctionDefinition): string {
 }
 
 export function registerFunction(name: string, def: FunctionDefinition): void {
+  if (!def || typeof def !== 'object' || !def.trigger) {
+    const received = typeof def === 'function'
+      ? 'a plain function'
+      : `${typeof def} (${JSON.stringify(def)?.slice(0, 100)})`;
+    throw new Error(
+      `registerFunction('${name}'): expected a FunctionDefinition with a 'trigger' property, but received ${received}. ` +
+      `Functions must use defineFunction() from '@edge-base/shared' and be exported as named HTTP method exports ` +
+      `(e.g. export const GET = defineFunction(...)). See https://docs.edgebase.dev/functions for details.`,
+    );
+  }
   functionRegistry.set(buildRegistryKey(name, def), def);
 }
 
@@ -1409,6 +1430,7 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
   const ctx: FunctionContext = {
     request: options.request,
     auth: options.auth,
+    db: admin.db,
     admin,
     params: options.params ?? {},
   };

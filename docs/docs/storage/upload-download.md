@@ -7,8 +7,8 @@ import TabItem from '@theme/TabItem';
 
 # Upload & Download
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 R2-based file storage with $0 egress cost.
@@ -131,9 +131,12 @@ bucket.upload(
 <TabItem value="go" label="Go">
 
 ```go
-bucket := admin.Storage.Bucket("avatars")
+import "context"
 
-result, err := bucket.Upload("user-1.jpg", fileData, "image/jpeg")
+ctx := context.Background()
+bucket := admin.Storage().Bucket("avatars")
+
+result, err := bucket.Upload(ctx, "user-1.jpg", fileData, "image/jpeg")
 ```
 
 </TabItem>
@@ -326,10 +329,13 @@ data = bucket.download('user-1.jpg')
 <TabItem value="go" label="Go">
 
 ```go
-bucket := admin.Storage.Bucket("avatars")
+import "context"
+
+ctx := context.Background()
+bucket := admin.Storage().Bucket("avatars")
 
 url := bucket.GetURL("user-1.jpg")
-data, err := bucket.Download("user-1.jpg")
+data, err := bucket.Download(ctx, "user-1.jpg")
 ```
 
 </TabItem>

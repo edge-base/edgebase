@@ -312,10 +312,14 @@ class HttpClient
             $headers[] = 'Content-Type: application/json';
         }
         $headers[] = 'Connection: close';
-        if ($this->serviceKey !== '') {
-            $headers[] = 'X-EdgeBase-Service-Key: ' . $this->serviceKey;
-            // Authorization: Bearer — admin endpoint auth (server auth.ts uses this)
-            $headers[] = 'Authorization: Bearer ' . $this->serviceKey;
+        try {
+            if ($this->serviceKey !== '') {
+                $headers[] = 'X-EdgeBase-Service-Key: ' . $this->serviceKey;
+                // Authorization: Bearer — admin endpoint auth (server auth.ts uses this)
+                $headers[] = 'Authorization: Bearer ' . $this->serviceKey;
+            }
+        } catch (\Throwable) {
+            // Token refresh failed — proceed as unauthenticated
         }
         return $headers;
     }

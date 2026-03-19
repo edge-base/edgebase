@@ -61,7 +61,7 @@ private func matchesDatabaseLiveChannel(_ channel: String, change: DbChange, mes
 ///
 /// Auth flow (CRITICAL —):
 ///   1. Open WebSocket connection (no HTTP Authorization header)
-///   2. Send `{"type":"auth","token":"...","sdkVersion":"0.1.0"}` message
+///   2. Send `{"type":"auth","token":"...","sdkVersion":"0.1.4"}` message
 ///   3. Wait for `auth_success` or `auth_refreshed` before sending subscribe messages
 ///   4. On `auth_refreshed`: parse `revokedChannels`, clean up, re-subscribe remaining
 ///
@@ -321,7 +321,7 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
 
     /// Authenticate via WebSocket message (not HTTP headers).
     ///
-    /// Sends `{"type":"auth","token":"...","sdkVersion":"0.1.0"}` and waits for
+    /// Sends `{"type":"auth","token":"...","sdkVersion":"0.1.4"}` and waits for
     /// `auth_success` or `auth_refreshed` response from the server.
     ///
     /// On `auth_refreshed`: parses `revokedChannels`, removes them
@@ -339,7 +339,7 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
         let authMsg: [String: Any] = [
             "type": "auth",
             "token": token,
-            "sdkVersion": "0.1.0"
+            "sdkVersion": "0.1.4"
         ]
         try await sendMessage(authMsg)
 
@@ -581,7 +581,7 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
             try? await self.sendMessage([
                 "type": "auth",
                 "token": token,
-                "sdkVersion": "0.1.0",
+                "sdkVersion": "0.1.4",
             ])
         }
     }

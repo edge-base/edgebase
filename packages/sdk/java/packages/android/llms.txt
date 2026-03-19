@@ -1,0 +1,73 @@
+# EdgeBase Android Java SDK
+
+Use this file as a quick-reference contract for AI coding assistants working with the
+Java client package.
+
+## Package Boundary
+
+Use `edgebase-android-java` only in client applications or trusted desktop JVM code.
+
+Do not ship admin-only workflows in browser bundles or expose the Service Key in app
+code. For backend code, prefer `edgebase-admin-java`.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/java/packages/android/README.md
+- Root README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/java/README.md
+- SDK Overview: https://edgebase.fun/docs/sdks
+- Admin SDK: https://edgebase.fun/docs/sdks/client-vs-server
+
+## Public Artifact
+
+- `com.github.edge-base.edgebase:edgebase-android-java:v0.1.4`
+
+## Canonical Examples
+
+### Create a client
+
+```java
+import java.util.List;
+import java.util.Map;
+
+import dev.edgebase.sdk.core.EdgeBaseFieldOps;
+import dev.edgebase.sdk.client.ClientEdgeBase;
+import dev.edgebase.sdk.client.EdgeBase;
+
+ClientEdgeBase client = EdgeBase.client("https://your-project.edgebase.fun");
+```
+
+### Query a table
+
+```java
+List<?> posts = client.db("shared")
+    .table("posts")
+    .getList();
+```
+
+### Use field operations
+
+```java
+client.db("shared").table("posts").update("id", java.util.Map.of(
+    "views", EdgeBaseFieldOps.increment(1)
+));
+```
+
+## Hard Rules
+
+- use `EdgeBase.client(...)` for app-side work
+- do not expose Service Keys through this package
+- prefer the admin package for trusted server-side operations
+- use `dev.edgebase.sdk.core.EdgeBaseFieldOps` for atomic field updates
+
+## Quick Reference
+
+```text
+EdgeBase.client(url)               -> ClientEdgeBase
+client.auth()                      -> AuthClient
+client.db(namespace)               -> DbRef
+client.storage()                   -> StorageClient
+client.functions()                 -> FunctionsClient
+client.analytics()                 -> AnalyticsClient
+client.push()                      -> PushClient
+client.destroy()                   -> void
+```

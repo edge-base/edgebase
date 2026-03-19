@@ -4,8 +4,8 @@ sidebar_position: 5
 
 # Access Rules
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Define who can upload, download, and delete files in your storage buckets. Rules are TypeScript functions declared in `edgebase.config.ts` that return `true` (allow) or `false` (deny).

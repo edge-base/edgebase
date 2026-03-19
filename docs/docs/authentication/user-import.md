@@ -4,8 +4,8 @@ sidebar_position: 18
 
 # User Import
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Batch import users from another system into EdgeBase. Supports pre-hashed passwords for seamless migration without requiring users to reset their passwords.

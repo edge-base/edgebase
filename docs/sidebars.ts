@@ -321,6 +321,40 @@ const sidebars = {
             },
           ],
         },
+        {
+          type: 'category',
+          label: 'Direct Control',
+          link: {type: 'doc', id: 'server/native-resources'},
+          items: [
+            {
+              type: 'category',
+              label: 'KV',
+              link: {type: 'doc', id: 'server/native-kv-overview'},
+              items: [
+                'server/native-kv-admin-sdk',
+                'server/native-kv-limits-pricing',
+              ],
+            },
+            {
+              type: 'category',
+              label: 'D1',
+              link: {type: 'doc', id: 'server/native-d1-overview'},
+              items: [
+                'server/native-d1-admin-sdk',
+                'server/native-d1-limits-pricing',
+              ],
+            },
+            {
+              type: 'category',
+              label: 'Vectorize',
+              link: {type: 'doc', id: 'server/native-vectorize-overview'},
+              items: [
+                'server/native-vectorize-admin-sdk',
+                'server/native-vectorize-limits-pricing',
+              ],
+            },
+          ],
+        },
       ],
     },
     {
@@ -405,7 +439,6 @@ const sidebars = {
               label: 'Extension Points',
               items: [
                 'server/enrich-auth',
-                'server/native-resources',
                 'server/raw-sql',
               ],
             },

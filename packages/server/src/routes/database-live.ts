@@ -22,7 +22,7 @@ import {
 export const databaseLiveRoute = new OpenAPIHono<HonoEnv>({ defaultHook: zodDefaultHook });
 
 const MAX_PENDING_PER_IP = 5;
-const PENDING_TTL_SECONDS = 10;
+const PENDING_TTL_SECONDS = 60;
 const dbLiveQuerySchema = z.object({
   channel: z.string().optional().openapi({ description: 'Legacy DB subscription channel name' }),
   namespace: z.string().optional().openapi({ description: 'Database namespace', example: 'shared' }),

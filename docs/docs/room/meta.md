@@ -10,8 +10,8 @@ import TabItem from '@theme/TabItem';
 
 # Meta (Room Info)
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 `room.meta` is the public-safe description of a room.

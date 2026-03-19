@@ -253,7 +253,7 @@ public actor HttpClient {
     }
 
     private func addAuthHeaders(_ request: inout URLRequest) async throws {
-        if let token = try await tokenManager.getAccessToken() {
+        if let token = try? await tokenManager.getAccessToken() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         if let projectId = projectId {

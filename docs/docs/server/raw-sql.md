@@ -192,15 +192,16 @@ val rows = admin.sql(
 
 ```python
 import os
-from edgebase_admin import AdminClient
+from edgebase_admin import create_admin_client
 
-admin = AdminClient(
+admin = create_admin_client(
     'https://your-app.example.com',
     service_key=os.environ['EDGEBASE_SERVICE_KEY'],
 )
 
 rows = admin.sql(
     'shared',
+    None,
     'SELECT * FROM posts WHERE status = ? ORDER BY createdAt DESC LIMIT 10',
     ['published'],
 )

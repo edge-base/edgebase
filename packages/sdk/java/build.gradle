@@ -3,14 +3,18 @@ plugins {
     id 'maven-publish'
 }
 
+def edgebaseReleaseVersion = '0.1.4'
+def edgebaseGroup = System.getenv('JITPACK') ? 'com.github.edge-base.edgebase' : 'dev.edgebase'
+def edgebaseVersion = System.getenv('JITPACK') ? (System.getenv('VERSION') ?: "v${edgebaseReleaseVersion}") : edgebaseReleaseVersion
+
 allprojects {
     repositories {
         mavenCentral()
     }
 }
 
-group = 'dev.edgebase'
-version = '0.1.3'
+group = edgebaseGroup
+version = edgebaseVersion
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -37,7 +41,7 @@ publishing {
     publications {
         maven(MavenPublication) {
             from components.java
-            groupId = 'dev.edgebase'
+            groupId = project.group.toString()
             artifactId = 'edgebase-sdk-java'
             version = project.version
             pom {

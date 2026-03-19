@@ -94,8 +94,7 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["DatabaseDO", "AuthDO"]
-new_classes = ["DatabaseLiveDO", "RoomsDO"]
+new_sqlite_classes = ["DatabaseDO", "AuthDO", "DatabaseLiveDO", "RoomsDO"]
 
 [[migrations]]
 tag = "v2"

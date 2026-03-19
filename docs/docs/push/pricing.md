@@ -16,7 +16,7 @@ EdgeBase Push Notification infrastructure costs are minimal — token storage us
 |----------|----------|------|
 | KV reads | Token lookup on send | $0.50 / million reads (10M/mo included) |
 | KV writes | Token registration | $5.00 / million writes (1M/mo included) |
-| KV storage | Token + topic data | $0.50 / GB (1 GB included) |
+| KV storage | Token + topic data | $0.50 / GB-month (1 GB included) |
 | Workers requests | API endpoint handling | $0.30 / million (10M/mo included) |
 
 ### Example: 50K Users, 10 Pushes/Day
@@ -37,5 +37,5 @@ FCM delivery is **free** with no per-message charge. You need a Firebase project
 On Docker, KV is emulated as local file storage. Push API endpoints run in the same process with no external KV charges. FCM delivery still requires internet access and FCM credentials.
 
 :::info Pricing source
-KV pricing reflects Cloudflare's published rates as of February 2026. FCM is free as per Google's Firebase pricing.
+KV pricing reflects Cloudflare's published rates as of March 2026. FCM is free as per Google's Firebase pricing.
 :::

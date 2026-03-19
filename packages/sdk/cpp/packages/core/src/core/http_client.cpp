@@ -53,9 +53,13 @@ struct HttpClient::Impl {
     headers = curl_slist_append(headers, "Content-Type: application/json");
     headers = curl_slist_append(headers, "Accept: application/json");
 
-    if (!token.empty())
-      headers = curl_slist_append(headers,
-                                  ("Authorization: Bearer " + token).c_str());
+    try {
+      if (!token.empty())
+        headers = curl_slist_append(headers,
+                                    ("Authorization: Bearer " + token).c_str());
+    } catch (...) {
+      // Token refresh failed — proceed as unauthenticated
+    }
     if (!serviceKey.empty()) {
       headers = curl_slist_append(
           headers, ("X-EdgeBase-Service-Key: " + serviceKey).c_str());
@@ -132,9 +136,13 @@ struct HttpClient::Impl {
     curl_mime_filename(field, key.c_str());
 
     struct curl_slist *headers = nullptr;
-    if (!token.empty())
-      headers = curl_slist_append(headers,
-                                  ("Authorization: Bearer " + token).c_str());
+    try {
+      if (!token.empty())
+        headers = curl_slist_append(headers,
+                                    ("Authorization: Bearer " + token).c_str());
+    } catch (...) {
+      // Token refresh failed — proceed as unauthenticated
+    }
     if (!serviceKey.empty()) {
       headers = curl_slist_append(
           headers, ("X-EdgeBase-Service-Key: " + serviceKey).c_str());

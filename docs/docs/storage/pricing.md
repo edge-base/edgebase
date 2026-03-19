@@ -4,20 +4,29 @@ sidebar_position: 8
 
 # Pricing
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 EdgeBase Storage uses Cloudflare R2 with **$0 egress** — downloading files costs nothing regardless of bandwidth.
 
+:::tip Free Plan
+<div className="docs-badge-row">
+  <span className="docs-badge docs-badge--free">Free Plan</span>
+  <span className="docs-badge docs-badge--setup">Billing Setup</span>
+</div>
+
+R2 is available on the Cloudflare Free plan. It includes 10 GB free storage, but Cloudflare requires a separate R2 subscription / billing activation before first use: **R2 Object Storage → Get Started**.
+:::
+
 ## Edge (Cloudflare)
 
-| Resource | Included (Workers Paid) | Overage |
-|----------|------------------------|---------|
-| R2 storage | 10 GB / month | $0.015 / GB |
-| R2 Class A ops (writes) | 1M / month | $4.50 / million |
-| R2 Class B ops (reads) | 10M / month | $0.36 / million |
-| R2 egress | **Unlimited** | **$0** |
+| Resource | Free Plan | Workers Paid | Overage |
+|----------|-----------|-------------|---------|
+| R2 storage | 10 GB / month | 10 GB / month | $0.015 / GB |
+| R2 Class A ops (writes) | 1M / month | 1M / month | $4.50 / million |
+| R2 Class B ops (reads) | 10M / month | 10M / month | $0.36 / million |
+| R2 egress | **Unlimited** | **Unlimited** | **$0** |
 
 ### Example: Social App (2 TB Files, 100 TB Egress/Month)
 

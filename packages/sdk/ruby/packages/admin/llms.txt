@@ -1,0 +1,117 @@
+# EdgeBase Ruby Admin SDK
+
+Use this file as a quick-reference contract for AI coding assistants working with `edgebase_admin`.
+
+## Package Boundary
+
+Use `edgebase_admin` only in trusted server-side Ruby environments.
+
+Do not ship this package to browser code, untrusted jobs, or client-side Ruby runtimes. It is meant for backend apps, scripts, cron jobs, and other places where a Service Key can stay private.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/ruby/packages/admin/README.md
+- Database Admin SDK: https://edgebase.fun/docs/database/admin-sdk
+- Admin users: https://edgebase.fun/docs/authentication/admin-users
+- Storage: https://edgebase.fun/docs/storage/upload-download
+- Push Admin SDK: https://edgebase.fun/docs/push/admin-sdk
+- Analytics Admin SDK: https://edgebase.fun/docs/analytics/admin-sdk
+- Admin SDK reference: https://edgebase.fun/docs/admin-sdk/reference
+
+If docs, examples, and assumptions disagree, prefer the current package API and the official docs over guessed patterns.
+
+## Canonical Examples
+
+### Create an admin client
+
+```ruby
+require "edgebase_admin"
+
+admin = EdgebaseAdmin::AdminClient.new(
+  "https://your-project.edgebase.fun",
+  service_key: ENV.fetch("EDGEBASE_SERVICE_KEY")
+)
+```
+
+### Query a table
+
+```ruby
+posts = admin.db("app").table("posts")
+rows = posts.where("status", "==", "published").get
+```
+
+### Manage users
+
+```ruby
+created = admin.admin_auth.create_user(
+  email: "june@example.com",
+  password: "pass1234",
+  data: { "displayName" => "June" }
+)
+
+admin.admin_auth.set_custom_claims(created["id"], {
+  "role" => "moderator"
+})
+```
+
+### Execute SQL
+
+```ruby
+rows = admin.sql(
+  "workspace",
+  "SELECT * FROM documents WHERE status = ?",
+  ["published"],
+  instance_id: "ws-1"
+)
+```
+
+### Send push and query analytics
+
+```ruby
+admin.push.send("user-123", {
+  "title" => "Hello",
+  "body" => "From the admin SDK"
+})
+
+overview = admin.analytics.overview("range" => "7d")
+```
+
+## Hard Rules
+
+- keep Service Keys on trusted servers only
+- all Ruby admin methods are synchronous
+- `admin.admin_auth` is canonical; `admin.auth` is an alias
+- `admin.sql(namespace, query, params = nil, instance_id: nil)` uses a keyword `instance_id:` for dynamic DOs
+- `admin.admin_auth.create_user()` accepts a hash or keyword arguments, but hash payloads are safest for docs and agents
+- `admin.storage` returns `EdgebaseCore::StorageClient`
+- `admin.functions` exposes `call()`, `get()`, `post()`, `put()`, `patch()`, and `delete()`
+- `admin.push` exposes `send()`, `send_many()`, `send_to_token()`, `get_tokens()`, `get_logs()`, `send_to_topic()`, and `broadcast()`
+- `admin.broadcast(channel, event, payload = {})` is server-side broadcast
+- `admin.destroy` is a no-op cleanup hook
+
+## Common Mistakes
+
+- do not use `edgebase_admin` in client-side Ruby code
+- do not copy JavaScript promise-based examples into Ruby
+- do not call `sql("SELECT ...")` without a namespace
+- do not pass the instance id positionally to `sql`; use `instance_id:`
+- do not expect `admin_auth` to return a promise or future
+
+## Quick Reference
+
+```text
+EdgebaseAdmin::AdminClient.new(url, service_key:)          -> AdminClient
+admin.db(namespace = "shared", instance_id = nil)         -> DbRef
+admin.admin_auth                                           -> AdminAuthClient
+admin.auth                                                 -> AdminAuthClient
+admin.sql(namespace, query, params = nil, instance_id: nil) -> Array or raw payload
+admin.storage                                              -> EdgebaseCore::StorageClient
+admin.push                                                 -> PushClient
+admin.functions                                            -> FunctionsClient
+admin.analytics                                            -> AnalyticsClient
+admin.kv(namespace)                                        -> KvClient
+admin.d1(database)                                         -> D1Client
+admin.vector(index)                                        -> VectorizeClient
+admin.broadcast(channel, event, payload = {})             -> nil
+admin.destroy                                              -> nil
+```

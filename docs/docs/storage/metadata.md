@@ -7,8 +7,8 @@ import TabItem from '@theme/TabItem';
 
 # Metadata
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Manage file metadata: content type, size, uploader info, and custom properties.
@@ -87,10 +87,13 @@ meta = bucket.get_metadata('user-1.jpg')
 <TabItem value="go" label="Go">
 
 ```go
-bucket := admin.Storage.Bucket("avatars")
+import "context"
 
-meta, err := bucket.GetMetadata("user-1.jpg")
-// meta.Key, meta.Size, meta.ContentType, meta.CustomMetadata
+ctx := context.Background()
+bucket := admin.Storage().Bucket("avatars")
+
+meta, err := bucket.GetMetadata(ctx, "user-1.jpg")
+// meta["key"], meta["size"], meta["contentType"], meta["customMetadata"]
 ```
 
 </TabItem>
@@ -226,12 +229,19 @@ bucket.update_metadata('user-1.jpg',
 <TabItem value="go" label="Go">
 
 ```go
-bucket := admin.Storage.Bucket("avatars")
+import "context"
 
-err := bucket.UpdateMetadata("user-1.jpg", map[string]string{
-    "alt":      "Updated profile photo",
-    "category": "avatars",
-}, "image/webp")
+ctx := context.Background()
+bucket := admin.Storage().Bucket("avatars")
+
+meta, err := bucket.UpdateMetadata(ctx, "user-1.jpg", map[string]interface{}{
+    "customMetadata": map[string]interface{}{
+        "alt":      "Updated profile photo",
+        "category": "avatars",
+    },
+    "contentType": "image/webp",
+})
+// meta["customMetadata"], meta["contentType"]
 ```
 
 </TabItem>

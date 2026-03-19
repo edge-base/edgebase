@@ -4,6 +4,7 @@ slug: /why-edgebase
 title: Why EdgeBase?
 sidebar_position: 0
 ---
+
 # Why EdgeBase?
 
 EdgeBase is the **first Backend-as-a-Service built entirely on serverless edge infrastructure**. Every other BaaS — Firebase, Supabase, Appwrite, PocketBase — runs on traditional server architecture: a central database, a container, or a single process. EdgeBase runs Auth, Database, Storage, and Functions natively on Cloudflare Workers and Durable Objects.
@@ -186,3 +187,11 @@ Server route definition (Hono + Zod)
 | **SDK auto-sync**      |     ❌ Manual     |      ❌ Manual      |      ❌ Manual       |    **Auto (OpenAPI)**    |
 | **Runtime validation** |        ❌         |         ❌          |          ❌          |   **Zod (always on)**    |
 | **License**            |    Proprietary    |     Apache-2.0      |         MIT          |         **MIT**          |
+
+---
+
+## Why It Also Fits AI Coding
+
+This architecture also makes EdgeBase a strong fit for AI-assisted development. Instead of splitting your backend across dashboard clicks, policy DSLs, and project-side state, EdgeBase keeps more of the contract in code.
+
+Schema, access rules, hooks, functions, and type generation can stay in one repo and one TypeScript workflow. That lets an agent update the backend in one patch and makes review, diffs, and iteration much simpler.

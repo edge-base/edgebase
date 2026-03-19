@@ -8,7 +8,7 @@
  * const posts = await client.db('shared').table('posts').where('status', '==', 'published').get();
  */
 
-import { HttpClient } from '@edge-base/core';
+import { HttpClient, EdgeBaseError } from '@edge-base/core';
 import { ContextManager } from '@edge-base/core';
 import type { ContextValue } from '@edge-base/core';
 import { DbRef } from '@edge-base/core';
@@ -90,6 +90,9 @@ export class ClientEdgeBase {
   private core: DefaultDbApi;
 
   constructor(url: string, options?: JuneClientOptions) {
+    if (!url || typeof url !== 'string') {
+      throw new EdgeBaseError(0, `[EdgeBase] Invalid URL: expected a non-empty string, got ${url === undefined ? 'undefined' : url === null ? 'null' : JSON.stringify(url)}. Set NEXT_PUBLIC_EDGEBASE_URL or pass a URL to createClient().`, undefined, 'invalid-url');
+    }
     const baseUrl = url.replace(/\/$/, '');
     this.tokenManager = new TokenManager(baseUrl);
     this.contextManager = new ContextManager();

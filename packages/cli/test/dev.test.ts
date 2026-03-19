@@ -3,7 +3,7 @@
  *
  * 테스트 범위:
  * 1. Config file validation
- * 2. Wrangler dev arguments & --no-open flag
+ * 2. Wrangler dev arguments & --open flag
  * 3. Functions Directory: scanFunctions
  * 4. Functions Registry: generateFunctionRegistry
  * 5. Plugin Tables Merge: mergePluginTables (Explicit Import Pattern)
@@ -431,13 +431,13 @@ describe('Wrangler dev arguments', () => {
 });
 
 // ======================================================================
-// 2.1 dev --no-open flag (dashboard opens by default)
+// 2.1 dev --open flag (dashboard stays closed by default)
 // ======================================================================
 
-describe('dev --no-open flag', () => {
-  it('devCommand accepts --no-open option (dashboard opens by default)', async () => {
+describe('dev --open flag', () => {
+  it('devCommand accepts --open option (dashboard stays closed by default)', async () => {
     const { devCommand } = await import('../src/commands/dev.js');
-    const openOption = devCommand.options.find((o: any) => o.long === '--no-open');
+    const openOption = devCommand.options.find((o: any) => o.long === '--open');
     expect(openOption).toBeDefined();
     expect(openOption!.description).toContain('admin dashboard');
   });

@@ -1,47 +1,80 @@
-# EdgeBase Rust Server SDK
+# EdgeBase Rust SDK Workspace
 
-Server-only SDK for EdgeBase — (2단계).
+Workspace root for the Rust EdgeBase SDKs.
 
-## Entry Point
+Most application code should install `edgebase-admin` for trusted server-side usage or `edgebase-core` for lower-level primitives. This root package tracks the Rust SDK release line and houses the integrated test workspace in this repository. It is not the main public crates.io install target.
 
-```rust
-use edgebase::EdgeBase;
+## Documentation Map
 
-let client = EdgeBase::server(
-    "https://your-project.edgebase.fun",
-    std::env::var("EDGEBASE_SERVICE_KEY")?.as_str(),
-)?;
+Use this README for the package map, then jump into the package-specific docs when you need depth:
+
+- [SDK Overview](https://edgebase.fun/docs/sdks)
+  Install commands and the public SDK matrix
+- [Admin SDK](https://edgebase.fun/docs/sdks/client-vs-server)
+  Trusted-server concepts and admin-only capabilities
+- [Admin SDK Reference](https://edgebase.fun/docs/admin-sdk/reference)
+  Cross-language examples for auth, database, storage, functions, push, and analytics
+- [Database Admin SDK](https://edgebase.fun/docs/database/admin-sdk)
+  Table queries, filters, pagination, batch writes, and raw SQL
+- [Storage](https://edgebase.fun/docs/storage/upload-download)
+  Uploads, downloads, metadata, and signed URLs
+- [Native Resources](https://edgebase.fun/docs/server/native-resources)
+  KV, D1, Vectorize, and other trusted edge-native resources
+
+## For AI Coding Assistants
+
+This workspace includes an `llms.txt` file for AI-assisted development.
+
+Use it when you want an assistant to:
+
+- choose the right Rust package boundary
+- keep Service Key logic on the server
+- use Rust method names and async patterns instead of copying JavaScript examples directly
+- know that `edgebase-admin` is the main application-facing crate and `edgebase-core` is the lower-level foundation
+
+You can find it:
+
+- in this repository: [llms.txt](https://github.com/edge-base/edgebase/blob/main/packages/sdk/rust/llms.txt)
+- in this workspace checkout next to the README
+
+## Package Map
+
+| Package | Use it for |
+| --- | --- |
+| `edgebase-sdk` | Workspace release line and integrated repository package |
+| `edgebase-admin` | Trusted server-side Rust code with Service Key access |
+| `edgebase-core` | Lower-level HTTP, database, storage, and shared primitives |
+
+## Installation
+
+For published application code, prefer the narrower crates:
+
+```toml
+[dependencies]
+edgebase-admin = "0.1.4"
 ```
 
-## Run Tests
+Or for lower-level primitives:
+
+```toml
+[dependencies]
+edgebase-core = "0.1.4"
+```
+
+The current public Rust release unit focuses on `edgebase-core` and `edgebase-admin`.
+
+## Development
+
+Run tests from the workspace root:
 
 ```bash
 cd packages/sdk/rust
 
-# Unit tests only (no server needed) — offline OK
-cargo test --lib
-
-# E2E tests (requires running server)
+cargo test -p edgebase-core
+cargo test -p edgebase-admin
 BASE_URL=http://localhost:8688 EDGEBASE_SERVICE_KEY=sk_test cargo test
 ```
 
-## Prerequisites
+## License
 
-- Rust 1.75+ (2021 edition)
-- `cargo`
-
-## Dependencies
-
-```toml
-reqwest  = "0.12"  # HTTP client (json feature)
-serde    = "1"     # Serialization
-tokio    = "1"     # Async runtime
-thiserror = "1"    # Error types
-```
-
-## Start Server (for E2E)
-
-```bash
-cd packages/server
-TMPDIR=/tmp XDG_CONFIG_HOME=/tmp npx wrangler dev --config wrangler.test.toml --port 8688
-```
+MIT

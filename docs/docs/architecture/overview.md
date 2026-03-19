@@ -138,10 +138,10 @@ Server-authoritative real-time state channel for multiplayer games, collaborativ
 | ------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | **D1**  | Auth database (AUTH_DB)             | All auth data: users, sessions, OAuth, email tokens, MFA, passkeys, public profiles                         |
 | **D1**  | Internal control plane (CONTROL_DB) | Plugin versions and other internal operational metadata                                                     |
-| **KV**  | Ephemeral state cache               | OAuth state (300s), WebSocket pending (10s), multipart upload tracking (7d), email tokens, push tokens/logs |
+| **KV**  | Ephemeral state cache               | OAuth state (300s), short-lived WebSocket pending gates, multipart upload tracking (7d), email tokens, push tokens/logs |
 | **R2**  | File storage                        | User uploads, signed URLs, multipart uploads                                                                |
 
-All KV entries are TTL-based and self-healing — they regenerate naturally after expiration or data loss, requiring no backup.
+Most KV usage in EdgeBase is ephemeral or cache-like. Persistent, strongly consistent state should live in D1, Durable Objects, or a database provider instead.
 
 ## Three Deployment Modes
 

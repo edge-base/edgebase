@@ -4,8 +4,8 @@ sidebar_position: 23
 
 # Pricing
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 EdgeBase Authentication costs **$0** regardless of user count. There is no per-MAU pricing.
@@ -16,10 +16,10 @@ Authentication uses JWT verification — pure cryptography with no network call 
 
 | Operation | How it works | Cost |
 |-----------|-------------|------|
-| Sign in / Sign up | D1 (AUTH_DB) read/write | Included in Workers Paid plan |
+| Sign in / Sign up | D1 (AUTH_DB) read/write | Covered by D1 limits (Free or Paid) |
 | Token verification | Local JWT signature check | $0 (no I/O) |
-| Token refresh | D1 (AUTH_DB) read/write | Included in Workers Paid plan |
-| Session management | D1 (AUTH_DB) operations | Included in Workers Paid plan |
+| Token refresh | D1 (AUTH_DB) read/write | Covered by D1 limits (Free or Paid) |
+| Session management | D1 (AUTH_DB) operations | Covered by D1 limits (Free or Paid) |
 
 ## Comparison
 
@@ -34,7 +34,7 @@ Authentication uses JWT verification — pure cryptography with no network call 
 *Firebase charges per-MAU after 50K free tier. Supabase charges $0.00325/MAU after 100K included.*
 
 :::tip Scaling beyond D1
-D1's included limits (25B reads, 50M writes, 10GB storage per month) handle the vast majority of applications. If you outgrow them, switch the auth provider to **Neon PostgreSQL** with a single config change — no code modifications. Auth remains $0 per MAU regardless of provider.
+The Free plan already includes 5M reads/day and 100K writes/day. The Workers Paid plan raises this to 25B reads and 50M writes/month. If you outgrow D1 limits, switch the auth provider to **Neon PostgreSQL** with a single config change — no code modifications. Auth remains $0 per MAU regardless of provider.
 :::
 
 ## Email Costs

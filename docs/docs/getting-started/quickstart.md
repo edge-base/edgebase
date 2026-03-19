@@ -15,7 +15,7 @@ Get EdgeBase running in under 5 minutes.
 npm create edgebase@latest my-app
 ```
 
-That's it — one command. `create-edgebase` scaffolds the project, installs the local EdgeBase packages, starts the dev server, and opens the Admin Dashboard in your browser automatically.
+That's it — one command. `create-edgebase` scaffolds the project, installs the local EdgeBase packages, and starts the dev server.
 If you only want the files without starting a persistent session, use `npm create edgebase@latest my-app -- --no-dev`.
 
 The scaffolded project structure:
@@ -37,7 +37,7 @@ my-app/
 
 The starter includes auth, storage, and a sample `GET /api/functions/health` endpoint, but it does **not** create a default app table for you.
 
-The Admin Dashboard opens at [http://localhost:8787/admin](http://localhost:8787/admin).
+The Admin Dashboard is available at [http://localhost:8787/admin](http://localhost:8787/admin).
 
 :::tip Restart Later
 To restart the dev server after closing it:
@@ -45,7 +45,7 @@ To restart the dev server after closing it:
 cd my-app
 npx edgebase dev
 ```
-The dashboard opens automatically. Use `--no-open` to disable: `npx edgebase dev --no-open`
+Open the dashboard manually at `http://localhost:8787/admin`, or use `npx edgebase dev --open` if you want the browser opened automatically.
 :::
 
 ## 2. Install an SDK
@@ -77,7 +77,7 @@ npm install @edge-base/react-native
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.1.0")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.1.4")
 ]
 ```
 
@@ -86,8 +86,12 @@ dependencies: [
 
 ```kotlin
 // build.gradle.kts
+repositories {
+    maven("https://jitpack.io")
+}
+
 dependencies {
-    implementation("dev.edgebase:edgebase-client-kotlin:0.1.0")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.1.4")
 }
 ```
 
@@ -97,8 +101,12 @@ dependencies {
 
 ```java
 // build.gradle
+repositories {
+    maven { url 'https://jitpack.io' }
+}
+
 dependencies {
-    implementation 'dev.edgebase:edgebase-android-java:0.1.0'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.1.4'
 }
 ```
 

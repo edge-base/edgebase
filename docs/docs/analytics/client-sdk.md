@@ -8,8 +8,8 @@ import TabItem from '@theme/TabItem';
 
 # Client SDK — Event Tracking
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Track custom events from client SDKs with `client.analytics.track(...)`.

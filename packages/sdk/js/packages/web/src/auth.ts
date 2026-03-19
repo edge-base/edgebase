@@ -50,6 +50,16 @@ export interface MfaFactor {
 
 export type SignInResult = AuthResult | MfaRequiredResult;
 
+/** Type guard to narrow SignInResult to AuthResult (i.e. MFA was not required). */
+export function isAuthResult(result: SignInResult): result is AuthResult {
+  return 'accessToken' in result;
+}
+
+/** Type guard to narrow SignInResult to MfaRequiredResult. */
+export function isMfaRequired(result: SignInResult): result is MfaRequiredResult {
+  return 'mfaRequired' in result && (result as MfaRequiredResult).mfaRequired === true;
+}
+
 export interface TotpEnrollResult {
   factorId: string;
   secret: string;

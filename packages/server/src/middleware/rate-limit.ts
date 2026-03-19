@@ -41,13 +41,26 @@ type HonoEnv = { Bindings: Env };
 
 export const RATE_LIMIT_DEFAULTS: Record<string, { requests: number; windowSec: number }> = {
   global:      { requests: 10_000_000, windowSec: 60 },
-  db: { requests: 100,        windowSec: 60 },
+  db:          { requests: 100,        windowSec: 60 },
   storage:     { requests: 50,         windowSec: 60 },
   functions:   { requests: 50,         windowSec: 60 },
   auth:        { requests: 30,         windowSec: 60 },
   authSignin:  { requests: 10,         windowSec: 60 },
   authSignup:  { requests: 10,         windowSec: 60 },
   events:      { requests: 100,        windowSec: 60 },
+};
+
+// Dev mode defaults: 10x higher to accommodate React strict mode double-rendering,
+// hot-reload page refreshes, and onSnapshot polling during development.
+export const RATE_LIMIT_DEV_DEFAULTS: Record<string, { requests: number; windowSec: number }> = {
+  global:      { requests: 10_000_000, windowSec: 60 },
+  db:          { requests: 1000,       windowSec: 60 },
+  storage:     { requests: 500,        windowSec: 60 },
+  functions:   { requests: 500,        windowSec: 60 },
+  auth:        { requests: 300,        windowSec: 60 },
+  authSignin:  { requests: 100,        windowSec: 60 },
+  authSignup:  { requests: 100,        windowSec: 60 },
+  events:      { requests: 1000,       windowSec: 60 },
 };
 
 // ─── Window parser ───
@@ -124,6 +137,11 @@ export class FixedWindowCounter {
     return Math.max(1, Math.ceil((bucket.resetAt - Date.now()) / 1000));
   }
 
+  /** Clear all buckets. Called when config changes to avoid stale limits blocking requests. */
+  reset(): void {
+    this.buckets.clear();
+  }
+
   private maybeCleanup(now: number): void {
     if (now - this.lastCleanup < FixedWindowCounter.CLEANUP_INTERVAL) return;
     this.lastCleanup = now;
@@ -139,7 +157,9 @@ export const counter = new FixedWindowCounter();
 
 // ─── Helpers ───
 
-/** Get config-based limit for a group, with fallback to defaults */
+/** Get config-based limit for a group, with fallback to defaults.
+ * In dev mode (release !== true), uses relaxed defaults to avoid
+ * rate limiting during development with hot-reload and strict mode. */
 export function getLimit(
   config: EdgeBaseConfig | undefined,
   group: string,
@@ -154,7 +174,9 @@ export function getLimit(
       };
     }
   }
-  return RATE_LIMIT_DEFAULTS[group] ?? { requests: 10_000_000, windowSec: 60 };
+  const isDevMode = config?.release !== true;
+  const defaults = isDevMode ? RATE_LIMIT_DEV_DEFAULTS : RATE_LIMIT_DEFAULTS;
+  return defaults[group] ?? { requests: 10_000_000, windowSec: 60 };
 }
 
 /** Map group name to the corresponding env binding */

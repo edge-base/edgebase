@@ -8,8 +8,8 @@ import TabItem from '@theme/TabItem';
 
 # Naver
 
-:::caution Beta
-This feature is in **beta**. Core behavior is stable, but some APIs or configuration may change before general availability.
+:::info Beta
+This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
 Sign in with Naver accounts using OAuth 2.0. Popular in South Korea.

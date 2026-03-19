@@ -31,7 +31,8 @@ export function parseErrorResponse(status: number, body: unknown): EdgeBaseError
 
 /**
  * Create a network-level error (fetch failures, timeouts, etc.)
+ * Uses slug 'network-error' so callers can distinguish from server errors.
  */
 export function networkError(message: string): EdgeBaseError {
-  return new EdgeBaseError(0, message);
+  return new EdgeBaseError(0, message, undefined, 'network-error');
 }

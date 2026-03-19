@@ -9,6 +9,7 @@
  * Constraint: `id` must NOT contain `:` character.
  */
 import { materializeConfig, type EdgeBaseConfig } from '@edge-base/shared';
+import { counter } from '../middleware/rate-limit.js';
 
 const RUNTIME_CONFIG_GLOBAL_KEY = '__EDGEBASE_RUNTIME_CONFIG__';
 
@@ -145,10 +146,17 @@ function readGlobalRuntimeConfig(): EdgeBaseConfig | null {
  */
 export function setConfig(config: EdgeBaseConfig): void {
   const normalized = materializeConfig(config);
+  const configChanged = _runtimeConfig !== null;
   _runtimeConfig = normalized;
 
   if (typeof globalThis === 'object' && globalThis !== null) {
     (globalThis as Record<string, unknown>)[RUNTIME_CONFIG_GLOBAL_KEY] = normalized;
+  }
+
+  // Reset rate limit counters when config changes (e.g. hot-reload in dev)
+  // to avoid stale counters blocking requests under new limits.
+  if (configChanged) {
+    counter.reset();
   }
 }
 

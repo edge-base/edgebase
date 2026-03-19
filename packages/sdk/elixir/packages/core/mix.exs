@@ -4,7 +4,7 @@ defmodule EdgeBaseCore.MixProject do
   def project do
     [
       app: :edgebase_core,
-      version: "0.1.0",
+      version: "0.1.4",
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -27,8 +27,12 @@ defmodule EdgeBaseCore.MixProject do
 
   defp package do
     [
+      files: ~w(lib mix.exs README.md llms.txt LICENSE),
       licenses: ["MIT"],
-      links: %{"Repository" => "https://github.com/edge-base/edgebase"}
+      links: %{
+        "Repository" => "https://github.com/edge-base/edgebase",
+        "Documentation" => "https://edgebase.fun/docs/sdks"
+      }
     ]
   end
 end

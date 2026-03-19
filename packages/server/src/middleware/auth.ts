@@ -149,6 +149,15 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next):
     c.set('auth', auth);
     return next();
   } catch (err) {
+    // In non-release (dev) mode, treat invalid/expired tokens as anonymous
+    // instead of hard-rejecting. This prevents stale tokens from blocking
+    // the demo/dev experience while still validating in production.
+    const config = parseConfig(c.env);
+    if (!config.release) {
+      c.set('auth', null);
+      return next();
+    }
+
     if (err instanceof TokenExpiredError) {
       return c.json(
         { code: 401, message: 'Token expired.', error: 'TOKEN_EXPIRED' },
