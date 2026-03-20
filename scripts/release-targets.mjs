@@ -41,6 +41,43 @@ export const RUST_PUBLISH_TARGET_IDS = [
   'rust-admin',
 ];
 
+export const NUGET_PUBLISH_TARGET_IDS = [
+  'csharp-core',
+  'csharp-admin',
+  'csharp-unity',
+];
+
+export const RUBY_PUBLISH_TARGET_IDS = [
+  'ruby-core',
+  'ruby-admin',
+];
+
+export const HEX_PUBLISH_TARGET_IDS = [
+  'elixir-core',
+  'elixir-admin',
+];
+
+export const PHP_SPLIT_TARGET_IDS = [
+  'php-core',
+  'php-admin',
+];
+
+export const SWIFT_SPLIT_TARGET_IDS = [
+  'swift-core',
+  'swift-ios',
+];
+
+export const JITPACK_VERIFY_TARGET_IDS = [
+  'java-core',
+  'java-android',
+  'java-admin',
+  'kotlin-core',
+  'kotlin-client',
+  'kotlin-admin',
+  'scala-core',
+  'scala-admin',
+];
+
 export const RELEASE_TARGETS = [
   // Public npm packages
   {
@@ -756,6 +793,24 @@ export const RELEASE_VERSION_REFERENCES = [
   {
     path: 'packages/sdk/swift/README.md',
     label: 'Swift README install version',
+    pattern: /(\.package\(url: "https:\/\/github\.com\/edge-base\/edgebase-swift", from: ")([^"]+)("\))/m,
+    replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
+  },
+  {
+    path: 'packages/sdk/swift/README.md',
+    label: 'Swift README core install version',
+    pattern: /(\.package\(url: "https:\/\/github\.com\/edge-base\/edgebase-swift-core", from: ")([^"]+)("\))/m,
+    replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
+  },
+  {
+    path: 'packages/sdk/swift/packages/core/README.md',
+    label: 'Swift core README install version',
+    pattern: /(\.package\(url: "https:\/\/github\.com\/edge-base\/edgebase-swift-core", from: ")([^"]+)("\))/m,
+    replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
+  },
+  {
+    path: 'packages/sdk/swift/packages/ios/README.md',
+    label: 'Swift client README install version',
     pattern: /(\.package\(url: "https:\/\/github\.com\/edge-base\/edgebase-swift", from: ")([^"]+)("\))/m,
     replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
   },

@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # EdgeBase Elixir Admin SDK
 
 Trusted server-side Elixir SDK for EdgeBase.
@@ -5,6 +11,10 @@ Trusted server-side Elixir SDK for EdgeBase.
 Use `edgebase_admin` from Phoenix apps, Plug services, background jobs, and other trusted Elixir runtimes that hold a Service Key. It exposes admin auth, database access, raw SQL, storage, push, analytics, functions, and native edge resources.
 
 This package uses a functional Elixir API. Most entry points return structs, and most service calls expose both non-bang and bang forms.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 
@@ -48,7 +58,7 @@ You can find it:
 ## Installation
 
 ```elixir
-{:edgebase_admin, "~> 0.1.4"}
+{:edgebase_admin, "~> 0.1.5"}
 ```
 
 If you consume the monorepo directly, use the path dependency already configured in this repository.

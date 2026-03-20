@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # EdgeBase Go Admin SDK
 
 Server-only Go SDK for EdgeBase.
@@ -5,6 +11,10 @@ Server-only Go SDK for EdgeBase.
 Use it with a Service Key from trusted environments such as backend APIs, workers, cron jobs, and CLIs. This package exposes the admin surface for database access, admin auth, raw SQL, storage, functions, analytics, push, and native Cloudflare resources.
 
 Go modules resolve this package directly from the repository's git tags, so consumers install it from source control without a separate package-registry publish step.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 

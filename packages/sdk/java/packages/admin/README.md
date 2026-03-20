@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # edgebase-admin-java
 
 Trusted JVM-side admin SDK for EdgeBase in Java.
@@ -5,6 +11,10 @@ Trusted JVM-side admin SDK for EdgeBase in Java.
 Use this package for backend services, Spring apps, batch jobs, and operational tooling that hold a Service Key. It gives you admin auth, service-key database access, raw SQL, push, analytics, functions, and trusted access to KV, D1, and Vectorize.
 
 If you only need lower-level primitives, use the sibling `edgebase-core-java` package instead.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 
@@ -49,7 +59,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-admin-java:v0.1.4")
+    implementation("com.github.edge-base.edgebase:edgebase-admin-java:v0.1.5")
 }
 ```
 

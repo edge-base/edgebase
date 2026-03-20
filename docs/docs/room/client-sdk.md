@@ -52,7 +52,7 @@ npm install @edge-base/react-native
 ```yaml
 # pubspec.yaml
 dependencies:
-  edgebase_flutter: ^0.1.4
+  edgebase_flutter: ^0.1.5
 ```
 
 ```bash
@@ -109,7 +109,7 @@ dependencies {
 **.NET:** NuGet or project reference:
 
 ```bash
-dotnet add package EdgeBase
+dotnet add package dev.edgebase.unity
 ```
 
 </TabItem>

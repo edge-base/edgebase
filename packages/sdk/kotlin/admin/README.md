@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # edgebase-admin-kotlin
 
 Trusted JVM-side admin SDK for EdgeBase in Kotlin.
@@ -5,6 +11,10 @@ Trusted JVM-side admin SDK for EdgeBase in Kotlin.
 Use this package for backend services, batch jobs, internal tools, and other trusted JVM code that needs Service Key access. It gives you admin auth, service-key database access, raw SQL, push, analytics, functions, and trusted access to KV, D1, and Vectorize.
 
 If you only need lower-level primitives, use the sibling `:core` module instead.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 
@@ -49,7 +59,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.1.4")
+    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.1.5")
 }
 ```
 

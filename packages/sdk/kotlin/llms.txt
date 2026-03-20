@@ -25,10 +25,10 @@ service code, and the `:core` module provides the shared KMP runtime used by bot
 ## Public Artifacts
 
 - JitPack group: `com.github.edge-base.edgebase`
-- tags are versioned with the leading `v`, for example `v0.1.4`
-- `com.github.edge-base.edgebase:edgebase-core:v0.1.4`
-- `com.github.edge-base.edgebase:edgebase-client:v0.1.4`
-- `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.1.4`
+- tags are versioned with the leading `v`, for example `v0.1.5`
+- `com.github.edge-base.edgebase:edgebase-core:v0.1.5`
+- `com.github.edge-base.edgebase:edgebase-client:v0.1.5`
+- `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.1.5`
 - the current public JitPack route validates the JVM publications of `:core` and `:client`
 - do not recommend the root `edgebase-kotlin` artifact for public installs
 

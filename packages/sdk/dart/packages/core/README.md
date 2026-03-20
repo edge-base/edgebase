@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 <h1 align="center">edgebase_core</h1>
 
 <p align="center">
@@ -37,7 +43,9 @@ It powers packages like [`edgebase_flutter`](https://pub.dev/packages/edgebase_f
 
 If you are building a normal Flutter app, start with [`edgebase_flutter`](https://pub.dev/packages/edgebase_flutter). If you need trusted Service Key access on the server, start with [`edgebase_admin`](https://pub.dev/packages/edgebase_admin).
 
-EdgeBase is an open-source edge-native BaaS that runs on Edge, Docker, and Node.js. If you want the full platform, CLI, docs, and the rest of the public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 

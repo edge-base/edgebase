@@ -4,15 +4,17 @@ set -euo pipefail
 TARGET_NAME="${1:?missing target name}"
 TARGET_PREFIX="${2:?missing subtree prefix}"
 DEST_REPO="${3:?missing destination repository}"
-SYNC_MODE="${4:?missing sync mode}"
-REF_NAME="${5:-}"
-PUSH_TOKEN="${6:?missing push token}"
-SOURCE_REF="${7:-HEAD}"
+CORE_REPO="${4:?missing core repository}"
+SYNC_MODE="${5:?missing sync mode}"
+REF_NAME="${6:-}"
+PUSH_TOKEN="${7:?missing push token}"
+SOURCE_REF="${8:-HEAD}"
 
 ROOT="$(git rev-parse --show-toplevel)"
-REMOTE_NAME="split-${TARGET_NAME}"
+REMOTE_NAME="swift-split-${TARGET_NAME}"
 WORKTREE_DIR=""
 TEMP_TAG=""
+DISPLAY_VERSION="$(node -p "require('${ROOT}/package.json').version")"
 
 cleanup() {
   if [[ -n "$WORKTREE_DIR" ]] && [[ -d "$WORKTREE_DIR" ]]; then
@@ -30,17 +32,19 @@ git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
 SPLIT_SHA="$(git subtree split --prefix="$TARGET_PREFIX" "$SOURCE_REF")"
-WORKTREE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/edgebase-php-${TARGET_NAME}-XXXXXX")"
+WORKTREE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/edgebase-swift-${TARGET_NAME}-XXXXXX")"
 
 git worktree add --detach "$WORKTREE_DIR" "$SPLIT_SHA" >/dev/null
-node "$ROOT/scripts/prepare-php-split-package.mjs" \
+node "$ROOT/scripts/prepare-swift-split-package.mjs" \
   --target="$TARGET_NAME" \
   --package-dir="$WORKTREE_DIR" \
-  --repo="$DEST_REPO"
+  --core-repo="$CORE_REPO" \
+  --sync-mode="$SYNC_MODE" \
+  --display-version="$DISPLAY_VERSION"
 
 if ! git -C "$WORKTREE_DIR" diff --quiet; then
   git -C "$WORKTREE_DIR" add -A
-  git -C "$WORKTREE_DIR" commit -m "chore: prepare ${TARGET_NAME} split package" >/dev/null
+  git -C "$WORKTREE_DIR" commit -m "chore: prepare ${TARGET_NAME} swift split package" >/dev/null
 fi
 
 FINAL_SHA="$(git -C "$WORKTREE_DIR" rev-parse HEAD)"
@@ -57,7 +61,7 @@ case "$SYNC_MODE" in
       echo "Tag sync requires a tag name." >&2
       exit 1
     fi
-    TEMP_TAG="split-sync-${TARGET_NAME}-${REF_NAME//\//-}"
+    TEMP_TAG="swift-split-sync-${TARGET_NAME}-${REF_NAME//\//-}"
     git tag -f "$TEMP_TAG" "$FINAL_SHA" >/dev/null
     git push --force "$REMOTE_NAME" "refs/tags/${TEMP_TAG}:refs/tags/${REF_NAME}"
     ;;

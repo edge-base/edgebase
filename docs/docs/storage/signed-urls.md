@@ -135,7 +135,7 @@ let url = bucket.create_signed_url("report.pdf", "1h").await?;
 ```csharp
 var bucket = admin.Storage.Bucket("private");
 
-var url = await bucket.CreateSignedUrlAsync("report.pdf", "1h");
+var url = await bucket.CreateSignedUrlAsync("report.pdf", 3600);
 ```
 
 </TabItem>
@@ -285,7 +285,7 @@ let results = bucket.create_signed_urls(
 var bucket = admin.Storage.Bucket("private");
 
 var results = await bucket.CreateSignedUrlsAsync(
-    new[] { "report-1.pdf", "report-2.pdf", "report-3.pdf" }, "1h"
+    new[] { "report-1.pdf", "report-2.pdf", "report-3.pdf" }, 3600
 );
 ```
 
@@ -445,8 +445,8 @@ let signed = bucket.create_signed_upload_url("large-file.zip", "10m").await?;
 ```csharp
 var bucket = admin.Storage.Bucket("uploads");
 
-var signed = await bucket.CreateSignedUploadUrlAsync("large-file.zip", "10m");
-// Upload using signed.Url
+var signed = await bucket.CreateSignedUploadUrlAsync("large-file.zip", 600);
+// Upload using signed["url"]
 ```
 
 </TabItem>

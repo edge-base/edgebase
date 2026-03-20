@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # EdgeBase PHP Admin SDK
 
 Trusted server-side PHP SDK for EdgeBase.
@@ -5,6 +11,10 @@ Trusted server-side PHP SDK for EdgeBase.
 Use `edgebase/admin` from backend APIs, jobs, workers, and other trusted PHP runtimes that hold a Service Key. It exposes admin auth, database access, raw SQL, storage, push, analytics, functions, and native edge resources.
 
 If you are working inside this repository, `AdminEdgeBase` exists as a backwards-compatible alias for `AdminClient`. Prefer `AdminClient` in new code.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 

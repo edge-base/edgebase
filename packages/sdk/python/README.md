@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # EdgeBase Python SDK
 
 Unified Python SDK for trusted EdgeBase server environments.
@@ -15,6 +21,10 @@ Use it when you want one install that covers:
 - room helpers via `RoomClient`
 
 If you only need the lean public install path today, install [`edgebase-admin`](https://pypi.org/project/edgebase-admin/) instead. If you need the low-level building blocks separately, install [`edgebase-core`](https://pypi.org/project/edgebase-core/).
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 

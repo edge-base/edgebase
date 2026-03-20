@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 <h1 align="center">edgebase_admin</h1>
 
 <p align="center">
@@ -38,7 +44,9 @@ Use it when you need:
 
 If code runs in a Flutter app or untrusted client, use [`edgebase_flutter`](https://pub.dev/packages/edgebase_flutter) instead. If you only need low-level primitives for a custom integration, use [`edgebase_core`](https://pub.dev/packages/edgebase_core).
 
-EdgeBase is an open-source edge-native BaaS that runs on Edge, Docker, and Node.js. If you want the full platform, CLI, docs, and the rest of the public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 > Beta: the package is already usable, but some APIs may still evolve before general availability.
 

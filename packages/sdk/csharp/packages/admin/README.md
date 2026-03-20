@@ -1,8 +1,18 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # EdgeBase.Admin
 
 Trusted server-side .NET SDK for EdgeBase.
 
 Use `EdgeBase.Admin` from backend APIs, jobs, workers, and other trusted environments that hold a Service Key. It exposes admin auth, service-key database access, raw SQL, storage, push, functions, analytics, KV, D1, and Vectorize clients.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 

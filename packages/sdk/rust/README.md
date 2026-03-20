@@ -1,8 +1,18 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # EdgeBase Rust SDK Workspace
 
 Workspace root for the Rust EdgeBase SDKs.
 
 Most application code should install `edgebase-admin` for trusted server-side usage or `edgebase-core` for lower-level primitives. This root package tracks the Rust SDK release line and houses the integrated test workspace in this repository. It is not the main public crates.io install target.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 
@@ -51,14 +61,14 @@ For published application code, prefer the narrower crates:
 
 ```toml
 [dependencies]
-edgebase-admin = "0.1.4"
+edgebase-admin = "0.1.5"
 ```
 
 Or for lower-level primitives:
 
 ```toml
 [dependencies]
-edgebase-core = "0.1.4"
+edgebase-core = "0.1.5"
 ```
 
 The current public Rust release unit focuses on `edgebase-core` and `edgebase-admin`.

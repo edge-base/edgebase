@@ -1731,19 +1731,47 @@ export type FunctionTrigger =
 /** Context object passed to function handlers at runtime. */
 export interface FunctionContext {
   /** The incoming HTTP request (for HTTP-triggered functions). */
-  request: Request;
+  request?: Request;
   /** URL path parameters extracted by the router. */
-  params: Record<string, string>;
+  params?: Record<string, string>;
   /** Authenticated user info, or null if unauthenticated. */
-  auth: { userId?: string; role?: string } | null;
+  auth?: {
+    userId?: string;
+    id?: string;
+    role?: string;
+    email?: string;
+    isAnonymous?: boolean;
+    custom?: Record<string, unknown>;
+    meta?: Record<string, unknown>;
+  } | null;
   /** Environment variables and secrets. */
-  env: Record<string, unknown>;
+  env?: Record<string, unknown>;
+  /** Admin client surface available in EdgeBase runtime. */
+  admin?: unknown;
+  /** Convenience database proxy available in EdgeBase runtime. */
+  db?: unknown;
+  /** Trigger metadata for DB/storage/auth/schedule functions. */
+  trigger?: {
+    namespace?: string;
+    id?: string;
+    table?: string;
+    event?: string;
+  };
+  /** Event payload for non-HTTP function triggers. */
+  data?: unknown;
+  before?: Record<string, unknown>;
+  after?: Record<string, unknown>;
+  /** Storage trigger file metadata. */
+  file?: Record<string, unknown>;
+  storage?: unknown;
+  analytics?: unknown;
+  pluginConfig?: Record<string, unknown>;
 }
 
 export interface FunctionDefinition {
   trigger: FunctionTrigger;
   captcha?: boolean;
-  handler: (context: FunctionContext) => Promise<unknown>;
+  handler: (context: unknown) => Promise<unknown>;
 }
 
 /** Increment when the public plugin contract changes incompatibly. */

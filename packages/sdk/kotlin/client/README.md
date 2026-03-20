@@ -1,9 +1,19 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # EdgeBase Kotlin Client
 
 Client-side Kotlin Multiplatform SDK for EdgeBase.
 
 Use this module for Android, iOS, JS, and JVM client applications that need auth,
 database access, storage, push, analytics, functions, and database-live support.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Installation
 
@@ -13,7 +23,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-client:v0.1.4")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.1.5")
 }
 ```
 

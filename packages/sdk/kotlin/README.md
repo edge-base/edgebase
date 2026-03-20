@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # EdgeBase Kotlin SDK
 
 Kotlin SDK for EdgeBase. The source modules in this directory are Kotlin
@@ -6,13 +12,17 @@ for `:core`, `:client`, and `:admin`.
 
 **Supported targets:** Android, iOS, JS (browser), JVM (desktop/server)
 
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
+
 ## Modules
 
 | Module | Artifact | Targets |
 | --- | --- | --- |
-| `:core` | `com.github.edge-base.edgebase:edgebase-core:v0.1.4` | current JitPack route publishes the JVM variant of the shared runtime |
-| `:client` | `com.github.edge-base.edgebase:edgebase-client:v0.1.4` | current JitPack route publishes the JVM variant of the client runtime |
-| `:admin` | `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.1.4` | JVM only |
+| `:core` | `com.github.edge-base.edgebase:edgebase-core:v0.1.5` | current JitPack route publishes the JVM variant of the shared runtime |
+| `:client` | `com.github.edge-base.edgebase:edgebase-client:v0.1.5` | current JitPack route publishes the JVM variant of the client runtime |
+| `:admin` | `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.1.5` | JVM only |
 
 If you build from the monorepo directly, depend on the Gradle modules under
 `packages/sdk/kotlin`. That path remains the way to consume the full Android, iOS,
@@ -28,9 +38,9 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-core:v0.1.4")
-    implementation("com.github.edge-base.edgebase:edgebase-client:v0.1.4")
-    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.1.4")
+    implementation("com.github.edge-base.edgebase:edgebase-core:v0.1.5")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.1.5")
+    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.1.5")
 }
 ```
 
@@ -76,7 +86,7 @@ client.destroy()
 
 ## Publication Notes
 
-- JitPack versions use the repository tag, for example `v0.1.4`
+- JitPack versions use the repository tag, for example `v0.1.5`
 - the public JitPack route validates the JVM publications of `:core` and `:client`
 - the umbrella root artifact `edgebase-kotlin` is intentionally excluded from public installs
 

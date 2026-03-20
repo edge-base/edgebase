@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # edgebase-admin-scala
 
 Trusted JVM-side admin SDK for EdgeBase in Scala.
@@ -5,6 +11,10 @@ Trusted JVM-side admin SDK for EdgeBase in Scala.
 Use this package for backend services, jobs, and internal tools that hold a Service Key. It wraps the Java admin runtime with Scala-friendly helpers while exposing admin auth, service-key database access, raw SQL, push, analytics, functions, and trusted access to KV, D1, and Vectorize.
 
 If you only need lower-level primitives, use the sibling `edgebase-core-scala` package instead.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 
@@ -46,7 +56,7 @@ You can find it:
 ```scala
 resolvers += "jitpack" at "https://jitpack.io"
 
-libraryDependencies += "com.github.edge-base.edgebase" % "edgebase-admin-scala" % "v0.1.4"
+libraryDependencies += "com.github.edge-base.edgebase" % "edgebase-admin-scala" % "v0.1.5"
 ```
 
 This package wraps the Java admin runtime, so it stays JVM-only and publishes as a single Scala/JVM artifact.

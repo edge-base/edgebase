@@ -676,7 +676,7 @@ export function wrapMethodExport(
   if (typeof handler === 'function') {
     fn = handler;
   } else if (handler && typeof handler === 'object') {
-    fn = handler.handler ?? (handler as unknown as (ctx: unknown) => Promise<unknown>);
+    fn = (handler.handler ?? handler) as unknown as (ctx: unknown) => Promise<unknown>;
     captcha = handler.captcha;
     if ('trigger' in handler && handler.trigger && typeof handler.trigger === 'object' && 'path' in handler.trigger) {
       const triggerPath = handler.trigger.path;

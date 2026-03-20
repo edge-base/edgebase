@@ -123,7 +123,7 @@ let meta = bucket.get_metadata("user-1.jpg").await?;
 var bucket = admin.Storage.Bucket("avatars");
 
 var meta = await bucket.GetMetadataAsync("user-1.jpg");
-// meta.Key, meta.Size, meta.ContentType, meta.CustomMetadata
+// meta["key"], meta["size"], meta["contentType"], meta["customMetadata"]
 ```
 
 </TabItem>

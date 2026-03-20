@@ -4,12 +4,14 @@ defmodule EdgeBaseAdmin.MixProject do
   def project do
     [
       app: :edgebase_admin,
-      version: "0.1.4",
+      version: "0.1.5",
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description: "EdgeBase admin SDK for Elixir",
-      package: package()
+      package: package(),
+      source_url: "https://github.com/edge-base/edgebase/tree/main/packages/sdk/elixir/packages/admin",
+      homepage_url: "https://edgebase.fun/docs/admin-sdk/reference"
     ]
   end
 
@@ -21,7 +23,7 @@ defmodule EdgeBaseAdmin.MixProject do
 
   defp deps do
     [
-      {:edgebase_core, "~> 0.1.4", path: "../core"},
+      {:edgebase_core, "~> 0.1.5", path: "../core"},
       {:jason, "~> 1.4"}
     ]
   end
@@ -31,8 +33,9 @@ defmodule EdgeBaseAdmin.MixProject do
       files: ~w(lib mix.exs README.md llms.txt LICENSE),
       licenses: ["MIT"],
       links: %{
-        "Repository" => "https://github.com/edge-base/edgebase",
-        "Documentation" => "https://edgebase.fun/docs/admin-sdk/reference"
+        "Repository" => "https://github.com/edge-base/edgebase/tree/main/packages/sdk/elixir/packages/admin",
+        "Documentation" => "https://edgebase.fun/docs/admin-sdk/reference",
+        "Issues" => "https://github.com/edge-base/edgebase/issues"
       }
     ]
   end

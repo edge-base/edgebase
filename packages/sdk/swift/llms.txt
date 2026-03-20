@@ -11,6 +11,11 @@ The `EdgeBase` package is for client apps and also exposes `EdgeBaseServerClient
 for trusted service-key workflows, while `EdgeBaseCore` holds the shared low-level
 primitives.
 
+Public SwiftPM distribution is split across:
+
+- `edgebase-swift-core` for `EdgeBaseCore`
+- `edgebase-swift` for `EdgeBase`
+
 ## Source Of Truth
 
 - Root README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/swift/README.md

@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # edgebase_core
 
 Shared low-level Ruby primitives for EdgeBase.
@@ -5,6 +11,10 @@ Shared low-level Ruby primitives for EdgeBase.
 `edgebase_core` is the foundation used by `edgebase_admin`. It provides the HTTP client, table query builder, storage helpers, field operation markers, error types, DB references, and document references used by higher-level SDKs.
 
 Most application code should install [`edgebase_admin`](https://rubygems.org/gems/edgebase_admin) instead. Use this package directly when you are building custom wrappers, generated bindings, or internal integrations.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 

@@ -4,12 +4,14 @@ defmodule EdgeBaseCore.MixProject do
   def project do
     [
       app: :edgebase_core,
-      version: "0.1.4",
+      version: "0.1.5",
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description: "EdgeBase core SDK for Elixir",
-      package: package()
+      package: package(),
+      source_url: "https://github.com/edge-base/edgebase/tree/main/packages/sdk/elixir/packages/core",
+      homepage_url: "https://edgebase.fun/docs/sdks"
     ]
   end
 
@@ -30,8 +32,9 @@ defmodule EdgeBaseCore.MixProject do
       files: ~w(lib mix.exs README.md llms.txt LICENSE),
       licenses: ["MIT"],
       links: %{
-        "Repository" => "https://github.com/edge-base/edgebase",
-        "Documentation" => "https://edgebase.fun/docs/sdks"
+        "Repository" => "https://github.com/edge-base/edgebase/tree/main/packages/sdk/elixir/packages/core",
+        "Documentation" => "https://edgebase.fun/docs/sdks",
+        "Issues" => "https://github.com/edge-base/edgebase/issues"
       }
     ]
   end

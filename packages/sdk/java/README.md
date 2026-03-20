@@ -1,14 +1,24 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # EdgeBase Java SDK
 
 Official Java SDK for EdgeBase, published for Gradle and Maven consumers through
 JitPack as three installable artifacts:
 
-- `com.github.edge-base.edgebase:edgebase-core-java:v0.1.4`
-- `com.github.edge-base.edgebase:edgebase-android-java:v0.1.4`
-- `com.github.edge-base.edgebase:edgebase-admin-java:v0.1.4`
+- `com.github.edge-base.edgebase:edgebase-core-java:v0.1.5`
+- `com.github.edge-base.edgebase:edgebase-android-java:v0.1.5`
+- `com.github.edge-base.edgebase:edgebase-admin-java:v0.1.5`
 
 The monorepo root `edgebase-sdk-java` artifact is intentionally not part of the
 public JitPack install path. Depend on the split artifacts below.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Installation
 
@@ -20,9 +30,9 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.edge-base.edgebase:edgebase-core-java:v0.1.4'
-    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.1.4'
-    implementation 'com.github.edge-base.edgebase:edgebase-admin-java:v0.1.4'
+    implementation 'com.github.edge-base.edgebase:edgebase-core-java:v0.1.5'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.1.5'
+    implementation 'com.github.edge-base.edgebase:edgebase-admin-java:v0.1.5'
 }
 ```
 
@@ -39,17 +49,17 @@ dependencies {
 <dependency>
     <groupId>com.github.edge-base.edgebase</groupId>
     <artifactId>edgebase-core-java</artifactId>
-    <version>v0.1.4</version>
+    <version>v0.1.5</version>
 </dependency>
 <dependency>
     <groupId>com.github.edge-base.edgebase</groupId>
     <artifactId>edgebase-android-java</artifactId>
-    <version>v0.1.4</version>
+    <version>v0.1.5</version>
 </dependency>
 <dependency>
     <groupId>com.github.edge-base.edgebase</groupId>
     <artifactId>edgebase-admin-java</artifactId>
-    <version>v0.1.4</version>
+    <version>v0.1.5</version>
 </dependency>
 ```
 

@@ -1,6 +1,6 @@
 {
     "name": "edgebase",
-    "version": "0.1.4",
+    "version": "0.1.5",
     "type": "module",
     "private": true,
     "scripts": {
@@ -21,7 +21,13 @@
         "release:npm": "node ./dev/release/publish-npm-release.mjs",
         "release:pub": "node ./dev/release/publish-pub-release.mjs",
         "release:pypi": "node ./dev/release/publish-pypi-release.mjs",
-        "release:crates": "node ./dev/release/publish-rust-release.mjs"
+        "release:crates": "node ./dev/release/publish-rust-release.mjs",
+        "release:nuget": "node ./dev/release/publish-nuget-release.mjs",
+        "release:rubygems": "node ./dev/release/publish-rubygems-release.mjs",
+        "release:hex": "node ./dev/release/publish-hex-release.mjs",
+        "release:php-sync": "node ./dev/release/sync-php-split-release.mjs",
+        "release:swift-sync": "node ./dev/release/sync-swift-split-release.mjs",
+        "release:jitpack": "node ./dev/release/verify-jitpack-release.mjs"
     },
     "devDependencies": {
         "@eslint/js": "^9.39.2",

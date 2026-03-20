@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 <h1 align="center">@edge-base/core</h1>
 
 <p align="center">
@@ -30,6 +36,10 @@ If you are building an application, you usually want a higher-level package inst
 - [`@edge-base/web`](https://www.npmjs.com/package/@edge-base/web) for browser apps
 - [`@edge-base/admin`](https://www.npmjs.com/package/@edge-base/admin) for trusted server-side code
 - [`@edge-base/react-native`](https://www.npmjs.com/package/@edge-base/react-native) for React Native apps
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 

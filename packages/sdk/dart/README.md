@@ -1,8 +1,18 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # edgebase
 
 Umbrella Dart package for EdgeBase.
 
 `edgebase` re-exports the Flutter client SDK so app code can start from a single import while still keeping `edgebase_flutter`, `edgebase_core`, and `edgebase_admin` available as dedicated packages when you want a narrower boundary.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 

@@ -1,21 +1,39 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # EdgeBase Swift SDK
 
 Swift SDK for EdgeBase.
 
-The public Swift packages are:
+The public Swift packages are split across two SwiftPM repositories:
 
-- `EdgeBaseCore` for shared HTTP, error, and query primitives
-- `EdgeBase` for client apps and trusted service-key workflows via `EdgeBaseServerClient`
+- `edgebase-swift-core` exposes `EdgeBaseCore` for shared HTTP, error, and query primitives
+- `edgebase-swift` exposes `EdgeBase` for client apps and trusted service-key workflows via `EdgeBaseServerClient`
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Installation
 
 ### Swift Package Manager
 
-Add to your `Package.swift`:
+Use the higher-level client package for most app and trusted-service workflows:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.1.4")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.1.5")
+]
+```
+
+If you only need the low-level shared primitives, install `EdgeBaseCore` directly:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/edge-base/edgebase-swift-core", from: "0.1.5")
 ]
 ```
 
@@ -25,6 +43,8 @@ If you are working inside this monorepo, the source packages live under:
 
 - `packages/sdk/swift/packages/core`
 - `packages/sdk/swift/packages/ios`
+
+The public mirror repositories are generated from those monorepo paths.
 
 ## Quick Start
 

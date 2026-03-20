@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # EdgeBase PHP SDK
 
 Server-side PHP SDK bundle for EdgeBase.
@@ -5,6 +11,10 @@ Server-side PHP SDK bundle for EdgeBase.
 `edgebase/sdk` is the broad Composer entry point in this repository. It bundles the trusted admin surface and the lower-level core primitives under one install, while `edgebase/admin` and `edgebase/core` remain available as narrower package docs and package boundaries.
 
 The intended public Composer package names are `edgebase/sdk`, `edgebase/admin`, and `edgebase/core`. In the current monorepo layout, these PHP packages still need a Packagist-compatible publish path such as split repositories or another Composer repository strategy before the install commands below work as public Packagist installs.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 

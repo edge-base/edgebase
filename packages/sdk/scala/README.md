@@ -1,14 +1,24 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # EdgeBase Scala SDK
 
 Scala-facing SDK modules that wrap the Java core/admin runtime with Scala-native
 collections and result models. Public consumption is intended through JitPack.
 
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
+
 ## Modules
 
 | Module | Artifact | Notes |
 | --- | --- | --- |
-| `:packages:core` | `com.github.edge-base.edgebase:edgebase-core-scala:v0.1.4` | Scala wrappers for DB, storage, and shared result types |
-| `:packages:admin` | `com.github.edge-base.edgebase:edgebase-admin-scala:v0.1.4` | Server-side admin SDK built on top of the Java admin SDK |
+| `:packages:core` | `com.github.edge-base.edgebase:edgebase-core-scala:v0.1.5` | Scala wrappers for DB, storage, and shared result types |
+| `:packages:admin` | `com.github.edge-base.edgebase:edgebase-admin-scala:v0.1.5` | Server-side admin SDK built on top of the Java admin SDK |
 
 If you build from the monorepo directly, depend on the Scala projects under
 `packages/sdk/scala`.
@@ -19,8 +29,8 @@ If you build from the monorepo directly, depend on the Scala projects under
 resolvers += "jitpack" at "https://jitpack.io"
 
 libraryDependencies ++= Seq(
-  "com.github.edge-base.edgebase" % "edgebase-core-scala" % "v0.1.4",
-  "com.github.edge-base.edgebase" % "edgebase-admin-scala" % "v0.1.4"
+  "com.github.edge-base.edgebase" % "edgebase-core-scala" % "v0.1.5",
+  "com.github.edge-base.edgebase" % "edgebase-admin-scala" % "v0.1.5"
 )
 ```
 

@@ -216,7 +216,7 @@ Chrome 50+, Firefox 44+, Edge 17+, Safari 16+, Opera 42+
 dependencies:
   firebase_core: ^3.0.0
   firebase_messaging: ^15.0.0
-  edgebase_flutter: ^0.1.4
+  edgebase_flutter: ^0.1.5
 ```
 
 3. Initialize Firebase:

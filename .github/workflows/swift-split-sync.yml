@@ -1,0 +1,167 @@
+name: Swift Split Repo Sync
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+    paths:
+      - packages/sdk/swift/packages/core/**
+      - packages/sdk/swift/packages/ios/**
+      - scripts/prepare-swift-split-package.mjs
+      - scripts/sync-swift-split-repo.sh
+      - .github/workflows/swift-split-sync.yml
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which package to sync
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - core
+          - client
+      sync_mode:
+        description: Sync branch or tag
+        required: false
+        default: branch
+        type: choice
+        options:
+          - branch
+          - tag
+      tag_name:
+        description: Tag name to mirror when sync_mode=tag
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swift-split-sync-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      requested_target: ${{ steps.config.outputs.requested_target }}
+      sync_mode: ${{ steps.config.outputs.sync_mode }}
+      ref_name: ${{ steps.config.outputs.ref_name }}
+      core_repo: ${{ steps.config.outputs.core_repo }}
+      client_repo: ${{ steps.config.outputs.client_repo }}
+    steps:
+      - name: Check split push token
+        env:
+          EDGEBASE_SPLIT_PUSH_TOKEN: ${{ secrets.EDGEBASE_SPLIT_PUSH_TOKEN }}
+        run: |
+          if [[ -z "${EDGEBASE_SPLIT_PUSH_TOKEN}" ]]; then
+            echo "::error::Missing secret EDGEBASE_SPLIT_PUSH_TOKEN."
+            echo "::error::Create a PAT or GitHub App token with contents:write access to the split repositories."
+            exit 1
+          fi
+
+      - name: Configure sync targets
+        id: config
+        env:
+          INPUT_TARGET: ${{ github.event.inputs.target }}
+          INPUT_SYNC_MODE: ${{ github.event.inputs.sync_mode }}
+          INPUT_TAG_NAME: ${{ github.event.inputs.tag_name }}
+          SWIFT_CORE_SPLIT_REPO: ${{ vars.SWIFT_CORE_SPLIT_REPO }}
+          SWIFT_CLIENT_SPLIT_REPO: ${{ vars.SWIFT_CLIENT_SPLIT_REPO }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_REF_TYPE: ${{ github.ref_type }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          requested_target="${INPUT_TARGET:-all}"
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            sync_mode="${INPUT_SYNC_MODE:-branch}"
+            if [[ "$sync_mode" == "tag" ]]; then
+              ref_name="${INPUT_TAG_NAME:-}"
+              if [[ -z "$ref_name" ]]; then
+                echo "::error::workflow_dispatch tag sync requires tag_name."
+                exit 1
+              fi
+            else
+              ref_name="main"
+            fi
+          else
+            if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+              sync_mode="tag"
+              ref_name="$GITHUB_REF_NAME"
+            else
+              sync_mode="branch"
+              ref_name="main"
+            fi
+          fi
+
+          echo "requested_target=$requested_target" >> "$GITHUB_OUTPUT"
+          echo "sync_mode=$sync_mode" >> "$GITHUB_OUTPUT"
+          echo "ref_name=$ref_name" >> "$GITHUB_OUTPUT"
+          echo "core_repo=${SWIFT_CORE_SPLIT_REPO:-edge-base/edgebase-swift-core}" >> "$GITHUB_OUTPUT"
+          echo "client_repo=${SWIFT_CLIENT_SPLIT_REPO:-edge-base/edgebase-swift}" >> "$GITHUB_OUTPUT"
+
+  sync-core:
+    name: Sync Swift core split repo
+    runs-on: ubuntu-latest
+    needs: resolve
+    if: needs.resolve.outputs.requested_target == 'all' || needs.resolve.outputs.requested_target == 'core'
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.sync_mode == 'tag' && github.event.inputs.tag_name || github.ref }}
+
+      - name: Sync core split repository
+        env:
+          EDGEBASE_SPLIT_PUSH_TOKEN: ${{ secrets.EDGEBASE_SPLIT_PUSH_TOKEN }}
+        run: |
+          chmod +x ./scripts/sync-swift-split-repo.sh
+          ./scripts/sync-swift-split-repo.sh \
+            "core" \
+            "packages/sdk/swift/packages/core" \
+            "${{ needs.resolve.outputs.core_repo }}" \
+            "${{ needs.resolve.outputs.core_repo }}" \
+            "${{ needs.resolve.outputs.sync_mode }}" \
+            "${{ needs.resolve.outputs.ref_name }}" \
+            "${EDGEBASE_SPLIT_PUSH_TOKEN}"
+
+  sync-client:
+    name: Sync Swift client split repo
+    runs-on: ubuntu-latest
+    needs:
+      - resolve
+      - sync-core
+    if: |
+      always() &&
+      !cancelled() &&
+      (needs.resolve.outputs.requested_target == 'all' || needs.resolve.outputs.requested_target == 'client') &&
+      (needs.sync-core.result == 'success' || needs.sync-core.result == 'skipped')
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.sync_mode == 'tag' && github.event.inputs.tag_name || github.ref }}
+
+      - name: Sync client split repository
+        env:
+          EDGEBASE_SPLIT_PUSH_TOKEN: ${{ secrets.EDGEBASE_SPLIT_PUSH_TOKEN }}
+        run: |
+          chmod +x ./scripts/sync-swift-split-repo.sh
+          ./scripts/sync-swift-split-repo.sh \
+            "client" \
+            "packages/sdk/swift/packages/ios" \
+            "${{ needs.resolve.outputs.client_repo }}" \
+            "${{ needs.resolve.outputs.core_repo }}" \
+            "${{ needs.resolve.outputs.sync_mode }}" \
+            "${{ needs.resolve.outputs.ref_name }}" \
+            "${EDGEBASE_SPLIT_PUSH_TOKEN}"

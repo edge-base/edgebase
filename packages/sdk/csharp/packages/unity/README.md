@@ -1,8 +1,18 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # EdgeBase.Unity
 
 Client SDK for Unity.
 
 `EdgeBase.Unity` brings EdgeBase auth, database, realtime, rooms, storage, functions, analytics, and push to Unity projects. It is designed for client-side app code, not trusted server or admin tasks.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Requirements
 

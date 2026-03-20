@@ -129,7 +129,7 @@ internal sealed class DatabaseLiveClient : IDisposable
                 {
                     ["type"]       = "auth",
                     ["token"]      = token,
-                    ["sdkVersion"] = "0.1.4",
+                    ["sdkVersion"] = "0.1.5",
                 });
                 var authBytes = Encoding.UTF8.GetBytes(authMsg);
                 await _ws.SendAsync(new ArraySegment<byte>(authBytes), WebSocketMessageType.Text, true, _cts.Token).ConfigureAwait(false);
@@ -511,7 +511,7 @@ internal sealed class DatabaseLiveClient : IDisposable
         {
             ["type"] = "auth",
             ["token"] = token,
-            ["sdkVersion"] = "0.1.4",
+            ["sdkVersion"] = "0.1.5",
         });
         var bytes = Encoding.UTF8.GetBytes(json);
         _ = _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);

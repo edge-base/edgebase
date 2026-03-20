@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/edge-base/edgebase">
+    <img src="https://raw.githubusercontent.com/edge-base/edgebase/main/docs/static/img/logo-icon.svg" alt="EdgeBase Logo" width="72" />
+  </a>
+</p>
+
 # edgebase-admin
 
 Server-only Python admin SDK for EdgeBase.
@@ -5,6 +11,10 @@ Server-only Python admin SDK for EdgeBase.
 Use `edgebase-admin` from trusted environments that hold a Service Key, such as backend APIs, cron jobs, workers, and operational tooling. It exposes admin auth, service-key database access, storage management, raw SQL, functions, analytics, push, and native Cloudflare resources.
 
 If you want the broader umbrella package that also includes the higher-level `EdgeBaseServer` entry point and room helpers, use `edgebase` from this repository or your internal build flow. The current public PyPI install path is `edgebase-admin`.
+
+EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
+
+This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
 
 ## Documentation Map
 
@@ -113,5 +123,5 @@ print(len(users.get("users", [])), len(posts.items), rows, signed.url)
 ## Requirements
 
 - Python `3.10+`
-- `edgebase-core>=0.1.4,<0.2.0`
+- `edgebase-core>=0.1.5,<0.2.0`
 - A valid EdgeBase Service Key
