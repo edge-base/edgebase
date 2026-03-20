@@ -574,8 +574,8 @@ describe('Functions Registry — generateFunctionRegistry()', () => {
     const content = readFileSync(registryPath, 'utf-8');
     expect(content).toContain('import echo_module');
     expect(content).toContain('import onUserCreated_module');
-    expect(content).toContain("registerFunction('echo', echo_module)");
-    expect(content).toContain("registerFunction('onUserCreated', onUserCreated_module)");
+    expect(content).toContain("registerFunction('echo', wrapMethodExport(echo_module, '*'));");
+    expect(content).toContain("registerFunction('onUserCreated', wrapMethodExport(onUserCreated_module, '*'));");
     expect(content).toContain('initFunctionRegistry');
     expect(content).toContain('Auto-generated');
   });
@@ -592,7 +592,7 @@ describe('Functions Registry — generateFunctionRegistry()', () => {
 
     const content = readFileSync(registryPath, 'utf-8');
     expect(content).toContain("../../../../functions/hooks/onAuth.ts");
-    expect(content).toContain("registerFunction('hooks/onAuth', hooks_onAuth_module)");
+    expect(content).toContain("registerFunction('hooks/onAuth', wrapMethodExport(hooks_onAuth_module, '*'));");
   });
 
   it('creates output directory if not exists', () => {

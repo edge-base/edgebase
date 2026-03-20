@@ -693,8 +693,8 @@ describe('generateFunctionRegistry', () => {
     expect(content).toMatch(
       /import onPostPublished_module from '\.\.\/(?:\.\.\/)*functions\/onPostPublished\.ts'/,
     );
-    expect(content).toContain("registerFunction('onUserCreated', onUserCreated_module)");
-    expect(content).toContain("registerFunction('onPostPublished', onPostPublished_module)");
+    expect(content).toContain("registerFunction('onUserCreated', wrapMethodExport(onUserCreated_module, '*'));");
+    expect(content).toContain("registerFunction('onPostPublished', wrapMethodExport(onPostPublished_module, '*'));");
     expect(content).toContain("import { parseConfig } from './lib/do-router.js'");
     expect(content).toContain('const keepBundled = [config, registerMiddleware, RoomsDO];');
     expect(content).toContain('const resolvedConfig = parseConfig();');

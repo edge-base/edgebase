@@ -172,7 +172,7 @@ describe('ensureWranglerToml', () => {
     expect(content).toContain('DatabaseDO');
     expect(content).toContain('AuthDO');
     expect(content).toContain('{ name = "ROOMS", class_name = "RoomsDO" }');
-    expect(content).toContain('new_classes = ["DatabaseLiveDO", "RoomsDO"]');
+    expect(content).toContain('new_sqlite_classes = ["DatabaseDO", "AuthDO", "DatabaseLiveDO", "RoomsDO"]');
   });
 
   it('injects account_id into existing wrangler.toml without account_id', () => {

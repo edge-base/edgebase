@@ -184,10 +184,10 @@ describe('CLI: init command', () => {
     expect(configContent).toContain("import { rateLimiting } from './config/rate-limits'");
     expect(configContent).toContain('databases: {');
     expect(configContent).toContain('Add your first DB block here');
-    expect(configContent).toContain('storage: {');
-    expect(configContent).toContain('buckets: {');
-    expect(configContent).toContain('uploads: {');
-    expect(configContent).toContain('Uses the generated STORAGE R2 binding by default');
+    expect(configContent).toContain('// storage: {');
+    expect(configContent).toContain('//   buckets: {');
+    expect(configContent).toContain('//     uploads: {');
+    expect(configContent).toContain('Uncomment to enable R2 file storage');
     expect(configContent).toContain('rateLimiting,');
     expect(configContent).toContain('access: {');
     expect(configContent).not.toContain('rules: {');
@@ -195,7 +195,6 @@ describe('CLI: init command', () => {
     expect(configContent).toContain('//     posts: {');
     expect(configContent).toContain('access policies are bypassed during development');
     expect(configContent).toContain('enable deny-by-default access');
-    expect(configContent).toContain('Add access policies here when ready for production');
     expect(configContent).toContain('write: (auth) => auth !== null');
     expect(configContent).toContain('handlers.lifecycle / handlers.actions / handlers.timers');
     expect(configContent).toContain("PING: (_payload, room) => {");
@@ -233,7 +232,7 @@ describe('CLI: init command', () => {
     expect(wranglerToml).toContain('directory = ".edgebase/runtime/server/admin-build"');
     expect(wranglerToml).toContain('{ name = "ROOMS", class_name = "RoomsDO" }');
     expect(wranglerToml).toContain('{ name = "LOGS", class_name = "LogsDO" }');
-    expect(wranglerToml).toContain('new_classes = ["DatabaseLiveDO", "RoomsDO"]');
+    expect(wranglerToml).toContain('new_sqlite_classes = ["DatabaseDO", "AuthDO", "DatabaseLiveDO", "RoomsDO"]');
     expect(wranglerToml).toContain('new_sqlite_classes = ["LogsDO"]');
     expect(runtimeConfigShim).toContain("import config from '../../../../edgebase.config.ts'");
     expect(runtimeTestConfigShim).toContain("import config from './src/generated-config.ts'");
