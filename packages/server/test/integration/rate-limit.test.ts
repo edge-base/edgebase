@@ -18,6 +18,7 @@ import {
   getGroup,
   getLimit,
   RATE_LIMIT_DEFAULTS,
+  RATE_LIMIT_DEV_DEFAULTS,
   counter,
 } from '../../src/middleware/rate-limit.js';
 
@@ -346,8 +347,7 @@ describe('1-20 rate-limit — getGroup', () => {
 describe('1-20 rate-limit — getLimit', () => {
   it('config undefined → defaults', () => {
     const result = getLimit(undefined, 'db');
-    expect(result.requests).toBe(100);
-    expect(result.windowSec).toBe(60);
+    expect(result).toEqual(RATE_LIMIT_DEV_DEFAULTS.db);
   });
 
   it('미존재 group → 안전한 fallback (10M)', () => {
@@ -373,8 +373,7 @@ describe('1-20 rate-limit — getLimit', () => {
       },
     } as any;
     const result = getLimit(config, 'storage');
-    expect(result.requests).toBe(50);
-    expect(result.windowSec).toBe(60);
+    expect(result).toEqual(RATE_LIMIT_DEV_DEFAULTS.storage);
   });
 });
 

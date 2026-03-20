@@ -11,7 +11,6 @@ import {
   getLimit,
   parseWindow,
   FixedWindowCounter,
-  RATE_LIMIT_DEFAULTS,
   RATE_LIMIT_DEV_DEFAULTS,
   rateLimitMiddleware,
 } from '../middleware/rate-limit.js';

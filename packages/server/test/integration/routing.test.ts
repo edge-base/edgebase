@@ -23,6 +23,7 @@ import {
   parseWindow,
   getGroup,
   getLimit,
+  RATE_LIMIT_DEV_DEFAULTS,
 } from '../../src/middleware/rate-limit.js';
 import { signAccessToken, signAdminAccessToken } from '../../src/lib/jwt.js';
 
@@ -374,7 +375,7 @@ describe('1-01 routing — getLimit', () => {
 
   it('no config → returns default for "db"', () => {
     const { requests } = getLimit(undefined, 'db');
-    expect(requests).toBe(100);
+    expect(requests).toBe(RATE_LIMIT_DEV_DEFAULTS.db.requests);
   });
 
   it('config with rateLimiting.global → overrides default', () => {

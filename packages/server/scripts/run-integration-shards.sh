@@ -82,9 +82,20 @@ retry_failed_files() {
     local retry_log="$LOG_DIR/r${round}-$(basename "$f" .test.ts).log"
     (
       cd "$SERVER_DIR"
+      local retry_config=".tmp-vitest-integration-r${round}-$(basename "$f" .test.ts)-$$.config.ts"
+      cat > "$retry_config" <<EOF
+import base from './vitest.integration.config.ts';
+export default {
+  ...base,
+  test: {
+    ...base.test,
+    include: ['${f}'],
+  },
+};
+EOF
+      trap 'rm -f "$retry_config"' EXIT
       TMPDIR=/tmp pnpm exec vitest run --passWithNoTests \
-        --config vitest.integration.config.ts \
-        "$f"
+        --config "$retry_config"
     ) > "$retry_log" 2>&1 &
     pids+=($!)
     file_map+=("$f")

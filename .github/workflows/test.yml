@@ -330,9 +330,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest
-          pip install -e './packages/sdk/python[dev]'
           pip install -e './packages/sdk/python/packages/core'
           pip install -e './packages/sdk/python/packages/admin'
+          pip install -e './packages/sdk/python[dev]' --no-deps
       - name: Start EdgeBase test server and run Python E2E
         run: |
           bash ./scripts/run-with-pty.sh <<'EOF'
