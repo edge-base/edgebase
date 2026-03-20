@@ -68,6 +68,7 @@ packages/sdk/cpp/packages/core/tests/build-storage-suite*/
 
 # Generated test/runtime output
 artifacts/
+.release-artifacts/
 /dev/
 /functions/
 /runtime/
