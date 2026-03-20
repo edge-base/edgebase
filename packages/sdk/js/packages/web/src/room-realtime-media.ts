@@ -175,8 +175,21 @@ export class RoomRealtimeMediaTransport {
     this.peerConnection = this.options.peerConnectionFactory(configuration);
     this.peerConnection.ontrack = (event) => this.handleRemoteTrack(event);
 
-    const response = await this.room.media.realtime.createSession(payload);
+    // Generate an initial SDP offer for session creation.
+    // Cloudflare Realtime requires a sessionDescription when creating a new session.
+    const initialOffer = await this.createLocalOffer();
+    const sessionPayload: RoomRealtimeCreateSessionRequest = {
+      ...payload,
+      sessionDescription: payload?.sessionDescription ?? initialOffer,
+    };
+
+    const response = await this.room.media.realtime.createSession(sessionPayload);
     this.sessionId = response.sessionId;
+
+    // Apply the response sessionDescription (answer) from Cloudflare
+    if (response.sessionDescription) {
+      await this.peerConnection.setRemoteDescription(response.sessionDescription);
+    }
 
     this.attachRoomSubscriptions();
     await this.subscribeExistingPublishedTracks();
