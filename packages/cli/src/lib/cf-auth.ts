@@ -227,14 +227,18 @@ export function parseWhoamiOutput(output: string): CloudflareAccount[] {
  * Trigger `wrangler login` (browser OAuth flow).
  * Only works in interactive terminals. Blocks until complete.
  */
-export function triggerWranglerLogin(projectDir: string): boolean {
+export function triggerWranglerLogin(projectDir: string, scopes?: string[]): boolean {
   console.log(chalk.blue('🔐 Opening Cloudflare login in browser...'));
   console.log(chalk.dim('  This opens Cloudflare OAuth in your browser and requires the user to finish sign-in.'));
   console.log(chalk.dim('  Return to the terminal after the browser flow completes.'));
   console.log();
 
   try {
-    execFileSync(wranglerCommand(), wranglerArgs(['wrangler', 'login']), {
+    const args = ['wrangler', 'login'];
+    if (scopes && scopes.length > 0) {
+      args.push('--scopes', ...scopes);
+    }
+    execFileSync(wranglerCommand(), wranglerArgs(args), {
       cwd: projectDir,
       stdio: 'inherit',
       timeout: 120000, // 2 minute timeout for browser auth
@@ -244,6 +248,40 @@ export function triggerWranglerLogin(projectDir: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Default OAuth scopes requested by wrangler login.
+ */
+export const WRANGLER_DEFAULT_SCOPES = [
+  'account:read',
+  'user:read',
+  'workers:write',
+  'workers_kv:write',
+  'workers_routes:write',
+  'workers_scripts:write',
+  'workers_tail:read',
+  'd1:write',
+  'pages:write',
+  'zone:read',
+  'ssl_certs:write',
+  'ai:write',
+  'queues:write',
+];
+
+/**
+ * Re-login with additional scopes for Cloudflare Calls/Realtime provisioning.
+ * `connectivity:admin` grants access to Calls App and TURN key management.
+ */
+export function triggerWranglerLoginWithCallsScope(projectDir: string): boolean {
+  console.log(chalk.yellow('⚠'), 'Current OAuth token lacks Cloudflare Calls permissions.');
+  console.log(chalk.blue('🔄 Re-authenticating with Calls/Realtime scope...'));
+  console.log();
+
+  return triggerWranglerLogin(projectDir, [
+    ...WRANGLER_DEFAULT_SCOPES,
+    'connectivity:admin',
+  ]);
 }
 
 /**

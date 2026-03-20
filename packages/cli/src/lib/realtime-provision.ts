@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import chalk from 'chalk';
-import { ensureCloudflareAuth, resolveApiToken } from './cf-auth.js';
+import { ensureCloudflareAuth, resolveApiToken, triggerWranglerLoginWithCallsScope } from './cf-auth.js';
 import { isQuiet } from './cli-context.js';
 import { writeLocalSecrets } from './local-secrets.js';
 import { deriveProjectSlug } from './runtime-scaffold.js';
@@ -146,12 +146,13 @@ function toProvisionAuthError(error: unknown, tokenSource: 'env' | 'wrangler_oau
     );
   }
 
-  // Auth token lacks Calls permissions
+  // Auth token lacks Calls permissions (shown after auto-retry also failed)
   if (tokenSource === 'wrangler_oauth' && /authentication error/i.test(error.message)) {
     return new Error(
-      'Cloudflare Calls/Realtime provisioning rejected the current wrangler OAuth token.\n' +
-      '    Create a Cloudflare API token with Calls Write or Connectivity Admin permissions,\n' +
-      '    export it as CLOUDFLARE_API_TOKEN, and rerun this command.',
+      'Cloudflare Calls/Realtime provisioning rejected the OAuth token (even after re-login).\n' +
+      '    Try creating a Cloudflare API token manually with Calls Write or Connectivity Admin permissions:\n' +
+      '    Dashboard → My Profile → API Tokens → Create Token\n' +
+      '    Then: CLOUDFLARE_API_TOKEN=<token> npx edgebase realtime provision',
     );
   }
 
@@ -274,16 +275,49 @@ export async function provisionRealtime(
   }
 
   const auth = await ensureCloudflareAuth(options.projectDir, process.stdout.isTTY);
-  const { token: apiToken, source: apiTokenSource } = resolveApiToken();
+  let { token: apiToken, source: apiTokenSource } = resolveApiToken();
 
   try {
+    return await doProvisionRealtime(auth.accountId, apiToken, existingSecrets, appName, turnName, options);
+  } catch (error) {
+    // Auto-retry with re-login if wrangler OAuth token lacks Calls permissions
+    if (
+      apiTokenSource === 'wrangler_oauth' &&
+      error instanceof Error &&
+      /authentication error/i.test(error.message) &&
+      process.stdout.isTTY
+    ) {
+      const reloginSuccess = triggerWranglerLoginWithCallsScope(options.projectDir);
+      if (reloginSuccess) {
+        const retryToken = resolveApiToken();
+        apiToken = retryToken.token;
+        apiTokenSource = retryToken.source;
+        try {
+          return await doProvisionRealtime(auth.accountId, apiToken, existingSecrets, appName, turnName, options);
+        } catch (retryError) {
+          throw toProvisionAuthError(retryError, apiTokenSource);
+        }
+      }
+    }
+    throw toProvisionAuthError(error, apiTokenSource);
+  }
+}
+
+async function doProvisionRealtime(
+  accountId: string,
+  apiToken: string,
+  existingSecrets: Partial<Record<RealtimeSecretName, string>>,
+  appName: string,
+  turnName: string,
+  options: RealtimeProvisionOptions,
+): Promise<RealtimeProvisionResult> {
     let appId = existingSecrets.CF_REALTIME_APP_ID;
     let appSecret = existingSecrets.CF_REALTIME_APP_SECRET;
     let appSource: 'local' | 'created' = appId && appSecret ? 'local' : 'created';
 
     if (options.forceCreateApp || !appId || !appSecret) {
       if (!options.forceCreateApp) {
-        const existingApp = (await listRealtimeApps(auth.accountId, apiToken))
+        const existingApp = (await listRealtimeApps(accountId, apiToken))
           .find((candidate) => candidate.name === appName);
         if (existingApp && (!appId || !appSecret)) {
           throw new Error(
@@ -293,7 +327,7 @@ export async function provisionRealtime(
         }
       }
 
-      const createdApp = await createRealtimeApp(auth.accountId, apiToken, appName);
+      const createdApp = await createRealtimeApp(accountId, apiToken, appName);
       if (!createdApp.uid || !createdApp.secret) {
         throw new Error('Cloudflare returned an incomplete Realtime app response.');
       }
@@ -308,7 +342,7 @@ export async function provisionRealtime(
 
     if (options.forceCreateTurn || !turnKeyId || !turnApiToken) {
       if (!options.forceCreateTurn) {
-        const existingTurnKey = (await listTurnKeys(auth.accountId, apiToken))
+        const existingTurnKey = (await listTurnKeys(accountId, apiToken))
           .find((candidate) => candidate.name === turnName);
         if (existingTurnKey && (!turnKeyId || !turnApiToken)) {
           throw new Error(
@@ -318,7 +352,7 @@ export async function provisionRealtime(
         }
       }
 
-      const createdTurnKey = await createTurnKey(auth.accountId, apiToken, turnName);
+      const createdTurnKey = await createTurnKey(accountId, apiToken, turnName);
       if (!createdTurnKey.uid || !createdTurnKey.key) {
         throw new Error('Cloudflare returned an incomplete TURN key response.');
       }
@@ -378,7 +412,4 @@ export async function provisionRealtime(
       turnName,
       turnSource,
     };
-  } catch (error) {
-    throw toProvisionAuthError(error, apiTokenSource);
-  }
 }

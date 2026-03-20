@@ -321,13 +321,25 @@ npx edgebase upgrade --target 0.2.0 --force
 
 ## 9. Set Up WebRTC For Room Media
 
-Provision Cloudflare Calls resources for Room Media (audio/video/screen-share):
+Room Media (audio/video/screen-share) requires Cloudflare Realtime (Serverless SFU). Setup is two steps:
+
+### Step 1: Enable Realtime subscription (one-time, via Dashboard)
+
+Go to **Cloudflare Dashboard → Realtime → Serverless SFU → Get Started** and activate the free tier (1,000 GB/month included).
+
+### Step 2: Provision via CLI (one command)
 
 ```bash
 npx edgebase realtime provision
 ```
 
-This creates the required Calls App and TURN service, then stores the credentials as Workers secrets. You only need to run this once per project.
+This single command handles everything:
+- Creates a Cloudflare Realtime App (SFU)
+- Creates a TURN key for NAT traversal
+- Stores all four secrets locally (`.env.development`, `.dev.vars`, `.edgebase/secrets.json`)
+- Syncs secrets to Workers (for production deployment)
+
+If your current OAuth token lacks Calls permissions, the CLI will automatically re-authenticate with the required `connectivity:admin` scope — no manual API token creation needed.
 
 Common options:
 
@@ -338,8 +350,8 @@ npx edgebase realtime provision --app-name my-calls-app --turn-name my-turn
 # Force re-create if already exists
 npx edgebase realtime provision --force-create-app --force-create-turn
 
-# Skip storing Workers secrets (manual setup)
+# Skip storing Workers secrets (local dev only)
 npx edgebase realtime provision --skip-workers-secrets
 ```
 
-Requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in your environment.
+You can also set `CLOUDFLARE_API_TOKEN` with Calls Write permissions if you prefer explicit API token authentication.
