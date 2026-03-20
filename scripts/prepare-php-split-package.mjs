@@ -74,8 +74,10 @@ function updateReadme(packageDir, target, repo) {
 
   if (repo) {
     replacements.push([
-      /https:\/\/github\.com\/edge-base\/edgebase\/blob\/main\/packages\/sdk\/php\/packages\/(?:core|admin)\/llms\.txt/g,
-      `https://github.com/${repo}/blob/main/llms.txt`,
+      `- in this repository: [llms.txt](https://github.com/edge-base/edgebase/blob/main/packages/sdk/php/packages/${target}/llms.txt)
+`,
+      `- in this repository: [llms.txt](https://github.com/${repo}/blob/main/llms.txt)
+`,
     ]);
   }
 
@@ -136,8 +138,10 @@ function updateLlms(packageDir, target, repo) {
 
   if (repo) {
     replacements.push([
-      /https:\/\/github\.com\/edge-base\/edgebase\/blob\/main\/packages\/sdk\/php\/packages\/(?:core|admin)\/README\.md/g,
-      `https://github.com/${repo}/blob/main/README.md`,
+      `- Package README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/php/packages/${target}/README.md
+`,
+      `- Package README: https://github.com/${repo}/blob/main/README.md
+`,
     ]);
   }
 
