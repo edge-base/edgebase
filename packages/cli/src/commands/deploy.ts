@@ -83,6 +83,7 @@ import {
 
 const FULL_CONFIG_EVAL = { allowRegexFallback: false } as const;
 const RELEASE_ENV_HEADER = '# EdgeBase production secrets';
+const ANSI_ESCAPE_REGEX = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, 'g');
 
 type AuthEnvField = 'clientId' | 'clientSecret' | 'issuer' | 'scopes';
 type AuthProviderInspection = {
@@ -488,7 +489,7 @@ function diagnoseProvisioningError(
 ): string[] {
   const hints: string[] = [];
   // Strip ANSI escape codes before pattern matching
-  const msg = errorMessage.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').toLowerCase();
+  const msg = errorMessage.replace(ANSI_ESCAPE_REGEX, '').toLowerCase();
 
   // R2 not enabled
   if (msg.includes('please enable r2') || msg.includes('code: 10042') || (msg.includes('r2') && msg.includes('enable'))) {
@@ -1829,7 +1830,7 @@ export const deployCommand = new Command('deploy')
     if (deployExitCode !== 0) {
       // Provide resource-specific hints when the final deploy step fails
       // Strip ANSI escape codes before matching error patterns
-      const outputLower = deployOutput.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').toLowerCase();
+      const outputLower = deployOutput.replace(ANSI_ESCAPE_REGEX, '').toLowerCase();
       let deployHint = `Check Cloudflare auth (${wranglerHint(['wrangler', 'whoami'])}), inspect verbose deploy output (${wranglerHint(['wrangler', 'deploy', '--verbose'])}), or re-login (${wranglerHint(['wrangler', 'login'])}).`;
       if (outputLower.includes('please enable r2') || outputLower.includes('code: 10042')) {
         deployHint = `R2 is not enabled on your Cloudflare account. Enable it at: Cloudflare Dashboard → R2 Object Storage → Get Started. Or remove 'storage' from edgebase.config.ts if not needed.`;
