@@ -1,5 +1,6 @@
 ---
 slug: /server/native-resources/vectorize/limits-pricing
+sidebar_position: 17
 ---
 
 # Vectorize Limits & Pricing

@@ -1,5 +1,6 @@
 ---
 slug: /server/native-resources/d1/admin-sdk
+sidebar_position: 10
 ---
 
 import Tabs from '@theme/Tabs';

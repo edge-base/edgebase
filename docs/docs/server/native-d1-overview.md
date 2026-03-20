@@ -1,5 +1,6 @@
 ---
 slug: /server/native-resources/d1
+sidebar_position: 9
 ---
 
 # D1

@@ -1,5 +1,6 @@
 ---
 slug: /server/native-resources/kv/limits-pricing
+sidebar_position: 14
 ---
 
 # KV Limits & Pricing

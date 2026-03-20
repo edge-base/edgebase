@@ -1,5 +1,6 @@
 ---
 slug: /server/native-resources/vectorize
+sidebar_position: 15
 ---
 
 # Vectorize

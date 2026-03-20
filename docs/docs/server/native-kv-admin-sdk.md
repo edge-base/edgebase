@@ -1,5 +1,6 @@
 ---
 slug: /server/native-resources/kv/admin-sdk
+sidebar_position: 13
 ---
 
 import Tabs from '@theme/Tabs';

@@ -1,5 +1,6 @@
 ---
 slug: /server/native-resources/d1/limits-pricing
+sidebar_position: 11
 ---
 
 # D1 Limits & Pricing

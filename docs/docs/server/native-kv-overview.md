@@ -1,5 +1,6 @@
 ---
 slug: /server/native-resources/kv
+sidebar_position: 12
 ---
 
 # KV

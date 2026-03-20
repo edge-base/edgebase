@@ -1,5 +1,6 @@
 ---
 slug: /server/native-resources/vectorize/admin-sdk
+sidebar_position: 16
 ---
 
 import Tabs from '@theme/Tabs';
