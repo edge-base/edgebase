@@ -91,6 +91,7 @@ class RoomClient:
         max_reconnect_attempts: int = 10,
         reconnect_base_delay: float = 1.0,
         send_timeout: float = 10.0,
+        connection_timeout: float = 15.0,
     ) -> None:
         self.namespace: str = namespace
         self.room_id: str = room_id
@@ -101,6 +102,7 @@ class RoomClient:
         self._max_reconnect_attempts = max_reconnect_attempts
         self._reconnect_base_delay = reconnect_base_delay
         self._send_timeout = send_timeout
+        self._connection_timeout = connection_timeout
 
         # ---- State (v2: shared + player) ----
         self._shared_state: Dict[str, Any] = {}
@@ -329,7 +331,16 @@ class RoomClient:
             raise ImportError("Install 'websockets>=12.0' for Room support.") from exc
 
         ws_url = self._build_ws_url()
-        self._ws = await websockets.connect(ws_url)
+        try:
+            self._ws = await asyncio.wait_for(
+                websockets.connect(ws_url),
+                timeout=self._connection_timeout,
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError(
+                f"Room WebSocket connection timed out after {self._connection_timeout}s. "
+                "Is the server running?"
+            )
         self._connected = True
         self._reconnect_attempts = 0
 

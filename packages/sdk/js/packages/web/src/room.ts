@@ -27,6 +27,8 @@ export interface RoomOptions {
   reconnectBaseDelay?: number;
   /** Timeout for send() requests in ms (default: 10000) */
   sendTimeout?: number;
+  /** Timeout for WebSocket connection establishment in ms (default: 15000) */
+  connectionTimeout?: number;
 }
 
 export interface Subscription {
@@ -460,6 +462,7 @@ export class RoomClient {
       maxReconnectAttempts: options?.maxReconnectAttempts ?? 10,
       reconnectBaseDelay: options?.reconnectBaseDelay ?? 1000,
       sendTimeout: options?.sendTimeout ?? 10000,
+      connectionTimeout: options?.connectionTimeout ?? 15000,
     };
 
     this.unsubAuthState = this.tokenManager.onAuthStateChange((user) => {
@@ -1000,19 +1003,36 @@ export class RoomClient {
       const wsUrl = this.buildWsUrl();
       const ws = new WebSocket(wsUrl);
       this.ws = ws;
+      let settled = false;
+
+      const connectionTimer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          try { ws.close(); } catch (_) { /* ignore */ }
+          this.ws = null;
+          reject(new EdgeBaseError(408, `Room WebSocket connection timed out after ${this.options.connectionTimeout}ms. Is the server running?`));
+        }
+      }, this.options.connectionTimeout);
 
       ws.onopen = () => {
+        clearTimeout(connectionTimer);
         this.connected = true;
         this.reconnectAttempts = 0;
         this.startHeartbeat();
         this.authenticate()
           .then(() => {
-            this.waitingForAuth = false;
-            resolve();
+            if (!settled) {
+              settled = true;
+              this.waitingForAuth = false;
+              resolve();
+            }
           })
           .catch((error) => {
-            this.handleAuthenticationFailure(error);
-            reject(error);
+            if (!settled) {
+              settled = true;
+              this.handleAuthenticationFailure(error);
+              reject(error);
+            }
           });
       };
 
@@ -1021,6 +1041,7 @@ export class RoomClient {
       };
 
       ws.onclose = (event: CloseEvent) => {
+        clearTimeout(connectionTimer);
         this.connected = false;
         this.authenticated = false;
         this.joined = false;
@@ -1043,7 +1064,11 @@ export class RoomClient {
       };
 
       ws.onerror = () => {
-        reject(new EdgeBaseError(500, 'Room WebSocket connection error'));
+        clearTimeout(connectionTimer);
+        if (!settled) {
+          settled = true;
+          reject(new EdgeBaseError(500, 'Room WebSocket connection error'));
+        }
       };
     });
   }

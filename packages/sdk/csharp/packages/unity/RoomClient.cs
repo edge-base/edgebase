@@ -61,6 +61,7 @@ namespace EdgeBase
         private readonly int _maxReconnectAttempts;
         private readonly int _reconnectBaseDelayMs;
         private readonly int _sendTimeoutMs;
+        private readonly int _connectionTimeoutMs;
 
         private Dictionary<string, object?> _sharedState = new();
         private int _sharedVersion;
@@ -151,7 +152,8 @@ namespace EdgeBase
             Func<string?> tokenGetter,
             int maxReconnectAttempts = 10,
             int reconnectBaseDelayMs = 1000,
-            int sendTimeoutMs = 10000
+            int sendTimeoutMs = 10000,
+            int connectionTimeoutMs = 15000
         )
         {
             _baseUrl = baseUrl.TrimEnd('/');
@@ -161,6 +163,7 @@ namespace EdgeBase
             _maxReconnectAttempts = maxReconnectAttempts;
             _reconnectBaseDelayMs = reconnectBaseDelayMs;
             _sendTimeoutMs = sendTimeoutMs;
+            _connectionTimeoutMs = connectionTimeoutMs;
 
             State = new RoomStateNamespace(this);
             Meta = new RoomMetaNamespace(this);
@@ -556,7 +559,17 @@ namespace EdgeBase
             var socket = new ClientWebSocket();
             try
             {
-                await socket.ConnectAsync(new Uri(WsUrl()), _cts.Token);
+                using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                connectCts.CancelAfter(_connectionTimeoutMs);
+                try
+                {
+                    await socket.ConnectAsync(new Uri(WsUrl()), connectCts.Token);
+                }
+                catch (OperationCanceledException) when (!_cts.Token.IsCancellationRequested)
+                {
+                    throw new EdgeBaseException(408,
+                        $"Room WebSocket connection timed out after {_connectionTimeoutMs}ms. Is the server running?");
+                }
                 _ws = socket;
                 _connected = true;
                 _reconnectAttempts = 0;

@@ -31,6 +31,8 @@ pub struct RoomOptions {
     pub reconnect_base_delay_ms: u64,
     /// Timeout for send() requests in ms (default: 10000)
     pub send_timeout_ms: u64,
+    /// Timeout for WebSocket connection establishment in ms (default: 15000)
+    pub connection_timeout_ms: u64,
 }
 
 impl Default for RoomOptions {
@@ -40,6 +42,7 @@ impl Default for RoomOptions {
             max_reconnect_attempts: 10,
             reconnect_base_delay_ms: 1000,
             send_timeout_ms: 10_000,
+            connection_timeout_ms: 15_000,
         }
     }
 }
@@ -906,7 +909,15 @@ impl RoomClient {
         use futures_util::{SinkExt, StreamExt};
         use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-        let (ws_stream, _response) = connect_async(self.ws_url()).await?;
+        let (ws_stream, _response) = tokio::time::timeout(
+            std::time::Duration::from_millis(self.opts.connection_timeout_ms),
+            connect_async(self.ws_url()),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!(
+            "Room WebSocket connection timed out after {}ms. Is the server running?",
+            self.opts.connection_timeout_ms,
+        ))??;
         let (mut write, mut read) = ws_stream.split();
 
         // Auth

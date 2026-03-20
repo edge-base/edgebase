@@ -60,17 +60,21 @@ public struct RoomOptions: Sendable {
     public var reconnectBaseDelay: TimeInterval
     /// Timeout for send() requests in seconds (default: 10.0)
     public var sendTimeout: TimeInterval
+    /// Timeout for WebSocket connection establishment in seconds (default: 15.0)
+    public var connectionTimeout: TimeInterval
 
     public init(
         autoReconnect: Bool = true,
         maxReconnectAttempts: Int = 10,
         reconnectBaseDelay: TimeInterval = 1.0,
-        sendTimeout: TimeInterval = 10.0
+        sendTimeout: TimeInterval = 10.0,
+        connectionTimeout: TimeInterval = 15.0
     ) {
         self.autoReconnect = autoReconnect
         self.maxReconnectAttempts = maxReconnectAttempts
         self.reconnectBaseDelay = reconnectBaseDelay
         self.sendTimeout = sendTimeout
+        self.connectionTimeout = connectionTimeout
     }
 }
 
@@ -687,7 +691,9 @@ public final class RoomClient: @unchecked Sendable {
         reconnectAttempts = 0
 
         do {
-            try await authenticate()
+            try await withConnectionTimeout {
+                try await self.authenticate()
+            }
             waitingForAuth = false
         } catch {
             handleAuthenticationFailure(error)
@@ -696,6 +702,22 @@ public final class RoomClient: @unchecked Sendable {
 
         Task { await receiveMessages() }
         startHeartbeat()
+    }
+
+    private func withConnectionTimeout<T>(_ operation: @escaping () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(self.options.connectionTimeout * 1_000_000_000))
+                throw EdgeBaseError(statusCode: 408,
+                    message: "Room WebSocket connection timed out after \(self.options.connectionTimeout)s. Is the server running?")
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
     }
 
     private func authenticate() async throws {

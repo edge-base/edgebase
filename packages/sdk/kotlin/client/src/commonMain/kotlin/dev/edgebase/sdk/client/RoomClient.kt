@@ -47,6 +47,8 @@ data class RoomOptions(
     val maxReconnectAttempts: Int = 10,
     val reconnectBaseDelayMs: Long = 1000L,
     val sendTimeoutMs: Long = 10000L,
+    /** Timeout for WebSocket connection establishment in ms (default: 15000) */
+    val connectionTimeoutMs: Long = 15000L,
 )
 
 typealias StateHandler = (Map<String, Any?>, Map<String, Any?>) -> Unit
@@ -511,6 +513,8 @@ class RoomClient(
             }
 
             val url = wsUrl()
+            try {
+                withTimeout(options.connectionTimeoutMs) {
             ktorClient.webSocket(url) {
                 webSocketSession = this
                 socketHandle = KtorRoomSocketHandle(this)
@@ -558,6 +562,11 @@ class RoomClient(
                 }
 
                 hbJob.cancel()
+            }
+                } // withTimeout
+            } catch (e: TimeoutCancellationException) {
+                throw EdgeBaseError(408,
+                    "Room WebSocket connection timed out after ${options.connectionTimeoutMs}ms. Is the server running?")
             }
         } catch (e: Exception) {
             handleAuthenticationFailure(e)
