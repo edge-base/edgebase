@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,8 +14,22 @@ function createHomeDir(): string {
   return dir;
 }
 
+function resolveTsxCommand(): string {
+  const binaryName = process.platform === 'win32' ? 'tsx.cmd' : 'tsx';
+  const candidates = [
+    join(packageDir, 'node_modules', '.bin', binaryName),
+    join(packageDir, '..', '..', 'node_modules', '.bin', binaryName),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+
+  return 'tsx';
+}
+
 function runCli(homeDir: string, args: string[]): string {
-  return execFileSync('pnpm', ['exec', 'tsx', 'src/index.ts', ...args], {
+  return execFileSync(resolveTsxCommand(), ['src/index.ts', ...args], {
     cwd: packageDir,
     encoding: 'utf-8',
     env: {
@@ -69,7 +83,7 @@ describe('CLI entrypoint telemetry', () => {
 
     runCli(homeDir, ['telemetry', 'enable']);
 
-    const result = spawnSync('pnpm', ['exec', 'tsx', 'src/index.ts', 'definitely-missing'], {
+    const result = spawnSync(resolveTsxCommand(), ['src/index.ts', 'definitely-missing'], {
       cwd: packageDir,
       encoding: 'utf-8',
       env: {

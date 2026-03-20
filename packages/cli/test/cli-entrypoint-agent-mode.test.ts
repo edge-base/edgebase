@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,20 @@ function createHomeDir(): string {
   return dir;
 }
 
+function resolveTsxCommand(): string {
+  const binaryName = process.platform === 'win32' ? 'tsx.cmd' : 'tsx';
+  const candidates = [
+    join(packageDir, 'node_modules', '.bin', binaryName),
+    join(packageDir, '..', '..', 'node_modules', '.bin', binaryName),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+
+  return 'tsx';
+}
+
 describe('CLI entrypoint agent mode', () => {
   afterEach(() => {
     for (const dir of tempDirs.splice(0)) {
@@ -24,9 +38,7 @@ describe('CLI entrypoint agent mode', () => {
   it('returns structured needs_input JSON for export when --table is missing', () => {
     const homeDir = createHomeDir();
 
-    const result = spawnSync('pnpm', [
-      'exec',
-      'tsx',
+    const result = spawnSync(resolveTsxCommand(), [
       'src/index.ts',
       '--json',
       '--non-interactive',
@@ -69,9 +81,7 @@ describe('CLI entrypoint agent mode', () => {
       databases: {},
     }));
 
-    const result = spawnSync('pnpm', [
-      'exec',
-      'tsx',
+    const result = spawnSync(resolveTsxCommand(), [
       'src/index.ts',
       '--json',
       '--non-interactive',
