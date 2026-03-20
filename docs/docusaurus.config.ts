@@ -213,7 +213,7 @@ const config: Config = {
           title: 'Community',
           items: [
             { label: 'GitHub', href: 'https://github.com/edge-base/edgebase' },
-            { label: 'Discord', href: 'https://discord.gg/edgebase' },
+            { label: 'Reddit', href: 'https://www.reddit.com/r/edgebase/' },
             { label: 'Issues', href: 'https://github.com/edge-base/edgebase/issues' },
           ],
         },
