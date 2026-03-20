@@ -2,16 +2,8 @@ name: PHP Split Repo Sync
 
 on:
   push:
-    branches:
-      - main
     tags:
       - v*
-    paths:
-      - packages/sdk/php/packages/core/**
-      - packages/sdk/php/packages/admin/**
-      - scripts/prepare-php-split-package.mjs
-      - scripts/sync-php-split-repo.sh
-      - .github/workflows/php-split-sync.yml
   workflow_dispatch:
     inputs:
       target:

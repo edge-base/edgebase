@@ -2,16 +2,8 @@ name: Swift Split Repo Sync
 
 on:
   push:
-    branches:
-      - main
     tags:
       - v*
-    paths:
-      - packages/sdk/swift/packages/core/**
-      - packages/sdk/swift/packages/ios/**
-      - scripts/prepare-swift-split-package.mjs
-      - scripts/sync-swift-split-repo.sh
-      - .github/workflows/swift-split-sync.yml
   workflow_dispatch:
     inputs:
       target:
