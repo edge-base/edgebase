@@ -420,7 +420,9 @@ jobs:
       EDGEBASE_E2E_REQUIRED: "1"
       EDGEBASE_TEST_LOG_PATH: /tmp/edgebase-swift-e2e-server.log
       EDGEBASE_TEST_PID_PATH: /tmp/edgebase-swift-e2e-server.pid
-      EDGEBASE_E2E_HEALTHCHECK_TIMEOUT_MS: "8000"
+      EDGEBASE_E2E_HEALTHCHECK_TIMEOUT_MS: "15000"
+      EDGEBASE_E2E_HEALTHCHECK_RETRIES: "3"
+      EDGEBASE_E2E_HEALTHCHECK_RETRY_DELAY_MS: "1000"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -447,17 +449,22 @@ jobs:
             exit "$status"
           }
           trap cleanup EXIT
+          ROOT_DIR="$(pwd)"
+          run_swift_suite() {
+            bash "$ROOT_DIR/scripts/wait-for-test-server.sh"
+            swift test --filter "$1"
+          }
           bash ./scripts/start-test-server.sh
           bash ./scripts/wait-for-test-server.sh
           cd packages/sdk/swift/packages/core
-          swift test --filter E2ETests
+          run_swift_suite E2ETests
           cd ../ios
-          swift test --filter EdgeBaseClientIosE2ETests
-          swift test --filter IosAuthExtendedE2ETests
-          swift test --filter IosDbExtendedE2ETests
-          swift test --filter IosStorageAuthE2ETests
-          swift test --filter IosRoomE2ETests
-          swift test --filter IosSwiftLangE2ETests
+          run_swift_suite EdgeBaseClientIosE2ETests
+          run_swift_suite IosAuthExtendedE2ETests
+          run_swift_suite IosDbExtendedE2ETests
+          run_swift_suite IosStorageAuthE2ETests
+          run_swift_suite IosRoomE2ETests
+          run_swift_suite IosSwiftLangE2ETests
           EOF
 
   # ─── Mutation Testing (PR only) ─────────────────────────────────────────────

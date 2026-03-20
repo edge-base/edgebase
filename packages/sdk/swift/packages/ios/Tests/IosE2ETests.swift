@@ -9,9 +9,23 @@ import XCTest
 private enum E2ETestSupport {
     private static let requiredEnv = "EDGEBASE_E2E_REQUIRED"
     private static let timeoutEnv = "EDGEBASE_E2E_HEALTHCHECK_TIMEOUT_MS"
+    private static let retryCountEnv = "EDGEBASE_E2E_HEALTHCHECK_RETRIES"
+    private static let retryDelayEnv = "EDGEBASE_E2E_HEALTHCHECK_RETRY_DELAY_MS"
 
     static func requireServer(_ baseUrl: String) throws {
-        guard !isServerAvailable(baseUrl) else { return }
+        let retryCount = max(Int(ProcessInfo.processInfo.environment[retryCountEnv] ?? "") ?? 3, 1)
+        let retryDelayMs = max(Double(ProcessInfo.processInfo.environment[retryDelayEnv] ?? "") ?? 1000, 200)
+
+        for attempt in 1...retryCount {
+            if isServerAvailable(baseUrl) {
+                return
+            }
+
+            if attempt < retryCount {
+                Thread.sleep(forTimeInterval: retryDelayMs / 1000.0)
+            }
+        }
+
         let message = "E2E backend not reachable at \(baseUrl). Start `edgebase dev --port 8688` or set BASE_URL. Set \(requiredEnv)=1 to fail instead of skip."
         if ProcessInfo.processInfo.environment[requiredEnv] == "1" {
             throw NSError(domain: "EdgeBaseE2E", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
