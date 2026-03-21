@@ -96,6 +96,7 @@ function sampleQuery(operationId?: string): string | null {
     checkRoomConnection: 'namespace=test-game&id=smoke-room',
     getRoomRealtimeSession: 'namespace=test-game&id=smoke-room',
     createRoomRealtimeSession: 'namespace=test-game&id=smoke-room',
+    createRoomCloudflareRealtimeKitSession: 'namespace=test-game&id=smoke-room',
     createRoomRealtimeIceServers: 'namespace=test-game&id=smoke-room',
     addRoomRealtimeTracks: 'namespace=test-game&id=smoke-room',
     renegotiateRoomRealtimeSession: 'namespace=test-game&id=smoke-room',

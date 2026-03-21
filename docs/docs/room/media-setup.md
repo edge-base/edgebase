@@ -1,5 +1,5 @@
 ---
-sidebar_position: 14
+sidebar_position: 16
 title: "Media Setup (Cloudflare RealtimeKit Provider)"
 description: Room Media의 cloudflare_realtimekit provider를 사용하기 위한 Cloudflare RealtimeKit 설정 가이드
 sidebar_label: "Media Setup"

@@ -95,6 +95,24 @@ export interface GeneratedDbApi {
   oauthLinkStart(provider: string): Promise<unknown>;
   /** OAuth link callback — GET /api/auth/oauth/link/{provider}/callback */
   oauthLinkCallback(provider: string): Promise<unknown>;
+  /** Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count */
+  dbSingleCountRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown>;
+  /** Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search */
+  dbSingleSearchRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown>;
+  /** Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id} */
+  dbSingleGetRecord(namespace: string, table: string, id: string, query: Record<string, string>): Promise<unknown>;
+  /** Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id} */
+  dbSingleUpdateRecord(namespace: string, table: string, id: string, body: unknown): Promise<unknown>;
+  /** Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id} */
+  dbSingleDeleteRecord(namespace: string, table: string, id: string): Promise<unknown>;
+  /** List records from a single-instance table — GET /api/db/{namespace}/tables/{table} */
+  dbSingleListRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown>;
+  /** Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table} */
+  dbSingleInsertRecord(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
+  /** Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch */
+  dbSingleBatchRecords(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
+  /** Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter */
+  dbSingleBatchByFilter(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count */
   dbCountRecords(namespace: string, instanceId: string, table: string, query: Record<string, string>): Promise<unknown>;
   /** Search records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/search */
@@ -179,28 +197,10 @@ export interface GeneratedDbApi {
   renegotiateRoomRealtimeSession(body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close */
   closeRoomRealtimeTracks(body: unknown, query: Record<string, string>): Promise<unknown>;
-  /** Track custom events — POST /api/analytics/track */
-  trackEvents(body: unknown): Promise<unknown>;
-  /** Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count */
-  dbSingleCountRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown>;
-  /** Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search */
-  dbSingleSearchRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown>;
-  /** Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id} */
-  dbSingleGetRecord(namespace: string, table: string, id: string, query: Record<string, string>): Promise<unknown>;
-  /** Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id} */
-  dbSingleUpdateRecord(namespace: string, table: string, id: string, body: unknown): Promise<unknown>;
-  /** Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id} */
-  dbSingleDeleteRecord(namespace: string, table: string, id: string): Promise<unknown>;
-  /** List records from a single-instance table — GET /api/db/{namespace}/tables/{table} */
-  dbSingleListRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown>;
-  /** Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table} */
-  dbSingleInsertRecord(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
-  /** Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch */
-  dbSingleBatchRecords(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
-  /** Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter */
-  dbSingleBatchByFilter(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session */
   createRoomCloudflareRealtimeKitSession(body: unknown, query: Record<string, string>): Promise<unknown>;
+  /** Track custom events — POST /api/analytics/track */
+  trackEvents(body: unknown): Promise<unknown>;
 }
 
 // ─── Implementation ────────────────────────────────────────────────────────
@@ -393,6 +393,42 @@ export class DefaultDbApi implements GeneratedDbApi {
     return this.transport.request('GET', `/api/auth/oauth/link/${provider}/callback`);
   }
 
+  async dbSingleCountRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('GET', `/api/db/${namespace}/tables/${table}/count`, { query });
+  }
+
+  async dbSingleSearchRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('GET', `/api/db/${namespace}/tables/${table}/search`, { query });
+  }
+
+  async dbSingleGetRecord(namespace: string, table: string, id: string, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('GET', `/api/db/${namespace}/tables/${table}/${id}`, { query });
+  }
+
+  async dbSingleUpdateRecord(namespace: string, table: string, id: string, body: unknown): Promise<unknown> {
+    return this.transport.request('PATCH', `/api/db/${namespace}/tables/${table}/${id}`, { body });
+  }
+
+  async dbSingleDeleteRecord(namespace: string, table: string, id: string): Promise<unknown> {
+    return this.transport.request('DELETE', `/api/db/${namespace}/tables/${table}/${id}`);
+  }
+
+  async dbSingleListRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('GET', `/api/db/${namespace}/tables/${table}`, { query });
+  }
+
+  async dbSingleInsertRecord(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('POST', `/api/db/${namespace}/tables/${table}`, { body, query });
+  }
+
+  async dbSingleBatchRecords(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('POST', `/api/db/${namespace}/tables/${table}/batch`, { body, query });
+  }
+
+  async dbSingleBatchByFilter(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('POST', `/api/db/${namespace}/tables/${table}/batch-by-filter`, { body, query });
+  }
+
   async dbCountRecords(namespace: string, instanceId: string, table: string, query: Record<string, string>): Promise<unknown> {
     return this.transport.request('GET', `/api/db/${namespace}/${instanceId}/tables/${table}/count`, { query });
   }
@@ -561,48 +597,12 @@ export class DefaultDbApi implements GeneratedDbApi {
     return this.transport.request('PUT', '/api/room/media/realtime/tracks/close', { body, query });
   }
 
-  async trackEvents(body: unknown): Promise<unknown> {
-    return this.transport.request('POST', '/api/analytics/track', { body });
-  }
-
-  async dbSingleCountRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('GET', `/api/db/${namespace}/tables/${table}/count`, { query });
-  }
-
-  async dbSingleSearchRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('GET', `/api/db/${namespace}/tables/${table}/search`, { query });
-  }
-
-  async dbSingleGetRecord(namespace: string, table: string, id: string, query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('GET', `/api/db/${namespace}/tables/${table}/${id}`, { query });
-  }
-
-  async dbSingleUpdateRecord(namespace: string, table: string, id: string, body: unknown): Promise<unknown> {
-    return this.transport.request('PATCH', `/api/db/${namespace}/tables/${table}/${id}`, { body });
-  }
-
-  async dbSingleDeleteRecord(namespace: string, table: string, id: string): Promise<unknown> {
-    return this.transport.request('DELETE', `/api/db/${namespace}/tables/${table}/${id}`);
-  }
-
-  async dbSingleListRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('GET', `/api/db/${namespace}/tables/${table}`, { query });
-  }
-
-  async dbSingleInsertRecord(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('POST', `/api/db/${namespace}/tables/${table}`, { body, query });
-  }
-
-  async dbSingleBatchRecords(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('POST', `/api/db/${namespace}/tables/${table}/batch`, { body, query });
-  }
-
-  async dbSingleBatchByFilter(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('POST', `/api/db/${namespace}/tables/${table}/batch-by-filter`, { body, query });
-  }
-
   async createRoomCloudflareRealtimeKitSession(body: unknown, query: Record<string, string>): Promise<unknown> {
     return this.transport.request('POST', '/api/room/media/cloudflare_realtimekit/session', { body, query });
+  }
+
+  async trackEvents(body: unknown): Promise<unknown> {
+    return this.transport.request('POST', '/api/analytics/track', { body });
   }
 
 }
@@ -637,18 +637,22 @@ export class ApiPaths {
   static readonly ADMIN_GET_AUTH_SETTINGS = '/admin/api/data/auth/settings';
   static readonly ADMIN_BACKUP_GET_CONFIG = '/admin/api/data/backup/config';
   static readonly ADMIN_BACKUP_DUMP_D1 = '/admin/api/data/backup/dump-d1';
+  static readonly ADMIN_BACKUP_DUMP_DATA = '/admin/api/data/backup/dump-data';
   static readonly ADMIN_BACKUP_DUMP_DO = '/admin/api/data/backup/dump-do';
   static readonly ADMIN_BACKUP_LIST_DOS = '/admin/api/data/backup/list-dos';
   static readonly ADMIN_BACKUP_RESTORE_D1 = '/admin/api/data/backup/restore-d1';
+  static readonly ADMIN_BACKUP_RESTORE_DATA = '/admin/api/data/backup/restore-data';
   static readonly ADMIN_BACKUP_RESTORE_DO = '/admin/api/data/backup/restore-do';
   static readonly ADMIN_CLEANUP_ANON = '/admin/api/data/cleanup-anon';
   static readonly ADMIN_GET_CONFIG_INFO = '/admin/api/data/config-info';
+  static readonly ADMIN_DESTROY_APP = '/admin/api/data/destroy-app';
   static readonly ADMIN_GET_DEV_INFO = '/admin/api/data/dev-info';
   static readonly ADMIN_GET_EMAIL_TEMPLATES = '/admin/api/data/email/templates';
   static readonly ADMIN_LIST_FUNCTIONS = '/admin/api/data/functions';
   static readonly ADMIN_GET_LOGS = '/admin/api/data/logs';
   static readonly ADMIN_GET_RECENT_LOGS = '/admin/api/data/logs/recent';
   static readonly ADMIN_GET_MONITORING = '/admin/api/data/monitoring';
+  static adminListNamespaceInstances(namespace: string) { return `/admin/api/data/namespaces/${namespace}/instances`; }
   static readonly ADMIN_GET_OVERVIEW = '/admin/api/data/overview';
   static readonly ADMIN_GET_PUSH_LOGS = '/admin/api/data/push/logs';
   static readonly ADMIN_TEST_PUSH_SEND = '/admin/api/data/push/test-send';

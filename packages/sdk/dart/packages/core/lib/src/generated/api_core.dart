@@ -233,6 +233,51 @@ class GeneratedDbApi {
     return _http.get('/auth/oauth/link/${Uri.encodeComponent(provider)}/callback', null);
   }
 
+  /// Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
+  Future<dynamic> dbSingleCountRecords(String namespace, String table, Map<String, String>? query) async {
+    return _http.get('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/count', query);
+  }
+
+  /// Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search
+  Future<dynamic> dbSingleSearchRecords(String namespace, String table, Map<String, String>? query) async {
+    return _http.get('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/search', query);
+  }
+
+  /// Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}
+  Future<dynamic> dbSingleGetRecord(String namespace, String table, String id, Map<String, String>? query) async {
+    return _http.get('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/${Uri.encodeComponent(id)}', query);
+  }
+
+  /// Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}
+  Future<dynamic> dbSingleUpdateRecord(String namespace, String table, String id, Object? body) async {
+    return _http.patch('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/${Uri.encodeComponent(id)}', body);
+  }
+
+  /// Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}
+  Future<dynamic> dbSingleDeleteRecord(String namespace, String table, String id) async {
+    return _http.delete('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/${Uri.encodeComponent(id)}');
+  }
+
+  /// List records from a single-instance table — GET /api/db/{namespace}/tables/{table}
+  Future<dynamic> dbSingleListRecords(String namespace, String table, Map<String, String>? query) async {
+    return _http.get('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}', query);
+  }
+
+  /// Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}
+  Future<dynamic> dbSingleInsertRecord(String namespace, String table, Object? body, Map<String, String>? query) async {
+    return _http.postWithQuery('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}', body, query);
+  }
+
+  /// Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch
+  Future<dynamic> dbSingleBatchRecords(String namespace, String table, Object? body, Map<String, String>? query) async {
+    return _http.postWithQuery('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/batch', body, query);
+  }
+
+  /// Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
+  Future<dynamic> dbSingleBatchByFilter(String namespace, String table, Object? body, Map<String, String>? query) async {
+    return _http.postWithQuery('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/batch-by-filter', body, query);
+  }
+
   /// Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
   Future<dynamic> dbCountRecords(String namespace, String instanceId, String table, Map<String, String>? query) async {
     return _http.get('/db/${Uri.encodeComponent(namespace)}/${Uri.encodeComponent(instanceId)}/tables/${Uri.encodeComponent(table)}/count', query);
@@ -443,59 +488,14 @@ class GeneratedDbApi {
     return _http.putWithQuery('/room/media/realtime/tracks/close', body, query);
   }
 
-  /// Track custom events — POST /api/analytics/track
-  Future<dynamic> trackEvents(Object? body) async {
-    return _http.post('/analytics/track', body);
-  }
-
-  /// Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
-  Future<dynamic> dbSingleCountRecords(String namespace, String table, Map<String, String>? query) async {
-    return _http.get('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/count', query);
-  }
-
-  /// Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search
-  Future<dynamic> dbSingleSearchRecords(String namespace, String table, Map<String, String>? query) async {
-    return _http.get('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/search', query);
-  }
-
-  /// Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}
-  Future<dynamic> dbSingleGetRecord(String namespace, String table, String id, Map<String, String>? query) async {
-    return _http.get('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/${Uri.encodeComponent(id)}', query);
-  }
-
-  /// Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}
-  Future<dynamic> dbSingleUpdateRecord(String namespace, String table, String id, Object? body) async {
-    return _http.patch('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/${Uri.encodeComponent(id)}', body);
-  }
-
-  /// Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}
-  Future<dynamic> dbSingleDeleteRecord(String namespace, String table, String id) async {
-    return _http.delete('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/${Uri.encodeComponent(id)}');
-  }
-
-  /// List records from a single-instance table — GET /api/db/{namespace}/tables/{table}
-  Future<dynamic> dbSingleListRecords(String namespace, String table, Map<String, String>? query) async {
-    return _http.get('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}', query);
-  }
-
-  /// Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}
-  Future<dynamic> dbSingleInsertRecord(String namespace, String table, Object? body, Map<String, String>? query) async {
-    return _http.postWithQuery('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}', body, query);
-  }
-
-  /// Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch
-  Future<dynamic> dbSingleBatchRecords(String namespace, String table, Object? body, Map<String, String>? query) async {
-    return _http.postWithQuery('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/batch', body, query);
-  }
-
-  /// Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
-  Future<dynamic> dbSingleBatchByFilter(String namespace, String table, Object? body, Map<String, String>? query) async {
-    return _http.postWithQuery('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/batch-by-filter', body, query);
-  }
-
   /// Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
   Future<dynamic> createRoomCloudflareRealtimeKitSession(Object? body, Map<String, String>? query) async {
     return _http.postWithQuery('/room/media/cloudflare_realtimekit/session', body, query);
+  }
+
+  /// Track custom events — POST /api/analytics/track
+  Future<dynamic> trackEvents(Object? body) async {
+    return _http.post('/analytics/track', body);
   }
 }
 
@@ -531,18 +531,22 @@ class ApiPaths {
   static const ADMIN_GET_AUTH_SETTINGS = '/admin/api/data/auth/settings';
   static const ADMIN_BACKUP_GET_CONFIG = '/admin/api/data/backup/config';
   static const ADMIN_BACKUP_DUMP_D1 = '/admin/api/data/backup/dump-d1';
+  static const ADMIN_BACKUP_DUMP_DATA = '/admin/api/data/backup/dump-data';
   static const ADMIN_BACKUP_DUMP_DO = '/admin/api/data/backup/dump-do';
   static const ADMIN_BACKUP_LIST_DOS = '/admin/api/data/backup/list-dos';
   static const ADMIN_BACKUP_RESTORE_D1 = '/admin/api/data/backup/restore-d1';
+  static const ADMIN_BACKUP_RESTORE_DATA = '/admin/api/data/backup/restore-data';
   static const ADMIN_BACKUP_RESTORE_DO = '/admin/api/data/backup/restore-do';
   static const ADMIN_CLEANUP_ANON = '/admin/api/data/cleanup-anon';
   static const ADMIN_GET_CONFIG_INFO = '/admin/api/data/config-info';
+  static const ADMIN_DESTROY_APP = '/admin/api/data/destroy-app';
   static const ADMIN_GET_DEV_INFO = '/admin/api/data/dev-info';
   static const ADMIN_GET_EMAIL_TEMPLATES = '/admin/api/data/email/templates';
   static const ADMIN_LIST_FUNCTIONS = '/admin/api/data/functions';
   static const ADMIN_GET_LOGS = '/admin/api/data/logs';
   static const ADMIN_GET_RECENT_LOGS = '/admin/api/data/logs/recent';
   static const ADMIN_GET_MONITORING = '/admin/api/data/monitoring';
+  static String adminListNamespaceInstances(String namespace) => '/admin/api/data/namespaces/$namespace/instances';
   static const ADMIN_GET_OVERVIEW = '/admin/api/data/overview';
   static const ADMIN_GET_PUSH_LOGS = '/admin/api/data/push/logs';
   static const ADMIN_TEST_PUSH_SEND = '/admin/api/data/push/test-send';

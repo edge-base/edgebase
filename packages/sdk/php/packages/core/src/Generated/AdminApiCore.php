@@ -322,6 +322,12 @@ class GeneratedAdminApi
         return $this->http->get('/admin/api/data/schema');
     }
 
+    /** List instance suggestions for a dynamic namespace — GET /admin/api/data/namespaces/{namespace}/instances */
+    public function admin_list_namespace_instances(string $namespace, array $query = []): mixed
+    {
+        return $this->http->get('/admin/api/data/namespaces/' . rawurlencode($namespace) . '/instances', $query);
+    }
+
     /** Export table data as JSON — GET /admin/api/data/tables/{name}/export */
     public function admin_export_table(string $name): mixed
     {
@@ -334,16 +340,16 @@ class GeneratedAdminApi
         return $this->http->get('/admin/api/data/logs');
     }
 
-    /** Get realtime monitoring stats — GET /admin/api/data/monitoring */
+    /** Get live monitoring stats — GET /admin/api/data/monitoring */
     public function admin_get_monitoring(): mixed
     {
         return $this->http->get('/admin/api/data/monitoring');
     }
 
     /** Get analytics dashboard data — GET /admin/api/data/analytics */
-    public function admin_get_analytics(): mixed
+    public function admin_get_analytics(array $query = []): mixed
     {
-        return $this->http->get('/admin/api/data/analytics');
+        return $this->http->get('/admin/api/data/analytics', $query);
     }
 
     /** Query analytics events for admin dashboard — GET /admin/api/data/analytics/events */
@@ -353,9 +359,9 @@ class GeneratedAdminApi
     }
 
     /** Get project overview for dashboard home — GET /admin/api/data/overview */
-    public function admin_get_overview(): mixed
+    public function admin_get_overview(array $query = []): mixed
     {
-        return $this->http->get('/admin/api/data/overview');
+        return $this->http->get('/admin/api/data/overview', $query);
     }
 
     /** Get dev mode status and sidecar port — GET /admin/api/data/dev-info */
@@ -478,6 +484,18 @@ class GeneratedAdminApi
         return $this->http->post('/admin/api/data/backup/restore-d1', $body);
     }
 
+    /** Dump data namespace tables for admin-side migrations — POST /admin/api/data/backup/dump-data */
+    public function admin_backup_dump_data(mixed $body = null): mixed
+    {
+        return $this->http->post('/admin/api/data/backup/dump-data', $body);
+    }
+
+    /** Restore data namespace tables for admin-side migrations — POST /admin/api/data/backup/restore-data */
+    public function admin_backup_restore_data(mixed $body = null): mixed
+    {
+        return $this->http->post('/admin/api/data/backup/restore-data', $body);
+    }
+
     /** Get backup config — GET /admin/api/data/backup/config */
     public function admin_backup_get_config(): mixed
     {
@@ -506,6 +524,12 @@ class GeneratedAdminApi
     public function admin_change_password(string $id, mixed $body = null): mixed
     {
         return $this->http->put('/admin/api/data/admins/' . rawurlencode($id) . '/password', $body);
+    }
+
+    /** Delete all Cloudflare resources and the Worker itself (self-destruct) — POST /admin/api/data/destroy-app */
+    public function admin_destroy_app(mixed $body = null): mixed
+    {
+        return $this->http->post('/admin/api/data/destroy-app', $body);
     }
 
     /** List all DO instances — POST /admin/api/backup/list-dos */

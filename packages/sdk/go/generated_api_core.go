@@ -240,6 +240,51 @@ func (a *GeneratedDbApi) OauthLinkCallback(ctx context.Context, provider string)
 	return a.client.Get(ctx, fmt.Sprintf("/api/auth/oauth/link/%s/callback", url.PathEscape(provider)))
 }
 
+// DbSingleCountRecords — Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
+func (a *GeneratedDbApi) DbSingleCountRecords(ctx context.Context, namespace string, table string, query map[string]string) (map[string]interface{}, error) {
+	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/db/%s/tables/%s/count", url.PathEscape(namespace), url.PathEscape(table)), query)
+}
+
+// DbSingleSearchRecords — Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search
+func (a *GeneratedDbApi) DbSingleSearchRecords(ctx context.Context, namespace string, table string, query map[string]string) (map[string]interface{}, error) {
+	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/db/%s/tables/%s/search", url.PathEscape(namespace), url.PathEscape(table)), query)
+}
+
+// DbSingleGetRecord — Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}
+func (a *GeneratedDbApi) DbSingleGetRecord(ctx context.Context, namespace string, table string, id string, query map[string]string) (map[string]interface{}, error) {
+	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/db/%s/tables/%s/%s", url.PathEscape(namespace), url.PathEscape(table), url.PathEscape(id)), query)
+}
+
+// DbSingleUpdateRecord — Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}
+func (a *GeneratedDbApi) DbSingleUpdateRecord(ctx context.Context, namespace string, table string, id string, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "PATCH", fmt.Sprintf("/api/db/%s/tables/%s/%s", url.PathEscape(namespace), url.PathEscape(table), url.PathEscape(id)), body)
+}
+
+// DbSingleDeleteRecord — Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}
+func (a *GeneratedDbApi) DbSingleDeleteRecord(ctx context.Context, namespace string, table string, id string) (map[string]interface{}, error) {
+	return a.client.Delete(ctx, fmt.Sprintf("/api/db/%s/tables/%s/%s", url.PathEscape(namespace), url.PathEscape(table), url.PathEscape(id)))
+}
+
+// DbSingleListRecords — List records from a single-instance table — GET /api/db/{namespace}/tables/{table}
+func (a *GeneratedDbApi) DbSingleListRecords(ctx context.Context, namespace string, table string, query map[string]string) (map[string]interface{}, error) {
+	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/db/%s/tables/%s", url.PathEscape(namespace), url.PathEscape(table)), query)
+}
+
+// DbSingleInsertRecord — Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}
+func (a *GeneratedDbApi) DbSingleInsertRecord(ctx context.Context, namespace string, table string, body interface{}, query map[string]string) (map[string]interface{}, error) {
+	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/db/%s/tables/%s", url.PathEscape(namespace), url.PathEscape(table)), body, query)
+}
+
+// DbSingleBatchRecords — Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch
+func (a *GeneratedDbApi) DbSingleBatchRecords(ctx context.Context, namespace string, table string, body interface{}, query map[string]string) (map[string]interface{}, error) {
+	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/db/%s/tables/%s/batch", url.PathEscape(namespace), url.PathEscape(table)), body, query)
+}
+
+// DbSingleBatchByFilter — Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
+func (a *GeneratedDbApi) DbSingleBatchByFilter(ctx context.Context, namespace string, table string, body interface{}, query map[string]string) (map[string]interface{}, error) {
+	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/db/%s/tables/%s/batch-by-filter", url.PathEscape(namespace), url.PathEscape(table)), body, query)
+}
+
 // DbCountRecords — Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
 func (a *GeneratedDbApi) DbCountRecords(ctx context.Context, namespace string, instanceId string, table string, query map[string]string) (map[string]interface{}, error) {
 	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/db/%s/%s/tables/%s/count", url.PathEscape(namespace), url.PathEscape(instanceId), url.PathEscape(table)), query)
@@ -450,59 +495,14 @@ func (a *GeneratedDbApi) CloseRoomRealtimeTracks(ctx context.Context, body inter
 	return a.client.DoWithQuery(ctx, "PUT", "/api/room/media/realtime/tracks/close", body, query)
 }
 
-// TrackEvents — Track custom events — POST /api/analytics/track
-func (a *GeneratedDbApi) TrackEvents(ctx context.Context, body interface{}) (map[string]interface{}, error) {
-	return a.client.do(ctx, "POST", "/api/analytics/track", body)
-}
-
-// DbSingleCountRecords — Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
-func (a *GeneratedDbApi) DbSingleCountRecords(ctx context.Context, namespace string, table string, query map[string]string) (map[string]interface{}, error) {
-	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/db/%s/tables/%s/count", url.PathEscape(namespace), url.PathEscape(table)), query)
-}
-
-// DbSingleSearchRecords — Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search
-func (a *GeneratedDbApi) DbSingleSearchRecords(ctx context.Context, namespace string, table string, query map[string]string) (map[string]interface{}, error) {
-	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/db/%s/tables/%s/search", url.PathEscape(namespace), url.PathEscape(table)), query)
-}
-
-// DbSingleGetRecord — Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}
-func (a *GeneratedDbApi) DbSingleGetRecord(ctx context.Context, namespace string, table string, id string, query map[string]string) (map[string]interface{}, error) {
-	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/db/%s/tables/%s/%s", url.PathEscape(namespace), url.PathEscape(table), url.PathEscape(id)), query)
-}
-
-// DbSingleUpdateRecord — Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}
-func (a *GeneratedDbApi) DbSingleUpdateRecord(ctx context.Context, namespace string, table string, id string, body interface{}) (map[string]interface{}, error) {
-	return a.client.do(ctx, "PATCH", fmt.Sprintf("/api/db/%s/tables/%s/%s", url.PathEscape(namespace), url.PathEscape(table), url.PathEscape(id)), body)
-}
-
-// DbSingleDeleteRecord — Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}
-func (a *GeneratedDbApi) DbSingleDeleteRecord(ctx context.Context, namespace string, table string, id string) (map[string]interface{}, error) {
-	return a.client.Delete(ctx, fmt.Sprintf("/api/db/%s/tables/%s/%s", url.PathEscape(namespace), url.PathEscape(table), url.PathEscape(id)))
-}
-
-// DbSingleListRecords — List records from a single-instance table — GET /api/db/{namespace}/tables/{table}
-func (a *GeneratedDbApi) DbSingleListRecords(ctx context.Context, namespace string, table string, query map[string]string) (map[string]interface{}, error) {
-	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/db/%s/tables/%s", url.PathEscape(namespace), url.PathEscape(table)), query)
-}
-
-// DbSingleInsertRecord — Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}
-func (a *GeneratedDbApi) DbSingleInsertRecord(ctx context.Context, namespace string, table string, body interface{}, query map[string]string) (map[string]interface{}, error) {
-	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/db/%s/tables/%s", url.PathEscape(namespace), url.PathEscape(table)), body, query)
-}
-
-// DbSingleBatchRecords — Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch
-func (a *GeneratedDbApi) DbSingleBatchRecords(ctx context.Context, namespace string, table string, body interface{}, query map[string]string) (map[string]interface{}, error) {
-	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/db/%s/tables/%s/batch", url.PathEscape(namespace), url.PathEscape(table)), body, query)
-}
-
-// DbSingleBatchByFilter — Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
-func (a *GeneratedDbApi) DbSingleBatchByFilter(ctx context.Context, namespace string, table string, body interface{}, query map[string]string) (map[string]interface{}, error) {
-	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/db/%s/tables/%s/batch-by-filter", url.PathEscape(namespace), url.PathEscape(table)), body, query)
-}
-
 // CreateRoomCloudflareRealtimeKitSession — Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
 func (a *GeneratedDbApi) CreateRoomCloudflareRealtimeKitSession(ctx context.Context, body interface{}, query map[string]string) (map[string]interface{}, error) {
 	return a.client.DoWithQuery(ctx, "POST", "/api/room/media/cloudflare_realtimekit/session", body, query)
+}
+
+// TrackEvents — Track custom events — POST /api/analytics/track
+func (a *GeneratedDbApi) TrackEvents(ctx context.Context, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", "/api/analytics/track", body)
 }
 
 // ─── Path Constants ────────────────────────────────────────────────────────
@@ -532,12 +532,15 @@ const (
 	PathAdminGetAuthSettings = "/admin/api/data/auth/settings"
 	PathAdminBackupGetConfig = "/admin/api/data/backup/config"
 	PathAdminBackupDumpD1 = "/admin/api/data/backup/dump-d1"
+	PathAdminBackupDumpData = "/admin/api/data/backup/dump-data"
 	PathAdminBackupDumpDO = "/admin/api/data/backup/dump-do"
 	PathAdminBackupListDOs = "/admin/api/data/backup/list-dos"
 	PathAdminBackupRestoreD1 = "/admin/api/data/backup/restore-d1"
+	PathAdminBackupRestoreData = "/admin/api/data/backup/restore-data"
 	PathAdminBackupRestoreDO = "/admin/api/data/backup/restore-do"
 	PathAdminCleanupAnon = "/admin/api/data/cleanup-anon"
 	PathAdminGetConfigInfo = "/admin/api/data/config-info"
+	PathAdminDestroyApp = "/admin/api/data/destroy-app"
 	PathAdminGetDevInfo = "/admin/api/data/dev-info"
 	PathAdminGetEmailTemplates = "/admin/api/data/email/templates"
 	PathAdminListFunctions = "/admin/api/data/functions"
@@ -645,6 +648,11 @@ func PathAdminDeleteAdmin(id string) string {
 // PathAdminChangePassword builds the path for /admin/api/data/admins/{id}/password.
 func PathAdminChangePassword(id string) string {
 	return "/admin/api/data/admins/" + id + "/password"
+}
+
+// PathAdminListNamespaceInstances builds the path for /admin/api/data/namespaces/{namespace}/instances.
+func PathAdminListNamespaceInstances(namespace string) string {
+	return "/admin/api/data/namespaces/" + namespace + "/instances"
 }
 
 // PathAdminListBucketObjects builds the path for /admin/api/data/storage/buckets/{name}/objects.

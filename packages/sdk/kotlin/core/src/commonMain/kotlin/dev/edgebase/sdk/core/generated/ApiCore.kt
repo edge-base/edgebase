@@ -235,6 +235,51 @@ open class GeneratedDbApi(protected val http: HttpClient) {
     suspend fun oauthLinkCallback(provider: String): Any? =
         http.get("/auth/oauth/link/${platformUrlEncode(provider)}/callback")
 
+    /** Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count */
+    @Suppress("UNCHECKED_CAST")
+    open suspend fun dbSingleCountRecords(namespace: String, table: String, query: Map<String, String>? = null): Any? =
+        http.get("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/count", query)
+
+    /** Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search */
+    @Suppress("UNCHECKED_CAST")
+    open suspend fun dbSingleSearchRecords(namespace: String, table: String, query: Map<String, String>? = null): Any? =
+        http.get("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/search", query)
+
+    /** Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id} */
+    @Suppress("UNCHECKED_CAST")
+    open suspend fun dbSingleGetRecord(namespace: String, table: String, id: String, query: Map<String, String>? = null): Any? =
+        http.get("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/${platformUrlEncode(id)}", query)
+
+    /** Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id} */
+    @Suppress("UNCHECKED_CAST")
+    open suspend fun dbSingleUpdateRecord(namespace: String, table: String, id: String, body: Map<String, Any?> = emptyMap()): Any? =
+        http.patch("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/${platformUrlEncode(id)}", body)
+
+    /** Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id} */
+    @Suppress("UNCHECKED_CAST")
+    open suspend fun dbSingleDeleteRecord(namespace: String, table: String, id: String): Any? =
+        http.delete("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/${platformUrlEncode(id)}")
+
+    /** List records from a single-instance table — GET /api/db/{namespace}/tables/{table} */
+    @Suppress("UNCHECKED_CAST")
+    open suspend fun dbSingleListRecords(namespace: String, table: String, query: Map<String, String>? = null): Any? =
+        http.get("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}", query)
+
+    /** Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table} */
+    @Suppress("UNCHECKED_CAST")
+    open suspend fun dbSingleInsertRecord(namespace: String, table: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
+        http.postWithQuery("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}", body, query)
+
+    /** Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch */
+    @Suppress("UNCHECKED_CAST")
+    open suspend fun dbSingleBatchRecords(namespace: String, table: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
+        http.postWithQuery("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/batch", body, query)
+
+    /** Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter */
+    @Suppress("UNCHECKED_CAST")
+    open suspend fun dbSingleBatchByFilter(namespace: String, table: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
+        http.postWithQuery("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/batch-by-filter", body, query)
+
     /** Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count */
     @Suppress("UNCHECKED_CAST")
     suspend fun dbCountRecords(namespace: String, instanceId: String, table: String, query: Map<String, String>? = null): Any? =
@@ -444,60 +489,15 @@ open class GeneratedDbApi(protected val http: HttpClient) {
     suspend fun closeRoomRealtimeTracks(body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
         http.putWithQuery("/room/media/realtime/tracks/close", body, query)
 
-    /** Track custom events — POST /api/analytics/track */
-    @Suppress("UNCHECKED_CAST")
-    suspend fun trackEvents(body: Map<String, Any?> = emptyMap()): Any? =
-        http.post("/analytics/track", body)
-
-    /** Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count */
-    @Suppress("UNCHECKED_CAST")
-    open suspend fun dbSingleCountRecords(namespace: String, table: String, query: Map<String, String>? = null): Any? =
-        http.get("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/count", query)
-
-    /** Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search */
-    @Suppress("UNCHECKED_CAST")
-    open suspend fun dbSingleSearchRecords(namespace: String, table: String, query: Map<String, String>? = null): Any? =
-        http.get("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/search", query)
-
-    /** Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id} */
-    @Suppress("UNCHECKED_CAST")
-    open suspend fun dbSingleGetRecord(namespace: String, table: String, id: String, query: Map<String, String>? = null): Any? =
-        http.get("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/${platformUrlEncode(id)}", query)
-
-    /** Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id} */
-    @Suppress("UNCHECKED_CAST")
-    open suspend fun dbSingleUpdateRecord(namespace: String, table: String, id: String, body: Map<String, Any?> = emptyMap()): Any? =
-        http.patch("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/${platformUrlEncode(id)}", body)
-
-    /** Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id} */
-    @Suppress("UNCHECKED_CAST")
-    open suspend fun dbSingleDeleteRecord(namespace: String, table: String, id: String): Any? =
-        http.delete("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/${platformUrlEncode(id)}")
-
-    /** List records from a single-instance table — GET /api/db/{namespace}/tables/{table} */
-    @Suppress("UNCHECKED_CAST")
-    open suspend fun dbSingleListRecords(namespace: String, table: String, query: Map<String, String>? = null): Any? =
-        http.get("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}", query)
-
-    /** Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table} */
-    @Suppress("UNCHECKED_CAST")
-    open suspend fun dbSingleInsertRecord(namespace: String, table: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
-        http.postWithQuery("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}", body, query)
-
-    /** Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch */
-    @Suppress("UNCHECKED_CAST")
-    open suspend fun dbSingleBatchRecords(namespace: String, table: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
-        http.postWithQuery("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/batch", body, query)
-
-    /** Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter */
-    @Suppress("UNCHECKED_CAST")
-    open suspend fun dbSingleBatchByFilter(namespace: String, table: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
-        http.postWithQuery("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/batch-by-filter", body, query)
-
     /** Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session */
     @Suppress("UNCHECKED_CAST")
     suspend fun createRoomCloudflareRealtimeKitSession(body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
         http.postWithQuery("/room/media/cloudflare_realtimekit/session", body, query)
+
+    /** Track custom events — POST /api/analytics/track */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun trackEvents(body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/analytics/track", body)
 }
 
 /**
@@ -531,18 +531,22 @@ object ApiPaths {
     const val ADMIN_GET_AUTH_SETTINGS = "/admin/api/data/auth/settings"
     const val ADMIN_BACKUP_GET_CONFIG = "/admin/api/data/backup/config"
     const val ADMIN_BACKUP_DUMP_D1 = "/admin/api/data/backup/dump-d1"
+    const val ADMIN_BACKUP_DUMP_DATA = "/admin/api/data/backup/dump-data"
     const val ADMIN_BACKUP_DUMP_DO = "/admin/api/data/backup/dump-do"
     const val ADMIN_BACKUP_LIST_DOS = "/admin/api/data/backup/list-dos"
     const val ADMIN_BACKUP_RESTORE_D1 = "/admin/api/data/backup/restore-d1"
+    const val ADMIN_BACKUP_RESTORE_DATA = "/admin/api/data/backup/restore-data"
     const val ADMIN_BACKUP_RESTORE_DO = "/admin/api/data/backup/restore-do"
     const val ADMIN_CLEANUP_ANON = "/admin/api/data/cleanup-anon"
     const val ADMIN_GET_CONFIG_INFO = "/admin/api/data/config-info"
+    const val ADMIN_DESTROY_APP = "/admin/api/data/destroy-app"
     const val ADMIN_GET_DEV_INFO = "/admin/api/data/dev-info"
     const val ADMIN_GET_EMAIL_TEMPLATES = "/admin/api/data/email/templates"
     const val ADMIN_LIST_FUNCTIONS = "/admin/api/data/functions"
     const val ADMIN_GET_LOGS = "/admin/api/data/logs"
     const val ADMIN_GET_RECENT_LOGS = "/admin/api/data/logs/recent"
     const val ADMIN_GET_MONITORING = "/admin/api/data/monitoring"
+    fun adminListNamespaceInstances(namespace: String) = "/admin/api/data/namespaces/$namespace/instances"
     const val ADMIN_GET_OVERVIEW = "/admin/api/data/overview"
     const val ADMIN_GET_PUSH_LOGS = "/admin/api/data/push/logs"
     const val ADMIN_TEST_PUSH_SEND = "/admin/api/data/push/test-send"

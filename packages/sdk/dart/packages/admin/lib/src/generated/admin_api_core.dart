@@ -263,6 +263,11 @@ class GeneratedAdminApi {
     return _http.get('/admin/api/data/schema', null);
   }
 
+  /// List instance suggestions for a dynamic namespace — GET /admin/api/data/namespaces/{namespace}/instances
+  Future<dynamic> adminListNamespaceInstances(String namespace, Map<String, String>? query) async {
+    return _http.get('/admin/api/data/namespaces/${Uri.encodeComponent(namespace)}/instances', query);
+  }
+
   /// Export table data as JSON — GET /admin/api/data/tables/{name}/export
   Future<dynamic> adminExportTable(String name) async {
     return _http.get('/admin/api/data/tables/${Uri.encodeComponent(name)}/export', null);
@@ -273,14 +278,14 @@ class GeneratedAdminApi {
     return _http.get('/admin/api/data/logs', null);
   }
 
-  /// Get realtime monitoring stats — GET /admin/api/data/monitoring
+  /// Get live monitoring stats — GET /admin/api/data/monitoring
   Future<dynamic> adminGetMonitoring() async {
     return _http.get('/admin/api/data/monitoring', null);
   }
 
   /// Get analytics dashboard data — GET /admin/api/data/analytics
-  Future<dynamic> adminGetAnalytics() async {
-    return _http.get('/admin/api/data/analytics', null);
+  Future<dynamic> adminGetAnalytics(Map<String, String>? query) async {
+    return _http.get('/admin/api/data/analytics', query);
   }
 
   /// Query analytics events for admin dashboard — GET /admin/api/data/analytics/events
@@ -289,8 +294,8 @@ class GeneratedAdminApi {
   }
 
   /// Get project overview for dashboard home — GET /admin/api/data/overview
-  Future<dynamic> adminGetOverview() async {
-    return _http.get('/admin/api/data/overview', null);
+  Future<dynamic> adminGetOverview(Map<String, String>? query) async {
+    return _http.get('/admin/api/data/overview', query);
   }
 
   /// Get dev mode status and sidecar port — GET /admin/api/data/dev-info
@@ -393,6 +398,16 @@ class GeneratedAdminApi {
     return _http.post('/admin/api/data/backup/restore-d1', body);
   }
 
+  /// Dump data namespace tables for admin-side migrations — POST /admin/api/data/backup/dump-data
+  Future<dynamic> adminBackupDumpData(Object? body) async {
+    return _http.post('/admin/api/data/backup/dump-data', body);
+  }
+
+  /// Restore data namespace tables for admin-side migrations — POST /admin/api/data/backup/restore-data
+  Future<dynamic> adminBackupRestoreData(Object? body) async {
+    return _http.post('/admin/api/data/backup/restore-data', body);
+  }
+
   /// Get backup config — GET /admin/api/data/backup/config
   Future<dynamic> adminBackupGetConfig() async {
     return _http.get('/admin/api/data/backup/config', null);
@@ -416,6 +431,11 @@ class GeneratedAdminApi {
   /// Change admin password — PUT /admin/api/data/admins/{id}/password
   Future<dynamic> adminChangePassword(String id, Object? body) async {
     return _http.put('/admin/api/data/admins/${Uri.encodeComponent(id)}/password', body);
+  }
+
+  /// Delete all Cloudflare resources and the Worker itself (self-destruct) — POST /admin/api/data/destroy-app
+  Future<dynamic> adminDestroyApp(Object? body) async {
+    return _http.post('/admin/api/data/destroy-app', body);
   }
 
   /// List all DO instances — POST /admin/api/backup/list-dos

@@ -1,7 +1,6 @@
 import Foundation
 import AVFoundation
 import RTKWebRTC
-import UIKit
 
 let roomP2PDefaultSignalPrefix = "edgebase.media.p2p"
 let roomP2PDefaultMemberReadyTimeoutMs: UInt64 = 10_000

@@ -1,6 +1,5 @@
 import Foundation
 import RealtimeKit
-import UIKit
 
 let roomMediaDocsURL = "https://edgebase.fun/docs/room/media"
 

@@ -270,6 +270,11 @@ func (a *GeneratedAdminApi) AdminGetSchema(ctx context.Context) (map[string]inte
 	return a.client.Get(ctx, "/admin/api/data/schema")
 }
 
+// AdminListNamespaceInstances — List instance suggestions for a dynamic namespace — GET /admin/api/data/namespaces/{namespace}/instances
+func (a *GeneratedAdminApi) AdminListNamespaceInstances(ctx context.Context, namespace string, query map[string]string) (map[string]interface{}, error) {
+	return a.client.GetWithQuery(ctx, fmt.Sprintf("/admin/api/data/namespaces/%s/instances", url.PathEscape(namespace)), query)
+}
+
 // AdminExportTable — Export table data as JSON — GET /admin/api/data/tables/{name}/export
 func (a *GeneratedAdminApi) AdminExportTable(ctx context.Context, name string) (map[string]interface{}, error) {
 	return a.client.Get(ctx, fmt.Sprintf("/admin/api/data/tables/%s/export", url.PathEscape(name)))
@@ -280,14 +285,14 @@ func (a *GeneratedAdminApi) AdminGetLogs(ctx context.Context) (map[string]interf
 	return a.client.Get(ctx, "/admin/api/data/logs")
 }
 
-// AdminGetMonitoring — Get realtime monitoring stats — GET /admin/api/data/monitoring
+// AdminGetMonitoring — Get live monitoring stats — GET /admin/api/data/monitoring
 func (a *GeneratedAdminApi) AdminGetMonitoring(ctx context.Context) (map[string]interface{}, error) {
 	return a.client.Get(ctx, "/admin/api/data/monitoring")
 }
 
 // AdminGetAnalytics — Get analytics dashboard data — GET /admin/api/data/analytics
-func (a *GeneratedAdminApi) AdminGetAnalytics(ctx context.Context) (map[string]interface{}, error) {
-	return a.client.Get(ctx, "/admin/api/data/analytics")
+func (a *GeneratedAdminApi) AdminGetAnalytics(ctx context.Context, query map[string]string) (map[string]interface{}, error) {
+	return a.client.GetWithQuery(ctx, "/admin/api/data/analytics", query)
 }
 
 // AdminGetAnalyticsEvents — Query analytics events for admin dashboard — GET /admin/api/data/analytics/events
@@ -296,8 +301,8 @@ func (a *GeneratedAdminApi) AdminGetAnalyticsEvents(ctx context.Context) (map[st
 }
 
 // AdminGetOverview — Get project overview for dashboard home — GET /admin/api/data/overview
-func (a *GeneratedAdminApi) AdminGetOverview(ctx context.Context) (map[string]interface{}, error) {
-	return a.client.Get(ctx, "/admin/api/data/overview")
+func (a *GeneratedAdminApi) AdminGetOverview(ctx context.Context, query map[string]string) (map[string]interface{}, error) {
+	return a.client.GetWithQuery(ctx, "/admin/api/data/overview", query)
 }
 
 // AdminGetDevInfo — Get dev mode status and sidecar port — GET /admin/api/data/dev-info
@@ -400,6 +405,16 @@ func (a *GeneratedAdminApi) AdminBackupRestoreD1(ctx context.Context, body inter
 	return a.client.do(ctx, "POST", "/admin/api/data/backup/restore-d1", body)
 }
 
+// AdminBackupDumpData — Dump data namespace tables for admin-side migrations — POST /admin/api/data/backup/dump-data
+func (a *GeneratedAdminApi) AdminBackupDumpData(ctx context.Context, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", "/admin/api/data/backup/dump-data", body)
+}
+
+// AdminBackupRestoreData — Restore data namespace tables for admin-side migrations — POST /admin/api/data/backup/restore-data
+func (a *GeneratedAdminApi) AdminBackupRestoreData(ctx context.Context, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", "/admin/api/data/backup/restore-data", body)
+}
+
 // AdminBackupGetConfig — Get backup config — GET /admin/api/data/backup/config
 func (a *GeneratedAdminApi) AdminBackupGetConfig(ctx context.Context) (map[string]interface{}, error) {
 	return a.client.Get(ctx, "/admin/api/data/backup/config")
@@ -423,6 +438,11 @@ func (a *GeneratedAdminApi) AdminDeleteAdmin(ctx context.Context, id string) (ma
 // AdminChangePassword — Change admin password — PUT /admin/api/data/admins/{id}/password
 func (a *GeneratedAdminApi) AdminChangePassword(ctx context.Context, id string, body interface{}) (map[string]interface{}, error) {
 	return a.client.do(ctx, "PUT", fmt.Sprintf("/admin/api/data/admins/%s/password", url.PathEscape(id)), body)
+}
+
+// AdminDestroyApp — Delete all Cloudflare resources and the Worker itself (self-destruct) — POST /admin/api/data/destroy-app
+func (a *GeneratedAdminApi) AdminDestroyApp(ctx context.Context, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", "/admin/api/data/destroy-app", body)
 }
 
 // BackupListDOs — List all DO instances — POST /admin/api/backup/list-dos

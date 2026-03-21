@@ -245,6 +245,51 @@ public class GeneratedDbApi {
         return http.get("/auth/oauth/link/" + encodePathParam(provider) + "/callback");
     }
 
+    /** Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count */
+    public Object dbSingleCountRecords(String namespace, String table, Map<String, String> query) throws EdgeBaseError {
+        return http.getWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/count", query);
+    }
+
+    /** Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search */
+    public Object dbSingleSearchRecords(String namespace, String table, Map<String, String> query) throws EdgeBaseError {
+        return http.getWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/search", query);
+    }
+
+    /** Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id} */
+    public Object dbSingleGetRecord(String namespace, String table, String id, Map<String, String> query) throws EdgeBaseError {
+        return http.getWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/" + encodePathParam(id), query);
+    }
+
+    /** Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id} */
+    public Object dbSingleUpdateRecord(String namespace, String table, String id, Map<String, ?> body) throws EdgeBaseError {
+        return http.patch("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/" + encodePathParam(id), body);
+    }
+
+    /** Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id} */
+    public Object dbSingleDeleteRecord(String namespace, String table, String id) throws EdgeBaseError {
+        return http.delete("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/" + encodePathParam(id));
+    }
+
+    /** List records from a single-instance table — GET /api/db/{namespace}/tables/{table} */
+    public Object dbSingleListRecords(String namespace, String table, Map<String, String> query) throws EdgeBaseError {
+        return http.getWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table), query);
+    }
+
+    /** Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table} */
+    public Object dbSingleInsertRecord(String namespace, String table, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
+        return http.postWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table), body, query);
+    }
+
+    /** Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch */
+    public Object dbSingleBatchRecords(String namespace, String table, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
+        return http.postWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/batch", body, query);
+    }
+
+    /** Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter */
+    public Object dbSingleBatchByFilter(String namespace, String table, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
+        return http.postWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/batch-by-filter", body, query);
+    }
+
     /** Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count */
     public Object dbCountRecords(String namespace, String instanceId, String table, Map<String, String> query) throws EdgeBaseError {
         return http.getWithQuery("/db/" + encodePathParam(namespace) + "/" + encodePathParam(instanceId) + "/tables/" + encodePathParam(table) + "/count", query);
@@ -455,59 +500,14 @@ public class GeneratedDbApi {
         return http.putWithQuery("/room/media/realtime/tracks/close", body, query);
     }
 
-    /** Track custom events — POST /api/analytics/track */
-    public Object trackEvents(Map<String, ?> body) throws EdgeBaseError {
-        return http.post("/analytics/track", body);
-    }
-
-    /** Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count */
-    public Object dbSingleCountRecords(String namespace, String table, Map<String, String> query) throws EdgeBaseError {
-        return http.getWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/count", query);
-    }
-
-    /** Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search */
-    public Object dbSingleSearchRecords(String namespace, String table, Map<String, String> query) throws EdgeBaseError {
-        return http.getWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/search", query);
-    }
-
-    /** Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id} */
-    public Object dbSingleGetRecord(String namespace, String table, String id, Map<String, String> query) throws EdgeBaseError {
-        return http.getWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/" + encodePathParam(id), query);
-    }
-
-    /** Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id} */
-    public Object dbSingleUpdateRecord(String namespace, String table, String id, Map<String, ?> body) throws EdgeBaseError {
-        return http.patch("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/" + encodePathParam(id), body);
-    }
-
-    /** Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id} */
-    public Object dbSingleDeleteRecord(String namespace, String table, String id) throws EdgeBaseError {
-        return http.delete("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/" + encodePathParam(id));
-    }
-
-    /** List records from a single-instance table — GET /api/db/{namespace}/tables/{table} */
-    public Object dbSingleListRecords(String namespace, String table, Map<String, String> query) throws EdgeBaseError {
-        return http.getWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table), query);
-    }
-
-    /** Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table} */
-    public Object dbSingleInsertRecord(String namespace, String table, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
-        return http.postWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table), body, query);
-    }
-
-    /** Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch */
-    public Object dbSingleBatchRecords(String namespace, String table, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
-        return http.postWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/batch", body, query);
-    }
-
-    /** Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter */
-    public Object dbSingleBatchByFilter(String namespace, String table, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
-        return http.postWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/batch-by-filter", body, query);
-    }
-
     /** Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session */
     public Object createRoomCloudflareRealtimeKitSession(Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
         return http.postWithQuery("/room/media/cloudflare_realtimekit/session", body, query);
+    }
+
+    /** Track custom events — POST /api/analytics/track */
+    public Object trackEvents(Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/analytics/track", body);
     }
 
     /**
@@ -549,18 +549,24 @@ public class GeneratedDbApi {
         public static final String ADMIN_GET_AUTH_SETTINGS = "/admin/api/data/auth/settings";
         public static final String ADMIN_BACKUP_GET_CONFIG = "/admin/api/data/backup/config";
         public static final String ADMIN_BACKUP_DUMP_D1 = "/admin/api/data/backup/dump-d1";
+        public static final String ADMIN_BACKUP_DUMP_DATA = "/admin/api/data/backup/dump-data";
         public static final String ADMIN_BACKUP_DUMP_DO = "/admin/api/data/backup/dump-do";
         public static final String ADMIN_BACKUP_LIST_DOS = "/admin/api/data/backup/list-dos";
         public static final String ADMIN_BACKUP_RESTORE_D1 = "/admin/api/data/backup/restore-d1";
+        public static final String ADMIN_BACKUP_RESTORE_DATA = "/admin/api/data/backup/restore-data";
         public static final String ADMIN_BACKUP_RESTORE_DO = "/admin/api/data/backup/restore-do";
         public static final String ADMIN_CLEANUP_ANON = "/admin/api/data/cleanup-anon";
         public static final String ADMIN_GET_CONFIG_INFO = "/admin/api/data/config-info";
+        public static final String ADMIN_DESTROY_APP = "/admin/api/data/destroy-app";
         public static final String ADMIN_GET_DEV_INFO = "/admin/api/data/dev-info";
         public static final String ADMIN_GET_EMAIL_TEMPLATES = "/admin/api/data/email/templates";
         public static final String ADMIN_LIST_FUNCTIONS = "/admin/api/data/functions";
         public static final String ADMIN_GET_LOGS = "/admin/api/data/logs";
         public static final String ADMIN_GET_RECENT_LOGS = "/admin/api/data/logs/recent";
         public static final String ADMIN_GET_MONITORING = "/admin/api/data/monitoring";
+        public static String adminListNamespaceInstances(String namespace) {
+            return "/admin/api/data/namespaces/" + namespace + "/instances";
+        }
         public static final String ADMIN_GET_OVERVIEW = "/admin/api/data/overview";
         public static final String ADMIN_GET_PUSH_LOGS = "/admin/api/data/push/logs";
         public static final String ADMIN_TEST_PUSH_SEND = "/admin/api/data/push/test-send";

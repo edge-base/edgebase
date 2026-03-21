@@ -107,6 +107,24 @@ public:
   Result oauth_link_start(const std::string& provider) const;
   /// OAuth link callback — GET /api/auth/oauth/link/{provider}/callback
   Result oauth_link_callback(const std::string& provider) const;
+  /// Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
+  virtual Result db_single_count_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query = {}) const;
+  /// Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search
+  virtual Result db_single_search_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query = {}) const;
+  /// Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}
+  virtual Result db_single_get_record(const std::string& namespace_, const std::string& table, const std::string& id, const std::map<std::string, std::string>& query = {}) const;
+  /// Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}
+  virtual Result db_single_update_record(const std::string& namespace_, const std::string& table, const std::string& id, const std::string& json_body) const;
+  /// Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}
+  virtual Result db_single_delete_record(const std::string& namespace_, const std::string& table, const std::string& id) const;
+  /// List records from a single-instance table — GET /api/db/{namespace}/tables/{table}
+  virtual Result db_single_list_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query = {}) const;
+  /// Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}
+  virtual Result db_single_insert_record(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
+  /// Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch
+  virtual Result db_single_batch_records(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
+  /// Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
+  virtual Result db_single_batch_by_filter(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
   Result db_count_records(const std::string& namespace_, const std::string& instance_id, const std::string& table, const std::map<std::string, std::string>& query = {}) const;
   /// Search records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/search
@@ -191,28 +209,10 @@ public:
   Result renegotiate_room_realtime_session(const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close
   Result close_room_realtime_tracks(const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
-  /// Track custom events — POST /api/analytics/track
-  Result track_events(const std::string& json_body) const;
-  /// Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
-  virtual Result db_single_count_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query = {}) const;
-  /// Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search
-  virtual Result db_single_search_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query = {}) const;
-  /// Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}
-  virtual Result db_single_get_record(const std::string& namespace_, const std::string& table, const std::string& id, const std::map<std::string, std::string>& query = {}) const;
-  /// Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}
-  virtual Result db_single_update_record(const std::string& namespace_, const std::string& table, const std::string& id, const std::string& json_body) const;
-  /// Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}
-  virtual Result db_single_delete_record(const std::string& namespace_, const std::string& table, const std::string& id) const;
-  /// List records from a single-instance table — GET /api/db/{namespace}/tables/{table}
-  virtual Result db_single_list_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query = {}) const;
-  /// Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}
-  virtual Result db_single_insert_record(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
-  /// Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch
-  virtual Result db_single_batch_records(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
-  /// Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
-  virtual Result db_single_batch_by_filter(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
   Result create_room_cloudflare_realtime_kit_session(const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
+  /// Track custom events — POST /api/analytics/track
+  Result track_events(const std::string& json_body) const;
 
 protected:
   HttpClient& http_;
@@ -254,18 +254,24 @@ namespace ApiPaths {
   constexpr const char* ADMIN_GET_AUTH_SETTINGS = "/admin/api/data/auth/settings";
   constexpr const char* ADMIN_BACKUP_GET_CONFIG = "/admin/api/data/backup/config";
   constexpr const char* ADMIN_BACKUP_DUMP_D1 = "/admin/api/data/backup/dump-d1";
+  constexpr const char* ADMIN_BACKUP_DUMP_DATA = "/admin/api/data/backup/dump-data";
   constexpr const char* ADMIN_BACKUP_DUMP_DO = "/admin/api/data/backup/dump-do";
   constexpr const char* ADMIN_BACKUP_LIST_DOS = "/admin/api/data/backup/list-dos";
   constexpr const char* ADMIN_BACKUP_RESTORE_D1 = "/admin/api/data/backup/restore-d1";
+  constexpr const char* ADMIN_BACKUP_RESTORE_DATA = "/admin/api/data/backup/restore-data";
   constexpr const char* ADMIN_BACKUP_RESTORE_DO = "/admin/api/data/backup/restore-do";
   constexpr const char* ADMIN_CLEANUP_ANON = "/admin/api/data/cleanup-anon";
   constexpr const char* ADMIN_GET_CONFIG_INFO = "/admin/api/data/config-info";
+  constexpr const char* ADMIN_DESTROY_APP = "/admin/api/data/destroy-app";
   constexpr const char* ADMIN_GET_DEV_INFO = "/admin/api/data/dev-info";
   constexpr const char* ADMIN_GET_EMAIL_TEMPLATES = "/admin/api/data/email/templates";
   constexpr const char* ADMIN_LIST_FUNCTIONS = "/admin/api/data/functions";
   constexpr const char* ADMIN_GET_LOGS = "/admin/api/data/logs";
   constexpr const char* ADMIN_GET_RECENT_LOGS = "/admin/api/data/logs/recent";
   constexpr const char* ADMIN_GET_MONITORING = "/admin/api/data/monitoring";
+  inline std::string admin_list_namespace_instances(const std::string& namespace_) {
+    return "/admin/api/data/namespaces/" + namespace_ + "/instances";
+  }
   constexpr const char* ADMIN_GET_OVERVIEW = "/admin/api/data/overview";
   constexpr const char* ADMIN_GET_PUSH_LOGS = "/admin/api/data/push/logs";
   constexpr const char* ADMIN_TEST_PUSH_SEND = "/admin/api/data/push/test-send";

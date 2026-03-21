@@ -253,6 +253,7 @@ const sidebars = {
               type: 'category',
               label: 'Runtime and Configuration',
               items: [
+                'room/media-setup',
                 'room/client-sdk',
                 'room/server',
                 'room/access-rules',

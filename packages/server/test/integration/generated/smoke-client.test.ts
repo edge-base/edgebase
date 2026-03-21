@@ -714,6 +714,100 @@ describe('Smoke: client', () => {
     expect(status).toBeLessThan(500);
   });
 
+  it('dbSingleCountRecords: GET /api/db/{namespace}/tables/{table}/count → not 5xx', async () => {
+    const { status, data } = await api('GET', '/api/db/test/tables/posts/count', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleSearchRecords: GET /api/db/{namespace}/tables/{table}/search → not 5xx', async () => {
+    const { status, data } = await api('GET', '/api/db/test/tables/posts/search', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleGetRecord: GET /api/db/{namespace}/tables/{table}/{id} → not 5xx', async () => {
+    const { status, data } = await api('GET', '/api/db/test/tables/posts/smoke-test-id-000', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleUpdateRecord: PATCH /api/db/{namespace}/tables/{table}/{id} → not 5xx', async () => {
+    const { status, data } = await api('PATCH', '/api/db/test/tables/posts/smoke-test-id-000', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleUpdateRecord: bad input → 400', async () => {
+    const { status } = await api('PATCH', '/api/db/test/tables/posts/smoke-test-id-000', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleDeleteRecord: DELETE /api/db/{namespace}/tables/{table}/{id} → not 5xx', async () => {
+    const { status, data } = await api('DELETE', '/api/db/test/tables/posts/smoke-test-id-000', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleListRecords: GET /api/db/{namespace}/tables/{table} → not 5xx', async () => {
+    const { status, data } = await api('GET', '/api/db/test/tables/posts', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleInsertRecord: POST /api/db/{namespace}/tables/{table} → not 5xx', async () => {
+    const { status, data } = await api('POST', '/api/db/test/tables/posts', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleInsertRecord: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/db/test/tables/posts', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleBatchRecords: POST /api/db/{namespace}/tables/{table}/batch → not 5xx', async () => {
+    const { status, data } = await api('POST', '/api/db/test/tables/posts/batch', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { records: [{ title: "smoke-batch" }] },
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleBatchByFilter: POST /api/db/{namespace}/tables/{table}/batch-by-filter → not 5xx', async () => {
+    const { status, data } = await api('POST', '/api/db/test/tables/posts/batch-by-filter', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { filter: [["title", "==", "smoke"]], data: { views: 0 } },
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleBatchByFilter: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/db/test/tables/posts/batch-by-filter', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
   it('dbCountRecords: GET /api/db/{namespace}/{instanceId}/tables/{table}/count → not 5xx', async () => {
     const { status, data } = await api('GET', '/api/db/test/default/tables/posts/count', {
       headers: { 'X-EdgeBase-Service-Key': SK },
@@ -1261,30 +1355,6 @@ describe('Smoke: client', () => {
     expect(status).toBeLessThan(500);
   });
 
-  it('createRoomCloudflareRealtimeKitSession: POST /api/room/media/cloudflare_realtimekit/session → not 5xx', async () => {
-    const { status } = await api('POST', '/api/room/media/cloudflare_realtimekit/session?namespace=test-game&id=smoke-room', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-      body: {},
-    });
-    expect(status).toBeLessThan(500);
-  });
-
-  it('createRoomCloudflareRealtimeKitSession: no auth → 401/403', async () => {
-    const { status } = await api('POST', '/api/room/media/cloudflare_realtimekit/session?namespace=test-game&id=smoke-room', {
-      body: {},
-    });
-    expect([401, 403]).toContain(status);
-  });
-
-  it('createRoomCloudflareRealtimeKitSession: bad input → 400', async () => {
-    const { status } = await api('POST', '/api/room/media/cloudflare_realtimekit/session?namespace=test-game&id=smoke-room', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
-    });
-    expect(status).toBeGreaterThanOrEqual(400);
-    expect(status).toBeLessThan(500);
-  });
-
   it('createRoomRealtimeIceServers: POST /api/room/media/realtime/turn → not 5xx', async () => {
     const { status, data } = await api('POST', '/api/room/media/realtime/turn?namespace=test-game&id=smoke-room', {
       headers: { 'X-EdgeBase-Service-Key': SK },
@@ -1381,6 +1451,30 @@ describe('Smoke: client', () => {
     expect(status).toBeLessThan(500);
   });
 
+  it('createRoomCloudflareRealtimeKitSession: POST /api/room/media/cloudflare_realtimekit/session → not 5xx', async () => {
+    const { status, data } = await api('POST', '/api/room/media/cloudflare_realtimekit/session?namespace=test-game&id=smoke-room', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('createRoomCloudflareRealtimeKitSession: no auth → 401/403', async () => {
+    const { status } = await api('POST', '/api/room/media/cloudflare_realtimekit/session?namespace=test-game&id=smoke-room', {
+      body: {},
+    });
+    expect([401, 403]).toContain(status);
+  });
+
+  it('createRoomCloudflareRealtimeKitSession: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/room/media/cloudflare_realtimekit/session?namespace=test-game&id=smoke-room', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
   it('trackEvents: POST /api/analytics/track → not 5xx', async () => {
     const { status, data } = await api('POST', '/api/analytics/track', {
       headers: { 'X-EdgeBase-Service-Key': SK },
@@ -1391,100 +1485,6 @@ describe('Smoke: client', () => {
 
   it('trackEvents: bad input → 400', async () => {
     const { status } = await api('POST', '/api/analytics/track', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
-    });
-    expect(status).toBeGreaterThanOrEqual(400);
-    expect(status).toBeLessThan(500);
-  });
-
-  it('dbSingleCountRecords: GET /api/db/{namespace}/tables/{table}/count → not 5xx', async () => {
-    const { status, data } = await api('GET', '/api/db/test/tables/posts/count', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-    });
-    expect(status).toBeLessThan(500);
-  });
-
-  it('dbSingleSearchRecords: GET /api/db/{namespace}/tables/{table}/search → not 5xx', async () => {
-    const { status, data } = await api('GET', '/api/db/test/tables/posts/search', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-    });
-    expect(status).toBeLessThan(500);
-  });
-
-  it('dbSingleGetRecord: GET /api/db/{namespace}/tables/{table}/{id} → not 5xx', async () => {
-    const { status, data } = await api('GET', '/api/db/test/tables/posts/smoke-test-id-000', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-    });
-    expect(status).toBeLessThan(500);
-  });
-
-  it('dbSingleUpdateRecord: PATCH /api/db/{namespace}/tables/{table}/{id} → not 5xx', async () => {
-    const { status, data } = await api('PATCH', '/api/db/test/tables/posts/smoke-test-id-000', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-      body: {},
-    });
-    expect(status).toBeLessThan(500);
-  });
-
-  it('dbSingleUpdateRecord: bad input → 400', async () => {
-    const { status } = await api('PATCH', '/api/db/test/tables/posts/smoke-test-id-000', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
-    });
-    expect(status).toBeGreaterThanOrEqual(400);
-    expect(status).toBeLessThan(500);
-  });
-
-  it('dbSingleDeleteRecord: DELETE /api/db/{namespace}/tables/{table}/{id} → not 5xx', async () => {
-    const { status, data } = await api('DELETE', '/api/db/test/tables/posts/smoke-test-id-000', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-    });
-    expect(status).toBeLessThan(500);
-  });
-
-  it('dbSingleListRecords: GET /api/db/{namespace}/tables/{table} → not 5xx', async () => {
-    const { status, data } = await api('GET', '/api/db/test/tables/posts', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-    });
-    expect(status).toBeLessThan(500);
-  });
-
-  it('dbSingleInsertRecord: POST /api/db/{namespace}/tables/{table} → not 5xx', async () => {
-    const { status, data } = await api('POST', '/api/db/test/tables/posts', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-      body: {},
-    });
-    expect(status).toBeLessThan(500);
-  });
-
-  it('dbSingleInsertRecord: bad input → 400', async () => {
-    const { status } = await api('POST', '/api/db/test/tables/posts', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
-    });
-    expect(status).toBeGreaterThanOrEqual(400);
-    expect(status).toBeLessThan(500);
-  });
-
-  it('dbSingleBatchRecords: POST /api/db/{namespace}/tables/{table}/batch → not 5xx', async () => {
-    const { status, data } = await api('POST', '/api/db/test/tables/posts/batch', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-      body: { records: [{ title: "smoke-batch" }] },
-    });
-    expect(status).toBeLessThan(500);
-  });
-
-  it('dbSingleBatchByFilter: POST /api/db/{namespace}/tables/{table}/batch-by-filter → not 5xx', async () => {
-    const { status, data } = await api('POST', '/api/db/test/tables/posts/batch-by-filter', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-      body: { filter: [["title", "==", "smoke"]], data: { views: 0 } },
-    });
-    expect(status).toBeLessThan(500);
-  });
-
-  it('dbSingleBatchByFilter: bad input → 400', async () => {
-    const { status } = await api('POST', '/api/db/test/tables/posts/batch-by-filter', {
       headers: { 'X-EdgeBase-Service-Key': SK },
       body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
     });

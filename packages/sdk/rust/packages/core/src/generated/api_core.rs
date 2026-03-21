@@ -240,6 +240,51 @@ impl<'a> GeneratedDbApi<'a> {
         self.http.get(&format!("/api/auth/oauth/link/{}/callback", encode_path_param(provider))).await
     }
 
+    /// Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
+    pub async fn db_single_count_records(&self, namespace: &str, table: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.get_with_query(&format!("/api/db/{}/tables/{}/count", encode_path_param(namespace), encode_path_param(table)), query).await
+    }
+
+    /// Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search
+    pub async fn db_single_search_records(&self, namespace: &str, table: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.get_with_query(&format!("/api/db/{}/tables/{}/search", encode_path_param(namespace), encode_path_param(table)), query).await
+    }
+
+    /// Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}
+    pub async fn db_single_get_record(&self, namespace: &str, table: &str, id: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.get_with_query(&format!("/api/db/{}/tables/{}/{}", encode_path_param(namespace), encode_path_param(table), encode_path_param(id)), query).await
+    }
+
+    /// Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}
+    pub async fn db_single_update_record(&self, namespace: &str, table: &str, id: &str, body: &Value) -> Result<Value, Error> {
+        self.http.patch(&format!("/api/db/{}/tables/{}/{}", encode_path_param(namespace), encode_path_param(table), encode_path_param(id)), body).await
+    }
+
+    /// Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}
+    pub async fn db_single_delete_record(&self, namespace: &str, table: &str, id: &str) -> Result<Value, Error> {
+        self.http.delete(&format!("/api/db/{}/tables/{}/{}", encode_path_param(namespace), encode_path_param(table), encode_path_param(id))).await
+    }
+
+    /// List records from a single-instance table — GET /api/db/{namespace}/tables/{table}
+    pub async fn db_single_list_records(&self, namespace: &str, table: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.get_with_query(&format!("/api/db/{}/tables/{}", encode_path_param(namespace), encode_path_param(table)), query).await
+    }
+
+    /// Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}
+    pub async fn db_single_insert_record(&self, namespace: &str, table: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.post_with_query(&format!("/api/db/{}/tables/{}", encode_path_param(namespace), encode_path_param(table)), body, query).await
+    }
+
+    /// Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch
+    pub async fn db_single_batch_records(&self, namespace: &str, table: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.post_with_query(&format!("/api/db/{}/tables/{}/batch", encode_path_param(namespace), encode_path_param(table)), body, query).await
+    }
+
+    /// Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
+    pub async fn db_single_batch_by_filter(&self, namespace: &str, table: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.post_with_query(&format!("/api/db/{}/tables/{}/batch-by-filter", encode_path_param(namespace), encode_path_param(table)), body, query).await
+    }
+
     /// Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
     pub async fn db_count_records(&self, namespace: &str, instance_id: &str, table: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
         self.http.get_with_query(&format!("/api/db/{}/{}/tables/{}/count", encode_path_param(namespace), encode_path_param(instance_id), encode_path_param(table)), query).await
@@ -450,59 +495,14 @@ impl<'a> GeneratedDbApi<'a> {
         self.http.put_with_query("/api/room/media/realtime/tracks/close", body, query).await
     }
 
-    /// Track custom events — POST /api/analytics/track
-    pub async fn track_events(&self, body: &Value) -> Result<Value, Error> {
-        self.http.post("/api/analytics/track", body).await
-    }
-
-    /// Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
-    pub async fn db_single_count_records(&self, namespace: &str, table: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.get_with_query(&format!("/api/db/{}/tables/{}/count", encode_path_param(namespace), encode_path_param(table)), query).await
-    }
-
-    /// Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search
-    pub async fn db_single_search_records(&self, namespace: &str, table: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.get_with_query(&format!("/api/db/{}/tables/{}/search", encode_path_param(namespace), encode_path_param(table)), query).await
-    }
-
-    /// Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}
-    pub async fn db_single_get_record(&self, namespace: &str, table: &str, id: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.get_with_query(&format!("/api/db/{}/tables/{}/{}", encode_path_param(namespace), encode_path_param(table), encode_path_param(id)), query).await
-    }
-
-    /// Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}
-    pub async fn db_single_update_record(&self, namespace: &str, table: &str, id: &str, body: &Value) -> Result<Value, Error> {
-        self.http.patch(&format!("/api/db/{}/tables/{}/{}", encode_path_param(namespace), encode_path_param(table), encode_path_param(id)), body).await
-    }
-
-    /// Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}
-    pub async fn db_single_delete_record(&self, namespace: &str, table: &str, id: &str) -> Result<Value, Error> {
-        self.http.delete(&format!("/api/db/{}/tables/{}/{}", encode_path_param(namespace), encode_path_param(table), encode_path_param(id))).await
-    }
-
-    /// List records from a single-instance table — GET /api/db/{namespace}/tables/{table}
-    pub async fn db_single_list_records(&self, namespace: &str, table: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.get_with_query(&format!("/api/db/{}/tables/{}", encode_path_param(namespace), encode_path_param(table)), query).await
-    }
-
-    /// Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}
-    pub async fn db_single_insert_record(&self, namespace: &str, table: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.post_with_query(&format!("/api/db/{}/tables/{}", encode_path_param(namespace), encode_path_param(table)), body, query).await
-    }
-
-    /// Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch
-    pub async fn db_single_batch_records(&self, namespace: &str, table: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.post_with_query(&format!("/api/db/{}/tables/{}/batch", encode_path_param(namespace), encode_path_param(table)), body, query).await
-    }
-
-    /// Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
-    pub async fn db_single_batch_by_filter(&self, namespace: &str, table: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.post_with_query(&format!("/api/db/{}/tables/{}/batch-by-filter", encode_path_param(namespace), encode_path_param(table)), body, query).await
-    }
-
     /// Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
     pub async fn create_room_cloudflare_realtime_kit_session(&self, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
         self.http.post_with_query("/api/room/media/cloudflare_realtimekit/session", body, query).await
+    }
+
+    /// Track custom events — POST /api/analytics/track
+    pub async fn track_events(&self, body: &Value) -> Result<Value, Error> {
+        self.http.post("/api/analytics/track", body).await
     }
 }
 
@@ -544,18 +544,24 @@ impl ApiPaths {
     pub const ADMIN_GET_AUTH_SETTINGS: &'static str = "/admin/api/data/auth/settings";
     pub const ADMIN_BACKUP_GET_CONFIG: &'static str = "/admin/api/data/backup/config";
     pub const ADMIN_BACKUP_DUMP_D1: &'static str = "/admin/api/data/backup/dump-d1";
+    pub const ADMIN_BACKUP_DUMP_DATA: &'static str = "/admin/api/data/backup/dump-data";
     pub const ADMIN_BACKUP_DUMP_DO: &'static str = "/admin/api/data/backup/dump-do";
     pub const ADMIN_BACKUP_LIST_DOS: &'static str = "/admin/api/data/backup/list-dos";
     pub const ADMIN_BACKUP_RESTORE_D1: &'static str = "/admin/api/data/backup/restore-d1";
+    pub const ADMIN_BACKUP_RESTORE_DATA: &'static str = "/admin/api/data/backup/restore-data";
     pub const ADMIN_BACKUP_RESTORE_DO: &'static str = "/admin/api/data/backup/restore-do";
     pub const ADMIN_CLEANUP_ANON: &'static str = "/admin/api/data/cleanup-anon";
     pub const ADMIN_GET_CONFIG_INFO: &'static str = "/admin/api/data/config-info";
+    pub const ADMIN_DESTROY_APP: &'static str = "/admin/api/data/destroy-app";
     pub const ADMIN_GET_DEV_INFO: &'static str = "/admin/api/data/dev-info";
     pub const ADMIN_GET_EMAIL_TEMPLATES: &'static str = "/admin/api/data/email/templates";
     pub const ADMIN_LIST_FUNCTIONS: &'static str = "/admin/api/data/functions";
     pub const ADMIN_GET_LOGS: &'static str = "/admin/api/data/logs";
     pub const ADMIN_GET_RECENT_LOGS: &'static str = "/admin/api/data/logs/recent";
     pub const ADMIN_GET_MONITORING: &'static str = "/admin/api/data/monitoring";
+    pub fn admin_list_namespace_instances(namespace: &str) -> String {
+        format!("/admin/api/data/namespaces/{}/instances", namespace)
+    }
     pub const ADMIN_GET_OVERVIEW: &'static str = "/admin/api/data/overview";
     pub const ADMIN_GET_PUSH_LOGS: &'static str = "/admin/api/data/push/logs";
     pub const ADMIN_TEST_PUSH_SEND: &'static str = "/admin/api/data/push/test-send";

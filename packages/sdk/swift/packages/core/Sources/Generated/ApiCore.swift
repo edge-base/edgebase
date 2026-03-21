@@ -238,6 +238,51 @@ public struct GeneratedDbApi {
         return try await http.get("/auth/oauth/link/\(edgebaseEncodePathParam(provider))/callback")
     }
 
+    /// Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
+    public func dbSingleCountRecords(_ namespace: String, _ table: String, query: [String: String]? = nil) async throws -> Any {
+        return try await http.get("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/count", queryParams: query)
+    }
+
+    /// Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search
+    public func dbSingleSearchRecords(_ namespace: String, _ table: String, query: [String: String]? = nil) async throws -> Any {
+        return try await http.get("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/search", queryParams: query)
+    }
+
+    /// Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}
+    public func dbSingleGetRecord(_ namespace: String, _ table: String, _ id: String, query: [String: String]? = nil) async throws -> Any {
+        return try await http.get("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/\(edgebaseEncodePathParam(id))", queryParams: query)
+    }
+
+    /// Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}
+    public func dbSingleUpdateRecord(_ namespace: String, _ table: String, _ id: String, _ body: [String: Any]) async throws -> Any {
+        return try await http.patch("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/\(edgebaseEncodePathParam(id))", body)
+    }
+
+    /// Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}
+    public func dbSingleDeleteRecord(_ namespace: String, _ table: String, _ id: String) async throws -> Any {
+        return try await http.delete("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/\(edgebaseEncodePathParam(id))")
+    }
+
+    /// List records from a single-instance table — GET /api/db/{namespace}/tables/{table}
+    public func dbSingleListRecords(_ namespace: String, _ table: String, query: [String: String]? = nil) async throws -> Any {
+        return try await http.get("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))", queryParams: query)
+    }
+
+    /// Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}
+    public func dbSingleInsertRecord(_ namespace: String, _ table: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
+        return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))", body, queryParams: query)
+    }
+
+    /// Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch
+    public func dbSingleBatchRecords(_ namespace: String, _ table: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
+        return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/batch", body, queryParams: query)
+    }
+
+    /// Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
+    public func dbSingleBatchByFilter(_ namespace: String, _ table: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
+        return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/batch-by-filter", body, queryParams: query)
+    }
+
     /// Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
     public func dbCountRecords(_ namespace: String, _ instanceId: String, _ table: String, query: [String: String]? = nil) async throws -> Any {
         return try await http.get("/db/\(edgebaseEncodePathParam(namespace))/\(edgebaseEncodePathParam(instanceId))/tables/\(edgebaseEncodePathParam(table))/count", queryParams: query)
@@ -448,59 +493,14 @@ public struct GeneratedDbApi {
         return try await http.put("/room/media/realtime/tracks/close", body, queryParams: query)
     }
 
-    /// Track custom events — POST /api/analytics/track
-    public func trackEvents(_ body: [String: Any]) async throws -> Any {
-        return try await http.post("/analytics/track", body)
-    }
-
-    /// Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
-    public func dbSingleCountRecords(_ namespace: String, _ table: String, query: [String: String]? = nil) async throws -> Any {
-        return try await http.get("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/count", queryParams: query)
-    }
-
-    /// Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search
-    public func dbSingleSearchRecords(_ namespace: String, _ table: String, query: [String: String]? = nil) async throws -> Any {
-        return try await http.get("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/search", queryParams: query)
-    }
-
-    /// Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}
-    public func dbSingleGetRecord(_ namespace: String, _ table: String, _ id: String, query: [String: String]? = nil) async throws -> Any {
-        return try await http.get("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/\(edgebaseEncodePathParam(id))", queryParams: query)
-    }
-
-    /// Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}
-    public func dbSingleUpdateRecord(_ namespace: String, _ table: String, _ id: String, _ body: [String: Any]) async throws -> Any {
-        return try await http.patch("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/\(edgebaseEncodePathParam(id))", body)
-    }
-
-    /// Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}
-    public func dbSingleDeleteRecord(_ namespace: String, _ table: String, _ id: String) async throws -> Any {
-        return try await http.delete("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/\(edgebaseEncodePathParam(id))")
-    }
-
-    /// List records from a single-instance table — GET /api/db/{namespace}/tables/{table}
-    public func dbSingleListRecords(_ namespace: String, _ table: String, query: [String: String]? = nil) async throws -> Any {
-        return try await http.get("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))", queryParams: query)
-    }
-
-    /// Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}
-    public func dbSingleInsertRecord(_ namespace: String, _ table: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
-        return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))", body, queryParams: query)
-    }
-
-    /// Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch
-    public func dbSingleBatchRecords(_ namespace: String, _ table: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
-        return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/batch", body, queryParams: query)
-    }
-
-    /// Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
-    public func dbSingleBatchByFilter(_ namespace: String, _ table: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
-        return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/batch-by-filter", body, queryParams: query)
-    }
-
     /// Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
     public func createRoomCloudflareRealtimeKitSession(_ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
         return try await http.post("/room/media/cloudflare_realtimekit/session", body, queryParams: query)
+    }
+
+    /// Track custom events — POST /api/analytics/track
+    public func trackEvents(_ body: [String: Any]) async throws -> Any {
+        return try await http.post("/analytics/track", body)
     }
 }
 
@@ -534,18 +534,22 @@ public enum ApiPaths {
     public static let ADMIN_GET_AUTH_SETTINGS = "/admin/api/data/auth/settings"
     public static let ADMIN_BACKUP_GET_CONFIG = "/admin/api/data/backup/config"
     public static let ADMIN_BACKUP_DUMP_D1 = "/admin/api/data/backup/dump-d1"
+    public static let ADMIN_BACKUP_DUMP_DATA = "/admin/api/data/backup/dump-data"
     public static let ADMIN_BACKUP_DUMP_DO = "/admin/api/data/backup/dump-do"
     public static let ADMIN_BACKUP_LIST_DOS = "/admin/api/data/backup/list-dos"
     public static let ADMIN_BACKUP_RESTORE_D1 = "/admin/api/data/backup/restore-d1"
+    public static let ADMIN_BACKUP_RESTORE_DATA = "/admin/api/data/backup/restore-data"
     public static let ADMIN_BACKUP_RESTORE_DO = "/admin/api/data/backup/restore-do"
     public static let ADMIN_CLEANUP_ANON = "/admin/api/data/cleanup-anon"
     public static let ADMIN_GET_CONFIG_INFO = "/admin/api/data/config-info"
+    public static let ADMIN_DESTROY_APP = "/admin/api/data/destroy-app"
     public static let ADMIN_GET_DEV_INFO = "/admin/api/data/dev-info"
     public static let ADMIN_GET_EMAIL_TEMPLATES = "/admin/api/data/email/templates"
     public static let ADMIN_LIST_FUNCTIONS = "/admin/api/data/functions"
     public static let ADMIN_GET_LOGS = "/admin/api/data/logs"
     public static let ADMIN_GET_RECENT_LOGS = "/admin/api/data/logs/recent"
     public static let ADMIN_GET_MONITORING = "/admin/api/data/monitoring"
+    public static func adminListNamespaceInstances(_ namespace: String) -> String { "/admin/api/data/namespaces/\(namespace)/instances" }
     public static let ADMIN_GET_OVERVIEW = "/admin/api/data/overview"
     public static let ADMIN_GET_PUSH_LOGS = "/admin/api/data/push/logs"
     public static let ADMIN_TEST_PUSH_SEND = "/admin/api/data/push/test-send"

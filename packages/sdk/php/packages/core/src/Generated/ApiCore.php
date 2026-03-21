@@ -291,6 +291,60 @@ class GeneratedDbApi
         return $this->http->get('/auth/oauth/link/' . rawurlencode($provider) . '/callback');
     }
 
+    /** Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count */
+    public function db_single_count_records(string $namespace, string $table, array $query = []): mixed
+    {
+        return $this->http->get('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/count', $query);
+    }
+
+    /** Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search */
+    public function db_single_search_records(string $namespace, string $table, array $query = []): mixed
+    {
+        return $this->http->get('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/search', $query);
+    }
+
+    /** Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id} */
+    public function db_single_get_record(string $namespace, string $table, string $id, array $query = []): mixed
+    {
+        return $this->http->get('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/' . rawurlencode($id), $query);
+    }
+
+    /** Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id} */
+    public function db_single_update_record(string $namespace, string $table, string $id, mixed $body = null): mixed
+    {
+        return $this->http->patch('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/' . rawurlencode($id), $body);
+    }
+
+    /** Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id} */
+    public function db_single_delete_record(string $namespace, string $table, string $id): mixed
+    {
+        return $this->http->delete('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/' . rawurlencode($id));
+    }
+
+    /** List records from a single-instance table — GET /api/db/{namespace}/tables/{table} */
+    public function db_single_list_records(string $namespace, string $table, array $query = []): mixed
+    {
+        return $this->http->get('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table), $query);
+    }
+
+    /** Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table} */
+    public function db_single_insert_record(string $namespace, string $table, mixed $body = null, array $query = []): mixed
+    {
+        return $this->http->postWithQuery('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table), $body, $query);
+    }
+
+    /** Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch */
+    public function db_single_batch_records(string $namespace, string $table, mixed $body = null, array $query = []): mixed
+    {
+        return $this->http->postWithQuery('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/batch', $body, $query);
+    }
+
+    /** Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter */
+    public function db_single_batch_by_filter(string $namespace, string $table, mixed $body = null, array $query = []): mixed
+    {
+        return $this->http->postWithQuery('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/batch-by-filter', $body, $query);
+    }
+
     /** Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count */
     public function db_count_records(string $namespace, string $instance_id, string $table, array $query = []): mixed
     {
@@ -543,70 +597,16 @@ class GeneratedDbApi
         return $this->http->putWithQuery('/room/media/realtime/tracks/close', $body, $query);
     }
 
-    /** Track custom events — POST /api/analytics/track */
-    public function track_events(mixed $body = null): mixed
-    {
-        return $this->http->post('/analytics/track', $body);
-    }
-
-    /** Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count */
-    public function db_single_count_records(string $namespace, string $table, array $query = []): mixed
-    {
-        return $this->http->get('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/count', $query);
-    }
-
-    /** Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search */
-    public function db_single_search_records(string $namespace, string $table, array $query = []): mixed
-    {
-        return $this->http->get('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/search', $query);
-    }
-
-    /** Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id} */
-    public function db_single_get_record(string $namespace, string $table, string $id, array $query = []): mixed
-    {
-        return $this->http->get('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/' . rawurlencode($id), $query);
-    }
-
-    /** Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id} */
-    public function db_single_update_record(string $namespace, string $table, string $id, mixed $body = null): mixed
-    {
-        return $this->http->patch('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/' . rawurlencode($id), $body);
-    }
-
-    /** Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id} */
-    public function db_single_delete_record(string $namespace, string $table, string $id): mixed
-    {
-        return $this->http->delete('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/' . rawurlencode($id));
-    }
-
-    /** List records from a single-instance table — GET /api/db/{namespace}/tables/{table} */
-    public function db_single_list_records(string $namespace, string $table, array $query = []): mixed
-    {
-        return $this->http->get('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table), $query);
-    }
-
-    /** Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table} */
-    public function db_single_insert_record(string $namespace, string $table, mixed $body = null, array $query = []): mixed
-    {
-        return $this->http->postWithQuery('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table), $body, $query);
-    }
-
-    /** Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch */
-    public function db_single_batch_records(string $namespace, string $table, mixed $body = null, array $query = []): mixed
-    {
-        return $this->http->postWithQuery('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/batch', $body, $query);
-    }
-
-    /** Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter */
-    public function db_single_batch_by_filter(string $namespace, string $table, mixed $body = null, array $query = []): mixed
-    {
-        return $this->http->postWithQuery('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/batch-by-filter', $body, $query);
-    }
-
     /** Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session */
     public function create_room_cloudflare_realtime_kit_session(mixed $body = null, array $query = []): mixed
     {
         return $this->http->postWithQuery('/room/media/cloudflare_realtimekit/session', $body, $query);
+    }
+
+    /** Track custom events — POST /api/analytics/track */
+    public function track_events(mixed $body = null): mixed
+    {
+        return $this->http->post('/analytics/track', $body);
     }
 }
 
@@ -654,18 +654,26 @@ final class ApiPaths
     public const ADMIN_GET_AUTH_SETTINGS = '/admin/api/data/auth/settings';
     public const ADMIN_BACKUP_GET_CONFIG = '/admin/api/data/backup/config';
     public const ADMIN_BACKUP_DUMP_D1 = '/admin/api/data/backup/dump-d1';
+    public const ADMIN_BACKUP_DUMP_DATA = '/admin/api/data/backup/dump-data';
     public const ADMIN_BACKUP_DUMP_DO = '/admin/api/data/backup/dump-do';
     public const ADMIN_BACKUP_LIST_DOS = '/admin/api/data/backup/list-dos';
     public const ADMIN_BACKUP_RESTORE_D1 = '/admin/api/data/backup/restore-d1';
+    public const ADMIN_BACKUP_RESTORE_DATA = '/admin/api/data/backup/restore-data';
     public const ADMIN_BACKUP_RESTORE_DO = '/admin/api/data/backup/restore-do';
     public const ADMIN_CLEANUP_ANON = '/admin/api/data/cleanup-anon';
     public const ADMIN_GET_CONFIG_INFO = '/admin/api/data/config-info';
+    public const ADMIN_DESTROY_APP = '/admin/api/data/destroy-app';
     public const ADMIN_GET_DEV_INFO = '/admin/api/data/dev-info';
     public const ADMIN_GET_EMAIL_TEMPLATES = '/admin/api/data/email/templates';
     public const ADMIN_LIST_FUNCTIONS = '/admin/api/data/functions';
     public const ADMIN_GET_LOGS = '/admin/api/data/logs';
     public const ADMIN_GET_RECENT_LOGS = '/admin/api/data/logs/recent';
     public const ADMIN_GET_MONITORING = '/admin/api/data/monitoring';
+
+    public static function admin_list_namespace_instances(string $namespace): string
+    {
+        return "/admin/api/data/namespaces/{$namespace}/instances";
+    }
     public const ADMIN_GET_OVERVIEW = '/admin/api/data/overview';
     public const ADMIN_GET_PUSH_LOGS = '/admin/api/data/push/logs';
     public const ADMIN_TEST_PUSH_SEND = '/admin/api/data/push/test-send';

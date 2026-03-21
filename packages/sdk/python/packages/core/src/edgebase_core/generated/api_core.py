@@ -196,6 +196,42 @@ class GeneratedDbApi:
         """OAuth link callback — GET /api/auth/oauth/link/{provider}/callback"""
         return self._http.get(f"/auth/oauth/link/{urllib.parse.quote(provider, safe='')}/callback")
 
+    def db_single_count_records(self, namespace: str, table: str, query: dict[str, str] | None = None) -> Any:
+        """Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count"""
+        return self._http.get(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/count", params=query)
+
+    def db_single_search_records(self, namespace: str, table: str, query: dict[str, str] | None = None) -> Any:
+        """Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search"""
+        return self._http.get(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/search", params=query)
+
+    def db_single_get_record(self, namespace: str, table: str, id: str, query: dict[str, str] | None = None) -> Any:
+        """Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}"""
+        return self._http.get(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/{urllib.parse.quote(id, safe='')}", params=query)
+
+    def db_single_update_record(self, namespace: str, table: str, id: str, body: Any) -> Any:
+        """Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}"""
+        return self._http.patch(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/{urllib.parse.quote(id, safe='')}", body)
+
+    def db_single_delete_record(self, namespace: str, table: str, id: str) -> Any:
+        """Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}"""
+        return self._http.delete(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/{urllib.parse.quote(id, safe='')}")
+
+    def db_single_list_records(self, namespace: str, table: str, query: dict[str, str] | None = None) -> Any:
+        """List records from a single-instance table — GET /api/db/{namespace}/tables/{table}"""
+        return self._http.get(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}", params=query)
+
+    def db_single_insert_record(self, namespace: str, table: str, body: Any, query: dict[str, str] | None = None) -> Any:
+        """Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}"""
+        return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}", body, params=query)
+
+    def db_single_batch_records(self, namespace: str, table: str, body: Any, query: dict[str, str] | None = None) -> Any:
+        """Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch"""
+        return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/batch", body, params=query)
+
+    def db_single_batch_by_filter(self, namespace: str, table: str, body: Any, query: dict[str, str] | None = None) -> Any:
+        """Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter"""
+        return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/batch-by-filter", body, params=query)
+
     def db_count_records(self, namespace: str, instance_id: str, table: str, query: dict[str, str] | None = None) -> Any:
         """Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count"""
         return self._http.get(f"/db/{urllib.parse.quote(namespace, safe='')}/{urllib.parse.quote(instance_id, safe='')}/tables/{urllib.parse.quote(table, safe='')}/count", params=query)
@@ -364,49 +400,13 @@ class GeneratedDbApi:
         """Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close"""
         return self._http.put("/room/media/realtime/tracks/close", body, params=query)
 
-    def track_events(self, body: Any) -> Any:
-        """Track custom events — POST /api/analytics/track"""
-        return self._http.post("/analytics/track", body)
-
-    def db_single_count_records(self, namespace: str, table: str, query: dict[str, str] | None = None) -> Any:
-        """Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count"""
-        return self._http.get(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/count", params=query)
-
-    def db_single_search_records(self, namespace: str, table: str, query: dict[str, str] | None = None) -> Any:
-        """Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search"""
-        return self._http.get(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/search", params=query)
-
-    def db_single_get_record(self, namespace: str, table: str, id: str, query: dict[str, str] | None = None) -> Any:
-        """Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}"""
-        return self._http.get(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/{urllib.parse.quote(id, safe='')}", params=query)
-
-    def db_single_update_record(self, namespace: str, table: str, id: str, body: Any) -> Any:
-        """Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}"""
-        return self._http.patch(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/{urllib.parse.quote(id, safe='')}", body)
-
-    def db_single_delete_record(self, namespace: str, table: str, id: str) -> Any:
-        """Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}"""
-        return self._http.delete(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/{urllib.parse.quote(id, safe='')}")
-
-    def db_single_list_records(self, namespace: str, table: str, query: dict[str, str] | None = None) -> Any:
-        """List records from a single-instance table — GET /api/db/{namespace}/tables/{table}"""
-        return self._http.get(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}", params=query)
-
-    def db_single_insert_record(self, namespace: str, table: str, body: Any, query: dict[str, str] | None = None) -> Any:
-        """Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}"""
-        return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}", body, params=query)
-
-    def db_single_batch_records(self, namespace: str, table: str, body: Any, query: dict[str, str] | None = None) -> Any:
-        """Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch"""
-        return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/batch", body, params=query)
-
-    def db_single_batch_by_filter(self, namespace: str, table: str, body: Any, query: dict[str, str] | None = None) -> Any:
-        """Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter"""
-        return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/batch-by-filter", body, params=query)
-
     def create_room_cloudflare_realtime_kit_session(self, body: Any, query: dict[str, str] | None = None) -> Any:
         """Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session"""
         return self._http.post("/room/media/cloudflare_realtimekit/session", body, params=query)
+
+    def track_events(self, body: Any) -> Any:
+        """Track custom events — POST /api/analytics/track"""
+        return self._http.post("/analytics/track", body)
 
 
 class ApiPaths:
@@ -436,12 +436,15 @@ class ApiPaths:
     ADMIN_GET_AUTH_SETTINGS = "/admin/api/data/auth/settings"
     ADMIN_BACKUP_GET_CONFIG = "/admin/api/data/backup/config"
     ADMIN_BACKUP_DUMP_D1 = "/admin/api/data/backup/dump-d1"
+    ADMIN_BACKUP_DUMP_DATA = "/admin/api/data/backup/dump-data"
     ADMIN_BACKUP_DUMP_DO = "/admin/api/data/backup/dump-do"
     ADMIN_BACKUP_LIST_DOS = "/admin/api/data/backup/list-dos"
     ADMIN_BACKUP_RESTORE_D1 = "/admin/api/data/backup/restore-d1"
+    ADMIN_BACKUP_RESTORE_DATA = "/admin/api/data/backup/restore-data"
     ADMIN_BACKUP_RESTORE_DO = "/admin/api/data/backup/restore-do"
     ADMIN_CLEANUP_ANON = "/admin/api/data/cleanup-anon"
     ADMIN_GET_CONFIG_INFO = "/admin/api/data/config-info"
+    ADMIN_DESTROY_APP = "/admin/api/data/destroy-app"
     ADMIN_GET_DEV_INFO = "/admin/api/data/dev-info"
     ADMIN_GET_EMAIL_TEMPLATES = "/admin/api/data/email/templates"
     ADMIN_LIST_FUNCTIONS = "/admin/api/data/functions"
@@ -546,6 +549,10 @@ class ApiPaths:
     @staticmethod
     def admin_change_password(id: str) -> str:
         return f"/admin/api/data/admins/{id}/password"
+
+    @staticmethod
+    def admin_list_namespace_instances(namespace: str) -> str:
+        return f"/admin/api/data/namespaces/{namespace}/instances"
 
     @staticmethod
     def admin_list_bucket_objects(name: str) -> str:

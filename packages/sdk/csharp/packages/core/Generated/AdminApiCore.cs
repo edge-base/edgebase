@@ -225,6 +225,10 @@ public class GeneratedAdminApi
     public Task<Dictionary<string, object?>> AdminGetSchemaAsync(CancellationToken ct = default)
         => _http.GetAsync("/admin/api/data/schema", ct);
 
+    /// <summary>List instance suggestions for a dynamic namespace — GET /admin/api/data/namespaces/{namespace}/instances</summary>
+    public Task<Dictionary<string, object?>> AdminListNamespaceInstancesAsync(string @namespace, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.GetWithQueryAsync($"/admin/api/data/namespaces/{EncodePathParam(@namespace)}/instances", query, ct);
+
     /// <summary>Export table data as JSON — GET /admin/api/data/tables/{name}/export</summary>
     public Task<Dictionary<string, object?>> AdminExportTableAsync(string name, CancellationToken ct = default)
         => _http.GetAsync($"/admin/api/data/tables/{EncodePathParam(name)}/export", ct);
@@ -233,21 +237,21 @@ public class GeneratedAdminApi
     public Task<Dictionary<string, object?>> AdminGetLogsAsync(CancellationToken ct = default)
         => _http.GetAsync("/admin/api/data/logs", ct);
 
-    /// <summary>Get realtime monitoring stats — GET /admin/api/data/monitoring</summary>
+    /// <summary>Get live monitoring stats — GET /admin/api/data/monitoring</summary>
     public Task<Dictionary<string, object?>> AdminGetMonitoringAsync(CancellationToken ct = default)
         => _http.GetAsync("/admin/api/data/monitoring", ct);
 
     /// <summary>Get analytics dashboard data — GET /admin/api/data/analytics</summary>
-    public Task<Dictionary<string, object?>> AdminGetAnalyticsAsync(CancellationToken ct = default)
-        => _http.GetAsync("/admin/api/data/analytics", ct);
+    public Task<Dictionary<string, object?>> AdminGetAnalyticsAsync(Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.GetWithQueryAsync("/admin/api/data/analytics", query, ct);
 
     /// <summary>Query analytics events for admin dashboard — GET /admin/api/data/analytics/events</summary>
     public Task<Dictionary<string, object?>> AdminGetAnalyticsEventsAsync(CancellationToken ct = default)
         => _http.GetAsync("/admin/api/data/analytics/events", ct);
 
     /// <summary>Get project overview for dashboard home — GET /admin/api/data/overview</summary>
-    public Task<Dictionary<string, object?>> AdminGetOverviewAsync(CancellationToken ct = default)
-        => _http.GetAsync("/admin/api/data/overview", ct);
+    public Task<Dictionary<string, object?>> AdminGetOverviewAsync(Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.GetWithQueryAsync("/admin/api/data/overview", query, ct);
 
     /// <summary>Get dev mode status and sidecar port — GET /admin/api/data/dev-info</summary>
     public Task<Dictionary<string, object?>> AdminGetDevInfoAsync(CancellationToken ct = default)
@@ -329,6 +333,14 @@ public class GeneratedAdminApi
     public Task<Dictionary<string, object?>> AdminBackupRestoreD1Async(object? body = null, CancellationToken ct = default)
         => _http.PostAsync("/admin/api/data/backup/restore-d1", body, ct);
 
+    /// <summary>Dump data namespace tables for admin-side migrations — POST /admin/api/data/backup/dump-data</summary>
+    public Task<Dictionary<string, object?>> AdminBackupDumpDataAsync(object? body = null, CancellationToken ct = default)
+        => _http.PostAsync("/admin/api/data/backup/dump-data", body, ct);
+
+    /// <summary>Restore data namespace tables for admin-side migrations — POST /admin/api/data/backup/restore-data</summary>
+    public Task<Dictionary<string, object?>> AdminBackupRestoreDataAsync(object? body = null, CancellationToken ct = default)
+        => _http.PostAsync("/admin/api/data/backup/restore-data", body, ct);
+
     /// <summary>Get backup config — GET /admin/api/data/backup/config</summary>
     public Task<Dictionary<string, object?>> AdminBackupGetConfigAsync(CancellationToken ct = default)
         => _http.GetAsync("/admin/api/data/backup/config", ct);
@@ -348,6 +360,10 @@ public class GeneratedAdminApi
     /// <summary>Change admin password — PUT /admin/api/data/admins/{id}/password</summary>
     public Task<Dictionary<string, object?>> AdminChangePasswordAsync(string id, object? body = null, CancellationToken ct = default)
         => _http.PutAsync($"/admin/api/data/admins/{EncodePathParam(id)}/password", body, ct);
+
+    /// <summary>Delete all Cloudflare resources and the Worker itself (self-destruct) — POST /admin/api/data/destroy-app</summary>
+    public Task<Dictionary<string, object?>> AdminDestroyAppAsync(object? body = null, CancellationToken ct = default)
+        => _http.PostAsync("/admin/api/data/destroy-app", body, ct);
 
     /// <summary>List all DO instances — POST /admin/api/backup/list-dos</summary>
     public Task<Dictionary<string, object?>> BackupListDOsAsync(object? body = null, CancellationToken ct = default)

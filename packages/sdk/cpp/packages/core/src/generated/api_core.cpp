@@ -205,6 +205,42 @@ Result GeneratedDbApi::oauth_link_callback(const std::string& provider) const {
   return http_.get("/api/auth/oauth/link/" + edgebase_encode_path_param(provider) + "/callback");
 }
 
+Result GeneratedDbApi::db_single_count_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query) const {
+  return http_.get("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/count", query);
+}
+
+Result GeneratedDbApi::db_single_search_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query) const {
+  return http_.get("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/search", query);
+}
+
+Result GeneratedDbApi::db_single_get_record(const std::string& namespace_, const std::string& table, const std::string& id, const std::map<std::string, std::string>& query) const {
+  return http_.get("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/" + edgebase_encode_path_param(id), query);
+}
+
+Result GeneratedDbApi::db_single_update_record(const std::string& namespace_, const std::string& table, const std::string& id, const std::string& json_body) const {
+  return http_.patch("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/" + edgebase_encode_path_param(id), json_body);
+}
+
+Result GeneratedDbApi::db_single_delete_record(const std::string& namespace_, const std::string& table, const std::string& id) const {
+  return http_.del("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/" + edgebase_encode_path_param(id));
+}
+
+Result GeneratedDbApi::db_single_list_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query) const {
+  return http_.get("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table), query);
+}
+
+Result GeneratedDbApi::db_single_insert_record(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query) const {
+  return http_.post_with_query("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table), json_body, query);
+}
+
+Result GeneratedDbApi::db_single_batch_records(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query) const {
+  return http_.post_with_query("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/batch", json_body, query);
+}
+
+Result GeneratedDbApi::db_single_batch_by_filter(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query) const {
+  return http_.post_with_query("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/batch-by-filter", json_body, query);
+}
+
 Result GeneratedDbApi::db_count_records(const std::string& namespace_, const std::string& instance_id, const std::string& table, const std::map<std::string, std::string>& query) const {
   return http_.get("/api/db/" + edgebase_encode_path_param(namespace_) + "/" + edgebase_encode_path_param(instance_id) + "/tables/" + edgebase_encode_path_param(table) + "/count", query);
 }
@@ -373,48 +409,12 @@ Result GeneratedDbApi::close_room_realtime_tracks(const std::string& json_body, 
   return http_.post_with_query("/api/room/media/realtime/tracks/close", json_body, query);
 }
 
-Result GeneratedDbApi::track_events(const std::string& json_body) const {
-  return http_.post("/api/analytics/track", json_body);
-}
-
-Result GeneratedDbApi::db_single_count_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query) const {
-  return http_.get("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/count", query);
-}
-
-Result GeneratedDbApi::db_single_search_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query) const {
-  return http_.get("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/search", query);
-}
-
-Result GeneratedDbApi::db_single_get_record(const std::string& namespace_, const std::string& table, const std::string& id, const std::map<std::string, std::string>& query) const {
-  return http_.get("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/" + edgebase_encode_path_param(id), query);
-}
-
-Result GeneratedDbApi::db_single_update_record(const std::string& namespace_, const std::string& table, const std::string& id, const std::string& json_body) const {
-  return http_.patch("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/" + edgebase_encode_path_param(id), json_body);
-}
-
-Result GeneratedDbApi::db_single_delete_record(const std::string& namespace_, const std::string& table, const std::string& id) const {
-  return http_.del("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/" + edgebase_encode_path_param(id));
-}
-
-Result GeneratedDbApi::db_single_list_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query) const {
-  return http_.get("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table), query);
-}
-
-Result GeneratedDbApi::db_single_insert_record(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query) const {
-  return http_.post_with_query("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table), json_body, query);
-}
-
-Result GeneratedDbApi::db_single_batch_records(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query) const {
-  return http_.post_with_query("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/batch", json_body, query);
-}
-
-Result GeneratedDbApi::db_single_batch_by_filter(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query) const {
-  return http_.post_with_query("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/batch-by-filter", json_body, query);
-}
-
 Result GeneratedDbApi::create_room_cloudflare_realtime_kit_session(const std::string& json_body, const std::map<std::string, std::string>& query) const {
   return http_.post_with_query("/api/room/media/cloudflare_realtimekit/session", json_body, query);
+}
+
+Result GeneratedDbApi::track_events(const std::string& json_body) const {
+  return http_.post("/api/analytics/track", json_body);
 }
 
 } // namespace client
