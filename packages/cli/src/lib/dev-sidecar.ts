@@ -719,7 +719,8 @@ function readCurrentSchema(
     const result = execTsxSync(
       [
         '-e',
-        `(async()=>{const mod=await import(${JSON.stringify(moduleUrl)});const d=mod.default??mod;const s={};for(const [ns,b] of Object.entries(d.databases??{})){for(const [t,tc] of Object.entries((b as any).tables??{})){s[t]={namespace:ns,fields:(tc as any).schema??{},fts:(tc as any).fts??[]};}}console.log(JSON.stringify(s));})().catch((error)=>{console.error(error instanceof Error?error.message:String(error));process.exit(1);});`,
+        `(async()=>{const moduleUrl=process.argv[1];const mod=await import(moduleUrl);const d=mod.default??mod;const s={};for(const [ns,b] of Object.entries(d.databases??{})){for(const [t,tc] of Object.entries((b as any).tables??{})){s[t]={namespace:ns,fields:(tc as any).schema??{},fts:(tc as any).fts??[]};}}console.log(JSON.stringify(s));})().catch((error)=>{console.error(error instanceof Error?error.message:String(error));process.exit(1);});`,
+        moduleUrl,
       ],
       { cwd: projectDir, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'ignore'] },
     ).trim();
@@ -1456,7 +1457,8 @@ async function handleRoute(
       const result = execTsxSync(
         [
           '-e',
-          `(async()=>{const mod=await import(${JSON.stringify(moduleUrl)});const d=mod.default??mod;const e=d.email??{};console.log(JSON.stringify({appName:e.appName||'EdgeBase',subjects:e.subjects||{},templates:e.templates||{}}));})().catch((error)=>{console.error(error instanceof Error?error.message:String(error));process.exit(1);});`,
+          `(async()=>{const moduleUrl=process.argv[1];const mod=await import(moduleUrl);const d=mod.default??mod;const e=d.email??{};console.log(JSON.stringify({appName:e.appName||'EdgeBase',subjects:e.subjects||{},templates:e.templates||{}}));})().catch((error)=>{console.error(error instanceof Error?error.message:String(error));process.exit(1);});`,
+          moduleUrl,
         ],
         { cwd: projectDir, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'ignore'] },
       ).trim();
