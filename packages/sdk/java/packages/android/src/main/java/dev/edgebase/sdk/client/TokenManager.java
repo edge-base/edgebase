@@ -76,6 +76,16 @@ class TokenManager {
                         }
                         return newTokens.getAccessToken();
                     } catch (Exception e) {
+                        // 401 means token revoked/expired — clear session (matches JS SDK).
+                        // Other errors (network, 5xx) keep session for retry.
+                        if (e instanceof EdgeBaseError && ((EdgeBaseError) e).getStatusCode() == 401) {
+                            currentTokens = null;
+                            storage.clearTokens();
+                            if (onAuthStateChange != null) {
+                                onAuthStateChange.accept(null);
+                            }
+                            return null;
+                        }
                         return accessToken;
                     }
                 }

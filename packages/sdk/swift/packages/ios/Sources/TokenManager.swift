@@ -151,9 +151,12 @@ public actor TokenManager: TokenManageable {
     }
 
     /// Try to restore session from storage.
+    /// Notifies auth state listeners on success (matches JS SDK auto-restore behavior).
     public func tryRestoreSession() async -> Bool {
         if let tokens = await storage.getTokens() {
             currentTokens = tokens
+            let user = decodeJWTPayload(tokens.accessToken)
+            notifyAuthStateChange(user)
             return true
         }
         return false
@@ -213,8 +216,10 @@ public actor TokenManager: TokenManageable {
     }
 
     /// Register auth state change handler.
+    /// Immediately fires with current state on subscription (matches JS SDK behavior).
     public func onAuthStateChange(_ handler: @escaping ([String: Any]?) -> Void) {
         authStateHandlers.append(handler)
+        handler(currentUser())
     }
 
     /// Notify all auth state change handlers.
