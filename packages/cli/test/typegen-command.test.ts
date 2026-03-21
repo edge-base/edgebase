@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
 import { setContext } from '../src/lib/cli-context.js';
 
 const mockFail = vi.fn();
@@ -17,18 +18,60 @@ vi.mock('../src/lib/spinner.js', () => ({
 }));
 
 async function removeDirWithRetry(dir: string): Promise<void> {
-  let lastError: unknown;
+  if (!existsSync(dir)) {
+    return;
+  }
 
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  let lastError: unknown;
+  const transientDeleteErrorCodes = new Set(['EPERM', 'EBUSY', 'ENOTEMPTY']);
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     try {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       return;
     } catch (error) {
       lastError = error;
-      if ((error as NodeJS.ErrnoException)?.code !== 'EPERM') {
+      if (!transientDeleteErrorCodes.has((error as NodeJS.ErrnoException)?.code ?? '')) {
         throw error;
       }
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+    }
+  }
+
+  if (process.platform === 'win32') {
+    // Windows runners can keep transient handles on freshly executed temp files.
+    // Avoid failing the assertion itself over best-effort temp cleanup.
+    const cleanupScript = `
+      const { existsSync, rmSync } = require('node:fs');
+      const dir = process.argv[1];
+      const transientDeleteErrorCodes = new Set(['EPERM', 'EBUSY', 'ENOTEMPTY']);
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      (async () => {
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          try {
+            if (!existsSync(dir)) return;
+            rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+            return;
+          } catch (error) {
+            if (!transientDeleteErrorCodes.has(error?.code ?? '')) {
+              return;
+            }
+            await sleep(500);
+          }
+        }
+      })().catch(() => {});
+    `;
+
+    try {
+      const cleanup = spawn(process.execPath, ['-e', cleanupScript, dir], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      cleanup.unref();
+      return;
+    } catch {
+      // Fall through to surface the original cleanup failure below.
     }
   }
 
@@ -58,6 +101,7 @@ describe('typegen command', () => {
   afterEach(async () => {
     process.chdir(originalCwd);
     vi.restoreAllMocks();
+    await vi.dynamicImportSettled();
     await removeDirWithRetry(testDir);
   });
 
