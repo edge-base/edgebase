@@ -149,6 +149,14 @@ Current verification note:
 
 - the Android transport registry and module-level media tests pass
 - the Java Room media runtime should currently be treated as Android-focused rather than a generic desktop Java media runtime
+- Android host-app smoke builds succeeded with AGP 8.6+ and compileSdk 35+
+
+Current Android host-app baseline:
+
+- Android Gradle Plugin `8.6+`
+- `compileSdk 35+`
+- `android.useAndroidX=true`
+- `android.enableJetifier=true`
 
 Read more:
 

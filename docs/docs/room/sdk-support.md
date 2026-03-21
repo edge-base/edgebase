@@ -64,9 +64,13 @@ If you are looking for the "server side" of Room, the correct destination is [Se
   - Flutter: host-app smoke builds succeeded on Web, macOS, Android, and an Apple Silicon iOS simulator via direct Xcode device build
   - Kotlin: JS, iOS simulator, macOS, and Android targets compile successfully
 - Swift: package tests and iOS simulator build succeeded with `cloudflare_realtimekit`
-- Java / Kotlin Android: package/runtime integration is verified through module builds and targeted Android transport tests
+- Java / Kotlin Android: package/runtime integration is verified through module builds, targeted transport tests, and Android host-app debug builds
 - `p2p` is still pending on Swift, Kotlin, and Java. Other server-only SDKs intentionally do not expose Room Media transport providers.
 
 :::note
-The strongest fully-verified Room Media paths today are Web, React Native, and Flutter. Swift and Android-native runtimes are progressing well, but the Kotlin multiplatform runtime is still Android-first rather than uniform across every KMP target.
+The strongest fully-verified Room Media paths today are Web, React Native, Flutter, and Android-native Java/Kotlin host builds. Swift and Android-native runtimes are progressing well, but the Kotlin multiplatform runtime is still Android-first rather than uniform across every KMP target.
+:::
+
+:::tip Android host-app requirement
+The current Java/Kotlin Android host-app smoke builds succeeded with **AGP 8.6+** and **compileSdk 35+**. If your app is still on AGP 8.2 / compileSdk 34, RealtimeKit's newer AndroidX metadata may block the media runtime before the app even compiles.
 :::

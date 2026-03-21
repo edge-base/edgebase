@@ -91,6 +91,14 @@ Current verification note:
 - Android, iOS simulator, macOS, and JS targets all compile from the monorepo
 - the strongest runtime path today is Android
 - other KMP targets should currently be treated as surface-compatible but not media-runtime-complete
+- Android host-app smoke builds succeeded once the app used AGP 8.6+ and compileSdk 35+
+
+If you are integrating the Android runtime into an app project, treat these as the current baseline:
+
+- Android Gradle Plugin `8.6+`
+- `compileSdk = 35` or newer
+- `android.useAndroidX=true`
+- `android.enableJetifier=true`
 
 Read more:
 
