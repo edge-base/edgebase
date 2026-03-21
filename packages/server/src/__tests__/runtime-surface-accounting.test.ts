@@ -7,10 +7,11 @@
  * indirectly covered.
  */
 import { readFileSync, readdirSync } from 'fs';
-import { resolve } from 'path';
+import { basename, relative, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { describe, expect, it } from 'vitest';
 
-const SRC_ROOT = resolve(new URL('..', import.meta.url).pathname);
+const SRC_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PACKAGE_ROOT = resolve(SRC_ROOT, '..');
 const RUNTIME_DIRS = [
   resolve(SRC_ROOT, 'routes'),
@@ -21,7 +22,7 @@ const TEST_DIRS = [
   resolve(SRC_ROOT, '__tests__'),
   resolve(PACKAGE_ROOT, 'test/integration'),
 ];
-const THIS_TEST_PATH = resolve(new URL(import.meta.url).pathname);
+const THIS_TEST_PATH = resolve(fileURLToPath(import.meta.url));
 
 // Files below are exercised indirectly, but the test sources do not mention the
 // exact filename/stem yet. Tracking them here keeps the gap reviewable.
@@ -60,7 +61,7 @@ function collectFiles(dir: string, predicate: (path: string) => boolean): string
 function toRuntimeKey(absPath: string): string {
   for (const dir of RUNTIME_DIRS) {
     if (absPath.startsWith(dir)) {
-      return absPath.slice(dir.length + 1).replace(/^/, `${dir.split('/').at(-1)}/`);
+      return `${basename(dir)}/${relative(dir, absPath).replace(/\\/g, '/')}`;
     }
   }
   throw new Error(`Unexpected runtime path: ${absPath}`);

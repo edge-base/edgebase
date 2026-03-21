@@ -12,10 +12,11 @@
  */
 import { readFileSync, readdirSync } from 'fs';
 import { resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { describe, it, expect } from 'vitest';
 import { normalizeOpenApiDocument, type OpenApiSpec } from '../lib/openapi.js';
 
-const ROUTES_DIR = resolve(new URL('../routes', import.meta.url).pathname);
+const ROUTES_DIR = resolve(fileURLToPath(new URL('../routes', import.meta.url)));
 
 // ─── Intentionally non-OpenAPI route registrations ───────────────────────────
 // Format: "filename.ts:<line-content-substring>"

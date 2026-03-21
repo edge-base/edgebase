@@ -1,5 +1,6 @@
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { describe, expect, it } from 'vitest';
 
 interface SmokeSkipEntry {
@@ -18,7 +19,7 @@ interface SmokeSkipReport {
 }
 
 const REPORT_PATH = resolve(
-  new URL('../../test/integration/generated/smoke-skip-report.json', import.meta.url).pathname,
+  fileURLToPath(new URL('../../test/integration/generated/smoke-skip-report.json', import.meta.url)),
 );
 
 function readReport(): SmokeSkipReport {
