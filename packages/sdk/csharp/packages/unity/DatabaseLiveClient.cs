@@ -35,6 +35,7 @@ internal sealed class DatabaseLiveClient : IDisposable
     private CancellationTokenSource _cts = new();
     private bool _disposed;
     private bool _shouldReconnect = true;
+    private int _reconnectAttempts;
     private bool _waitingForAuth;
 
     private readonly List<Action<Dictionary<string, object?>>> _messageHandlers = new();
@@ -86,7 +87,7 @@ internal sealed class DatabaseLiveClient : IDisposable
         {
             2 => parts[1] == change.Table,
             3 => parts[2] == change.Table,
-            4 => parts[2] == change.Table ? parts[3] == change.DocId : parts[3] == change.Table,
+            4 => (parts[2] == change.Table && parts[3] == change.DocId) || parts[3] == change.Table,
             _ => parts[3] == change.Table && parts[4] == change.DocId,
         };
     }
@@ -153,6 +154,7 @@ internal sealed class DatabaseLiveClient : IDisposable
                             if (t == "auth_success")
                             {
                                 _authenticated = true;
+                                _reconnectAttempts = 0;
                                 _waitingForAuth = false;
                                 ResubscribeAll();
                                 break;
@@ -160,6 +162,7 @@ internal sealed class DatabaseLiveClient : IDisposable
                             if (t == "auth_refreshed")
                             {
                                 _authenticated = true;
+                                _reconnectAttempts = 0;
                                 _waitingForAuth = false;
                                 // Handle revokedChannels
                                 HandleRevokedChannels(msg);
@@ -214,7 +217,9 @@ internal sealed class DatabaseLiveClient : IDisposable
     {
         if (!_shouldReconnect || _disposed || _waitingForAuth) return;
         _authenticated = false;
-        await Task.Delay(1000).ConfigureAwait(false);
+        var delay = Math.Min(1000 * (int)Math.Pow(2, _reconnectAttempts), 30000);
+        _reconnectAttempts++;
+        await Task.Delay(delay).ConfigureAwait(false);
         await ConnectAsync().ConfigureAwait(false);
     }
 

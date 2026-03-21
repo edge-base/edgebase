@@ -515,7 +515,8 @@ function matchesDatabaseLiveChannel(channel: string, change: DbChange, messageCh
   if (parts.length === 2) return parts[1] === change.table;
   if (parts.length === 3) return parts[2] === change.table;
   if (parts.length === 4) {
-    if (parts[2] === change.table) return change.docId === parts[3];
+    // Could be dblive:ns:table:docId or dblive:ns:instanceId:table
+    if (parts[2] === change.table && change.docId === parts[3]) return true;
     return parts[3] === change.table;
   }
   return parts[3] === change.table && change.docId === parts[4];

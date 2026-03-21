@@ -3,6 +3,7 @@
 #include <edgebase/edgebase.h>
 
 #include <algorithm>
+#include <sstream>
 #include <cctype>
 #include <cstdlib>
 #include <ixwebsocket/IXWebSocket.h>
@@ -130,15 +131,13 @@ int DatabaseLiveClient::onSnapshot(const std::string &tableName,
   if (!serverFilters.empty()) {
     sub["filters"] = json::array();
     for (const auto &filter : serverFilters) {
-      sub["filters"].push_back(
-          {{"field", filter.field}, {"op", filter.op}, {"value", filter.value}});
+      sub["filters"].push_back(json::array({filter.field, filter.op, filter.value}));
     }
   }
   if (!serverOrFilters.empty()) {
     sub["orFilters"] = json::array();
     for (const auto &filter : serverOrFilters) {
-      sub["orFilters"].push_back(
-          {{"field", filter.field}, {"op", filter.op}, {"value", filter.value}});
+      sub["orFilters"].push_back(json::array({filter.field, filter.op, filter.value}));
     }
   }
 
@@ -230,6 +229,48 @@ void DatabaseLiveClient::dispatchMessage(const std::string &raw) {
     msg[key] = value.is_string() ? value.get<std::string>() : value.dump();
   }
 
+  auto matchChannel = [](const std::string &channel, const DbChange &chg,
+                        const std::string &msgCh) -> bool {
+    if (!msgCh.empty()) return channel == msgCh;
+    std::vector<std::string> parts;
+    std::istringstream iss(channel);
+    std::string part;
+    while (std::getline(iss, part, ':')) parts.push_back(part);
+    if (parts.empty() || parts[0] != "dblive") return false;
+    switch (parts.size()) {
+      case 2: return parts[1] == chg.table;
+      case 3: return parts[2] == chg.table;
+      case 4:
+        if (parts[2] == chg.table && chg.docId == parts[3]) return true;
+        return parts[3] == chg.table;
+      case 5: return parts[3] == chg.table && chg.docId == parts[4];
+      default: return false;
+    }
+  };
+
+  if (msg.count("type") && msg.at("type") == "batch_changes") {
+    const std::string table = msg.count("table") ? msg.at("table") : "";
+    const std::string batchChannel = msg.count("channel") ? msg.at("channel") : "";
+    if (j.count("changes") && j["changes"].is_array()) {
+      for (const auto &ch : j["changes"]) {
+        DbChange change;
+        change.changeType = ch.value("event", "");
+        change.table = table;
+        change.docId = ch.value("docId", "");
+        change.timestamp = ch.value("timestamp", "");
+        change.dataJson = ch.count("data") ? ch["data"].dump() : "{}";
+        const std::string msgCh = batchChannel.empty() ? "" : normalizeDatabaseLiveChannel(batchChannel);
+
+        std::lock_guard<std::mutex> lock(handlersMx_);
+        for (auto &[id, entry] : snapshotHandlers_) {
+          if (matchChannel(entry.first, change, msgCh)) {
+            entry.second(change);
+          }
+        }
+      }
+    }
+  }
+
   if (msg.count("type") && msg.at("type") == "db_change") {
     DbChange change;
     const std::string messageChannel =
@@ -242,9 +283,7 @@ void DatabaseLiveClient::dispatchMessage(const std::string &raw) {
 
     std::lock_guard<std::mutex> lock(handlersMx_);
     for (auto &[id, entry] : snapshotHandlers_) {
-      if ((!messageChannel.empty() && entry.first == messageChannel) ||
-          (messageChannel.empty() &&
-           entry.first == normalizeDatabaseLiveChannel(change.table))) {
+      if (matchChannel(entry.first, change, messageChannel)) {
         entry.second(change);
       }
     }
@@ -264,16 +303,14 @@ void DatabaseLiveClient::resubscribeAll() {
     if (filterIt != channelFilters_.end()) {
       sub["filters"] = json::array();
       for (const auto &filter : filterIt->second) {
-        sub["filters"].push_back(
-            {{"field", filter.field}, {"op", filter.op}, {"value", filter.value}});
+        sub["filters"].push_back(json::array({filter.field, filter.op, filter.value}));
       }
     }
     auto orFilterIt = channelOrFilters_.find(entry.first);
     if (orFilterIt != channelOrFilters_.end()) {
       sub["orFilters"] = json::array();
       for (const auto &filter : orFilterIt->second) {
-        sub["orFilters"].push_back(
-            {{"field", filter.field}, {"op", filter.op}, {"value", filter.value}});
+        sub["orFilters"].push_back(json::array({filter.field, filter.op, filter.value}));
       }
     }
     sendRaw(sub.dump());

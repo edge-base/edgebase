@@ -54,10 +54,10 @@ private fun matchesDatabaseLiveChannel(channel: String, change: DbChange, messag
     return when (parts.size) {
         2 -> parts[1] == change.table
         3 -> parts[2] == change.table
-        4 -> if (parts[2] == change.table) {
-            change.id == parts[3]
-        } else {
-            parts[3] == change.table
+        4 -> {
+            // Could be dblive:ns:table:docId or dblive:ns:instanceId:table
+            if (parts[2] == change.table && change.id == parts[3]) true
+            else parts[3] == change.table
         }
         else -> parts[3] == change.table && change.id == parts[4]
     }
@@ -90,7 +90,7 @@ internal class DatabaseLiveClient(
     // Shared message flow for subscription lifecycle events.
     internal val messageFlow = MutableSharedFlow<Map<String, Any?>>(
         extraBufferCapacity = 64,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
+        onBufferOverflow = BufferOverflow.SUSPEND
     )
 
     /** Server-side filters per channel for recovery after FILTER_RESYNC. */
@@ -291,6 +291,22 @@ internal class DatabaseLiveClient(
                     ))
                 }
                 return
+            }
+
+            // Handle NOT_AUTHENTICATED: attempt re-auth
+            if (type == "error") {
+                val code = msg["code"] as? String
+                if (code == "NOT_AUTHENTICATED") {
+                    isAuthenticated = false
+                    scope.launch {
+                        try {
+                            session?.close(CloseReason(CloseReason.Codes.NORMAL, "Re-authenticating"))
+                        } catch (_: Exception) { /* already closed */ }
+                        session = null
+                        isConnected = false
+                        connect()
+                    }
+                }
             }
 
             // All other messages: emit to shared flow

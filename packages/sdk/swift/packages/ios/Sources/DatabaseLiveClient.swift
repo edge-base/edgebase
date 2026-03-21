@@ -46,9 +46,8 @@ private func matchesDatabaseLiveChannel(_ channel: String, change: DbChange, mes
     case 3:
         return parts[2] == change.table
     case 4:
-        if parts[2] == change.table {
-            return change.id == parts[3]
-        }
+        // Could be dblive:ns:table:docId or dblive:ns:instanceId:table
+        if parts[2] == change.table && change.id == parts[3] { return true }
         return parts[3] == change.table
     default:
         return parts[3] == change.table && change.id == parts[4]
@@ -383,6 +382,13 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
             resubscribeAll()
 
         case "error":
+            let errorCode = msg["code"] as? String
+            if errorCode == "NOT_AUTHENTICATED" {
+                isAuthenticated = false
+                Task { [weak self] in
+                    try? await self?.authenticate()
+                }
+            }
             let errMsg = msg["message"] as? String ?? "Authentication failed"
             throw EdgeBaseError(statusCode: 401, message: errMsg)
 

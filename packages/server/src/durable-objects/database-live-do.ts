@@ -573,11 +573,13 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
           if (!canRead) continue;
 
           let shouldSend = true;
-          if (change.data && (meta.channelFilters.size > 0 || meta.channelOrFilters.size > 0)) {
+          if (meta.channelFilters.size > 0 || meta.channelOrFilters.size > 0) {
             const filters = meta.channelFilters.get(batch.channel) || [];
             const orFilters = meta.channelOrFilters.get(batch.channel) || [];
             if (filters.length > 0 || orFilters.length > 0) {
-              shouldSend = evaluateDatabaseLiveFilters(change.data as Record<string, unknown>, filters, orFilters);
+              shouldSend = change.data
+                ? evaluateDatabaseLiveFilters(change.data as Record<string, unknown>, filters, orFilters)
+                : true; // DELETE events (null data) pass filters
             }
           }
 
@@ -608,11 +610,13 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
         if (!canRead) continue;
 
         let shouldSend = true;
-        if (change.data && (meta.channelFilters.size > 0 || meta.channelOrFilters.size > 0)) {
+        if (meta.channelFilters.size > 0 || meta.channelOrFilters.size > 0) {
           const filters = meta.channelFilters.get(batch.channel) || [];
           const orFilters = meta.channelOrFilters.get(batch.channel) || [];
           if (filters.length > 0 || orFilters.length > 0) {
-            shouldSend = evaluateDatabaseLiveFilters(change.data as Record<string, unknown>, filters, orFilters);
+            shouldSend = change.data
+              ? evaluateDatabaseLiveFilters(change.data as Record<string, unknown>, filters, orFilters)
+              : true; // DELETE events (null data) pass filters
           }
         }
 
@@ -727,11 +731,13 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
       if (!canRead) continue;
 
       let shouldSend = true;
-      if (eventData && (meta.channelFilters.size > 0 || meta.channelOrFilters.size > 0) && msgChannel) {
+      if ((meta.channelFilters.size > 0 || meta.channelOrFilters.size > 0) && msgChannel) {
         const filters = meta.channelFilters.get(msgChannel) || [];
         const orFilters = meta.channelOrFilters.get(msgChannel) || [];
         if (filters.length > 0 || orFilters.length > 0) {
-          shouldSend = evaluateDatabaseLiveFilters(eventData, filters, orFilters);
+          shouldSend = eventData
+            ? evaluateDatabaseLiveFilters(eventData, filters, orFilters)
+            : true; // DELETE events (null data) pass filters
         }
       }
 
@@ -820,11 +826,14 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
       const result = await Promise.race([
         Promise.resolve(rule(authCtx as Record<string, unknown> | null, row)),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Database live row access timeout')), 50),
+          setTimeout(() => reject(new Error('Database live row access timeout')), 500),
         ),
       ]);
       return Boolean(result);
-    } catch {
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('timeout')) {
+        console.warn('DatabaseLive: row access rule timed out after 500ms');
+      }
       return false;
     }
   }
@@ -848,11 +857,14 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
       const result = await Promise.race([
         Promise.resolve(tableRules(authCtx as Record<string, unknown> | null, {})),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Database live channel access timeout')), 50),
+          setTimeout(() => reject(new Error('Database live channel access timeout')), 500),
         ),
       ]);
       return Boolean(result);
-    } catch {
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('timeout')) {
+        console.warn('DatabaseLive: channel access rule timed out after 500ms');
+      }
       return false;
     }
   }
