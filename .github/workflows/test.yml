@@ -42,7 +42,6 @@ jobs:
       - name: Run server integration tests (Miniflare)
         run: pnpm test:integration
 
-
   # ─── G2: Generated Code Drift Check ────────────────────────────────────────
   generated-code-check:
     name: Generated Code Drift
@@ -73,8 +72,12 @@ jobs:
 
   # ─── 5. JS SDK 단위 테스트 ──────────────────────────────────────────────────
   sdk-js-unit:
-    name: JS SDK Unit
-    runs-on: ubuntu-latest
+    name: JS SDK Unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -146,8 +149,12 @@ jobs:
 
   # ─── 6. Kotlin SDK 단위 테스트 ──────────────────────────────────────────────
   sdk-kotlin-unit:
-    name: Kotlin SDK Unit
-    runs-on: ubuntu-latest
+    name: Kotlin SDK Unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -163,8 +170,12 @@ jobs:
 
   # ─── 7. Java SDK 단위 테스트 ────────────────────────────────────────────────
   sdk-java-unit:
-    name: Java SDK Unit
-    runs-on: ubuntu-latest
+    name: Java SDK Unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -180,8 +191,12 @@ jobs:
 
   # ─── 8. Dart / Flutter SDK ──────────────────────────────────────────────────
   sdk-dart-unit:
-    name: Dart SDK Unit
-    runs-on: ubuntu-latest
+    name: Dart SDK Unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -199,8 +214,12 @@ jobs:
 
   # ─── 9. Rust SDK 단위 테스트 ────────────────────────────────────────────────
   sdk-rust-unit:
-    name: Rust SDK Unit
-    runs-on: ubuntu-latest
+    name: Rust SDK Unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -213,8 +232,12 @@ jobs:
 
   # ─── 10. C# SDK 단위 테스트 ─────────────────────────────────────────────────
   sdk-csharp-unit:
-    name: C# SDK Unit
-    runs-on: ubuntu-latest
+    name: C# SDK Unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -226,8 +249,12 @@ jobs:
 
   # ─── 11. Go SDK 단위 테스트 ────────────────────────────────────────────────
   sdk-go-unit:
-    name: Go SDK Unit
-    runs-on: ubuntu-latest
+    name: Go SDK Unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -239,8 +266,12 @@ jobs:
 
   # ─── 12. React Native SDK 단위 테스트 ──────────────────────────────────────
   sdk-react-native-unit:
-    name: React Native SDK Unit
-    runs-on: ubuntu-latest
+    name: React Native SDK Unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -258,15 +289,40 @@ jobs:
         run: pnpm test
         working-directory: packages/sdk/react-native
 
-  # ─── 13. Go SDK E2E ─────────────────────────────────────────────────────────
-  sdk-go-e2e:
-    name: Go SDK E2E
-    runs-on: ubuntu-latest
+  # ─── 12.5. JS SDK E2E ───────────────────────────────────────────────────────
+  sdk-js-e2e:
+    name: JS SDK E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     needs: [server-unit]
     env:
-      EDGEBASE_E2E_REQUIRED: "1"
-      EDGEBASE_TEST_LOG_PATH: /tmp/edgebase-go-e2e-server.log
-      EDGEBASE_TEST_PID_PATH: /tmp/edgebase-go-e2e-server.pid
+      EDGEBASE_E2E_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start EdgeBase test server and run JS SDK E2E
+        run: node ./scripts/run-with-services.mjs --server --mock-fcm --cwd packages/sdk/js -- pnpm run test:e2e
+
+  # ─── 13. Go SDK E2E ─────────────────────────────────────────────────────────
+  sdk-go-e2e:
+    name: Go SDK E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -280,37 +336,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Start EdgeBase test server and run Go E2E
-        run: |
-          bash ./scripts/run-with-pty.sh <<'EOF'
-          set -euo pipefail
-          cleanup() {
-            status=$?
-            if [[ -f "$EDGEBASE_TEST_PID_PATH" ]]; then
-              PID="$(cat "$EDGEBASE_TEST_PID_PATH")"
-              kill "$PID" 2>/dev/null || true
-              pkill -P "$PID" 2>/dev/null || true
-            fi
-            if [[ $status -ne 0 && -f "$EDGEBASE_TEST_LOG_PATH" ]]; then
-              tail -n 200 "$EDGEBASE_TEST_LOG_PATH" || true
-            fi
-            exit "$status"
-          }
-          trap cleanup EXIT
-          bash ./scripts/start-test-server.sh
-          bash ./scripts/wait-for-test-server.sh
-          cd packages/sdk/go
-          go test -tags e2e -v ./...
-          EOF
+        run: node ./scripts/run-with-services.mjs --server --cwd packages/sdk/go -- go test -tags e2e -v ./...
 
   # ─── 14. Python SDK E2E ─────────────────────────────────────────────────────
   sdk-python-e2e:
-    name: Python SDK E2E
-    runs-on: ubuntu-latest
+    name: Python SDK E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     needs: [server-unit]
     env:
-      EDGEBASE_E2E_REQUIRED: "1"
-      EDGEBASE_TEST_LOG_PATH: /tmp/edgebase-python-e2e-server.log
-      EDGEBASE_TEST_PID_PATH: /tmp/edgebase-python-e2e-server.pid
+      EDGEBASE_E2E_REQUIRED: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -331,40 +369,20 @@ jobs:
           pip install -e './packages/sdk/python/packages/admin'
           pip install -e './packages/sdk/python[dev]' --no-deps
       - name: Start EdgeBase test server and run Python E2E
-        run: |
-          bash ./scripts/run-with-pty.sh <<'EOF'
-          set -euo pipefail
-          cleanup() {
-            status=$?
-            if [[ -f "$EDGEBASE_TEST_PID_PATH" ]]; then
-              PID="$(cat "$EDGEBASE_TEST_PID_PATH")"
-              kill "$PID" 2>/dev/null || true
-              pkill -P "$PID" 2>/dev/null || true
-            fi
-            if [[ $status -ne 0 && -f "$EDGEBASE_TEST_LOG_PATH" ]]; then
-              tail -n 200 "$EDGEBASE_TEST_LOG_PATH" || true
-            fi
-            exit "$status"
-          }
-          trap cleanup EXIT
-          bash ./scripts/start-test-server.sh
-          bash ./scripts/wait-for-test-server.sh
-          pytest packages/sdk/python/packages/core/tests/test_core_e2e.py
-          pytest packages/sdk/python/packages/admin/tests/test_admin_e2e.py
-          EOF
+        run: node ./scripts/run-with-services.mjs --server -- pytest packages/sdk/python/packages/core/tests/test_core_e2e.py packages/sdk/python/packages/admin/tests/test_admin_e2e.py
 
   # ─── 15. React Native SDK E2E ───────────────────────────────────────────────
   sdk-react-native-e2e:
-    name: React Native SDK E2E
-    runs-on: ubuntu-latest
+    name: React Native SDK E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     needs: [server-unit]
     env:
-      EDGEBASE_E2E_REQUIRED: "1"
-      EDGEBASE_TEST_LOG_PATH: /tmp/edgebase-rn-e2e-server.log
-      EDGEBASE_TEST_PID_PATH: /tmp/edgebase-rn-e2e-server.pid
-      MOCK_FCM_LOG_PATH: /tmp/mock-fcm-rn-e2e.log
-      MOCK_FCM_PID_PATH: /tmp/mock-fcm-rn-e2e.pid
-      MOCK_FCM_PORT: "9099"
+      EDGEBASE_E2E_REQUIRED: '1'
+      MOCK_FCM_PORT: '9099'
       MOCK_FCM_BASE_URL: http://localhost:9099
     steps:
       - uses: actions/checkout@v4
@@ -376,37 +394,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Start EdgeBase test server and run React Native E2E
-        run: |
-          bash ./scripts/run-with-pty.sh <<'EOF'
-          set -euo pipefail
-          cleanup() {
-            status=$?
-            if [[ -f "$EDGEBASE_TEST_PID_PATH" ]]; then
-              PID="$(cat "$EDGEBASE_TEST_PID_PATH")"
-              kill "$PID" 2>/dev/null || true
-              pkill -P "$PID" 2>/dev/null || true
-            fi
-            if [[ -f "$MOCK_FCM_PID_PATH" ]]; then
-              PID="$(cat "$MOCK_FCM_PID_PATH")"
-              kill "$PID" 2>/dev/null || true
-              pkill -P "$PID" 2>/dev/null || true
-            fi
-            if [[ $status -ne 0 && -f "$EDGEBASE_TEST_LOG_PATH" ]]; then
-              tail -n 200 "$EDGEBASE_TEST_LOG_PATH" || true
-            fi
-            if [[ $status -ne 0 && -f "$MOCK_FCM_LOG_PATH" ]]; then
-              tail -n 200 "$MOCK_FCM_LOG_PATH" || true
-            fi
-            exit "$status"
-          }
-          trap cleanup EXIT
-          bash ./scripts/start-mock-fcm-server.sh
-          bash ./scripts/wait-for-mock-fcm-server.sh
-          bash ./scripts/start-test-server.sh
-          bash ./scripts/wait-for-test-server.sh
-          cd packages/sdk/react-native
-          pnpm test:e2e
-          EOF
+        run: node ./scripts/run-with-services.mjs --server --mock-fcm --cwd packages/sdk/react-native -- pnpm test:e2e
 
   # ─── 16. Swift SDK E2E ──────────────────────────────────────────────────────
   sdk-swift-e2e:
@@ -414,12 +402,12 @@ jobs:
     runs-on: macos-latest
     needs: [server-unit]
     env:
-      EDGEBASE_E2E_REQUIRED: "1"
+      EDGEBASE_E2E_REQUIRED: '1'
       EDGEBASE_TEST_LOG_PATH: /tmp/edgebase-swift-e2e-server.log
       EDGEBASE_TEST_PID_PATH: /tmp/edgebase-swift-e2e-server.pid
-      EDGEBASE_E2E_HEALTHCHECK_TIMEOUT_MS: "15000"
-      EDGEBASE_E2E_HEALTHCHECK_RETRIES: "3"
-      EDGEBASE_E2E_HEALTHCHECK_RETRY_DELAY_MS: "1000"
+      EDGEBASE_E2E_HEALTHCHECK_TIMEOUT_MS: '15000'
+      EDGEBASE_E2E_HEALTHCHECK_RETRIES: '3'
+      EDGEBASE_E2E_HEALTHCHECK_RETRY_DELAY_MS: '1000'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -582,6 +570,7 @@ jobs:
       - sdk-csharp-unit
       - sdk-go-unit
       - sdk-react-native-unit
+      - sdk-js-e2e
       - sdk-go-e2e
       - sdk-python-e2e
       - sdk-react-native-e2e
@@ -602,6 +591,7 @@ jobs:
           echo "C# Unit: ${{ needs.sdk-csharp-unit.result }}"
           echo "Go Unit: ${{ needs.sdk-go-unit.result }}"
           echo "React Native Unit: ${{ needs.sdk-react-native-unit.result }}"
+          echo "JS SDK E2E: ${{ needs.sdk-js-e2e.result }}"
           echo "Go E2E: ${{ needs.sdk-go-e2e.result }}"
           echo "Python E2E: ${{ needs.sdk-python-e2e.result }}"
           echo "React Native E2E: ${{ needs.sdk-react-native-e2e.result }}"

@@ -1,0 +1,35 @@
+#!/usr/bin/env node
+
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { runCommand } from '../../../../scripts/ci-utils.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const packageDir = path.resolve(__dirname, '..');
+const tempDir = process.env['TMPDIR'] ?? process.env['TMP'] ?? process.env['TEMP'] ?? os.tmpdir();
+
+const suites = [
+  ['packages/core', 'vitest.config.ts', 'test/e2e/core.e2e.test.ts'],
+  ['packages/web', 'vitest.config.ts', 'test/e2e/web.e2e.test.ts'],
+  ['packages/admin', 'vitest.config.ts', 'test/e2e/admin.e2e.test.ts'],
+];
+
+for (const [relativeDir, configPath, testPath] of suites) {
+  const result = await runCommand(
+    'pnpm',
+    ['exec', 'vitest', 'run', '--config', configPath, testPath],
+    {
+      cwd: path.join(packageDir, relativeDir),
+      env: {
+        TMPDIR: tempDir,
+        TMP: tempDir,
+        TEMP: tempDir,
+      },
+    },
+  );
+
+  if (result.code !== 0) {
+    process.exit(result.code ?? 1);
+  }
+}
