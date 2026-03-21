@@ -149,6 +149,13 @@ function parsePath(urlPath: string): string[] {
   return urlPath.split('/').filter(Boolean);
 }
 
+function sanitizeForLog(value: string): string {
+  return value
+    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, '?');
+}
+
 function isDynamicDbBlock(
   dbBlock:
     | {
@@ -976,10 +983,11 @@ async function handleRoute(
     }
 
     const effectiveEnvKey = resolveRequestedPostgresEnvKey(namespace, envKey);
+    const namespaceLabel = sanitizeForLog(namespace);
 
     console.log();
     console.log(
-      chalk.blue(`📦 Starting D1 -> Postgres migration for database block '${namespace}'...`),
+      chalk.blue(`📦 Starting D1 -> Postgres migration for database block '${namespaceLabel}'...`),
     );
     console.log(chalk.dim('  This migrates every table in the block, not just the current table.'));
     console.log(chalk.dim('  1/4 Exporting all tables from D1...'));
@@ -1027,7 +1035,7 @@ async function handleRoute(
 
     console.log(
       chalk.green(
-        `✓ Database block '${namespace}' is now running on Postgres (${dumpedTableCount} table${dumpedTableCount === 1 ? '' : 's'} restored).`,
+        `✓ Database block '${namespaceLabel}' is now running on Postgres (${dumpedTableCount} table${dumpedTableCount === 1 ? '' : 's'} restored).`,
       ),
     );
 
@@ -1499,7 +1507,7 @@ export function startSidecar(opts: SidecarOptions): Server {
       console.log(chalk.dim(`  📐 Schema Editor sidecar skipped (:${opts.port} already in use)`));
       return;
     }
-    console.log(chalk.dim('  📐 Schema Editor sidecar skipped:'), err.message);
+    console.log(chalk.dim('  📐 Schema Editor sidecar skipped:'), sanitizeForLog(err.message));
   });
 
   server.listen(opts.port, () => {
