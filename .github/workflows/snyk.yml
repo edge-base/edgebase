@@ -91,7 +91,7 @@ jobs:
           elif grep -Eiq 'SNYK-CODE-0005|snyk code is not enabled|not supported for your current organization|activate snyk code' snyk-code.log; then
             outcome="skip"
             reason="code-not-enabled"
-          elif grep -Eiq 'test limit|rate limit|too many requests|quota|payment required|unauthorized|forbidden|authentication failed|failed to authenticate|access denied|service unavailable|temporarily unavailable|organization .* not found' snyk-code.log; then
+          elif grep -Eiq 'test limit|rate limit|reached .* limit|too many requests|quota|payment required|unauthorized|forbidden|authentication failed|failed to authenticate|access denied|service unavailable|temporarily unavailable|organization .* not found' snyk-code.log; then
             outcome="skip"
             reason="platform-or-access-rejection"
           fi
@@ -273,7 +273,7 @@ jobs:
           elif [ "$status" = "3" ]; then
             outcome="skip"
             reason="no-supported-projects"
-          elif grep -Eiq 'test limit|rate limit|too many requests|quota|payment required|unauthorized|forbidden|authentication failed|failed to authenticate|access denied|service unavailable|temporarily unavailable|organization .* not found' snyk-open-source.log; then
+          elif grep -Eiq 'test limit|rate limit|reached .* limit|too many requests|quota|payment required|unauthorized|forbidden|authentication failed|failed to authenticate|access denied|service unavailable|temporarily unavailable|organization .* not found' snyk-open-source.log; then
             outcome="skip"
             reason="platform-or-access-rejection"
           fi
