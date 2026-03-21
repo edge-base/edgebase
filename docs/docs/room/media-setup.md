@@ -7,8 +7,9 @@ sidebar_label: "Media Setup"
 
 # Media Setup (Cloudflare RealtimeKit Provider)
 
-:::caution Alpha
-Room Media는 현재 **alpha** 단계입니다. API와 동작이 예고 없이 변경될 수 있습니다.
+:::info Beta
+Room Media는 현재 **beta** 단계입니다. 기본 `cloudflare_realtimekit`
+provider를 중심으로 지원 매트릭스를 정리하고 있습니다.
 :::
 
 이 문서는 `room.media.transport()`의 기본값인 `cloudflare_realtimekit` provider를 설정하는 방법을 설명합니다.

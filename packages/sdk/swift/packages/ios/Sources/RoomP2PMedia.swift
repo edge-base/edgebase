@@ -46,6 +46,25 @@ public struct RoomP2PMediaTransportOptions: Sendable {
     }
 }
 
+public struct RoomP2PScreenShareSource {
+    public let track: RTKRTCVideoTrack
+    public let stream: RTKRTCMediaStream?
+    public let deviceId: String?
+    public let stopHandler: (() -> Void)?
+
+    public init(
+        track: RTKRTCVideoTrack,
+        stream: RTKRTCMediaStream? = nil,
+        deviceId: String? = nil,
+        stopHandler: (() -> Void)? = nil
+    ) {
+        self.track = track
+        self.stream = stream
+        self.deviceId = deviceId
+        self.stopHandler = stopHandler
+    }
+}
+
 internal struct RoomP2PSessionDescription {
     let type: String
     let sdp: String
@@ -249,8 +268,7 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
     }
 
     public func startScreenShare(_ payload: [String: Any]? = nil) async throws -> Any? {
-        let captured = try await resolveRuntime().captureDisplayMedia()
-            ?? { throw RoomMediaTransportError("P2P transport could not create a screen-share track.") }()
+        let captured = try await resolveScreenShareCapture(payload)
 
         captured.track.onEnded { [weak self] in
             Task { try? await self?.stopScreenShare() }
@@ -260,6 +278,11 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
         rememberLocalTrack(kind: "screen", captured: captured)
 
         var next = payload ?? [:]
+        next.removeValue(forKey: "source")
+        next.removeValue(forKey: "videoTrack")
+        next.removeValue(forKey: "track")
+        next.removeValue(forKey: "stream")
+        next.removeValue(forKey: "stopHandler")
         next["trackId"] = captured.track.id
         if let deviceId = captured.track.deviceId {
             next["deviceId"] = deviceId
@@ -723,6 +746,65 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
         try await resolveRuntime().captureUserMedia(kind: kind, deviceId: deviceId)
     }
 
+    private func resolveScreenShareCapture(_ payload: [String: Any]?) async throws -> RoomP2PCapturedTrack {
+        if let source = payload?["source"] as? RoomP2PScreenShareSource {
+            return buildInjectedScreenCapture(
+                track: source.track,
+                stream: source.stream,
+                deviceId: source.deviceId,
+                stopHandler: source.stopHandler
+            )
+        }
+
+        let injectedTrack = (payload?["videoTrack"] as? RTKRTCVideoTrack)
+            ?? (payload?["track"] as? RTKRTCVideoTrack)
+        if let injectedTrack {
+            return buildInjectedScreenCapture(
+                track: injectedTrack,
+                stream: payload?["stream"] as? RTKRTCMediaStream,
+                deviceId: payload?["deviceId"] as? String,
+                stopHandler: payload?["stopHandler"] as? (() -> Void)
+            )
+        }
+
+        if let captured = try await resolveRuntime().captureDisplayMedia() {
+            return captured
+        }
+
+        throw RoomMediaTransportError(
+            "P2P screen sharing on iOS requires an app-provided RTKRTCVideoTrack " +
+            "(payload['source'], payload['videoTrack'], or payload['track']). See \(roomMediaDocsURL)"
+        )
+    }
+
+    private func buildInjectedScreenCapture(
+        track: RTKRTCVideoTrack,
+        stream: RTKRTCMediaStream?,
+        deviceId: String?,
+        stopHandler: (() -> Void)?
+    ) -> RoomP2PCapturedTrack {
+        let resolvedStream: RTKRTCMediaStream
+        if let stream {
+            resolvedStream = stream
+        } else {
+            let streamFactory = RTKRTCPeerConnectionFactory()
+            let generated = streamFactory.mediaStream(withStreamId: "screen-\(track.trackId)")
+            generated.addVideoTrack(track)
+            resolvedStream = generated
+        }
+
+        return RoomP2PCapturedTrack(
+            kind: "screen",
+            track: NativeRoomP2PMediaTrack(
+                track: track,
+                deviceId: deviceId,
+                stopHandler: stopHandler
+            ),
+            stream: NativeRoomP2PMediaStream(stream: resolvedStream),
+            stopOnCleanup: stopHandler != nil
+        )
+    }
+
     private func ensureConnectedMemberId() async throws -> String {
         if let localMemberId { return localMemberId }
         return try await connect()
@@ -789,12 +871,25 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
     }
 
     private func buildView(kind: String, track: RoomP2PMediaTrackAdapter, stream: RoomP2PMediaStreamAdapter, isLocal: Bool) -> AnyObject? {
+        let createView = {
+            () -> AnyObject? in
         guard kind == "video" || kind == "screen",
               let videoTrack = track.asAny() as? RTKRTCVideoTrack else {
             return stream.asAny() as AnyObject?
         }
         let view = RTKRTCMTLVideoView(frame: .zero)
         videoTrack.add(view)
+        return view
+        }
+
+        if Thread.isMainThread {
+            return createView()
+        }
+
+        var view: AnyObject?
+        DispatchQueue.main.sync {
+            view = createView()
+        }
         return view
     }
 }
@@ -1179,13 +1274,20 @@ private final class NativeRoomP2PRtpSenderAdapter: RoomP2PRtpSenderAdapter {
 private final class NativeRoomP2PMediaTrack: RoomP2PMediaTrackAdapter {
     private let track: RTKRTCMediaStreamTrack
     private let capturer: RTKRTCCameraVideoCapturer?
+    private let stopHandler: (() -> Void)?
     private var endedHandler: (() -> Void)?
     let deviceId: String?
 
-    init(track: RTKRTCMediaStreamTrack, deviceId: String?, capturer: RTKRTCCameraVideoCapturer? = nil) {
+    init(
+        track: RTKRTCMediaStreamTrack,
+        deviceId: String?,
+        capturer: RTKRTCCameraVideoCapturer? = nil,
+        stopHandler: (() -> Void)? = nil
+    ) {
         self.track = track
         self.deviceId = deviceId
         self.capturer = capturer
+        self.stopHandler = stopHandler
     }
 
     var id: String { track.trackId }
@@ -1201,6 +1303,7 @@ private final class NativeRoomP2PMediaTrack: RoomP2PMediaTrackAdapter {
                 self.endedHandler?()
             }
         } else {
+            stopHandler?()
             endedHandler?()
         }
     }

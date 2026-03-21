@@ -116,7 +116,7 @@ rooms: {
 | `event` | `string` | Signal event name |
 | `payload` | `unknown` | Signal payload |
 
-## Media Access *(Alpha)*
+## Media Access *(Beta)*
 
 Media access rules use a nested structure with three gates:
 

@@ -683,18 +683,31 @@ private final class NativeRoomCloudflareRealtimeKitClientAdapter: NSObject, Room
     }
 
     func buildView(participant: RoomCloudflareParticipantSnapshot, kind: String, isSelf: Bool) -> AnyObject? {
-        if kind == "video" {
-            if isSelf {
-                return meeting.localUser.getSelfPreview()
+        let createView = { [self]
+            () -> AnyObject? in
+            if kind == "video" {
+                if isSelf {
+                    return meeting.localUser.getSelfPreview()
+                }
+                return (participant.participantHandle as? RtkMeetingParticipant)?.getVideoView()
             }
-            return (participant.participantHandle as? RtkMeetingParticipant)?.getVideoView()
+
+            if kind == "screen" {
+                return (participant.participantHandle as? RtkMeetingParticipant)?.getScreenShareVideoView()
+            }
+
+            return nil
         }
 
-        if kind == "screen" {
-            return (participant.participantHandle as? RtkMeetingParticipant)?.getScreenShareVideoView()
+        if Thread.isMainThread {
+            return createView()
         }
 
-        return nil
+        var view: AnyObject?
+        DispatchQueue.main.sync {
+            view = createView()
+        }
+        return view
     }
 
     func addListener(_ listener: any RoomCloudflareParticipantListener) {

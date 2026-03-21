@@ -903,10 +903,11 @@ handlers: {
 
 ---
 
-## Media Tracks *(Alpha)*
+## Media Tracks *(Beta)*
 
-:::caution Alpha
-This feature is in **alpha**. APIs may change before beta.
+:::info Beta
+This feature is in **beta**. Prefer the default `cloudflare_realtimekit`
+transport for the broadest production-oriented support matrix.
 :::
 
 Room's media layer handles audio, video, and screen-share state. The actual WebRTC negotiation happens through Cloudflare Realtime or your own SFU; `room.media` manages the control plane (who is publishing, mute state, device selection).

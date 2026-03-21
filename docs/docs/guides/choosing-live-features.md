@@ -42,7 +42,7 @@ Use Room when clients need coordinated real-time interaction beyond simple datab
 - **`room.meta`** — lobby-safe metadata before join, such as mode, capacity, or public labels
 - **`room.members`** — built-in presence tracking (who is online, typing indicators, cursor positions)
 - **`room.signals`** — lightweight pub/sub for custom events (chat messages, WebRTC signaling, collaboration cursors)
-- **`room.media`** *(alpha)* — audio/video/screen publish, mute, and device state for conferencing UIs
+- **`room.media`** *(beta)* — audio/video/screen publish, mute, and device state for conferencing UIs
 
 And two operational namespaces round out the client experience:
 

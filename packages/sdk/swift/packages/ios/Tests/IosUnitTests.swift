@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+import RTKWebRTC
 @testable import EdgeBase
 
 private final class MockRoomURLProtocol: URLProtocol, @unchecked Sendable {
@@ -1381,6 +1382,7 @@ final class RoomMediaTransportIosUnitTests: XCTestCase {
         private(set) var captureAudioCount = 0
         private(set) var captureVideoCount = 0
         private(set) var captureScreenCount = 0
+        var allowsDisplayCapture = true
 
         func createPeerConnection(configuration: RoomP2PRtcConfigurationOptions) async throws -> RoomP2PPeerConnectionAdapter {
             XCTAssertEqual(configuration.iceServers.first?.urls.first, "stun:stun.l.google.com:19302")
@@ -1414,6 +1416,7 @@ final class RoomMediaTransportIosUnitTests: XCTestCase {
 
         func captureDisplayMedia() async throws -> RoomP2PCapturedTrack? {
             captureScreenCount += 1
+            guard allowsDisplayCapture else { return nil }
             let track = FakeP2PTrack(id: "screen-local-\(captureScreenCount)", kind: "video")
             return RoomP2PCapturedTrack(
                 kind: "screen",
@@ -1678,6 +1681,160 @@ final class RoomMediaTransportIosUnitTests: XCTestCase {
             "requestId": try XCTUnwrap(signalFrame["requestId"] as? String),
         ])
         _ = try await audioTask.value
+    }
+
+    func test_p2p_transport_accepts_injected_ios_screen_share_source() async throws {
+        let room = RoomClient(
+            baseUrl: "https://edgebase.fun",
+            namespace: "game",
+            roomId: "room-1",
+            tokenManager: TokenManager(storage: MemoryTokenStorage())
+        )
+        let socket = FakeRoomWebSocketTask()
+        room.attachSocketForTesting(socket)
+        room.handleMessageForTesting([
+            "type": "auth_success",
+            "userId": "user-1",
+            "connectionId": "conn-1",
+        ])
+        room.handleMessageForTesting([
+            "type": "members_sync",
+            "members": [
+                [
+                    "memberId": "member-self",
+                    "userId": "user-1",
+                    "connectionId": "conn-1",
+                    "state": [:],
+                ],
+                [
+                    "memberId": "member-remote",
+                    "userId": "user-2",
+                    "connectionId": "conn-2",
+                    "state": [:],
+                ],
+            ],
+        ])
+
+        let runtime = FakeP2PRuntime()
+        roomP2PMediaRuntimeFactoryOverride = { runtime }
+
+        let transport = room.media.transport(
+            RoomMediaTransportOptions(
+                provider: .p2p,
+                p2p: RoomP2PMediaTransportOptions()
+            )
+        )
+        defer {
+            transport.destroy()
+            room.leave()
+        }
+
+        _ = try await transport.connect(nil)
+
+        let factory = RTKRTCPeerConnectionFactory()
+        let source = factory.videoSource()
+        let screenTrack = factory.videoTrack(with: source, trackId: "ios-screen-track")
+        let stream = factory.mediaStream(withStreamId: "ios-screen-stream")
+        stream.addVideoTrack(screenTrack)
+        var didStopInjectedTrack = false
+
+        let startTask = Task {
+            try await transport.startScreenShare([
+                "source": RoomP2PScreenShareSource(
+                    track: screenTrack,
+                    stream: stream,
+                    deviceId: "ios-replaykit",
+                    stopHandler: { didStopInjectedTrack = true }
+                ),
+            ])
+        }
+
+        let mediaFrame = try waitForRoomMessage(socket, index: 1)
+        XCTAssertEqual(mediaFrame["type"] as? String, "media")
+        XCTAssertEqual(mediaFrame["operation"] as? String, "publish")
+        XCTAssertEqual(mediaFrame["kind"] as? String, "screen")
+        XCTAssertEqual((mediaFrame["payload"] as? [String: Any])?["trackId"] as? String, "ios-screen-track")
+        XCTAssertEqual((mediaFrame["payload"] as? [String: Any])?["providerSessionId"] as? String, "member-self")
+
+        room.handleMessageForTesting([
+            "type": "media_result",
+            "operation": "publish",
+            "kind": "screen",
+            "requestId": try XCTUnwrap(mediaFrame["requestId"] as? String),
+        ])
+
+        let signalFrame = try waitForRoomMessage(socket, index: 2)
+        XCTAssertEqual(signalFrame["type"] as? String, "signal")
+        XCTAssertEqual(signalFrame["event"] as? String, "edgebase.media.p2p.offer")
+        room.handleMessageForTesting([
+            "type": "signal_sent",
+            "requestId": try XCTUnwrap(signalFrame["requestId"] as? String),
+        ])
+
+        let localView = try await startTask.value
+        XCTAssertTrue(localView is RTKRTCMTLVideoView)
+        XCTAssertEqual(runtime.captureScreenCount, 0)
+
+        let stopTask = Task { try await transport.stopScreenShare() }
+        let stopFrame = try waitForRoomMessage(socket, index: 3)
+        XCTAssertEqual(stopFrame["type"] as? String, "media")
+        XCTAssertEqual(stopFrame["operation"] as? String, "unpublish")
+        XCTAssertEqual(stopFrame["kind"] as? String, "screen")
+        room.handleMessageForTesting([
+            "type": "media_result",
+            "operation": "unpublish",
+            "kind": "screen",
+            "requestId": try XCTUnwrap(stopFrame["requestId"] as? String),
+        ])
+        try await stopTask.value
+        XCTAssertTrue(didStopInjectedTrack)
+    }
+
+    func test_p2p_transport_reports_ios_screen_share_requirement_without_source() async throws {
+        let room = RoomClient(
+            baseUrl: "https://edgebase.fun",
+            namespace: "game",
+            roomId: "room-1",
+            tokenManager: TokenManager(storage: MemoryTokenStorage())
+        )
+        room.handleMessageForTesting([
+            "type": "auth_success",
+            "userId": "user-1",
+            "connectionId": "conn-1",
+        ])
+        room.handleMessageForTesting([
+            "type": "members_sync",
+            "members": [[
+                "memberId": "member-self",
+                "userId": "user-1",
+                "connectionId": "conn-1",
+                "state": [:],
+            ]],
+        ])
+
+        let runtime = FakeP2PRuntime()
+        runtime.allowsDisplayCapture = false
+        roomP2PMediaRuntimeFactoryOverride = { runtime }
+
+        let transport = room.media.transport(
+            RoomMediaTransportOptions(
+                provider: .p2p,
+                p2p: RoomP2PMediaTransportOptions()
+            )
+        )
+        defer { transport.destroy() }
+
+        _ = try await transport.connect(nil)
+
+        do {
+            _ = try await transport.startScreenShare(nil)
+            XCTFail("Expected startScreenShare to throw when no injected source is provided")
+        } catch {
+            XCTAssertTrue(
+                String(describing: error).contains("RTKRTCVideoTrack"),
+                "Expected iOS screen-share source guidance in error, got: \(error)"
+            )
+        }
     }
 
 }
