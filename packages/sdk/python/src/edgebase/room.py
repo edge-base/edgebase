@@ -202,6 +202,27 @@ class RoomClient:
         self._player_state = {}
         self._player_version = 0
 
+    def _reject_all_pending(self, message: str) -> None:
+        """Reject all pending send() futures with an error."""
+        error = RuntimeError(message)
+        for request_id, future in list(self._pending_requests.items()):
+            if not future.done():
+                future.set_exception(error)
+        self._pending_requests.clear()
+
+    async def destroy(self) -> None:
+        """Leave the room, clear all handler lists, and release resources.
+
+        After calling destroy(), this RoomClient instance should not be reused.
+        """
+        await self.leave()
+        self._shared_state_handlers.clear()
+        self._player_state_handlers.clear()
+        self._message_handlers.clear()
+        self._all_message_handlers.clear()
+        self._error_handlers.clear()
+        self._kicked_handlers.clear()
+
     # ---- Actions -----------------------------------------------------------
 
     async def send(self, action_type: str, payload: Any = None) -> Any:
@@ -391,11 +412,15 @@ class RoomClient:
             async for raw in self._ws:
                 self._handle_message(raw)
         except Exception:
+            pass
+        finally:
             self._connected = False
             self._authenticated = False
             self._joined = False
-            if not self._intentionally_left and self._auto_reconnect:
-                await self._schedule_reconnect()
+            if not self._intentionally_left:
+                self._reject_all_pending("WebSocket disconnected")
+                if self._auto_reconnect:
+                    await self._schedule_reconnect()
 
     def _handle_message(self, raw: str) -> None:
         try:

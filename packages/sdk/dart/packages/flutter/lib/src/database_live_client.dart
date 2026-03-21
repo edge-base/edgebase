@@ -101,6 +101,14 @@ typedef MessageHandler = void Function(Map<String, dynamic> message);
 /// Filter tuple for server-side filtering.
 typedef FilterTuple = List<dynamic>;
 
+/// Per-subscriber filter info for recomputeChannelFilters() pattern (see JS SDK PR #14).
+class _DatabaseLiveSubscriber {
+  final int id;
+  final List<FilterTuple>? filters;
+  final List<FilterTuple>? orFilters;
+  _DatabaseLiveSubscriber({required this.id, this.filters, this.orFilters});
+}
+
 /// DatabaseLive client — WebSocket connection with auto-reconnect.
 /// Implements: auth_refreshed + revokedChannels handling.
 class DatabaseLiveClient implements core.DatabaseLiveClient {
@@ -123,6 +131,11 @@ class DatabaseLiveClient implements core.DatabaseLiveClient {
 
   /// Server-side OR filters per channel for recovery after FILTER_RESYNC.
   final _channelOrFilters = <String, List<FilterTuple>>{};
+
+  /// Per-subscriber filter tracking for recomputeChannelFilters() pattern.
+  final _channelSubscribers = <String, List<_DatabaseLiveSubscriber>>{};
+  int _nextSubscriberId = 0;
+
   StreamSubscription<TokenUser?>? _authStateSubscription;
   bool _waitingForAuth = false;
 
@@ -233,6 +246,7 @@ class DatabaseLiveClient implements core.DatabaseLiveClient {
       for (final channel in revoked) {
         _subscriptions[channel]?.close();
         _subscriptions.remove(channel);
+        _channelSubscribers.remove(channel);
         _channelFilters.remove(channel);
         _channelOrFilters.remove(channel);
       }
@@ -331,13 +345,18 @@ class DatabaseLiveClient implements core.DatabaseLiveClient {
       _subscriptions[channel] = StreamController<core.DbChange>.broadcast();
     }
 
-    // Store server-side filters for recovery
-    if (serverFilters != null && serverFilters.isNotEmpty) {
-      _channelFilters[channel] = serverFilters;
-    }
-    if (serverOrFilters != null && serverOrFilters.isNotEmpty) {
-      _channelOrFilters[channel] = serverOrFilters;
-    }
+    // Create per-subscriber filter tracking
+    final subscriberId = _nextSubscriberId++;
+    final subscriber = _DatabaseLiveSubscriber(
+      id: subscriberId,
+      filters: serverFilters,
+      orFilters: serverOrFilters,
+    );
+    _channelSubscribers.putIfAbsent(channel, () => []);
+    _channelSubscribers[channel]!.add(subscriber);
+
+    // Recompute channel-level filters from all subscribers
+    _recomputeChannelFilters(channel);
 
     // Connect with channel parameter (server requires it)
     connect(channel: channel);
@@ -351,6 +370,7 @@ class DatabaseLiveClient implements core.DatabaseLiveClient {
   }
 
   /// Unsubscribe from table changes.
+  /// Removes all subscribers for the channel.
   @override
   void unsubscribe(String tableName) {
     final channel = _normalizeDatabaseLiveChannel(tableName);
@@ -362,8 +382,37 @@ class DatabaseLiveClient implements core.DatabaseLiveClient {
     }
     _subscriptions[channel]?.close();
     _subscriptions.remove(channel);
+    _channelSubscribers.remove(channel);
     _channelFilters.remove(channel);
     _channelOrFilters.remove(channel);
+  }
+
+  /// Unsubscribe a specific subscriber by ID.
+  /// If other subscribers remain, recomputes filters and re-sends subscribe.
+  /// If none remain, sends unsubscribe and cleans up.
+  void unsubscribeById(String tableName, int subscriberId) {
+    final channel = _normalizeDatabaseLiveChannel(tableName);
+    _channelSubscribers[channel]?.removeWhere((s) => s.id == subscriberId);
+    if (_channelSubscribers[channel]?.isEmpty ?? true) {
+      // No subscribers remain — clean up and unsubscribe
+      _channelSubscribers.remove(channel);
+      _channelFilters.remove(channel);
+      _channelOrFilters.remove(channel);
+      if (_connected) {
+        _channel?.sink.add(jsonEncode({
+          'type': 'unsubscribe',
+          'channel': channel,
+        }));
+      }
+      _subscriptions[channel]?.close();
+      _subscriptions.remove(channel);
+    } else {
+      // Other subscribers remain — recompute filters and re-send subscribe
+      _recomputeChannelFilters(channel);
+      if (_authenticated) {
+        _sendSubscribe(channel);
+      }
+    }
   }
 
   /// Listen for specific message types.
@@ -392,6 +441,32 @@ class DatabaseLiveClient implements core.DatabaseLiveClient {
     if (filters != null && filters.isNotEmpty) msg['filters'] = filters;
     if (orFilters != null && orFilters.isNotEmpty) msg['orFilters'] = orFilters;
     _channel!.sink.add(jsonEncode(msg));
+  }
+
+  /// Recompute channel-level filters from all active subscribers.
+  /// Implements the JS SDK PR #14 pattern to prevent filter overwrite bugs.
+  void _recomputeChannelFilters(String channel) {
+    final subs = _channelSubscribers[channel];
+    if (subs == null || subs.isEmpty) {
+      _channelFilters.remove(channel);
+      _channelOrFilters.remove(channel);
+      return;
+    }
+    bool foundFilters = false;
+    bool foundOrFilters = false;
+    for (final s in subs) {
+      if (!foundFilters && s.filters != null && s.filters!.isNotEmpty) {
+        _channelFilters[channel] = s.filters!;
+        foundFilters = true;
+      }
+      if (!foundOrFilters && s.orFilters != null && s.orFilters!.isNotEmpty) {
+        _channelOrFilters[channel] = s.orFilters!;
+        foundOrFilters = true;
+      }
+      if (foundFilters && foundOrFilters) break;
+    }
+    if (!foundFilters) _channelFilters.remove(channel);
+    if (!foundOrFilters) _channelOrFilters.remove(channel);
   }
 
   /// Re-subscribe to all tracked channels after auth.
@@ -426,6 +501,7 @@ class DatabaseLiveClient implements core.DatabaseLiveClient {
       ctrl.close();
     }
     _subscriptions.clear();
+    _channelSubscribers.clear();
     _channelFilters.clear();
     _channelOrFilters.clear();
     _messageHandlers.clear();

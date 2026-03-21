@@ -107,6 +107,11 @@ void RoomClient::join() {
           self->set_connection_state("kicked");
         }
 
+        // Reject pending requests on unexpected disconnect
+        if (!self->intentionally_left_.load()) {
+          self->reject_all_pending("WebSocket connection lost");
+        }
+
         if (!self->intentionally_left_.load() && self->opts_.auto_reconnect &&
             self->reconnect_attempts_ < self->opts_.max_reconnect_attempts) {
           self->schedule_reconnect();
@@ -168,6 +173,21 @@ void RoomClient::send(const std::string &action_type, const json &payload,
             {"actionType", action_type},
             {"payload", payload},
             {"requestId", request_id}});
+
+  // Timeout for pending request
+  auto weak = weak_from_this();
+  int timeout_ms = opts_.send_timeout_ms;
+  std::thread([weak, request_id, timeout_ms]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    auto self = weak.lock();
+    if (!self) return;
+    auto it = self->pending_requests_.find(request_id);
+    if (it != self->pending_requests_.end()) {
+      if (it->second.on_error)
+        it->second.on_error("Action timed out");
+      self->pending_requests_.erase(it);
+    }
+  }).detach();
 }
 
 // ── Subscriptions (v2 API) ──────────────────────────────────────────────────
@@ -337,6 +357,7 @@ std::string RoomClient::ws_url() const {
 void RoomClient::authenticate() {
   const auto token = token_fn_();
   if (token.empty()) {
+    reject_all_pending("Auth state lost");
     intentionally_left_.store(true);
     connected_.store(false);
     authenticated_.store(false);
@@ -661,6 +682,21 @@ void RoomClient::send_signal(const std::string &event, const json &payload,
   if (options.contains("memberId"))
     message["memberId"] = options["memberId"];
   send_raw(message);
+
+  // Timeout for pending signal request
+  auto weak = weak_from_this();
+  int timeout_ms = opts_.send_timeout_ms;
+  std::thread([weak, request_id, timeout_ms]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    auto self = weak.lock();
+    if (!self) return;
+    auto it = self->pending_signal_requests_.find(request_id);
+    if (it != self->pending_signal_requests_.end()) {
+      if (it->second.on_error)
+        it->second.on_error("Signal timed out");
+      self->pending_signal_requests_.erase(it);
+    }
+  }).detach();
 }
 
 void RoomClient::send_member_state(const json &state, VoidCallback on_success,
@@ -676,6 +712,21 @@ void RoomClient::send_member_state(const json &state, VoidCallback on_success,
   send_raw({{"type", "member_state"},
             {"state", state},
             {"requestId", request_id}});
+
+  // Timeout for pending member state request
+  auto weak = weak_from_this();
+  int timeout_ms = opts_.send_timeout_ms;
+  std::thread([weak, request_id, timeout_ms]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    auto self = weak.lock();
+    if (!self) return;
+    auto it = self->pending_member_state_requests_.find(request_id);
+    if (it != self->pending_member_state_requests_.end()) {
+      if (it->second.on_error)
+        it->second.on_error("Member state timed out");
+      self->pending_member_state_requests_.erase(it);
+    }
+  }).detach();
 }
 
 void RoomClient::clear_member_state(VoidCallback on_success,
@@ -689,6 +740,21 @@ void RoomClient::clear_member_state(VoidCallback on_success,
   pending_member_state_requests_[request_id] =
       PendingVoidRequest{std::move(on_success), std::move(on_error)};
   send_raw({{"type", "member_state_clear"}, {"requestId", request_id}});
+
+  // Timeout for pending member state clear request
+  auto weak = weak_from_this();
+  int timeout_ms = opts_.send_timeout_ms;
+  std::thread([weak, request_id, timeout_ms]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    auto self = weak.lock();
+    if (!self) return;
+    auto it = self->pending_member_state_requests_.find(request_id);
+    if (it != self->pending_member_state_requests_.end()) {
+      if (it->second.on_error)
+        it->second.on_error("Member state clear timed out");
+      self->pending_member_state_requests_.erase(it);
+    }
+  }).detach();
 }
 
 void RoomClient::send_admin(const std::string &operation,
@@ -708,6 +774,21 @@ void RoomClient::send_admin(const std::string &operation,
             {"memberId", member_id},
             {"payload", payload},
             {"requestId", request_id}});
+
+  // Timeout for pending admin request
+  auto weak = weak_from_this();
+  int timeout_ms = opts_.send_timeout_ms;
+  std::thread([weak, request_id, timeout_ms]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    auto self = weak.lock();
+    if (!self) return;
+    auto it = self->pending_admin_requests_.find(request_id);
+    if (it != self->pending_admin_requests_.end()) {
+      if (it->second.on_error)
+        it->second.on_error("Admin action timed out");
+      self->pending_admin_requests_.erase(it);
+    }
+  }).detach();
 }
 
 void RoomClient::send_media(const std::string &operation,
@@ -726,6 +807,21 @@ void RoomClient::send_media(const std::string &operation,
             {"kind", kind},
             {"payload", payload},
             {"requestId", request_id}});
+
+  // Timeout for pending media request
+  auto weak = weak_from_this();
+  int timeout_ms = opts_.send_timeout_ms;
+  std::thread([weak, request_id, timeout_ms]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    auto self = weak.lock();
+    if (!self) return;
+    auto it = self->pending_media_requests_.find(request_id);
+    if (it != self->pending_media_requests_.end()) {
+      if (it->second.on_error)
+        it->second.on_error("Media action timed out");
+      self->pending_media_requests_.erase(it);
+    }
+  }).detach();
 }
 
 void RoomClient::switch_media_devices(const json &payload,

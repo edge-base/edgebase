@@ -454,6 +454,31 @@ export class RoomClient {
     this.setConnectionState('disconnected');
   }
 
+  /** Destroy the room client, cleaning up all listeners and the auth subscription. */
+  destroy(): void {
+    this.leave();
+    this.unsubAuthState?.();
+    this.unsubAuthState = null;
+    this.sharedStateHandlers.length = 0;
+    this.playerStateHandlers.length = 0;
+    this.messageHandlers.clear();
+    this.allMessageHandlers.length = 0;
+    this.errorHandlers.length = 0;
+    this.kickedHandlers.length = 0;
+    this.memberSyncHandlers.length = 0;
+    this.memberJoinHandlers.length = 0;
+    this.memberLeaveHandlers.length = 0;
+    this.memberStateHandlers.length = 0;
+    this.signalHandlers.clear();
+    this.anySignalHandlers.length = 0;
+    this.mediaTrackHandlers.length = 0;
+    this.mediaTrackRemovedHandlers.length = 0;
+    this.mediaStateHandlers.length = 0;
+    this.mediaDeviceHandlers.length = 0;
+    this.reconnectHandlers.length = 0;
+    this.connectionStateHandlers.length = 0;
+  }
+
   // ─── Actions ───
 
   /**
@@ -905,6 +930,10 @@ export class RoomClient {
         this.stopHeartbeat();
         if (event.code === 4004 && this.connectionState !== 'kicked') {
           this.handleKicked();
+        }
+
+        if (!this.intentionallyLeft) {
+          this.rejectAllPendingRequests(new EdgeBaseError(499, 'WebSocket connection lost'));
         }
 
         if (
@@ -1437,6 +1466,10 @@ export class RoomClient {
   }
 
   private handleAuthStateChange(user: TokenUser | null): void {
+    if (user === null) {
+      this.rejectAllPendingRequests(new EdgeBaseError(401, 'Auth state lost'));
+    }
+
     if (user) {
       if (this.ws && this.connected && this.authenticated) {
         this.refreshAuth();
@@ -1744,6 +1777,18 @@ export class RoomClient {
       ...mediaMember.state,
       [kind]: next,
     };
+  }
+
+  private rejectAllPendingRequests(error: EdgeBaseError): void {
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+    this.pendingRequests.clear();
+    this.rejectPendingVoidRequests(this.pendingSignalRequests, error);
+    this.rejectPendingVoidRequests(this.pendingAdminRequests, error);
+    this.rejectPendingVoidRequests(this.pendingMemberStateRequests, error);
+    this.rejectPendingVoidRequests(this.pendingMediaRequests, error);
   }
 
   private rejectPendingVoidRequests(

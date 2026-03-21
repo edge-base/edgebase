@@ -16,6 +16,15 @@ import Foundation
 /// Mirrors JS SDK FilterTuple: [field, op, value].
 public typealias DatabaseLiveFilterTuple = [Any]
 
+/// Subscriber info for per-subscriber filter tracking.
+/// Enables recomputeChannelFilters() pattern (see JS SDK PR #14).
+private struct DatabaseLiveSubscriber {
+    let id: Int
+    let handler: (DbChange) -> Void
+    let filters: [DatabaseLiveFilterTuple]?
+    let orFilters: [DatabaseLiveFilterTuple]?
+}
+
 private func normalizeDatabaseLiveChannel(_ tableOrChannel: String) -> String {
     tableOrChannel.hasPrefix("dblive:") ? tableOrChannel : "dblive:\(tableOrChannel)"
 }
@@ -76,7 +85,8 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
     private var reconnectAttempts = 0
     private let maxReconnectAttempts = 10
     private let reconnectBaseDelay: TimeInterval = 1.0
-    private var subscriptions: [String: [(DbChange) -> Void]] = [:]
+    private var subscriptions: [String: [DatabaseLiveSubscriber]] = [:]
+    private var nextSubscriberId = 0
     private var messageHandlers: [String: [(Any) -> Void]] = [:]
     private var waitingForAuth = false
 
@@ -180,42 +190,7 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
     /// This method ensures the WebSocket is connected and authenticated before
     /// sending the subscribe message to the server.
     func subscribe(_ tableName: String) -> AsyncStream<DbChange> {
-        AsyncStream { continuation in
-            let handler: (DbChange) -> Void = { change in
-                continuation.yield(change)
-            }
-
-            let channel = normalizeDatabaseLiveChannel(tableName)
-
-            self.queue.sync {
-                if self.subscriptions[channel] == nil {
-                    self.subscriptions[channel] = []
-                }
-                self.subscriptions[channel]?.append(handler)
-            }
-
-            // Connect and subscribe
-            Task { [weak self] in
-                guard let self = self else { return }
-                do {
-                    try await self.connect(channel: channel)
-                    self.sendSubscribe(channel)
-                } catch {
-                    // Connection failed — terminate the stream
-                    continuation.finish()
-                }
-            }
-
-            continuation.onTermination = { _ in
-                self.queue.sync {
-                    self.subscriptions[channel] = nil
-                    self.channelFilters.removeValue(forKey: channel)
-                    self.channelOrFilters.removeValue(forKey: channel)
-                }
-                // Send unsubscribe to server
-                self.sendUnsubscribe(channel)
-            }
-        }
+        return subscribe(tableName, filters: nil, orFilters: nil)
     }
 
     /// Subscribe to table changes with server-side filters.
@@ -232,26 +207,30 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
     ) -> AsyncStream<DbChange> {
         let channel = normalizeDatabaseLiveChannel(tableName)
 
-        // Store filters for FILTER_RESYNC recovery
-        queue.sync {
-            if let f = filters, !f.isEmpty {
-                self.channelFilters[channel] = f
-            }
-            if let of = orFilters, !of.isEmpty {
-                self.channelOrFilters[channel] = of
-            }
-        }
-
         return AsyncStream { continuation in
             let handler: (DbChange) -> Void = { change in
                 continuation.yield(change)
             }
 
+            let subscriberId = self.queue.sync { () -> Int in
+                let id = self.nextSubscriberId
+                self.nextSubscriberId += 1
+                return id
+            }
+
+            let subscriber = DatabaseLiveSubscriber(
+                id: subscriberId,
+                handler: handler,
+                filters: filters,
+                orFilters: orFilters
+            )
+
             self.queue.sync {
                 if self.subscriptions[channel] == nil {
                     self.subscriptions[channel] = []
                 }
-                self.subscriptions[channel]?.append(handler)
+                self.subscriptions[channel]?.append(subscriber)
+                self.recomputeChannelFilters(channel)
             }
 
             Task { [weak self] in
@@ -266,20 +245,33 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
 
             continuation.onTermination = { _ in
                 self.queue.sync {
-                    self.subscriptions[channel] = nil
-                    self.channelFilters.removeValue(forKey: channel)
-                    self.channelOrFilters.removeValue(forKey: channel)
+                    // Remove this specific subscriber by ID
+                    self.subscriptions[channel]?.removeAll { $0.id == subscriberId }
+                    // If no subscribers remain, clean up entirely
+                    if self.subscriptions[channel]?.isEmpty == true {
+                        self.subscriptions.removeValue(forKey: channel)
+                        self.channelFilters.removeValue(forKey: channel)
+                        self.channelOrFilters.removeValue(forKey: channel)
+                    } else {
+                        // Recompute filters from remaining subscribers and re-send subscribe
+                        self.recomputeChannelFilters(channel)
+                    }
                 }
-                self.sendUnsubscribe(channel)
+                if self.queue.sync(execute: { self.subscriptions[channel] == nil }) {
+                    self.sendUnsubscribe(channel)
+                } else {
+                    self.sendSubscribe(channel)
+                }
             }
         }
     }
 
     /// Unsubscribe from a table (DatabaseLiveSubscribable conformance).
+    /// Removes all subscribers for the channel and sends unsubscribe.
     func unsubscribe(_ id: String) {
         let channel = normalizeDatabaseLiveChannel(id)
         queue.sync {
-            subscriptions[channel] = nil
+            subscriptions.removeValue(forKey: channel)
             channelFilters.removeValue(forKey: channel)
             channelOrFilters.removeValue(forKey: channel)
         }
@@ -443,8 +435,8 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
             let change = DbChange.fromJSON(json)
             let messageChannel = json["channel"] as? String
             queue.sync {
-                for (channel, handlers) in subscriptions where matchesDatabaseLiveChannel(channel, change: change, messageChannel: messageChannel) {
-                    handlers.forEach { $0(change) }
+                for (channel, subscribers) in subscriptions where matchesDatabaseLiveChannel(channel, change: change, messageChannel: messageChannel) {
+                    subscribers.forEach { $0.handler(change) }
                 }
             }
 
@@ -463,8 +455,8 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
                     timestamp: c["timestamp"] as? String
                 )
                 queue.sync {
-                    for (channel, handlers) in subscriptions where matchesDatabaseLiveChannel(channel, change: change, messageChannel: channelStr) {
-                        handlers.forEach { $0(change) }
+                    for (channel, subscribers) in subscriptions where matchesDatabaseLiveChannel(channel, change: change, messageChannel: channelStr) {
+                        subscribers.forEach { $0.handler(change) }
                     }
                 }
             }
@@ -505,6 +497,28 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
             queue.sync {
                 messageHandlers[type]?.forEach { $0(json) }
             }
+        }
+    }
+
+    // MARK: - Filter Recomputation
+
+    /// Recompute channel-level filters from all active subscribers.
+    /// Must be called inside queue.sync.
+    private func recomputeChannelFilters(_ channel: String) {
+        guard let subs = subscriptions[channel], !subs.isEmpty else {
+            channelFilters.removeValue(forKey: channel)
+            channelOrFilters.removeValue(forKey: channel)
+            return
+        }
+        if let first = subs.first(where: { $0.filters != nil && !($0.filters!.isEmpty) }) {
+            channelFilters[channel] = first.filters!
+        } else {
+            channelFilters.removeValue(forKey: channel)
+        }
+        if let first = subs.first(where: { $0.orFilters != nil && !($0.orFilters!.isEmpty) }) {
+            channelOrFilters[channel] = first.orFilters!
+        } else {
+            channelOrFilters.removeValue(forKey: channel)
         }
     }
 

@@ -1135,6 +1135,10 @@ class RoomClient {
     _heartbeatTimer = null;
     _setConnectionState('disconnected');
 
+    if (!_intentionallyLeft) {
+      _rejectAllPendingRequests('WebSocket connection lost');
+    }
+
     if (!_intentionallyLeft &&
         !_waitingForAuth &&
         _options.autoReconnect &&
@@ -1187,8 +1191,34 @@ class RoomClient {
     _connectionStateHandlers.clear();
   }
 
+  /// Destroy the room client, cleaning up all handlers and subscriptions.
+  void destroy() {
+    leave();
+    _authStateSubscription?.cancel();
+    _authStateSubscription = null;
+    _sharedStateHandlers.clear();
+    _playerStateHandlers.clear();
+    _messageHandlers.clear();
+    _allMessageHandlers.clear();
+    _errorHandlers.clear();
+    _kickedHandlers.clear();
+    _memberSyncHandlers.clear();
+    _memberJoinHandlers.clear();
+    _memberLeaveHandlers.clear();
+    _memberStateHandlers.clear();
+    _signalHandlers.clear();
+    _anySignalHandlers.clear();
+    _mediaTrackHandlers.clear();
+    _mediaTrackRemovedHandlers.clear();
+    _mediaStateHandlers.clear();
+    _mediaDeviceHandlers.clear();
+    _reconnectHandlers.clear();
+    _connectionStateHandlers.clear();
+  }
+
   void _handleAuthStateChange(TokenUser? user) {
     if (user == null) {
+      _rejectAllPendingRequests('Auth state lost');
       if (_channel != null) {
         final socket = _channel;
         _sendRaw({'type': 'leave'});
@@ -1254,6 +1284,20 @@ class RoomClient {
     if (!pending.completer.isCompleted) {
       pending.completer.completeError(Exception(message));
     }
+  }
+
+  void _rejectAllPendingRequests(String message) {
+    for (final entry in _pendingRequests.entries) {
+      entry.value.timer.cancel();
+      if (!entry.value.completer.isCompleted) {
+        entry.value.completer.completeError(Exception(message));
+      }
+    }
+    _pendingRequests.clear();
+    _rejectPendingVoidRequests(_pendingSignalRequests, message);
+    _rejectPendingVoidRequests(_pendingAdminRequests, message);
+    _rejectPendingVoidRequests(_pendingMemberStateRequests, message);
+    _rejectPendingVoidRequests(_pendingMediaRequests, message);
   }
 
   void _rejectPendingVoidRequests(

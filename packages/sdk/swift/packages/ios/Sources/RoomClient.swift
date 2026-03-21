@@ -788,6 +788,10 @@ public final class RoomClient: @unchecked Sendable {
                 isConnected = false
                 isAuthenticated = false
                 isJoined = false
+                stopHeartbeat()
+                if !intentionallyLeft {
+                    rejectAllPendingRequests(message: "WebSocket connection lost")
+                }
                 if let task = ws as? URLSessionWebSocketTask,
                    task.closeCode.rawValue == 4004,
                    currentConnectionState != "kicked" {
@@ -1161,6 +1165,20 @@ public final class RoomClient: @unchecked Sendable {
         store.removeAll()
     }
 
+    private func rejectAllPendingRequests(message: String) {
+        queue.sync(flags: .barrier) {
+            for (_, pending) in pendingRequests {
+                pending.timeoutTask.cancel()
+                pending.continuation.resume(throwing: EdgeBaseError(statusCode: 499, message: message))
+            }
+            pendingRequests.removeAll()
+            rejectPendingVoidRequests(&pendingSignalRequests, message: message)
+            rejectPendingVoidRequests(&pendingAdminRequests, message: message)
+            rejectPendingVoidRequests(&pendingMemberStateRequests, message: message)
+            rejectPendingVoidRequests(&pendingMediaRequests, message: message)
+        }
+    }
+
     private func upsertMember(_ member: [String: Any]) {
         let memberId = (member["memberId"] as? String) ?? (member["userId"] as? String)
         guard let memberId else { return }
@@ -1290,6 +1308,7 @@ public final class RoomClient: @unchecked Sendable {
             return
         }
 
+        rejectAllPendingRequests(message: "Auth state lost")
         waitingForAuth = joinRequested
         isConnected = false
         isAuthenticated = false
