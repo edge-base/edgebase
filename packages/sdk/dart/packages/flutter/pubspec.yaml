@@ -8,6 +8,8 @@ environment:
   sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
+  flutter:
+    sdk: flutter
   edgebase_core: ^0.1.5
   http: ^1.2.0
   js: ^0.7.2
@@ -16,6 +18,8 @@ dependencies:
   firebase_core: ^3.8.0
   firebase_messaging: ^15.1.0
   flutter_inappwebview: ^6.0.0
+  realtimekit_core: ^0.1.5+1
+  realtimekit_core_platform_interface: ^0.1.5
 
 dev_dependencies:
   test: ^1.24.0

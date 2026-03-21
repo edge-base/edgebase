@@ -155,6 +155,42 @@ Once you create a client, these are the main surfaces you will use:
 - `client.push`
   Register device tokens and listen for foreground push messages
 
+## Room Media Transport
+
+Flutter now exposes the same top-level room media transport entrypoint as the web and React Native SDKs:
+
+```dart
+final room = client.room('calls', 'demo-room');
+await room.join();
+
+final transport = room.media.transport(
+  const RoomMediaTransportOptions(
+    provider: 'cloudflare_realtimekit',
+  ),
+);
+
+await transport.connect({
+  'name': 'June',
+  'customParticipantId': 'flutter-june',
+});
+
+await transport.enableAudio();
+final localVideoView = await transport.enableVideo();
+```
+
+`cloudflare_realtimekit` is the currently supported Flutter runtime provider.
+
+To use it, add the RealtimeKit dependency alongside `edgebase_flutter`:
+
+```bash
+flutter pub add realtimekit_core
+```
+
+Read more:
+
+- [Room Media Overview](https://edgebase.fun/docs/room/media)
+- [Room Media Setup](https://edgebase.fun/docs/room/media-setup)
+
 ## Authentication
 
 ### Email and password
