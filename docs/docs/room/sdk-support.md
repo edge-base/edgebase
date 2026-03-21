@@ -56,7 +56,11 @@ If you are looking for the "server side" of Room, the correct destination is [Se
   - React Native: `cloudflare_realtimekit` and `p2p`
   - Flutter: `cloudflare_realtimekit` and `p2p`
   - Swift iOS: `cloudflare_realtimekit`
-  - Kotlin client: `cloudflare_realtimekit`
-  - Java core / Android package: `cloudflare_realtimekit`
+  - Kotlin client: Android runtime currently supports `cloudflare_realtimekit`; other KMP targets keep the API surface but currently return transport-unavailable
+  - Java core / Android package: Android runtime currently supports `cloudflare_realtimekit`
   - C#/Unity and C++/Unreal: matching placeholder entry points that redirect to [Room Media](/docs/room/media)
+- Verified smoke builds in the current matrix:
+  - React Native: iOS simulator build succeeded; Android integration reached app compile and is currently blocked by external Gradle artifact TLS fetches in this environment
+  - Flutter: Web, macOS, and Android host apps built successfully; iOS is still blocked by an upstream RealtimeKit iOS linker issue in current toolchains
+  - Kotlin: JS, iOS simulator, macOS, and Android targets compile successfully
 - `p2p` is still pending on Swift, Kotlin, and Java. Other server-only SDKs intentionally do not expose Room Media transport providers.

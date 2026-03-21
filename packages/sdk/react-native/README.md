@@ -260,6 +260,16 @@ npm install @cloudflare/realtimekit-react-native
 npm install @cloudflare/react-native-webrtc
 ```
 
+Practical integration notes from the current host-app smoke matrix:
+
+- `cloudflare_realtimekit` currently expects React Native `0.77+`
+- iOS needs the usual `cd ios && pod install`
+- Android apps using `@cloudflare/realtimekit-react-native` need a `blob_provider_authority` string resource
+
+```xml
+<string name="blob_provider_authority">${applicationId}.blobs</string>
+```
+
 For setup details and provider tradeoffs, see the room media docs:
 
 - [Room Media Overview](https://edgebase.fun/docs/room/media)

@@ -128,7 +128,9 @@ The main client APIs are:
 `room.media.transport(...)` is currently available across multiple client SDKs, but the provider mix is not identical everywhere yet.
 
 - Web, React Native, and Flutter support `cloudflare_realtimekit` and `p2p`
-- Swift iOS, Kotlin, and Java currently support `cloudflare_realtimekit`
+- Swift iOS currently supports `cloudflare_realtimekit`
+- Kotlin currently exposes the same transport API everywhere, with `cloudflare_realtimekit` wired on Android first
+- Java currently exposes the same transport API, with `cloudflare_realtimekit` wired through the Android runtime package
 - C#/Unity and C++/Unreal expose aligned placeholder entry points that currently return a "not available yet" error and point back to this guide
 
 If you need the broadest cross-SDK parity today, use `cloudflare_realtimekit`.

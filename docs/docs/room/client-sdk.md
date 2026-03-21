@@ -85,7 +85,7 @@ dependencies {
 }
 ```
 
-Works on Android, JVM, iOS (via Kotlin Multiplatform).
+The shared Room client compiles across Android, JVM, JS, and Apple targets. Room Media transport runtime support is currently strongest on Android.
 
 </TabItem>
 <TabItem value="java" label="Java">

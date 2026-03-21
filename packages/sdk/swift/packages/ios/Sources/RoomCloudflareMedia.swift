@@ -764,6 +764,16 @@ private final class NativeRoomCloudflareParticipantsBridge: NSObject, RtkPartici
         }
     }
 
+    func onParticipantPinned(participant: RtkRemoteParticipant) {}
+
+    func onParticipantUnpinned(participant: RtkRemoteParticipant) {}
+
+    func onActiveParticipantsChanged(active: [RtkRemoteParticipant]) {}
+
+    func onActiveSpeakerChanged(participant: RtkRemoteParticipant?) {}
+
+    func onAllParticipantsUpdated(allParticipants: [RtkParticipant]) {}
+
     func onAudioUpdate(participant: RtkRemoteParticipant, isEnabled: Bool) {
         let snapshot = snapshot(from: participant, audioEnabled: isEnabled)
         for listener in listeners.values {
@@ -791,6 +801,8 @@ private final class NativeRoomCloudflareParticipantsBridge: NSObject, RtkPartici
             listener.onParticipantsSync(snapshots)
         }
     }
+
+    func onNewBroadcastMessage(type: String, payload: [String: Any]) {}
 
     private func snapshot(
         from participant: RtkMeetingParticipant,

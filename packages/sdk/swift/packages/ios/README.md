@@ -58,10 +58,14 @@ let client = EdgeBaseClient("https://your-project.edgebase.fun")
 ## Room Media Transport
 
 The Swift Room surface includes `room.media.transport(...)` with
-`cloudflare_realtimekit` as the currently available provider.
+`cloudflare_realtimekit` as the currently available provider on iOS.
 
-`p2p` is still in progress on Swift, so the recommended provider today is
-`cloudflare_realtimekit`.
+Important runtime note:
+
+- the package itself builds for iOS and macOS
+- the bundled RealtimeKit transport is currently wired for iOS
+- macOS keeps the same API surface, but `room.media.transport(...)` currently reports unavailable at runtime
+- `p2p` is still in progress on Swift
 
 Read more:
 

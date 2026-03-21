@@ -132,12 +132,14 @@ transport.enableVideo().join();
 Current provider status:
 
 - `cloudflare_realtimekit`
-  Available on the shared Java Room surface today
+  Available on Android when the Cloudflare RealtimeKit Android runtime is present
 - `p2p`
   Not available yet on the Java runtime
 
-If you are using the Android package, add Cloudflare's Android runtime so the default
-`cloudflare_realtimekit` transport can attach to a foreground Activity:
+The shared Java Room surface exposes the same transport API everywhere, but the actual
+managed media runtime currently targets Android. If you are using the Android package,
+add Cloudflare's Android runtime so the default `cloudflare_realtimekit` transport can
+attach to a foreground Activity:
 
 ```groovy
 implementation 'com.cloudflare.realtimekit:core-android:1.5.5'

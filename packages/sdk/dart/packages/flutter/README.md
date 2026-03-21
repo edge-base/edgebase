@@ -192,6 +192,34 @@ flutter pub add realtimekit_core
 flutter pub add flutter_webrtc
 ```
 
+Current host-app smoke builds have been verified on Web, macOS, and Android.
+
+Additional integration notes:
+
+- Android host apps need Java 11+ compile options and core library desugaring enabled
+- when you use both `realtimekit_core` and `flutter_webrtc`, exclude the older `com.github.davidliu:audioswitch` dependency from the app to avoid duplicate classes
+- iOS support is still beta and currently depends on upstream RealtimeKit iOS plugin linkage staying healthy in your toolchain
+
+Example Android app-level configuration:
+
+```kotlin
+android {
+  compileOptions {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+    isCoreLibraryDesugaringEnabled = true
+  }
+}
+
+dependencies {
+  coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+}
+
+configurations.all {
+  exclude(group = "com.github.davidliu", module = "audioswitch")
+}
+```
+
 Read more:
 
 - [Room Media Overview](https://edgebase.fun/docs/room/media)
