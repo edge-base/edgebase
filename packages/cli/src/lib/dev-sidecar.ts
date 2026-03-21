@@ -152,15 +152,10 @@ function parsePath(urlPath: string): string[] {
 function sanitizeForLog(value: string): string {
   const escape = String.fromCharCode(27);
   const ansiPattern = new RegExp(`${escape}\\[[0-9;]*[A-Za-z]`, 'g');
-  return value
+  const cleaned = value
     .replace(ansiPattern, '')
-    .replace(/[\r\n\t]+/g, ' ')
-    .split('')
-    .map((char) => {
-      const code = char.charCodeAt(0);
-      return code <= 0x1f || (code >= 0x7f && code <= 0x9f) ? '?' : char;
-    })
-    .join('');
+    .replace(/[\r\n\t]+/g, ' ');
+  return cleaned.replace(/[^ -~]/g, '?');
 }
 
 function isDynamicDbBlock(
@@ -724,7 +719,7 @@ function readCurrentSchema(
     const result = execTsxSync(
       [
         '-e',
-        `const mod = await import(${JSON.stringify(moduleUrl)}); const d=mod.default??mod; const s={}; for (const [ns,b] of Object.entries(d.databases??{})) { for (const [t,tc] of Object.entries((b as any).tables??{})) { s[t]={namespace:ns,fields:(tc as any).schema??{},fts:(tc as any).fts??[]}; } } console.log(JSON.stringify(s));`,
+        `(async()=>{const mod=await import(${JSON.stringify(moduleUrl)});const d=mod.default??mod;const s={};for(const [ns,b] of Object.entries(d.databases??{})){for(const [t,tc] of Object.entries((b as any).tables??{})){s[t]={namespace:ns,fields:(tc as any).schema??{},fts:(tc as any).fts??[]};}}console.log(JSON.stringify(s));})().catch((error)=>{console.error(error instanceof Error?error.message:String(error));process.exit(1);});`,
       ],
       { cwd: projectDir, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'ignore'] },
     ).trim();
@@ -1461,7 +1456,7 @@ async function handleRoute(
       const result = execTsxSync(
         [
           '-e',
-          `const mod = await import(${JSON.stringify(moduleUrl)}); const d=mod.default??mod; const e=d.email??{}; console.log(JSON.stringify({appName:e.appName||'EdgeBase',subjects:e.subjects||{},templates:e.templates||{}}));`,
+          `(async()=>{const mod=await import(${JSON.stringify(moduleUrl)});const d=mod.default??mod;const e=d.email??{};console.log(JSON.stringify({appName:e.appName||'EdgeBase',subjects:e.subjects||{},templates:e.templates||{}}));})().catch((error)=>{console.error(error instanceof Error?error.message:String(error));process.exit(1);});`,
         ],
         { cwd: projectDir, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'ignore'] },
       ).trim();

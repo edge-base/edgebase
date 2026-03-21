@@ -142,6 +142,7 @@ async function startMockFcm() {
 async function main() {
   const { options, commandArgs } = parseArgs(process.argv.slice(2));
   ensureDir(ciTempDir);
+  const edgebaseTestPort = process.env['EDGEBASE_TEST_PORT'] ?? '8688';
 
   const services = [];
   let exitCode = 0;
@@ -159,7 +160,7 @@ async function main() {
     const result = await runCommand(command, args, {
       cwd: options.cwd,
       env: {
-        BASE_URL: process.env['BASE_URL'] ?? 'http://localhost:8688',
+        BASE_URL: process.env['BASE_URL'] ?? `http://localhost:${edgebaseTestPort}`,
         EDGEBASE_SERVICE_KEY:
           process.env['EDGEBASE_SERVICE_KEY'] ??
           process.env['SERVICE_KEY'] ??
