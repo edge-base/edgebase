@@ -48,7 +48,7 @@ import {
   type FilterTuple,
 } from '../lib/query-engine.js';
 import { summarizeValidationErrors, validateInsert, validateUpdate } from '../lib/validation.js';
-import { hookRejectedError, validationError, notFoundError } from '../lib/errors.js';
+import { hookRejectedError, validationError, notFoundError, normalizeDatabaseError } from '../lib/errors.js';
 import {
   executeDbTriggers,
   getRegisteredFunctions,
@@ -1935,6 +1935,11 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       if ('code' in err && typeof (err as Record<string, unknown>).code === 'number') {
         const e = err as { code: number; message: string; data?: unknown };
         return c.json({ code: e.code, message: e.message, data: e.data }, e.code as 200);
+      }
+      // Normalize well-known database errors (e.g. UNIQUE constraint violations → 409)
+      const normalizedDbError = normalizeDatabaseError(err);
+      if (normalizedDbError) {
+        return c.json(normalizedDbError.toJSON(), normalizedDbError.code as 400);
       }
       console.error('DatabaseDO Error:', err);
       return c.json({ code: 500, message: 'Internal server error.' }, 500);
