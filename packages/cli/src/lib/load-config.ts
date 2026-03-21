@@ -10,6 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import { writeFileSync, unlinkSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { buildBundleWithEsbuild, execTsxSync } from './node-tools.js';
 import { ensureProjectSharedPackageLink } from './runtime-scaffold.js';
 
@@ -36,9 +37,9 @@ function firstUsefulLine(value: string): string | null {
 
   if (lines.length === 0) return null;
   return (
-    lines.find((line) => line.startsWith('Error:'))
-    ?? lines.find((line) => /^Transform failed|^Build failed/.test(line))
-    ?? lines[0]
+    lines.find((line) => line.startsWith('Error:')) ??
+    lines.find((line) => /^Transform failed|^Build failed/.test(line)) ??
+    lines[0]
   );
 }
 
@@ -46,12 +47,14 @@ function summarizeLoadConfigError(error: unknown): string {
   const baseMessage = error instanceof Error ? error.message.split('\n')[0] : String(error);
   if (!error || typeof error !== 'object') return baseMessage;
 
-  const stderr = typeof (error as { stderr?: unknown }).stderr === 'string'
-    ? (error as { stderr: string }).stderr
-    : '';
-  const stdout = typeof (error as { stdout?: unknown }).stdout === 'string'
-    ? (error as { stdout: string }).stdout
-    : '';
+  const stderr =
+    typeof (error as { stderr?: unknown }).stderr === 'string'
+      ? (error as { stderr: string }).stderr
+      : '';
+  const stdout =
+    typeof (error as { stdout?: unknown }).stdout === 'string'
+      ? (error as { stdout: string }).stdout
+      : '';
 
   const detail = firstUsefulLine(stderr) ?? firstUsefulLine(stdout);
   if (!detail || baseMessage.includes(detail)) return baseMessage;
@@ -74,7 +77,8 @@ export function loadConfigSafe(
 ): Record<string, unknown> {
   const stripFns = options?.stripFunctions !== false;
   const allowRegexFallback = options?.allowRegexFallback !== false;
-  const absPath = resolve(configPath).replace(/\\/g, '/');
+  const absPath = resolve(cwd, configPath);
+  const configUrl = pathToFileURL(absPath).href;
   const tmpDir = join(cwd, '.edgebase');
   mkdirSync(tmpDir, { recursive: true });
   ensureProjectSharedPackageLink(cwd);
@@ -92,7 +96,7 @@ export function loadConfigSafe(
       ? `(_, v) => typeof v === 'function' ? '__EDGEBASE_FUNCTION__' : v`
       : `undefined`;
     const code = [
-      `const p = ${JSON.stringify(absPath)};`,
+      `const p = ${JSON.stringify(configUrl)};`,
       `const mod = await import(p);`,
       `const c = mod.default ?? mod;`,
       `process.stdout.write(${JSON.stringify(sentinel)} + JSON.stringify(c, ${replacer}));`,
@@ -101,12 +105,19 @@ export function loadConfigSafe(
     writeFileSync(tmpScript, code, 'utf-8');
     try {
       const raw = execTsxSync([tmpScript], {
-        cwd, encoding: 'utf-8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'],
+        cwd,
+        encoding: 'utf-8',
+        timeout: 15000,
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
       const result = extractConfigFromOutput(raw, sentinel);
       return JSON.parse(result);
     } finally {
-      try { unlinkSync(tmpScript); } catch { /* cleanup non-fatal */ }
+      try {
+        unlinkSync(tmpScript);
+      } catch {
+        /* cleanup non-fatal */
+      }
     }
   } catch (err) {
     tsxError = summarizeLoadConfigError(err);
@@ -116,7 +127,7 @@ export function loadConfigSafe(
   // Strategy 2: esbuild bundle + node eval
   try {
     const tmpBundle = join(tmpDir, '_config_eval_bundle.mjs');
-    buildBundleWithEsbuild(configPath, tmpBundle, cwd);
+    buildBundleWithEsbuild(absPath, tmpBundle, cwd);
 
     const tmpEvalScript = join(tmpDir, '_config_eval2.mjs');
     const sentinel = '__EDGEBASE_CONFIG_JSON__';
@@ -124,7 +135,7 @@ export function loadConfigSafe(
       ? `(_, v) => typeof v === 'function' ? '__EDGEBASE_FUNCTION__' : v`
       : `undefined`;
     const code = [
-      `const p = ${JSON.stringify(tmpBundle.replace(/\\/g, '/'))};`,
+      `const p = ${JSON.stringify(pathToFileURL(tmpBundle).href)};`,
       `const mod = await import(p);`,
       `const c = mod.default ?? mod;`,
       `process.stdout.write(${JSON.stringify(sentinel)} + JSON.stringify(c, ${replacer}));`,
@@ -132,14 +143,25 @@ export function loadConfigSafe(
     writeFileSync(tmpEvalScript, code, 'utf-8');
 
     try {
-      const raw = execFileSync('node', [tmpEvalScript], {
-        cwd, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'],
+      const raw = execFileSync(process.execPath, [tmpEvalScript], {
+        cwd,
+        encoding: 'utf-8',
+        timeout: 10000,
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
       const result = extractConfigFromOutput(raw, sentinel);
       return JSON.parse(result);
     } finally {
-      try { unlinkSync(tmpBundle); } catch { /* cleanup non-fatal */ }
-      try { unlinkSync(tmpEvalScript); } catch { /* cleanup non-fatal */ }
+      try {
+        unlinkSync(tmpBundle);
+      } catch {
+        /* cleanup non-fatal */
+      }
+      try {
+        unlinkSync(tmpEvalScript);
+      } catch {
+        /* cleanup non-fatal */
+      }
     }
   } catch (err) {
     esbuildError = summarizeLoadConfigError(err);
@@ -148,9 +170,7 @@ export function loadConfigSafe(
 
   if (!allowRegexFallback) {
     const messages = [tsxError, esbuildError].filter((err): err is string => Boolean(err));
-    const detail = messages.length > 0
-      ? ` ${messages.join(' | ')}`
-      : '';
+    const detail = messages.length > 0 ? ` ${messages.join(' | ')}` : '';
     throw new Error(`Failed to fully evaluate edgebase.config.ts.${detail}`.trim());
   }
 
@@ -269,8 +289,8 @@ function extractSchemaFields(block: string): Record<string, unknown> {
     const rest = fieldContent;
     if (/required\s*:\s*true/.test(rest)) field.required = true;
     const referenceMatch =
-      /references\s*:\s*['"]([^'"]+)['"]/.exec(rest)
-      ?? /references\s*:\s*\{[\s\S]*?table\s*:\s*['"]([^'"]+)['"]/.exec(rest);
+      /references\s*:\s*['"]([^'"]+)['"]/.exec(rest) ??
+      /references\s*:\s*\{[\s\S]*?table\s*:\s*['"]([^'"]+)['"]/.exec(rest);
     if (referenceMatch) field.references = referenceMatch[1];
     const enumMatch = /enum\s*:\s*\[([^\]]+)\]/.exec(rest);
     if (enumMatch) {

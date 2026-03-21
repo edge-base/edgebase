@@ -9,10 +9,11 @@
  */
 import { readFileSync, readdirSync } from 'fs';
 import { resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { describe, it, expect } from 'vitest';
 
-const LIB_DIR = resolve(new URL('../lib', import.meta.url).pathname);
-const TEST_DIR = resolve(new URL('.', import.meta.url).pathname);
+const LIB_DIR = resolve(fileURLToPath(new URL('../lib', import.meta.url)));
+const TEST_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)));
 
 // ─── Lib files that do NOT yet have dedicated tests ─────────────────────────
 // Remove entries as tests are added — each removal is a net win.

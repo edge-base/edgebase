@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
 import { setContext } from '../src/lib/cli-context.js';
 
 const mockFail = vi.fn();
@@ -16,12 +17,76 @@ vi.mock('../src/lib/spinner.js', () => ({
   }),
 }));
 
+async function removeDirWithRetry(dir: string): Promise<void> {
+  if (!existsSync(dir)) {
+    return;
+  }
+
+  let lastError: unknown;
+  const transientDeleteErrorCodes = new Set(['EPERM', 'EBUSY', 'ENOTEMPTY']);
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!transientDeleteErrorCodes.has((error as NodeJS.ErrnoException)?.code ?? '')) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+    }
+  }
+
+  if (process.platform === 'win32') {
+    // Windows runners can keep transient handles on freshly executed temp files.
+    // Avoid failing the assertion itself over best-effort temp cleanup.
+    const cleanupScript = `
+      const { existsSync, rmSync } = require('node:fs');
+      const dir = process.argv[1];
+      const transientDeleteErrorCodes = new Set(['EPERM', 'EBUSY', 'ENOTEMPTY']);
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      (async () => {
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          try {
+            if (!existsSync(dir)) return;
+            rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+            return;
+          } catch (error) {
+            if (!transientDeleteErrorCodes.has(error?.code ?? '')) {
+              return;
+            }
+            await sleep(500);
+          }
+        }
+      })().catch(() => {});
+    `;
+
+    try {
+      const cleanup = spawn(process.execPath, ['-e', cleanupScript, dir], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      cleanup.unref();
+      return;
+    } catch {
+      // Fall through to surface the original cleanup failure below.
+    }
+  }
+
+  throw lastError;
+}
+
 describe('typegen command', () => {
   let testDir: string;
   let originalCwd: string;
 
   beforeEach(() => {
-    testDir = join(tmpdir(), `edgebase-typegen-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = join(
+      tmpdir(),
+      `edgebase-typegen-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
     mkdirSync(testDir, { recursive: true });
     originalCwd = process.cwd();
     process.chdir(testDir);
@@ -33,10 +98,10 @@ describe('typegen command', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     process.chdir(originalCwd);
-    rmSync(testDir, { recursive: true, force: true });
     vi.restoreAllMocks();
+    await removeDirWithRetry(testDir);
   });
 
   it('rejects legacy config syntax instead of falling back to regex parsing', async () => {
@@ -67,18 +132,24 @@ export default defineConfig({
 
     const { typegenCommand } = await import('../src/commands/typegen.js');
 
-    await expect(typegenCommand.parseAsync(['-o', 'edgebase.d.ts'], { from: 'user' })).rejects.toMatchObject({
+    await expect(
+      typegenCommand.parseAsync(['-o', 'edgebase.d.ts'], { from: 'user' }),
+    ).rejects.toMatchObject({
       payload: expect.objectContaining({
         status: 'error',
         code: 'typegen_config_parse_failed',
-        message: expect.stringContaining('Legacy config syntax is no longer supported at databases.shared.tables.posts.rules'),
+        message: expect.stringContaining(
+          'Legacy config syntax is no longer supported at databases.shared.tables.posts.rules',
+        ),
         hint: 'Make sure edgebase.config.ts exports a valid config object.',
       }),
     });
     expect(existsSync(join(testDir, 'edgebase.d.ts'))).toBe(false);
-    expect(mockFail).toHaveBeenCalledWith(expect.stringContaining(
-      'Legacy config syntax is no longer supported at databases.shared.tables.posts.rules',
-    ));
+    expect(mockFail).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Legacy config syntax is no longer supported at databases.shared.tables.posts.rules',
+      ),
+    );
   });
 
   it('generates types for a valid config', async () => {

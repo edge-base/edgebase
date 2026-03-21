@@ -10,7 +10,7 @@ import {
   rmSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { resolve, join, dirname } from 'node:path';
+import { resolve, join, dirname, sep } from 'node:path';
 import { createInterface } from 'node:readline';
 import chalk from 'chalk';
 import { isCliStructuredError, raiseCliError, raiseNeedsInput } from '../lib/agent-contract.js';
@@ -539,13 +539,16 @@ async function confirmRestore(message: string): Promise<boolean> {
     raiseNeedsInput({
       code: 'backup_restore_confirmation_required',
       field: 'yes',
-      message: 'Backup restore requires explicit confirmation before wiping and replacing target data.',
+      message:
+        'Backup restore requires explicit confirmation before wiping and replacing target data.',
       hint: 'Review the backup summary, then rerun with --yes.',
-      choices: [{
-        label: 'Approve restore',
-        value: 'yes',
-        args: ['--yes'],
-      }],
+      choices: [
+        {
+          label: 'Approve restore',
+          value: 'yes',
+          args: ['--yes'],
+        },
+      ],
     });
   }
 
@@ -592,7 +595,13 @@ function collectFiles(dir: string, base = dir): Array<{ path: string; rel: strin
     if (entry.isDirectory()) {
       results.push(...collectFiles(fullPath, base));
     } else {
-      results.push({ path: fullPath, rel: fullPath.slice(base.length + 1) });
+      results.push({
+        path: fullPath,
+        rel: fullPath
+          .slice(base.length + 1)
+          .split(sep)
+          .join('/'),
+      });
     }
   }
   return results;
@@ -770,7 +779,12 @@ backupCommand
             });
           } else {
             // Config-scan mode: Worker enumerates via config + membership
-            listResult = await apiCall<{ dos: DOInfo[]; total: number }>(api, '/list-dos', 'POST', {});
+            listResult = await apiCall<{ dos: DOInfo[]; total: number }>(
+              api,
+              '/list-dos',
+              'POST',
+              {},
+            );
           }
           enumSpinner.succeed(`Found ${listResult.total} DO instances`);
         } catch (err) {
@@ -1035,12 +1049,11 @@ backupCommand
           dataNamespaces = {};
           try {
             for (const namespace of directNamespaceNames) {
-              const dump = await apiCall<DataNamespaceDump>(api, '/dump-data', 'POST', { namespace });
+              const dump = await apiCall<DataNamespaceDump>(api, '/dump-data', 'POST', {
+                namespace,
+              });
               dataNamespaces[namespace] = dump;
-              totalRows += Object.values(dump.tables).reduce(
-                (sum, rows) => sum + rows.length,
-                0,
-              );
+              totalRows += Object.values(dump.tables).reduce((sum, rows) => sum + rows.length, 0);
             }
             dataSpinner.succeed(`Dumped ${directNamespaceNames.length} data namespace(s)`);
           } catch (err) {
@@ -1369,7 +1382,12 @@ backupCommand
               hexIds: allHexIds,
             });
           } else {
-            currentDOs = await apiCall<{ dos: DOInfo[]; total: number }>(api, '/list-dos', 'POST', {});
+            currentDOs = await apiCall<{ dos: DOInfo[]; total: number }>(
+              api,
+              '/list-dos',
+              'POST',
+              {},
+            );
           }
         } catch (err) {
           logHumanError(chalk.red(` ✗ ${errorMessage(err)}`));
@@ -1500,7 +1518,11 @@ backupCommand
             );
             throw new Error(summarizeFailures('Data namespace restore', namespaceFailures));
           }
-          logHuman(`\r${chalk.green('✓')} Restored ${dataNamespaceEntries.length} data namespace(s)`.padEnd(80));
+          logHuman(
+            `\r${chalk.green('✓')} Restored ${dataNamespaceEntries.length} data namespace(s)`.padEnd(
+              80,
+            ),
+          );
         }
 
         if (hasStorage && storageDirPath) {

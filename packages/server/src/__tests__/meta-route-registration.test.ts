@@ -6,14 +6,15 @@
  */
 import { readFileSync, readdirSync } from 'fs';
 import { resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { describe, it, expect } from 'vitest';
 
 describe('index.ts route registration completeness', () => {
   const source = readFileSync(
-    new URL('../index.ts', import.meta.url),
+    fileURLToPath(new URL('../index.ts', import.meta.url)),
     'utf-8',
   );
-  const routesDir = resolve(new URL('../routes', import.meta.url).pathname);
+  const routesDir = resolve(fileURLToPath(new URL('../routes', import.meta.url)));
   const EXPECTED_ROUTES = readdirSync(routesDir)
     .filter((fileName) => fileName.endsWith('.ts'))
     .sort()

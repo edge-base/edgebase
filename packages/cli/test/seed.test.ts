@@ -3,11 +3,12 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, parse, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { _internals } from '../src/commands/seed.js';
 
-const { buildSeedTableBasePath, inferDefaultSeedNamespace, listSeedNamespaces, resolveSeedTarget } = _internals;
+const { buildSeedTableBasePath, inferDefaultSeedNamespace, listSeedNamespaces, resolveSeedTarget } =
+  _internals;
 
 let tmpDir: string;
 
@@ -150,9 +151,7 @@ describe('URL handling', () => {
   it('constructs table API URL correctly', () => {
     const baseUrl = 'http://localhost:8787';
     const tablePath = buildSeedTableBasePath('shared');
-    expect(`${baseUrl}${tablePath}/posts`).toBe(
-      'http://localhost:8787/api/db/shared/tables/posts',
-    );
+    expect(`${baseUrl}${tablePath}/posts`).toBe('http://localhost:8787/api/db/shared/tables/posts');
   });
 
   it('constructs health check URL correctly', () => {
@@ -161,9 +160,7 @@ describe('URL handling', () => {
   });
 
   it('constructs dynamic namespace API paths with an instance id', () => {
-    expect(buildSeedTableBasePath('workspace', 'ws-123')).toBe(
-      '/api/db/workspace/ws-123/tables',
-    );
+    expect(buildSeedTableBasePath('workspace', 'ws-123')).toBe('/api/db/workspace/ws-123/tables');
   });
 });
 
@@ -212,7 +209,7 @@ describe('Custom seed file path', () => {
 
   it('resolves absolute seed file path', () => {
     const seedPath = resolve(tmpDir, '/absolute/path/seed.json');
-    expect(seedPath).toBe('/absolute/path/seed.json');
+    expect(seedPath).toBe(resolve(parse(tmpDir).root, 'absolute/path/seed.json'));
   });
 });
 
@@ -247,7 +244,9 @@ describe('Seed namespace resolution', () => {
       },
     };
 
-    expect(() => resolveSeedTarget({ namespace: 'workspace' }, config)).toThrow(/requires an instance id/);
+    expect(() => resolveSeedTarget({ namespace: 'workspace' }, config)).toThrow(
+      /requires an instance id/,
+    );
   });
 
   it('accepts dynamic targets when namespace and instance id are both provided', () => {

@@ -5,9 +5,12 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach } from 'vitest';
 import { describe, expect, it } from 'vitest';
+import { npmCommand } from '../src/lib/npm.js';
+import { pnpmCommand } from '../src/lib/pnpm.js';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const tempDirs: string[] = [];
+const packageManagerExecOptions = process.platform === 'win32' ? { shell: true as const } : {};
 
 interface PackedFile {
   path: string;
@@ -18,16 +21,18 @@ interface PackResult {
 }
 
 function getPackedPaths(): string[] {
-  execFileSync('pnpm', ['run', 'build'], {
+  execFileSync(pnpmCommand(), ['run', 'build'], {
     cwd: packageDir,
     encoding: 'utf-8',
     stdio: 'pipe',
+    ...packageManagerExecOptions,
   });
 
-  const output = execFileSync('npm', ['pack', '--json', '--dry-run', '--ignore-scripts'], {
+  const output = execFileSync(npmCommand(), ['pack', '--json', '--dry-run', '--ignore-scripts'], {
     cwd: packageDir,
     encoding: 'utf-8',
     stdio: 'pipe',
+    ...packageManagerExecOptions,
   });
 
   const [packResult] = JSON.parse(output) as PackResult[];
@@ -35,10 +40,11 @@ function getPackedPaths(): string[] {
 }
 
 function buildCli(): void {
-  execFileSync('pnpm', ['run', 'build'], {
+  execFileSync(pnpmCommand(), ['run', 'build'], {
     cwd: packageDir,
     encoding: 'utf-8',
     stdio: 'pipe',
+    ...packageManagerExecOptions,
   });
 }
 
@@ -69,7 +75,13 @@ describe('cli package tarball', () => {
 
     execFileSync(
       process.execPath,
-      [resolve(packageDir, 'dist', 'index.js'), 'create-plugin', 'demo-plugin', '--with-client', 'js'],
+      [
+        resolve(packageDir, 'dist', 'index.js'),
+        'create-plugin',
+        'demo-plugin',
+        '--with-client',
+        'js',
+      ],
       {
         cwd: workDir,
         encoding: 'utf-8',

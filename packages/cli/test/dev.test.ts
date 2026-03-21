@@ -14,7 +14,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readlinkSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer as createNetServer } from 'node:net';
 import { _internals } from '../src/commands/deploy.js';
@@ -74,11 +74,17 @@ describe('Runtime config scaffold', () => {
   });
 
   it('creates a runtime test-config shim that points at the project test config when present', () => {
-    writeFileSync(join(tmpDir, 'edgebase.test.config.ts'), 'export default { auth: { anonymousAuth: false } };');
+    writeFileSync(
+      join(tmpDir, 'edgebase.test.config.ts'),
+      'export default { auth: { anonymousAuth: false } };',
+    );
 
     ensureRuntimeScaffold(tmpDir);
 
-    const shim = readFileSync(join(tmpDir, '.edgebase', 'runtime', 'server', 'edgebase.test.config.ts'), 'utf-8');
+    const shim = readFileSync(
+      join(tmpDir, '.edgebase', 'runtime', 'server', 'edgebase.test.config.ts'),
+      'utf-8',
+    );
     expect(shim).toContain("import config from '../../../edgebase.test.config.ts'");
   });
 
@@ -117,12 +123,19 @@ describe('Runtime config scaffold', () => {
   it('rebuilds the runtime registry even without a functions directory so plugins can register', () => {
     ensureRuntimeScaffold(tmpDir);
 
-    const registryPath = join(tmpDir, '.edgebase', 'runtime', 'server', 'src', '_functions-registry.ts');
+    const registryPath = join(
+      tmpDir,
+      '.edgebase',
+      'runtime',
+      'server',
+      'src',
+      '_functions-registry.ts',
+    );
     _devInternals.rebuildFunctionsRegistry(join(tmpDir, 'functions'), registryPath);
 
     const registry = readFileSync(registryPath, 'utf-8');
     expect(registry).toContain('Plugin Functions + Hooks Registration');
-    expect(registry).toContain("registerFunction(`${plugin.name}/${funcName}`");
+    expect(registry).toContain('registerFunction(`${plugin.name}/${funcName}`');
     expect(registry).toContain('rebuildCompiledRoutes()');
   });
 
@@ -160,9 +173,12 @@ describe('Runtime config scaffold', () => {
     ensureProjectSharedPackageLink(projectDir);
 
     const projectSharedSrc = join(projectDir, 'node_modules', '@edge-base', 'shared', 'src');
-    expect(readFileSync(join(projectDir, 'node_modules', '@edge-base', 'shared', '.edgebase-shim'), 'utf-8')).toContain(
-      'edgebase-shared-shim',
-    );
+    expect(
+      readFileSync(
+        join(projectDir, 'node_modules', '@edge-base', 'shared', '.edgebase-shim'),
+        'utf-8',
+      ),
+    ).toContain('edgebase-shared-shim');
     const linkedSharedSrc = readlinkSync(projectSharedSrc);
     expect(linkedSharedSrc).not.toBe(projectSharedSrc);
     expect(existsSync(join(linkedSharedSrc, 'index.ts'))).toBe(true);
@@ -182,9 +198,9 @@ describe('Runtime config scaffold', () => {
     const runtimeNodeModules = join(tmpDir, 'workspace-node_modules');
     mkdirSync(runtimeNodeModules, { recursive: true });
 
-    expect(
-      resolveRuntimeNodeModulesSourceFromCandidates([missing, runtimeNodeModules]),
-    ).toBe(runtimeNodeModules);
+    expect(resolveRuntimeNodeModulesSourceFromCandidates([missing, runtimeNodeModules])).toBe(
+      runtimeNodeModules,
+    );
   });
 
   it('falls back to a later shared package source when early node_modules links are absent', () => {
@@ -315,7 +331,9 @@ describe('Wrangler dev arguments', () => {
       const nextPort = await _devInternals.findAvailablePort(occupiedPort);
       expect(nextPort).toBeGreaterThan(occupiedPort);
     } finally {
-      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+      await new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve())),
+      );
     }
   });
 
@@ -336,7 +354,9 @@ describe('Wrangler dev arguments', () => {
       expect(resolved.sidecarPort).toBeGreaterThan(resolved.port);
       expect(resolved.sidecarPort).not.toBe(resolved.port);
     } finally {
-      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+      await new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve())),
+      );
     }
   });
 
@@ -346,7 +366,9 @@ describe('Wrangler dev arguments', () => {
 
     try {
       await expect(_devInternals.isPortAvailable(reservation.port)).resolves.toBe(false);
-      await expect(_devInternals.findAvailablePort(reservation.port)).resolves.toBeGreaterThan(reservation.port);
+      await expect(_devInternals.findAvailablePort(reservation.port)).resolves.toBeGreaterThan(
+        reservation.port,
+      );
     } finally {
       await reservation.release();
     }
@@ -361,14 +383,16 @@ describe('Wrangler dev arguments', () => {
     ]);
 
     try {
-      expect(new Set([
-        first.port,
-        first.sidecarPort,
-        first.inspectorPort,
-        second.port,
-        second.sidecarPort,
-        second.inspectorPort,
-      ]).size).toBe(6);
+      expect(
+        new Set([
+          first.port,
+          first.sidecarPort,
+          first.inspectorPort,
+          second.port,
+          second.sidecarPort,
+          second.inspectorPort,
+        ]).size,
+      ).toBe(6);
     } finally {
       await Promise.allSettled([first.release(), second.release()]);
     }
@@ -450,9 +474,7 @@ describe('dev --open flag', () => {
       linux: 'xdg-open',
     };
     for (const [platform, expected] of Object.entries(platformCommands)) {
-      const cmd =
-        platform === 'darwin' ? 'open' :
-        platform === 'win32' ? 'start' : 'xdg-open';
+      const cmd = platform === 'darwin' ? 'open' : platform === 'win32' ? 'start' : 'xdg-open';
       expect(cmd).toBe(expected);
     }
   });
@@ -506,8 +528,8 @@ describe('Functions Directory — scanFunctions()', () => {
 
     const functions = scanFunctions(functionsDir);
     expect(functions).toHaveLength(2);
-    expect(functions.map(f => f.name)).toContain('onUserCreated');
-    expect(functions.map(f => f.name)).toContain('onPostPublished');
+    expect(functions.map((f) => f.name)).toContain('onUserCreated');
+    expect(functions.map((f) => f.name)).toContain('onPostPublished');
   });
 
   it('ignores non-.ts files', () => {
@@ -541,8 +563,8 @@ describe('Functions Directory — scanFunctions()', () => {
 
     const functions = scanFunctions(functionsDir);
     expect(functions).toHaveLength(2);
-    expect(functions.map(f => f.name)).toContain('echo');
-    expect(functions.map(f => f.name)).toContain('hooks/onAuth');
+    expect(functions.map((f) => f.name)).toContain('echo');
+    expect(functions.map((f) => f.name)).toContain('hooks/onAuth');
   });
 
   it('returns empty array for empty functions/', () => {
@@ -565,8 +587,20 @@ describe('Functions Registry — generateFunctionRegistry()', () => {
     const registryPath = join(outputDir, '_functions-registry.ts');
 
     const functions = [
-      { name: 'echo', relativePath: 'echo.ts', methods: [] as string[], hasDefaultExport: true, isMiddleware: false },
-      { name: 'onUserCreated', relativePath: 'onUserCreated.ts', methods: [] as string[], hasDefaultExport: true, isMiddleware: false },
+      {
+        name: 'echo',
+        relativePath: 'echo.ts',
+        methods: [] as string[],
+        hasDefaultExport: true,
+        isMiddleware: false,
+      },
+      {
+        name: 'onUserCreated',
+        relativePath: 'onUserCreated.ts',
+        methods: [] as string[],
+        hasDefaultExport: true,
+        isMiddleware: false,
+      },
     ];
     generateFunctionRegistry(functions, registryPath);
 
@@ -575,7 +609,9 @@ describe('Functions Registry — generateFunctionRegistry()', () => {
     expect(content).toContain('import echo_module');
     expect(content).toContain('import onUserCreated_module');
     expect(content).toContain("registerFunction('echo', wrapMethodExport(echo_module, '*'));");
-    expect(content).toContain("registerFunction('onUserCreated', wrapMethodExport(onUserCreated_module, '*'));");
+    expect(content).toContain(
+      "registerFunction('onUserCreated', wrapMethodExport(onUserCreated_module, '*'));",
+    );
     expect(content).toContain('initFunctionRegistry');
     expect(content).toContain('Auto-generated');
   });
@@ -586,13 +622,21 @@ describe('Functions Registry — generateFunctionRegistry()', () => {
     const registryPath = join(outputDir, '_functions-registry.ts');
 
     const functions = [
-      { name: 'hooks/onAuth', relativePath: 'hooks/onAuth.ts', methods: [] as string[], hasDefaultExport: true, isMiddleware: false },
+      {
+        name: 'hooks/onAuth',
+        relativePath: 'hooks/onAuth.ts',
+        methods: [] as string[],
+        hasDefaultExport: true,
+        isMiddleware: false,
+      },
     ];
     generateFunctionRegistry(functions, registryPath);
 
     const content = readFileSync(registryPath, 'utf-8');
-    expect(content).toContain("../../../../functions/hooks/onAuth.ts");
-    expect(content).toContain("registerFunction('hooks/onAuth', wrapMethodExport(hooks_onAuth_module, '*'));");
+    expect(content).toContain('../../../../functions/hooks/onAuth.ts');
+    expect(content).toContain(
+      "registerFunction('hooks/onAuth', wrapMethodExport(hooks_onAuth_module, '*'));",
+    );
   });
 
   it('creates output directory if not exists', () => {
@@ -600,7 +644,15 @@ describe('Functions Registry — generateFunctionRegistry()', () => {
     const registryPath = join(outputDir, '_functions-registry.ts');
 
     generateFunctionRegistry(
-      [{ name: 'test', relativePath: 'test.ts', methods: [] as string[], hasDefaultExport: true, isMiddleware: false }],
+      [
+        {
+          name: 'test',
+          relativePath: 'test.ts',
+          methods: [] as string[],
+          hasDefaultExport: true,
+          isMiddleware: false,
+        },
+      ],
       registryPath,
     );
 
@@ -612,11 +664,33 @@ describe('Functions Registry — generateFunctionRegistry()', () => {
     mkdirSync(outputDir, { recursive: true });
     const registryPath = join(outputDir, '_functions-registry.ts');
 
-    generateFunctionRegistry([{ name: 'v1', relativePath: 'v1.ts', methods: [] as string[], hasDefaultExport: true, isMiddleware: false }], registryPath);
+    generateFunctionRegistry(
+      [
+        {
+          name: 'v1',
+          relativePath: 'v1.ts',
+          methods: [] as string[],
+          hasDefaultExport: true,
+          isMiddleware: false,
+        },
+      ],
+      registryPath,
+    );
     const content1 = readFileSync(registryPath, 'utf-8');
     expect(content1).toContain("'v1'");
 
-    generateFunctionRegistry([{ name: 'v2', relativePath: 'v2.ts', methods: [] as string[], hasDefaultExport: true, isMiddleware: false }], registryPath);
+    generateFunctionRegistry(
+      [
+        {
+          name: 'v2',
+          relativePath: 'v2.ts',
+          methods: [] as string[],
+          hasDefaultExport: true,
+          isMiddleware: false,
+        },
+      ],
+      registryPath,
+    );
     const content2 = readFileSync(registryPath, 'utf-8');
     expect(content2).toContain("'v2'");
     expect(content2).not.toContain("'v1'");
@@ -642,7 +716,15 @@ describe('Functions Registry — generateFunctionRegistry()', () => {
     const registryPath = join(outputDir, '_functions-registry.ts');
 
     generateFunctionRegistry(
-      [{ name: 'dev/auth-probe', relativePath: 'dev/auth-probe.ts', methods: ['GET'] as string[], hasDefaultExport: false, isMiddleware: false }],
+      [
+        {
+          name: 'dev/auth-probe',
+          relativePath: 'dev/auth-probe.ts',
+          methods: ['GET'] as string[],
+          hasDefaultExport: false,
+          isMiddleware: false,
+        },
+      ],
       registryPath,
       {
         configImportPath: './generated-config.js',
@@ -651,7 +733,9 @@ describe('Functions Registry — generateFunctionRegistry()', () => {
     );
 
     const content = readFileSync(registryPath, 'utf-8');
-    expect(content).toContain("import * as dev_auth_probe_module from '../../../functions/dev/auth-probe.ts'");
+    expect(content).toContain(
+      "import * as dev_auth_probe_module from '../../../functions/dev/auth-probe.ts'",
+    );
   });
 
   it('registers blocking storage hook events as storage triggers', () => {
@@ -682,7 +766,11 @@ describe('Plugin Tables Merge — mergePluginTables()', () => {
       shared: { tables: { posts: { schema: {} } } },
     };
     const plugins = [
-      { name: 'plugin-stripe', config: {}, tables: { customers: { schema: { userId: { type: 'string' } } } } },
+      {
+        name: 'plugin-stripe',
+        config: {},
+        tables: { customers: { schema: { userId: { type: 'string' } } } },
+      },
     ];
 
     mergePluginTables(databases, plugins as any);
@@ -870,14 +958,12 @@ describe('Watch Filtering Logic', () => {
     writeFileSync(join(configDir, 'nested', 'auth.mts'), 'export default {};');
     writeFileSync(join(configDir, 'notes.md'), '# ignore');
 
-    const files = _devInternals.listConfigWatchFiles(configDir)
-      .map((file) => file.replace(`${tmpDir}/`, ''))
+    const files = _devInternals
+      .listConfigWatchFiles(configDir)
+      .map((file) => relative(tmpDir, file).replace(/\\/g, '/'))
       .sort();
 
-    expect(files).toEqual([
-      'config/nested/auth.mts',
-      'config/rate-limits.ts',
-    ]);
+    expect(files).toEqual(['config/nested/auth.mts', 'config/rate-limits.ts']);
   });
 });
 
@@ -902,7 +988,15 @@ describe('Edge Cases', () => {
     const registryPath = join(outputDir, '_functions-registry.ts');
 
     generateFunctionRegistry(
-      [{ name: 'on-user-created', relativePath: 'on-user-created.ts', methods: [] as string[], hasDefaultExport: true, isMiddleware: false }],
+      [
+        {
+          name: 'on-user-created',
+          relativePath: 'on-user-created.ts',
+          methods: [] as string[],
+          hasDefaultExport: true,
+          isMiddleware: false,
+        },
+      ],
       registryPath,
     );
 
