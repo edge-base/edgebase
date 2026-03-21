@@ -108,7 +108,7 @@ async function login(email: string, password: string): Promise<void> {
 
 /**
  * Initial admin setup — create the first admin account.
- * Local development only; release deployments bootstrap admins through the CLI.
+ * Non-release environments only; release deployments bootstrap admins through the CLI.
  * POST {apiOrigin}/admin/api/setup
  */
 async function setup(email: string, password: string): Promise<void> {

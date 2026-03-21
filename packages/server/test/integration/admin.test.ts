@@ -282,6 +282,35 @@ describe('1-21 admin — setup', () => {
     expect(second.status).toBe(400);
   });
 
+  it('non-release setup does not depend on the request host header', async () => {
+    await resetAdminState();
+
+    const res = await worker.fetch(
+      new Request('http://example.invalid/admin/api/setup', {
+        method: 'POST',
+        headers: {
+          'X-EdgeBase-Service-Key': SK,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: 'host-check@test.com',
+          password: 'Admin1234!',
+        }),
+      }),
+      {
+        ...(globalThis as any).env,
+        EDGEBASE_CONFIG: JSON.stringify({ release: false }),
+      } as any,
+      {
+        waitUntil() {},
+        passThroughOnException() {},
+      } as unknown as ExecutionContext,
+    );
+
+    expect(res.status).toBe(201);
+    expect(await adminCount()).toBe(1);
+  });
+
   it('local dev setup — email 누락 → 400', async () => {
     await resetAdminState();
     const { status } = await apiWithEnv('POST', '/admin/api/setup', {

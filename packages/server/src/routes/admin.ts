@@ -119,27 +119,10 @@ function quoteSqlIdentifier(identifier: string): string {
   return `"${identifier}"`;
 }
 
-function isLoopbackAdminHost(hostname: string): boolean {
-  return hostname === 'localhost'
-    || hostname === '127.0.0.1'
-    || hostname === '0.0.0.0'
-    || hostname === '::1'
-    || hostname === '[::1]';
-}
-
-function isPublicAdminSetupAllowed(c: { env: Env; req: { url: string } }): boolean {
+function isPublicAdminSetupAllowed(env: Env): boolean {
   try {
-    const config = parseConfig(c.env);
-    if (config.release) {
-      return false;
-    }
-  } catch {
-    return false;
-  }
-
-  try {
-    const url = new URL(c.req.url);
-    return isLoopbackAdminHost(url.hostname);
+    const config = parseConfig(env);
+    return config.release !== true;
   } catch {
     return false;
   }
@@ -388,7 +371,7 @@ adminRoute.openapi(adminSetupStatus, async (c) => {
   await ensureAuthSchema(getAuthDb(c));
   const exists = await adminExists(getAuthDb(c));
   const needsSetup = !exists;
-  const publicSetupAllowed = needsSetup ? isPublicAdminSetupAllowed(c) : false;
+  const publicSetupAllowed = needsSetup ? isPublicAdminSetupAllowed(c.env) : false;
   return c.json({
     needsSetup,
     publicSetupAllowed,
@@ -422,6 +405,7 @@ const adminSetup = createRoute({
   responses: {
     201: { description: 'Admin created', content: { 'application/json': { schema: jsonResponseSchema } } },
     400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
+    403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
   },
 });
 
@@ -429,7 +413,7 @@ adminRoute.openapi(adminSetup, async (c) => {
   await ensureAuthSchema(getAuthDb(c));
   const exists = await adminExists(getAuthDb(c));
   if (exists) throw new EdgeBaseError(400, 'Admin account already exists. Use login instead.', undefined, 'already-exists');
-  if (!isPublicAdminSetupAllowed(c)) {
+  if (!isPublicAdminSetupAllowed(c.env)) {
     throw new EdgeBaseError(
       403,
       'Public admin setup is disabled for this deployment. Run `npx edgebase admin bootstrap` with a Service Key, or use the deploy/docker bootstrap flow instead.',
