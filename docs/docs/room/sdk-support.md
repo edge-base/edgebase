@@ -56,18 +56,18 @@ If you are looking for the "server side" of Room, the correct destination is [Se
   - React Native: `cloudflare_realtimekit` and `p2p`
   - Flutter: `cloudflare_realtimekit` and `p2p`
   - Swift iOS: `cloudflare_realtimekit` and `p2p`
-  - Kotlin client: Android runtime currently supports `cloudflare_realtimekit` and `p2p`
+  - Kotlin client: Android and iOS runtimes currently support `cloudflare_realtimekit` and `p2p`
   - Java core / Android package: Android runtime currently supports `cloudflare_realtimekit` and `p2p`
 - Verified smoke builds in the current matrix:
   - React Native: host-app smoke builds succeeded on both iOS simulator and Android debug
   - Flutter: host-app smoke builds succeeded on Web, macOS, Android, and an Apple Silicon iOS simulator via direct Xcode device build
-  - Kotlin: JS, iOS simulator, iOS device, macOS, JVM, and Android targets compile successfully; Android unit tests verify provider selection for `cloudflare_realtimekit` and `p2p`
+  - Kotlin: JS, iOS simulator, iOS device, macOS, JVM, and Android targets compile successfully; Android unit tests verify provider selection for `cloudflare_realtimekit` and `p2p`, and iOS simulator tests verify built-in factory availability for both providers
 - Swift iOS: package tests and iOS simulator build succeeded; P2P now has package-level transport coverage, including injected screen-share source coverage
 - Java / Kotlin Android: package/runtime integration is verified through module builds, targeted transport tests, and Android host-app debug builds
-- Kotlin currently ships Room Media runtime on Android only. Swift iOS and Java Android now expose `p2p`, but native live media E2E is still strongest on Web / React Native / Flutter. Other server-only SDKs intentionally do not expose Room Media transport providers.
+- Kotlin currently ships built-in Room Media runtime on Android and iOS. JS, JVM, and macOS still share the unified room surface and compile cleanly, but do not yet ship built-in Room Media runtime providers. Swift iOS and Java Android now expose `p2p`, but native live media E2E is still strongest on Web / React Native / Flutter. Other server-only SDKs intentionally do not expose Room Media transport providers.
 
 :::note
-The strongest fully-verified Room Media paths today are Web plus the mobile host-build/runtime smoke paths on React Native, Flutter, Swift iOS, and Android-native Java/Kotlin. Kotlin multiplatform still compiles across every target, but the built-in Room Media runtime is currently scoped to Android. On Swift iOS, P2P screen share is available through an app-provided `RTKRTCVideoTrack` source rather than built-in ReplayKit capture.
+The strongest fully-verified Room Media paths today are Web plus the mobile host-build/runtime smoke paths on React Native, Flutter, Swift iOS, Kotlin iOS, and Android-native Java/Kotlin. Kotlin multiplatform still compiles across every target, but the built-in Room Media runtime is currently scoped to Android and iOS. On Swift iOS, P2P screen share is available through an app-provided `RTKRTCVideoTrack` source rather than built-in ReplayKit capture.
 :::
 
 :::tip Android host-app requirement

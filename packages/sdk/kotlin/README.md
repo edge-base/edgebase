@@ -77,19 +77,20 @@ client.destroy()
 ## Room Media Transport
 
 The Kotlin client surface includes `room.media.transport(...)` with both
-`cloudflare_realtimekit` and `p2p` wired on Android.
+`cloudflare_realtimekit` and `p2p` wired on Android and iOS.
 
 Important runtime note:
 
 - the Kotlin Multiplatform room surface compiles across Android, iOS, macOS, JS, and JVM
-- the Room Media runtime providers (`cloudflare_realtimekit` and `p2p`) are currently supported on Android
-- Apple/JS/JVM targets currently share the broader Room model types, but are outside the Room Media runtime support matrix
+- the Room Media runtime providers (`cloudflare_realtimekit` and `p2p`) are currently supported on Android and iOS
+- JS, JVM, and macOS targets still share the broader Room model types, but are outside the built-in Room Media runtime support matrix
 
 Current verification note:
 
 - Android, iOS simulator, macOS, and JS targets all compile from the monorepo
 - Android runtime/provider selection is verified for both `cloudflare_realtimekit` and `p2p`
-- the strongest runtime path today is Android
+- iOS simulator tests now verify built-in factory availability for both `cloudflare_realtimekit` and `p2p`
+- the strongest runtime paths today are Android host-app builds plus iOS simulator transport coverage
 - Android host-app smoke builds succeeded once the app used AGP 8.6+ and compileSdk 35+
 
 If you are integrating the Android runtime into an app project, treat these as the current baseline:
@@ -98,6 +99,8 @@ If you are integrating the Android runtime into an app project, treat these as t
 - `compileSdk = 35` or newer
 - `android.useAndroidX=true`
 - `android.enableJetifier=true`
+
+If you are integrating the iOS runtime from the monorepo source modules, the current build expects the matching Cloudflare iOS binary frameworks to be resolved during the Gradle build. That source-build path is now covered in the module's iOS simulator tests.
 
 Read more:
 

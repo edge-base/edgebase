@@ -6,7 +6,11 @@
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
+import org.jetbrains.kotlin.konan.target.Family
 import org.gradle.api.publish.maven.MavenPublication
+import java.io.File
+import java.net.URL
+import java.security.MessageDigest
 
 plugins {
     kotlin("multiplatform")
@@ -32,6 +36,66 @@ val enableAppleFrameworks = (findProperty("kotlin.apple.frameworks") as String?)
         val lower = task.lowercase()
         lower.contains("xcframework") || lower.contains("framework") || lower.contains("ios") || lower.contains("macos")
     }
+
+val kotlinIosFrameworksRoot = layout.buildDirectory.dir("realtimekit-ios-frameworks")
+
+data class KotlinIosBinaryArtifact(
+    val name: String,
+    val url: String,
+    val checksum: String,
+)
+
+val kotlinIosBinaryArtifacts = listOf(
+    KotlinIosBinaryArtifact(
+        name = "RTKWebRTC-v125.6422.07.zip",
+        url = "https://sdk-assets.realtime.cloudflare.com/RTKWebRTC-v125.6422.07.zip",
+        checksum = "114cb3ea15c5709f2c35d2b1c7a64e742a6902d375d54895984263bb79d75ce3",
+    ),
+    KotlinIosBinaryArtifact(
+        name = "RealtimeKit-1.5.0.zip",
+        url = "https://sdk-assets.realtime.cloudflare.com/RealtimeKit-1.5.0-4a3c5a2a-d75a-4973-816e-be10c81494d6.xcframework.zip",
+        checksum = "f609f6365e70325da04dd59ba9f6b49d5593c030eb51022d2bcfb9e32d4b85d3",
+    ),
+)
+
+fun sha256(file: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            digest.update(buffer, 0, read)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
+
+val prepareKotlinIosBinaryFrameworks = tasks.register("prepareKotlinIosBinaryFrameworks") {
+    outputs.dir(kotlinIosFrameworksRoot)
+    doLast {
+        val root = kotlinIosFrameworksRoot.get().asFile
+        root.mkdirs()
+
+        kotlinIosBinaryArtifacts.forEach { artifact ->
+            val zipFile = root.resolve(artifact.name)
+            if (!zipFile.exists() || sha256(zipFile) != artifact.checksum) {
+                zipFile.outputStream().use { output ->
+                    URL(artifact.url).openStream().use { input -> input.copyTo(output) }
+                }
+                val actualChecksum = sha256(zipFile)
+                check(actualChecksum == artifact.checksum) {
+                    "Checksum mismatch for ${artifact.name}: expected ${artifact.checksum}, got $actualChecksum"
+                }
+            }
+
+            copy {
+                from(zipTree(zipFile))
+                into(root)
+            }
+        }
+    }
+}
 
 kotlin {
     // Android
@@ -80,6 +144,41 @@ kotlin {
         }
     }
 
+    targets.configureEach {
+        if (this is org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget && konanTarget.family == Family.IOS) {
+            val isSimulator = name.contains("Simulator", ignoreCase = true) || name.endsWith("X64")
+            val frameworksRoot = kotlinIosFrameworksRoot.get().asFile
+            val webrtcFrameworkDir = frameworksRoot.resolve(
+                "RTKWebRTC.xcframework/${if (isSimulator) "ios-arm64_x86_64-simulator" else "ios-arm64"}",
+            )
+            val realtimeKitFrameworkDir = frameworksRoot.resolve(
+                "RealtimeKit.xcframework/${if (isSimulator) "ios-arm64_x86_64-simulator" else "ios-arm64"}",
+            )
+            val swiftLibDir = File(
+                if (isSimulator) {
+                    "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator"
+                } else {
+                    "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphoneos"
+                },
+            )
+
+            binaries.configureEach {
+                linkTaskProvider.configure {
+                    dependsOn(prepareKotlinIosBinaryFrameworks)
+                }
+                linkerOpts(
+                    "-F${webrtcFrameworkDir.absolutePath}",
+                    "-F${realtimeKitFrameworkDir.absolutePath}",
+                    "-L${swiftLibDir.absolutePath}",
+                    "-rpath",
+                    webrtcFrameworkDir.absolutePath,
+                    "-rpath",
+                    realtimeKitFrameworkDir.absolutePath,
+                )
+            }
+        }
+    }
+
     // Common source set hierarchy
     applyDefaultHierarchyTemplate()
 
@@ -109,6 +208,13 @@ kotlin {
         val appleMain by getting {
             dependencies {
                 implementation("io.ktor:ktor-client-darwin:3.1.0")
+            }
+        }
+
+        val iosMain by getting {
+            dependencies {
+                implementation("com.cloudflare.realtimekit:core:1.5.0")
+                implementation("com.cloudflare.realtimekit:webrtc-kmp:0.125.8")
             }
         }
 
