@@ -1,0 +1,123 @@
+# EdgeBase C++ Core SDK
+
+Use this file as a quick-reference contract for AI coding assistants working with the pure C++17 EdgeBase client SDK in `packages/sdk/cpp/packages/core`.
+
+## Package Boundary
+
+Use this package for native client-side C++ apps and engine integrations that need the EdgeBase client surface without Unreal-specific wrappers.
+
+This package is not a privileged admin SDK. Do not assume Service Key flows, raw SQL admin helpers, admin auth management, or other trusted server-only APIs exist here. If you need privileged backend access, use an EdgeBase admin SDK in a server runtime or call your own backend.
+
+## Source Of Truth
+
+- Package overview: https://github.com/edge-base/edgebase/blob/main/packages/sdk/cpp/README.md
+- Public header: https://github.com/edge-base/edgebase/blob/main/packages/sdk/cpp/packages/core/include/edgebase/edgebase.h
+- Generated client wrappers: https://github.com/edge-base/edgebase/blob/main/packages/sdk/cpp/packages/core/include/edgebase/generated/client_wrappers.h
+- Quickstart: https://edgebase.fun/docs/getting-started/quickstart
+- Authentication: https://edgebase.fun/docs/authentication
+- Database client SDK: https://edgebase.fun/docs/database/client-sdk
+- Database subscriptions: https://edgebase.fun/docs/database/subscriptions
+- Storage upload/download: https://edgebase.fun/docs/storage/upload-download
+- Functions client SDK: https://edgebase.fun/docs/functions/client-sdk
+- Push client SDK: https://edgebase.fun/docs/push/client-sdk
+- Analytics client SDK: https://edgebase.fun/docs/analytics/client-sdk
+- Room client SDK: https://edgebase.fun/docs/room/client-sdk
+
+If docs, snippets, and assumptions disagree, prefer the current header/API surface over guessed patterns from another runtime.
+
+## Canonical Examples
+
+### Create a client
+
+```cpp
+#include <edgebase/edgebase.h>
+
+eb::EdgeBase client("https://your-project.edgebase.fun");
+```
+
+### Sign in and read the current user
+
+```cpp
+auto result = client.auth().signIn("june@example.com", "pass1234");
+
+if (result.ok) {
+  std::string userJson = client.auth().currentUser();
+}
+```
+
+### Query data
+
+```cpp
+auto scores = client.db("shared")
+    .table("scores")
+    .where("stage", "==", "5")
+    .orderBy("score", "desc")
+    .limit(10)
+    .getList();
+```
+
+### Upload a file
+
+```cpp
+std::vector<uint8_t> bytes = {0x01, 0x02, 0x03};
+
+auto upload = client.storage()
+    .bucket("avatars")
+    .upload("user123.bin", bytes, "application/octet-stream");
+```
+
+### Call a function
+
+```cpp
+auto response = client.functions().post(
+    "contact/send",
+    R"({"email":"june@example.com","message":"hello"})");
+```
+
+### Join a room
+
+```cpp
+auto room = client.room("game", "lobby-1");
+```
+
+## Hard Rules
+
+- this is a client SDK; do not assume privileged admin/server helpers exist here
+- `eb::EdgeBase` is the main entry point
+- `client.db(namespace, instanceId?)` takes the instance id positionally
+- `TableRef` is an immutable query builder; chain `where`, `orderBy`, `limit`, `page`, `after`, `before`, or `search` before `getList()`
+- `auth().currentUser()` returns a JSON string, not a typed user object
+- `storage().bucket(name)` returns a bucket-scoped client
+- `functions().get/post/put/patch/del` use function paths like `"jobs/run"`
+- `push()` requires native token/provider wiring from the host app
+- `room(namespace, roomId, opts?)` returns a `std::shared_ptr<edgebase::RoomClient>`
+
+## Common Mistakes
+
+- do not invent a C++ admin SDK surface that is not present in this package
+- do not expose privileged secrets in shipped native client binaries
+- do not pass instance ids as named objects; use `db("workspace", "ws-1")`
+- do not assume `currentUser()` returns parsed structs; it returns raw JSON
+- do not copy JavaScript async/Promise syntax into C++
+- do not use Unreal-specific `UObject`, `Blueprint`, or `FString` types in pure core code
+
+## Quick Reference
+
+```text
+eb::EdgeBase(url)                                        -> client entry point
+client.auth()                                            -> AuthClient
+client.storage()                                         -> StorageClient
+client.push()                                            -> PushClient
+client.functions()                                       -> FunctionsClient
+client.analytics()                                       -> AnalyticsClient
+client.db(namespace, instanceId?)                        -> DbRef
+client.room(namespace, roomId, opts?)                    -> shared_ptr<edgebase::RoomClient>
+client.setContext(map)                                   -> void
+client.setLocale(locale)                                 -> void
+client.auth().signUp(email, password, displayName?, captchaToken?) -> Result
+client.auth().signIn(email, password, captchaToken?)     -> Result
+client.auth().currentUser()                              -> std::string
+client.db("shared").table("posts").getList()             -> Result
+client.storage().bucket(name).upload(key, bytes, type)   -> Result
+client.functions().post(path, jsonBody)                  -> Result
+```
