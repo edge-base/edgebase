@@ -161,7 +161,11 @@ describe('js-core:field-ops — increment / deleteField', () => {
   let postId: string;
 
   beforeAll(async () => {
-    const { data } = await raw('POST', '/api/db/shared/tables/posts', { title: 'FieldOps', viewCount: 0 });
+    const { data } = await raw('POST', '/api/db/shared/tables/posts', {
+      title: 'FieldOps',
+      viewCount: 0,
+      extra: 'to-delete',
+    });
     postId = data?.id;
   });
 
@@ -185,9 +189,9 @@ describe('js-core:field-ops — increment / deleteField', () => {
 
   it('deleteField → null', async () => {
     if (!postId) return;
-    const body = { title: { $op: 'deleteField' } };
+    const body = { extra: { $op: 'deleteField' } };
     const { data } = await raw('PATCH', `/api/db/shared/tables/posts/${postId}`, body);
-    expect(data.title).toBeNull();
+    expect(data.extra === null || data.extra === undefined).toBe(true);
   });
 
   it('SDK increment() serializeFieldOps 확인', () => {
@@ -262,8 +266,12 @@ describe('js-core:table — OR filter', () => {
   const orIds: string[] = [];
 
   beforeAll(async () => {
-    for (const t of ['OR Alpha', 'OR Beta', 'OR Gamma']) {
-      const { data } = await raw('POST', '/api/db/shared/tables/posts', { title: t });
+    for (const [title, status] of [
+      ['OR Alpha', 'draft'],
+      ['OR Beta', 'archived'],
+      ['OR Gamma', 'published'],
+    ] as const) {
+      const { data } = await raw('POST', '/api/db/shared/tables/posts', { title, status });
       if (data?.id) orIds.push(data.id);
     }
   });
@@ -273,13 +281,19 @@ describe('js-core:table — OR filter', () => {
   });
 
   it('orFilter — title=OR Alpha OR title=OR Beta → 2개', async () => {
-    const filter = JSON.stringify([['title', '==', 'OR Alpha']]);
-    const orFilter = JSON.stringify([['title', '==', 'OR Beta']]);
+    const filter = JSON.stringify([['title', 'contains', 'OR ']]);
+    const orFilter = JSON.stringify([
+      ['status', '==', 'draft'],
+      ['status', '==', 'archived'],
+    ]);
     const { data } = await raw(
       'GET',
       `/api/db/shared/tables/posts?filter=${encodeURIComponent(filter)}&orFilter=${encodeURIComponent(orFilter)}&limit=10`
     );
     const titles = (data.items ?? []).map((i: any) => i.title);
-    expect(titles.includes('OR Alpha') || titles.includes('OR Beta')).toBe(true);
+    expect(data.items).toHaveLength(2);
+    expect(titles).toContain('OR Alpha');
+    expect(titles).toContain('OR Beta');
+    expect(titles).not.toContain('OR Gamma');
   });
 });
