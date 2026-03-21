@@ -59,6 +59,79 @@ jobs:
       - name: Admin Dashboard Tests
         run: pnpm --dir packages/admin test
 
+  compatibility-node:
+    name: Node Compatibility (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Cross-OS compatibility is intentionally scoped to user-facing Node packages.
+      # Bash-heavy maintainer scripts and E2E orchestration remain on Linux/macOS jobs.
+      - name: Build shared package
+        run: pnpm --dir packages/shared build
+
+      - name: Build CLI package
+        run: pnpm --dir packages/cli build
+
+      - name: Build server package
+        run: pnpm --dir packages/server build
+
+      - name: Build admin dashboard
+        run: pnpm --dir packages/admin build
+
+      - name: Build JS SDK core package
+        run: pnpm --dir packages/sdk/js/packages/core build
+
+      - name: Build JS SDK web package
+        run: pnpm --dir packages/sdk/js/packages/web build
+
+      - name: Build JS SDK admin package
+        run: pnpm --dir packages/sdk/js/packages/admin build
+
+      - name: Build JS SDK SSR package
+        run: pnpm --dir packages/sdk/js/packages/ssr build
+
+      - name: Build React Native SDK package
+        run: pnpm --dir packages/sdk/react-native build
+
+      - name: Test shared package
+        run: pnpm --dir packages/shared test
+
+      - name: Test CLI package
+        run: pnpm --dir packages/cli test
+
+      - name: Test server package
+        run: pnpm --dir packages/server test
+
+      - name: Test admin dashboard
+        run: pnpm --dir packages/admin test
+
+      - name: Test JS SDK core package
+        run: pnpm --dir packages/sdk/js/packages/core test
+
+      - name: Test JS SDK web package
+        run: pnpm --dir packages/sdk/js/packages/web test
+
+      - name: Test JS SDK admin package
+        run: pnpm --dir packages/sdk/js/packages/admin test
+
+      - name: Test React Native SDK package
+        run: pnpm --dir packages/sdk/react-native test
+
   sdk-python:
     runs-on: ubuntu-latest
     steps:
