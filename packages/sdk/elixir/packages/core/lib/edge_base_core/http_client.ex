@@ -1,4 +1,6 @@
 defmodule EdgeBaseCore.HttpClient do
+  import Bitwise
+
   alias EdgeBaseCore.Error
 
   @max_transport_retries 2
