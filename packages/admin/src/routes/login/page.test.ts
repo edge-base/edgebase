@@ -100,7 +100,7 @@ describe('login page', () => {
     });
 
     it('blocks setup submission when the password is too short', async () => {
-        mocks.fetchSetupStatus.mockResolvedValue({ needsSetup: true });
+        mocks.fetchSetupStatus.mockResolvedValue({ needsSetup: true, publicSetupAllowed: true });
 
         render(LoginPage);
 
@@ -117,6 +117,23 @@ describe('login page', () => {
 
         expect(await screen.findByText('Password must be at least 8 characters.')).toBeInTheDocument();
         expect(mocks.authStore.setup).not.toHaveBeenCalled();
+    });
+
+    it('shows CLI bootstrap instructions when public setup is disabled', async () => {
+        mocks.fetchSetupStatus.mockResolvedValue({
+            needsSetup: true,
+            publicSetupAllowed: false,
+            message: 'Public admin setup is disabled for this deployment.',
+        });
+
+        render(LoginPage);
+
+        await screen.findByText('Finish admin bootstrap from the CLI');
+        expect(screen.getByText(/Public admin setup is disabled for this deployment/i)).toBeInTheDocument();
+        expect(
+            screen.getByText('npx edgebase admin bootstrap --url http://localhost --service-key <service-key>'),
+        ).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Create Admin Account' })).not.toBeInTheDocument();
     });
 
     it('shows the recovery hint when login fails with invalid credentials', async () => {

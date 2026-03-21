@@ -347,8 +347,13 @@ The Admin Dashboard is built into self-hosted deployments:
 http://your-domain.com/admin
 ```
 
-An admin account setup screen is displayed on first access.
-If you lose an admin password later, recover it with `npx edgebase admin reset-password` using a configured root Service Key. Admin recovery is CLI-based rather than email-based.
+Production-style self-hosted deployments do not expose a public first-admin form. Bootstrap the first admin from your project directory instead:
+
+```bash
+npx edgebase admin bootstrap --url http://localhost:8787 --service-key <service-key>
+```
+
+`npx edgebase docker run` guides you through this automatically for first-time setups. If you lose an admin password later, recover it with `npx edgebase admin reset-password` using the same root Service Key. Admin recovery is CLI-based rather than email-based.
 
 ---
 

@@ -6,7 +6,6 @@
  */
 import { Command } from 'commander';
 import { execFileSync } from 'node:child_process';
-import * as readline from 'node:readline';
 import { webcrypto } from 'node:crypto';
 import chalk from 'chalk';
 import { fetchWithTimeout } from '../lib/fetch-with-timeout.js';
@@ -17,12 +16,17 @@ import {
   raiseNeedsInput,
 } from '../lib/agent-contract.js';
 import { ensureCloudflareAuth } from '../lib/cf-auth.js';
-import { isJson, isNonInteractive, isQuiet } from '../lib/cli-context.js';
+import { isJson, isQuiet } from '../lib/cli-context.js';
 import {
   readProjectWranglerContext,
   resolveManagedD1DatabaseName,
 } from '../lib/project-runtime.js';
 import { wranglerCommand, wranglerArgs } from '../lib/wrangler.js';
+import {
+  ensureBootstrapAdmin,
+  normalizeAdminEmail,
+  promptValue,
+} from '../lib/admin-bootstrap.js';
 
 const HASH_ITERATIONS = 100_000;
 const SALT_LENGTH = 16;
@@ -55,57 +59,6 @@ async function hashPassword(password: string): Promise<string> {
   );
 
   return `pbkdf2:sha256:${HASH_ITERATIONS}:${toBase64(salt.buffer)}:${toBase64(hash)}`;
-}
-
-function prompt(
-  question: string,
-  hidden = false,
-  options?: { field?: string; hint?: string; message?: string },
-): Promise<string> {
-  if (!process.stdin.isTTY || isNonInteractive()) {
-    raiseNeedsInput({
-      code: 'admin_input_required',
-      field: options?.field,
-      message: options?.message ?? `${question.replace(/:?\s*$/, '')} is required.`,
-      hint: options?.hint,
-    });
-  }
-
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
-    if (hidden && process.stdout.isTTY) {
-      process.stdout.write(question);
-      const stdin = process.stdin;
-      const oldRawMode = stdin.isRaw;
-      stdin.setRawMode(true);
-      let input = '';
-      stdin.resume();
-      stdin.on('data', function handler(ch: Buffer) {
-        const c = ch.toString('utf8');
-        if (c === '\n' || c === '\r' || c === '\u0004') {
-          stdin.setRawMode(oldRawMode ?? false);
-          stdin.removeListener('data', handler);
-          stdin.pause();
-          rl.close();
-          process.stdout.write('\n');
-          resolve(input);
-        } else if (c === '\u007F' || c === '\b') {
-          if (input.length > 0) input = input.slice(0, -1);
-        } else {
-          input += c;
-        }
-      });
-    } else {
-      rl.question(question, (answer) => {
-        rl.close();
-        resolve(answer);
-      });
-    }
-  });
 }
 
 function extractCommandFailure(error: unknown): string {
@@ -263,6 +216,89 @@ export const adminCommand = new Command('admin')
   .description('Admin management commands');
 
 adminCommand
+  .command('bootstrap')
+  .description('Create the first admin account using a Service Key')
+  .option('--url <url>', 'Worker URL (default: EDGEBASE_URL or http://localhost:8787)')
+  .option('--service-key <key>', 'Service Key (or set EDGEBASE_SERVICE_KEY env)')
+  .option('--email <email>', 'Bootstrap admin email')
+  .option('--password-file <path>', 'Read bootstrap admin password from a file')
+  .option('--password-stdin', 'Read bootstrap admin password from stdin')
+  .action(async (options: {
+    url?: string;
+    serviceKey?: string;
+    email?: string;
+    passwordFile?: string;
+    passwordStdin?: boolean;
+  }) => {
+    const serviceKey = resolveOptionalServiceKey(options);
+    if (!serviceKey) {
+      raiseNeedsInput({
+        code: 'service_key_required',
+        field: 'serviceKey',
+        message: 'Service Key required for bootstrap admin creation.',
+        hint: 'Provide --service-key <key>, set EDGEBASE_SERVICE_KEY, or deploy once so .edgebase/secrets.json is populated.',
+      });
+    }
+
+    const url = resolveServerUrl({ url: options.url }, false) || 'http://localhost:8787';
+    const email = options.email
+      ? normalizeAdminEmail(options.email)
+      : await promptValue('Bootstrap admin email: ', false, {
+        field: 'bootstrapAdminEmail',
+        hint: 'Rerun with --email <email>.',
+        message: 'A bootstrap admin email is required before setup can continue.',
+      });
+
+    if (!isQuiet()) {
+      console.log('\n🔄 Checking admin bootstrap status...');
+    }
+
+    const result = await ensureBootstrapAdmin({
+      url,
+      serviceKey,
+      email,
+      passwordFile: options.passwordFile,
+      passwordStdin: options.passwordStdin,
+      emailPromptHint: 'Rerun with --email <email>.',
+      passwordPromptHint: 'Use --password-file <path> or pipe the password with --password-stdin in CI/CD.',
+      emailRequiredMessage: 'A bootstrap admin email is required before setup can continue.',
+      passwordRequiredMessage: 'A bootstrap admin password is required before setup can continue.',
+    });
+
+    if (isJson()) {
+      console.log(JSON.stringify({
+        status: 'success',
+        action: result.status,
+        url,
+        ...(result.status === 'created'
+          ? { admin: result.admin }
+          : result.status === 'already-configured'
+            ? { admin: result.admin, admins: result.admins }
+            : { admins: result.admins, requestedEmail: result.requestedEmail }),
+      }));
+      return;
+    }
+
+    if (result.status === 'created') {
+      console.log(chalk.green('✅'), `Bootstrap admin created for ${result.admin.email}.`);
+      return;
+    }
+
+    if (result.status === 'already-configured') {
+      console.log(chalk.green('✓'), `Bootstrap admin already configured for ${result.admin.email}.`);
+      return;
+    }
+
+    const knownAdmins = result.admins.map((admin) => admin.email).join(', ');
+    console.log(chalk.yellow('⚠'), 'Admin accounts already exist, so bootstrap was skipped.');
+    console.log(chalk.dim(`  Existing admins: ${knownAdmins}`));
+    if (result.requestedEmail) {
+      console.log(chalk.dim(`  Requested bootstrap email: ${result.requestedEmail}`));
+    }
+    console.log(chalk.dim('  Add or rotate admins from the dashboard settings or the admin API instead of re-running bootstrap.'));
+  });
+
+adminCommand
   .command('reset-password')
   .description('Reset admin password')
   .option('--url <url>', 'Worker URL (default: EDGEBASE_URL or http://localhost:8787)')
@@ -271,12 +307,12 @@ adminCommand
   .option('--password <password>', 'New password (skip interactive prompt)')
   .option('--local', 'Use local D1 database (for local dev)')
   .action(async (options: { url?: string; serviceKey?: string; email?: string; password?: string; local?: boolean }) => {
-    const email = options.email ?? await prompt('Admin email: ', false, {
+    const email = options.email ?? await promptValue('Admin email: ', false, {
       field: 'email',
       hint: 'Rerun with --email <email>.',
       message: 'An admin email is required before password reset can continue.',
     });
-    const newPassword = options.password ?? await prompt('New password (min 8 chars): ', true, {
+    const newPassword = options.password ?? await promptValue('New password (min 8 chars): ', true, {
       field: 'password',
       hint: 'Rerun with --password <password>.',
       message: 'A new password is required before password reset can continue.',

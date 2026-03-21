@@ -1,8 +1,16 @@
 /**
  * Tests for CLI admin command — password validation, Service Key requirement.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { toSqliteStringLiteral } from '../src/commands/admin.js';
+import {
+  ensureBootstrapAdmin,
+  normalizeAdminEmail,
+} from '../src/lib/admin-bootstrap.js';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 // ======================================================================
 // 1. Password validation
@@ -66,6 +74,88 @@ describe('Email validation', () => {
   it('accepts any non-empty email', () => {
     expect(validateEmail('admin@example.com')).toBe(true);
     expect(validateEmail('user')).toBe(true); // admin.ts does not validate format
+  });
+});
+
+describe('bootstrap admin helpers', () => {
+  it('normalizes bootstrap admin email values', () => {
+    expect(normalizeAdminEmail(' Admin@Example.COM ')).toBe('admin@example.com');
+  });
+
+  it('treats a matching existing admin as already configured', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        admins: [{ id: 'admin_1', email: 'admin@example.com' }],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch;
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await ensureBootstrapAdmin({
+      url: 'http://localhost:8787',
+      serviceKey: 'sk-test',
+      email: 'Admin@Example.com',
+      password: 'Admin1234!',
+    });
+
+    expect(result.status).toBe('already-configured');
+  });
+
+  it('skips bootstrap when a different admin already exists', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        admins: [{ id: 'admin_1', email: 'owner@example.com' }],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch;
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await ensureBootstrapAdmin({
+      url: 'http://localhost:8787',
+      serviceKey: 'sk-test',
+      email: 'new-owner@example.com',
+      password: 'Admin1234!',
+    });
+
+    expect(result).toEqual({
+      status: 'skipped-existing',
+      admins: [{ id: 'admin_1', email: 'owner@example.com' }],
+      requestedEmail: 'new-owner@example.com',
+    });
+  });
+
+  it('creates the first admin when none exist yet', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ admins: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 'admin_1',
+        email: 'admin@example.com',
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }));
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const result = await ensureBootstrapAdmin({
+      url: 'http://localhost:8787',
+      serviceKey: 'sk-test',
+      email: 'admin@example.com',
+      password: 'Admin1234!',
+    });
+
+    expect(result).toEqual({
+      status: 'created',
+      admin: {
+        id: 'admin_1',
+        email: 'admin@example.com',
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

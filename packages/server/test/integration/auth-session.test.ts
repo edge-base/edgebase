@@ -17,6 +17,7 @@
  *            signout 후 토큰은 무효화됨 → 독립적 계정 사용
  */
 import { describe, it, expect, beforeAll } from 'vitest';
+import { signRefreshToken } from '../../src/lib/jwt.js';
 
 const BASE = 'http://localhost';
 
@@ -194,6 +195,7 @@ describe('1-11 auth-session — refresh', () => {
 
 describe('1-11 auth-session — signout', () => {
   let refreshToken: string;
+  let forgedRefreshToken: string;
 
   beforeAll(async () => {
     const { data } = await api('POST', '/signup', {
@@ -201,11 +203,17 @@ describe('1-11 auth-session — signout', () => {
       password: 'Signout1234!',
     });
     refreshToken = data.refreshToken;
+    forgedRefreshToken = await signRefreshToken({ sub: data.user.id }, 'wrong-signout-secret', '28d');
   });
 
   it('유효한 refreshToken으로 signout → 200', async () => {
     const { status } = await api('POST', '/signout', { refreshToken });
     expect(status).toBe(200);
+  });
+
+  it('JWT 형태이지만 위조된 refreshToken으로 signout → 401', async () => {
+    const { status } = await api('POST', '/signout', { refreshToken: forgedRefreshToken });
+    expect(status).toBe(401);
   });
 
   it('signout 후 동일 refreshToken refresh → 401', async () => {

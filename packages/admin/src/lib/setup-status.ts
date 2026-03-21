@@ -2,6 +2,9 @@ import { getAdminApiUrl } from '$lib/runtime-config';
 
 export interface SetupStatus {
 	needsSetup: boolean;
+	publicSetupAllowed?: boolean;
+	setupMethod?: 'browser' | 'cli' | 'login';
+	message?: string;
 }
 
 export async function fetchSetupStatus(): Promise<SetupStatus> {

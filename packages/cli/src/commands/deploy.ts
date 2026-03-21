@@ -45,8 +45,11 @@ import {
   type DumpedData,
   type MigrationOptions,
 } from '../lib/migrator.js';
-import { isCliStructuredError, raiseCliError } from '../lib/agent-contract.js';
-import { resolveServiceKey as resolveServiceKeyFromOptions } from '../lib/resolve-options.js';
+import { isCliStructuredError, raiseCliError, raiseNeedsInput } from '../lib/agent-contract.js';
+import {
+  resolveOptionalServiceKey,
+  resolveServiceKey as resolveServiceKeyFromOptions,
+} from '../lib/resolve-options.js';
 import { parseDevVars, parseEnvFile } from '../lib/dev-sidecar.js';
 import { ensureCloudflareAuth, ensureWranglerToml, resolveApiToken } from '../lib/cf-auth.js';
 import { spin } from '../lib/spinner.js';
@@ -80,6 +83,13 @@ import {
   INTERNAL_D1_BINDINGS,
   writeRuntimeConfigShim,
 } from '../lib/runtime-scaffold.js';
+import {
+  ensureBootstrapAdmin,
+  normalizeAdminEmail,
+  promptValue,
+  validateAdminEmail,
+  type EnsureBootstrapAdminResult,
+} from '../lib/admin-bootstrap.js';
 
 const FULL_CONFIG_EVAL = { allowRegexFallback: false } as const;
 const RELEASE_ENV_HEADER = '# EdgeBase production secrets';
@@ -1292,16 +1302,28 @@ export const deployCommand = new Command('deploy')
   .alias('dp')
   .description('Deploy to Cloudflare')
   .option('--dry-run', 'Validate config without deploying')
+  .option('--bootstrap-admin-email <email>', 'Bootstrap admin email to ensure for release deployments')
+  .option('--bootstrap-admin-password-file <path>', 'Read the bootstrap admin password from a file')
+  .option('--bootstrap-admin-password-stdin', 'Read the bootstrap admin password from stdin')
   .option(
     '--if-destructive <action>',
     'Action on destructive schema changes in CI/CD: reject (default) or reset',
     'reject',
   )
-  .action(async (options: { dryRun?: boolean; ifDestructive?: string }) => {
+  .action(async (options: {
+    dryRun?: boolean;
+    ifDestructive?: string;
+    bootstrapAdminEmail?: string;
+    bootstrapAdminPasswordFile?: string;
+    bootstrapAdminPasswordStdin?: boolean;
+  }) => {
     const projectDir = resolve('.');
     const configPath = join(projectDir, 'edgebase.config.ts');
     const isDryRun = !!options.dryRun;
     const isTTY = !!process.stdin.isTTY;
+    let bootstrapAdminEmail = options.bootstrapAdminEmail
+      ? normalizeAdminEmail(options.bootstrapAdminEmail)
+      : '';
 
     if (!existsSync(configPath)) {
       raiseCliError({
@@ -1368,6 +1390,30 @@ export const deployCommand = new Command('deploy')
     }
 
     warnings.push(...collectAuthEnvWarnings(projectDir));
+
+    if (
+      !isDryRun
+      && configJson?.release === true
+      && !bootstrapAdminEmail
+    ) {
+      if (isTTY && !isJson() && !isNonInteractive()) {
+        bootstrapAdminEmail = normalizeAdminEmail(await promptValue('Bootstrap admin email: ', false, {
+          field: 'bootstrapAdminEmail',
+          hint: 'Rerun with --bootstrap-admin-email <email>.',
+          message: 'A bootstrap admin email is required for release deployments.',
+        }));
+      } else {
+        raiseNeedsInput({
+          code: 'bootstrap_admin_email_required',
+          field: 'bootstrapAdminEmail',
+          message: 'A bootstrap admin email is required for release deployments.',
+          hint: 'Provide --bootstrap-admin-email <email> when running non-interactively.',
+        });
+      }
+    }
+    if (bootstrapAdminEmail) {
+      validateAdminEmail(bootstrapAdminEmail);
+    }
 
     for (const w of warnings) {
       console.log(chalk.yellow('⚠'), w);
@@ -1887,6 +1933,34 @@ export const deployCommand = new Command('deploy')
       workerUrl: deployedWorkerUrl,
     });
 
+    let bootstrapAdminResult: EnsureBootstrapAdminResult | null = null;
+    if (configJson?.release === true && deployedWorkerUrl) {
+      const serviceKey = resolveOptionalServiceKey({});
+      if (!serviceKey) {
+        raiseCliError({
+          code: 'bootstrap_admin_service_key_missing',
+          message: 'Deploy succeeded, but no Service Key was available for bootstrap admin setup.',
+          hint: 'Check .edgebase/secrets.json or set EDGEBASE_SERVICE_KEY, then run `npx edgebase admin bootstrap --url <worker-url>`.',
+        });
+      }
+
+      if (!isQuiet()) {
+        console.log(chalk.dim('  Ensuring bootstrap admin...'));
+      }
+
+      bootstrapAdminResult = await ensureBootstrapAdmin({
+        url: deployedWorkerUrl,
+        serviceKey,
+        email: bootstrapAdminEmail,
+        passwordFile: options.bootstrapAdminPasswordFile,
+        passwordStdin: options.bootstrapAdminPasswordStdin,
+        emailPromptHint: 'Rerun with --bootstrap-admin-email <email>.',
+        emailRequiredMessage: 'A bootstrap admin email is required for release deployments.',
+        passwordPromptHint: 'Use --bootstrap-admin-password-file <path> or pipe the password with --bootstrap-admin-password-stdin in CI/CD.',
+        passwordRequiredMessage: 'A bootstrap admin password is required to create the first admin account.',
+      });
+    }
+
     const deployedAdminUrl = deployedWorkerUrl
       ? await resolveAdminUrlFromRuntime(deployedWorkerUrl)
       : null;
@@ -1899,6 +1973,7 @@ export const deployCommand = new Command('deploy')
           status: 'success',
           url: deployedWorkerUrl,
           adminUrl: deployedAdminUrl,
+          ...(bootstrapAdminResult ? { bootstrapAdmin: bootstrapAdminResult.status } : {}),
         }));
       }
     } else {
@@ -1914,6 +1989,20 @@ export const deployCommand = new Command('deploy')
         } else {
           console.log(chalk.dim('  Admin: not deployed'));
         }
+      }
+
+      if (bootstrapAdminResult?.status === 'created') {
+        console.log(chalk.green('✓'), `Bootstrap admin created for ${bootstrapAdminResult.admin.email}`);
+      } else if (bootstrapAdminResult?.status === 'already-configured') {
+        console.log(chalk.green('✓'), `Bootstrap admin already configured for ${bootstrapAdminResult.admin.email}`);
+      } else if (bootstrapAdminResult?.status === 'skipped-existing') {
+        const knownAdmins = bootstrapAdminResult.admins.map((admin) => admin.email).join(', ');
+        console.log(chalk.yellow('⚠'), 'Admin bootstrap skipped because admin accounts already exist.');
+        console.log(chalk.dim(`  Existing admins: ${knownAdmins}`));
+        if (bootstrapAdminResult.requestedEmail) {
+          console.log(chalk.dim(`  Requested bootstrap email: ${bootstrapAdminResult.requestedEmail}`));
+        }
+        console.log(chalk.dim('  Add or rotate admins from the dashboard settings or with `npx edgebase admin bootstrap`/admin APIs instead of reusing deploy bootstrap.'));
       }
     }
 
@@ -1949,7 +2038,12 @@ export const deployCommand = new Command('deploy')
       }
 
       if (isJson()) {
-        console.log(JSON.stringify({ status: 'success', url: deployedWorkerUrl, migrated: true }));
+        console.log(JSON.stringify({
+          status: 'success',
+          url: deployedWorkerUrl,
+          migrated: true,
+          ...(bootstrapAdminResult ? { bootstrapAdmin: bootstrapAdminResult.status } : {}),
+        }));
       }
     }
 

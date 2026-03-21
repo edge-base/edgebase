@@ -251,13 +251,15 @@ Inspect and rotate the root Service Key and JWT signing secrets.
 ### `admin`
 
 ```bash
+npx edgebase admin bootstrap --url https://my-worker.workers.dev --service-key <service-key> --email admin@example.com
+npx edgebase admin bootstrap --url http://localhost:8787 --service-key <service-key> --email admin@example.com
 npx edgebase admin reset-password --local --email admin@example.com
 npx edgebase admin reset-password --local --email admin@example.com --password new-password-123
 npx edgebase admin reset-password --url https://my-worker.workers.dev --service-key <service-key>
 npx edgebase admin reset-password --email admin@example.com --password new-password-123 --url https://my-worker.workers.dev --service-key <service-key>
 ```
 
-Recover or rotate admin access credentials.
+Bootstrap the first admin account, then recover or rotate admin access credentials.
 
 ## Plugins And Tooling
 
@@ -295,6 +297,7 @@ Scaffold a plugin package with server and optional client SDK boilerplate.
 npx edgebase docker build
 npx edgebase docker run
 npx edgebase docker run --port 3000 --detach
+npx edgebase docker run --bootstrap-admin-email admin@example.com
 ```
 
 Build and run the self-hosted Docker image.
