@@ -1805,9 +1805,156 @@ namespace EdgeBase
             public Task Switch(Dictionary<string, object?> payload) => _room.SwitchMediaDevices(payload);
         }
 
+        public sealed class RoomMediaTransportOptions
+        {
+            public string Provider { get; set; } = "cloudflare_realtimekit";
+            public Dictionary<string, object?>? CloudflareRealtimeKit { get; set; }
+            public Dictionary<string, object?>? P2P { get; set; }
+
+            public string provider
+            {
+                get => Provider;
+                set => Provider = value;
+            }
+
+            public Dictionary<string, object?>? cloudflareRealtimeKit
+            {
+                get => CloudflareRealtimeKit;
+                set => CloudflareRealtimeKit = value;
+            }
+
+            public Dictionary<string, object?>? p2p
+            {
+                get => P2P;
+                set => P2P = value;
+            }
+        }
+
+        public sealed class RoomMediaTransportUnavailableException : PlatformNotSupportedException
+        {
+            public string Provider { get; }
+            public string DocumentationUrl { get; }
+
+            internal RoomMediaTransportUnavailableException(string provider)
+                : base(RoomMediaNamespace.BuildTransportUnavailableMessage(provider))
+            {
+                Provider = provider;
+                DocumentationUrl = RoomMediaNamespace.DocumentationUrl;
+            }
+        }
+
+        public sealed class RoomCloudflareRealtimeKitNamespace
+        {
+            private readonly RoomClient _room;
+
+            internal RoomCloudflareRealtimeKitNamespace(RoomClient room) => _room = room;
+
+            public Task<Dictionary<string, object?>> CreateSession(Dictionary<string, object?>? payload = null)
+                => Task.FromException<Dictionary<string, object?>>(
+                    RoomMediaNamespace.CreateTransportUnavailableException("cloudflare_realtimekit"));
+
+            public Task<Dictionary<string, object?>> createSession(Dictionary<string, object?>? payload = null)
+                => CreateSession(payload);
+        }
+
+        public sealed class RoomMediaTransport : IDisposable
+        {
+            public const string DocumentationUrl = RoomMediaNamespace.DocumentationUrl;
+
+            public string Provider { get; }
+
+            internal RoomMediaTransport(string provider)
+            {
+                Provider = string.IsNullOrWhiteSpace(provider) ? "cloudflare_realtimekit" : provider;
+            }
+
+            public Task<string> Connect(Dictionary<string, object?>? payload = null)
+                => Unsupported<string>();
+
+            public Task<object?> EnableAudio(object? constraints = null)
+                => Unsupported<object?>();
+
+            public Task<object?> EnableVideo(object? constraints = null)
+                => Unsupported<object?>();
+
+            public Task<object?> StartScreenShare(object? constraints = null)
+                => Unsupported<object?>();
+
+            public Task DisableAudio()
+                => Unsupported();
+
+            public Task DisableVideo()
+                => Unsupported();
+
+            public Task StopScreenShare()
+                => Unsupported();
+
+            public Task SetMuted(string kind, bool muted)
+                => Unsupported();
+
+            public Task SwitchDevices(Dictionary<string, object?> payload)
+                => Unsupported();
+
+            public IDisposable OnRemoteTrack(Action<Dictionary<string, object?>> handler)
+                => throw RoomMediaNamespace.CreateTransportUnavailableException(Provider);
+
+            public string? GetSessionId() => null;
+
+            public object? GetPeerConnection() => null;
+
+            public void Destroy()
+            {
+            }
+
+            public void Dispose() => Destroy();
+
+            public Task<string> connect(Dictionary<string, object?>? payload = null)
+                => Connect(payload);
+
+            public Task<object?> enableAudio(object? constraints = null)
+                => EnableAudio(constraints);
+
+            public Task<object?> enableVideo(object? constraints = null)
+                => EnableVideo(constraints);
+
+            public Task<object?> startScreenShare(object? constraints = null)
+                => StartScreenShare(constraints);
+
+            public Task disableAudio()
+                => DisableAudio();
+
+            public Task disableVideo()
+                => DisableVideo();
+
+            public Task stopScreenShare()
+                => StopScreenShare();
+
+            public Task setMuted(string kind, bool muted)
+                => SetMuted(kind, muted);
+
+            public Task switchDevices(Dictionary<string, object?> payload)
+                => SwitchDevices(payload);
+
+            public IDisposable onRemoteTrack(Action<Dictionary<string, object?>> handler)
+                => OnRemoteTrack(handler);
+
+            public string? getSessionId() => GetSessionId();
+
+            public object? getPeerConnection() => GetPeerConnection();
+
+            public void destroy() => Destroy();
+
+            private Task Unsupported()
+                => Task.FromException(RoomMediaNamespace.CreateTransportUnavailableException(Provider));
+
+            private Task<T> Unsupported<T>()
+                => Task.FromException<T>(RoomMediaNamespace.CreateTransportUnavailableException(Provider));
+        }
+
         public sealed class RoomMediaNamespace
         {
             private readonly RoomClient _room;
+            public const string DocumentationUrl = "https://edgebase.fun/docs/room/media";
 
             internal RoomMediaNamespace(RoomClient room)
             {
@@ -1816,17 +1963,20 @@ namespace EdgeBase
                 Video = new RoomMediaKindNamespace(room, "video");
                 Screen = new RoomScreenMediaNamespace(room);
                 Devices = new RoomMediaDevicesNamespace(room);
+                CloudflareRealtimeKit = new RoomCloudflareRealtimeKitNamespace(room);
             }
 
             public RoomMediaKindNamespace Audio { get; }
             public RoomMediaKindNamespace Video { get; }
             public RoomScreenMediaNamespace Screen { get; }
             public RoomMediaDevicesNamespace Devices { get; }
+            public RoomCloudflareRealtimeKitNamespace CloudflareRealtimeKit { get; }
 
             public RoomMediaKindNamespace audio => Audio;
             public RoomMediaKindNamespace video => Video;
             public RoomScreenMediaNamespace screen => Screen;
             public RoomMediaDevicesNamespace devices => Devices;
+            public RoomCloudflareRealtimeKitNamespace cloudflareRealtimeKit => CloudflareRealtimeKit;
 
             public List<Dictionary<string, object?>> List() => _room.ListMediaMembers();
 
@@ -1841,6 +1991,18 @@ namespace EdgeBase
 
             public IDisposable OnDeviceChange(Action<Dictionary<string, object?>, Dictionary<string, object?>> handler)
                 => _room.OnMediaDeviceChange(handler);
+
+            public RoomMediaTransport Transport(RoomMediaTransportOptions? options = null)
+                => new RoomMediaTransport(options?.Provider ?? "cloudflare_realtimekit");
+
+            public RoomMediaTransport transport(RoomMediaTransportOptions? options = null)
+                => Transport(options);
+
+            internal static string BuildTransportUnavailableMessage(string provider)
+                => $"Room media transport provider '{provider}' is not available yet in EdgeBase.Unity. See {DocumentationUrl}";
+
+            internal static RoomMediaTransportUnavailableException CreateTransportUnavailableException(string provider)
+                => new(provider);
         }
 
         public sealed class RoomSessionNamespace

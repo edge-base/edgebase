@@ -940,6 +940,67 @@ TEST(RoomClientUnit, UnifiedSurfaceSendsSignalMemberAdminAndMediaFrames) {
                         {"send:signal", "send:member_state", "send:admin", "send:media"}));
 }
 
+TEST(RoomClientUnit, MediaTransportPlaceholderReportsDocsLink) {
+  edgebase::RoomClient room(
+      "http://localhost:8688",
+      "game",
+      "room-transport",
+      []() { return std::string("token"); });
+
+  auto transport = room.media.transport();
+  std::string connect_error;
+  transport.connect(
+      json::object(),
+      [](const json &) {},
+      [&](const std::string &error) { connect_error = error; });
+
+  EXPECT_EQ(transport.provider, "cloudflare_realtimekit");
+  EXPECT_NE(connect_error.find("https://edgebase.fun/docs/room/media"),
+            std::string::npos);
+  EXPECT_THROW(transport.on_remote_track([](const json &, const json &) {}),
+               std::runtime_error);
+  EXPECT_EQ(transport.get_session_id(), "");
+  EXPECT_EQ(transport.get_peer_connection(), nullptr);
+}
+
+TEST(RoomClientUnit, MediaTransportPlaceholderRespectsRequestedProvider) {
+  edgebase::RoomClient room(
+      "http://localhost:8688",
+      "game",
+      "room-transport-p2p",
+      []() { return std::string("token"); });
+
+  edgebase::RoomClient::MediaNamespace::TransportOptions options;
+  options.provider = "p2p";
+  auto transport = room.media.transport(options);
+  std::string error;
+  transport.enable_audio(
+      json::object(),
+      [](const json &) {},
+      [&](const std::string &message) { error = message; });
+
+  EXPECT_EQ(transport.provider, "p2p");
+  EXPECT_NE(error.find("provider 'p2p'"), std::string::npos);
+}
+
+TEST(RoomClientUnit, CloudflareRealtimeKitPlaceholderReportsDocsLink) {
+  edgebase::RoomClient room(
+      "http://localhost:8688",
+      "game",
+      "room-cloudflare",
+      []() { return std::string("token"); });
+
+  std::string error;
+  room.media.cloudflare_realtimekit.create_session(
+      json::object(),
+      [](const json &) {},
+      [&](const std::string &message) { error = message; });
+
+  EXPECT_NE(error.find("cloudflare_realtimekit"), std::string::npos);
+  EXPECT_NE(error.find("https://edgebase.fun/docs/room/media"),
+            std::string::npos);
+}
+
 // ─── PushClient Permission Tests ──────────────────────────────────────────
 
 TEST(PushClientUnit, GetPermissionStatusReturnsValidValue) {

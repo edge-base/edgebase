@@ -323,6 +323,12 @@ await room.signals.send('chat.message', { text: 'hello' });
 
 The rest of this page keeps the flat compatibility methods documented because they are still useful as cross-SDK fallbacks and map cleanly to the unified namespaces.
 
+:::note C# / C++ Room Media transport status
+`room.media.transport(...)` is currently production-ready on the Web SDK.
+
+The C#/Unity and C++/Unreal SDKs expose matching Room Media transport/provider entry points so application code can share the same public shape, but those provider implementations still return a "not available yet" error and point to [Room Media](/docs/room/media).
+:::
+
 | Preferred namespace API | Compatibility API |
 | --- | --- |
 | `room.state.getShared()` | `room.getSharedState()` |

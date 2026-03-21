@@ -22,6 +22,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include "nlohmann/json.hpp"
@@ -233,6 +234,98 @@ public:
   };
 
   struct MediaNamespace {
+    static constexpr const char *documentation_url =
+        "https://edgebase.fun/docs/room/media";
+
+    struct TransportOptions {
+      std::string provider = "cloudflare_realtimekit";
+      json cloudflare_realtimekit = json::object();
+      json p2p = json::object();
+    };
+
+    struct CloudflareRealtimeKitNamespace {
+      static std::string unavailable_message() {
+        return std::string(
+                   "Room media transport provider 'cloudflare_realtimekit' is "
+                   "not available yet in EdgeBase C++. See ") +
+               documentation_url;
+      }
+
+      void create_session(const json &,
+                          ResultCallback,
+                          ErrorCallback on_error) const {
+        report_unavailable(on_error, unavailable_message());
+      }
+    };
+
+    struct Transport {
+      std::string provider = "cloudflare_realtimekit";
+
+      void connect(const json &,
+                   ResultCallback,
+                   ErrorCallback on_error) const {
+        report_unavailable(on_error, unavailable_message(provider));
+      }
+
+      void enable_audio(const json &,
+                        ResultCallback,
+                        ErrorCallback on_error) const {
+        report_unavailable(on_error, unavailable_message(provider));
+      }
+
+      void enable_video(const json &,
+                        ResultCallback,
+                        ErrorCallback on_error) const {
+        report_unavailable(on_error, unavailable_message(provider));
+      }
+
+      void start_screen_share(const json &,
+                              ResultCallback,
+                              ErrorCallback on_error) const {
+        report_unavailable(on_error, unavailable_message(provider));
+      }
+
+      void disable_audio(VoidCallback, ErrorCallback on_error) const {
+        report_unavailable(on_error, unavailable_message(provider));
+      }
+
+      void disable_video(VoidCallback, ErrorCallback on_error) const {
+        report_unavailable(on_error, unavailable_message(provider));
+      }
+
+      void stop_screen_share(VoidCallback, ErrorCallback on_error) const {
+        report_unavailable(on_error, unavailable_message(provider));
+      }
+
+      void set_muted(const std::string &,
+                     bool,
+                     VoidCallback,
+                     ErrorCallback on_error) const {
+        report_unavailable(on_error, unavailable_message(provider));
+      }
+
+      void switch_devices(const json &, VoidCallback, ErrorCallback on_error) const {
+        report_unavailable(on_error, unavailable_message(provider));
+      }
+
+      Subscription on_remote_track(MediaTrackHandler) const {
+        throw std::runtime_error(unavailable_message(provider));
+      }
+
+      std::string get_session_id() const { return std::string(); }
+
+      void *get_peer_connection() const { return nullptr; }
+
+      void destroy() const {}
+
+    private:
+      static std::string unavailable_message(const std::string &provider_name) {
+        return std::string("Room media transport provider '") + provider_name +
+               "' is not available yet in EdgeBase C++. See " +
+               documentation_url;
+      }
+    };
+
     struct KindNamespace {
       RoomClient *room = nullptr;
       std::string kind;
@@ -288,15 +381,26 @@ public:
 
     explicit MediaNamespace(RoomClient *owner = nullptr)
         : room(owner), audio{owner, "audio"}, video{owner, "video"},
-          screen{owner}, devices{owner} {}
+          screen{owner}, devices{owner}, cloudflare_realtimekit{} {}
 
     RoomClient *room = nullptr;
     KindNamespace audio;
     KindNamespace video;
     ScreenNamespace screen;
     DevicesNamespace devices;
+    CloudflareRealtimeKitNamespace cloudflare_realtimekit;
 
     json list() const { return room ? room->media_members_ : json::array(); }
+    Transport transport() const {
+      return transport(TransportOptions{});
+    }
+
+    Transport transport(const TransportOptions &options) const {
+      return Transport{
+          options.provider.empty() ? std::string("cloudflare_realtimekit")
+                                   : options.provider,
+      };
+    }
     Subscription on_track(MediaTrackHandler handler) {
       return room ? room->on_media_track(std::move(handler)) : Subscription{};
     }
@@ -311,6 +415,16 @@ public:
     Subscription on_device_change(MediaDeviceHandler handler) {
       return room ? room->on_media_device_change(std::move(handler))
                   : Subscription{};
+    }
+
+  private:
+    static void report_unavailable(ErrorCallback on_error,
+                                   const std::string &message) {
+      if (on_error) {
+        on_error(message);
+        return;
+      }
+      throw std::runtime_error(message);
     }
   };
 

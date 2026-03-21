@@ -51,4 +51,5 @@ If you are looking for the "server side" of Room, the correct destination is [Se
 
 - The unified Room client model groups five core live surfaces (`room.state`, `room.meta`, `room.members`, `room.signals`, `room.media` *(alpha)*) plus two companion runtime namespaces (`room.admin`, `room.session`).
 - That unified namespace surface is currently implemented in the Web, React Native, Flutter, Rust, Kotlin, Java, PHP, C#, Swift iOS, and C++ client SDKs.
+- The provider-based Room Media transport surface is currently implemented on the Web SDK. C#/Unity and C++/Unreal expose matching placeholder entry points that point developers to [Room Media](/docs/room/media) until their native transport integrations land.
 - Other client SDKs still interoperate with the `rooms` runtime through the legacy Room protocol, but their public unified namespace surface is still being migrated.

@@ -124,6 +124,12 @@ The main client APIs are:
 - `room.media.onStateChange(...)`
 - `room.media.onDeviceChange(...)`
 
+:::note C# / C++ transport providers
+C#/Unity and C++/Unreal now expose `room.media.transport(...)` and `room.media.cloudflareRealtimeKit` / `room->media.cloudflare_realtimekit` so their public Room surface stays aligned with the Web SDK.
+
+Those provider APIs are still in preparation on those runtimes. Calling them currently returns a "not available yet" error that points back to this guide.
+:::
+
 ## Access Control
 
 Media has split access gates because subscribe, publish, and control are different concerns:

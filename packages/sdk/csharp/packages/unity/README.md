@@ -58,6 +58,7 @@ Use it when you want an agent or code assistant to:
 - use `Db(namespace, instanceId?)` with positional instance ids
 - remember that `Room(namespaceName, roomId, ...)` is the Unity room entry point
 - avoid copying browser assumptions into Unity code
+- treat `room.Media.Transport(...)` and `room.Media.CloudflareRealtimeKit.*` as placeholder surfaces for now
 
 ## Installation
 
@@ -121,6 +122,16 @@ Once you create a client, these are the main surfaces you will use:
   Request context and locale helpers
 - `client.Destroy()`
   Close network resources when the client is no longer needed
+
+## Room Media Transport Providers
+
+`room.Media.Transport(...)` and `room.Media.CloudflareRealtimeKit.CreateSession(...)` are exposed so the Unity room API can stay aligned with the Web SDK surface.
+
+They are not implemented yet in `EdgeBase.Unity`.
+
+Calling them currently raises a `PlatformNotSupportedException` with the Room Media guide:
+
+- [Room Media](https://edgebase.fun/docs/room/media)
 
 ## Choose The Right Package
 

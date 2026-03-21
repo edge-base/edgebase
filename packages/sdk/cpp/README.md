@@ -151,6 +151,16 @@ auto insertResult = core.db("shared")
 auto url = core.storage().bucket("avatars").getUrl("user123.png");
 ```
 
+## Room Media Transport Providers
+
+`room->media.transport(...)` and `room->media.cloudflare_realtimekit.create_session(...)` are exposed in the C++ Room surface so it can stay aligned with the Web SDK.
+
+They are not implemented yet in the C++ / Unreal SDK.
+
+Calling them currently reports an unavailable message with the Room Media guide:
+
+- [Room Media](https://edgebase.fun/docs/room/media)
+
 ## Build The Core Library
 
 ```bash
