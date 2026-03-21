@@ -145,6 +145,11 @@ attach to a foreground Activity:
 implementation 'com.cloudflare.realtimekit:core-android:1.5.5'
 ```
 
+Current verification note:
+
+- the Android transport registry and module-level media tests pass
+- the Java Room media runtime should currently be treated as Android-focused rather than a generic desktop Java media runtime
+
 Read more:
 
 - [Room Media Overview](https://edgebase.fun/docs/room/media)

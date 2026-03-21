@@ -192,13 +192,13 @@ flutter pub add realtimekit_core
 flutter pub add flutter_webrtc
 ```
 
-Current host-app smoke builds have been verified on Web, macOS, and Android.
+Current host-app smoke builds have been verified on Web, macOS, Android, and an Apple Silicon iOS simulator via direct Xcode device build.
 
 Additional integration notes:
 
 - Android host apps need Java 11+ compile options and core library desugaring enabled
 - when you use both `realtimekit_core` and `flutter_webrtc`, exclude the older `com.github.davidliu:audioswitch` dependency from the app to avoid duplicate classes
-- iOS support is still beta and currently depends on upstream RealtimeKit iOS plugin linkage staying healthy in your toolchain
+- generic `flutter build ios --simulator` can still trip over universal simulator linking, but direct arm64 simulator builds through Xcode succeeded in the current smoke matrix
 
 Example Android app-level configuration:
 

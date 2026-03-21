@@ -86,6 +86,12 @@ Important runtime note:
 - Apple/JS/JVM targets keep the same API surface but currently report transport-unavailable at runtime
 - `p2p` is still in progress on the Kotlin runtime everywhere
 
+Current verification note:
+
+- Android, iOS simulator, macOS, and JS targets all compile from the monorepo
+- the strongest runtime path today is Android
+- other KMP targets should currently be treated as surface-compatible but not media-runtime-complete
+
 Read more:
 
 - [Room Media Overview](https://edgebase.fun/docs/room/media)

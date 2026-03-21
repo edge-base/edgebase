@@ -67,6 +67,12 @@ Important runtime note:
 - macOS keeps the same API surface, but `room.media.transport(...)` currently reports unavailable at runtime
 - `p2p` is still in progress on Swift
 
+Current verification note:
+
+- `swift test` passes
+- iOS simulator builds succeeded in the current smoke matrix
+- macOS still keeps the same API surface but not the RealtimeKit runtime
+
 Read more:
 
 - [Room Media Overview](https://edgebase.fun/docs/room/media)

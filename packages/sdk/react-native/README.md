@@ -265,6 +265,7 @@ Practical integration notes from the current host-app smoke matrix:
 - `cloudflare_realtimekit` currently expects React Native `0.77+`
 - iOS needs the usual `cd ios && pod install`
 - Android apps using `@cloudflare/realtimekit-react-native` need a `blob_provider_authority` string resource
+- current host-app smoke builds succeeded on both iOS simulator and Android debug
 
 ```xml
 <string name="blob_provider_authority">${applicationId}.blobs</string>
