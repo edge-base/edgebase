@@ -7,6 +7,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:edgebase_core/src/token_manager.dart' as core;
+import 'package:edgebase_core/src/errors.dart';
 
 import 'shared_prefs_token_storage_stub.dart'
     if (dart.library.ui) 'shared_prefs_token_storage_flutter.dart';
@@ -85,7 +86,9 @@ class TokenManager implements core.TokenManager {
   /// Current user parsed from JWT.
   TokenUser? get currentUser => _currentUser;
 
-  /// Stream of auth state changes (fires on each change).
+  /// Broadcast stream of auth state changes.
+  /// Use [currentUser] for the initial state — the stream only emits on
+  /// subsequent changes (matching the Firebase/Dart convention).
   Stream<TokenUser?> get onAuthStateChange => _authStateController.stream;
 
   /// Check if the current access token is expired (with 30s buffer).
@@ -130,9 +133,14 @@ class TokenManager implements core.TokenManager {
       );
       _refreshCompleter!.complete(_accessToken);
       return _accessToken;
-    } catch (_) {
-      // Refresh failed — return existing token for graceful degradation
-      // (matches Swift/Kotlin behavior; session cleared on explicit sign-out)
+    } catch (e) {
+      // 401 means token revoked/expired — clear session (matches JS SDK).
+      // Other errors (network, 5xx) keep session for retry.
+      if (e is EdgeBaseError && e.statusCode == 401) {
+        await clearTokens();
+        _refreshCompleter!.complete(null);
+        return null;
+      }
       _refreshCompleter!.complete(_accessToken);
       return _accessToken;
     } finally {

@@ -151,9 +151,12 @@ public actor TokenManager: TokenManageable {
     }
 
     /// Try to restore session from storage.
+    /// Notifies auth state listeners on success (matches JS SDK auto-restore behavior).
     public func tryRestoreSession() async -> Bool {
         if let tokens = await storage.getTokens() {
             currentTokens = tokens
+            let user = decodeJWTPayload(tokens.accessToken)
+            notifyAuthStateChange(user)
             return true
         }
         return false
@@ -213,8 +216,14 @@ public actor TokenManager: TokenManageable {
     }
 
     /// Register auth state change handler.
+    /// If there is an active session, fires immediately with the current user
+    /// (matches JS SDK behavior). Nil is not emitted on registration since it's
+    /// the default state and would race with async Task-based callers like RoomClient.
     public func onAuthStateChange(_ handler: @escaping ([String: Any]?) -> Void) {
         authStateHandlers.append(handler)
+        if let user = currentUser() {
+            handler(user)
+        }
     }
 
     /// Notify all auth state change handlers.

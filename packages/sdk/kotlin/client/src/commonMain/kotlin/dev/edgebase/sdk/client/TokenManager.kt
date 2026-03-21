@@ -178,8 +178,17 @@ class ClientTokenManager(private val storage: TokenStorage) : TokenManager {
                     storage.saveTokens(newTokens)
                     notifyAuthStateChange(decodeJwtPayload(newTokens.accessToken))
                     newTokens.accessToken
-                } catch (_: Exception) {
-                    tokens.accessToken
+                } catch (e: Exception) {
+                    // 401 means token revoked/expired — clear session (matches JS SDK).
+                    // Other errors (network, 5xx) keep session for retry.
+                    if (e is EdgeBaseError && e.statusCode == 401) {
+                        currentTokens = null
+                        storage.clearTokens()
+                        notifyAuthStateChange(null)
+                        null
+                    } else {
+                        tokens.accessToken
+                    }
                 }
             }
             return tokens.accessToken
