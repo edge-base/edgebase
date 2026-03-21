@@ -73,11 +73,29 @@ jobs:
 
       - name: Check for drift
         run: |
+          check_generated_paths_clean() {
+            local label="$1"
+            shift
+
+            if ! git diff --exit-code -- "$@"; then
+              echo "${label} are out of date. Run generators and commit."
+              exit 1
+            fi
+
+            local untracked
+            untracked="$(git ls-files --others --exclude-standard -- "$@")"
+            if [ -n "$untracked" ]; then
+              echo "${label} include untracked files. Run generators and commit:"
+              echo "$untracked"
+              exit 1
+            fi
+          }
+
           mapfile -t GENERATED_PATHS < <(node tools/sdk-codegen/list-generated-paths.mjs)
-          git diff --exit-code -- "${GENERATED_PATHS[@]}" || (echo "Generated code is out of date. Run generators and commit." && exit 1)
+          check_generated_paths_clean "Generated code" "${GENERATED_PATHS[@]}"
 
           mapfile -t SKILL_PATHS < <(node tools/agent-skill-gen/list-generated-paths.mjs)
-          git diff --exit-code -- "${SKILL_PATHS[@]}" || (echo "Generated skill references are out of date. Run the skill generator and commit." && exit 1)
+          check_generated_paths_clean "Generated skill references" "${SKILL_PATHS[@]}"
 
   # ─── 5. JS SDK 단위 테스트 ──────────────────────────────────────────────────
   sdk-js-unit:
