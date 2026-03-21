@@ -20,6 +20,7 @@ const SERVICE_KEY = process.env['SERVICE_KEY'] || 'test-service-key-for-admin';
 const PREFIX = `js-core-e2e-${Date.now()}`;
 let admin: ReturnType<typeof createAdminClient>;
 const createdIds: string[] = [];
+const createdFiles: Array<{ bucket: string; key: string }> = [];
 
 beforeAll(() => {
   admin = createAdminClient(BASE_URL, { serviceKey: SERVICE_KEY });
@@ -38,6 +39,14 @@ afterAll(async () => {
         } catch {}
       }),
     );
+  }
+  const uniqueFiles = Array.from(
+    new Map(createdFiles.map((file) => [`${file.bucket}:${file.key}`, file])).values(),
+  );
+  for (const file of uniqueFiles) {
+    try {
+      await admin.storage.delete(file.bucket, file.key);
+    } catch {}
   }
   admin.destroy();
 }, 30000);
@@ -535,6 +544,109 @@ describe('E2E core — Storage', () => {
     } catch {
       expect(true).toBe(true);
     }
+  });
+});
+
+describe('E2E core — Storage advanced', () => {
+  const bucket = 'test-bucket';
+
+  it('createSignedUrls returns a signed URL for each key', async () => {
+    const bucketRef = admin.storage.bucket(bucket);
+    const keyA = `core-e2e-signed-a-${Date.now()}.txt`;
+    const keyB = `core-e2e-signed-b-${Date.now()}.txt`;
+
+    await admin.storage.upload(bucket, keyA, new Blob(['signed-a'], { type: 'text/plain' }));
+    await admin.storage.upload(bucket, keyB, new Blob(['signed-b'], { type: 'text/plain' }));
+    createdFiles.push({ bucket, key: keyA }, { bucket, key: keyB });
+
+    const urls = await bucketRef.createSignedUrls([keyA, keyB], { expiresIn: '10m' });
+    expect(urls).toHaveLength(2);
+    expect(urls.map((item) => item.key).sort()).toEqual([keyA, keyB].sort());
+    for (const item of urls) {
+      expect(item.url).toContain('token=');
+      expect(item.expiresAt).toBeTruthy();
+    }
+  });
+
+  it('createSignedUploadUrl uploads content through the returned URL', async () => {
+    const bucketRef = admin.storage.bucket(bucket);
+    const key = `core-e2e-signed-upload-${Date.now()}.txt`;
+    const signed = await bucketRef.createSignedUploadUrl(key, { maxFileSize: '1MB' });
+    expect(signed.url).toContain('token=');
+    expect(signed.maxFileSize).toBe('1MB');
+
+    const form = new FormData();
+    form.append('file', new Blob(['signed-upload-body'], { type: 'text/plain' }), 'signed-upload.txt');
+    form.append('key', key);
+    const uploadRes = await fetch(signed.url, { method: 'POST', body: form });
+    expect(uploadRes.status).toBe(201);
+
+    createdFiles.push({ bucket, key });
+    const downloaded = await bucketRef.download(key, { as: 'text' }) as string;
+    expect(downloaded).toBe('signed-upload-body');
+  });
+
+  it('updateMetadata + exists reflect storage changes', async () => {
+    const bucketRef = admin.storage.bucket(bucket);
+    const key = `core-e2e-meta-${Date.now()}.txt`;
+    await admin.storage.upload(bucket, key, new Blob(['meta-test'], { type: 'text/plain' }));
+    createdFiles.push({ bucket, key });
+
+    await expect(bucketRef.exists(key)).resolves.toBe(true);
+    const updated = await bucketRef.updateMetadata(key, {
+      contentType: 'text/markdown',
+      customMetadata: { label: 'advanced', version: '2' },
+    });
+    expect(updated.contentType).toBe('text/markdown');
+    expect(updated.customMetadata.label).toBe('advanced');
+    expect(updated.customMetadata.version).toBe('2');
+
+    const meta = await bucketRef.getMetadata(key);
+    expect(meta.contentType).toBe('text/markdown');
+    expect(meta.customMetadata.label).toBe('advanced');
+  });
+
+  it('deleteMany removes uploaded files and exists() turns false', async () => {
+    const bucketRef = admin.storage.bucket(bucket);
+    const keyA = `core-e2e-delmany-a-${Date.now()}.txt`;
+    const keyB = `core-e2e-delmany-b-${Date.now()}.txt`;
+
+    await admin.storage.upload(bucket, keyA, new Blob(['delete-a'], { type: 'text/plain' }));
+    await admin.storage.upload(bucket, keyB, new Blob(['delete-b'], { type: 'text/plain' }));
+
+    const result = await bucketRef.deleteMany([keyA, keyB]);
+    expect(result.deleted).toEqual(expect.arrayContaining([keyA, keyB]));
+    expect(result.failed).toHaveLength(0);
+    await expect(bucketRef.exists(keyA)).resolves.toBe(false);
+    await expect(bucketRef.exists(keyB)).resolves.toBe(false);
+  });
+
+  it('initiateResumableUpload + getUploadParts + resumeUpload complete successfully', async () => {
+    const bucketRef = admin.storage.bucket(bucket);
+    const key = `core-e2e-resume-${Date.now()}.bin`;
+    const uploadId = await bucketRef.initiateResumableUpload(key, 'application/octet-stream');
+    expect(typeof uploadId).toBe('string');
+
+    const emptyParts = await bucketRef.getUploadParts(key, uploadId);
+    expect(emptyParts.uploadId).toBe(uploadId);
+    expect(emptyParts.key).toBe(key);
+    expect(emptyParts.parts).toHaveLength(0);
+
+    const payload = new Uint8Array(5 * 1024 * 1024 + 512 * 1024);
+    payload.fill(7);
+    const progress: number[] = [];
+    const uploaded = await bucketRef.resumeUpload(key, uploadId, payload, {
+      contentType: 'application/octet-stream',
+      onProgress: ({ percent }) => progress.push(percent),
+    });
+
+    createdFiles.push({ bucket, key });
+    expect(uploaded.key).toBe(key);
+    expect(uploaded.size).toBe(payload.byteLength);
+    expect(progress.at(-1)).toBe(100);
+
+    const downloaded = await bucketRef.download(key, { as: 'arraybuffer' }) as ArrayBuffer;
+    expect(downloaded.byteLength).toBe(payload.byteLength);
   });
 });
 
