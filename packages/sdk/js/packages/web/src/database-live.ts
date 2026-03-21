@@ -88,10 +88,14 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
     }
     this.subscriptions.get(channel)!.push(sub);
 
-    if (sub.serverFilters && sub.serverFilters.length > 0) {
+    // Only set channel-level server filters when this is the first subscription
+    // for the channel. Subsequent subscriptions on the same channel should not
+    // overwrite the filters already sent to the server — that would silently
+    // break the earlier subscriber's expected filter set.
+    if (sub.serverFilters && sub.serverFilters.length > 0 && !this.channelFilters.has(channel)) {
       this.channelFilters.set(channel, sub.serverFilters);
     }
-    if (sub.serverOrFilters && sub.serverOrFilters.length > 0) {
+    if (sub.serverOrFilters && sub.serverOrFilters.length > 0 && !this.channelOrFilters.has(channel)) {
       this.channelOrFilters.set(channel, sub.serverOrFilters);
     }
 

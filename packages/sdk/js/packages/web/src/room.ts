@@ -566,15 +566,7 @@ export class RoomClient {
     this.stopHeartbeat();
 
     // Reject all pending send() requests
-    for (const [reqId, pending] of this.pendingRequests) {
-      clearTimeout(pending.timeout);
-      pending.reject(new EdgeBaseError(499, 'Room left'));
-    }
-    this.pendingRequests.clear();
-    this.rejectPendingVoidRequests(this.pendingSignalRequests, new EdgeBaseError(499, 'Room left'));
-    this.rejectPendingVoidRequests(this.pendingAdminRequests, new EdgeBaseError(499, 'Room left'));
-    this.rejectPendingVoidRequests(this.pendingMemberStateRequests, new EdgeBaseError(499, 'Room left'));
-    this.rejectPendingVoidRequests(this.pendingMediaRequests, new EdgeBaseError(499, 'Room left'));
+    this.rejectAllPendingRequests(new EdgeBaseError(499, 'Room left'));
 
     if (this.ws) {
       const socket = this.ws;
@@ -596,6 +588,37 @@ export class RoomClient {
     this.currentConnectionId = null;
     this.reconnectInfo = null;
     this.setConnectionState('disconnected');
+  }
+
+  /**
+   * Destroy the RoomClient and release all resources.
+   * Calls leave() if still connected, unsubscribes from auth state changes,
+   * and clears all handler arrays to allow garbage collection.
+   */
+  destroy(): void {
+    this.leave();
+    this.unsubAuthState?.();
+    this.unsubAuthState = null;
+
+    // Clear all handler arrays to break references
+    this.sharedStateHandlers.length = 0;
+    this.playerStateHandlers.length = 0;
+    this.messageHandlers.clear();
+    this.allMessageHandlers.length = 0;
+    this.errorHandlers.length = 0;
+    this.kickedHandlers.length = 0;
+    this.memberSyncHandlers.length = 0;
+    this.memberJoinHandlers.length = 0;
+    this.memberLeaveHandlers.length = 0;
+    this.memberStateHandlers.length = 0;
+    this.signalHandlers.clear();
+    this.anySignalHandlers.length = 0;
+    this.mediaTrackHandlers.length = 0;
+    this.mediaTrackRemovedHandlers.length = 0;
+    this.mediaStateHandlers.length = 0;
+    this.mediaDeviceHandlers.length = 0;
+    this.reconnectHandlers.length = 0;
+    this.connectionStateHandlers.length = 0;
   }
 
   // ─── Actions ───
@@ -1047,6 +1070,12 @@ export class RoomClient {
         this.joined = false;
         this.ws = null;
         this.stopHeartbeat();
+
+        // Reject pending requests immediately so callers don't hang until timeout
+        if (!this.intentionallyLeft) {
+          this.rejectAllPendingRequests(new EdgeBaseError(499, 'WebSocket connection lost'));
+        }
+
         if (event.code === 4004 && this.connectionState !== 'kicked') {
           this.handleKicked();
         }
@@ -1412,7 +1441,7 @@ export class RoomClient {
     this.syncMediaMemberInfo(member);
 
     const requestId = msg.requestId as string | undefined;
-    if (requestId && member.memberId === this.currentUserId) {
+    if (requestId) {
       const pending = this.pendingMemberStateRequests.get(requestId);
       if (pending) {
         clearTimeout(pending.timeout);
@@ -1602,6 +1631,10 @@ export class RoomClient {
     this.waitingForAuth = this.joinRequested;
     this.reconnectInfo = null;
     this.setConnectionState('auth_lost');
+
+    // Reject pending requests — auth is gone, server won't respond
+    this.rejectAllPendingRequests(new EdgeBaseError(401, 'Auth state lost'));
+
     if (this.ws) {
       const socket = this.ws;
       this.sendRaw({ type: 'leave' });
@@ -1891,6 +1924,19 @@ export class RoomClient {
       ...mediaMember.state,
       [kind]: next,
     };
+  }
+
+  /** Reject all 5 pending request maps at once. */
+  private rejectAllPendingRequests(error: EdgeBaseError): void {
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+    this.pendingRequests.clear();
+    this.rejectPendingVoidRequests(this.pendingSignalRequests, error);
+    this.rejectPendingVoidRequests(this.pendingAdminRequests, error);
+    this.rejectPendingVoidRequests(this.pendingMemberStateRequests, error);
+    this.rejectPendingVoidRequests(this.pendingMediaRequests, error);
   }
 
   private rejectPendingVoidRequests(

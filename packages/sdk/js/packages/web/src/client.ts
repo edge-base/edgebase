@@ -88,6 +88,7 @@ export class ClientEdgeBase {
   private httpClient: HttpClient;
   private contextManager: ContextManager;
   private core: DefaultDbApi;
+  private swMessageHandler: ((event: MessageEvent) => void) | null = null;
 
   constructor(url: string, options?: JuneClientOptions) {
     if (!url || typeof url !== 'string') {
@@ -118,7 +119,7 @@ export class ClientEdgeBase {
 
     // Listen for Service Worker messages (foreground push)
     if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.addEventListener('message', (event) => {
+      this.swMessageHandler = (event: MessageEvent) => {
         if (event.data?.type === 'push') {
           const msg = event.data.payload ?? event.data;
           for (const cb of messageListeners) cb(msg);
@@ -127,7 +128,8 @@ export class ClientEdgeBase {
           const msg = event.data.payload ?? event.data;
           for (const cb of openedAppListeners) cb(msg);
         }
-      });
+      };
+      navigator.serviceWorker.addEventListener('message', this.swMessageHandler);
     }
 
     // Helper: get or create persistent device ID
@@ -355,6 +357,12 @@ export class ClientEdgeBase {
     this.analytics.destroy();
     this.tokenManager.destroy();
     this.databaseLive.disconnect();
+
+    // Remove Service Worker listener to allow GC of this instance
+    if (this.swMessageHandler && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.removeEventListener('message', this.swMessageHandler);
+      this.swMessageHandler = null;
+    }
   }
 }
 

@@ -57,6 +57,9 @@ function isTokenExpired(token: string, bufferSeconds = 30): boolean {
 function extractUser(token: string): TokenUser | null {
   try {
     const payload = decodeJwtPayload(token);
+    if (typeof payload.sub !== 'string' || !payload.sub) {
+      return null;
+    }
     const custom =
       payload.custom && typeof payload.custom === 'object'
         ? payload.custom as Record<string, unknown>
@@ -64,7 +67,7 @@ function extractUser(token: string): TokenUser | null {
           ? payload.customClaims as Record<string, unknown>
           : undefined;
     return {
-      id: payload.sub as string,
+      id: payload.sub,
       email: payload.email as string | undefined,
       displayName: payload.displayName as string | undefined,
       avatarUrl: payload.avatarUrl as string | undefined,
