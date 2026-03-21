@@ -379,16 +379,35 @@ public class HttpClient {
 
             addRequestMetadataHeaders(requestBuilder);
 
-            try (Response response = client.newCall(requestBuilder.build()).execute()) {
+            // Transport retry: independent loop (max 2 retries) around the network call
+            Response response = null;
+            for (int transportAttempt = 0; transportAttempt <= 2; transportAttempt++) {
+                try {
+                    response = client.newCall(requestBuilder.build()).execute();
+                    break;
+                } catch (IOException e) {
+                    if (transportAttempt < 2) {
+                        try { Thread.sleep(50L * (transportAttempt + 1)); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                        // Rebuild request for retry (OkHttp request can only be executed once)
+                        requestBuilder = requestBuilder.build().newBuilder();
+                        continue;
+                    }
+                    throw new EdgeBaseError(0, "Request failed: " + e.getMessage());
+                }
+            }
+
+            try {
                 // 429 retry with Retry-After
                 if (response.code() == 429 && rateLimitAttempt < 3) {
                     long delay = parseRetryAfterDelay(response.header("Retry-After"), rateLimitAttempt);
+                    response.close();
                     Thread.sleep(delay);
                     return request(method, path, body, isPublic, isRetry, queryParams, rateLimitAttempt + 1);
                 }
 
                 // Handle 401 — retry once after token refresh
                 if (response.code() == 401 && !isRetry && !isPublic) {
+                    response.close();
                     String refreshToken = tokenManager.getRefreshToken();
                     if (refreshToken != null) {
                         try {
@@ -399,18 +418,14 @@ public class HttpClient {
                     return request(method, path, body, isPublic, true, queryParams, rateLimitAttempt);
                 }
                 return parseResponse(response);
+            } finally {
+                response.close();
             }
         } catch (EdgeBaseError e) {
             throw e;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new EdgeBaseError(0, "Request interrupted");
-        } catch (IOException e) {
-            if (rateLimitAttempt < 2) {
-                try { Thread.sleep(50L * (rateLimitAttempt + 1)); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
-                return request(method, path, body, isPublic, isRetry, queryParams, rateLimitAttempt + 1);
-            }
-            throw new EdgeBaseError(0, "Request failed: " + e.getMessage());
         }
     }
 

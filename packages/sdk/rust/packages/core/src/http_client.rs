@@ -115,7 +115,13 @@ impl HttpClient {
                             .and_then(|v| v.to_str().ok())
                             .and_then(|v| v.parse::<u64>().ok());
                         let base_ms = retry_after.map(|s| s * 1000).unwrap_or(1000 * (1u64 << attempt));
-                        let delay = std::cmp::min(base_ms + base_ms / 4, 10000);
+                        // Jitter: 0–25% of base delay (use simple pseudo-random from time nanos)
+                        let nanos = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.subsec_nanos())
+                            .unwrap_or(0);
+                        let jitter = (base_ms as f64 * 0.25 * (nanos % 1_000_000) as f64 / 1_000_000.0) as u64;
+                        let delay = std::cmp::min(base_ms + jitter, 10000);
                         tokio::time::sleep(Duration::from_millis(delay)).await;
                         continue;
                     }

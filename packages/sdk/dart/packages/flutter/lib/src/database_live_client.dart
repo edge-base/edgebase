@@ -309,7 +309,7 @@ class DatabaseLiveClient implements core.DatabaseLiveClient {
     if (_reconnectAttempts >= _options.maxReconnectAttempts) return;
     _reconnectTimer?.cancel();
     final baseDelay = _options.reconnectDelay * math.pow(2, _reconnectAttempts).toInt();
-    final jitter = (baseDelay.inMilliseconds * 0.25 * (DateTime.now().millisecondsSinceEpoch % 100) / 100).round();
+    final jitter = (baseDelay.inMilliseconds * 0.25 * math.Random().nextDouble()).round();
     final cappedDelay = Duration(milliseconds: math.min(baseDelay.inMilliseconds + jitter, 30000));
     _reconnectTimer = Timer(cappedDelay, () {
       _reconnectAttempts++;

@@ -5,6 +5,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import 'errors.dart';
 import 'token_manager.dart';
@@ -157,7 +158,7 @@ class HttpClient {
       try {
         response = await _send(method, uri, headers, encoded);
       } on TimeoutException {
-        if (attempt < 3 && _isRetryableTransportError(TimeoutException('timeout'))) {
+        if (attempt < 2) {
           await Future.delayed(Duration(milliseconds: 50 * (attempt + 1)));
           continue;
         }
@@ -166,7 +167,7 @@ class HttpClient {
         );
       } catch (e) {
         if (e is EdgeBaseError) rethrow;
-        if (attempt < 3 && _isRetryableTransportError(e)) {
+        if (attempt < 2 && _isRetryableTransportError(e)) {
           await Future.delayed(Duration(milliseconds: 50 * (attempt + 1)));
           continue;
         }
@@ -338,7 +339,8 @@ class HttpClient {
       final seconds = int.tryParse(header);
       if (seconds != null && seconds > 0) baseMs = seconds * 1000;
     }
-    final jitter = (baseMs * 0.25 * (DateTime.now().millisecondsSinceEpoch % 100) / 100).round();
+    final random = math.Random();
+    final jitter = (baseMs * 0.25 * random.nextDouble()).round();
     return Duration(milliseconds: (baseMs + jitter).clamp(0, 10000));
   }
 

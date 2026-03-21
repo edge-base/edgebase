@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -157,7 +158,7 @@ func parseRetryAfterDelay(header string, attempt int) time.Duration {
 			baseDelay = time.Duration(seconds) * time.Second
 		}
 	}
-	jitter := time.Duration(float64(baseDelay) * 0.25 * float64(time.Now().UnixNano()%100) / 100)
+	jitter := time.Duration(float64(baseDelay) * 0.25 * rand.Float64())
 	delay := baseDelay + jitter
 	if delay > 10*time.Second {
 		delay = 10 * time.Second

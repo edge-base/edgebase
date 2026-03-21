@@ -73,7 +73,7 @@ public actor HttpClient {
     }
 
     /// GET raw response (for file downloads).
-    public func getRaw(_ path: String) async throws -> Data {
+    public func getRaw(_ path: String, rateLimitAttempt: Int = 0) async throws -> Data {
         let url = buildURL(path: "/api\(path)")
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
@@ -83,13 +83,13 @@ public actor HttpClient {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw EdgeBaseError(statusCode: 0, message: "Invalid response")
         }
-        if httpResponse.statusCode == 429 {
+        if httpResponse.statusCode == 429 && rateLimitAttempt < 3 {
             let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
-            var baseDelayMs: Double = 1000
+            var baseDelayMs: Double = 1000 * pow(2.0, Double(rateLimitAttempt))
             if let header = retryAfter, let seconds = Double(header), seconds > 0 { baseDelayMs = seconds * 1000 }
             let jitter = Double.random(in: 0...(baseDelayMs * 0.25))
             try await Task.sleep(nanoseconds: UInt64(min(baseDelayMs + jitter, 10000) * 1_000_000))
-            return try await getRaw(path)
+            return try await getRaw(path, rateLimitAttempt: rateLimitAttempt + 1)
         }
         if httpResponse.statusCode >= 400 {
             throw EdgeBaseError.fromJSON(data, statusCode: httpResponse.statusCode)
@@ -105,7 +105,8 @@ public actor HttpClient {
         fileName: String,
         fieldName: String = "file",
         fileContentType: String = "application/octet-stream",
-        fields: [String: String] = [:]
+        fields: [String: String] = [:],
+        rateLimitAttempt: Int = 0
     ) async throws -> Any {
         let url = buildURL(path: "/api\(path)")
         var req = URLRequest(url: url)
@@ -135,13 +136,13 @@ public actor HttpClient {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw EdgeBaseError(statusCode: 0, message: "Invalid response")
         }
-        if httpResponse.statusCode == 429 {
+        if httpResponse.statusCode == 429 && rateLimitAttempt < 3 {
             let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
-            var baseDelayMs: Double = 1000
+            var baseDelayMs: Double = 1000 * pow(2.0, Double(rateLimitAttempt))
             if let header = retryAfter, let seconds = Double(header), seconds > 0 { baseDelayMs = seconds * 1000 }
             let jitter = Double.random(in: 0...(baseDelayMs * 0.25))
             try await Task.sleep(nanoseconds: UInt64(min(baseDelayMs + jitter, 10000) * 1_000_000))
-            return try await postMultipart(path, fileData: fileData, fileName: fileName, fieldName: fieldName, fileContentType: fileContentType, fields: fields)
+            return try await postMultipart(path, fileData: fileData, fileName: fileName, fieldName: fieldName, fileContentType: fileContentType, fields: fields, rateLimitAttempt: rateLimitAttempt + 1)
         }
         if httpResponse.statusCode >= 400 {
             throw EdgeBaseError.fromJSON(data, statusCode: httpResponse.statusCode)
@@ -155,7 +156,8 @@ public actor HttpClient {
         _ path: String,
         data: Data,
         contentType: String = "application/octet-stream",
-        queryParams: [String: String]? = nil
+        queryParams: [String: String]? = nil,
+        rateLimitAttempt: Int = 0
     ) async throws -> Any {
         let url = buildURL(path: "/api\(path)", queryParams: queryParams)
         var req = URLRequest(url: url)
@@ -168,13 +170,13 @@ public actor HttpClient {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw EdgeBaseError(statusCode: 0, message: "Invalid response")
         }
-        if httpResponse.statusCode == 429 {
+        if httpResponse.statusCode == 429 && rateLimitAttempt < 3 {
             let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
-            var baseDelayMs: Double = 1000
+            var baseDelayMs: Double = 1000 * pow(2.0, Double(rateLimitAttempt))
             if let header = retryAfter, let seconds = Double(header), seconds > 0 { baseDelayMs = seconds * 1000 }
             let jitter = Double.random(in: 0...(baseDelayMs * 0.25))
             try await Task.sleep(nanoseconds: UInt64(min(baseDelayMs + jitter, 10000) * 1_000_000))
-            return try await postRaw(path, data: data, contentType: contentType, queryParams: queryParams)
+            return try await postRaw(path, data: data, contentType: contentType, queryParams: queryParams, rateLimitAttempt: rateLimitAttempt + 1)
         }
         if httpResponse.statusCode >= 400 {
             throw EdgeBaseError.fromJSON(responseData, statusCode: httpResponse.statusCode)
