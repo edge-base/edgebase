@@ -176,6 +176,18 @@ func isRetryableTransportError(err error) bool {
 	return false
 }
 
+// sleepWithContext delays for the given duration but returns early if ctx is cancelled.
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func (c *HTTPClient) do(ctx context.Context, method, path string, body interface{}) (map[string]interface{}, error) {
 	maxRetries := 3
 	var lastErr error
@@ -203,7 +215,9 @@ func (c *HTTPClient) do(ctx context.Context, method, path string, body interface
 		if err != nil {
 			lastErr = err
 			if attempt < 2 && isRetryableTransportError(err) {
-				time.Sleep(time.Duration(50*(attempt+1)) * time.Millisecond)
+				if err := sleepWithContext(ctx, time.Duration(50*(attempt+1))*time.Millisecond); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			return nil, fmt.Errorf("network error: %w", err)
@@ -218,7 +232,9 @@ func (c *HTTPClient) do(ctx context.Context, method, path string, body interface
 		// 429 retry with Retry-After
 		if resp.StatusCode == 429 && attempt < maxRetries {
 			delay := parseRetryAfterDelay(resp.Header.Get("Retry-After"), attempt)
-			time.Sleep(delay)
+			if err := sleepWithContext(ctx, delay); err != nil {
+				return nil, err
+			}
 			continue
 		}
 

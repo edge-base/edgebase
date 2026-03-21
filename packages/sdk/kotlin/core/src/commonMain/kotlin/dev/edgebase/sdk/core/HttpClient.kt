@@ -258,7 +258,7 @@ class HttpClient(
             val retryAfter = response.headers["Retry-After"]
             val baseDelayMs = retryAfter?.toLongOrNull()?.let { it * 1000 }
                 ?: (1000L * (1L shl rateLimitAttempt))
-            val jitter = (baseDelayMs * 0.25 * Math.random()).toLong()
+            val jitter = (baseDelayMs * 0.25 * kotlin.random.Random.nextDouble()).toLong()
             delay(minOf(baseDelayMs + jitter, 10000L))
             return request(method, path, body, isPublic, isRetry, queryParams, rateLimitAttempt + 1)
         }

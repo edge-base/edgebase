@@ -150,6 +150,7 @@ class HttpClient {
   }) async {
     final uri = _buildUri(path, query);
     final encoded = body != null ? jsonEncode(body) : null;
+    var did401Retry = false;
 
     for (var attempt = 0; attempt <= 3; attempt++) {
       final headers = await _buildHeaders(withAuth: !skipAuth);
@@ -180,8 +181,9 @@ class HttpClient {
         continue;
       }
 
-      // 401 auto-retry: refresh token and retry once
-      if (response.statusCode == 401 && !skipAuth && serviceKey == null && attempt == 0) {
+      // 401 auto-retry: refresh token and retry once (independent of transport/429 retries)
+      if (response.statusCode == 401 && !skipAuth && serviceKey == null && !did401Retry) {
+        did401Retry = true;
         try {
           final newHeaders = await _buildHeaders(withAuth: true);
           response = await _send(method, uri, newHeaders, encoded);
