@@ -5,6 +5,10 @@
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
+#include <chrono>
+#include <cstdlib>
+#include <random>
 
 namespace client {
 
@@ -111,6 +115,28 @@ struct HttpClient::Impl {
     return {ok, static_cast<int>(statusCode), response, ok ? "" : response};
   }
 
+  Result performWithRetry(const std::string &method, const std::string &url,
+                   const std::string &body,
+                   const struct curl_slist *extraHeaders) const {
+    for (int attempt = 0; attempt <= 3; ++attempt) {
+      Result result = perform(method, url, body, extraHeaders);
+      if (result.statusCode == 429 && attempt < 3) {
+        int baseDelayMs = 1000 * (1 << attempt);
+        static thread_local std::mt19937 rng{std::random_device{}()};
+        int jitter = std::uniform_int_distribution<int>(0, baseDelayMs / 4)(rng);
+        int delayMs = std::min(baseDelayMs + jitter, 10000);
+        std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+        continue;
+      }
+      if (!result.ok && result.statusCode == 0 && attempt < 2) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50 * (attempt + 1)));
+        continue;
+      }
+      return result;
+    }
+    return {false, 0, "", "Request failed after retries"};
+  }
+
   Result uploadMultipart(const std::string &url, const std::string &key,
                          const std::vector<uint8_t> &data,
                          const std::string &contentType) const {
@@ -211,17 +237,17 @@ Result HttpClient::get(const std::string &path,
     }
     curl_easy_cleanup(tmp);
   }
-  return impl_->perform("GET", url, "", nullptr);
+  return impl_->performWithRetry("GET", url, "", nullptr);
 }
 
 Result HttpClient::post(const std::string &path,
                         const std::string &jsonBody) const {
-  return impl_->perform("POST", impl_->buildUrl(path), jsonBody, nullptr);
+  return impl_->performWithRetry("POST", impl_->buildUrl(path), jsonBody, nullptr);
 }
 
 Result HttpClient::put(const std::string &path,
                        const std::string &jsonBody) const {
-  return impl_->perform("PUT", impl_->buildUrl(path), jsonBody, nullptr);
+  return impl_->performWithRetry("PUT", impl_->buildUrl(path), jsonBody, nullptr);
 }
 
 Result HttpClient::post_with_query(const std::string &path,
@@ -240,7 +266,7 @@ Result HttpClient::post_with_query(const std::string &path,
     }
     curl_easy_cleanup(tmp);
   }
-  return impl_->perform("POST", url, jsonBody, nullptr);
+  return impl_->performWithRetry("POST", url, jsonBody, nullptr);
 }
 
 Result HttpClient::post_bytes_with_query(
@@ -312,16 +338,16 @@ Result HttpClient::post_bytes_with_query(
 
 Result HttpClient::patch(const std::string &path,
                          const std::string &jsonBody) const {
-  return impl_->perform("PATCH", impl_->buildUrl(path), jsonBody, nullptr);
+  return impl_->performWithRetry("PATCH", impl_->buildUrl(path), jsonBody, nullptr);
 }
 
 Result HttpClient::del(const std::string &path) const {
-  return impl_->perform("DELETE", impl_->buildUrl(path), "", nullptr);
+  return impl_->performWithRetry("DELETE", impl_->buildUrl(path), "", nullptr);
 }
 
 Result HttpClient::del(const std::string &path,
                        const std::string &jsonBody) const {
-  return impl_->perform("DELETE", impl_->buildUrl(path), jsonBody, nullptr);
+  return impl_->performWithRetry("DELETE", impl_->buildUrl(path), jsonBody, nullptr);
 }
 
 bool HttpClient::head(const std::string &path) const {

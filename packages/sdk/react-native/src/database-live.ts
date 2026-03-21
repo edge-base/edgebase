@@ -431,7 +431,9 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
   }
 
   private scheduleReconnect(channel: string): void {
-    const delay = this.options.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts);
+    const baseDelay = this.options.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts);
+    const jitter = Math.random() * baseDelay * 0.25;
+    const delay = baseDelay + jitter;
     this.reconnectAttempts++;
     setTimeout(() => { this.connect(channel).catch(() => {}); }, Math.min(delay, 30000));
   }
@@ -513,7 +515,8 @@ function matchesDatabaseLiveChannel(channel: string, change: DbChange, messageCh
   if (parts.length === 2) return parts[1] === change.table;
   if (parts.length === 3) return parts[2] === change.table;
   if (parts.length === 4) {
-    if (parts[2] === change.table) return change.docId === parts[3];
+    // Could be dblive:ns:table:docId or dblive:ns:instanceId:table
+    if (parts[2] === change.table && change.docId === parts[3]) return true;
     return parts[3] === change.table;
   }
   return parts[3] === change.table && change.docId === parts[4];

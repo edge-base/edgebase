@@ -743,14 +743,15 @@ export class TableRef<T = Record<string, unknown>> {
         const hasFilterConstraints = currentFilters.length > 0 || currentOrFilters.length > 0;
         const hadItem = items.has(docId);
 
-        // Client-side filtering — skip if server-side filter is active
-        if (!useServerFilter && hasFilterConstraints) {
+        // Client-side filtering — always applied as safety net, even when server filter is active
+        if (hasFilterConstraints) {
           if (change.changeType === 'removed') {
             if (!hadItem) return;
           } else if (!data || !matchesSnapshotFilters(data, currentFilters, currentOrFilters, this.filterMatchFn)) {
             if (hadItem) {
+              const lastKnown = items.get(docId);
               items.delete(docId);
-              pendingChanges.removed.push((data ?? { id: docId }) as T);
+              pendingChanges.removed.push((data ?? lastKnown ?? { id: docId }) as T);
               scheduleFlush();
             }
             return;
@@ -766,10 +767,12 @@ export class TableRef<T = Record<string, unknown>> {
             if (data) items.set(docId, data as T);
             pendingChanges[hadItem ? 'modified' : 'added'].push(data as T);
             break;
-          case 'removed':
+          case 'removed': {
+            const lastKnown = items.get(docId);
             items.delete(docId);
-            pendingChanges.removed.push((data ?? { id: docId }) as T);
+            pendingChanges.removed.push((data ?? lastKnown ?? { id: docId }) as T);
             break;
+          }
         }
 
         scheduleFlush();

@@ -595,7 +595,9 @@ class RoomClient(
             _connectionState != "auth_lost"
         ) {
             val attempt = reconnectAttempts + 1
-            val reconnectDelay = minOf(options.reconnectBaseDelayMs * (1L shl reconnectAttempts), 30000L)
+            val baseDelay = minOf(options.reconnectBaseDelayMs * (1L shl reconnectAttempts), 30000L)
+            val jitter = (baseDelay * 0.25 * kotlin.random.Random.nextDouble()).toLong()
+            val reconnectDelay = baseDelay + jitter
             reconnectAttempts++
             beginReconnectAttempt(attempt)
             delay(reconnectDelay)

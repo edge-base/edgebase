@@ -7,6 +7,8 @@ No token refresh logic — use service_key for all server-side calls.
 from __future__ import annotations
 
 import os
+import time
+import random
 from typing import Any
 
 import httpx
@@ -120,16 +122,41 @@ class HttpClient:
 
     # MARK: - Internal
 
-    def _request(
-        self,
-        method: str,
-        path: str,
-        params: dict[str, str] | None = None,
-        json_body: Any = None,
-    ) -> Any:
+    @staticmethod
+    def _parse_retry_after_delay(response: httpx.Response, attempt: int) -> float:
+        base_delay = 1.0 * (2 ** attempt)
+        retry_after = response.headers.get("retry-after")
+        if retry_after:
+            try:
+                seconds = int(retry_after)
+                if seconds > 0: base_delay = float(seconds)
+            except ValueError: pass
+        jitter = random.random() * base_delay * 0.25
+        return min(base_delay + jitter, 10.0)
+
+    @staticmethod
+    def _is_retryable_transport_error(error: Exception) -> bool:
+        msg = str(error).lower()
+        return any(k in msg for k in ["timeout", "connection", "reset", "refused", "network", "eof"])
+
+    def _request(self, method: str, path: str, params: dict[str, str] | None = None, json_body: Any = None) -> Any:
         url = self._build_url(path)
         headers = self._auth_headers()
-        response = self._client.request(method, url, params=params, json=json_body, headers=headers)
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            try:
+                response = self._client.request(method, url, params=params, json=json_body, headers=headers)
+            except Exception as exc:
+                if attempt < 2 and self._is_retryable_transport_error(exc):
+                    time.sleep(0.05 * (attempt + 1))
+                    continue
+                raise
+            if response.status_code == 429 and attempt < max_retries:
+                delay = self._parse_retry_after_delay(response, attempt)
+                time.sleep(delay)
+                continue
+            return self._parse_response(response)
+        # Final attempt exhausted (e.g., persistent 429) — parse last response as-is
         return self._parse_response(response)
 
     def _build_url(self, path: str) -> str:

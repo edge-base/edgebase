@@ -5,6 +5,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import 'errors.dart';
 import 'token_manager.dart';
@@ -139,7 +140,7 @@ class HttpClient {
     }
   }
 
-  /// Core request method with automatic 401 retry.
+  /// Core request method with automatic 401 retry, 429 retry, and transport retry.
   Future<dynamic> _request(
     String method,
     String path, {
@@ -148,35 +149,56 @@ class HttpClient {
     Map<String, String>? query,
   }) async {
     final uri = _buildUri(path, query);
-    final headers = await _buildHeaders(withAuth: !skipAuth);
     final encoded = body != null ? jsonEncode(body) : null;
+    var did401Retry = false;
 
-    http.Response response;
-    try {
-      response = await _send(method, uri, headers, encoded);
-    } on TimeoutException {
-      throw EdgeBaseError(
-        'Request timeout after ${_requestTimeout.inMilliseconds}ms',
-      );
-    } catch (e) {
-      if (e is EdgeBaseError) rethrow;
-      throw EdgeBaseError('Network error: $e');
-    }
+    for (var attempt = 0; attempt <= 3; attempt++) {
+      final headers = await _buildHeaders(withAuth: !skipAuth);
 
-    // 401 auto-retry: refresh token and retry once
-    if (response.statusCode == 401 && !skipAuth && serviceKey == null) {
+      http.Response response;
       try {
-        final newHeaders = await _buildHeaders(withAuth: true);
-        response = await _send(method, uri, newHeaders, encoded);
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          return _handleResponse(response);
+        response = await _send(method, uri, headers, encoded);
+      } on TimeoutException {
+        if (attempt < 2) {
+          await Future.delayed(Duration(milliseconds: 50 * (attempt + 1)));
+          continue;
         }
-      } catch (_) {
-        // Retry failed, fall through to original response handling
+        throw EdgeBaseError(
+          'Request timeout after ${_requestTimeout.inMilliseconds}ms',
+        );
+      } catch (e) {
+        if (e is EdgeBaseError) rethrow;
+        if (attempt < 2 && _isRetryableTransportError(e)) {
+          await Future.delayed(Duration(milliseconds: 50 * (attempt + 1)));
+          continue;
+        }
+        throw EdgeBaseError('Network error: $e');
       }
+
+      // 429 retry with Retry-After
+      if (response.statusCode == 429 && attempt < 3) {
+        await Future.delayed(_parseRetryAfter(response, attempt));
+        continue;
+      }
+
+      // 401 auto-retry: refresh token and retry once (independent of transport/429 retries)
+      if (response.statusCode == 401 && !skipAuth && serviceKey == null && !did401Retry) {
+        did401Retry = true;
+        try {
+          final newHeaders = await _buildHeaders(withAuth: true);
+          response = await _send(method, uri, newHeaders, encoded);
+          if (response.statusCode >= 200 && response.statusCode < 300) {
+            return _handleResponse(response);
+          }
+        } catch (_) {
+          // Retry failed, fall through to original response handling
+        }
+      }
+
+      return _handleResponse(response);
     }
 
-    return _handleResponse(response);
+    throw EdgeBaseError('Request failed after maximum retries');
   }
 
   /// Build URI with optional query parameters.
@@ -310,6 +332,25 @@ class HttpClient {
     } catch (_) {
       return false;
     }
+  }
+
+  static Duration _parseRetryAfter(http.Response response, int attempt) {
+    final header = response.headers['retry-after'];
+    var baseMs = 1000 * (1 << attempt);
+    if (header != null) {
+      final seconds = int.tryParse(header);
+      if (seconds != null && seconds > 0) baseMs = seconds * 1000;
+    }
+    final random = math.Random();
+    final jitter = (baseMs * 0.25 * random.nextDouble()).round();
+    return Duration(milliseconds: (baseMs + jitter).clamp(0, 10000));
+  }
+
+  static bool _isRetryableTransportError(Object error) {
+    final msg = error.toString().toLowerCase();
+    return msg.contains('timeout') || msg.contains('socket') ||
+        msg.contains('connection') || msg.contains('reset') ||
+        msg.contains('refused') || msg.contains('network');
   }
 
   void close() => _client.close();

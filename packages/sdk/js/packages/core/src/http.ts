@@ -6,6 +6,34 @@ import type { ContextManager } from './context.js';
 import { parseErrorResponse, networkError } from './errors.js';
 import type { ITokenManager, ITokenPair } from './types.js';
 
+/** Parse Retry-After header and calculate delay with exponential backoff + jitter */
+function parseRetryAfter(header: string | null, attempt: number): number {
+  let baseDelay = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+  if (header) {
+    const seconds = Number(header);
+    if (!isNaN(seconds) && seconds > 0) {
+      baseDelay = seconds * 1000;
+    }
+  }
+  const jitter = Math.random() * baseDelay * 0.25;
+  return Math.min(baseDelay + jitter, 10000);
+}
+
+/** Check if error is a retryable network error */
+function isRetryableNetworkError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return msg.includes('fetch') || msg.includes('network') ||
+    msg.includes('timeout') || msg.includes('econnreset') ||
+    msg.includes('econnrefused') || msg.includes('socket') ||
+    msg.includes('abort');
+}
+
+/** Sleep for given milliseconds */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export interface HttpClientOptions {
   baseUrl: string;
   serviceKey?: string;
@@ -103,7 +131,7 @@ export class HttpClient {
     return data;
   }
 
-  /** Core request method */
+  /** Core request method with 429 retry, transport retry, and 401 token refresh */
   private async request<T>(
     method: string,
     path: string,
@@ -119,55 +147,73 @@ export class HttpClient {
       }
     }
 
-    const headers = await this.buildHeaders(options.skipAuth);
-    if (body === undefined) {
-      delete headers['Content-Type'];
-    }
-    const fetchOptions: RequestInit = { method, headers };
-    if (body !== undefined) {
-      fetchOptions.body = JSON.stringify(body);
-    }
+    const maxRetries = 3;
 
-    let response: Response;
-    try {
-      response = await fetch(url.toString(), fetchOptions);
-    } catch (err) {
-      throw networkError(
-        `Network error: ${err instanceof Error ? err.message : 'Unknown error'}`,
-      );
-    }
-
-    // Handle 401 with one forced token refresh retry.
-    if (response.status === 401 && !options.skipAuth && !this.serviceKey) {
-      try {
-        this.tokenManager?.invalidateAccessToken();
-        const newHeaders = await this.buildHeaders(false);
-        if (body === undefined) {
-          delete newHeaders['Content-Type'];
-        }
-        const retryOptions: RequestInit = { method, headers: newHeaders };
-        if (body !== undefined) {
-          retryOptions.body = JSON.stringify(body);
-        }
-        const retryResponse = await fetch(url.toString(), retryOptions);
-        if (retryResponse.ok) {
-          if (retryResponse.status === 204) return undefined as T;
-          return (await retryResponse.json()) as T;
-        }
-        // If retry also fails, fall through to error handling below
-        response = retryResponse;
-      } catch {
-        // retry failed, use original response
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const headers = await this.buildHeaders(options.skipAuth);
+      if (body === undefined) {
+        delete headers['Content-Type'];
       }
+      const fetchOptions: RequestInit = { method, headers };
+      if (body !== undefined) {
+        fetchOptions.body = JSON.stringify(body);
+      }
+
+      let response: Response;
+      try {
+        response = await fetch(url.toString(), fetchOptions);
+      } catch (err) {
+        // Transport retry: retry on network errors (max 2 transport retries)
+        if (attempt < 2 && isRetryableNetworkError(err)) {
+          await sleep(50 * (attempt + 1));
+          continue;
+        }
+        throw networkError(
+          `Network error: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        );
+      }
+
+      // 429 retry with Retry-After header and exponential backoff + jitter
+      if (response.status === 429 && attempt < maxRetries) {
+        const delay = parseRetryAfter(response.headers.get('Retry-After'), attempt);
+        await sleep(delay);
+        continue;
+      }
+
+      // Handle 401 with one forced token refresh retry.
+      if (response.status === 401 && !options.skipAuth && !this.serviceKey) {
+        try {
+          this.tokenManager?.invalidateAccessToken();
+          const newHeaders = await this.buildHeaders(false);
+          if (body === undefined) {
+            delete newHeaders['Content-Type'];
+          }
+          const retryOptions: RequestInit = { method, headers: newHeaders };
+          if (body !== undefined) {
+            retryOptions.body = JSON.stringify(body);
+          }
+          const retryResponse = await fetch(url.toString(), retryOptions);
+          if (retryResponse.ok) {
+            if (retryResponse.status === 204) return undefined as T;
+            return (await retryResponse.json()) as T;
+          }
+          response = retryResponse;
+        } catch {
+          // retry failed, use original response
+        }
+      }
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        throw parseErrorResponse(response.status, errorBody);
+      }
+
+      if (response.status === 204) return undefined as T;
+      return (await response.json()) as T;
     }
 
-    if (!response.ok) {
-      const errorBody = await response.json().catch(() => null);
-      throw parseErrorResponse(response.status, errorBody);
-    }
-
-    if (response.status === 204) return undefined as T;
-    return (await response.json()) as T;
+    // Should not reach here
+    throw networkError('Request failed after retries');
   }
 
   /** GET request */

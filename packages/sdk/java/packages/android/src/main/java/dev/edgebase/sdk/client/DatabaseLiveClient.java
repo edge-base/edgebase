@@ -51,6 +51,7 @@ class DatabaseLiveClient implements dev.edgebase.sdk.core.DatabaseLiveClient {
     private volatile boolean authenticated;
     private volatile boolean waitingForAuth;
     private volatile boolean shouldReconnect = true;
+    private volatile int reconnectAttempts;
     private final List<Consumer<Map<String, Object>>> messageListeners = new CopyOnWriteArrayList<>();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "edgebase-dblive");
@@ -91,9 +92,8 @@ class DatabaseLiveClient implements dev.edgebase.sdk.core.DatabaseLiveClient {
         return switch (parts.length) {
             case 2 -> Objects.equals(parts[1], change.getTable());
             case 3 -> Objects.equals(parts[2], change.getTable());
-            case 4 -> Objects.equals(parts[2], change.getTable())
-                    ? Objects.equals(parts[3], change.getId())
-                    : Objects.equals(parts[3], change.getTable());
+            case 4 -> (Objects.equals(parts[2], change.getTable()) && Objects.equals(parts[3], change.getId()))
+                    || Objects.equals(parts[3], change.getTable());
             default -> Objects.equals(parts[3], change.getTable()) && Objects.equals(parts[4], change.getId());
         };
     }
@@ -153,6 +153,7 @@ class DatabaseLiveClient implements dev.edgebase.sdk.core.DatabaseLiveClient {
                     // ── Auth success: mark authenticated & re-subscribe all channels
                     if ("auth_success".equals(type)) {
                         authenticated = true;
+                        reconnectAttempts = 0;
                         resubscribeAll();
                         return;
                     }
@@ -160,6 +161,7 @@ class DatabaseLiveClient implements dev.edgebase.sdk.core.DatabaseLiveClient {
                     // ── Auth refreshed: handle revoked channels, then re-subscribe
                     if ("auth_refreshed".equals(type)) {
                         authenticated = true;
+                        reconnectAttempts = 0;
                         handleAuthRefreshed(msg);
                         resubscribeAll();
                         return;
@@ -169,6 +171,14 @@ class DatabaseLiveClient implements dev.edgebase.sdk.core.DatabaseLiveClient {
                     if ("FILTER_RESYNC".equals(type)) {
                         resyncFilters();
                         return;
+                    }
+
+                    // Handle NOT_AUTHENTICATED: trigger re-auth
+                    if ("error".equals(type)) {
+                        String code = (String) msg.get("code");
+                        if ("NOT_AUTHENTICATED".equals(code) || "AUTH_FAILED".equals(code)) {
+                            handleAuthenticationFailure(new EdgeBaseError(401, "Authentication lost"));
+                        }
                     }
 
                     // Dispatch to all registered listeners
@@ -191,7 +201,9 @@ class DatabaseLiveClient implements dev.edgebase.sdk.core.DatabaseLiveClient {
                 isConnected = false;
                 authenticated = false;
                 if (shouldReconnect && !waitingForAuth) {
-                    scheduler.schedule(() -> connect(null), 1, TimeUnit.SECONDS);
+                    long delay = Math.min((long) (1000 * Math.pow(2, reconnectAttempts)), 30000);
+                    reconnectAttempts++;
+                    scheduler.schedule(() -> connect(null), delay, TimeUnit.MILLISECONDS);
                 }
             }
 
@@ -200,7 +212,9 @@ class DatabaseLiveClient implements dev.edgebase.sdk.core.DatabaseLiveClient {
                 isConnected = false;
                 authenticated = false;
                 if (shouldReconnect && !waitingForAuth) {
-                    scheduler.schedule(() -> connect(null), 1, TimeUnit.SECONDS);
+                    long delay = Math.min((long) (1000 * Math.pow(2, reconnectAttempts)), 30000);
+                    reconnectAttempts++;
+                    scheduler.schedule(() -> connect(null), delay, TimeUnit.MILLISECONDS);
                 }
             }
         });

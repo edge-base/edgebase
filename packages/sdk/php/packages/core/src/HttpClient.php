@@ -232,10 +232,10 @@ class HttpClient
             $jsonBody = '{}';
         }
 
-        $attempts = in_array($method, ['GET', 'DELETE'], true) ? 3 : 1;
+        $maxRetries = 3;
         $lastError = null;
 
-        for ($attempt = 0; $attempt < $attempts; $attempt++) {
+        for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
             $ch = curl_init($fullUrl);
             $opts = [
                 CURLOPT_RETURNTRANSFER => true,
@@ -251,10 +251,22 @@ class HttpClient
                 return $this->executeCurl($ch, $path);
             } catch (EdgeBaseException $error) {
                 $lastError = $error;
-                if ($attempt + 1 >= $attempts || !$this->isTransientTransportError($error)) {
-                    throw $error;
+
+                // 429 retry with exponential backoff + jitter
+                if ($error->getStatusCode() === 429 && $attempt < $maxRetries) {
+                    $baseDelay = 1_000_000 * (1 << $attempt); // 1s, 2s, 4s in microseconds
+                    $jitter = random_int(0, (int) ($baseDelay * 0.25));
+                    usleep(min($baseDelay + $jitter, 10_000_000));
+                    continue;
                 }
-                usleep(250_000 * ($attempt + 1));
+
+                // Transport retry (all methods, max 2 retries)
+                if ($attempt < 2 && $this->isTransientTransportError($error)) {
+                    usleep(250_000 * ($attempt + 1));
+                    continue;
+                }
+
+                throw $error;
             }
         }
 

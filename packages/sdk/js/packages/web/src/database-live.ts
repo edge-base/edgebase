@@ -234,11 +234,14 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
 
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
+        if (this.ws) this.ws.onmessage = originalOnMessage ?? null;
         reject(new EdgeBaseError(401, 'Auth timeout'));
       }, 10000);
 
       const originalOnMessage = this.ws?.onmessage;
       if (!this.ws) return;
+
+      const messageQueue: MessageEvent[] = [];
 
       this.ws.onmessage = (event: MessageEvent) => {
         const msg = JSON.parse(event.data as string) as Record<string, unknown>;
@@ -259,13 +262,25 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
 
           this.resubscribeAll();
           resolve();
+
+          // Replay queued non-auth messages
+          for (const queued of messageQueue) {
+            if (this.ws?.onmessage) {
+              this.ws.onmessage(queued);
+            }
+          }
           return;
         }
 
         if (msg.type === 'error') {
           clearTimeout(timeout);
+          if (this.ws) this.ws.onmessage = originalOnMessage ?? null;
           reject(new EdgeBaseError(401, msg.message as string));
+          return;
         }
+
+        // Queue non-auth messages for replay after auth completes
+        messageQueue.push(event);
       };
     });
   }
@@ -462,7 +477,9 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
   }
 
   private scheduleReconnect(channel: string): void {
-    const delay = this.options.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts);
+    const baseDelay = this.options.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts);
+    const jitter = Math.random() * baseDelay * 0.25;
+    const delay = baseDelay + jitter;
     this.reconnectAttempts++;
     setTimeout(() => {
       this.connect(channel).catch(() => {
@@ -559,10 +576,12 @@ function matchesDatabaseLiveChannel(channel: string, change: DbChange, messageCh
   if (parts.length === 2) return parts[1] === change.table;
   if (parts.length === 3) return parts[2] === change.table;
   if (parts.length === 4) {
-    if (parts[2] === change.table) {
-      return change.docId === parts[3];
-    }
-    return parts[3] === change.table;
+    // Could be dblive:ns:table:docId or dblive:ns:instanceId:table
+    // Try table:docId first (more specific)
+    if (parts[2] === change.table && change.docId === parts[3]) return true;
+    // Try instanceId:table
+    if (parts[3] === change.table) return true;
+    return false;
   }
   return parts[3] === change.table && change.docId === parts[4];
 }
