@@ -1045,6 +1045,9 @@ public class RoomClient {
         authenticated = false;
         joined = false;
         ws = null;
+        if (!intentionallyLeft) {
+            rejectAllPending(new EdgeBaseError(499, "WebSocket connection lost"));
+        }
         if (lastCloseCode == 4004 && !"kicked".equals(connectionState)) {
             handleKicked();
         }
@@ -1135,6 +1138,7 @@ public class RoomClient {
             return;
         }
 
+        rejectAllPending(new EdgeBaseError(401, "Auth state lost"));
         waitingForAuth = joinRequested;
         reconnectInfo = null;
         setConnectionState("auth_lost");
@@ -1177,6 +1181,24 @@ public class RoomClient {
 
     public void destroy() {
         leave();
+        sharedStateHandlers.clear();
+        playerStateHandlers.clear();
+        messageHandlers.clear();
+        allMessageHandlers.clear();
+        errorHandlers.clear();
+        kickedHandlers.clear();
+        membersSyncHandlers.clear();
+        memberJoinHandlers.clear();
+        memberLeaveHandlers.clear();
+        memberStateHandlers.clear();
+        signalHandlers.clear();
+        anySignalHandlers.clear();
+        mediaTrackHandlers.clear();
+        mediaTrackRemovedHandlers.clear();
+        mediaStateHandlers.clear();
+        mediaDeviceHandlers.clear();
+        reconnectHandlers.clear();
+        connectionStateHandlers.clear();
         scheduler.shutdownNow();
     }
 
@@ -1234,6 +1256,17 @@ public class RoomClient {
             entry.getValue().completeExceptionally(error);
         }
         pending.clear();
+    }
+
+    private void rejectAllPending(EdgeBaseError error) {
+        for (CompletableFuture<Object> future : pendingRequests.values()) {
+            future.completeExceptionally(error);
+        }
+        pendingRequests.clear();
+        rejectPendingVoidRequests(pendingSignalRequests, error);
+        rejectPendingVoidRequests(pendingAdminRequests, error);
+        rejectPendingVoidRequests(pendingMemberStateRequests, error);
+        rejectPendingVoidRequests(pendingMediaRequests, error);
     }
 
     private void setConnectionState(String next) {

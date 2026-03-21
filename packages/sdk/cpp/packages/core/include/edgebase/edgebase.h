@@ -538,8 +538,16 @@ private:
 
   std::mutex handlersMx_;
   std::map<int, MessageHandler> handlers_;
-  std::map<int, std::pair<std::string, std::function<void(const DbChange &)>>>
-      snapshotHandlers_;
+
+  /// Per-subscriber info including channel, handler, and filters.
+  /// Enables recomputeChannelFilters() pattern (see JS SDK PR #14).
+  struct SnapshotEntry {
+    std::string channel;
+    std::function<void(const DbChange &)> handler;
+    std::vector<FilterTuple> filters;
+    std::vector<FilterTuple> orFilters;
+  };
+  std::map<int, SnapshotEntry> snapshotHandlers_;
 
   /// Server-side filters per channel for recovery after FILTER_RESYNC.
   std::map<std::string, std::vector<FilterTuple>> channelFilters_;
@@ -561,6 +569,7 @@ private:
   void dispatchMessage(const std::string &raw);
   void resubscribeAll();
   void resyncFilters();
+  void recomputeChannelFilters(const std::string &channel);
 };
 
 // ── PushClient

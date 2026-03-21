@@ -575,6 +575,9 @@ class RoomClient(
         isConnected = false
         isAuthenticated = false
         isJoined = false
+        if (!intentionallyLeft) {
+            rejectAllPending(EdgeBaseError(499, "WebSocket connection lost"))
+        }
         val closeCode = try {
             webSocketSession?.closeReason?.await()?.code?.toInt()
         } catch (_: Throwable) {
@@ -979,6 +982,7 @@ class RoomClient(
             return
         }
 
+        rejectAllPending(EdgeBaseError(401, "Auth state lost"))
         val socket = socketHandle
         waitingForAuth = joinRequested
         _reconnectInfo = null
@@ -1016,8 +1020,37 @@ class RoomClient(
         isJoined = false
     }
 
+    private fun rejectAllPending(error: EdgeBaseError) {
+        pendingRequests.values.forEach { it.completeExceptionally(error) }
+        pendingRequests.clear()
+        rejectPendingUnitRequests(pendingSignalRequests, error)
+        rejectPendingUnitRequests(pendingAdminRequests, error)
+        rejectPendingUnitRequests(pendingMemberStateRequests, error)
+        rejectPendingUnitRequests(pendingMediaRequests, error)
+    }
+
     fun destroy() {
         leave()
+        sharedStateHandlers.clear()
+        playerStateHandlers.clear()
+        messageHandlers.clear()
+        allMessageHandlers.clear()
+        errorHandlers.clear()
+        kickedHandlers.clear()
+        joinHandlers.clear()
+        leaveHandlers.clear()
+        memberSyncHandlers.clear()
+        memberJoinHandlers.clear()
+        memberLeaveHandlers.clear()
+        memberStateHandlers.clear()
+        signalHandlers.clear()
+        anySignalHandlers.clear()
+        mediaTrackHandlers.clear()
+        mediaTrackRemovedHandlers.clear()
+        mediaStateHandlers.clear()
+        mediaDeviceHandlers.clear()
+        reconnectHandlers.clear()
+        connectionStateHandlers.clear()
         scope.cancel()
         ktorClient.close()
     }

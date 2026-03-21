@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <sstream>
 #include <thread>
+#include <vector>
 
 namespace edgebase {
 
@@ -107,6 +108,11 @@ void RoomClient::join() {
           self->set_connection_state("kicked");
         }
 
+        // Reject pending requests on unexpected disconnect
+        if (!self->intentionally_left_.load()) {
+          self->reject_all_pending("WebSocket connection lost");
+        }
+
         if (!self->intentionally_left_.load() && self->opts_.auto_reconnect &&
             self->reconnect_attempts_ < self->opts_.max_reconnect_attempts) {
           self->schedule_reconnect();
@@ -162,12 +168,37 @@ void RoomClient::send(const std::string &action_type, const json &payload,
 
   std::string request_id = generate_request_id();
 
-  pending_requests_[request_id] = PendingRequest{on_result, on_error};
+  {
+    std::lock_guard<std::mutex> lock(pending_requests_mx_);
+    pending_requests_[request_id] = PendingRequest{std::move(on_result),
+                                                   std::move(on_error)};
+  }
 
   send_raw({{"type", "send"},
             {"actionType", action_type},
             {"payload", payload},
             {"requestId", request_id}});
+
+  // Timeout for pending request
+  auto weak = weak_from_this();
+  int timeout_ms = opts_.send_timeout_ms;
+  std::thread([weak, request_id, timeout_ms]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    auto self = weak.lock();
+    if (!self) return;
+    ErrorCallback on_error;
+    {
+      std::lock_guard<std::mutex> lock(self->pending_requests_mx_);
+      auto it = self->pending_requests_.find(request_id);
+      if (it != self->pending_requests_.end()) {
+        on_error = std::move(it->second.on_error);
+        self->pending_requests_.erase(it);
+      }
+    }
+    if (on_error) {
+      on_error("Action timed out");
+    }
+  }).detach();
 }
 
 // ── Subscriptions (v2 API) ──────────────────────────────────────────────────
@@ -337,6 +368,7 @@ std::string RoomClient::ws_url() const {
 void RoomClient::authenticate() {
   const auto token = token_fn_();
   if (token.empty()) {
+    reject_all_pending("Auth state lost");
     intentionally_left_.store(true);
     connected_.store(false);
     authenticated_.store(false);
@@ -425,11 +457,17 @@ void RoomClient::handle_message(const std::string &raw) {
   // ── Action result ──
   if (type == "action_result") {
     std::string request_id = msg.value("requestId", "");
-    auto it = pending_requests_.find(request_id);
-    if (it != pending_requests_.end()) {
-      if (it->second.on_result)
-        it->second.on_result(msg.value("result", json()));
-      pending_requests_.erase(it);
+    ResultCallback on_result;
+    {
+      std::lock_guard<std::mutex> lock(pending_requests_mx_);
+      auto it = pending_requests_.find(request_id);
+      if (it != pending_requests_.end()) {
+        on_result = std::move(it->second.on_result);
+        pending_requests_.erase(it);
+      }
+    }
+    if (on_result) {
+      on_result(msg.value("result", json()));
     }
     return;
   }
@@ -437,11 +475,17 @@ void RoomClient::handle_message(const std::string &raw) {
   // ── Action error ──
   if (type == "action_error") {
     std::string request_id = msg.value("requestId", "");
-    auto it = pending_requests_.find(request_id);
-    if (it != pending_requests_.end()) {
-      if (it->second.on_error)
-        it->second.on_error(msg.value("message", "Unknown error"));
-      pending_requests_.erase(it);
+    ErrorCallback on_error;
+    {
+      std::lock_guard<std::mutex> lock(pending_requests_mx_);
+      auto it = pending_requests_.find(request_id);
+      if (it != pending_requests_.end()) {
+        on_error = std::move(it->second.on_error);
+        pending_requests_.erase(it);
+      }
+    }
+    if (on_error) {
+      on_error(msg.value("message", "Unknown error"));
     }
     return;
   }
@@ -651,8 +695,11 @@ void RoomClient::send_signal(const std::string &event, const json &payload,
     return;
   }
   std::string request_id = generate_request_id();
-  pending_signal_requests_[request_id] =
-      PendingVoidRequest{std::move(on_success), std::move(on_error)};
+  {
+    std::lock_guard<std::mutex> lock(pending_requests_mx_);
+    pending_signal_requests_[request_id] =
+        PendingVoidRequest{std::move(on_success), std::move(on_error)};
+  }
   json message{{"type", "signal"},
                {"event", event},
                {"payload", payload},
@@ -661,6 +708,27 @@ void RoomClient::send_signal(const std::string &event, const json &payload,
   if (options.contains("memberId"))
     message["memberId"] = options["memberId"];
   send_raw(message);
+
+  // Timeout for pending signal request
+  auto weak = weak_from_this();
+  int timeout_ms = opts_.send_timeout_ms;
+  std::thread([weak, request_id, timeout_ms]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    auto self = weak.lock();
+    if (!self) return;
+    ErrorCallback on_error;
+    {
+      std::lock_guard<std::mutex> lock(self->pending_requests_mx_);
+      auto it = self->pending_signal_requests_.find(request_id);
+      if (it != self->pending_signal_requests_.end()) {
+        on_error = std::move(it->second.on_error);
+        self->pending_signal_requests_.erase(it);
+      }
+    }
+    if (on_error) {
+      on_error("Signal timed out");
+    }
+  }).detach();
 }
 
 void RoomClient::send_member_state(const json &state, VoidCallback on_success,
@@ -671,11 +739,35 @@ void RoomClient::send_member_state(const json &state, VoidCallback on_success,
     return;
   }
   std::string request_id = generate_request_id();
-  pending_member_state_requests_[request_id] =
-      PendingVoidRequest{std::move(on_success), std::move(on_error)};
+  {
+    std::lock_guard<std::mutex> lock(pending_requests_mx_);
+    pending_member_state_requests_[request_id] =
+        PendingVoidRequest{std::move(on_success), std::move(on_error)};
+  }
   send_raw({{"type", "member_state"},
             {"state", state},
             {"requestId", request_id}});
+
+  // Timeout for pending member state request
+  auto weak = weak_from_this();
+  int timeout_ms = opts_.send_timeout_ms;
+  std::thread([weak, request_id, timeout_ms]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    auto self = weak.lock();
+    if (!self) return;
+    ErrorCallback on_error;
+    {
+      std::lock_guard<std::mutex> lock(self->pending_requests_mx_);
+      auto it = self->pending_member_state_requests_.find(request_id);
+      if (it != self->pending_member_state_requests_.end()) {
+        on_error = std::move(it->second.on_error);
+        self->pending_member_state_requests_.erase(it);
+      }
+    }
+    if (on_error) {
+      on_error("Member state timed out");
+    }
+  }).detach();
 }
 
 void RoomClient::clear_member_state(VoidCallback on_success,
@@ -686,9 +778,33 @@ void RoomClient::clear_member_state(VoidCallback on_success,
     return;
   }
   std::string request_id = generate_request_id();
-  pending_member_state_requests_[request_id] =
-      PendingVoidRequest{std::move(on_success), std::move(on_error)};
+  {
+    std::lock_guard<std::mutex> lock(pending_requests_mx_);
+    pending_member_state_requests_[request_id] =
+        PendingVoidRequest{std::move(on_success), std::move(on_error)};
+  }
   send_raw({{"type", "member_state_clear"}, {"requestId", request_id}});
+
+  // Timeout for pending member state clear request
+  auto weak = weak_from_this();
+  int timeout_ms = opts_.send_timeout_ms;
+  std::thread([weak, request_id, timeout_ms]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    auto self = weak.lock();
+    if (!self) return;
+    ErrorCallback on_error;
+    {
+      std::lock_guard<std::mutex> lock(self->pending_requests_mx_);
+      auto it = self->pending_member_state_requests_.find(request_id);
+      if (it != self->pending_member_state_requests_.end()) {
+        on_error = std::move(it->second.on_error);
+        self->pending_member_state_requests_.erase(it);
+      }
+    }
+    if (on_error) {
+      on_error("Member state clear timed out");
+    }
+  }).detach();
 }
 
 void RoomClient::send_admin(const std::string &operation,
@@ -701,13 +817,37 @@ void RoomClient::send_admin(const std::string &operation,
     return;
   }
   std::string request_id = generate_request_id();
-  pending_admin_requests_[request_id] =
-      PendingVoidRequest{std::move(on_success), std::move(on_error)};
+  {
+    std::lock_guard<std::mutex> lock(pending_requests_mx_);
+    pending_admin_requests_[request_id] =
+        PendingVoidRequest{std::move(on_success), std::move(on_error)};
+  }
   send_raw({{"type", "admin"},
             {"operation", operation},
             {"memberId", member_id},
             {"payload", payload},
             {"requestId", request_id}});
+
+  // Timeout for pending admin request
+  auto weak = weak_from_this();
+  int timeout_ms = opts_.send_timeout_ms;
+  std::thread([weak, request_id, timeout_ms]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    auto self = weak.lock();
+    if (!self) return;
+    ErrorCallback on_error;
+    {
+      std::lock_guard<std::mutex> lock(self->pending_requests_mx_);
+      auto it = self->pending_admin_requests_.find(request_id);
+      if (it != self->pending_admin_requests_.end()) {
+        on_error = std::move(it->second.on_error);
+        self->pending_admin_requests_.erase(it);
+      }
+    }
+    if (on_error) {
+      on_error("Admin action timed out");
+    }
+  }).detach();
 }
 
 void RoomClient::send_media(const std::string &operation,
@@ -719,13 +859,37 @@ void RoomClient::send_media(const std::string &operation,
     return;
   }
   std::string request_id = generate_request_id();
-  pending_media_requests_[request_id] =
-      PendingVoidRequest{std::move(on_success), std::move(on_error)};
+  {
+    std::lock_guard<std::mutex> lock(pending_requests_mx_);
+    pending_media_requests_[request_id] =
+        PendingVoidRequest{std::move(on_success), std::move(on_error)};
+  }
   send_raw({{"type", "media"},
             {"operation", operation},
             {"kind", kind},
             {"payload", payload},
             {"requestId", request_id}});
+
+  // Timeout for pending media request
+  auto weak = weak_from_this();
+  int timeout_ms = opts_.send_timeout_ms;
+  std::thread([weak, request_id, timeout_ms]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    auto self = weak.lock();
+    if (!self) return;
+    ErrorCallback on_error;
+    {
+      std::lock_guard<std::mutex> lock(self->pending_requests_mx_);
+      auto it = self->pending_media_requests_.find(request_id);
+      if (it != self->pending_media_requests_.end()) {
+        on_error = std::move(it->second.on_error);
+        self->pending_media_requests_.erase(it);
+      }
+    }
+    if (on_error) {
+      on_error("Media action timed out");
+    }
+  }).detach();
 }
 
 void RoomClient::switch_media_devices(const json &payload,
@@ -804,47 +968,76 @@ std::string RoomClient::generate_request_id() {
 }
 
 void RoomClient::reject_all_pending(const std::string &reason) {
-  for (auto &[id, pending] : pending_requests_) {
-    if (pending.on_error)
-      pending.on_error(reason);
+  std::vector<ErrorCallback> callbacks;
+  {
+    std::lock_guard<std::mutex> lock(pending_requests_mx_);
+    callbacks.reserve(pending_requests_.size() + pending_signal_requests_.size() +
+                      pending_admin_requests_.size() +
+                      pending_member_state_requests_.size() +
+                      pending_media_requests_.size());
+    for (auto &[id, pending] : pending_requests_) {
+      if (pending.on_error)
+        callbacks.push_back(std::move(pending.on_error));
+    }
+    pending_requests_.clear();
+    for (auto &[id, request] : pending_signal_requests_) {
+      if (request.on_error)
+        callbacks.push_back(std::move(request.on_error));
+    }
+    pending_signal_requests_.clear();
+    for (auto &[id, request] : pending_admin_requests_) {
+      if (request.on_error)
+        callbacks.push_back(std::move(request.on_error));
+    }
+    pending_admin_requests_.clear();
+    for (auto &[id, request] : pending_member_state_requests_) {
+      if (request.on_error)
+        callbacks.push_back(std::move(request.on_error));
+    }
+    pending_member_state_requests_.clear();
+    for (auto &[id, request] : pending_media_requests_) {
+      if (request.on_error)
+        callbacks.push_back(std::move(request.on_error));
+    }
+    pending_media_requests_.clear();
   }
-  pending_requests_.clear();
-  reject_all_pending_void(pending_signal_requests_, reason);
-  reject_all_pending_void(pending_admin_requests_, reason);
-  reject_all_pending_void(pending_member_state_requests_, reason);
-  reject_all_pending_void(pending_media_requests_, reason);
+  for (auto &callback : callbacks) {
+    callback(reason);
+  }
 }
 
 void RoomClient::resolve_pending_void(
     std::map<std::string, PendingVoidRequest> &pending,
     const std::string &request_id) {
-  auto it = pending.find(request_id);
-  if (it != pending.end()) {
-    if (it->second.on_success)
-      it->second.on_success();
-    pending.erase(it);
+  VoidCallback on_success;
+  {
+    std::lock_guard<std::mutex> lock(pending_requests_mx_);
+    auto it = pending.find(request_id);
+    if (it != pending.end()) {
+      on_success = std::move(it->second.on_success);
+      pending.erase(it);
+    }
+  }
+  if (on_success) {
+    on_success();
   }
 }
 
 void RoomClient::reject_pending_void(
     std::map<std::string, PendingVoidRequest> &pending,
     const std::string &request_id, const std::string &message) {
-  auto it = pending.find(request_id);
-  if (it != pending.end()) {
-    if (it->second.on_error)
-      it->second.on_error(message);
-    pending.erase(it);
+  ErrorCallback on_error;
+  {
+    std::lock_guard<std::mutex> lock(pending_requests_mx_);
+    auto it = pending.find(request_id);
+    if (it != pending.end()) {
+      on_error = std::move(it->second.on_error);
+      pending.erase(it);
+    }
   }
-}
-
-void RoomClient::reject_all_pending_void(
-    std::map<std::string, PendingVoidRequest> &pending,
-    const std::string &reason) {
-  for (auto &[id, request] : pending) {
-    if (request.on_error)
-      request.on_error(reason);
+  if (on_error) {
+    on_error(message);
   }
-  pending.clear();
 }
 
 void RoomClient::set_connection_state(const std::string &state) {

@@ -3,6 +3,7 @@
 #include <edgebase/edgebase.h>
 
 #include <algorithm>
+#include <set>
 #include <sstream>
 #include <cctype>
 #include <cstdlib>
@@ -118,25 +119,29 @@ int DatabaseLiveClient::onSnapshot(const std::string &tableName,
                                const std::vector<FilterTuple> &serverOrFilters) {
   int id = nextId_++;
   const std::string channel = normalizeDatabaseLiveChannel(tableName);
+  std::vector<FilterTuple> effectiveFilters;
+  std::vector<FilterTuple> effectiveOrFilters;
   {
     std::lock_guard<std::mutex> lock(handlersMx_);
-    snapshotHandlers_[id] = {channel, std::move(handler)};
-    if (!serverFilters.empty())
-      channelFilters_[channel] = serverFilters;
-    if (!serverOrFilters.empty())
-      channelOrFilters_[channel] = serverOrFilters;
+    snapshotHandlers_[id] = {channel, std::move(handler), serverFilters, serverOrFilters};
+    recomputeChannelFilters(channel);
+    // Use recomputed channel-level filters for the subscribe message
+    auto fit = channelFilters_.find(channel);
+    if (fit != channelFilters_.end()) effectiveFilters = fit->second;
+    auto ofit = channelOrFilters_.find(channel);
+    if (ofit != channelOrFilters_.end()) effectiveOrFilters = ofit->second;
   }
 
   json sub = {{"type", "subscribe"}, {"channel", channel}};
-  if (!serverFilters.empty()) {
+  if (!effectiveFilters.empty()) {
     sub["filters"] = json::array();
-    for (const auto &filter : serverFilters) {
+    for (const auto &filter : effectiveFilters) {
       sub["filters"].push_back(json::array({filter.field, filter.op, filter.value}));
     }
   }
-  if (!serverOrFilters.empty()) {
+  if (!effectiveOrFilters.empty()) {
     sub["orFilters"] = json::array();
-    for (const auto &filter : serverOrFilters) {
+    for (const auto &filter : effectiveOrFilters) {
       sub["orFilters"].push_back(json::array({filter.field, filter.op, filter.value}));
     }
   }
@@ -162,11 +167,11 @@ void DatabaseLiveClient::unsubscribe(int id) {
   std::lock_guard<std::mutex> lock(handlersMx_);
   auto it = snapshotHandlers_.find(id);
   if (it != snapshotHandlers_.end()) {
-    const auto channel = it->second.first;
+    const auto channel = it->second.channel;
     snapshotHandlers_.erase(it);
     bool hasOther = false;
     for (const auto &[otherId, entry] : snapshotHandlers_) {
-      if (entry.first == channel) {
+      if (entry.channel == channel) {
         hasOther = true;
         break;
       }
@@ -174,6 +179,28 @@ void DatabaseLiveClient::unsubscribe(int id) {
     if (!hasOther) {
       channelFilters_.erase(channel);
       channelOrFilters_.erase(channel);
+      // Send unsubscribe since no handlers remain
+      json unsub = {{"type", "unsubscribe"}, {"channel", channel}};
+      sendRaw(unsub.dump());
+    } else {
+      // Recompute filters from remaining handlers and re-send subscribe
+      recomputeChannelFilters(channel);
+      json sub = {{"type", "subscribe"}, {"channel", channel}};
+      auto filterIt = channelFilters_.find(channel);
+      if (filterIt != channelFilters_.end()) {
+        sub["filters"] = json::array();
+        for (const auto &filter : filterIt->second) {
+          sub["filters"].push_back(json::array({filter.field, filter.op, filter.value}));
+        }
+      }
+      auto orFilterIt = channelOrFilters_.find(channel);
+      if (orFilterIt != channelOrFilters_.end()) {
+        sub["orFilters"] = json::array();
+        for (const auto &filter : orFilterIt->second) {
+          sub["orFilters"].push_back(json::array({filter.field, filter.op, filter.value}));
+        }
+      }
+      sendRaw(sub.dump());
     }
   }
   handlers_.erase(id);
@@ -263,8 +290,8 @@ void DatabaseLiveClient::dispatchMessage(const std::string &raw) {
 
         std::lock_guard<std::mutex> lock(handlersMx_);
         for (auto &[id, entry] : snapshotHandlers_) {
-          if (matchChannel(entry.first, change, msgCh)) {
-            entry.second(change);
+          if (matchChannel(entry.channel, change, msgCh)) {
+            entry.handler(change);
           }
         }
       }
@@ -283,8 +310,8 @@ void DatabaseLiveClient::dispatchMessage(const std::string &raw) {
 
     std::lock_guard<std::mutex> lock(handlersMx_);
     for (auto &[id, entry] : snapshotHandlers_) {
-      if (matchChannel(entry.first, change, messageChannel)) {
-        entry.second(change);
+      if (matchChannel(entry.channel, change, messageChannel)) {
+        entry.handler(change);
       }
     }
   }
@@ -297,16 +324,21 @@ void DatabaseLiveClient::dispatchMessage(const std::string &raw) {
 
 void DatabaseLiveClient::resubscribeAll() {
   std::lock_guard<std::mutex> lock(handlersMx_);
+  // Collect unique channels to avoid duplicate subscribe messages
+  std::set<std::string> channels;
   for (const auto &[id, entry] : snapshotHandlers_) {
-    json sub = {{"type", "subscribe"}, {"channel", entry.first}};
-    auto filterIt = channelFilters_.find(entry.first);
+    channels.insert(entry.channel);
+  }
+  for (const auto &channel : channels) {
+    json sub = {{"type", "subscribe"}, {"channel", channel}};
+    auto filterIt = channelFilters_.find(channel);
     if (filterIt != channelFilters_.end()) {
       sub["filters"] = json::array();
       for (const auto &filter : filterIt->second) {
         sub["filters"].push_back(json::array({filter.field, filter.op, filter.value}));
       }
     }
-    auto orFilterIt = channelOrFilters_.find(entry.first);
+    auto orFilterIt = channelOrFilters_.find(channel);
     if (orFilterIt != channelOrFilters_.end()) {
       sub["orFilters"] = json::array();
       for (const auto &filter : orFilterIt->second) {
@@ -315,6 +347,27 @@ void DatabaseLiveClient::resubscribeAll() {
     }
     sendRaw(sub.dump());
   }
+}
+
+void DatabaseLiveClient::recomputeChannelFilters(const std::string &channel) {
+  // Must be called with handlersMx_ held.
+  // Find the first handler for this channel that has filters/orFilters.
+  bool foundFilters = false;
+  bool foundOrFilters = false;
+  for (const auto &[id, entry] : snapshotHandlers_) {
+    if (entry.channel != channel) continue;
+    if (!foundFilters && !entry.filters.empty()) {
+      channelFilters_[channel] = entry.filters;
+      foundFilters = true;
+    }
+    if (!foundOrFilters && !entry.orFilters.empty()) {
+      channelOrFilters_[channel] = entry.orFilters;
+      foundOrFilters = true;
+    }
+    if (foundFilters && foundOrFilters) break;
+  }
+  if (!foundFilters) channelFilters_.erase(channel);
+  if (!foundOrFilters) channelOrFilters_.erase(channel);
 }
 
 void DatabaseLiveClient::resyncFilters() { resubscribeAll(); }

@@ -348,7 +348,16 @@ impl RoomClient {
                                 msg = ws_rx.recv() => {
                                     match msg {
                                         Some(raw) => this.handle_message(&raw),
-                                        None => break, // WS closed
+                                        None => {
+                                            // WS closed — reject pending requests
+                                            // if disconnect was not intentional
+                                            if !*this.intentionally_left.lock().unwrap() {
+                                                this.reject_all_pending(
+                                                    "WebSocket disconnected",
+                                                );
+                                            }
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -393,8 +402,8 @@ impl RoomClient {
 
         *self.send_tx.lock().unwrap() = None;
 
-        // Drop all pending send() requests — senders are dropped, receivers get RecvError
-        self.pending_requests.lock().unwrap().clear();
+        // Reject all pending requests with explicit error
+        self.reject_all_pending("Room left");
 
         // Reset state
         *self.shared_state.write().unwrap() = json!({});
@@ -406,10 +415,6 @@ impl RoomClient {
         *self.current_user_id.lock().unwrap() = None;
         *self.current_connection_id.lock().unwrap() = None;
         *self.reconnect_info.write().unwrap() = None;
-        self.pending_signal_requests.lock().unwrap().clear();
-        self.pending_admin_requests.lock().unwrap().clear();
-        self.pending_member_state_requests.lock().unwrap().clear();
-        self.pending_media_requests.lock().unwrap().clear();
         self.set_connection_state(ROOM_STATE_IDLE);
     }
 
@@ -867,6 +872,62 @@ impl RoomClient {
             self.send_media("device", "screen", Some(json!({ "deviceId": device_id }))).await?;
         }
         Ok(())
+    }
+
+    /// Reject all pending requests across all pending maps with an error message.
+    /// Called when the WebSocket disconnects unexpectedly.
+    fn reject_all_pending(&self, message: &str) {
+        let error_msg = message.to_string();
+
+        // Reject pending action requests
+        for (_, tx) in self.pending_requests.lock().unwrap().drain() {
+            let _ = tx.send(Err(Error::Room(error_msg.clone())));
+        }
+
+        // Reject pending signal requests
+        for (_, tx) in self.pending_signal_requests.lock().unwrap().drain() {
+            let _ = tx.send(Err(Error::Room(error_msg.clone())));
+        }
+
+        // Reject pending admin requests
+        for (_, tx) in self.pending_admin_requests.lock().unwrap().drain() {
+            let _ = tx.send(Err(Error::Room(error_msg.clone())));
+        }
+
+        // Reject pending member state requests
+        for (_, tx) in self.pending_member_state_requests.lock().unwrap().drain() {
+            let _ = tx.send(Err(Error::Room(error_msg.clone())));
+        }
+
+        // Reject pending media requests
+        for (_, tx) in self.pending_media_requests.lock().unwrap().drain() {
+            let _ = tx.send(Err(Error::Room(error_msg.clone())));
+        }
+    }
+
+    /// Leave the room, clear all handler lists, and release resources.
+    /// After calling destroy(), this RoomClient instance should not be reused.
+    pub async fn destroy(self: &Arc<Self>) {
+        self.leave().await;
+
+        // Clear all handler lists
+        self.shared_state_handlers.lock().unwrap().clear();
+        self.player_state_handlers.lock().unwrap().clear();
+        self.message_handlers.lock().unwrap().clear();
+        self.error_handlers.lock().unwrap().clear();
+        self.kicked_handlers.lock().unwrap().clear();
+        self.member_sync_handlers.lock().unwrap().clear();
+        self.member_join_handlers.lock().unwrap().clear();
+        self.member_leave_handlers.lock().unwrap().clear();
+        self.member_state_handlers.lock().unwrap().clear();
+        self.signal_handlers.lock().unwrap().clear();
+        self.any_signal_handlers.lock().unwrap().clear();
+        self.media_track_handlers.lock().unwrap().clear();
+        self.media_track_removed_handlers.lock().unwrap().clear();
+        self.media_state_handlers.lock().unwrap().clear();
+        self.media_device_handlers.lock().unwrap().clear();
+        self.reconnect_handlers.lock().unwrap().clear();
+        self.connection_state_handlers.lock().unwrap().clear();
     }
 
     // ── Private: Connection ──────────────────────────────────────────────────

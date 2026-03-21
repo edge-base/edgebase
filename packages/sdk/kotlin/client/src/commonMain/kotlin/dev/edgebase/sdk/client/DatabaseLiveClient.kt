@@ -32,6 +32,15 @@ private const val SDK_VERSION = "0.1.5"
  */
 typealias FilterTuple = Triple<String, String, Any?>
 
+/**
+ * Per-subscriber filter info for recomputeChannelFilters() pattern (see JS SDK PR #14).
+ */
+private data class DatabaseLiveSubscriber(
+    val id: Int,
+    val filters: List<FilterTuple>?,
+    val orFilters: List<FilterTuple>?
+)
+
 private fun normalizeDatabaseLiveChannel(tableOrChannel: String): String =
     if (tableOrChannel.startsWith("dblive:")) tableOrChannel else "dblive:$tableOrChannel"
 
@@ -101,6 +110,11 @@ internal class DatabaseLiveClient(
 
     /** Channels currently subscribed to — used for resubscribeAll() after auth. */
     private val subscribedChannels = mutableSetOf<String>()
+
+    /** Per-subscriber filter tracking for recomputeChannelFilters() pattern. */
+    private val channelSubscribers = mutableMapOf<String, MutableList<DatabaseLiveSubscriber>>()
+    private var nextSubscriberId = 0
+
     private var waitingForAuth = false
 
     init {
@@ -324,9 +338,37 @@ internal class DatabaseLiveClient(
         val revoked = (msg["revokedChannels"] as? List<*>)
             ?.filterIsInstance<String>() ?: emptyList()
         for (ch in revoked) {
+            channelSubscribers.remove(ch)
             subscribedChannels.remove(ch)
             channelFilters.remove(ch)
             channelOrFilters.remove(ch)
+        }
+    }
+
+    // MARK: - Filter Recomputation
+
+    /**
+     * Recompute channel-level filters from all active subscribers.
+     * Implements the JS SDK PR #14 pattern to prevent filter overwrite bugs.
+     */
+    private fun recomputeChannelFilters(channel: String) {
+        val subs = channelSubscribers[channel]
+        if (subs == null || subs.isEmpty()) {
+            channelFilters.remove(channel)
+            channelOrFilters.remove(channel)
+            return
+        }
+        val firstWithFilters = subs.firstOrNull { it.filters != null && it.filters.isNotEmpty() }
+        if (firstWithFilters != null) {
+            channelFilters[channel] = firstWithFilters.filters!!
+        } else {
+            channelFilters.remove(channel)
+        }
+        val firstWithOrFilters = subs.firstOrNull { it.orFilters != null && it.orFilters.isNotEmpty() }
+        if (firstWithOrFilters != null) {
+            channelOrFilters[channel] = firstWithOrFilters.orFilters!!
+        } else {
+            channelOrFilters.remove(channel)
         }
     }
 
@@ -458,13 +500,17 @@ internal class DatabaseLiveClient(
     ): Flow<DbChange> = callbackFlow {
         val channel = normalizeDatabaseLiveChannel(tableName)
 
-        // Store filters for recovery
-        if (serverFilters != null && serverFilters.isNotEmpty()) {
-            channelFilters[channel] = serverFilters
-        }
-        if (serverOrFilters != null && serverOrFilters.isNotEmpty()) {
-            channelOrFilters[channel] = serverOrFilters
-        }
+        // Create subscriber with per-subscriber filters
+        val subscriberId = nextSubscriberId++
+        val subscriber = DatabaseLiveSubscriber(
+            id = subscriberId,
+            filters = serverFilters,
+            orFilters = serverOrFilters
+        )
+
+        // Add subscriber and recompute channel-level filters
+        channelSubscribers.getOrPut(channel) { mutableListOf() }.add(subscriber)
+        recomputeChannelFilters(channel)
 
         // Track channel subscription
         subscribedChannels.add(channel)
@@ -489,13 +535,23 @@ internal class DatabaseLiveClient(
 
         awaitClose {
             job.cancel()
-            subscribedChannels.remove(channel)
-            channelFilters.remove(channel)
-            channelOrFilters.remove(channel)
-            sendMessage(mapOf(
-                "type" to "unsubscribe",
-                "channel" to channel
-            ))
+            // Remove this specific subscriber
+            channelSubscribers[channel]?.removeAll { it.id == subscriberId }
+            if (channelSubscribers[channel]?.isEmpty() == true) {
+                // No subscribers remain — clean up and unsubscribe
+                channelSubscribers.remove(channel)
+                subscribedChannels.remove(channel)
+                channelFilters.remove(channel)
+                channelOrFilters.remove(channel)
+                sendMessage(mapOf(
+                    "type" to "unsubscribe",
+                    "channel" to channel
+                ))
+            } else {
+                // Other subscribers remain — recompute filters and re-send subscribe
+                recomputeChannelFilters(channel)
+                sendSubscribeInternal(channel)
+            }
         }
     }
 
@@ -503,6 +559,7 @@ internal class DatabaseLiveClient(
      * Unsubscribe from a channel by ID.
      */
     override fun unsubscribe(id: String) {
+        channelSubscribers.remove(id)
         subscribedChannels.remove(id)
         channelFilters.remove(id)
         channelOrFilters.remove(id)
@@ -519,6 +576,7 @@ internal class DatabaseLiveClient(
         session = null
         isConnected = false
         isAuthenticated = false
+        channelSubscribers.clear()
         subscribedChannels.clear()
         channelFilters.clear()
         channelOrFilters.clear()
