@@ -11,6 +11,14 @@
 import type { TokenManager, TokenUser } from './token-manager.js';
 import { EdgeBaseError } from '@edge-base/core';
 import { refreshAccessToken } from './auth-refresh.js';
+import {
+  RoomCloudflareMediaTransport,
+  type RoomCloudflareMediaTransportOptions,
+} from './room-cloudflare-media.js';
+import {
+  RoomP2PMediaTransport,
+  type RoomP2PMediaTransportOptions,
+} from './room-p2p-media.js';
 
 // ─── Types ───
 
@@ -76,6 +84,7 @@ export interface RoomMediaTrack {
   muted: boolean;
   publishedAt?: number;
   adminDisabled?: boolean;
+  providerSessionId?: string;
 }
 
 export interface RoomMemberMediaKindState {
@@ -85,6 +94,7 @@ export interface RoomMemberMediaKindState {
   deviceId?: string;
   publishedAt?: number;
   adminDisabled?: boolean;
+  providerSessionId?: string;
 }
 
 export interface RoomMemberMediaState {
@@ -120,6 +130,60 @@ export interface RoomCloudflareRealtimeKitCreateSessionResponse {
   connectionId?: string;
   reused?: boolean;
 }
+
+export interface RoomMediaTransportConnectPayload {
+  connectionId?: string;
+  customParticipantId?: string;
+  name?: string;
+  picture?: string;
+}
+
+export interface RoomMediaRemoteTrackEvent {
+  kind: RoomMediaKind;
+  track: MediaStreamTrack;
+  stream?: MediaStream;
+  trackName?: string;
+  providerSessionId?: string;
+  participantId?: string;
+  customParticipantId?: string;
+  userId?: string;
+}
+
+export interface RoomMediaTransport {
+  connect(payload?: RoomMediaTransportConnectPayload): Promise<string>;
+  enableAudio(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
+  enableVideo(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
+  startScreenShare(constraints?: unknown): Promise<MediaStreamTrack>;
+  disableAudio(): Promise<void>;
+  disableVideo(): Promise<void>;
+  stopScreenShare(): Promise<void>;
+  setMuted(kind: Extract<RoomMediaKind, 'audio' | 'video'>, muted: boolean): Promise<void>;
+  switchDevices(payload: {
+    audioInputId?: string;
+    videoInputId?: string;
+    screenInputId?: string;
+  }): Promise<void>;
+  onRemoteTrack(handler: (event: RoomMediaRemoteTrackEvent) => void): Subscription;
+  getSessionId(): string | null;
+  getPeerConnection(): RTCPeerConnection | null;
+  destroy(): void;
+}
+
+export type RoomMediaTransportProvider = 'cloudflare_realtimekit' | 'p2p';
+
+export interface RoomCloudflareRealtimeKitTransportFactoryOptions {
+  provider?: 'cloudflare_realtimekit';
+  cloudflareRealtimeKit?: RoomCloudflareMediaTransportOptions;
+}
+
+export interface RoomP2PTransportFactoryOptions {
+  provider: 'p2p';
+  p2p?: RoomP2PMediaTransportOptions;
+}
+
+export type RoomMediaTransportOptions =
+  | RoomCloudflareRealtimeKitTransportFactoryOptions
+  | RoomP2PTransportFactoryOptions;
 
 // ─── Helpers ───
 
@@ -291,6 +355,22 @@ export class RoomClient {
 
   readonly members = {
     list: (): RoomMember[] => cloneValue(this._members),
+    current: (): RoomMember | null => {
+      const connectionId = this.currentConnectionId;
+      if (connectionId) {
+        const byConnection = this._members.find((member) => member.connectionId === connectionId);
+        if (byConnection) {
+          return cloneValue(byConnection);
+        }
+      }
+
+      const userId = this.currentUserId;
+      if (!userId) {
+        return null;
+      }
+      const member = this._members.find((entry) => entry.userId === userId) ?? null;
+      return member ? cloneValue(member) : null;
+    },
     onSync: (handler: (members: RoomMember[]) => void): Subscription => this.onMembersSync(handler),
     onJoin: (handler: (member: RoomMember) => void): Subscription => this.onMemberJoin(handler),
     onLeave: (handler: (member: RoomMember, reason: RoomMemberLeaveReason) => void): Subscription =>
@@ -342,6 +422,17 @@ export class RoomClient {
         payload?: RoomCloudflareRealtimeKitCreateSessionRequest,
       ): Promise<RoomCloudflareRealtimeKitCreateSessionResponse> =>
         this.requestCloudflareRealtimeKitMedia('session', 'POST', payload),
+    },
+    transport: (options?: RoomMediaTransportOptions): RoomMediaTransport => {
+      const provider = options?.provider ?? 'cloudflare_realtimekit';
+      if (provider === 'p2p') {
+        const p2pOptions = (options as RoomP2PTransportFactoryOptions | undefined)?.p2p;
+        return new RoomP2PMediaTransport(this, p2pOptions);
+      }
+
+      const cloudflareOptions =
+        (options as RoomCloudflareRealtimeKitTransportFactoryOptions | undefined)?.cloudflareRealtimeKit;
+      return new RoomCloudflareMediaTransport(this, cloudflareOptions);
     },
     onTrack: (handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription =>
       this.onMediaTrack(handler),

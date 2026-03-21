@@ -225,6 +225,46 @@ When you pass `appState` to `createClient()`, the SDK automatically coordinates 
 - background/inactive: disconnect realtime transports to reduce battery and network use
 - foreground: refresh auth state and reconnect realtime transports
 
+## Room Media Transports
+
+React Native now exposes the same top-level room media transport entrypoint as the web SDK:
+
+```ts
+const room = client.room('calls', 'demo');
+await room.join();
+
+const transport = room.media.transport({
+  provider: 'cloudflare_realtimekit',
+});
+
+await transport.connect({
+  name: 'June',
+  customParticipantId: 'mobile-june',
+});
+
+await transport.enableAudio();
+await transport.enableVideo();
+```
+
+Available providers:
+
+- `cloudflare_realtimekit`
+  Uses Cloudflare RealtimeKit for managed media sessions
+- `p2p`
+  Uses direct peer-to-peer media with signaling through `room.signals`
+
+Install the matching optional peer dependencies for the transport you use:
+
+```bash
+npm install @cloudflare/realtimekit-react-native
+npm install @cloudflare/react-native-webrtc
+```
+
+For setup details and provider tradeoffs, see the room media docs:
+
+- [Room Media Overview](https://edgebase.fun/docs/room/media)
+- [Room Media Setup](https://edgebase.fun/docs/room/media-setup)
+
 ## Platform Differences vs `@edge-base/web`
 
 | Feature | Web | React Native |
