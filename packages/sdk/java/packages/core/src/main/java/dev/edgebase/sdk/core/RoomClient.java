@@ -2167,6 +2167,7 @@ public class RoomClient {
         private volatile String sessionId;
         private volatile String providerSessionId;
         private volatile RoomCloudflareParticipantListener participantListener;
+        private volatile CompletableFuture<String> connectFuture;
 
         private RoomCloudflareMediaTransport(RoomCloudflareRealtimeKitTransportOptions options) {
             this.options = options == null ? new RoomCloudflareRealtimeKitTransportOptions() : options;
@@ -2177,9 +2178,22 @@ public class RoomClient {
             if (sessionId != null) {
                 return CompletableFuture.completedFuture(sessionId);
             }
+            CompletableFuture<String> existingFuture = connectFuture;
+            if (existingFuture != null) {
+                return existingFuture;
+            }
 
-            Map<String, Object> requestPayload = payload == null ? Map.of() : payload;
-            return media.cloudflareRealtimeKit.createSession(requestPayload).thenCompose(session -> {
+            CompletableFuture<String> createdFuture;
+            synchronized (this) {
+                if (sessionId != null) {
+                    return CompletableFuture.completedFuture(sessionId);
+                }
+                if (connectFuture != null) {
+                    return connectFuture;
+                }
+
+                Map<String, Object> requestPayload = payload == null ? Map.of() : payload;
+                createdFuture = media.cloudflareRealtimeKit.createSession(requestPayload).thenCompose(session -> {
                 String authToken = (String) session.get("authToken");
                 if (authToken == null || authToken.isBlank()) {
                     return CompletableFuture.failedFuture(
@@ -2250,6 +2264,15 @@ public class RoomClient {
                             });
                 });
             });
+                connectFuture = createdFuture;
+            }
+
+            createdFuture.whenComplete((ignored, error) -> {
+                if (connectFuture == createdFuture) {
+                    connectFuture = null;
+                }
+            });
+            return createdFuture;
         }
 
         @Override
@@ -2317,17 +2340,28 @@ public class RoomClient {
 
         @Override
         public CompletableFuture<Void> setMuted(String kind, boolean muted) {
-            return switch (kind) {
-                case "audio" -> muted
-                        ? disableAudio()
-                        : enableAudio(Map.of("providerSessionId", providerSessionId)).thenApply(ignored -> null);
-                case "video" -> muted
-                        ? disableVideo()
-                        : enableVideo(Map.of("providerSessionId", providerSessionId)).thenApply(ignored -> null);
-                default -> CompletableFuture.failedFuture(
-                        new UnsupportedOperationException("Unsupported mute kind: " + kind)
-                );
-            };
+            try {
+                RoomCloudflareRealtimeKitClientAdapter client = requireClient();
+                return switch (kind) {
+                    case "audio" -> {
+                        CompletableFuture<Void> providerFuture = muted
+                                ? client.disableAudio()
+                                : client.enableAudio();
+                        yield providerFuture.thenCompose(ignored -> media.audio.setMuted(muted));
+                    }
+                    case "video" -> {
+                        CompletableFuture<Void> providerFuture = muted
+                                ? client.disableVideo()
+                                : client.enableVideo();
+                        yield providerFuture.thenCompose(ignored -> media.video.setMuted(muted));
+                    }
+                    default -> CompletableFuture.failedFuture(
+                            new UnsupportedOperationException("Unsupported mute kind: " + kind)
+                    );
+                };
+            } catch (RuntimeException error) {
+                return CompletableFuture.failedFuture(error);
+            }
         }
 
         @Override
@@ -2372,11 +2406,16 @@ public class RoomClient {
         public void destroy() {
             RoomCloudflareRealtimeKitClientAdapter client = this.client;
             RoomCloudflareParticipantListener listener = participantListener;
+            CompletableFuture<String> connectFuture = this.connectFuture;
             this.client = null;
             participantListener = null;
             sessionId = null;
             providerSessionId = null;
+            this.connectFuture = null;
             publishedRemoteKeys.clear();
+            if (connectFuture != null) {
+                connectFuture.cancel(true);
+            }
 
             if (client != null && listener != null) {
                 client.removeListener(listener);

@@ -106,6 +106,7 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
   private readonly participantListeners = new Map<string, ParticipantListenerSet>();
   private readonly remoteTrackIds = new Map<string, string>();
   private clientFactoryPromise: Promise<RoomCloudflareKitClientFactory> | null = null;
+  private connectPromise: Promise<string> | null = null;
   private meeting: RoomCloudflareKitClient | null = null;
   private sessionId: string | null = null;
   private joinedMapSubscriptionsAttached = false;
@@ -150,6 +151,9 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
     if (this.meeting && this.sessionId) {
       return this.sessionId;
     }
+    if (this.connectPromise) {
+      return this.connectPromise;
+    }
 
     if (payload && typeof payload === 'object' && 'sessionDescription' in payload) {
       throw new Error(
@@ -157,27 +161,38 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
       );
     }
 
-    const session = await this.room.media.cloudflareRealtimeKit.createSession(payload);
-    const factory = await this.resolveClientFactory();
-    const meeting = await factory.init({
-      authToken: session.authToken,
-      defaults: {
-        audio: false,
-        video: false,
-      },
-    });
+    const connectPromise = (async () => {
+      const session = await this.room.media.cloudflareRealtimeKit.createSession(payload);
+      const factory = await this.resolveClientFactory();
+      const meeting = await factory.init({
+        authToken: session.authToken,
+        defaults: {
+          audio: false,
+          video: false,
+        },
+      });
 
-    this.meeting = meeting;
-    this.sessionId = session.sessionId;
-    this.attachParticipantMapListeners();
+      this.meeting = meeting;
+      this.sessionId = session.sessionId;
+      this.attachParticipantMapListeners();
 
+      try {
+        await meeting.join();
+        this.syncAllParticipants();
+        return session.sessionId;
+      } catch (error) {
+        this.cleanupMeeting();
+        throw error;
+      }
+    })();
+
+    this.connectPromise = connectPromise;
     try {
-      await meeting.join();
-      this.syncAllParticipants();
-      return session.sessionId;
-    } catch (error) {
-      this.cleanupMeeting();
-      throw error;
+      return await connectPromise;
+    } finally {
+      if (this.connectPromise === connectPromise) {
+        this.connectPromise = null;
+      }
     }
   }
 
@@ -524,10 +539,10 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
 
   private cleanupMeeting(): void {
     const meeting = this.meeting;
-    this.meeting = null;
-    this.sessionId = null;
     this.detachParticipantMapListeners();
     this.clearParticipantListeners();
+    this.meeting = null;
+    this.sessionId = null;
 
     if (meeting) {
       void meeting.leave().catch(() => {});

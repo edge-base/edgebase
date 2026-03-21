@@ -2,10 +2,15 @@ package dev.edgebase.sdk.client
 
 import dev.edgebase.sdk.core.EdgeBaseError
 import dev.edgebase.sdk.core.platformUuid
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private const val ROOM_MEDIA_DOCS_URL = "https://edgebase.fun/docs/room/media"
 
@@ -132,8 +137,10 @@ internal class RoomCloudflareMediaTransport(
     private val options: RoomCloudflareRealtimeKitTransportOptions = RoomCloudflareRealtimeKitTransportOptions(),
 ) : RoomMediaTransport {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val connectMutex = Mutex()
     private val remoteTrackHandlers = linkedMapOf<String, (RoomMediaRemoteTrackEvent) -> Unit>()
     private val publishedRemoteKeys = mutableSetOf<String>()
+    private var connectDeferred: Deferred<String>? = null
     private var client: RoomCloudflareRealtimeKitClientAdapter? = null
     private var sessionId: String? = null
     private var providerSessionId: String? = null
@@ -141,7 +148,26 @@ internal class RoomCloudflareMediaTransport(
 
     override suspend fun connect(payload: RoomMediaTransportConnectPayload): String {
         sessionId?.let { return it }
+        connectDeferred?.let { return it.await() }
 
+        val deferred = connectMutex.withLock {
+            connectDeferred?.let { return@withLock it }
+            sessionId?.let { return@withLock CompletableDeferred(it) }
+            scope.async { connectInternal(payload) }.also { connectDeferred = it }
+        }
+
+        return try {
+            deferred.await()
+        } finally {
+            connectMutex.withLock {
+                if (connectDeferred === deferred) {
+                    connectDeferred = null
+                }
+            }
+        }
+    }
+
+    private suspend fun connectInternal(payload: RoomMediaTransportConnectPayload): String {
         val session = room.media.cloudflareRealtimeKit.createSession(payload)
         val authToken = session["authToken"] as? String
             ?: throw EdgeBaseError(500, "Cloudflare RealtimeKit session is missing authToken.")
@@ -243,20 +269,23 @@ internal class RoomCloudflareMediaTransport(
     }
 
     override suspend fun setMuted(kind: String, muted: Boolean) {
+        val client = requireClient()
         when (kind) {
             "audio" -> {
                 if (muted) {
-                    disableAudio()
+                    client.disableAudio()
                 } else {
-                    enableAudio(mapOf("providerSessionId" to providerSessionId))
+                    client.enableAudio()
                 }
+                room.media.audio.setMuted(muted)
             }
             "video" -> {
                 if (muted) {
-                    disableVideo()
+                    client.disableVideo()
                 } else {
-                    enableVideo(mapOf("providerSessionId" to providerSessionId))
+                    client.enableVideo()
                 }
+                room.media.video.setMuted(muted)
             }
             else -> throw UnsupportedOperationException("Unsupported mute kind: $kind")
         }
@@ -286,6 +315,8 @@ internal class RoomCloudflareMediaTransport(
     override fun getPeerConnection(): Any? = null
 
     override fun destroy() {
+        connectDeferred?.cancel()
+        connectDeferred = null
         val client = client
         val listener = participantListener
         this.client = null

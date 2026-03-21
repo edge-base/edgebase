@@ -148,6 +148,7 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
   private readonly participantListeners = new Map<string, ParticipantListenerSet>();
   private readonly remoteTrackIds = new Map<string, string>();
   private clientFactoryPromise: Promise<RoomCloudflareKitClientFactory> | null = null;
+  private connectPromise: Promise<string> | null = null;
   private meeting: RoomCloudflareKitClient | null = null;
   private sessionId: string | null = null;
   private joinedMapSubscriptionsAttached = false;
@@ -187,34 +188,48 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
     if (this.meeting && this.sessionId) {
       return this.sessionId;
     }
+    if (this.connectPromise) {
+      return this.connectPromise;
+    }
 
-    const session = await this.room.media.cloudflareRealtimeKit.createSession(payload);
-    const factory = await this.resolveClientFactory();
-    const meeting = await factory.init({
-      authToken: session.authToken,
-      defaults: {
-        audio: false,
-        video: false,
-      },
-    });
+    const connectPromise = (async () => {
+      const session = await this.room.media.cloudflareRealtimeKit.createSession(payload);
+      const factory = await this.resolveClientFactory();
+      const meeting = await factory.init({
+        authToken: session.authToken,
+        defaults: {
+          audio: false,
+          video: false,
+        },
+      });
 
-    this.meeting = meeting;
-    this.sessionId = session.sessionId;
-    this.attachParticipantMapListeners();
+      this.meeting = meeting;
+      this.sessionId = session.sessionId;
+      this.attachParticipantMapListeners();
 
-    try {
-      if (meeting.join) {
-        await meeting.join();
-      } else if (meeting.joinRoom) {
-        await meeting.joinRoom();
-      } else {
-        throw new Error('RealtimeKit client does not expose join()/joinRoom().');
+      try {
+        if (meeting.join) {
+          await meeting.join();
+        } else if (meeting.joinRoom) {
+          await meeting.joinRoom();
+        } else {
+          throw new Error('RealtimeKit client does not expose join()/joinRoom().');
+        }
+        this.syncAllParticipants();
+        return session.sessionId;
+      } catch (error) {
+        this.cleanupMeeting();
+        throw error;
       }
-      this.syncAllParticipants();
-      return session.sessionId;
-    } catch (error) {
-      this.cleanupMeeting();
-      throw error;
+    })();
+
+    this.connectPromise = connectPromise;
+    try {
+      return await connectPromise;
+    } finally {
+      if (this.connectPromise === connectPromise) {
+        this.connectPromise = null;
+      }
     }
   }
 
@@ -564,10 +579,10 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
 
   private cleanupMeeting(): void {
     const meeting = this.meeting;
-    this.meeting = null;
-    this.sessionId = null;
     this.detachParticipantMapListeners();
     this.clearParticipantListeners();
+    this.meeting = null;
+    this.sessionId = null;
 
     if (meeting) {
       const leavePromise = meeting.leave?.() ?? meeting.leaveRoom?.();

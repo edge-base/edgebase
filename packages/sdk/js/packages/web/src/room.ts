@@ -377,6 +377,7 @@ export class RoomClient {
   private waitingForAuth = false;
   private joinRequested = false;
   private unsubAuthState: (() => void) | null = null;
+  private browserNetworkListenersAttached = false;
   private readonly browserOfflineHandler = () => {
     if (this.intentionallyLeft || !this.joinRequested) {
       return;
@@ -481,11 +482,22 @@ export class RoomClient {
 
   readonly members = {
     list: (): RoomMember[] => cloneValue(this._members),
-    current: (): RoomMember | null => cloneValue(
-      this._members.find((member) =>
-        member.userId === this.currentUserId && member.connectionId === this.currentConnectionId,
-      ) ?? null,
-    ),
+    current: (): RoomMember | null => {
+      const connectionId = this.currentConnectionId;
+      if (connectionId) {
+        const byConnection = this._members.find((member) => member.connectionId === connectionId);
+        if (byConnection) {
+          return cloneValue(byConnection);
+        }
+      }
+
+      const userId = this.currentUserId;
+      if (!userId) {
+        return null;
+      }
+      const member = this._members.find((entry) => entry.userId === userId) ?? null;
+      return member ? cloneValue(member) : null;
+    },
     onSync: (handler: (members: RoomMember[]) => void): Subscription => this.onMembersSync(handler),
     onJoin: (handler: (member: RoomMember) => void): Subscription => this.onMemberJoin(handler),
     onLeave: (handler: (member: RoomMember, reason: RoomMemberLeaveReason) => void): Subscription =>
@@ -748,6 +760,7 @@ export class RoomClient {
    */
   destroy(): void {
     this.leave();
+    this.detachBrowserNetworkListeners();
     this.unsubAuthState?.();
     this.unsubAuthState = null;
 
@@ -2131,6 +2144,10 @@ export class RoomClient {
   }
 
   private attachBrowserNetworkListeners(): void {
+    if (this.browserNetworkListenersAttached) {
+      return;
+    }
+
     const eventTarget = typeof globalThis !== 'undefined'
       && typeof (globalThis as typeof globalThis & {
         addEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
@@ -2146,6 +2163,30 @@ export class RoomClient {
 
     eventTarget.addEventListener('offline', this.browserOfflineHandler);
     eventTarget.addEventListener('online', this.browserOnlineHandler);
+    this.browserNetworkListenersAttached = true;
+  }
+
+  private detachBrowserNetworkListeners(): void {
+    if (!this.browserNetworkListenersAttached) {
+      return;
+    }
+
+    const eventTarget = typeof globalThis !== 'undefined'
+      && typeof (globalThis as typeof globalThis & {
+        removeEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
+      }).removeEventListener === 'function'
+      ? globalThis as typeof globalThis & {
+        removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
+      }
+      : null;
+
+    if (!eventTarget) {
+      return;
+    }
+
+    eventTarget.removeEventListener('offline', this.browserOfflineHandler);
+    eventTarget.removeEventListener('online', this.browserOnlineHandler);
+    this.browserNetworkListenersAttached = false;
   }
 
   private scheduleReconnect(): void {

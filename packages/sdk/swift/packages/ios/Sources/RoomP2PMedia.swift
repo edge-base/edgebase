@@ -223,9 +223,14 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
         hydrateRemoteTrackKinds()
         attachRoomSubscriptions()
 
-        for member in room.members.list() {
-            guard let peerMemberId = member["memberId"] as? String, peerMemberId != memberId else { continue }
-            _ = try await ensurePeer(memberId: peerMemberId)
+        do {
+            for member in room.members.list() {
+                guard let peerMemberId = member["memberId"] as? String, peerMemberId != memberId else { continue }
+                _ = try await ensurePeer(memberId: peerMemberId)
+            }
+        } catch {
+            rollbackConnectedState()
+            throw error
         }
 
         return memberId
@@ -381,17 +386,23 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
         })
         subscriptions.append(room.members.onSync { [weak self] members in
             guard let self else { return }
+            let activeMemberIds = Set(
+                members.compactMap { member -> String? in
+                    guard let memberId = member["memberId"] as? String, memberId != self.localMemberId else { return nil }
+                    return memberId
+                }
+            )
             for member in members {
                 guard let memberId = member["memberId"] as? String, memberId != self.localMemberId else { continue }
                 Task { _ = try? await self.ensurePeer(memberId: memberId) }
             }
+            for memberId in self.peers.keys where !activeMemberIds.contains(memberId) {
+                self.removeRemoteMember(memberId: memberId)
+            }
         })
         subscriptions.append(room.members.onLeave { [weak self] member, _ in
             guard let self, let memberId = member["memberId"] as? String else { return }
-            self.remoteTrackKinds.keys.filter { $0.hasPrefix("\(memberId):") }.forEach { self.remoteTrackKinds.removeValue(forKey: $0) }
-            self.emittedRemoteTracks = self.emittedRemoteTracks.filter { !$0.hasPrefix("\(memberId):") }
-            self.pendingRemoteTracks.keys.filter { $0.hasPrefix("\(memberId):") }.forEach { self.pendingRemoteTracks.removeValue(forKey: $0) }
-            self.closePeer(memberId: memberId)
+            self.removeRemoteMember(memberId: memberId)
         })
         subscriptions.append(room.signals.on(offerEvent) { [weak self] payload, meta in
             guard let self else { return }
@@ -439,10 +450,19 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
     private func currentMember() -> [String: Any]? {
         guard let userId = room.session.userId() else { return nil }
         let connectionId = room.session.connectionId()
-        return room.members.list().first { member in
+        let members = room.members.list()
+        if let connectionId {
+            if let member = members.first(where: { member in
+                let memberUserId = member["userId"] as? String
+                let memberConnectionId = member["connectionId"] as? String
+                return memberUserId == userId && memberConnectionId == connectionId
+            }) {
+                return member
+            }
+        }
+        return members.first { member in
             let memberUserId = member["userId"] as? String
-            let memberConnectionId = member["connectionId"] as? String
-            return memberUserId == userId && (connectionId == nil || memberConnectionId == connectionId)
+            return memberUserId == userId
         }
     }
 
@@ -693,10 +713,6 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
 
     private func flushPendingRemoteTracks(memberId: String, roomKind: String) {
         let expectedTrackKind = roomKind == "audio" ? "audio" : "video"
-        if (roomKind == "video" || roomKind == "screen") && getPublishedVideoLikeKinds(memberId: memberId).count != 1 {
-            return
-        }
-
         if let (key, pending) = pendingRemoteTracks.first(where: { entry in
             entry.value.memberId == memberId && entry.value.track.kind.lowercased() == expectedTrackKind
         }) {
@@ -814,6 +830,25 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
         if let peer = peers.removeValue(forKey: memberId) {
             destroyPeer(peer)
         }
+    }
+
+    private func removeRemoteMember(memberId: String) {
+        remoteTrackKinds.keys.filter { $0.hasPrefix("\(memberId):") }.forEach { remoteTrackKinds.removeValue(forKey: $0) }
+        emittedRemoteTracks = emittedRemoteTracks.filter { !$0.hasPrefix("\(memberId):") }
+        pendingRemoteTracks.keys.filter { $0.hasPrefix("\(memberId):") }.forEach { pendingRemoteTracks.removeValue(forKey: $0) }
+        closePeer(memberId: memberId)
+    }
+
+    private func rollbackConnectedState() {
+        connected = false
+        localMemberId = nil
+        subscriptions.forEach { $0.unsubscribe() }
+        subscriptions.removeAll()
+        peers.values.forEach(destroyPeer)
+        peers.removeAll()
+        remoteTrackKinds.removeAll()
+        emittedRemoteTracks.removeAll()
+        pendingRemoteTracks.removeAll()
     }
 
     private func destroyPeer(_ peer: RoomP2PPeerState) {

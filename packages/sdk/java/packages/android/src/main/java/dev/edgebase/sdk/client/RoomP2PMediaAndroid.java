@@ -115,11 +115,16 @@ final class RoomP2PMediaAndroid {
                 hydrateRemoteTrackKinds();
                 attachRoomSubscriptions();
 
-                for (Map<String, Object> member : room.members.list()) {
-                    String memberId = stringValue(member.get("memberId"));
-                    if (memberId != null && !memberId.equals(localMemberId)) {
-                        ensurePeer(memberId);
+                try {
+                    for (Map<String, Object> member : room.members.list()) {
+                        String memberId = stringValue(member.get("memberId"));
+                        if (memberId != null && !memberId.equals(localMemberId)) {
+                            ensurePeer(memberId);
+                        }
                     }
+                } catch (RuntimeException error) {
+                    rollbackConnectedState();
+                    throw error;
                 }
 
                 return localMemberId;
@@ -301,10 +306,17 @@ final class RoomP2PMediaAndroid {
                 }
             }));
             subscriptions.add(room.members.onSync(members -> {
+                Set<String> activeMemberIds = ConcurrentHashMap.newKeySet();
                 for (Map<String, Object> member : members) {
                     String memberId = stringValue(member.get("memberId"));
                     if (memberId != null && !memberId.equals(localMemberId)) {
+                        activeMemberIds.add(memberId);
                         CompletableFuture.runAsync(() -> ensurePeer(memberId));
+                    }
+                }
+                for (String memberId : new ArrayList<>(peers.keySet())) {
+                    if (!activeMemberIds.contains(memberId)) {
+                        removeRemoteMember(memberId);
                     }
                 }
             }));
@@ -313,10 +325,7 @@ final class RoomP2PMediaAndroid {
                 if (memberId == null) {
                     return;
                 }
-                remoteTrackKinds.keySet().removeIf(key -> key.startsWith(memberId + ":"));
-                emittedRemoteTracks.removeIf(key -> key.startsWith(memberId + ":"));
-                pendingRemoteTracks.keySet().removeIf(key -> key.startsWith(memberId + ":"));
-                closePeer(memberId);
+                removeRemoteMember(memberId);
             }));
             subscriptions.add(room.signals.on(offerEvent(), (payload, meta) ->
                     CompletableFuture.runAsync(() -> handleDescriptionSignal("offer", payload, meta))));
@@ -368,11 +377,18 @@ final class RoomP2PMediaAndroid {
                 return null;
             }
             String connectionId = room.session.getConnectionId();
+            if (connectionId != null) {
+                for (Map<String, Object> member : room.members.list()) {
+                    String memberUserId = stringValue(member.get("userId"));
+                    String memberConnectionId = stringValue(member.get("connectionId"));
+                    if (Objects.equals(memberUserId, userId) && Objects.equals(connectionId, memberConnectionId)) {
+                        return member;
+                    }
+                }
+            }
             for (Map<String, Object> member : room.members.list()) {
                 String memberUserId = stringValue(member.get("userId"));
-                String memberConnectionId = stringValue(member.get("connectionId"));
-                if (Objects.equals(memberUserId, userId)
-                        && (connectionId == null || Objects.equals(connectionId, memberConnectionId))) {
+                if (Objects.equals(memberUserId, userId)) {
                     return member;
                 }
             }
@@ -660,11 +676,6 @@ final class RoomP2PMediaAndroid {
 
         private void flushPendingRemoteTracks(String memberId, String roomKind) {
             String expectedKind = "audio".equals(roomKind) ? "audio" : "video";
-            if (("video".equals(roomKind) || "screen".equals(roomKind))
-                    && getPublishedVideoLikeKinds(memberId).size() != 1) {
-                return;
-            }
-
             for (Map.Entry<String, PendingRemoteTrack> entry : new ArrayList<>(pendingRemoteTracks.entrySet())) {
                 PendingRemoteTrack pending = entry.getValue();
                 if (!Objects.equals(pending.memberId, memberId)) {
@@ -724,6 +735,25 @@ final class RoomP2PMediaAndroid {
                 return CompletableFuture.completedFuture(localMemberId);
             }
             return connect(Map.of());
+        }
+
+        private void removeRemoteMember(String memberId) {
+            remoteTrackKinds.keySet().removeIf(key -> key.startsWith(memberId + ":"));
+            emittedRemoteTracks.removeIf(key -> key.startsWith(memberId + ":"));
+            pendingRemoteTracks.keySet().removeIf(key -> key.startsWith(memberId + ":"));
+            closePeer(memberId);
+        }
+
+        private void rollbackConnectedState() {
+            connected = false;
+            localMemberId = null;
+            subscriptions.forEach(RoomClient.Subscription::unsubscribe);
+            subscriptions.clear();
+            peers.values().forEach(this::destroyPeer);
+            peers.clear();
+            remoteTrackKinds.clear();
+            emittedRemoteTracks.clear();
+            pendingRemoteTracks.clear();
         }
 
         private void closePeer(String memberId) {

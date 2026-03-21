@@ -215,6 +215,7 @@ public final class RoomCloudflareMediaTransport: RoomMediaTransport {
     private var sessionId: String?
     private var providerSessionId: String?
     private var participantListener: _RoomCloudflareTransportParticipantListener?
+    private var connectTaskState: (id: UUID, task: Task<String, Error>)?
 
     init(room: RoomClient, options: RoomCloudflareRealtimeKitTransportOptions) {
         self.room = room
@@ -226,6 +227,24 @@ public final class RoomCloudflareMediaTransport: RoomMediaTransport {
             return sessionId
         }
 
+        if let existingTask = connectTaskState?.task {
+            return try await existingTask.value
+        }
+
+        let taskId = UUID()
+        let task = Task<String, Error> {
+            try await connectInternal(payload)
+        }
+        connectTaskState = (taskId, task)
+        defer {
+            if connectTaskState?.id == taskId {
+                connectTaskState = nil
+            }
+        }
+        return try await task.value
+    }
+
+    private func connectInternal(_ payload: RoomMediaTransportConnectPayload?) async throws -> String {
         let session = try await room.media.cloudflareRealtimeKit.createSession(payload ?? [:])
         guard let authToken = session["authToken"] as? String else {
             throw RoomMediaTransportError("Cloudflare RealtimeKit session is missing authToken.")
@@ -304,19 +323,22 @@ public final class RoomCloudflareMediaTransport: RoomMediaTransport {
     }
 
     public func setMuted(kind: String, muted: Bool) async throws {
+        let client = try requireClient()
         switch kind {
         case "audio":
             if muted {
-                try await disableAudio()
+                try await client.disableAudio()
             } else {
-                _ = try await enableAudio(["providerSessionId": providerSessionId as Any])
+                try await client.enableAudio()
             }
+            try await room.media.audio.setMuted(muted)
         case "video":
             if muted {
-                try await disableVideo()
+                try await client.disableVideo()
             } else {
-                _ = try await enableVideo(["providerSessionId": providerSessionId as Any])
+                try await client.enableVideo()
             }
+            try await room.media.video.setMuted(muted)
         default:
             throw RoomMediaTransportError("Unsupported mute kind: \(kind)")
         }
@@ -355,11 +377,14 @@ public final class RoomCloudflareMediaTransport: RoomMediaTransport {
     public func destroy() {
         let client = client
         let listener = participantListener
+        let connectTask = connectTaskState?.task
+        connectTaskState = nil
         self.client = nil
         participantListener = nil
         sessionId = nil
         providerSessionId = nil
         publishedRemoteKeys.removeAll()
+        connectTask?.cancel()
 
         if let client, let listener {
             client.removeListener(listener)

@@ -98,6 +98,7 @@ class RoomCloudflareMediaTransport implements RoomMediaTransport {
   String? _sessionId;
   String? _providerSessionId;
   RoomCloudflareParticipantListener? _participantListener;
+  Future<String>? _connectFuture;
 
   RoomCloudflareMediaTransport(
     this._room, [
@@ -109,34 +110,49 @@ class RoomCloudflareMediaTransport implements RoomMediaTransport {
     if (_sessionId != null) {
       return _sessionId!;
     }
+    final inFlight = _connectFuture;
+    if (inFlight != null) {
+      return inFlight;
+    }
 
-    final session =
-        await _room.media.cloudflareRealtimeKit.createSession(payload);
-    final client = await _resolveClientFactory().call(
-      authToken: session['authToken'] as String,
-      displayName: payload?['name'] as String?,
-      enableAudio: false,
-      enableVideo: false,
-      baseDomain: _options.baseDomain,
-    );
+    final connectFuture = () async {
+      final session =
+          await _room.media.cloudflareRealtimeKit.createSession(payload);
+      final client = await _resolveClientFactory().call(
+        authToken: session['authToken'] as String,
+        displayName: payload?['name'] as String?,
+        enableAudio: false,
+        enableVideo: false,
+        baseDomain: _options.baseDomain,
+      );
 
-    _client = client;
-    _sessionId = session['sessionId'] as String?;
-    _providerSessionId = session['participantId'] as String?;
-    _participantListener = _RoomCloudflareTransportParticipantListener(this);
-    client.addListener(_participantListener!);
+      _client = client;
+      _sessionId = session['sessionId'] as String?;
+      _providerSessionId = session['participantId'] as String?;
+      _participantListener = _RoomCloudflareTransportParticipantListener(this);
+      client.addListener(_participantListener!);
 
+      try {
+        await client.joinRoom();
+        _syncParticipants(client.joinedParticipants);
+        return _sessionId ?? session['sessionId'] as String;
+      } catch (error) {
+        client.removeListener(_participantListener!);
+        _participantListener = null;
+        _client = null;
+        _sessionId = null;
+        _providerSessionId = null;
+        rethrow;
+      }
+    }();
+
+    _connectFuture = connectFuture;
     try {
-      await client.joinRoom();
-      _syncParticipants(client.joinedParticipants);
-      return _sessionId ?? session['sessionId'] as String;
-    } catch (error) {
-      client.removeListener(_participantListener!);
-      _participantListener = null;
-      _client = null;
-      _sessionId = null;
-      _providerSessionId = null;
-      rethrow;
+      return await connectFuture;
+    } finally {
+      if (identical(_connectFuture, connectFuture)) {
+        _connectFuture = null;
+      }
     }
   }
 
@@ -187,21 +203,24 @@ class RoomCloudflareMediaTransport implements RoomMediaTransport {
 
   @override
   Future<void> setMuted(String kind, bool muted) async {
+    final client = await _requireClient();
     if (kind == 'audio') {
       if (muted) {
-        await disableAudio();
+        await client.disableAudio();
       } else {
-        await enableAudio({'providerSessionId': _providerSessionId});
+        await client.enableAudio();
       }
+      await _room.media.audio.setMuted(muted);
       return;
     }
 
     if (kind == 'video') {
       if (muted) {
-        await disableVideo();
+        await client.disableVideo();
       } else {
-        await enableVideo({'providerSessionId': _providerSessionId});
+        await client.enableVideo();
       }
+      await _room.media.video.setMuted(muted);
       return;
     }
 
@@ -248,6 +267,7 @@ class RoomCloudflareMediaTransport implements RoomMediaTransport {
     _participantListener = null;
     _sessionId = null;
     _providerSessionId = null;
+    _connectFuture = null;
     _publishedRemoteKeys.clear();
 
     if (client != null && participantListener != null) {

@@ -220,11 +220,16 @@ class RoomP2PMediaTransport implements RoomMediaTransport {
     _hydrateRemoteTrackKinds();
     _attachRoomSubscriptions();
 
-    for (final member in _room.members.list()) {
-      final memberId = member['memberId'] as String?;
-      if (memberId != null && memberId != _localMemberId) {
-        await _ensurePeer(memberId);
+    try {
+      for (final member in _room.members.list()) {
+        final memberId = member['memberId'] as String?;
+        if (memberId != null && memberId != _localMemberId) {
+          await _ensurePeer(memberId);
+        }
       }
+    } catch (error) {
+      _rollbackConnectedState();
+      rethrow;
     }
 
     return _localMemberId!;
@@ -462,9 +467,16 @@ class RoomP2PMediaTransport implements RoomMediaTransport {
     final connectionId = _room._currentConnectionId;
     if (userId == null) return null;
 
+    if (connectionId != null) {
+      for (final member in _room.members.list()) {
+        if (member['connectionId'] == connectionId) {
+          return member;
+        }
+      }
+    }
+
     for (final member in _room.members.list()) {
-      if (member['userId'] != userId) continue;
-      if (connectionId == null || member['connectionId'] == connectionId) {
+      if (member['userId'] == userId) {
         return member;
       }
     }
@@ -482,20 +494,24 @@ class RoomP2PMediaTransport implements RoomMediaTransport {
         }
       }),
       _room.members.onSync((members) {
+        final activeMemberIds = <String>{};
         for (final member in members) {
           final memberId = member['memberId'] as String?;
           if (memberId != null && memberId != _localMemberId) {
+            activeMemberIds.add(memberId);
             unawaited(_ensurePeer(memberId));
+          }
+        }
+        for (final memberId in _peers.keys.toList()) {
+          if (!activeMemberIds.contains(memberId)) {
+            _removeRemoteMember(memberId);
           }
         }
       }),
       _room.members.onLeave((member, _reason) {
         final memberId = member['memberId'] as String?;
         if (memberId == null) return;
-        _remoteTrackKinds.removeWhere((key, _value) => key.startsWith('$memberId:'));
-        _emittedRemoteTracks.removeWhere((key) => key.startsWith('$memberId:'));
-        _pendingRemoteTracks.removeWhere((key, _value) => key.startsWith('$memberId:'));
-        _closePeer(memberId);
+        _removeRemoteMember(memberId);
       }),
       _room.signals.on(_offerEvent, (payload, meta) {
         unawaited(_handleDescriptionSignal('offer', payload, meta));
@@ -867,11 +883,6 @@ class RoomP2PMediaTransport implements RoomMediaTransport {
 
   void _flushPendingRemoteTracks(String memberId, String roomKind) {
     final expectedTrackKind = roomKind == 'audio' ? 'audio' : 'video';
-    if ((roomKind == 'video' || roomKind == 'screen') &&
-        _getPublishedVideoLikeKinds(memberId).length != 1) {
-      return;
-    }
-
     for (final entry in _pendingRemoteTracks.entries.toList()) {
       final pending = entry.value;
       if (pending.memberId != memberId || pending.track.kind != expectedTrackKind) {
@@ -982,6 +993,30 @@ class RoomP2PMediaTransport implements RoomMediaTransport {
       return _localMemberId!;
     }
     return connect();
+  }
+
+  void _removeRemoteMember(String memberId) {
+    _remoteTrackKinds.removeWhere((key, _value) => key.startsWith('$memberId:'));
+    _emittedRemoteTracks.removeWhere((key) => key.startsWith('$memberId:'));
+    _pendingRemoteTracks.removeWhere((key, _value) => key.startsWith('$memberId:'));
+    _closePeer(memberId);
+  }
+
+  void _rollbackConnectedState() {
+    _connected = false;
+    _localMemberId = null;
+    for (final subscription in List<RoomSubscription>.from(_subscriptions)) {
+      subscription.cancel();
+    }
+    _subscriptions.clear();
+    for (final peer in _peers.values.toList()) {
+      _destroyPeer(peer);
+    }
+    _peers.clear();
+    _pendingPeers.clear();
+    _remoteTrackKinds.clear();
+    _emittedRemoteTracks.clear();
+    _pendingRemoteTracks.clear();
   }
 
   RTCSessionDescription? _normalizeDescription(dynamic payload) {

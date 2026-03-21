@@ -41,6 +41,7 @@
         "prepack": "pnpm run build"
     },
     "dependencies": {
+        "@cloudflare/realtimekit": "1.2.5",
         "@edge-base/core": "workspace:*"
     },
     "devDependencies": {

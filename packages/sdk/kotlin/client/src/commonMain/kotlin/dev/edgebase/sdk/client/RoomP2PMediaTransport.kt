@@ -187,11 +187,16 @@ internal class RoomP2PMediaTransport(
         hydrateRemoteTrackKinds()
         attachRoomSubscriptions()
 
-        room.members.list().forEach { member ->
-            val memberId = member["memberId"] as? String
-            if (memberId != null && memberId != localMemberId) {
-                ensurePeer(memberId)
+        try {
+            room.members.list().forEach { member ->
+                val memberId = member["memberId"] as? String
+                if (memberId != null && memberId != localMemberId) {
+                    ensurePeer(memberId)
+                }
             }
+        } catch (error: Throwable) {
+            rollbackConnectedState()
+            throw error
         }
 
         return localMemberId!!
@@ -348,19 +353,23 @@ internal class RoomP2PMediaTransport(
             }
         }
         subscriptions += room.members.onSync { members ->
+            val activeMemberIds = mutableSetOf<String>()
             members.forEach { member ->
                 val memberId = member["memberId"] as? String
                 if (memberId != null && memberId != localMemberId) {
+                    activeMemberIds += memberId
                     scope.launch { ensurePeer(memberId) }
+                }
+            }
+            peers.keys.toList().forEach { memberId ->
+                if (!activeMemberIds.contains(memberId)) {
+                    removeRemoteMember(memberId)
                 }
             }
         }
         subscriptions += room.members.onLeave { member, _ ->
             val memberId = member["memberId"] as? String ?: return@onLeave
-            remoteTrackKinds.keys.filter { it.startsWith("$memberId:") }.forEach(remoteTrackKinds::remove)
-            emittedRemoteTracks.removeAll { it.startsWith("$memberId:") }
-            pendingRemoteTracks.keys.filter { it.startsWith("$memberId:") }.forEach(pendingRemoteTracks::remove)
-            closePeer(memberId)
+            removeRemoteMember(memberId)
         }
         subscriptions += room.signals.on(offerEvent) { payload, meta ->
             scope.launch { handleDescriptionSignal("offer", payload, meta) }
@@ -402,10 +411,13 @@ internal class RoomP2PMediaTransport(
     private fun currentMember(): Map<String, Any?>? {
         val userId = room.session.userId ?: return null
         val connectionId = room.session.connectionId
+        if (connectionId != null) {
+            room.members.list().firstOrNull { member ->
+                (member["connectionId"] as? String) == connectionId
+            }?.let { return it }
+        }
         return room.members.list().firstOrNull { member ->
-            val memberUserId = member["userId"] as? String
-            val memberConnectionId = member["connectionId"] as? String
-            memberUserId == userId && (connectionId == null || memberConnectionId == connectionId)
+            (member["userId"] as? String) == userId
         }
     }
 
@@ -693,10 +705,6 @@ internal class RoomP2PMediaTransport(
 
     private fun flushPendingRemoteTracks(memberId: String, roomKind: String) {
         val expectedTrackKind = if (roomKind == "audio") "audio" else "video"
-        if ((roomKind == "video" || roomKind == "screen") && getPublishedVideoLikeKinds(memberId).size != 1) {
-            return
-        }
-
         pendingRemoteTracks.entries.firstOrNull { (_, pending) ->
             pending.memberId == memberId && pending.track.kind == expectedTrackKind
         }?.let { (key, pending) ->
@@ -749,6 +757,27 @@ internal class RoomP2PMediaTransport(
 
     private suspend fun ensureConnectedMemberId(): String {
         return localMemberId ?: connect()
+    }
+
+    private fun removeRemoteMember(memberId: String) {
+        remoteTrackKinds.keys.filter { it.startsWith("$memberId:") }.forEach(remoteTrackKinds::remove)
+        emittedRemoteTracks.removeAll { it.startsWith("$memberId:") }
+        pendingRemoteTracks.keys.filter { it.startsWith("$memberId:") }.forEach(pendingRemoteTracks::remove)
+        closePeer(memberId)
+    }
+
+    private fun rollbackConnectedState() {
+        connected = false
+        localMemberId = null
+        subscriptions.toList().forEach { it.unsubscribe() }
+        subscriptions.clear()
+        pendingPeers.values.forEach { it.cancel() }
+        pendingPeers.clear()
+        peers.values.toList().forEach(::destroyPeer)
+        peers.clear()
+        remoteTrackKinds.clear()
+        emittedRemoteTracks.clear()
+        pendingRemoteTracks.clear()
     }
 
     private fun closePeer(memberId: String) {

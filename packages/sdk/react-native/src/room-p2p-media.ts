@@ -191,10 +191,15 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     this.hydrateRemoteTrackKinds();
     this.attachRoomSubscriptions();
 
-    for (const member of this.room.members.list()) {
-      if (member.memberId !== this.localMemberId) {
-        this.ensurePeer(member.memberId);
+    try {
+      for (const member of this.room.members.list()) {
+        if (member.memberId !== this.localMemberId) {
+          this.ensurePeer(member.memberId);
+        }
       }
+    } catch (error) {
+      this.rollbackConnectedState();
+      throw error;
     }
 
     return this.localMemberId;
@@ -373,21 +378,21 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
         }
       }),
       this.room.members.onSync((members) => {
+        const activeMemberIds = new Set<string>();
         for (const member of members) {
           if (member.memberId !== this.localMemberId) {
+            activeMemberIds.add(member.memberId);
             this.ensurePeer(member.memberId);
+          }
+        }
+        for (const memberId of Array.from(this.peers.keys())) {
+          if (!activeMemberIds.has(memberId)) {
+            this.removeRemoteMember(memberId);
           }
         }
       }),
       this.room.members.onLeave((member) => {
-        this.remoteTrackKinds.forEach((_kind, key) => {
-          if (key.startsWith(`${member.memberId}:`)) {
-            this.remoteTrackKinds.delete(key);
-            this.emittedRemoteTracks.delete(key);
-            this.pendingRemoteTracks.delete(key);
-          }
-        });
-        this.closePeer(member.memberId);
+        this.removeRemoteMember(member.memberId);
       }),
       this.room.signals.on(this.offerEvent, (payload, meta) => {
         void this.handleDescriptionSignal('offer', payload, meta);
@@ -683,6 +688,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     }
 
     this.emittedRemoteTracks.add(key);
+    const participant = this.findMember(memberId);
     const payload: RoomMediaRemoteTrackEvent = {
       kind,
       track,
@@ -690,8 +696,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       trackName: track.id,
       providerSessionId: memberId,
       participantId: memberId,
-      customParticipantId: memberId,
-      userId: memberId,
+      userId: participant?.userId,
     };
 
     for (const handler of this.remoteTrackHandlers) {
@@ -719,10 +724,6 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
 
   private flushPendingRemoteTracks(memberId: string, roomKind: RoomMediaKind): void {
     const expectedTrackKind = roomKind === 'audio' ? 'audio' : 'video';
-    if ((roomKind === 'video' || roomKind === 'screen') && this.getPublishedVideoLikeKinds(memberId).length !== 1) {
-      return;
-    }
-
     for (const [key, pending] of this.pendingRemoteTracks.entries()) {
       if (pending.memberId !== memberId || pending.track.kind !== expectedTrackKind) {
         continue;
@@ -754,6 +755,44 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     if (!peer) return;
     this.destroyPeer(peer);
     this.peers.delete(memberId);
+  }
+
+  private removeRemoteMember(memberId: string): void {
+    this.remoteTrackKinds.forEach((_kind, key) => {
+      if (key.startsWith(`${memberId}:`)) {
+        this.remoteTrackKinds.delete(key);
+      }
+    });
+    this.emittedRemoteTracks.forEach((key) => {
+      if (key.startsWith(`${memberId}:`)) {
+        this.emittedRemoteTracks.delete(key);
+      }
+    });
+    this.pendingRemoteTracks.forEach((_pending, key) => {
+      if (key.startsWith(`${memberId}:`)) {
+        this.pendingRemoteTracks.delete(key);
+      }
+    });
+    this.closePeer(memberId);
+  }
+
+  private findMember(memberId: string): RoomMember | undefined {
+    return this.room.members.list().find((member) => member.memberId === memberId);
+  }
+
+  private rollbackConnectedState(): void {
+    this.connected = false;
+    this.localMemberId = null;
+    for (const subscription of this.subscriptions.splice(0)) {
+      subscription.unsubscribe();
+    }
+    for (const peer of this.peers.values()) {
+      this.destroyPeer(peer);
+    }
+    this.peers.clear();
+    this.remoteTrackKinds.clear();
+    this.emittedRemoteTracks.clear();
+    this.pendingRemoteTracks.clear();
   }
 
   private destroyPeer(peer: P2PPeerState): void {
