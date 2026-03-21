@@ -10,14 +10,7 @@
  * 6. 하위 호환 — 기존 .dev.vars만 있는 프로젝트
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import {
-  existsSync,
-  rmSync,
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  copyFileSync,
-} from 'node:fs';
+import { existsSync, rmSync, mkdirSync, writeFileSync, readFileSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -32,18 +25,18 @@ import { parseEnvFile, parseDevVars } from '../src/lib/dev-sidecar.js';
 let tmpDir: string;
 const originalCwd = process.cwd();
 
+function cleanupTestDir(dir: string): void {
+  process.chdir(originalCwd);
+  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+
 beforeEach(() => {
-  tmpDir = join(
-    tmpdir(),
-    `eb-env-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  );
+  tmpDir = join(tmpdir(), `eb-env-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(tmpDir, { recursive: true });
 });
 
 afterEach(() => {
-  // Restore CWD since init does process.chdir()
-  process.chdir(originalCwd);
-  rmSync(tmpDir, { recursive: true, force: true });
+  cleanupTestDir(tmpDir);
 });
 
 // ======================================================================
@@ -93,10 +86,10 @@ describe('parseEnvFile — basic parsing', () => {
 
   it('does NOT strip mismatched quotes', () => {
     const fp = join(tmpDir, '.env');
-    writeFileSync(fp, "MIXED=\"value'\n");
+    writeFileSync(fp, 'MIXED="value\'\n');
 
     const result = parseEnvFile(fp);
-    expect(result).toEqual({ MIXED: "\"value'" });
+    expect(result).toEqual({ MIXED: '"value\'' });
   });
 
   it('handles values containing = signs', () => {
@@ -206,15 +199,9 @@ describe('parseEnvFile — real-world .env.development template', () => {
 
 describe('parseDevVars — .env.development → .dev.vars fallback', () => {
   it('reads .env.development when it exists', () => {
-    writeFileSync(
-      join(tmpDir, '.env.development'),
-      'JWT_USER_SECRET=from_env_dev\n',
-    );
+    writeFileSync(join(tmpDir, '.env.development'), 'JWT_USER_SECRET=from_env_dev\n');
     // Also create .dev.vars with different value
-    writeFileSync(
-      join(tmpDir, '.dev.vars'),
-      'JWT_USER_SECRET=from_dev_vars\n',
-    );
+    writeFileSync(join(tmpDir, '.dev.vars'), 'JWT_USER_SECRET=from_dev_vars\n');
 
     const result = parseDevVars(tmpDir);
     // .env.development takes priority
@@ -239,14 +226,8 @@ describe('parseDevVars — .env.development → .dev.vars fallback', () => {
   });
 
   it('.env.development completely supersedes .dev.vars (no merge)', () => {
-    writeFileSync(
-      join(tmpDir, '.env.development'),
-      'KEY_A=from_dev\n',
-    );
-    writeFileSync(
-      join(tmpDir, '.dev.vars'),
-      'KEY_A=from_vars\nKEY_B=only_in_vars\n',
-    );
+    writeFileSync(join(tmpDir, '.env.development'), 'KEY_A=from_dev\n');
+    writeFileSync(join(tmpDir, '.dev.vars'), 'KEY_A=from_vars\nKEY_B=only_in_vars\n');
 
     const result = parseDevVars(tmpDir);
     expect(result.KEY_A).toBe('from_dev');
@@ -312,10 +293,7 @@ describe('dev sync — .env.development → .dev.vars copy', () => {
       'STRIPE_SECRET_KEY=sk_test_xyz',
     ].join('\n');
     writeFileSync(join(tmpDir, '.env.development'), envDev);
-    copyFileSync(
-      join(tmpDir, '.env.development'),
-      join(tmpDir, '.dev.vars'),
-    );
+    copyFileSync(join(tmpDir, '.env.development'), join(tmpDir, '.dev.vars'));
 
     // Verify .dev.vars is valid for both wrangler and parseEnvFile
     const parsed = parseEnvFile(join(tmpDir, '.dev.vars'));
@@ -339,10 +317,7 @@ describe('deploy syncEnvSecrets — .env.release → JSON transform', () => {
 
   it('converts .env.release to valid JSON for wrangler secret bulk', () => {
     const fp = join(tmpDir, '.env.release');
-    writeFileSync(
-      fp,
-      'JWT_USER_SECRET=prod_secret\nSTRIPE_KEY=sk_live_abc\n',
-    );
+    writeFileSync(fp, 'JWT_USER_SECRET=prod_secret\nSTRIPE_KEY=sk_live_abc\n');
 
     const vars = parseEnvFile(fp);
     const json = JSON.stringify(vars);
@@ -356,10 +331,7 @@ describe('deploy syncEnvSecrets — .env.release → JSON transform', () => {
 
   it('excludes SERVICE_KEY from sync (auto-managed)', () => {
     const fp = join(tmpDir, '.env.release');
-    writeFileSync(
-      fp,
-      'SERVICE_KEY=user_should_not_set_this\nJWT_USER_SECRET=real_secret\n',
-    );
+    writeFileSync(fp, 'SERVICE_KEY=user_should_not_set_this\nJWT_USER_SECRET=real_secret\n');
 
     const vars = parseEnvFile(fp);
     // Simulate syncEnvSecrets SERVICE_KEY exclusion
@@ -456,7 +428,7 @@ describe('init command — env file generation', () => {
       // Secrets should be different
       expect(userMatch![1]).not.toBe(adminMatch![1]);
     } finally {
-      rmSync(freshDir, { recursive: true, force: true });
+      cleanupTestDir(freshDir);
     }
   });
 
@@ -483,7 +455,7 @@ describe('init command — env file generation', () => {
       const userMatch = content.match(/JWT_USER_SECRET=([a-f0-9]+)/);
       expect(userMatch).toBeNull(); // empty value in template
     } finally {
-      rmSync(freshDir, { recursive: true, force: true });
+      cleanupTestDir(freshDir);
     }
   });
 
@@ -508,7 +480,7 @@ describe('init command — env file generation', () => {
       expect(content).toContain('SERVICE_KEY');
       expect(content).toContain('auto-managed');
     } finally {
-      rmSync(freshDir, { recursive: true, force: true });
+      cleanupTestDir(freshDir);
     }
   });
 
@@ -533,7 +505,7 @@ describe('init command — env file generation', () => {
       expect(content).toContain('.wrangler.generated.*');
       expect(content).toContain('edgebase.d.ts');
     } finally {
-      rmSync(freshDir, { recursive: true, force: true });
+      cleanupTestDir(freshDir);
     }
   });
 
@@ -559,7 +531,7 @@ describe('init command — env file generation', () => {
       expect(secretsJson.JWT_USER_SECRET).toBe(userSecret);
       expect(secretsJson.JWT_ADMIN_SECRET).toBe(adminSecret);
     } finally {
-      rmSync(freshDir, { recursive: true, force: true });
+      cleanupTestDir(freshDir);
     }
   });
 
@@ -582,7 +554,7 @@ describe('init command — env file generation', () => {
       const content = readFileSync(join(freshDir, '.env.development'), 'utf-8');
       expect(content).toBe(preExisting);
     } finally {
-      rmSync(freshDir, { recursive: true, force: true });
+      cleanupTestDir(freshDir);
     }
   });
 });
@@ -613,9 +585,7 @@ describe('Backward compatibility — existing .dev.vars projects', () => {
       copyFileSync(envDevPath, join(tmpDir, '.dev.vars'));
     }
 
-    expect(readFileSync(join(tmpDir, '.dev.vars'), 'utf-8')).toBe(
-      originalContent,
-    );
+    expect(readFileSync(join(tmpDir, '.dev.vars'), 'utf-8')).toBe(originalContent);
   });
 
   it('deploy works without .env.release (no sync, no error)', () => {
@@ -627,14 +597,8 @@ describe('Backward compatibility — existing .dev.vars projects', () => {
 
   it('migration path: .dev.vars → .env.development coexistence', () => {
     // User has old .dev.vars, then creates .env.development
-    writeFileSync(
-      join(tmpDir, '.dev.vars'),
-      'JWT_USER_SECRET=old\nOLD_KEY=legacy\n',
-    );
-    writeFileSync(
-      join(tmpDir, '.env.development'),
-      'JWT_USER_SECRET=new\nNEW_KEY=modern\n',
-    );
+    writeFileSync(join(tmpDir, '.dev.vars'), 'JWT_USER_SECRET=old\nOLD_KEY=legacy\n');
+    writeFileSync(join(tmpDir, '.env.development'), 'JWT_USER_SECRET=new\nNEW_KEY=modern\n');
 
     // parseDevVars prefers .env.development
     const result = parseDevVars(tmpDir);
@@ -716,14 +680,8 @@ describe('Edge cases', () => {
   });
 
   it('.env.development and .env.release have different content', () => {
-    writeFileSync(
-      join(tmpDir, '.env.development'),
-      'STRIPE_KEY=sk_test_dev\nENV=development\n',
-    );
-    writeFileSync(
-      join(tmpDir, '.env.release'),
-      'STRIPE_KEY=sk_live_prod\nENV=production\n',
-    );
+    writeFileSync(join(tmpDir, '.env.development'), 'STRIPE_KEY=sk_test_dev\nENV=development\n');
+    writeFileSync(join(tmpDir, '.env.release'), 'STRIPE_KEY=sk_live_prod\nENV=production\n');
 
     const dev = parseEnvFile(join(tmpDir, '.env.development'));
     const release = parseEnvFile(join(tmpDir, '.env.release'));

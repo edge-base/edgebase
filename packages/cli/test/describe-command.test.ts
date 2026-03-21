@@ -2,21 +2,28 @@ import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { pnpmCommand } from '../src/lib/pnpm.js';
+import { resolveTsxCommand } from '../src/lib/node-tools.js';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const tsxCommand = resolveTsxCommand();
+const tsxExecOptions = /\.cmd$/i.test(tsxCommand.command) ? { shell: true as const } : {};
 
 describe('describe command', () => {
   it('returns the live CLI surface as JSON', () => {
-    const result = spawnSync(pnpmCommand(), ['exec', 'tsx', 'src/index.ts', '--json', 'describe'], {
-      cwd: packageDir,
-      encoding: 'utf-8',
-      env: {
-        ...process.env,
-        NO_COLOR: '1',
+    const result = spawnSync(
+      tsxCommand.command,
+      [...tsxCommand.argsPrefix, 'src/index.ts', '--json', 'describe'],
+      {
+        cwd: packageDir,
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          NO_COLOR: '1',
+        },
+        stdio: 'pipe',
+        ...tsxExecOptions,
       },
-      stdio: 'pipe',
-    });
+    );
 
     expect(result.status).toBe(0);
     const payload = JSON.parse(result.stdout);
@@ -46,8 +53,15 @@ describe('describe command', () => {
 
   it('can limit the output to a specific command path', () => {
     const result = spawnSync(
-      pnpmCommand(),
-      ['exec', 'tsx', 'src/index.ts', '--json', 'describe', '--command', 'backup restore'],
+      tsxCommand.command,
+      [
+        ...tsxCommand.argsPrefix,
+        'src/index.ts',
+        '--json',
+        'describe',
+        '--command',
+        'backup restore',
+      ],
       {
         cwd: packageDir,
         encoding: 'utf-8',
@@ -56,6 +70,7 @@ describe('describe command', () => {
           NO_COLOR: '1',
         },
         stdio: 'pipe',
+        ...tsxExecOptions,
       },
     );
 

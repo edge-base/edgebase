@@ -10,6 +10,7 @@ import { pnpmCommand } from '../src/lib/pnpm.js';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const tempDirs: string[] = [];
+const packageManagerExecOptions = process.platform === 'win32' ? { shell: true as const } : {};
 
 interface PackedFile {
   path: string;
@@ -24,12 +25,14 @@ function getPackedPaths(): string[] {
     cwd: packageDir,
     encoding: 'utf-8',
     stdio: 'pipe',
+    ...packageManagerExecOptions,
   });
 
   const output = execFileSync(npmCommand(), ['pack', '--json', '--dry-run', '--ignore-scripts'], {
     cwd: packageDir,
     encoding: 'utf-8',
     stdio: 'pipe',
+    ...packageManagerExecOptions,
   });
 
   const [packResult] = JSON.parse(output) as PackResult[];
@@ -41,6 +44,7 @@ function buildCli(): void {
     cwd: packageDir,
     encoding: 'utf-8',
     stdio: 'pipe',
+    ...packageManagerExecOptions,
   });
 }
 

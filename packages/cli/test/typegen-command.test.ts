@@ -21,7 +21,10 @@ describe('typegen command', () => {
   let originalCwd: string;
 
   beforeEach(() => {
-    testDir = join(tmpdir(), `edgebase-typegen-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = join(
+      tmpdir(),
+      `edgebase-typegen-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
     mkdirSync(testDir, { recursive: true });
     originalCwd = process.cwd();
     process.chdir(testDir);
@@ -35,7 +38,7 @@ describe('typegen command', () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
-    rmSync(testDir, { recursive: true, force: true });
+    rmSync(testDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     vi.restoreAllMocks();
   });
 
@@ -67,18 +70,24 @@ export default defineConfig({
 
     const { typegenCommand } = await import('../src/commands/typegen.js');
 
-    await expect(typegenCommand.parseAsync(['-o', 'edgebase.d.ts'], { from: 'user' })).rejects.toMatchObject({
+    await expect(
+      typegenCommand.parseAsync(['-o', 'edgebase.d.ts'], { from: 'user' }),
+    ).rejects.toMatchObject({
       payload: expect.objectContaining({
         status: 'error',
         code: 'typegen_config_parse_failed',
-        message: expect.stringContaining('Legacy config syntax is no longer supported at databases.shared.tables.posts.rules'),
+        message: expect.stringContaining(
+          'Legacy config syntax is no longer supported at databases.shared.tables.posts.rules',
+        ),
         hint: 'Make sure edgebase.config.ts exports a valid config object.',
       }),
     });
     expect(existsSync(join(testDir, 'edgebase.d.ts'))).toBe(false);
-    expect(mockFail).toHaveBeenCalledWith(expect.stringContaining(
-      'Legacy config syntax is no longer supported at databases.shared.tables.posts.rules',
-    ));
+    expect(mockFail).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Legacy config syntax is no longer supported at databases.shared.tables.posts.rules',
+      ),
+    );
   });
 
   it('generates types for a valid config', async () => {

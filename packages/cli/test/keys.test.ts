@@ -155,9 +155,14 @@ describe('writeSecretsJson', () => {
   it('writes with chmod 0o600 (owner-only)', () => {
     writeSecretsJson(tmpDir, { SERVICE_KEY: 'test' });
     const stats = statSync(join(tmpDir, '.edgebase', 'secrets.json'));
-    // 0o600 = 0o100600 (file) → octal mode 600
     const mode = stats.mode & 0o777;
-    expect(mode).toBe(0o600);
+    if (process.platform === 'win32') {
+      expect(mode & 0o111).toBe(0);
+      expect(mode & 0o444).toBeGreaterThan(0);
+    } else {
+      // 0o600 = 0o100600 (file) → octal mode 600
+      expect(mode).toBe(0o600);
+    }
   });
 
   it('overwrites existing secrets.json', () => {

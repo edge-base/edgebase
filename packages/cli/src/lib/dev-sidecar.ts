@@ -40,14 +40,15 @@ export interface SidecarOptions {
 type AuthSettingsTarget = 'development' | 'release';
 
 const NEON_PROJECT_CACHE_TTL_MS = 60_000;
-let neonProjectsCache:
-  | {
-    loadedAt: number;
-    items: NeonProjectOption[];
-  }
-  | null = null;
+let neonProjectsCache: {
+  loadedAt: number;
+  items: NeonProjectOption[];
+} | null = null;
 type PostgresPool = {
-  query(sql: string, params?: unknown[]): Promise<{
+  query(
+    sql: string,
+    params?: unknown[],
+  ): Promise<{
     fields?: Array<{ name: string }>;
     rows?: Record<string, unknown>[];
     rowCount?: number | null;
@@ -63,13 +64,19 @@ type PgSchemaInitModule = {
   ensurePgSchema: (
     connectionString: string,
     namespace: string,
-    tables: Record<string, {
-      schema?: Record<string, unknown>;
-      indexes?: unknown[];
-      fts?: unknown[];
-      migrations?: unknown[];
-    }>,
-    queryExecutor?: (sql: string, params?: unknown[]) => Promise<{
+    tables: Record<
+      string,
+      {
+        schema?: Record<string, unknown>;
+        indexes?: unknown[];
+        fts?: unknown[];
+        migrations?: unknown[];
+      }
+    >,
+    queryExecutor?: (
+      sql: string,
+      params?: unknown[],
+    ) => Promise<{
       columns: string[];
       rows: Record<string, unknown>[];
       rowCount: number;
@@ -99,8 +106,7 @@ async function verifyAdminJwt(token: string, secret: string): Promise<boolean> {
 
 async function verifyAuth(req: IncomingMessage, adminSecret: string): Promise<boolean> {
   const internalSecret =
-    req.headers['x-edgebase-internal-secret'] ??
-    req.headers['X-EdgeBase-Internal-Secret'];
+    req.headers['x-edgebase-internal-secret'] ?? req.headers['X-EdgeBase-Internal-Secret'];
   const internalValue = Array.isArray(internalSecret) ? internalSecret[0] : internalSecret;
   if (internalValue && internalValue === adminSecret) {
     return true;
@@ -144,13 +150,15 @@ function parsePath(urlPath: string): string[] {
 }
 
 function isDynamicDbBlock(
-  dbBlock: {
-    instance?: boolean;
-    access?: {
-      canCreate?: unknown;
-      access?: unknown;
-    };
-  } | undefined,
+  dbBlock:
+    | {
+        instance?: boolean;
+        access?: {
+          canCreate?: unknown;
+          access?: unknown;
+        };
+      }
+    | undefined,
 ): boolean {
   if (!dbBlock) return false;
   return !!(dbBlock.instance || dbBlock.access?.canCreate || dbBlock.access?.access);
@@ -169,14 +177,13 @@ function parseAuthSettingsTarget(value: string | null): AuthSettingsTarget {
 }
 
 function isManagedAuthEnvKey(key: string): boolean {
-  return MANAGED_AUTH_ENV_KEYS.includes(key)
-    || MANAGED_AUTH_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
+  return (
+    MANAGED_AUTH_ENV_KEYS.includes(key) ||
+    MANAGED_AUTH_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))
+  );
 }
 
-function readAuthEnvValues(
-  projectDir: string,
-  target: AuthSettingsTarget,
-): Record<string, string> {
+function readAuthEnvValues(projectDir: string, target: AuthSettingsTarget): Record<string, string> {
   if (target === 'release') {
     return parseEnvFile(join(projectDir, '.env.release'));
   }
@@ -250,10 +257,12 @@ function getEnvTargets(
   target: AuthSettingsTarget,
 ): Array<{ filePath: string; header: string }> {
   if (target === 'release') {
-    return [{
-      filePath: join(projectDir, '.env.release'),
-      header: RELEASE_ENV_HEADER,
-    }];
+    return [
+      {
+        filePath: join(projectDir, '.env.release'),
+        header: RELEASE_ENV_HEADER,
+      },
+    ];
   }
 
   const envDevelopmentPath = join(projectDir, '.env.development');
@@ -295,12 +304,17 @@ function syncOAuthSecretsToLocalEnv(
   projectDir: string,
   target: AuthSettingsTarget,
   allowedOAuthProviders: string[] | undefined,
-  oauth: Record<string, {
-    clientId?: string | null;
-    clientSecret?: string | null;
-    issuer?: string | null;
-    scopes?: string[];
-  }> | undefined,
+  oauth:
+    | Record<
+        string,
+        {
+          clientId?: string | null;
+          clientSecret?: string | null;
+          issuer?: string | null;
+          scopes?: string[];
+        }
+      >
+    | undefined,
 ): void {
   updateEnvValue(
     projectDir,
@@ -315,29 +329,55 @@ function syncOAuthSecretsToLocalEnv(
 
   for (const [provider, config] of Object.entries(oauth)) {
     const envKeys = getOAuthEnvKeys(provider);
-    updateEnvValue(projectDir, target, envKeys.clientId, typeof config.clientId === 'string' ? config.clientId : null);
-    updateEnvValue(projectDir, target, envKeys.clientSecret, typeof config.clientSecret === 'string' ? config.clientSecret : null);
+    updateEnvValue(
+      projectDir,
+      target,
+      envKeys.clientId,
+      typeof config.clientId === 'string' ? config.clientId : null,
+    );
+    updateEnvValue(
+      projectDir,
+      target,
+      envKeys.clientSecret,
+      typeof config.clientSecret === 'string' ? config.clientSecret : null,
+    );
 
     if (envKeys.issuer) {
-      updateEnvValue(projectDir, target, envKeys.issuer, typeof config.issuer === 'string' ? config.issuer : null);
+      updateEnvValue(
+        projectDir,
+        target,
+        envKeys.issuer,
+        typeof config.issuer === 'string' ? config.issuer : null,
+      );
     }
     if (envKeys.scopes) {
       const scopesValue = Array.isArray(config.scopes)
-        ? config.scopes.map((scope) => scope.trim()).filter(Boolean).join(',')
+        ? config.scopes
+            .map((scope) => scope.trim())
+            .filter(Boolean)
+            .join(',')
         : null;
-      updateEnvValue(projectDir, target, envKeys.scopes, scopesValue && scopesValue.length > 0 ? scopesValue : null);
+      updateEnvValue(
+        projectDir,
+        target,
+        envKeys.scopes,
+        scopesValue && scopesValue.length > 0 ? scopesValue : null,
+      );
     }
   }
 }
 
 function readAuthSettings(config: EdgeBaseConfig): Record<string, unknown> {
   const authConfig = config.auth ?? {};
-  const oauthEntries: Record<string, {
-    clientId: string | null;
-    clientSecret: string | null;
-    issuer?: string | null;
-    scopes?: string[];
-  }> = {};
+  const oauthEntries: Record<
+    string,
+    {
+      clientId: string | null;
+      clientSecret: string | null;
+      issuer?: string | null;
+      scopes?: string[];
+    }
+  > = {};
 
   const oauthConfig = authConfig.oauth ?? {};
   for (const [provider, value] of Object.entries(oauthConfig)) {
@@ -350,7 +390,8 @@ function readAuthSettings(config: EdgeBaseConfig): Record<string, unknown> {
         const oidcRecord = oidcValue as Record<string, unknown>;
         oauthEntries[`oidc:${oidcName}`] = {
           clientId: typeof oidcRecord.clientId === 'string' ? oidcRecord.clientId : null,
-          clientSecret: typeof oidcRecord.clientSecret === 'string' ? oidcRecord.clientSecret : null,
+          clientSecret:
+            typeof oidcRecord.clientSecret === 'string' ? oidcRecord.clientSecret : null,
           issuer: typeof oidcRecord.issuer === 'string' ? oidcRecord.issuer : null,
           scopes: Array.isArray(oidcRecord.scopes)
             ? oidcRecord.scopes.filter((scope): scope is string => typeof scope === 'string')
@@ -362,21 +403,27 @@ function readAuthSettings(config: EdgeBaseConfig): Record<string, unknown> {
 
     oauthEntries[provider] = {
       clientId: typeof providerValue.clientId === 'string' ? providerValue.clientId : null,
-      clientSecret: typeof providerValue.clientSecret === 'string' ? providerValue.clientSecret : null,
+      clientSecret:
+        typeof providerValue.clientSecret === 'string' ? providerValue.clientSecret : null,
     };
   }
 
   return {
-    providers: Array.isArray(authConfig.allowedOAuthProviders) ? authConfig.allowedOAuthProviders : [],
+    providers: Array.isArray(authConfig.allowedOAuthProviders)
+      ? authConfig.allowedOAuthProviders
+      : [],
     emailAuth: authConfig.emailAuth !== false,
     anonymousAuth: !!authConfig.anonymousAuth,
-    allowedRedirectUrls: Array.isArray(authConfig.allowedRedirectUrls) ? authConfig.allowedRedirectUrls : [],
+    allowedRedirectUrls: Array.isArray(authConfig.allowedRedirectUrls)
+      ? authConfig.allowedRedirectUrls
+      : [],
     session: {
       accessTokenTTL: authConfig.session?.accessTokenTTL ?? null,
       refreshTokenTTL: authConfig.session?.refreshTokenTTL ?? null,
-      maxActiveSessions: typeof authConfig.session?.maxActiveSessions === 'number'
-        ? authConfig.session.maxActiveSessions
-        : null,
+      maxActiveSessions:
+        typeof authConfig.session?.maxActiveSessions === 'number'
+          ? authConfig.session.maxActiveSessions
+          : null,
     },
     magicLink: {
       enabled: !!authConfig.magicLink?.enabled,
@@ -437,10 +484,7 @@ async function getSidecarPostgresPool(connectionString: string): Promise<Postgre
   return pool;
 }
 
-async function ensureSidecarPostgresSchema(
-  opts: SidecarOptions,
-  namespace: string,
-): Promise<void> {
+async function ensureSidecarPostgresSchema(opts: SidecarOptions, namespace: string): Promise<void> {
   const config = loadSidecarConfig(opts);
   const dbBlock = config.databases?.[namespace];
   if (!dbBlock) {
@@ -471,10 +515,7 @@ async function ensureSidecarPostgresSchema(
   );
 }
 
-function resolveSidecarPostgresConnectionString(
-  opts: SidecarOptions,
-  namespace: string,
-): string {
+function resolveSidecarPostgresConnectionString(opts: SidecarOptions, namespace: string): string {
   const config = loadSidecarConfig(opts);
   const dbBlock = config.databases?.[namespace];
   if (!dbBlock) {
@@ -522,7 +563,7 @@ async function executeWorkerSql(
 
   let message = `SQL execution failed with ${response.status}`;
   try {
-    const payload = await response.json() as { message?: string };
+    const payload = (await response.json()) as { message?: string };
     if (payload.message) {
       message = payload.message;
     }
@@ -551,7 +592,7 @@ async function callWorkerAdmin<T>(
   if (!response.ok) {
     let message = `${path} failed with ${response.status}`;
     try {
-      const payload = await response.json() as { message?: string };
+      const payload = (await response.json()) as { message?: string };
       if (payload.message) {
         message = payload.message;
       }
@@ -659,14 +700,17 @@ export async function renameBackingTable(
 
 // ─── Schema Reader ───
 
-function readCurrentSchema(configPath: string): Record<string, { namespace: string; fields: Record<string, unknown>; fts: string[] }> {
+function readCurrentSchema(
+  configPath: string,
+): Record<string, { namespace: string; fields: Record<string, unknown>; fts: string[] }> {
   try {
     // Use a quick approach: read config via tsx eval
     const projectDir = resolve(configPath, '..');
+    const moduleUrl = pathToFileURL(resolve(configPath)).href;
     const result = execTsxSync(
       [
         '-e',
-        `import c from ${JSON.stringify(configPath)}; const d=c.default??c; const s={}; for (const [ns,b] of Object.entries(d.databases??{})) { for (const [t,tc] of Object.entries((b as any).tables??{})) { s[t]={namespace:ns,fields:(tc as any).schema??{},fts:(tc as any).fts??[]}; } } console.log(JSON.stringify(s));`,
+        `const mod = await import(${JSON.stringify(moduleUrl)}); const d=mod.default??mod; const s={}; for (const [ns,b] of Object.entries(d.databases??{})) { for (const [t,tc] of Object.entries((b as any).tables??{})) { s[t]={namespace:ns,fields:(tc as any).schema??{},fts:(tc as any).fts??[]}; } } console.log(JSON.stringify(s));`,
       ],
       { cwd: projectDir, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'ignore'] },
     ).trim();
@@ -695,7 +739,12 @@ async function handleRoute(
   }
 
   // POST /postgres/query — pooled local PostgreSQL query bridge for Worker dev mode
-  if (method === 'POST' && segments[0] === 'postgres' && segments[1] === 'query' && segments.length === 2) {
+  if (
+    method === 'POST' &&
+    segments[0] === 'postgres' &&
+    segments[1] === 'query' &&
+    segments.length === 2
+  ) {
     const body = await readBody(req);
     const namespace = body.namespace as string;
     const sql = body.sql as string;
@@ -717,7 +766,12 @@ async function handleRoute(
   }
 
   // POST /postgres/ensure-schema — persistent local PostgreSQL schema warmup/cache
-  if (method === 'POST' && segments[0] === 'postgres' && segments[1] === 'ensure-schema' && segments.length === 2) {
+  if (
+    method === 'POST' &&
+    segments[0] === 'postgres' &&
+    segments[1] === 'ensure-schema' &&
+    segments.length === 2
+  ) {
     const body = await readBody(req);
     const namespace = body.namespace as string;
     if (!namespace) throw new Error('namespace is required.');
@@ -735,7 +789,12 @@ async function handleRoute(
   }
 
   // POST /schema/tables — create table
-  if (method === 'POST' && segments[0] === 'schema' && segments[1] === 'tables' && segments.length === 2) {
+  if (
+    method === 'POST' &&
+    segments[0] === 'schema' &&
+    segments[1] === 'tables' &&
+    segments.length === 2
+  ) {
     const body = await readBody(req);
     const dbKey = (body.dbKey as string) || 'shared';
     const name = body.name as string;
@@ -749,7 +808,12 @@ async function handleRoute(
   }
 
   // POST /schema/databases — create database block
-  if (method === 'POST' && segments[0] === 'schema' && segments[1] === 'databases' && segments.length === 2) {
+  if (
+    method === 'POST' &&
+    segments[0] === 'schema' &&
+    segments[1] === 'databases' &&
+    segments.length === 2
+  ) {
     const body = await readBody(req);
     const name = body.name as string;
     const topology = (body.topology as 'single' | 'dynamic' | undefined) ?? 'single';
@@ -774,20 +838,27 @@ async function handleRoute(
   }
 
   // POST /integrations/neon/databases — create postgres DB block + configure Neon envs
-  if (method === 'POST' && segments[0] === 'integrations' && segments[1] === 'neon' && segments[2] === 'databases' && segments.length === 3) {
+  if (
+    method === 'POST' &&
+    segments[0] === 'integrations' &&
+    segments[1] === 'neon' &&
+    segments[2] === 'databases' &&
+    segments.length === 3
+  ) {
     const body = await readBody(req);
     const name = body.name as string;
     const topology = (body.topology as 'single' | 'dynamic' | undefined) ?? 'single';
     const envKey = body.envKey as string | undefined;
     const projectName = body.projectName as string | undefined;
     const projectId = body.projectId as string | undefined;
-    const mode = ((body.mode as NeonProjectMode | undefined) ?? 'reuse');
+    const mode = (body.mode as NeonProjectMode | undefined) ?? 'reuse';
     const targetLabel = body.targetLabel as string | undefined;
     const placeholder = body.placeholder as string | undefined;
     const helperText = body.helperText as string | undefined;
 
     if (!name) throw new Error('Database block name is required.');
-    if (topology !== 'single') throw new Error('Neon helper only supports single-instance database blocks.');
+    if (topology !== 'single')
+      throw new Error('Neon helper only supports single-instance database blocks.');
 
     const effectiveEnvKey = resolveRequestedPostgresEnvKey(name, envKey);
 
@@ -823,22 +894,32 @@ async function handleRoute(
   }
 
   // POST /integrations/neon/connect — configure Neon envs for an existing postgres DB block
-  if (method === 'POST' && segments[0] === 'integrations' && segments[1] === 'neon' && segments[2] === 'connect' && segments.length === 3) {
+  if (
+    method === 'POST' &&
+    segments[0] === 'integrations' &&
+    segments[1] === 'neon' &&
+    segments[2] === 'connect' &&
+    segments.length === 3
+  ) {
     const body = await readBody(req);
     const namespace = body.namespace as string;
     const envKey = body.envKey as string | undefined;
     const projectId = body.projectId as string | undefined;
-    const mode = ((body.mode as NeonProjectMode | undefined) ?? 'reuse');
+    const mode = (body.mode as NeonProjectMode | undefined) ?? 'reuse';
 
     if (!namespace) throw new Error('namespace is required.');
 
     const config = loadSidecarConfig(opts);
     const provider = getEffectiveSidecarProvider(config, namespace);
     if (provider === 'do') {
-      throw new Error(`Namespace '${namespace}' is not eligible for Neon because it uses Durable Objects.`);
+      throw new Error(
+        `Namespace '${namespace}' is not eligible for Neon because it uses Durable Objects.`,
+      );
     }
     if (provider === 'd1') {
-      throw new Error(`Namespace '${namespace}' still uses D1. Use the D1 upgrade flow instead of reconnect.`);
+      throw new Error(
+        `Namespace '${namespace}' still uses D1. Use the D1 upgrade flow instead of reconnect.`,
+      );
     }
 
     const neonResult = await runNeonSetup({
@@ -868,13 +949,19 @@ async function handleRoute(
   }
 
   // POST /integrations/neon/upgrade — migrate a D1 single DB block to Neon-backed postgres
-  if (method === 'POST' && segments[0] === 'integrations' && segments[1] === 'neon' && segments[2] === 'upgrade' && segments.length === 3) {
+  if (
+    method === 'POST' &&
+    segments[0] === 'integrations' &&
+    segments[1] === 'neon' &&
+    segments[2] === 'upgrade' &&
+    segments.length === 3
+  ) {
     const body = await readBody(req);
     const namespace = body.namespace as string;
     const envKey = body.envKey as string | undefined;
     const projectName = body.projectName as string | undefined;
     const projectId = body.projectId as string | undefined;
-    const mode = ((body.mode as NeonProjectMode | undefined) ?? 'reuse');
+    const mode = (body.mode as NeonProjectMode | undefined) ?? 'reuse';
     const authorization = req.headers.authorization;
 
     if (!namespace) throw new Error('namespace is required.');
@@ -883,13 +970,17 @@ async function handleRoute(
     const config = loadSidecarConfig(opts);
     const provider = getEffectiveSidecarProvider(config, namespace);
     if (provider !== 'd1') {
-      throw new Error(`Only D1-backed single database blocks can be upgraded automatically. '${namespace}' is on '${provider}'.`);
+      throw new Error(
+        `Only D1-backed single database blocks can be upgraded automatically. '${namespace}' is on '${provider}'.`,
+      );
     }
 
     const effectiveEnvKey = resolveRequestedPostgresEnvKey(namespace, envKey);
 
     console.log();
-    console.log(chalk.blue(`📦 Starting D1 -> Postgres migration for database block '${namespace}'...`));
+    console.log(
+      chalk.blue(`📦 Starting D1 -> Postgres migration for database block '${namespace}'...`),
+    );
     console.log(chalk.dim('  This migrates every table in the block, not just the current table.'));
     console.log(chalk.dim('  1/4 Exporting all tables from D1...'));
 
@@ -898,7 +989,11 @@ async function handleRoute(
     }>(opts, authorization, 'data/backup/dump-data', { namespace });
     const dumpedTableCount = Object.keys(dump.tables ?? {}).length;
 
-    console.log(chalk.dim(`  2/4 Connecting Postgres${mode === 'create' ? ' by creating a Neon project' : ' to the selected Neon project'}...`));
+    console.log(
+      chalk.dim(
+        `  2/4 Connecting Postgres${mode === 'create' ? ' by creating a Neon project' : ' to the selected Neon project'}...`,
+      ),
+    );
 
     const neonResult = await runNeonSetup({
       projectDir: opts.projectDir,
@@ -919,14 +1014,22 @@ async function handleRoute(
     console.log(chalk.dim('  3/4 Waiting for the dev worker to restart on Postgres...'));
     await waitForNamespaceProvider(opts, authorization, namespace, 'postgres');
 
-    console.log(chalk.dim(`  4/4 Restoring ${dumpedTableCount} table${dumpedTableCount === 1 ? '' : 's'} into Postgres...`));
+    console.log(
+      chalk.dim(
+        `  4/4 Restoring ${dumpedTableCount} table${dumpedTableCount === 1 ? '' : 's'} into Postgres...`,
+      ),
+    );
     await callWorkerAdmin(opts, authorization, 'data/backup/restore-data', {
       namespace,
       tables: dump.tables,
       skipWipe: false,
     });
 
-    console.log(chalk.green(`✓ Database block '${namespace}' is now running on Postgres (${dumpedTableCount} table${dumpedTableCount === 1 ? '' : 's'} restored).`));
+    console.log(
+      chalk.green(
+        `✓ Database block '${namespace}' is now running on Postgres (${dumpedTableCount} table${dumpedTableCount === 1 ? '' : 's'} restored).`,
+      ),
+    );
 
     json(res, 200, {
       ok: true,
@@ -940,16 +1043,24 @@ async function handleRoute(
   }
 
   // GET /integrations/neon/projects — list existing Neon projects for dashboard selection
-  if (method === 'GET' && segments[0] === 'integrations' && segments[1] === 'neon' && segments[2] === 'projects' && segments.length === 3) {
+  if (
+    method === 'GET' &&
+    segments[0] === 'integrations' &&
+    segments[1] === 'neon' &&
+    segments[2] === 'projects' &&
+    segments.length === 3
+  ) {
     const forceRefresh = url.searchParams.get('refresh') === '1';
-    const isCacheFresh = !forceRefresh
-      && neonProjectsCache
-      && (Date.now() - neonProjectsCache.loadedAt) < NEON_PROJECT_CACHE_TTL_MS;
-    const items = (isCacheFresh && neonProjectsCache)
-      ? neonProjectsCache.items
-      : await listAvailableNeonProjects({
-        projectDir: opts.projectDir,
-      });
+    const isCacheFresh =
+      !forceRefresh &&
+      neonProjectsCache &&
+      Date.now() - neonProjectsCache.loadedAt < NEON_PROJECT_CACHE_TTL_MS;
+    const items =
+      isCacheFresh && neonProjectsCache
+        ? neonProjectsCache.items
+        : await listAvailableNeonProjects({
+            projectDir: opts.projectDir,
+          });
 
     if (!isCacheFresh) {
       neonProjectsCache = {
@@ -963,7 +1074,13 @@ async function handleRoute(
   }
 
   // POST /schema/storage/buckets — create storage bucket
-  if (method === 'POST' && segments[0] === 'schema' && segments[1] === 'storage' && segments[2] === 'buckets' && segments.length === 3) {
+  if (
+    method === 'POST' &&
+    segments[0] === 'schema' &&
+    segments[1] === 'storage' &&
+    segments[2] === 'buckets' &&
+    segments.length === 3
+  ) {
     const body = await readBody(req);
     const name = body.name as string;
 
@@ -975,7 +1092,12 @@ async function handleRoute(
   }
 
   // DELETE /schema/tables/:name — delete table
-  if (method === 'DELETE' && segments[0] === 'schema' && segments[1] === 'tables' && segments.length === 3) {
+  if (
+    method === 'DELETE' &&
+    segments[0] === 'schema' &&
+    segments[1] === 'tables' &&
+    segments.length === 3
+  ) {
     const tableName = segments[2];
     const body = await readBody(req);
     const dbKey = (body.dbKey as string) || 'shared';
@@ -986,7 +1108,13 @@ async function handleRoute(
   }
 
   // PUT /schema/tables/:name/rename — rename table
-  if (method === 'PUT' && segments[0] === 'schema' && segments[1] === 'tables' && segments[3] === 'rename' && segments.length === 4) {
+  if (
+    method === 'PUT' &&
+    segments[0] === 'schema' &&
+    segments[1] === 'tables' &&
+    segments[3] === 'rename' &&
+    segments.length === 4
+  ) {
     const tableName = segments[2];
     const body = await readBody(req);
     const dbKey = (body.dbKey as string) || 'shared';
@@ -1017,7 +1145,13 @@ async function handleRoute(
   }
 
   // POST /schema/tables/:name/columns — add column
-  if (method === 'POST' && segments[0] === 'schema' && segments[1] === 'tables' && segments[3] === 'columns' && segments.length === 4) {
+  if (
+    method === 'POST' &&
+    segments[0] === 'schema' &&
+    segments[1] === 'tables' &&
+    segments[3] === 'columns' &&
+    segments.length === 4
+  ) {
     const tableName = segments[2];
     const body = await readBody(req);
     const dbKey = (body.dbKey as string) || 'shared';
@@ -1033,7 +1167,13 @@ async function handleRoute(
   }
 
   // PUT /schema/tables/:name/columns/:col — update column
-  if (method === 'PUT' && segments[0] === 'schema' && segments[1] === 'tables' && segments[3] === 'columns' && segments.length === 5) {
+  if (
+    method === 'PUT' &&
+    segments[0] === 'schema' &&
+    segments[1] === 'tables' &&
+    segments[3] === 'columns' &&
+    segments.length === 5
+  ) {
     const tableName = segments[2];
     const columnName = segments[4];
     const body = await readBody(req);
@@ -1048,7 +1188,13 @@ async function handleRoute(
   }
 
   // DELETE /schema/tables/:name/columns/:col — remove column
-  if (method === 'DELETE' && segments[0] === 'schema' && segments[1] === 'tables' && segments[3] === 'columns' && segments.length === 5) {
+  if (
+    method === 'DELETE' &&
+    segments[0] === 'schema' &&
+    segments[1] === 'tables' &&
+    segments[3] === 'columns' &&
+    segments.length === 5
+  ) {
     const tableName = segments[2];
     const columnName = segments[4];
     const body = await readBody(req);
@@ -1060,7 +1206,13 @@ async function handleRoute(
   }
 
   // POST /schema/tables/:name/indexes — add index
-  if (method === 'POST' && segments[0] === 'schema' && segments[1] === 'tables' && segments[3] === 'indexes' && segments.length === 4) {
+  if (
+    method === 'POST' &&
+    segments[0] === 'schema' &&
+    segments[1] === 'tables' &&
+    segments[3] === 'indexes' &&
+    segments.length === 4
+  ) {
     const tableName = segments[2];
     const body = await readBody(req);
     const dbKey = (body.dbKey as string) || 'shared';
@@ -1074,7 +1226,13 @@ async function handleRoute(
   }
 
   // DELETE /schema/tables/:name/indexes/:idx — remove index
-  if (method === 'DELETE' && segments[0] === 'schema' && segments[1] === 'tables' && segments[3] === 'indexes' && segments.length === 5) {
+  if (
+    method === 'DELETE' &&
+    segments[0] === 'schema' &&
+    segments[1] === 'tables' &&
+    segments[3] === 'indexes' &&
+    segments.length === 5
+  ) {
     const tableName = segments[2];
     const indexIdx = parseInt(segments[4], 10);
     const body = await readBody(req);
@@ -1086,7 +1244,13 @@ async function handleRoute(
   }
 
   // PUT /schema/tables/:name/fts — set FTS fields
-  if (method === 'PUT' && segments[0] === 'schema' && segments[1] === 'tables' && segments[3] === 'fts' && segments.length === 4) {
+  if (
+    method === 'PUT' &&
+    segments[0] === 'schema' &&
+    segments[1] === 'tables' &&
+    segments[3] === 'fts' &&
+    segments.length === 4
+  ) {
     const tableName = segments[2];
     const body = await readBody(req);
     const dbKey = (body.dbKey as string) || 'shared';
@@ -1100,7 +1264,12 @@ async function handleRoute(
   // ─── Auth Settings Editing ───
 
   // GET /auth/settings — read current auth config
-  if (method === 'GET' && segments[0] === 'auth' && segments[1] === 'settings' && segments.length === 2) {
+  if (
+    method === 'GET' &&
+    segments[0] === 'auth' &&
+    segments[1] === 'settings' &&
+    segments.length === 2
+  ) {
     const target = parseAuthSettingsTarget(url.searchParams.get('target'));
     const config = loadSidecarConfig(opts, target);
     json(res, 200, { ok: true, target, ...readAuthSettings(config) });
@@ -1108,7 +1277,12 @@ async function handleRoute(
   }
 
   // PUT /auth/settings — save auth config
-  if (method === 'PUT' && segments[0] === 'auth' && segments[1] === 'settings' && segments.length === 2) {
+  if (
+    method === 'PUT' &&
+    segments[0] === 'auth' &&
+    segments[1] === 'settings' &&
+    segments.length === 2
+  ) {
     const target = parseAuthSettingsTarget(url.searchParams.get('target'));
     const body = await readBody(req);
     const session = body.session as Record<string, unknown> | undefined;
@@ -1116,29 +1290,32 @@ async function handleRoute(
     const emailOtp = body.emailOtp as Record<string, unknown> | undefined;
     const passkeys = body.passkeys as Record<string, unknown> | undefined;
     const oauth = body.oauth as Record<string, Record<string, unknown>> | undefined;
-    const normalizedOAuth = oauth && typeof oauth === 'object'
-      ? Object.fromEntries(
-        Object.entries(oauth)
-          .filter(([, value]) => value && typeof value === 'object')
-          .map(([provider, value]) => [
-            provider,
-            {
-              clientId: typeof value.clientId === 'string' ? value.clientId : null,
-              clientSecret: typeof value.clientSecret === 'string' ? value.clientSecret : null,
-              issuer: typeof value.issuer === 'string' ? value.issuer : null,
-              scopes: Array.isArray(value.scopes)
-                ? value.scopes.filter((scope): scope is string => typeof scope === 'string')
-                : [],
-            },
-          ]),
-      )
-      : undefined;
+    const normalizedOAuth =
+      oauth && typeof oauth === 'object'
+        ? Object.fromEntries(
+            Object.entries(oauth)
+              .filter(([, value]) => value && typeof value === 'object')
+              .map(([provider, value]) => [
+                provider,
+                {
+                  clientId: typeof value.clientId === 'string' ? value.clientId : null,
+                  clientSecret: typeof value.clientSecret === 'string' ? value.clientSecret : null,
+                  issuer: typeof value.issuer === 'string' ? value.issuer : null,
+                  scopes: Array.isArray(value.scopes)
+                    ? value.scopes.filter((scope): scope is string => typeof scope === 'string')
+                    : [],
+                },
+              ]),
+          )
+        : undefined;
 
     syncOAuthSecretsToLocalEnv(
       opts.projectDir,
       target,
       Array.isArray(body.allowedOAuthProviders)
-        ? body.allowedOAuthProviders.filter((provider): provider is string => typeof provider === 'string')
+        ? body.allowedOAuthProviders.filter(
+            (provider): provider is string => typeof provider === 'string',
+          )
         : undefined,
       normalizedOAuth,
     );
@@ -1147,41 +1324,52 @@ async function handleRoute(
       emailAuth: typeof body.emailAuth === 'boolean' ? body.emailAuth : undefined,
       anonymousAuth: typeof body.anonymousAuth === 'boolean' ? body.anonymousAuth : undefined,
       allowedOAuthProviders: Array.isArray(body.allowedOAuthProviders)
-        ? body.allowedOAuthProviders.filter((provider): provider is string => typeof provider === 'string')
+        ? body.allowedOAuthProviders.filter(
+            (provider): provider is string => typeof provider === 'string',
+          )
         : undefined,
       allowedRedirectUrls: Array.isArray(body.allowedRedirectUrls)
         ? body.allowedRedirectUrls.filter((url): url is string => typeof url === 'string')
         : undefined,
-      session: session && typeof session === 'object'
-        ? {
-          accessTokenTTL: typeof session.accessTokenTTL === 'string' ? session.accessTokenTTL : null,
-          refreshTokenTTL: typeof session.refreshTokenTTL === 'string' ? session.refreshTokenTTL : null,
-          maxActiveSessions: typeof session.maxActiveSessions === 'number' ? session.maxActiveSessions : null,
-        }
-        : undefined,
-      magicLink: magicLink && typeof magicLink === 'object'
-        ? {
-          enabled: typeof magicLink.enabled === 'boolean' ? magicLink.enabled : undefined,
-          autoCreate: typeof magicLink.autoCreate === 'boolean' ? magicLink.autoCreate : undefined,
-          tokenTTL: typeof magicLink.tokenTTL === 'string' ? magicLink.tokenTTL : null,
-        }
-        : undefined,
-      emailOtp: emailOtp && typeof emailOtp === 'object'
-        ? {
-          enabled: typeof emailOtp.enabled === 'boolean' ? emailOtp.enabled : undefined,
-          autoCreate: typeof emailOtp.autoCreate === 'boolean' ? emailOtp.autoCreate : undefined,
-        }
-        : undefined,
-      passkeys: passkeys && typeof passkeys === 'object'
-        ? {
-          enabled: typeof passkeys.enabled === 'boolean' ? passkeys.enabled : undefined,
-          rpName: typeof passkeys.rpName === 'string' ? passkeys.rpName : null,
-          rpID: typeof passkeys.rpID === 'string' ? passkeys.rpID : null,
-          origin: Array.isArray(passkeys.origin)
-            ? passkeys.origin.filter((origin): origin is string => typeof origin === 'string')
-            : undefined,
-        }
-        : undefined,
+      session:
+        session && typeof session === 'object'
+          ? {
+              accessTokenTTL:
+                typeof session.accessTokenTTL === 'string' ? session.accessTokenTTL : null,
+              refreshTokenTTL:
+                typeof session.refreshTokenTTL === 'string' ? session.refreshTokenTTL : null,
+              maxActiveSessions:
+                typeof session.maxActiveSessions === 'number' ? session.maxActiveSessions : null,
+            }
+          : undefined,
+      magicLink:
+        magicLink && typeof magicLink === 'object'
+          ? {
+              enabled: typeof magicLink.enabled === 'boolean' ? magicLink.enabled : undefined,
+              autoCreate:
+                typeof magicLink.autoCreate === 'boolean' ? magicLink.autoCreate : undefined,
+              tokenTTL: typeof magicLink.tokenTTL === 'string' ? magicLink.tokenTTL : null,
+            }
+          : undefined,
+      emailOtp:
+        emailOtp && typeof emailOtp === 'object'
+          ? {
+              enabled: typeof emailOtp.enabled === 'boolean' ? emailOtp.enabled : undefined,
+              autoCreate:
+                typeof emailOtp.autoCreate === 'boolean' ? emailOtp.autoCreate : undefined,
+            }
+          : undefined,
+      passkeys:
+        passkeys && typeof passkeys === 'object'
+          ? {
+              enabled: typeof passkeys.enabled === 'boolean' ? passkeys.enabled : undefined,
+              rpName: typeof passkeys.rpName === 'string' ? passkeys.rpName : null,
+              rpID: typeof passkeys.rpID === 'string' ? passkeys.rpID : null,
+              origin: Array.isArray(passkeys.origin)
+                ? passkeys.origin.filter((origin): origin is string => typeof origin === 'string')
+                : undefined,
+            }
+          : undefined,
       oauth: normalizedOAuth,
     });
 
@@ -1192,7 +1380,12 @@ async function handleRoute(
   // ─── Email Template Editing ───
 
   // PUT /email/templates — save email subject/template override (with optional locale)
-  if (method === 'PUT' && segments[0] === 'email' && segments[1] === 'templates' && segments.length === 2) {
+  if (
+    method === 'PUT' &&
+    segments[0] === 'email' &&
+    segments[1] === 'templates' &&
+    segments.length === 2
+  ) {
     const body = await readBody(req);
     const type = body.type as string;
     const locale = (body.locale as string | undefined) ?? 'en';
@@ -1240,14 +1433,20 @@ async function handleRoute(
   }
 
   // GET /email/templates — read current email config
-  if (method === 'GET' && segments[0] === 'email' && segments[1] === 'templates' && segments.length === 2) {
+  if (
+    method === 'GET' &&
+    segments[0] === 'email' &&
+    segments[1] === 'templates' &&
+    segments.length === 2
+  ) {
     // Re-read the full config to get email section
     try {
       const projectDir = resolve(opts.configPath, '..');
+      const moduleUrl = pathToFileURL(resolve(opts.configPath)).href;
       const result = execTsxSync(
         [
           '-e',
-          `import c from ${JSON.stringify(opts.configPath)}; const d=c.default??c; const e=d.email??{}; console.log(JSON.stringify({appName:e.appName||'EdgeBase',subjects:e.subjects||{},templates:e.templates||{}}));`,
+          `const mod = await import(${JSON.stringify(moduleUrl)}); const d=mod.default??mod; const e=d.email??{}; console.log(JSON.stringify({appName:e.appName||'EdgeBase',subjects:e.subjects||{},templates:e.templates||{}}));`,
         ],
         { cwd: projectDir, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'ignore'] },
       ).trim();
@@ -1269,7 +1468,10 @@ export function startSidecar(opts: SidecarOptions): Server {
     // CORS headers (dashboard on :8787, sidecar on :8788)
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-EdgeBase-Internal-Secret');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-EdgeBase-Internal-Secret',
+    );
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -1332,7 +1534,10 @@ export function parseEnvFile(filePath: string): Record<string, string> {
       const key = trimmed.slice(0, eqIdx).trim();
       let value = trimmed.slice(eqIdx + 1).trim();
       // Strip surrounding quotes
-      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
         value = value.slice(1, -1);
       }
       vars[key] = value;

@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { pnpmCommand } from '../src/lib/pnpm.js';
+import { resolveTsxCommand } from '../src/lib/node-tools.js';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const tempDirs: string[] = [];
+const tsxCommand = resolveTsxCommand();
+const tsxExecOptions = /\.cmd$/i.test(tsxCommand.command) ? { shell: true as const } : {};
 
 function createHomeDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'edgebase-cli-agent-mode-'));
@@ -26,10 +28,9 @@ describe('CLI entrypoint agent mode', () => {
     const homeDir = createHomeDir();
 
     const result = spawnSync(
-      pnpmCommand(),
+      tsxCommand.command,
       [
-        'exec',
-        'tsx',
+        ...tsxCommand.argsPrefix,
         'src/index.ts',
         '--json',
         '--non-interactive',
@@ -49,6 +50,7 @@ describe('CLI entrypoint agent mode', () => {
           NO_COLOR: '1',
         },
         stdio: 'pipe',
+        ...tsxExecOptions,
       },
     );
 
@@ -80,10 +82,9 @@ describe('CLI entrypoint agent mode', () => {
     );
 
     const result = spawnSync(
-      pnpmCommand(),
+      tsxCommand.command,
       [
-        'exec',
-        'tsx',
+        ...tsxCommand.argsPrefix,
         'src/index.ts',
         '--json',
         '--non-interactive',
@@ -106,6 +107,7 @@ describe('CLI entrypoint agent mode', () => {
           NO_COLOR: '1',
         },
         stdio: 'pipe',
+        ...tsxExecOptions,
       },
     );
 

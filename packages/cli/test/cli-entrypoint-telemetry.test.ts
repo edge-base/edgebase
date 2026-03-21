@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { pnpmCommand } from '../src/lib/pnpm.js';
+import { resolveTsxCommand } from '../src/lib/node-tools.js';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const tempDirs: string[] = [];
+const tsxCommand = resolveTsxCommand();
+const tsxExecOptions = /\.cmd$/i.test(tsxCommand.command) ? { shell: true as const } : {};
 
 function createHomeDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'edgebase-cli-telemetry-'));
@@ -16,7 +18,7 @@ function createHomeDir(): string {
 }
 
 function runCli(homeDir: string, args: string[]): string {
-  return execFileSync(pnpmCommand(), ['exec', 'tsx', 'src/index.ts', ...args], {
+  return execFileSync(tsxCommand.command, [...tsxCommand.argsPrefix, 'src/index.ts', ...args], {
     cwd: packageDir,
     encoding: 'utf-8',
     env: {
@@ -26,6 +28,7 @@ function runCli(homeDir: string, args: string[]): string {
       NO_COLOR: '1',
     },
     stdio: 'pipe',
+    ...tsxExecOptions,
   });
 }
 
@@ -70,17 +73,22 @@ describe('CLI entrypoint telemetry', () => {
 
     runCli(homeDir, ['telemetry', 'enable']);
 
-    const result = spawnSync(pnpmCommand(), ['exec', 'tsx', 'src/index.ts', 'definitely-missing'], {
-      cwd: packageDir,
-      encoding: 'utf-8',
-      env: {
-        ...process.env,
-        HOME: homeDir,
-        USERPROFILE: homeDir,
-        NO_COLOR: '1',
+    const result = spawnSync(
+      tsxCommand.command,
+      [...tsxCommand.argsPrefix, 'src/index.ts', 'definitely-missing'],
+      {
+        cwd: packageDir,
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          USERPROFILE: homeDir,
+          NO_COLOR: '1',
+        },
+        stdio: 'pipe',
+        ...tsxExecOptions,
       },
-      stdio: 'pipe',
-    });
+    );
 
     expect(result.status).toBe(1);
 

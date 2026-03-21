@@ -42,7 +42,9 @@ describe('Service Key resolution', () => {
         try {
           const secrets = JSON.parse(readFileSync(secretsPath, 'utf-8'));
           serviceKey = secrets.SERVICE_KEY;
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     }
     return serviceKey;
@@ -50,21 +52,30 @@ describe('Service Key resolution', () => {
 
   it('uses --service-key option first', () => {
     mkdirSync(join(tmpDir, '.edgebase'), { recursive: true });
-    writeFileSync(join(tmpDir, '.edgebase', 'secrets.json'), JSON.stringify({ SERVICE_KEY: 'from-json' }));
+    writeFileSync(
+      join(tmpDir, '.edgebase', 'secrets.json'),
+      JSON.stringify({ SERVICE_KEY: 'from-json' }),
+    );
 
     expect(resolveServiceKey('from-option', 'from-env', tmpDir)).toBe('from-option');
   });
 
   it('falls back to env when no option', () => {
     mkdirSync(join(tmpDir, '.edgebase'), { recursive: true });
-    writeFileSync(join(tmpDir, '.edgebase', 'secrets.json'), JSON.stringify({ SERVICE_KEY: 'from-json' }));
+    writeFileSync(
+      join(tmpDir, '.edgebase', 'secrets.json'),
+      JSON.stringify({ SERVICE_KEY: 'from-json' }),
+    );
 
     expect(resolveServiceKey(undefined, 'from-env', tmpDir)).toBe('from-env');
   });
 
   it('falls back to secrets.json when no option or env', () => {
     mkdirSync(join(tmpDir, '.edgebase'), { recursive: true });
-    writeFileSync(join(tmpDir, '.edgebase', 'secrets.json'), JSON.stringify({ SERVICE_KEY: 'from-json' }));
+    writeFileSync(
+      join(tmpDir, '.edgebase', 'secrets.json'),
+      JSON.stringify({ SERVICE_KEY: 'from-json' }),
+    );
 
     expect(resolveServiceKey(undefined, undefined, tmpDir)).toBe('from-json');
   });
@@ -128,7 +139,7 @@ describe('Output path handling', () => {
 
   it('uses custom output path when provided', () => {
     const outputPath = resolve('/tmp/my-exports/data.json');
-    expect(outputPath).toContain('my-exports/data.json');
+    expect(outputPath.replace(/\\/g, '/')).toContain('my-exports/data.json');
   });
 
   it('creates output directory if it does not exist', () => {
