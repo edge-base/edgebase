@@ -25,7 +25,7 @@ async function removeDirWithRetry(dir: string): Promise<void> {
   let lastError: unknown;
   const transientDeleteErrorCodes = new Set(['EPERM', 'EBUSY', 'ENOTEMPTY']);
 
-  for (let attempt = 0; attempt < 12; attempt += 1) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
     try {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       return;
@@ -34,7 +34,7 @@ async function removeDirWithRetry(dir: string): Promise<void> {
       if (!transientDeleteErrorCodes.has((error as NodeJS.ErrnoException)?.code ?? '')) {
         throw error;
       }
-      await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
     }
   }
 
@@ -101,7 +101,6 @@ describe('typegen command', () => {
   afterEach(async () => {
     process.chdir(originalCwd);
     vi.restoreAllMocks();
-    await vi.dynamicImportSettled();
     await removeDirWithRetry(testDir);
   });
 
