@@ -292,6 +292,122 @@ private final class FakeRoomWebSocketTask: RoomWebSocketTask {
     }
 }
 
+private final class FakeRoomCloudflareClientAdapter: RoomCloudflareRealtimeKitClientAdapter {
+    private(set) var joinCallCount = 0
+    private(set) var leaveCallCount = 0
+    private(set) var enableAudioCallCount = 0
+    private(set) var disableAudioCallCount = 0
+    private(set) var enableVideoCallCount = 0
+    private(set) var disableVideoCallCount = 0
+    private(set) var enableScreenShareCallCount = 0
+    private(set) var disableScreenShareCallCount = 0
+    private(set) var selectedAudioDevices: [String] = []
+    private(set) var selectedVideoDevices: [String] = []
+    private var listeners: [ObjectIdentifier: any RoomCloudflareParticipantListener] = [:]
+
+    var localParticipant: RoomCloudflareParticipantSnapshot
+    var joinedParticipants: [RoomCloudflareParticipantSnapshot]
+
+    init(
+        localParticipant: RoomCloudflareParticipantSnapshot = RoomCloudflareParticipantSnapshot(
+            id: "participant-self",
+            userId: "user-self",
+            name: "Self",
+            audioEnabled: false,
+            videoEnabled: false,
+            screenShareEnabled: false,
+            participantHandle: NSString(string: "handle:self")
+        ),
+        joinedParticipants: [RoomCloudflareParticipantSnapshot] = []
+    ) {
+        self.localParticipant = localParticipant
+        self.joinedParticipants = joinedParticipants
+    }
+
+    func joinRoom() async throws {
+        joinCallCount += 1
+    }
+
+    func leaveRoom() async throws {
+        leaveCallCount += 1
+    }
+
+    func enableAudio() async throws {
+        enableAudioCallCount += 1
+    }
+
+    func disableAudio() async throws {
+        disableAudioCallCount += 1
+    }
+
+    func enableVideo() async throws {
+        enableVideoCallCount += 1
+    }
+
+    func disableVideo() async throws {
+        disableVideoCallCount += 1
+    }
+
+    func enableScreenShare() async throws {
+        enableScreenShareCallCount += 1
+    }
+
+    func disableScreenShare() async throws {
+        disableScreenShareCallCount += 1
+    }
+
+    func setAudioDevice(_ deviceId: String) async throws {
+        selectedAudioDevices.append(deviceId)
+    }
+
+    func setVideoDevice(_ deviceId: String) async throws {
+        selectedVideoDevices.append(deviceId)
+    }
+
+    func buildView(participant: RoomCloudflareParticipantSnapshot, kind: String, isSelf: Bool) -> AnyObject? {
+        NSString(string: "view:\(participant.id):\(kind):\(isSelf ? "self" : "remote")")
+    }
+
+    func addListener(_ listener: any RoomCloudflareParticipantListener) {
+        listeners[ObjectIdentifier(listener)] = listener
+    }
+
+    func removeListener(_ listener: any RoomCloudflareParticipantListener) {
+        listeners.removeValue(forKey: ObjectIdentifier(listener))
+    }
+
+    func emitAudio(for participant: RoomCloudflareParticipantSnapshot, enabled: Bool) {
+        for listener in listeners.values {
+            listener.onAudioUpdate(participant, enabled: enabled)
+        }
+    }
+}
+
+private func makeRoomURLSession() -> URLSession {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MockRoomURLProtocol.self]
+    return URLSession(configuration: configuration)
+}
+
+private func waitForRoomMessage(
+    _ socket: FakeRoomWebSocketTask,
+    index: Int,
+    timeout: TimeInterval = 2.0
+) throws -> [String: Any] {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if socket.messages.count >= index {
+            return socket.messages[index - 1]
+        }
+        Thread.sleep(forTimeInterval: 0.01)
+    }
+    throw NSError(
+        domain: "RoomMediaTransportTests",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for message #\(index); events=\(socket.events); messages=\(socket.messages)"]
+    )
+}
+
 // ─── E. FieldOps 구조 ─────────────────────────────────────────────────────────
 
 import EdgeBaseCore
@@ -1108,7 +1224,190 @@ final class ExternalTokenManagerIosUnitTests: XCTestCase {
     }
 }
 
-// ─── O. DocRef 구조 검증 ────────────────────────────────────────────────────
+// ─── O. Room media transport 검증 ──────────────────────────────────────────
+
+final class RoomMediaTransportIosUnitTests: XCTestCase {
+
+    override func tearDown() {
+        MockRoomURLProtocol.requestHandler = nil
+        super.tearDown()
+    }
+
+    func test_cloudflare_transport_connects_through_provider_endpoint() async throws {
+        MockRoomURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/room/media/cloudflare_realtimekit/session")
+            XCTAssertEqual(request.url?.query, "namespace=game&id=room-1")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+
+            let body = try readRequestBody(request)
+            let payload = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: body) as? [String: Any]
+            )
+            XCTAssertEqual(payload["name"] as? String, "Swift User")
+            XCTAssertEqual(payload["customParticipantId"] as? String, "swift-user-1")
+
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let data = try JSONSerialization.data(withJSONObject: [
+                "sessionId": "session-1",
+                "meetingId": "meeting-1",
+                "participantId": "participant-1",
+                "authToken": "auth-token-1",
+                "presetName": "default",
+            ])
+            return (response, data)
+        }
+
+        let tokenManager = TokenManager(storage: MemoryTokenStorage())
+        await tokenManager.setTokens(TokenPair(accessToken: "access-token", refreshToken: "refresh-token"))
+
+        let room = RoomClient(
+            baseUrl: "https://edgebase.fun",
+            namespace: "game",
+            roomId: "room-1",
+            tokenManager: tokenManager,
+            session: makeRoomURLSession()
+        )
+
+        let remoteParticipant = RoomCloudflareParticipantSnapshot(
+            id: "remote-1",
+            userId: "user-2",
+            name: "Remote User",
+            customParticipantId: "remote-custom-1",
+            audioEnabled: false,
+            videoEnabled: true,
+            screenShareEnabled: false,
+            participantHandle: NSString(string: "handle:remote-1")
+        )
+        let fakeClient = FakeRoomCloudflareClientAdapter(joinedParticipants: [remoteParticipant])
+
+        let transport = room.media.transport(
+            RoomMediaTransportOptions(
+                cloudflareRealtimeKit: RoomCloudflareRealtimeKitTransportOptions(
+                    clientFactory: { options in
+                        XCTAssertEqual(options.authToken, "auth-token-1")
+                        XCTAssertEqual(options.displayName, "Swift User")
+                        XCTAssertFalse(options.enableAudio)
+                        XCTAssertFalse(options.enableVideo)
+                        XCTAssertEqual(options.baseDomain, "dyte.io")
+                        return fakeClient
+                    }
+                )
+            )
+        )
+
+        var remoteEvents: [RoomMediaRemoteTrackEvent] = []
+        let subscription = transport.onRemoteTrack { remoteEvents.append($0) }
+        defer {
+            subscription.unsubscribe()
+            transport.destroy()
+        }
+
+        let sessionId = try await transport.connect([
+            "name": "Swift User",
+            "customParticipantId": "swift-user-1",
+        ])
+
+        XCTAssertEqual(sessionId, "session-1")
+        XCTAssertEqual(fakeClient.joinCallCount, 1)
+        XCTAssertEqual(transport.getSessionId(), "session-1")
+        XCTAssertEqual(remoteEvents.count, 1)
+        XCTAssertEqual(remoteEvents.first?.kind, "video")
+        XCTAssertEqual(remoteEvents.first?.participantId, "remote-1")
+        XCTAssertEqual(remoteEvents.first?.customParticipantId, "remote-custom-1")
+        XCTAssertEqual(remoteEvents.first?.view as? String, "view:remote-1:video:remote")
+    }
+
+    func test_cloudflare_transport_forwards_local_media_operations() async throws {
+        MockRoomURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let data = try JSONSerialization.data(withJSONObject: [
+                "sessionId": "session-2",
+                "meetingId": "meeting-2",
+                "participantId": "participant-2",
+                "authToken": "auth-token-2",
+                "presetName": "default",
+            ])
+            return (response, data)
+        }
+
+        let tokenManager = TokenManager(storage: MemoryTokenStorage())
+        await tokenManager.setTokens(TokenPair(accessToken: "access-token", refreshToken: "refresh-token"))
+
+        let room = RoomClient(
+            baseUrl: "https://edgebase.fun",
+            namespace: "game",
+            roomId: "room-1",
+            tokenManager: tokenManager,
+            session: makeRoomURLSession()
+        )
+        let socket = FakeRoomWebSocketTask()
+        room.attachSocketForTesting(socket)
+
+        let fakeClient = FakeRoomCloudflareClientAdapter()
+        let transport = room.media.transport(
+            RoomMediaTransportOptions(
+                cloudflareRealtimeKit: RoomCloudflareRealtimeKitTransportOptions(
+                    clientFactory: { _ in fakeClient }
+                )
+            )
+        )
+
+        defer {
+            room.leave()
+        }
+
+        _ = try await transport.connect(["name": "Swift User"])
+
+        let audioTask = Task { try await transport.enableAudio(nil) }
+        let audioFrame = try waitForRoomMessage(socket, index: 1)
+        XCTAssertEqual(audioFrame["type"] as? String, "media")
+        XCTAssertEqual(audioFrame["operation"] as? String, "publish")
+        XCTAssertEqual(audioFrame["kind"] as? String, "audio")
+        XCTAssertEqual((audioFrame["payload"] as? [String: Any])?["providerSessionId"] as? String, "participant-2")
+        room.handleMessageForTesting([
+            "type": "media_result",
+            "operation": "publish",
+            "kind": "audio",
+            "requestId": try XCTUnwrap(audioFrame["requestId"] as? String),
+        ])
+        _ = try await audioTask.value
+
+        let videoTask = Task { try await transport.enableVideo(nil) }
+        let videoFrame = try waitForRoomMessage(socket, index: 2)
+        XCTAssertEqual(videoFrame["type"] as? String, "media")
+        XCTAssertEqual(videoFrame["operation"] as? String, "publish")
+        XCTAssertEqual(videoFrame["kind"] as? String, "video")
+        XCTAssertEqual((videoFrame["payload"] as? [String: Any])?["providerSessionId"] as? String, "participant-2")
+        room.handleMessageForTesting([
+            "type": "media_result",
+            "operation": "publish",
+            "kind": "video",
+            "requestId": try XCTUnwrap(videoFrame["requestId"] as? String),
+        ])
+        let videoView = try await videoTask.value
+
+        XCTAssertEqual(fakeClient.enableAudioCallCount, 1)
+        XCTAssertEqual(fakeClient.enableVideoCallCount, 1)
+        XCTAssertEqual(videoView as? String, "view:participant-self:video:self")
+
+        transport.destroy()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(fakeClient.leaveCallCount, 1)
+    }
+}
+
+// ─── P. DocRef 구조 검증 ────────────────────────────────────────────────────
 
 final class DocRefIosUnitTests: XCTestCase {
 

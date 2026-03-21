@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -40,6 +41,131 @@ class RoomClientLeaveTest {
         public void close() {
             events.add("close");
             leaveLifecycle.countDown();
+        }
+    }
+
+    private static final class FakeCloudflareClientAdapter implements RoomClient.RoomCloudflareRealtimeKitClientAdapter {
+        final List<RoomClient.RoomCloudflareParticipantListener> listeners = new CopyOnWriteArrayList<>();
+        RoomClient.RoomCloudflareParticipantSnapshot localParticipant;
+        List<RoomClient.RoomCloudflareParticipantSnapshot> joinedParticipants;
+        boolean joinCalled;
+        boolean leaveCalled;
+        int enableAudioCalls;
+        int enableVideoCalls;
+        int enableScreenShareCalls;
+        int disableAudioCalls;
+        int disableVideoCalls;
+        int disableScreenShareCalls;
+        String selectedAudioDeviceId;
+        String selectedVideoDeviceId;
+
+        FakeCloudflareClientAdapter() {
+            this(
+                    participant("self-participant", "user-1", "Self User", false, false, false, "self-handle"),
+                    new ArrayList<>()
+            );
+        }
+
+        FakeCloudflareClientAdapter(
+                RoomClient.RoomCloudflareParticipantSnapshot localParticipant,
+                List<RoomClient.RoomCloudflareParticipantSnapshot> joinedParticipants
+        ) {
+            this.localParticipant = localParticipant;
+            this.joinedParticipants = joinedParticipants;
+        }
+
+        @Override
+        public CompletableFuture<Void> joinRoom() {
+            joinCalled = true;
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> leaveRoom() {
+            leaveCalled = true;
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> enableAudio() {
+            enableAudioCalls += 1;
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> disableAudio() {
+            disableAudioCalls += 1;
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> enableVideo() {
+            enableVideoCalls += 1;
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> disableVideo() {
+            disableVideoCalls += 1;
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> enableScreenShare() {
+            enableScreenShareCalls += 1;
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> disableScreenShare() {
+            disableScreenShareCalls += 1;
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> setAudioDevice(String deviceId) {
+            selectedAudioDeviceId = deviceId;
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> setVideoDevice(String deviceId) {
+            selectedVideoDeviceId = deviceId;
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public RoomClient.RoomCloudflareParticipantSnapshot getLocalParticipant() {
+            return localParticipant;
+        }
+
+        @Override
+        public List<RoomClient.RoomCloudflareParticipantSnapshot> getJoinedParticipants() {
+            return joinedParticipants;
+        }
+
+        @Override
+        public Object buildView(RoomClient.RoomCloudflareParticipantSnapshot participant, String kind, boolean isSelf) {
+            if ("audio".equals(kind)) {
+                return null;
+            }
+            return isSelf ? "view:self:" + kind : "view:" + participant.getId() + ":" + kind;
+        }
+
+        @Override
+        public void addListener(RoomClient.RoomCloudflareParticipantListener listener) {
+            listeners.add(listener);
+        }
+
+        @Override
+        public void removeListener(RoomClient.RoomCloudflareParticipantListener listener) {
+            listeners.remove(listener);
+        }
+
+        void emitAudio(RoomClient.RoomCloudflareParticipantSnapshot participant, boolean enabled) {
+            for (RoomClient.RoomCloudflareParticipantListener listener : List.copyOf(listeners)) {
+                listener.onAudioUpdate(participant, enabled);
+            }
         }
     }
 
@@ -186,6 +312,124 @@ class RoomClientLeaveTest {
         }
     }
 
+    @Test
+    void cloudflareRealtimeKitTransport_connects_and_emits_remote_tracks() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.setExecutor(Executors.newSingleThreadExecutor());
+        server.createContext("/api/room/media/cloudflare_realtimekit/session", exchange -> {
+            assertEquals("POST", exchange.getRequestMethod());
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            JSONObject payload = new JSONObject(body);
+            assertEquals("Java User", payload.getString("name"));
+            assertEquals("java-user-1", payload.getString("customParticipantId"));
+            writeResponse(exchange, 200, "{\"sessionId\":\"session-2\",\"meetingId\":\"meeting-2\",\"participantId\":\"participant-2\",\"authToken\":\"auth-token-2\",\"presetName\":\"default\"}");
+        });
+        server.start();
+        try {
+            String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+            RoomClient room = new RoomClient(baseUrl, "media", "room-1", () -> "token");
+            FakeCloudflareClientAdapter fakeClient = new FakeCloudflareClientAdapter(
+                    participant("self-participant", "user-1", "Self User", false, false, false, "self-handle"),
+                    List.of(participant("remote-1", "user-2", "Remote User", false, true, false, "participant:remote-1"))
+            );
+            RoomClient.RoomMediaTransport transport = room.media.transport(
+                    new RoomClient.RoomMediaTransportOptions()
+                            .setCloudflareRealtimeKit(
+                                    new RoomClient.RoomCloudflareRealtimeKitTransportOptions()
+                                            .setClientFactory(options -> {
+                                                assertEquals("auth-token-2", options.getAuthToken());
+                                                assertEquals("Java User", options.getDisplayName());
+                                                assertEquals("dyte.io", options.getBaseDomain());
+                                                return CompletableFuture.completedFuture(fakeClient);
+                                            })
+                            )
+            );
+
+            List<RoomClient.RoomMediaRemoteTrackEvent> remoteEvents = new ArrayList<>();
+            transport.onRemoteTrack(remoteEvents::add);
+
+            String sessionId = transport.connect(Map.of(
+                    "name", "Java User",
+                    "customParticipantId", "java-user-1"
+            )).join();
+
+            assertEquals("session-2", sessionId);
+            assertTrue(fakeClient.joinCalled);
+            assertEquals(1, remoteEvents.size());
+            assertEquals("video", remoteEvents.get(0).getKind());
+            assertEquals("remote-1", remoteEvents.get(0).getParticipantId());
+            assertEquals("view:remote-1:video", remoteEvents.get(0).getView());
+
+            transport.destroy();
+            assertTrue(fakeClient.leaveCalled);
+            room.destroy();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void cloudflareRealtimeKitTransport_forwards_local_media_operations() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.setExecutor(Executors.newSingleThreadExecutor());
+        server.createContext("/api/room/media/cloudflare_realtimekit/session", exchange -> {
+            writeResponse(exchange, 200, "{\"sessionId\":\"session-3\",\"meetingId\":\"meeting-3\",\"participantId\":\"participant-3\",\"authToken\":\"auth-token-3\",\"presetName\":\"default\"}");
+        });
+        server.start();
+        try {
+            String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+            RoomClient room = new RoomClient(baseUrl, "media", "room-1", () -> "token");
+            FakeRoomSocket fakeSocket = new FakeRoomSocket();
+            room.attachSocketForTesting(fakeSocket, true, true, true);
+
+            FakeCloudflareClientAdapter fakeClient = new FakeCloudflareClientAdapter();
+            RoomClient.RoomMediaTransport transport = room.media.transport(
+                    new RoomClient.RoomMediaTransportOptions()
+                            .setCloudflareRealtimeKit(
+                                    new RoomClient.RoomCloudflareRealtimeKitTransportOptions()
+                                            .setClientFactory(options -> CompletableFuture.completedFuture(fakeClient))
+                            )
+            );
+
+            transport.connect(Map.of("name", "Java User")).join();
+
+            CompletableFuture<Object> audioFuture = transport.enableAudio(Map.of("deviceId", "mic-1"));
+            JSONObject audioFrame = fakeSocket.messages.get(0);
+            assertEquals("media", audioFrame.getString("type"));
+            assertEquals("publish", audioFrame.getString("operation"));
+            assertEquals("audio", audioFrame.getString("kind"));
+            assertEquals("participant-3", audioFrame.getJSONObject("payload").getString("providerSessionId"));
+            room.handleRawForTesting("{\"type\":\"media_result\",\"requestId\":\"" + audioFrame.getString("requestId") + "\",\"operation\":\"publish\",\"kind\":\"audio\"}");
+            assertEquals("self-handle", audioFuture.join());
+
+            CompletableFuture<Object> videoFuture = transport.enableVideo(Map.of("deviceId", "cam-1"));
+            JSONObject videoFrame = fakeSocket.messages.get(1);
+            assertEquals("video", videoFrame.getString("kind"));
+            room.handleRawForTesting("{\"type\":\"media_result\",\"requestId\":\"" + videoFrame.getString("requestId") + "\",\"operation\":\"publish\",\"kind\":\"video\"}");
+            assertEquals("view:self:video", videoFuture.join());
+
+            CompletableFuture<Void> switchFuture = transport.switchDevices(Map.of(
+                    "audioInputId", "mic-2",
+                    "videoInputId", "cam-2"
+            ));
+            JSONObject audioDeviceFrame = fakeSocket.messages.get(2);
+            JSONObject videoDeviceFrame = fakeSocket.messages.get(3);
+            room.handleRawForTesting("{\"type\":\"media_result\",\"requestId\":\"" + audioDeviceFrame.getString("requestId") + "\",\"operation\":\"device\",\"kind\":\"audio\"}");
+            room.handleRawForTesting("{\"type\":\"media_result\",\"requestId\":\"" + videoDeviceFrame.getString("requestId") + "\",\"operation\":\"device\",\"kind\":\"video\"}");
+            switchFuture.join();
+
+            assertEquals(1, fakeClient.enableAudioCalls);
+            assertEquals(1, fakeClient.enableVideoCalls);
+            assertEquals("mic-2", fakeClient.selectedAudioDeviceId);
+            assertEquals("cam-2", fakeClient.selectedVideoDeviceId);
+
+            transport.destroy();
+            room.destroy();
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private static void writeResponse(HttpExchange exchange, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
@@ -193,5 +437,27 @@ class RoomClientLeaveTest {
         try (OutputStream output = exchange.getResponseBody()) {
             output.write(bytes);
         }
+    }
+
+    private static RoomClient.RoomCloudflareParticipantSnapshot participant(
+            String id,
+            String userId,
+            String name,
+            boolean audioEnabled,
+            boolean videoEnabled,
+            boolean screenShareEnabled,
+            Object handle
+    ) {
+        return new RoomClient.RoomCloudflareParticipantSnapshot(
+                id,
+                userId,
+                name,
+                null,
+                null,
+                audioEnabled,
+                videoEnabled,
+                screenShareEnabled,
+                handle
+        );
     }
 }

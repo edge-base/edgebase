@@ -20,6 +20,7 @@ dependencies:
   flutter_inappwebview: ^6.0.0
   realtimekit_core: ^0.1.5+1
   realtimekit_core_platform_interface: ^0.1.5
+  flutter_webrtc: ^1.4.0
 
 dev_dependencies:
   test: ^1.24.0

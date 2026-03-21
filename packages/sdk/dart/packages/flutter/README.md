@@ -178,12 +178,18 @@ await transport.enableAudio();
 final localVideoView = await transport.enableVideo();
 ```
 
-`cloudflare_realtimekit` is the currently supported Flutter runtime provider.
+Flutter currently supports these room media providers:
 
-To use it, add the RealtimeKit dependency alongside `edgebase_flutter`:
+- `cloudflare_realtimekit`
+  Managed media sessions through Cloudflare RealtimeKit
+- `p2p`
+  Direct peer-to-peer media with signaling over `room.signals`
+
+Install the matching optional runtime dependencies alongside `edgebase_flutter`:
 
 ```bash
 flutter pub add realtimekit_core
+flutter pub add flutter_webrtc
 ```
 
 Read more:

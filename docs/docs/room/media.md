@@ -124,10 +124,14 @@ The main client APIs are:
 - `room.media.onStateChange(...)`
 - `room.media.onDeviceChange(...)`
 
-:::note C# / C++ transport providers
-C#/Unity and C++/Unreal now expose `room.media.transport(...)` and `room.media.cloudflareRealtimeKit` / `room->media.cloudflare_realtimekit` so their public Room surface stays aligned with the Web SDK.
+:::note Transport provider availability
+`room.media.transport(...)` is currently available across multiple client SDKs, but the provider mix is not identical everywhere yet.
 
-Those provider APIs are still in preparation on those runtimes. Calling them currently returns a "not available yet" error that points back to this guide.
+- Web, React Native, and Flutter support `cloudflare_realtimekit` and `p2p`
+- Swift iOS, Kotlin, and Java currently support `cloudflare_realtimekit`
+- C#/Unity and C++/Unreal expose aligned placeholder entry points that currently return a "not available yet" error and point back to this guide
+
+If you need the broadest cross-SDK parity today, use `cloudflare_realtimekit`.
 :::
 
 ## Access Control

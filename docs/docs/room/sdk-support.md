@@ -50,6 +50,13 @@ If you are looking for the "server side" of Room, the correct destination is [Se
 ## Unified Surface Rollout
 
 - The unified Room client model groups five core live surfaces (`room.state`, `room.meta`, `room.members`, `room.signals`, `room.media` *(alpha)*) plus two companion runtime namespaces (`room.admin`, `room.session`).
-- That unified namespace surface is currently implemented in the Web, React Native, Flutter, Rust, Kotlin, Java, PHP, C#, Swift iOS, and C++ client SDKs.
-- The provider-based Room Media transport surface is currently implemented on the Web SDK. C#/Unity and C++/Unreal expose matching placeholder entry points that point developers to [Room Media](/docs/room/media) until their native transport integrations land.
-- Other client SDKs still interoperate with the `rooms` runtime through the legacy Room protocol, but their public unified namespace surface is still being migrated.
+- That unified namespace surface is currently implemented in the Web, React Native, Flutter, Kotlin, Java, Swift iOS, C#, and C++ client SDKs.
+- Room Media transport provider support is currently split like this:
+  - Web: `cloudflare_realtimekit` and `p2p`
+  - React Native: `cloudflare_realtimekit` and `p2p`
+  - Flutter: `cloudflare_realtimekit` and `p2p`
+  - Swift iOS: `cloudflare_realtimekit`
+  - Kotlin client: `cloudflare_realtimekit`
+  - Java core / Android package: `cloudflare_realtimekit`
+  - C#/Unity and C++/Unreal: matching placeholder entry points that redirect to [Room Media](/docs/room/media)
+- `p2p` is still pending on Swift, Kotlin, and Java. Other server-only SDKs intentionally do not expose Room Media transport providers.

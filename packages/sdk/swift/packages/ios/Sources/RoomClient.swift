@@ -1584,7 +1584,7 @@ public final class RoomCloudflareRealtimeKitNamespace: @unchecked Sendable {
 }
 
 public final class RoomMediaNamespace: @unchecked Sendable {
-    private unowned let room: RoomClient
+    unowned let room: RoomClient
 
     init(room: RoomClient) {
         self.room = room

@@ -55,6 +55,19 @@ import EdgeBase
 let client = EdgeBaseClient("https://your-project.edgebase.fun")
 ```
 
+## Room Media Transport
+
+The Swift Room surface includes `room.media.transport(...)` with
+`cloudflare_realtimekit` as the currently available provider.
+
+`p2p` is still in progress on Swift, so the recommended provider today is
+`cloudflare_realtimekit`.
+
+Read more:
+
+- [Room Media Overview](https://edgebase.fun/docs/room/media)
+- [Room Media Setup](https://edgebase.fun/docs/room/media-setup)
+
 ## Notes
 
 - Use `EdgeBaseClient` for end-user flows.

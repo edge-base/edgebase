@@ -50,6 +50,8 @@ import java.util.function.Consumer;
 @SuppressWarnings("deprecation")
 public class RoomClient {
     private static final long ROOM_EXPLICIT_LEAVE_CLOSE_DELAY_MS = 40L;
+    private static final String ROOM_MEDIA_DOCS_URL = "https://edgebase.fun/docs/room/media";
+    private static volatile RoomCloudflareRealtimeKitClientFactory defaultCloudflareRealtimeKitClientFactory;
 
     interface RoomSocket {
         void send(String msg);
@@ -74,6 +76,268 @@ public class RoomClient {
     @FunctionalInterface
     public interface AnySignalHandler {
         void accept(String event, Object payload, Map<String, Object> meta);
+    }
+
+    public static final class RoomMediaRemoteTrackEvent {
+        private final String kind;
+        private final Object track;
+        private final Object view;
+        private final String trackName;
+        private final String providerSessionId;
+        private final String participantId;
+        private final String customParticipantId;
+        private final String userId;
+        private final Map<String, Object> participant;
+
+        public RoomMediaRemoteTrackEvent(
+                String kind,
+                Object track,
+                Object view,
+                String trackName,
+                String providerSessionId,
+                String participantId,
+                String customParticipantId,
+                String userId,
+                Map<String, Object> participant
+        ) {
+            this.kind = kind;
+            this.track = track;
+            this.view = view;
+            this.trackName = trackName;
+            this.providerSessionId = providerSessionId;
+            this.participantId = participantId;
+            this.customParticipantId = customParticipantId;
+            this.userId = userId;
+            this.participant = participant == null ? Map.of() : Map.copyOf(participant);
+        }
+
+        public String getKind() { return kind; }
+        public Object getTrack() { return track; }
+        public Object getView() { return view; }
+        public String getTrackName() { return trackName; }
+        public String getProviderSessionId() { return providerSessionId; }
+        public String getParticipantId() { return participantId; }
+        public String getCustomParticipantId() { return customParticipantId; }
+        public String getUserId() { return userId; }
+        public Map<String, Object> getParticipant() { return participant; }
+    }
+
+    public interface RoomMediaTransport {
+        CompletableFuture<String> connect(Map<String, Object> payload);
+        default CompletableFuture<String> connect() { return connect(Map.of()); }
+        CompletableFuture<Object> enableAudio(Map<String, Object> payload);
+        default CompletableFuture<Object> enableAudio() { return enableAudio(Map.of()); }
+        CompletableFuture<Object> enableVideo(Map<String, Object> payload);
+        default CompletableFuture<Object> enableVideo() { return enableVideo(Map.of()); }
+        CompletableFuture<Object> startScreenShare(Map<String, Object> payload);
+        default CompletableFuture<Object> startScreenShare() { return startScreenShare(Map.of()); }
+        CompletableFuture<Void> disableAudio();
+        CompletableFuture<Void> disableVideo();
+        CompletableFuture<Void> stopScreenShare();
+        CompletableFuture<Void> setMuted(String kind, boolean muted);
+        CompletableFuture<Void> switchDevices(Map<String, Object> payload);
+        Subscription onRemoteTrack(Consumer<RoomMediaRemoteTrackEvent> handler);
+        String getSessionId();
+        Object getPeerConnection();
+        void destroy();
+    }
+
+    public enum RoomMediaTransportProvider {
+        CLOUDFLARE_REALTIMEKIT("cloudflare_realtimekit"),
+        P2P("p2p");
+
+        private final String wireName;
+
+        RoomMediaTransportProvider(String wireName) {
+            this.wireName = wireName;
+        }
+
+        public String wireName() {
+            return wireName;
+        }
+    }
+
+    public static final class RoomCloudflareRealtimeKitTransportOptions {
+        private boolean autoSubscribe = true;
+        private String baseDomain = "dyte.io";
+        private RoomCloudflareRealtimeKitClientFactory clientFactory;
+
+        public boolean isAutoSubscribe() {
+            return autoSubscribe;
+        }
+
+        public RoomCloudflareRealtimeKitTransportOptions setAutoSubscribe(boolean autoSubscribe) {
+            this.autoSubscribe = autoSubscribe;
+            return this;
+        }
+
+        public String getBaseDomain() {
+            return baseDomain;
+        }
+
+        public RoomCloudflareRealtimeKitTransportOptions setBaseDomain(String baseDomain) {
+            this.baseDomain = baseDomain == null || baseDomain.isBlank() ? "dyte.io" : baseDomain;
+            return this;
+        }
+
+        public RoomCloudflareRealtimeKitClientFactory getClientFactory() {
+            return clientFactory;
+        }
+
+        public RoomCloudflareRealtimeKitTransportOptions setClientFactory(RoomCloudflareRealtimeKitClientFactory clientFactory) {
+            this.clientFactory = clientFactory;
+            return this;
+        }
+    }
+
+    public static final class RoomMediaTransportOptions {
+        private RoomMediaTransportProvider provider = RoomMediaTransportProvider.CLOUDFLARE_REALTIMEKIT;
+        private RoomCloudflareRealtimeKitTransportOptions cloudflareRealtimeKit = new RoomCloudflareRealtimeKitTransportOptions();
+
+        public RoomMediaTransportProvider getProvider() {
+            return provider;
+        }
+
+        public RoomMediaTransportOptions setProvider(RoomMediaTransportProvider provider) {
+            this.provider = provider == null ? RoomMediaTransportProvider.CLOUDFLARE_REALTIMEKIT : provider;
+            return this;
+        }
+
+        public RoomCloudflareRealtimeKitTransportOptions getCloudflareRealtimeKit() {
+            return cloudflareRealtimeKit;
+        }
+
+        public RoomMediaTransportOptions setCloudflareRealtimeKit(RoomCloudflareRealtimeKitTransportOptions cloudflareRealtimeKit) {
+            this.cloudflareRealtimeKit = cloudflareRealtimeKit == null
+                    ? new RoomCloudflareRealtimeKitTransportOptions()
+                    : cloudflareRealtimeKit;
+            return this;
+        }
+    }
+
+    public static final class RoomCloudflareRealtimeKitClientFactoryOptions {
+        private final String authToken;
+        private final String displayName;
+        private final boolean enableAudio;
+        private final boolean enableVideo;
+        private final String baseDomain;
+
+        public RoomCloudflareRealtimeKitClientFactoryOptions(
+                String authToken,
+                String displayName,
+                boolean enableAudio,
+                boolean enableVideo,
+                String baseDomain
+        ) {
+            this.authToken = authToken;
+            this.displayName = displayName;
+            this.enableAudio = enableAudio;
+            this.enableVideo = enableVideo;
+            this.baseDomain = baseDomain;
+        }
+
+        public String getAuthToken() { return authToken; }
+        public String getDisplayName() { return displayName; }
+        public boolean isEnableAudio() { return enableAudio; }
+        public boolean isEnableVideo() { return enableVideo; }
+        public String getBaseDomain() { return baseDomain; }
+    }
+
+    @FunctionalInterface
+    public interface RoomCloudflareRealtimeKitClientFactory {
+        CompletableFuture<RoomCloudflareRealtimeKitClientAdapter> create(
+                RoomCloudflareRealtimeKitClientFactoryOptions options
+        );
+    }
+
+    public static final class RoomCloudflareParticipantSnapshot {
+        private final String id;
+        private final String userId;
+        private final String name;
+        private final String picture;
+        private final String customParticipantId;
+        private final boolean audioEnabled;
+        private final boolean videoEnabled;
+        private final boolean screenShareEnabled;
+        private final Object participantHandle;
+
+        public RoomCloudflareParticipantSnapshot(
+                String id,
+                String userId,
+                String name,
+                String picture,
+                String customParticipantId,
+                boolean audioEnabled,
+                boolean videoEnabled,
+                boolean screenShareEnabled,
+                Object participantHandle
+        ) {
+            this.id = id;
+            this.userId = userId;
+            this.name = name;
+            this.picture = picture;
+            this.customParticipantId = customParticipantId;
+            this.audioEnabled = audioEnabled;
+            this.videoEnabled = videoEnabled;
+            this.screenShareEnabled = screenShareEnabled;
+            this.participantHandle = participantHandle;
+        }
+
+        public String getId() { return id; }
+        public String getUserId() { return userId; }
+        public String getName() { return name; }
+        public String getPicture() { return picture; }
+        public String getCustomParticipantId() { return customParticipantId; }
+        public boolean isAudioEnabled() { return audioEnabled; }
+        public boolean isVideoEnabled() { return videoEnabled; }
+        public boolean isScreenShareEnabled() { return screenShareEnabled; }
+        public Object getParticipantHandle() { return participantHandle; }
+
+        public Map<String, Object> toMap() {
+            LinkedHashMap<String, Object> result = new LinkedHashMap<>();
+            result.put("id", id);
+            result.put("userId", userId);
+            result.put("name", name);
+            if (picture != null) result.put("picture", picture);
+            if (customParticipantId != null) result.put("customParticipantId", customParticipantId);
+            result.put("audioEnabled", audioEnabled);
+            result.put("videoEnabled", videoEnabled);
+            result.put("screenShareEnabled", screenShareEnabled);
+            return result;
+        }
+    }
+
+    public interface RoomCloudflareParticipantListener {
+        default void onParticipantJoin(RoomCloudflareParticipantSnapshot participant) {}
+        default void onParticipantLeave(RoomCloudflareParticipantSnapshot participant) {}
+        default void onAudioUpdate(RoomCloudflareParticipantSnapshot participant, boolean enabled) {}
+        default void onVideoUpdate(RoomCloudflareParticipantSnapshot participant, boolean enabled) {}
+        default void onScreenShareUpdate(RoomCloudflareParticipantSnapshot participant, boolean enabled) {}
+        default void onParticipantsSync(List<RoomCloudflareParticipantSnapshot> participants) {}
+    }
+
+    public interface RoomCloudflareRealtimeKitClientAdapter {
+        CompletableFuture<Void> joinRoom();
+        CompletableFuture<Void> leaveRoom();
+        CompletableFuture<Void> enableAudio();
+        CompletableFuture<Void> disableAudio();
+        CompletableFuture<Void> enableVideo();
+        CompletableFuture<Void> disableVideo();
+        CompletableFuture<Void> enableScreenShare();
+        CompletableFuture<Void> disableScreenShare();
+        CompletableFuture<Void> setAudioDevice(String deviceId);
+        CompletableFuture<Void> setVideoDevice(String deviceId);
+        RoomCloudflareParticipantSnapshot getLocalParticipant();
+        List<RoomCloudflareParticipantSnapshot> getJoinedParticipants();
+        Object buildView(RoomCloudflareParticipantSnapshot participant, String kind, boolean isSelf);
+        void addListener(RoomCloudflareParticipantListener listener);
+        void removeListener(RoomCloudflareParticipantListener listener);
+    }
+
+    public static void setDefaultCloudflareRealtimeKitClientFactory(
+            RoomCloudflareRealtimeKitClientFactory clientFactory
+    ) {
+        defaultCloudflareRealtimeKitClientFactory = clientFactory;
     }
 
     /** Room namespace (e.g. 'game', 'chat'). */
@@ -1776,12 +2040,331 @@ public class RoomClient {
         }
     }
 
+    private final class RoomCloudflareMediaTransport implements RoomMediaTransport {
+        private final RoomCloudflareRealtimeKitTransportOptions options;
+        private final ConcurrentHashMap<String, Consumer<RoomMediaRemoteTrackEvent>> remoteTrackHandlers = new ConcurrentHashMap<>();
+        private final Set<String> publishedRemoteKeys = ConcurrentHashMap.newKeySet();
+        private volatile RoomCloudflareRealtimeKitClientAdapter client;
+        private volatile String sessionId;
+        private volatile String providerSessionId;
+        private volatile RoomCloudflareParticipantListener participantListener;
+
+        private RoomCloudflareMediaTransport(RoomCloudflareRealtimeKitTransportOptions options) {
+            this.options = options == null ? new RoomCloudflareRealtimeKitTransportOptions() : options;
+        }
+
+        @Override
+        public CompletableFuture<String> connect(Map<String, Object> payload) {
+            if (sessionId != null) {
+                return CompletableFuture.completedFuture(sessionId);
+            }
+
+            Map<String, Object> requestPayload = payload == null ? Map.of() : payload;
+            return media.cloudflareRealtimeKit.createSession(requestPayload).thenCompose(session -> {
+                String authToken = (String) session.get("authToken");
+                if (authToken == null || authToken.isBlank()) {
+                    return CompletableFuture.failedFuture(
+                            new EdgeBaseError(500, "Cloudflare RealtimeKit session is missing authToken.")
+                    );
+                }
+
+                return resolveClientFactory().create(
+                        new RoomCloudflareRealtimeKitClientFactoryOptions(
+                                authToken,
+                                (String) requestPayload.get("name"),
+                                false,
+                                false,
+                                options.getBaseDomain()
+                        )
+                ).thenCompose(nextClient -> {
+                    client = nextClient;
+                    sessionId = (String) session.get("sessionId");
+                    providerSessionId = (String) session.get("participantId");
+
+                    RoomCloudflareParticipantListener listener = new RoomCloudflareParticipantListener() {
+                        @Override
+                        public void onParticipantJoin(RoomCloudflareParticipantSnapshot participant) {
+                            syncParticipant(participant);
+                        }
+
+                        @Override
+                        public void onParticipantLeave(RoomCloudflareParticipantSnapshot participant) {
+                            removeParticipant(participant);
+                        }
+
+                        @Override
+                        public void onAudioUpdate(RoomCloudflareParticipantSnapshot participant, boolean enabled) {
+                            emitParticipantKind(participant, "audio", enabled);
+                        }
+
+                        @Override
+                        public void onVideoUpdate(RoomCloudflareParticipantSnapshot participant, boolean enabled) {
+                            emitParticipantKind(participant, "video", enabled);
+                        }
+
+                        @Override
+                        public void onScreenShareUpdate(RoomCloudflareParticipantSnapshot participant, boolean enabled) {
+                            emitParticipantKind(participant, "screen", enabled);
+                        }
+
+                        @Override
+                        public void onParticipantsSync(List<RoomCloudflareParticipantSnapshot> participants) {
+                            syncParticipants(participants);
+                        }
+                    };
+                    participantListener = listener;
+                    nextClient.addListener(listener);
+
+                    return nextClient.joinRoom()
+                            .thenApply(ignored -> {
+                                syncParticipants(nextClient.getJoinedParticipants());
+                                return sessionId != null ? sessionId : (String) session.getOrDefault("sessionId", "");
+                            })
+                            .whenComplete((ignored, error) -> {
+                                if (error != null) {
+                                    nextClient.removeListener(listener);
+                                    participantListener = null;
+                                    client = null;
+                                    sessionId = null;
+                                    providerSessionId = null;
+                                }
+                            });
+                });
+            });
+        }
+
+        @Override
+        public CompletableFuture<Object> enableAudio(Map<String, Object> payload) {
+            try {
+                RoomCloudflareRealtimeKitClientAdapter client = requireClient();
+                return client.enableAudio()
+                        .thenCompose(ignored -> media.audio.enable(withProviderSession(payload)))
+                        .thenApply(ignored -> client.getLocalParticipant().getParticipantHandle());
+            } catch (RuntimeException error) {
+                return CompletableFuture.failedFuture(error);
+            }
+        }
+
+        @Override
+        public CompletableFuture<Object> enableVideo(Map<String, Object> payload) {
+            try {
+                RoomCloudflareRealtimeKitClientAdapter client = requireClient();
+                return client.enableVideo()
+                        .thenCompose(ignored -> media.video.enable(withProviderSession(payload)))
+                        .thenApply(ignored -> client.buildView(client.getLocalParticipant(), "video", true));
+            } catch (RuntimeException error) {
+                return CompletableFuture.failedFuture(error);
+            }
+        }
+
+        @Override
+        public CompletableFuture<Object> startScreenShare(Map<String, Object> payload) {
+            try {
+                RoomCloudflareRealtimeKitClientAdapter client = requireClient();
+                return client.enableScreenShare()
+                        .thenCompose(ignored -> media.screen.start(withProviderSession(payload)))
+                        .thenApply(ignored -> client.buildView(client.getLocalParticipant(), "screen", true));
+            } catch (RuntimeException error) {
+                return CompletableFuture.failedFuture(error);
+            }
+        }
+
+        @Override
+        public CompletableFuture<Void> disableAudio() {
+            RoomCloudflareRealtimeKitClientAdapter client = this.client;
+            if (client == null) {
+                return CompletableFuture.completedFuture(null);
+            }
+            return client.disableAudio().thenCompose(ignored -> media.audio.disable());
+        }
+
+        @Override
+        public CompletableFuture<Void> disableVideo() {
+            RoomCloudflareRealtimeKitClientAdapter client = this.client;
+            if (client == null) {
+                return CompletableFuture.completedFuture(null);
+            }
+            return client.disableVideo().thenCompose(ignored -> media.video.disable());
+        }
+
+        @Override
+        public CompletableFuture<Void> stopScreenShare() {
+            RoomCloudflareRealtimeKitClientAdapter client = this.client;
+            if (client == null) {
+                return CompletableFuture.completedFuture(null);
+            }
+            return client.disableScreenShare().thenCompose(ignored -> media.screen.stop());
+        }
+
+        @Override
+        public CompletableFuture<Void> setMuted(String kind, boolean muted) {
+            return switch (kind) {
+                case "audio" -> muted
+                        ? disableAudio()
+                        : enableAudio(Map.of("providerSessionId", providerSessionId)).thenApply(ignored -> null);
+                case "video" -> muted
+                        ? disableVideo()
+                        : enableVideo(Map.of("providerSessionId", providerSessionId)).thenApply(ignored -> null);
+                default -> CompletableFuture.failedFuture(
+                        new UnsupportedOperationException("Unsupported mute kind: " + kind)
+                );
+            };
+        }
+
+        @Override
+        public CompletableFuture<Void> switchDevices(Map<String, Object> payload) {
+            try {
+                RoomCloudflareRealtimeKitClientAdapter client = requireClient();
+                CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
+                String audioInputId = payload == null ? null : (String) payload.get("audioInputId");
+                String videoInputId = payload == null ? null : (String) payload.get("videoInputId");
+
+                if (audioInputId != null && !audioInputId.isBlank()) {
+                    chain = chain.thenCompose(ignored -> client.setAudioDevice(audioInputId));
+                }
+                if (videoInputId != null && !videoInputId.isBlank()) {
+                    chain = chain.thenCompose(ignored -> client.setVideoDevice(videoInputId));
+                }
+
+                return chain.thenCompose(ignored -> media.devices.switchInputs(payload == null ? Map.of() : payload));
+            } catch (RuntimeException error) {
+                return CompletableFuture.failedFuture(error);
+            }
+        }
+
+        @Override
+        public Subscription onRemoteTrack(Consumer<RoomMediaRemoteTrackEvent> handler) {
+            String key = UUID.randomUUID().toString();
+            remoteTrackHandlers.put(key, handler);
+            return () -> remoteTrackHandlers.remove(key);
+        }
+
+        @Override
+        public String getSessionId() {
+            return sessionId;
+        }
+
+        @Override
+        public Object getPeerConnection() {
+            return null;
+        }
+
+        @Override
+        public void destroy() {
+            RoomCloudflareRealtimeKitClientAdapter client = this.client;
+            RoomCloudflareParticipantListener listener = participantListener;
+            this.client = null;
+            participantListener = null;
+            sessionId = null;
+            providerSessionId = null;
+            publishedRemoteKeys.clear();
+
+            if (client != null && listener != null) {
+                client.removeListener(listener);
+                client.leaveRoom();
+            }
+        }
+
+        private RoomCloudflareRealtimeKitClientFactory resolveClientFactory() {
+            if (options.getClientFactory() != null) {
+                return options.getClientFactory();
+            }
+            if (defaultCloudflareRealtimeKitClientFactory != null) {
+                return defaultCloudflareRealtimeKitClientFactory;
+            }
+            throw new UnsupportedOperationException(
+                    "Cloudflare RealtimeKit room media transport is unavailable on this platform. See " + ROOM_MEDIA_DOCS_URL
+            );
+        }
+
+        private RoomCloudflareRealtimeKitClientAdapter requireClient() {
+            RoomCloudflareRealtimeKitClientAdapter current = client;
+            if (current == null) {
+                throw new IllegalStateException(
+                        "Call room.media.transport().connect() before using media controls."
+                );
+            }
+            return current;
+        }
+
+        private Map<String, Object> withProviderSession(Map<String, Object> payload) {
+            LinkedHashMap<String, Object> result = new LinkedHashMap<>();
+            if (payload != null) {
+                result.putAll(payload);
+            }
+            if (providerSessionId != null) {
+                result.put("providerSessionId", providerSessionId);
+            }
+            return result;
+        }
+
+        private void syncParticipants(List<RoomCloudflareParticipantSnapshot> participants) {
+            for (RoomCloudflareParticipantSnapshot participant : participants) {
+                syncParticipant(participant);
+            }
+        }
+
+        private void syncParticipant(RoomCloudflareParticipantSnapshot participant) {
+            emitParticipantKind(participant, "audio", participant.isAudioEnabled());
+            emitParticipantKind(participant, "video", participant.isVideoEnabled());
+            emitParticipantKind(participant, "screen", participant.isScreenShareEnabled());
+        }
+
+        private void removeParticipant(RoomCloudflareParticipantSnapshot participant) {
+            publishedRemoteKeys.removeIf(key -> key.startsWith(participant.getId() + ":"));
+        }
+
+        private void emitParticipantKind(
+                RoomCloudflareParticipantSnapshot participant,
+                String kind,
+                boolean enabled
+        ) {
+            String key = participant.getId() + ":" + kind;
+            if (!enabled) {
+                publishedRemoteKeys.remove(key);
+                return;
+            }
+            if (!publishedRemoteKeys.add(key)) {
+                return;
+            }
+
+            RoomMediaRemoteTrackEvent event = new RoomMediaRemoteTrackEvent(
+                    kind,
+                    participant.getParticipantHandle(),
+                    client == null ? null : client.buildView(participant, kind, false),
+                    null,
+                    participant.getId(),
+                    participant.getId(),
+                    participant.getCustomParticipantId(),
+                    participant.getUserId(),
+                    participant.toMap()
+            );
+            for (Consumer<RoomMediaRemoteTrackEvent> handler : remoteTrackHandlers.values()) {
+                handler.accept(event);
+            }
+        }
+    }
+
     public final class RoomMediaNamespace {
         public final RoomMediaKindNamespace audio = new RoomMediaKindNamespace("audio");
         public final RoomMediaKindNamespace video = new RoomMediaKindNamespace("video");
         public final RoomScreenMediaNamespace screen = new RoomScreenMediaNamespace();
         public final RoomMediaDevicesNamespace devices = new RoomMediaDevicesNamespace();
         public final RoomCloudflareRealtimeKitNamespace cloudflareRealtimeKit = new RoomCloudflareRealtimeKitNamespace();
+
+        public RoomMediaTransport transport() {
+            return transport(new RoomMediaTransportOptions());
+        }
+
+        public RoomMediaTransport transport(RoomMediaTransportOptions options) {
+            RoomMediaTransportOptions resolved = options == null ? new RoomMediaTransportOptions() : options;
+            if (resolved.getProvider() == RoomMediaTransportProvider.CLOUDFLARE_REALTIMEKIT) {
+                return new RoomCloudflareMediaTransport(resolved.getCloudflareRealtimeKit());
+            }
+            throw new UnsupportedOperationException(
+                    "P2P room media transport is not yet available in the Java core SDK. See " + ROOM_MEDIA_DOCS_URL
+            );
+        }
 
         public List<Map<String, Object>> list() {
             return RoomClient.this.listMediaMembers();

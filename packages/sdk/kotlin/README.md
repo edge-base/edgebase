@@ -74,6 +74,19 @@ client.db("shared").table("posts").onSnapshot().collect { change ->
 client.destroy()
 ```
 
+## Room Media Transport
+
+The Kotlin client surface includes `room.media.transport(...)` with `cloudflare_realtimekit`
+as the currently available provider.
+
+`p2p` is still in progress on the Kotlin runtime, so the safest cross-platform choice
+today is `cloudflare_realtimekit`.
+
+Read more:
+
+- [Room Media Overview](https://edgebase.fun/docs/room/media)
+- [Room Media Setup](https://edgebase.fun/docs/room/media-setup)
+
 ## Features
 
 - **Auth**: signUp, signIn, signOut, OAuth, anonymous, sessions, profile

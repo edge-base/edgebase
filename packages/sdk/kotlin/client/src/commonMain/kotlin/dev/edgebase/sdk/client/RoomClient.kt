@@ -290,7 +290,17 @@ class RoomClient(
         rejectPendingUnitRequests(pendingMediaRequests, EdgeBaseError(499, "Room left"))
 
         val socket = socketHandle
-        sendMsg(mapOf("type" to "leave"), requireAuth = false)
+        if (socket != null) {
+            val leaveElement = HttpClient.anyToJsonElement(mapOf("type" to "leave"))
+            val leavePayload = json.encodeToString(JsonElement.serializer(), leaveElement)
+            scope.launch {
+                try {
+                    socket.send(Frame.Text(leavePayload))
+                } catch (_: Exception) {
+                    // Socket is gone.
+                }
+            }
+        }
         scope.launch {
             delay(ROOM_EXPLICIT_LEAVE_CLOSE_DELAY_MS)
             try {
@@ -1550,12 +1560,24 @@ class RoomCloudflareRealtimeKitNamespace(private val client: RoomClient) {
     }
 }
 
-class RoomMediaNamespace(private val client: RoomClient) {
+class RoomMediaNamespace(internal val client: RoomClient) {
     val audio = RoomMediaKindNamespace(client, "audio")
     val video = RoomMediaKindNamespace(client, "video")
     val screen = RoomScreenMediaNamespace(client)
     val devices = RoomMediaDevicesNamespace(client)
     val cloudflareRealtimeKit = RoomCloudflareRealtimeKitNamespace(client)
+
+    fun transport(options: RoomMediaTransportOptions = RoomMediaTransportOptions()): RoomMediaTransport {
+        return when (options.provider) {
+            RoomMediaTransportProvider.cloudflare_realtimekit ->
+                RoomCloudflareMediaTransport(
+                    room = client,
+                    options = options.cloudflareRealtimeKit ?: RoomCloudflareRealtimeKitTransportOptions(),
+                )
+            RoomMediaTransportProvider.p2p ->
+                UnsupportedRoomMediaTransport(RoomMediaTransportProvider.p2p)
+        }
+    }
 
     fun list(): List<Map<String, Any?>> = client.listMediaMembers()
 

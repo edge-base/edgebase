@@ -323,10 +323,14 @@ await room.signals.send('chat.message', { text: 'hello' });
 
 The rest of this page keeps the flat compatibility methods documented because they are still useful as cross-SDK fallbacks and map cleanly to the unified namespaces.
 
-:::note C# / C++ Room Media transport status
-`room.media.transport(...)` is currently production-ready on the Web SDK.
+:::note Room Media transport status
+`room.media.transport(...)` is already active on the Web, React Native, Flutter, Swift iOS, Kotlin, and Java Room SDKs.
 
-The C#/Unity and C++/Unreal SDKs expose matching Room Media transport/provider entry points so application code can share the same public shape, but those provider implementations still return a "not available yet" error and point to [Room Media](/docs/room/media).
+The provider mix is still rolling out:
+
+- Web, React Native, and Flutter support `cloudflare_realtimekit` and `p2p`
+- Swift iOS, Kotlin, and Java currently support `cloudflare_realtimekit`
+- C#/Unity and C++/Unreal expose matching Room Media transport/provider entry points, but those provider implementations still return a "not available yet" error and point to [Room Media](/docs/room/media)
 :::
 
 | Preferred namespace API | Compatibility API |

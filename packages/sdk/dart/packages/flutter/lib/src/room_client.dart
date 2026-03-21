@@ -19,6 +19,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:edgebase_core/src/generated/api_core.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
 import 'package:realtimekit_core_platform_interface/realtimekit_core_platform_interface.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -26,6 +27,7 @@ import 'auth_refresh.dart';
 import 'token_manager.dart';
 
 part 'room_cloudflare_media.dart';
+part 'room_p2p_media.dart';
 
 const _roomExplicitLeaveCloseDelay = Duration(milliseconds: 40);
 
@@ -179,13 +181,36 @@ class RoomCloudflareRealtimeKitTransportOptions {
   });
 }
 
+abstract class RoomP2PMediaDevicesAdapter {
+  Future<MediaStream> getUserMedia(Map<String, dynamic> mediaConstraints);
+  Future<MediaStream> getDisplayMedia(Map<String, dynamic> mediaConstraints);
+}
+
+class RoomP2PMediaTransportOptions {
+  final Map<String, dynamic>? rtcConfiguration;
+  final Future<RTCPeerConnection> Function(
+    Map<String, dynamic> configuration,
+  )? peerConnectionFactory;
+  final RoomP2PMediaDevicesAdapter? mediaDevices;
+  final String signalPrefix;
+
+  const RoomP2PMediaTransportOptions({
+    this.rtcConfiguration,
+    this.peerConnectionFactory,
+    this.mediaDevices,
+    this.signalPrefix = 'edgebase.media.p2p',
+  });
+}
+
 class RoomMediaTransportOptions {
   final String provider;
   final RoomCloudflareRealtimeKitTransportOptions? cloudflareRealtimeKit;
+  final RoomP2PMediaTransportOptions? p2p;
 
   const RoomMediaTransportOptions({
     this.provider = 'cloudflare_realtimekit',
     this.cloudflareRealtimeKit,
+    this.p2p,
   });
 }
 
@@ -1799,8 +1824,9 @@ class RoomMediaNamespace {
           resolved.cloudflareRealtimeKit,
         );
       case 'p2p':
-        throw UnsupportedError(
-          'P2P room media transport is not yet available in edgebase_flutter. See https://edgebase.fun/docs/room/media',
+        return RoomP2PMediaTransport(
+          _client,
+          resolved.p2p,
         );
       default:
         throw UnsupportedError(

@@ -107,6 +107,47 @@ String url = client.storage().bucket("avatars").getUrl("profile.png");
 client.destroy();
 ```
 
+## Room Media Transport
+
+The shared Java Room surface now exposes the same top-level media transport entrypoint as the web SDK:
+
+```java
+RoomClient room = client.room("calls", "demo-room");
+room.join().join();
+
+RoomClient.RoomMediaTransport transport = room.media.transport(
+    new RoomClient.RoomMediaTransportOptions()
+        .setProvider(RoomClient.RoomMediaTransportProvider.CLOUDFLARE_REALTIMEKIT)
+);
+
+transport.connect(Map.of(
+    "name", "June",
+    "customParticipantId", "java-june"
+)).join();
+
+transport.enableAudio().join();
+transport.enableVideo().join();
+```
+
+Current provider status:
+
+- `cloudflare_realtimekit`
+  Available on the shared Java Room surface today
+- `p2p`
+  Not available yet on the Java runtime
+
+If you are using the Android package, add Cloudflare's Android runtime so the default
+`cloudflare_realtimekit` transport can attach to a foreground Activity:
+
+```groovy
+implementation 'com.cloudflare.realtimekit:core-android:1.5.5'
+```
+
+Read more:
+
+- [Room Media Overview](https://edgebase.fun/docs/room/media)
+- [Room Media Setup](https://edgebase.fun/docs/room/media-setup)
+
 ### Server SDK (Spring / Ktor / Backend)
 
 ```java
