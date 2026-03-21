@@ -88,16 +88,8 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
     }
     this.subscriptions.get(channel)!.push(sub);
 
-    // Only set channel-level server filters when this is the first subscription
-    // for the channel. Subsequent subscriptions on the same channel should not
-    // overwrite the filters already sent to the server — that would silently
-    // break the earlier subscriber's expected filter set.
-    if (sub.serverFilters && sub.serverFilters.length > 0 && !this.channelFilters.has(channel)) {
-      this.channelFilters.set(channel, sub.serverFilters);
-    }
-    if (sub.serverOrFilters && sub.serverOrFilters.length > 0 && !this.channelOrFilters.has(channel)) {
-      this.channelOrFilters.set(channel, sub.serverOrFilters);
-    }
+    // Recompute merged channel filters from all active subscriptions.
+    this.recomputeChannelFilters(channel);
 
     this.connect(channel).catch(() => {
       // Errors surface through the normal auth/socket flow.
@@ -113,6 +105,10 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
         this.channelFilters.delete(channel);
         this.channelOrFilters.delete(channel);
         this.sendUnsubscribe(channel);
+      } else {
+        // Recompute filters from remaining subscribers and re-send to server
+        this.recomputeChannelFilters(channel);
+        this.sendSubscribe(channel);
       }
     };
   }
@@ -374,6 +370,36 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
       for (const handler of this.errorHandlers) {
         handler({ code: msg.code as string, message: msg.message as string });
       }
+    }
+  }
+
+  /**
+   * Recompute channel-level server filters by picking the filters from the
+   * first active subscription that has them.  When a subscriber is removed,
+   * this ensures the next subscriber's filters take effect instead of leaving
+   * stale filters from the removed subscriber.
+   */
+  private recomputeChannelFilters(channel: string): void {
+    const subs = this.subscriptions.get(channel);
+    if (!subs || subs.length === 0) {
+      this.channelFilters.delete(channel);
+      this.channelOrFilters.delete(channel);
+      return;
+    }
+
+    // Pick the first subscription that provides each filter type
+    const firstWithFilters = subs.find((s) => s.serverFilters && s.serverFilters.length > 0);
+    if (firstWithFilters?.serverFilters) {
+      this.channelFilters.set(channel, firstWithFilters.serverFilters);
+    } else {
+      this.channelFilters.delete(channel);
+    }
+
+    const firstWithOrFilters = subs.find((s) => s.serverOrFilters && s.serverOrFilters.length > 0);
+    if (firstWithOrFilters?.serverOrFilters) {
+      this.channelOrFilters.set(channel, firstWithOrFilters.serverOrFilters);
+    } else {
+      this.channelOrFilters.delete(channel);
     }
   }
 
