@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, parse, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { _internals } from '../src/commands/seed.js';
 
@@ -209,7 +209,7 @@ describe('Custom seed file path', () => {
 
   it('resolves absolute seed file path', () => {
     const seedPath = resolve(tmpDir, '/absolute/path/seed.json');
-    expect(seedPath).toBe(resolve('/absolute/path/seed.json'));
+    expect(seedPath).toBe(resolve(parse(tmpDir).root, 'absolute/path/seed.json'));
   });
 });
 

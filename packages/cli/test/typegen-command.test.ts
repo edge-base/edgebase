@@ -16,6 +16,25 @@ vi.mock('../src/lib/spinner.js', () => ({
   }),
 }));
 
+async function removeDirWithRetry(dir: string): Promise<void> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if ((error as NodeJS.ErrnoException)?.code !== 'EPERM') {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+
+  throw lastError;
+}
+
 describe('typegen command', () => {
   let testDir: string;
   let originalCwd: string;
@@ -36,10 +55,10 @@ describe('typegen command', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     process.chdir(originalCwd);
-    rmSync(testDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     vi.restoreAllMocks();
+    await removeDirWithRetry(testDir);
   });
 
   it('rejects legacy config syntax instead of falling back to regex parsing', async () => {

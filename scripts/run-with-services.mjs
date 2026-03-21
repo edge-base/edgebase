@@ -87,11 +87,17 @@ async function startServer() {
     },
   );
 
-  await waitForHttp(`http://localhost:${port}/api/health`, {
-    child,
-    logPath,
-    name: 'EdgeBase test server',
-  });
+  try {
+    await waitForHttp(`http://localhost:${port}/api/health`, {
+      child,
+      logPath,
+      name: 'EdgeBase test server',
+    });
+  } catch (error) {
+    await killProcessTree(child.pid);
+    logStream.end();
+    throw error;
+  }
 
   return { child, logPath, logStream, label: 'EdgeBase test server' };
 }
@@ -114,15 +120,21 @@ async function startMockFcm() {
     },
   );
 
-  await waitForHttp(`${baseUrl}/health`, {
-    child,
-    logPath,
-    name: 'mock FCM server',
-    timeoutMs: Number(process.env['MOCK_FCM_STARTUP_TIMEOUT_SECONDS'] ?? '30') * 1_000,
-    validate(body) {
-      return body.includes('"service":"sdk-mock-fcm-server"');
-    },
-  });
+  try {
+    await waitForHttp(`${baseUrl}/health`, {
+      child,
+      logPath,
+      name: 'mock FCM server',
+      timeoutMs: Number(process.env['MOCK_FCM_STARTUP_TIMEOUT_SECONDS'] ?? '30') * 1_000,
+      validate(body) {
+        return body.includes('"service":"sdk-mock-fcm-server"');
+      },
+    });
+  } catch (error) {
+    await killProcessTree(child.pid);
+    logStream.end();
+    throw error;
+  }
 
   return { child, logPath, logStream, label: 'mock FCM server' };
 }
@@ -132,6 +144,7 @@ async function main() {
   ensureDir(ciTempDir);
 
   const services = [];
+  let exitCode = 0;
 
   try {
     if (options.server) {
@@ -162,7 +175,7 @@ async function main() {
       for (const service of services) {
         process.stderr.write(formatFailureLog(service.label, service.logPath));
       }
-      process.exit(result.code ?? 1);
+      exitCode = result.code ?? 1;
     }
   } finally {
     for (const service of services.reverse()) {
@@ -170,9 +183,15 @@ async function main() {
       service.logStream.end();
     }
   }
+
+  return exitCode;
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+main()
+  .then((exitCode) => {
+    process.exitCode = exitCode;
+  })
+  .catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  });
