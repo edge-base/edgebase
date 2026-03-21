@@ -408,6 +408,10 @@ public class GeneratedDbApi
     /// <summary>Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter</summary>
     public Task<Dictionary<string, object?>> DbSingleBatchByFilterAsync(string @namespace, string table, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
         => _http.PostAsyncWithQuery($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/batch-by-filter", body, query, ct);
+
+    /// <summary>Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session</summary>
+    public Task<Dictionary<string, object?>> CreateRoomCloudflareRealtimeKitSessionAsync(object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.PostAsyncWithQuery("/api/room/media/cloudflare_realtimekit/session", body, query, ct);
 }
 
 
@@ -583,6 +587,7 @@ public static class ApiPaths
     public const string PUSH_UNREGISTER = "/api/push/unregister";
     public const string CONNECT_ROOM = "/api/room";
     public const string CHECK_ROOM_CONNECTION = "/api/room/connect-check";
+    public const string CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session";
     public const string RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate";
     public const string GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";
     public const string CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";

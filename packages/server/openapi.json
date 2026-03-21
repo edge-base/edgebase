@@ -19557,6 +19557,274 @@
           }
         }
       }
+    },
+    "/api/room/media/cloudflare_realtimekit/session": {
+      "post": {
+        "operationId": "createRoomCloudflareRealtimeKitSession",
+        "tags": [
+          "client"
+        ],
+        "summary": "Create a room Cloudflare RealtimeKit session",
+        "description": "Creates a Cloudflare RealtimeKit session for the authenticated room member.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Room namespace"
+            },
+            "required": true,
+            "description": "Room namespace",
+            "name": "namespace",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Room ID"
+            },
+            "required": true,
+            "description": "Room ID",
+            "name": "id",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "connectionId": {
+                    "type": "string",
+                    "description": "Specific room connection ID to bind the realtime session to"
+                  },
+                  "correlationId": {
+                    "type": "string",
+                    "description": "Optional provider correlation ID"
+                  },
+                  "thirdparty": {
+                    "type": "boolean",
+                    "description": "Forward Cloudflare Realtime thirdparty mode"
+                  },
+                  "sessionDescription": {
+                    "type": "object",
+                    "properties": {
+                      "sdp": {
+                        "type": "string",
+                        "description": "WebRTC session description payload"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "offer",
+                          "answer"
+                        ],
+                        "description": "Session description type"
+                      }
+                    },
+                    "required": [
+                      "sdp",
+                      "type"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Realtime session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "description": "Realtime provider session ID"
+                    },
+                    "sessionDescription": {
+                      "type": "object",
+                      "properties": {
+                        "sdp": {
+                          "type": "string",
+                          "description": "WebRTC session description payload"
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "offer",
+                            "answer"
+                          ],
+                          "description": "Session description type"
+                        }
+                      },
+                      "required": [
+                        "sdp",
+                        "type"
+                      ]
+                    },
+                    "errorCode": {
+                      "type": "string"
+                    },
+                    "errorDescription": {
+                      "type": "string"
+                    },
+                    "connectionId": {
+                      "type": "string",
+                      "description": "Room connection ID associated with the session"
+                    },
+                    "reused": {
+                      "type": "boolean",
+                      "description": "Whether an existing provider session was reused"
+                    }
+                  },
+                  "required": [
+                    "sessionId"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Room runtime not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicting existing published media",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "userBearerAuth": []
+          }
+        ]
+      }
     }
   },
   "webhooks": {},

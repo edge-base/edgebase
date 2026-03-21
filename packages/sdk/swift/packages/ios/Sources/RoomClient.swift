@@ -309,6 +309,63 @@ public final class RoomClient: @unchecked Sendable {
         return json
     }
 
+    internal func requestCloudflareRealtimeKitMedia(
+        path: String,
+        method: String = "POST",
+        payload: [String: Any] = [:]
+    ) async throws -> [String: Any] {
+        try await requestRoomMedia(
+            providerPath: "cloudflare_realtimekit",
+            path: path,
+            method: method,
+            payload: payload
+        )
+    }
+
+    internal func requestRoomMedia(
+        providerPath: String,
+        path: String,
+        method: String = "POST",
+        payload: [String: Any] = [:]
+    ) async throws -> [String: Any] {
+        guard let token = try await tokenManager.getAccessToken() else {
+            throw EdgeBaseError(statusCode: 401, message: "Authentication required")
+        }
+
+        let trimmedUrl = baseUrl.hasSuffix("/") ? String(baseUrl.dropLast()) : baseUrl
+        let ns = namespace.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? namespace
+        let id = roomId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? roomId
+        let urlString = "\(trimmedUrl)/api/room/media/\(providerPath)/\(path)?namespace=\(ns)&id=\(id)"
+
+        guard let url = URL(string: urlString) else {
+            throw EdgeBaseError(statusCode: 0, message: "Invalid room media URL")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if method != "GET" {
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        }
+
+        let (data, response) = try await urlSession.data(for: request)
+        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+            let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+            let message = json["message"] as? String ?? "Room media request failed: \(httpResponse.statusCode)"
+            throw EdgeBaseError(statusCode: httpResponse.statusCode, message: message)
+        }
+
+        if data.isEmpty {
+            return [:]
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw EdgeBaseError(statusCode: 0, message: "Invalid room media response")
+        }
+        return json
+    }
+
     // MARK: - Connection Lifecycle
 
     /// Connect to the room, authenticate, and join.
@@ -1514,6 +1571,18 @@ public final class RoomMediaDevicesNamespace: @unchecked Sendable {
     public func `switch`(_ payload: [String: Any]) async throws { try await room.switchMediaDevices(payload) }
 }
 
+public final class RoomCloudflareRealtimeKitNamespace: @unchecked Sendable {
+    private unowned let room: RoomClient
+
+    init(room: RoomClient) {
+        self.room = room
+    }
+
+    public func createSession(_ payload: [String: Any] = [:]) async throws -> [String: Any] {
+        try await room.requestCloudflareRealtimeKitMedia(path: "session", payload: payload)
+    }
+}
+
 public final class RoomMediaNamespace: @unchecked Sendable {
     private unowned let room: RoomClient
 
@@ -1523,12 +1592,14 @@ public final class RoomMediaNamespace: @unchecked Sendable {
         video = RoomMediaKindNamespace(room: room, kind: "video")
         screen = RoomScreenMediaNamespace(room: room)
         devices = RoomMediaDevicesNamespace(room: room)
+        cloudflareRealtimeKit = RoomCloudflareRealtimeKitNamespace(room: room)
     }
 
     public let audio: RoomMediaKindNamespace
     public let video: RoomMediaKindNamespace
     public let screen: RoomScreenMediaNamespace
     public let devices: RoomMediaDevicesNamespace
+    public let cloudflareRealtimeKit: RoomCloudflareRealtimeKitNamespace
 
     public func list() -> [[String: Any]] { room.listMediaMembers() }
     public func onTrack(_ handler: @escaping ([String: Any], [String: Any]) -> Void) -> Subscription { room.onMediaTrack(handler) }

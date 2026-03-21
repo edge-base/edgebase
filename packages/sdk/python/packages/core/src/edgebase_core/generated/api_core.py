@@ -404,6 +404,10 @@ class GeneratedDbApi:
         """Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter"""
         return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/batch-by-filter", body, params=query)
 
+    def create_room_cloudflare_realtime_kit_session(self, body: Any, query: dict[str, str] | None = None) -> Any:
+        """Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session"""
+        return self._http.post("/room/media/cloudflare_realtimekit/session", body, params=query)
+
 
 class ApiPaths:
     """Auto-generated path constants — DO NOT EDIT."""
@@ -520,6 +524,7 @@ class ApiPaths:
     PUSH_UNREGISTER = "/api/push/unregister"
     CONNECT_ROOM = "/api/room"
     CHECK_ROOM_CONNECTION = "/api/room/connect-check"
+    CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session"
     RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate"
     GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
     CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"

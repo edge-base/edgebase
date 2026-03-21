@@ -199,6 +199,8 @@ export interface GeneratedDbApi {
   dbSingleBatchRecords(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter */
   dbSingleBatchByFilter(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
+  /** Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session */
+  createRoomCloudflareRealtimeKitSession(body: unknown, query: Record<string, string>): Promise<unknown>;
 }
 
 // ─── Implementation ────────────────────────────────────────────────────────
@@ -599,6 +601,10 @@ export class DefaultDbApi implements GeneratedDbApi {
     return this.transport.request('POST', `/api/db/${namespace}/tables/${table}/batch-by-filter`, { body, query });
   }
 
+  async createRoomCloudflareRealtimeKitSession(body: unknown, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('POST', '/api/room/media/cloudflare_realtimekit/session', { body, query });
+  }
+
 }
 
 // ─── Path Constants ────────────────────────────────────────────────────────
@@ -771,6 +777,7 @@ export class ApiPaths {
   static readonly PUSH_UNREGISTER = '/api/push/unregister';
   static readonly CONNECT_ROOM = '/api/room';
   static readonly CHECK_ROOM_CONNECTION = '/api/room/connect-check';
+  static readonly CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = '/api/room/media/cloudflare_realtimekit/session';
   static readonly RENEGOTIATE_ROOM_REALTIME_SESSION = '/api/room/media/realtime/renegotiate';
   static readonly GET_ROOM_REALTIME_SESSION = '/api/room/media/realtime/session';
   static readonly CREATE_ROOM_REALTIME_SESSION = '/api/room/media/realtime/session';

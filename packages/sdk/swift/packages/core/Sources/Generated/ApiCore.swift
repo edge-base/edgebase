@@ -497,6 +497,11 @@ public struct GeneratedDbApi {
     public func dbSingleBatchByFilter(_ namespace: String, _ table: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
         return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/batch-by-filter", body, queryParams: query)
     }
+
+    /// Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
+    public func createRoomCloudflareRealtimeKitSession(_ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
+        return try await http.post("/room/media/cloudflare_realtimekit/session", body, queryParams: query)
+    }
 }
 
 // ─── Path Constants ────────────────────────────────────────────────────────
@@ -669,6 +674,7 @@ public enum ApiPaths {
     public static let PUSH_UNREGISTER = "/api/push/unregister"
     public static let CONNECT_ROOM = "/api/room"
     public static let CHECK_ROOM_CONNECTION = "/api/room/connect-check"
+    public static let CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session"
     public static let RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate"
     public static let GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
     public static let CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"

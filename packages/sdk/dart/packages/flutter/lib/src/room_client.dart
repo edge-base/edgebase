@@ -120,6 +120,8 @@ typedef MediaDeviceHandler = void Function(
   Map<String, dynamic> member,
   Map<String, dynamic> change,
 );
+typedef RoomCloudflareRealtimeKitCreateSessionRequest = Map<String, dynamic>;
+typedef RoomCloudflareRealtimeKitCreateSessionResponse = Map<String, dynamic>;
 
 /// Handler for reconnect lifecycle.
 typedef ReconnectHandler = void Function(Map<String, dynamic> info);
@@ -260,6 +262,63 @@ class RoomClient {
           'Failed to get room metadata: ${response.statusCode} ${response.reasonPhrase}');
     }
     return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> _requestCloudflareRealtimeKitMedia(
+    String path,
+    String method, [
+    Map<String, dynamic>? payload,
+  ]) {
+    return _requestRoomMedia('cloudflare_realtimekit', path, method, payload);
+  }
+
+  Future<Map<String, dynamic>> _requestRoomMedia(
+    String providerPath,
+    String path,
+    String method, [
+    Map<String, dynamic>? payload,
+  ]) async {
+    final token = await _tokenManager.getAccessToken(
+      (refreshToken) => refreshAccessToken(_baseUrl, refreshToken),
+    );
+    if (token == null) {
+      throw Exception('Authentication required');
+    }
+
+    final uri = Uri.parse(
+      '${_baseUrl.replaceAll(RegExp(r'/$'), '')}/api/room/media/$providerPath/$path',
+    ).replace(queryParameters: {
+      'namespace': namespace,
+      'id': roomId,
+    });
+
+    final headers = {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    };
+    final response = switch (method) {
+      'GET' => await http.get(uri, headers: headers),
+      'PUT' => await http.put(
+          uri,
+          headers: headers,
+          body: jsonEncode(payload ?? <String, dynamic>{}),
+        ),
+      _ => await http.post(
+          uri,
+          headers: headers,
+          body: jsonEncode(payload ?? <String, dynamic>{}),
+        ),
+    };
+    final decoded = response.body.isEmpty
+        ? <String, dynamic>{}
+        : (jsonDecode(response.body) as Map<String, dynamic>);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        decoded['message'] ?? 'Room media request failed: ${response.statusCode}',
+      );
+    }
+
+    return decoded;
   }
 
   // ── Connection Lifecycle ──
@@ -1636,18 +1695,34 @@ class RoomMediaDevicesNamespace {
       _client.switchMediaDevices(payload);
 }
 
+class RoomCloudflareRealtimeKitNamespace {
+  final RoomClient _client;
+  RoomCloudflareRealtimeKitNamespace(this._client);
+
+  Future<RoomCloudflareRealtimeKitCreateSessionResponse> createSession([
+    RoomCloudflareRealtimeKitCreateSessionRequest? payload,
+  ]) =>
+      _client._requestCloudflareRealtimeKitMedia(
+        'session',
+        'POST',
+        payload,
+      );
+}
+
 class RoomMediaNamespace {
   final RoomClient _client;
   late final RoomMediaKindNamespace audio;
   late final RoomMediaKindNamespace video;
   late final RoomScreenMediaNamespace screen;
   late final RoomMediaDevicesNamespace devices;
+  late final RoomCloudflareRealtimeKitNamespace cloudflareRealtimeKit;
 
   RoomMediaNamespace(this._client) {
     audio = RoomMediaKindNamespace(_client, 'audio');
     video = RoomMediaKindNamespace(_client, 'video');
     screen = RoomScreenMediaNamespace(_client);
     devices = RoomMediaDevicesNamespace(_client);
+    cloudflareRealtimeKit = RoomCloudflareRealtimeKitNamespace(_client);
   }
 
   List<Map<String, dynamic>> list() => _client.listMediaMembers();

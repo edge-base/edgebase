@@ -493,6 +493,11 @@ open class GeneratedDbApi(protected val http: HttpClient) {
     @Suppress("UNCHECKED_CAST")
     open suspend fun dbSingleBatchByFilter(namespace: String, table: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
         http.postWithQuery("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/batch-by-filter", body, query)
+
+    /** Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun createRoomCloudflareRealtimeKitSession(body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
+        http.postWithQuery("/room/media/cloudflare_realtimekit/session", body, query)
 }
 
 /**
@@ -666,6 +671,7 @@ object ApiPaths {
     const val PUSH_UNREGISTER = "/api/push/unregister"
     const val CONNECT_ROOM = "/api/room"
     const val CHECK_ROOM_CONNECTION = "/api/room/connect-check"
+    const val CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session"
     const val RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate"
     const val GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
     const val CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"

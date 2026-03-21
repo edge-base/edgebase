@@ -206,6 +206,66 @@ class RoomClient(
         }
     }
 
+    suspend fun requestCloudflareRealtimeKitMedia(
+        path: String,
+        method: String = "POST",
+        payload: Map<String, Any?> = emptyMap(),
+    ): Map<String, Any?> {
+        return requestRoomMedia(
+            providerPath = "cloudflare_realtimekit",
+            path = path,
+            method = method,
+            payload = payload,
+        )
+    }
+
+    suspend fun requestRoomMedia(
+        providerPath: String,
+        path: String,
+        method: String = "POST",
+        payload: Map<String, Any?> = emptyMap(),
+    ): Map<String, Any?> {
+        val token = tokenManager.getAccessToken() ?: throw EdgeBaseError(401, "Authentication required")
+        val client = createPlatformHttpClient()
+        val url = "${baseUrl.trimEnd('/')}/api/room/media/$providerPath/$path?namespace=${platformUrlEncode(namespace)}&id=${platformUrlEncode(roomId)}"
+        val requestBody = Json.encodeToString(
+            JsonElement.serializer(),
+            HttpClient.anyToJsonElement(payload),
+        )
+        try {
+            val response: HttpResponse = when (method) {
+                "GET" -> client.get(url) {
+                    header("Authorization", "Bearer $token")
+                    header("Accept", "application/json")
+                }
+                "PUT" -> client.put(url) {
+                    header("Authorization", "Bearer $token")
+                    header("Content-Type", "application/json")
+                    setBody(requestBody)
+                }
+                else -> client.post(url) {
+                    header("Authorization", "Bearer $token")
+                    header("Content-Type", "application/json")
+                    setBody(requestBody)
+                }
+            }
+            val body = response.bodyAsText()
+            val json = Json { ignoreUnknownKeys = true }
+            if (response.status.value !in 200..299) {
+                val element = if (body.isBlank()) JsonObject(emptyMap()) else json.parseToJsonElement(body).jsonObject
+                val message = element["message"]?.jsonPrimitive?.content ?: "Room media request failed: ${response.status.value}"
+                throw EdgeBaseError(response.status.value, message)
+            }
+            if (body.isBlank()) {
+                return emptyMap()
+            }
+            @Suppress("UNCHECKED_CAST")
+            return HttpClient.jsonElementToAny(json.parseToJsonElement(body)) as? Map<String, Any?> ?: emptyMap()
+        } finally {
+            client.close()
+        }
+    }
+
     fun join() {
         intentionallyLeft = false
         joinRequested = true
@@ -1480,11 +1540,22 @@ class RoomMediaDevicesNamespace(private val client: RoomClient) {
     }
 }
 
+class RoomCloudflareRealtimeKitNamespace(private val client: RoomClient) {
+    suspend fun createSession(payload: Map<String, Any?> = emptyMap()): Map<String, Any?> {
+        return client.requestCloudflareRealtimeKitMedia(
+            path = "session",
+            method = "POST",
+            payload = payload,
+        )
+    }
+}
+
 class RoomMediaNamespace(private val client: RoomClient) {
     val audio = RoomMediaKindNamespace(client, "audio")
     val video = RoomMediaKindNamespace(client, "video")
     val screen = RoomScreenMediaNamespace(client)
     val devices = RoomMediaDevicesNamespace(client)
+    val cloudflareRealtimeKit = RoomCloudflareRealtimeKitNamespace(client)
 
     fun list(): List<Map<String, Any?>> = client.listMediaMembers()
 

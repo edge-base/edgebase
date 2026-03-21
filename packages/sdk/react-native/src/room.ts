@@ -104,6 +104,23 @@ export interface RoomMediaDeviceChange {
   deviceId: string;
 }
 
+export interface RoomCloudflareRealtimeKitCreateSessionRequest {
+  connectionId?: string;
+  customParticipantId?: string;
+  name?: string;
+  picture?: string;
+}
+
+export interface RoomCloudflareRealtimeKitCreateSessionResponse {
+  sessionId: string;
+  meetingId: string;
+  participantId: string;
+  authToken: string;
+  presetName: string;
+  connectionId?: string;
+  reused?: boolean;
+}
+
 // ─── Helpers ───
 
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -320,6 +337,12 @@ export class RoomClient {
         screenInputId?: string;
       }): Promise<void> => this.switchMediaDevices(payload),
     },
+    cloudflareRealtimeKit: {
+      createSession: (
+        payload?: RoomCloudflareRealtimeKitCreateSessionRequest,
+      ): Promise<RoomCloudflareRealtimeKitCreateSessionResponse> =>
+        this.requestCloudflareRealtimeKitMedia('session', 'POST', payload),
+    },
     onTrack: (handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription =>
       this.onMediaTrack(handler),
     onTrackRemoved: (handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription =>
@@ -382,6 +405,51 @@ export class RoomClient {
    */
   async getMetadata(): Promise<Record<string, unknown>> {
     return RoomClient.getMetadata(this.baseUrl, this.namespace, this.roomId);
+  }
+
+  private async requestCloudflareRealtimeKitMedia<T>(
+    path: string,
+    method: 'GET' | 'POST' | 'PUT',
+    payload?: unknown,
+  ): Promise<T> {
+    return this.requestRoomMedia('cloudflare_realtimekit', path, method, payload);
+  }
+
+  private async requestRoomMedia<T>(
+    providerPath: string,
+    path: string,
+    method: 'GET' | 'POST' | 'PUT',
+    payload?: unknown,
+  ): Promise<T> {
+    const token = await this.tokenManager.getAccessToken(
+      (refreshToken) => refreshAccessToken(this.baseUrl, refreshToken),
+    );
+    if (!token) {
+      throw new EdgeBaseError(401, 'Authentication required');
+    }
+
+    const url = new URL(`${this.baseUrl.replace(/\/$/, '')}/api/room/media/${providerPath}/${path}`);
+    url.searchParams.set('namespace', this.namespace);
+    url.searchParams.set('id', this.roomId);
+
+    const response = await fetch(url.toString(), {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: method === 'GET' ? undefined : JSON.stringify(payload ?? {}),
+    });
+
+    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!response.ok) {
+      throw new EdgeBaseError(
+        response.status,
+        (typeof data.message === 'string' && data.message) || `Room media request failed: ${response.statusText}`,
+      );
+    }
+
+    return data as T;
   }
 
   /**

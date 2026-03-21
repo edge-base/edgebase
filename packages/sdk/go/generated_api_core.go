@@ -500,6 +500,11 @@ func (a *GeneratedDbApi) DbSingleBatchByFilter(ctx context.Context, namespace st
 	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/db/%s/tables/%s/batch-by-filter", url.PathEscape(namespace), url.PathEscape(table)), body, query)
 }
 
+// CreateRoomCloudflareRealtimeKitSession — Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
+func (a *GeneratedDbApi) CreateRoomCloudflareRealtimeKitSession(ctx context.Context, body interface{}, query map[string]string) (map[string]interface{}, error) {
+	return a.client.DoWithQuery(ctx, "POST", "/api/room/media/cloudflare_realtimekit/session", body, query)
+}
+
 // ─── Path Constants ────────────────────────────────────────────────────────
 
 const (
@@ -615,6 +620,7 @@ const (
 	PathPushUnregister = "/api/push/unregister"
 	PathConnectRoom = "/api/room"
 	PathCheckRoomConnection = "/api/room/connect-check"
+	PathCreateRoomCloudflareRealtimeKitSession = "/api/room/media/cloudflare_realtimekit/session"
 	PathRenegotiateRoomRealtimeSession = "/api/room/media/realtime/renegotiate"
 	PathGetRoomRealtimeSession = "/api/room/media/realtime/session"
 	PathCreateRoomRealtimeSession = "/api/room/media/realtime/session"

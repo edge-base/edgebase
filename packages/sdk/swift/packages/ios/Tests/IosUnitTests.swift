@@ -2,6 +2,62 @@ import XCTest
 import Foundation
 @testable import EdgeBase
 
+private final class MockRoomURLProtocol: URLProtocol, @unchecked Sendable {
+    static var requestHandler: (@Sendable (URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let handler = Self.requestHandler else {
+            client?.urlProtocol(self, didFailWithError: NSError(domain: "MockRoomURLProtocol", code: 0))
+            return
+        }
+
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
+private func readRequestBody(_ request: URLRequest) throws -> Data {
+    if let body = request.httpBody {
+        return body
+    }
+
+    guard let stream = request.httpBodyStream else {
+        throw NSError(domain: "MockRoomURLProtocol", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing request body"])
+    }
+
+    stream.open()
+    defer { stream.close() }
+
+    let bufferSize = 4096
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+    defer { buffer.deallocate() }
+
+    var data = Data()
+    while stream.hasBytesAvailable {
+        let read = stream.read(buffer, maxLength: bufferSize)
+        if read < 0 {
+            throw stream.streamError ?? NSError(domain: "MockRoomURLProtocol", code: 2)
+        }
+        if read == 0 {
+            break
+        }
+        data.append(buffer, count: read)
+    }
+    return data
+}
+
 /**
  * Swift iOS SDK 단위 테스트 — EdgeBaseClient / AuthClient 구조 검증
  *
@@ -770,6 +826,65 @@ final class RoomClientIosUnitTests: XCTestCase {
         try await mediaTask.value
 
         XCTAssertEqual(fakeSocket.events, ["send:signal", "send:member_state", "send:admin", "send:media"])
+    }
+
+    func test_room_cloudflareRealtimeKit_createSession_hits_provider_endpoint() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockRoomURLProtocol.self]
+        let session = URLSession(configuration: config)
+        let tokenManager = ExternalTokenManager(tokenProvider: { "token" })
+
+        MockRoomURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token")
+            XCTAssertEqual(request.url?.path, "/api/room/media/cloudflare_realtimekit/session")
+
+            let components = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+            let queryItems = Dictionary(uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+            XCTAssertEqual(queryItems["namespace"], "media")
+            XCTAssertEqual(queryItems["id"], "room-1")
+
+            let body = try readRequestBody(request)
+            let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(payload["name"] as? String, "Swift User")
+            XCTAssertEqual(payload["customParticipantId"] as? String, "swift-user-1")
+
+            let responseBody = try JSONSerialization.data(withJSONObject: [
+                "sessionId": "session-1",
+                "meetingId": "meeting-1",
+                "participantId": "participant-1",
+                "authToken": "auth-token-1",
+                "presetName": "default",
+            ])
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseBody)
+        }
+
+        defer { MockRoomURLProtocol.requestHandler = nil }
+
+        let room = RoomClient(
+            baseUrl: "http://127.0.0.1:8688",
+            namespace: "media",
+            roomId: "room-1",
+            tokenManager: tokenManager,
+            session: session
+        )
+
+        let result = try await room.media.cloudflareRealtimeKit.createSession([
+            "name": "Swift User",
+            "customParticipantId": "swift-user-1",
+        ])
+
+        XCTAssertEqual(result["sessionId"] as? String, "session-1")
+        XCTAssertEqual(result["meetingId"] as? String, "meeting-1")
+        XCTAssertEqual(result["participantId"] as? String, "participant-1")
+        XCTAssertEqual(result["authToken"] as? String, "auth-token-1")
+        XCTAssertEqual(result["presetName"] as? String, "default")
     }
 }
 

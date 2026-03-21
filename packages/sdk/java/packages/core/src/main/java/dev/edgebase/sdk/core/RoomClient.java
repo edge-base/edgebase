@@ -310,6 +310,65 @@ public class RoomClient {
         }
     }
 
+    public CompletableFuture<Map<String, Object>> requestCloudflareRealtimeKitMedia(String path, String method, Map<String, Object> payload) {
+        return CompletableFuture.supplyAsync(() ->
+                requestRoomMedia("cloudflare_realtimekit", path, method, payload)
+        );
+    }
+
+    public CompletableFuture<Map<String, Object>> requestCloudflareRealtimeKitMedia(String path, String method) {
+        return requestCloudflareRealtimeKitMedia(path, method, new LinkedHashMap<>());
+    }
+
+    public Map<String, Object> requestRoomMedia(String providerPath, String path, String method, Map<String, Object> payload) {
+        try {
+            String token = tokenSupplier.get();
+            if (token == null || token.isBlank()) {
+                throw new EdgeBaseError(401, "Authentication required");
+            }
+
+            String url = baseUrl.replaceAll("/$", "") + "/api/room/media/" + providerPath + "/" + path
+                    + "?namespace=" + encodeURIComponent(namespace)
+                    + "&id=" + encodeURIComponent(roomId);
+
+            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setRequestMethod(method);
+            conn.setRequestProperty("Accept", "application/json");
+            conn.setRequestProperty("Authorization", "Bearer " + token);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setDoInput(true);
+            if (!"GET".equals(method)) {
+                conn.setDoOutput(true);
+                byte[] body = new JSONObject(payload == null ? Map.of() : payload).toString().getBytes(StandardCharsets.UTF_8);
+                conn.getOutputStream().write(body);
+            }
+
+            int status = conn.getResponseCode();
+            byte[] bytes;
+            try (var stream = status >= 400 ? conn.getErrorStream() : conn.getInputStream()) {
+                bytes = stream == null ? new byte[0] : stream.readAllBytes();
+            }
+            String body = new String(bytes, StandardCharsets.UTF_8);
+            if (status < 200 || status >= 300) {
+                String message = "Room media request failed: " + status;
+                if (!body.isBlank()) {
+                    JSONObject errorJson = new JSONObject(body);
+                    message = errorJson.optString("message", message);
+                }
+                throw new EdgeBaseError(status, message);
+            }
+
+            if (body.isBlank()) {
+                return new LinkedHashMap<>();
+            }
+            return jsonObjectToMap(new JSONObject(body));
+        } catch (EdgeBaseError e) {
+            throw e;
+        } catch (Exception e) {
+            throw new EdgeBaseError(500, "Failed to request room media: " + e.getMessage());
+        }
+    }
+
     public void join() {
         intentionallyLeft = false;
         joinRequested = true;
@@ -1707,11 +1766,22 @@ public class RoomClient {
         }
     }
 
+    public final class RoomCloudflareRealtimeKitNamespace {
+        public CompletableFuture<Map<String, Object>> createSession(Map<String, Object> payload) {
+            return RoomClient.this.requestCloudflareRealtimeKitMedia("session", "POST", payload);
+        }
+
+        public CompletableFuture<Map<String, Object>> createSession() {
+            return RoomClient.this.requestCloudflareRealtimeKitMedia("session", "POST");
+        }
+    }
+
     public final class RoomMediaNamespace {
         public final RoomMediaKindNamespace audio = new RoomMediaKindNamespace("audio");
         public final RoomMediaKindNamespace video = new RoomMediaKindNamespace("video");
         public final RoomScreenMediaNamespace screen = new RoomScreenMediaNamespace();
         public final RoomMediaDevicesNamespace devices = new RoomMediaDevicesNamespace();
+        public final RoomCloudflareRealtimeKitNamespace cloudflareRealtimeKit = new RoomCloudflareRealtimeKitNamespace();
 
         public List<Map<String, Object>> list() {
             return RoomClient.this.listMediaMembers();

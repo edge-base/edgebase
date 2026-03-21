@@ -525,6 +525,27 @@ const createRoomRealtimeSession = createRoute({
   },
 });
 
+const createRoomCloudflareRealtimeKitSession = createRoute({
+  operationId: 'createRoomCloudflareRealtimeKitSession',
+  method: 'post',
+  path: '/media/cloudflare_realtimekit/session',
+  tags: ['client'],
+  summary: 'Create a room Cloudflare RealtimeKit session',
+  description: 'Creates a Cloudflare RealtimeKit session for the authenticated room member.',
+  request: {
+    query: roomQuerySchema,
+    body: { content: { 'application/json': { schema: roomRealtimeCreateSessionBodySchema } }, required: false },
+  },
+  responses: {
+    200: { description: 'Cloudflare RealtimeKit session created', content: { 'application/json': { schema: roomRealtimeCreateSessionResponseSchema } } },
+    400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
+    401: { description: 'Authentication required', content: { 'application/json': { schema: errorResponseSchema } } },
+    403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
+    404: { description: 'Room runtime not found', content: { 'application/json': { schema: errorResponseSchema } } },
+    409: { description: 'Conflicting existing published media', content: { 'application/json': { schema: errorResponseSchema } } },
+  },
+});
+
 const createRoomRealtimeIceServers = createRoute({
   operationId: 'createRoomRealtimeIceServers',
   method: 'post',
@@ -638,7 +659,8 @@ roomRoute.openapi(closeRoomRealtimeTracks, async (c) =>
     validatedJson: c.req.valid('json'),
   }));
 
-roomRoute.post('/media/cloudflare_realtimekit/session', async (c) =>
+roomRoute.openapi(createRoomCloudflareRealtimeKitSession, async (c) =>
   proxyRoomDoRequest(c, '/media/cloudflare_realtimekit/session', 'POST', {
     requireAuth: true,
+    validatedJson: c.req.valid('json'),
   }));

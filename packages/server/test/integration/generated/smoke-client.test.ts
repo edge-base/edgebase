@@ -1261,6 +1261,30 @@ describe('Smoke: client', () => {
     expect(status).toBeLessThan(500);
   });
 
+  it('createRoomCloudflareRealtimeKitSession: POST /api/room/media/cloudflare_realtimekit/session → not 5xx', async () => {
+    const { status } = await api('POST', '/api/room/media/cloudflare_realtimekit/session?namespace=test-game&id=smoke-room', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('createRoomCloudflareRealtimeKitSession: no auth → 401/403', async () => {
+    const { status } = await api('POST', '/api/room/media/cloudflare_realtimekit/session?namespace=test-game&id=smoke-room', {
+      body: {},
+    });
+    expect([401, 403]).toContain(status);
+  });
+
+  it('createRoomCloudflareRealtimeKitSession: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/room/media/cloudflare_realtimekit/session?namespace=test-game&id=smoke-room', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
   it('createRoomRealtimeIceServers: POST /api/room/media/realtime/turn → not 5xx', async () => {
     const { status, data } = await api('POST', '/api/room/media/realtime/turn?namespace=test-game&id=smoke-room', {
       headers: { 'X-EdgeBase-Service-Key': SK },

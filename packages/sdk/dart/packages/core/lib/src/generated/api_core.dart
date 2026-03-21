@@ -492,6 +492,11 @@ class GeneratedDbApi {
   Future<dynamic> dbSingleBatchByFilter(String namespace, String table, Object? body, Map<String, String>? query) async {
     return _http.postWithQuery('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/batch-by-filter', body, query);
   }
+
+  /// Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
+  Future<dynamic> createRoomCloudflareRealtimeKitSession(Object? body, Map<String, String>? query) async {
+    return _http.postWithQuery('/room/media/cloudflare_realtimekit/session', body, query);
+  }
 }
 
 // ─── Path Constants ────────────────────────────────────────────────────────
@@ -666,6 +671,7 @@ class ApiPaths {
   static const PUSH_UNREGISTER = '/api/push/unregister';
   static const CONNECT_ROOM = '/api/room';
   static const CHECK_ROOM_CONNECTION = '/api/room/connect-check';
+  static const CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = '/api/room/media/cloudflare_realtimekit/session';
   static const RENEGOTIATE_ROOM_REALTIME_SESSION = '/api/room/media/realtime/renegotiate';
   static const GET_ROOM_REALTIME_SESSION = '/api/room/media/realtime/session';
   static const CREATE_ROOM_REALTIME_SESSION = '/api/room/media/realtime/session';

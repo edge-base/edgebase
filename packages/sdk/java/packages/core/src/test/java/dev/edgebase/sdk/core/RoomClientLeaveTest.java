@@ -1,8 +1,14 @@
 package dev.edgebase.sdk.core;
 
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 import org.json.JSONObject;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -10,6 +16,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -140,5 +147,51 @@ class RoomClientLeaveTest {
         assertEquals(List.of("send:signal", "send:member_state", "send:admin", "send:media"), fakeSocket.events);
 
         room.destroy();
+    }
+
+    @Test
+    void cloudflareRealtimeKitCreateSession_hits_provider_endpoint() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.setExecutor(Executors.newSingleThreadExecutor());
+        server.createContext("/api/room/media/cloudflare_realtimekit/session", exchange -> {
+            assertEquals("POST", exchange.getRequestMethod());
+            assertEquals("Bearer token", exchange.getRequestHeaders().getFirst("Authorization"));
+            assertEquals("media", exchange.getRequestURI().getQuery().contains("namespace=media") ? "media" : null);
+            assertEquals("room-1", exchange.getRequestURI().getQuery().contains("id=room-1") ? "room-1" : null);
+
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            JSONObject payload = new JSONObject(body);
+            assertEquals("Java User", payload.getString("name"));
+            assertEquals("java-user-1", payload.getString("customParticipantId"));
+
+            writeResponse(exchange, 200, "{\"sessionId\":\"session-1\",\"meetingId\":\"meeting-1\",\"participantId\":\"participant-1\",\"authToken\":\"auth-token-1\",\"presetName\":\"default\"}");
+        });
+        server.start();
+        try {
+            String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+            RoomClient room = new RoomClient(baseUrl, "media", "room-1", () -> "token");
+            Map<String, Object> result = room.media.cloudflareRealtimeKit.createSession(
+                    Map.of("name", "Java User", "customParticipantId", "java-user-1")
+            ).join();
+
+            assertEquals("session-1", result.get("sessionId"));
+            assertEquals("meeting-1", result.get("meetingId"));
+            assertEquals("participant-1", result.get("participantId"));
+            assertEquals("auth-token-1", result.get("authToken"));
+            assertEquals("default", result.get("presetName"));
+
+            room.destroy();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private static void writeResponse(HttpExchange exchange, int status, String body) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(status, bytes.length);
+        try (OutputStream output = exchange.getResponseBody()) {
+            output.write(bytes);
+        }
     }
 }

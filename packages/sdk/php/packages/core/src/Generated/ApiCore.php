@@ -602,6 +602,12 @@ class GeneratedDbApi
     {
         return $this->http->postWithQuery('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/batch-by-filter', $body, $query);
     }
+
+    /** Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session */
+    public function create_room_cloudflare_realtime_kit_session(mixed $body = null, array $query = []): mixed
+    {
+        return $this->http->postWithQuery('/room/media/cloudflare_realtimekit/session', $body, $query);
+    }
 }
 
 /**
@@ -996,6 +1002,7 @@ final class ApiPaths
     public const PUSH_UNREGISTER = '/api/push/unregister';
     public const CONNECT_ROOM = '/api/room';
     public const CHECK_ROOM_CONNECTION = '/api/room/connect-check';
+    public const CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = '/api/room/media/cloudflare_realtimekit/session';
     public const RENEGOTIATE_ROOM_REALTIME_SESSION = '/api/room/media/realtime/renegotiate';
     public const GET_ROOM_REALTIME_SESSION = '/api/room/media/realtime/session';
     public const CREATE_ROOM_REALTIME_SESSION = '/api/room/media/realtime/session';

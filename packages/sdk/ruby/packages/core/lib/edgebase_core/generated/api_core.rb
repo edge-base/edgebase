@@ -496,6 +496,11 @@ module EdgebaseCore
     def db_single_batch_by_filter(namespace, table, body = nil, query: nil)
       @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/batch-by-filter", body, params: query)
     end
+
+    # Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
+    def create_room_cloudflare_realtime_kit_session(body = nil, query: nil)
+      @http.post("/room/media/cloudflare_realtimekit/session", body, params: query)
+    end
   end
 
 
@@ -613,6 +618,7 @@ module EdgebaseCore
     PUSH_UNREGISTER = "/api/push/unregister"
     CONNECT_ROOM = "/api/room"
     CHECK_ROOM_CONNECTION = "/api/room/connect-check"
+    CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session"
     RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate"
     GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
     CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"

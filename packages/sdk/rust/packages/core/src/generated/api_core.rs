@@ -499,6 +499,11 @@ impl<'a> GeneratedDbApi<'a> {
     pub async fn db_single_batch_by_filter(&self, namespace: &str, table: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
         self.http.post_with_query(&format!("/api/db/{}/tables/{}/batch-by-filter", encode_path_param(namespace), encode_path_param(table)), body, query).await
     }
+
+    /// Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
+    pub async fn create_room_cloudflare_realtime_kit_session(&self, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.post_with_query("/api/room/media/cloudflare_realtimekit/session", body, query).await
+    }
 }
 
 // ─── Path Constants ────────────────────────────────────────────────────────
@@ -783,6 +788,7 @@ impl ApiPaths {
     pub const PUSH_UNREGISTER: &'static str = "/api/push/unregister";
     pub const CONNECT_ROOM: &'static str = "/api/room";
     pub const CHECK_ROOM_CONNECTION: &'static str = "/api/room/connect-check";
+    pub const CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION: &'static str = "/api/room/media/cloudflare_realtimekit/session";
     pub const RENEGOTIATE_ROOM_REALTIME_SESSION: &'static str = "/api/room/media/realtime/renegotiate";
     pub const GET_ROOM_REALTIME_SESSION: &'static str = "/api/room/media/realtime/session";
     pub const CREATE_ROOM_REALTIME_SESSION: &'static str = "/api/room/media/realtime/session";

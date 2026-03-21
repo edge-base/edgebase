@@ -1,5 +1,7 @@
 package dev.edgebase.sdk.client
 
+import com.sun.net.httpserver.HttpExchange
+import com.sun.net.httpserver.HttpServer
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import kotlinx.coroutines.runBlocking
@@ -7,7 +9,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.net.InetSocketAddress
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -210,6 +215,56 @@ class RoomClientJvmTest {
         room.destroy()
     }
 
+    @Test
+    fun cloudflareRealtimeKitCreateSession_hits_provider_endpoint() = runBlocking {
+        val server = HttpServer.create(InetSocketAddress(0), 0)
+        server.executor = Executors.newSingleThreadExecutor()
+        server.createContext("/api/room/media/cloudflare_realtimekit/session") { exchange ->
+            assertEquals("POST", exchange.requestMethod)
+            assertEquals("Bearer token", exchange.requestHeaders.getFirst("Authorization"))
+            val query = exchange.requestURI.query ?: ""
+            assertTrue(query.contains("namespace=media"))
+            assertTrue(query.contains("id=room-1"))
+
+            val body = exchange.requestBody.readBytes().toString(StandardCharsets.UTF_8)
+            val payload = Json.parseToJsonElement(body).jsonObject
+            assertEquals("Kotlin User", payload["name"]?.jsonPrimitive?.content)
+            assertEquals("kotlin-user-1", payload["customParticipantId"]?.jsonPrimitive?.content)
+
+            writeJsonResponse(
+                exchange,
+                """{"sessionId":"session-1","meetingId":"meeting-1","participantId":"participant-1","authToken":"auth-token-1","presetName":"default"}""",
+            )
+        }
+        server.start()
+        try {
+            val tokenManager = ClientTokenManager(MemoryTokenStorage())
+            tokenManager.setTokens(TokenPair("token", "refresh-token"))
+            val room = RoomClient(
+                "http://127.0.0.1:${server.address.port}",
+                "media",
+                "room-1",
+                tokenManager,
+            )
+            val result = room.media.cloudflareRealtimeKit.createSession(
+                mapOf(
+                    "name" to "Kotlin User",
+                    "customParticipantId" to "kotlin-user-1",
+                ),
+            )
+
+            assertEquals("session-1", result["sessionId"])
+            assertEquals("meeting-1", result["meetingId"])
+            assertEquals("participant-1", result["participantId"])
+            assertEquals("auth-token-1", result["authToken"])
+            assertEquals("default", result["presetName"])
+
+            room.destroy()
+        } finally {
+            server.stop(0)
+        }
+    }
+
     private fun waitForMessage(socket: FakeRoomSocketHandle, index: Int): JsonObject {
         val deadline = System.currentTimeMillis() + 2000L
         while (System.currentTimeMillis() < deadline) {
@@ -234,5 +289,14 @@ class RoomClientJvmTest {
         }
         thread.start()
         return thread to failure
+    }
+
+    private fun writeJsonResponse(exchange: HttpExchange, body: String) {
+        val bytes = body.toByteArray(StandardCharsets.UTF_8)
+        exchange.responseHeaders.add("Content-Type", "application/json")
+        exchange.sendResponseHeaders(200, bytes.size.toLong())
+        exchange.responseBody.use { output ->
+            output.write(bytes)
+        }
     }
 }

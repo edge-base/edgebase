@@ -211,6 +211,8 @@ public:
   virtual Result db_single_batch_records(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
   virtual Result db_single_batch_by_filter(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
+  /// Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
+  Result create_room_cloudflare_realtime_kit_session(const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
 
 protected:
   HttpClient& http_;
@@ -496,6 +498,7 @@ namespace ApiPaths {
   constexpr const char* PUSH_UNREGISTER = "/api/push/unregister";
   constexpr const char* CONNECT_ROOM = "/api/room";
   constexpr const char* CHECK_ROOM_CONNECTION = "/api/room/connect-check";
+  constexpr const char* CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session";
   constexpr const char* RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate";
   constexpr const char* GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";
   constexpr const char* CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";

@@ -505,6 +505,11 @@ public class GeneratedDbApi {
         return http.postWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/batch-by-filter", body, query);
     }
 
+    /** Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session */
+    public Object createRoomCloudflareRealtimeKitSession(Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
+        return http.postWithQuery("/room/media/cloudflare_realtimekit/session", body, query);
+    }
+
     /**
      * Auto-generated path constants.
      */
@@ -788,6 +793,7 @@ public class GeneratedDbApi {
         public static final String PUSH_UNREGISTER = "/api/push/unregister";
         public static final String CONNECT_ROOM = "/api/room";
         public static final String CHECK_ROOM_CONNECTION = "/api/room/connect-check";
+        public static final String CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session";
         public static final String RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate";
         public static final String GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";
         public static final String CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";

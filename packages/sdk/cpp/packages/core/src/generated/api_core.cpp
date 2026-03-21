@@ -413,4 +413,8 @@ Result GeneratedDbApi::db_single_batch_by_filter(const std::string& namespace_, 
   return http_.post_with_query("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/batch-by-filter", json_body, query);
 }
 
+Result GeneratedDbApi::create_room_cloudflare_realtime_kit_session(const std::string& json_body, const std::map<std::string, std::string>& query) const {
+  return http_.post_with_query("/api/room/media/cloudflare_realtimekit/session", json_body, query);
+}
+
 } // namespace client
