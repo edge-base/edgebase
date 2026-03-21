@@ -15,12 +15,24 @@ const buildTargets = [
   ['packages/sdk/js/packages/core', 'dist/index.js'],
   ['packages/sdk/js/packages/web', 'dist/index.js'],
   ['packages/sdk/js/packages/admin', 'dist/index.js'],
+  ['packages/sdk/js/packages/ssr', 'dist/index.js'],
 ];
 
 const suites = [
+  ['.', 'vitest.e2e.config.ts', [
+    'test/core.e2e.test.ts',
+    'test/web.e2e.test.ts',
+    'test/web-storage.e2e.test.ts',
+    'test/admin.e2e.test.ts',
+    'test/ssr.e2e.test.ts',
+  ]],
+  ['.', 'vitest.ssr-e2e.config.ts', ['test/ssr-auth.e2e.test.ts']],
   ['packages/core', 'vitest.config.ts', 'test/e2e/core.e2e.test.ts'],
   ['packages/web', 'vitest.config.ts', 'test/e2e/web.e2e.test.ts'],
-  ['packages/admin', 'vitest.config.ts', 'test/e2e/admin.e2e.test.ts'],
+  ['packages/admin', 'vitest.config.ts', [
+    'test/e2e/admin.e2e.test.ts',
+    'test/e2e/property.e2e.test.ts',
+  ]],
 ];
 
 async function ensureBuildArtifacts() {
@@ -43,10 +55,11 @@ async function ensureBuildArtifacts() {
 
 await ensureBuildArtifacts();
 
-for (const [relativeDir, configPath, testPath] of suites) {
+for (const [relativeDir, configPath, testPaths] of suites) {
+  const paths = Array.isArray(testPaths) ? testPaths : [testPaths];
   const result = await runCommand(
     'pnpm',
-    ['exec', 'vitest', 'run', '--config', configPath, testPath],
+    ['exec', 'vitest', 'run', '--config', configPath, ...paths],
     {
       cwd: path.join(packageDir, relativeDir),
       env: {

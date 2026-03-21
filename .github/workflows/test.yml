@@ -632,7 +632,7 @@ jobs:
       - name: Start EdgeBase test server and run PHP E2E
         run: |
           node ./scripts/run-with-services.mjs --server --mock-fcm --cwd packages/sdk/php -- \
-            vendor/bin/phpunit packages/core/tests/e2e packages/admin/tests/e2e --colors=always
+            vendor/bin/phpunit --colors=always
 
   # ─── 23. Elixir SDK E2E ─────────────────────────────────────────────────────
   sdk-elixir-e2e:
@@ -659,13 +659,16 @@ jobs:
         run: |
           mix local.hex --force
           mix local.rebar --force
-      - name: Install Elixir SDK dependencies
-        run: mix deps.get
-        working-directory: packages/sdk/elixir/packages/admin
       - name: Start EdgeBase test server and run Elixir E2E
         run: |
-          node ./scripts/run-with-services.mjs --server --cwd packages/sdk/elixir/packages/admin -- \
-            mix test test/admin_e2e_test.exs
+          node ./scripts/run-with-services.mjs --server -- \
+            bash -lc 'set -euo pipefail
+              cd packages/sdk/elixir/packages/core
+              mix deps.get
+              mix test
+              cd ../admin
+              mix deps.get
+              mix test'
 
   # ─── 24. Scala SDK E2E ──────────────────────────────────────────────────────
   sdk-scala-e2e:
@@ -696,7 +699,7 @@ jobs:
       - name: Start EdgeBase test server and run Scala E2E
         run: |
           node ./scripts/run-with-services.mjs --server --cwd packages/sdk/scala -- \
-            gradle :packages:admin:test --tests dev.edgebase.sdk.scala.admin.AdminEdgeBaseE2ETest
+            gradle test
 
   # ─── 25. Ruby SDK E2E ───────────────────────────────────────────────────────
   sdk-ruby-e2e:
@@ -719,8 +722,13 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Start EdgeBase test server and run Ruby E2E
         run: |
-          node ./scripts/run-with-services.mjs --server --cwd packages/sdk/ruby/packages/admin -- \
-            ruby -Ilib -I../core/lib test/test_admin_e2e.rb
+          node ./scripts/run-with-services.mjs --server -- \
+            bash -lc 'set -euo pipefail
+              cd packages/sdk/ruby/packages/core
+              ruby -Ilib -Itest test/test_core_unit.rb
+              cd ../admin
+              ruby -Ilib -I../core/lib -Itest test/test_admin_unit.rb
+              ruby -Ilib -I../core/lib -Itest test/test_admin_e2e.rb'
 
   # ─── 26. C++ SDK E2E ────────────────────────────────────────────────────────
   sdk-cpp-e2e:
@@ -748,9 +756,11 @@ jobs:
               UNREAL_BUILD_DIR="${RUNNER_TEMP}/edgebase-cpp-unreal-build"
               cmake -S packages/sdk/cpp/packages/core/tests -B "$CORE_BUILD_DIR" -G Ninja
               cmake --build "$CORE_BUILD_DIR" --parallel
+              "$CORE_BUILD_DIR/unit_test"
               "$CORE_BUILD_DIR/e2e_test"
               cmake -S packages/sdk/cpp/packages/unreal -B "$UNREAL_BUILD_DIR" -G Ninja
               cmake --build "$UNREAL_BUILD_DIR" --parallel
+              "$UNREAL_BUILD_DIR/unit_test"
               "$UNREAL_BUILD_DIR/e2e_test"'
 
   # ─── Mutation Testing (PR only) ─────────────────────────────────────────────
