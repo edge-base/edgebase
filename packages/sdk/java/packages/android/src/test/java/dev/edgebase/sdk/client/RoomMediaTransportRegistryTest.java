@@ -17,4 +17,9 @@ class RoomMediaTransportRegistryTest {
     void registryHelper_noops_when_realtimekit_runtime_is_absent() {
         assertDoesNotThrow(RoomCloudflareRealtimeKitAndroid::maybeRegisterDefaultTransportFactory);
     }
+
+    @Test
+    void registryHelper_noops_when_p2p_runtime_is_absent() {
+        assertDoesNotThrow(RoomP2PMediaAndroid::maybeRegisterDefaultTransportFactory);
+    }
 }

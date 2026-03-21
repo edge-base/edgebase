@@ -1227,9 +1227,208 @@ final class ExternalTokenManagerIosUnitTests: XCTestCase {
 // ─── O. Room media transport 검증 ──────────────────────────────────────────
 
 final class RoomMediaTransportIosUnitTests: XCTestCase {
+    private final class FakeP2PTrack: RoomP2PMediaTrackAdapter {
+        let id: String
+        let kind: String
+        let deviceId: String?
+        var enabled: Bool = true
+        private var endedHandler: (() -> Void)?
+        private(set) var stopped = false
+
+        init(id: String, kind: String, deviceId: String? = nil) {
+            self.id = id
+            self.kind = kind
+            self.deviceId = deviceId
+        }
+
+        func stop() {
+            stopped = true
+            endedHandler?()
+        }
+
+        func onEnded(_ handler: (() -> Void)?) {
+            endedHandler = handler
+        }
+
+        func dispose() {}
+
+        func asAny() -> Any? {
+            self
+        }
+    }
+
+    private final class FakeP2PStream: RoomP2PMediaStreamAdapter {
+        private let label: NSString
+        private(set) var released = false
+
+        init(label: String) {
+            self.label = NSString(string: label)
+        }
+
+        func release() {
+            released = true
+        }
+
+        func asAny() -> Any? {
+            label
+        }
+    }
+
+    private final class FakeP2PSender: RoomP2PRtpSenderAdapter {
+        var track: RoomP2PMediaTrackAdapter?
+
+        init(track: RoomP2PMediaTrackAdapter?) {
+            self.track = track
+        }
+
+        func replaceTrack(_ track: RoomP2PMediaTrackAdapter) async throws {
+            self.track = track
+        }
+    }
+
+    private final class FakeP2PPeerConnection: RoomP2PPeerConnectionAdapter {
+        let label: String
+        var connectionState: String = "new"
+        var signalingState: String = "stable"
+        var localDescription: RoomP2PSessionDescription?
+        var remoteDescription: RoomP2PSessionDescription?
+        private var iceCandidateHandler: (@Sendable (RoomP2PIceCandidate) async -> Void)?
+        private var negotiationNeededHandler: (@Sendable () async -> Void)?
+        private var trackHandler: (@Sendable (RoomP2PRemoteTrackPayload) async -> Void)?
+        private(set) var createOfferCount = 0
+        private(set) var createAnswerCount = 0
+        private(set) var closeCount = 0
+        private(set) var addedTracks: [String] = []
+        private(set) var removedTracks: [String] = []
+        private(set) var iceCandidates: [RoomP2PIceCandidate] = []
+
+        init(label: String) {
+            self.label = label
+        }
+
+        func setIceCandidateHandler(_ handler: (@Sendable (RoomP2PIceCandidate) async -> Void)?) {
+            iceCandidateHandler = handler
+        }
+
+        func setNegotiationNeededHandler(_ handler: (@Sendable () async -> Void)?) {
+            negotiationNeededHandler = handler
+        }
+
+        func setTrackHandler(_ handler: (@Sendable (RoomP2PRemoteTrackPayload) async -> Void)?) {
+            trackHandler = handler
+        }
+
+        func createOffer() async throws -> RoomP2PSessionDescription {
+            createOfferCount += 1
+            return RoomP2PSessionDescription(type: "offer", sdp: "offer-\(label)-\(createOfferCount)")
+        }
+
+        func createAnswer() async throws -> RoomP2PSessionDescription {
+            createAnswerCount += 1
+            return RoomP2PSessionDescription(type: "answer", sdp: "answer-\(label)-\(createAnswerCount)")
+        }
+
+        func setLocalDescription(_ description: RoomP2PSessionDescription) async throws {
+            localDescription = description
+            signalingState = description.type == "offer" ? "have_local_offer" : "stable"
+        }
+
+        func setRemoteDescription(_ description: RoomP2PSessionDescription) async throws {
+            remoteDescription = description
+            signalingState = description.type == "offer" ? "have_remote_offer" : "stable"
+        }
+
+        func addIceCandidate(_ candidate: RoomP2PIceCandidate) async throws -> Bool {
+            iceCandidates.append(candidate)
+            return true
+        }
+
+        func addTrack(_ track: RoomP2PMediaTrackAdapter, stream: RoomP2PMediaStreamAdapter) -> RoomP2PRtpSenderAdapter {
+            addedTracks.append(track.id)
+            return FakeP2PSender(track: track)
+        }
+
+        func removeTrack(_ sender: RoomP2PRtpSenderAdapter) -> Bool {
+            if let trackId = sender.track?.id {
+                removedTracks.append(trackId)
+            }
+            return true
+        }
+
+        func close() {
+            connectionState = "closed"
+            closeCount += 1
+        }
+
+        func asAnyObject() -> AnyObject? {
+            nil
+        }
+
+        func emitRemoteTrack(trackId: String, kind: String, streamLabel: String = "remote-stream") async {
+            await trackHandler?(RoomP2PRemoteTrackPayload(
+                track: FakeP2PTrack(id: trackId, kind: kind),
+                stream: FakeP2PStream(label: streamLabel)
+            ))
+        }
+
+        func emitNegotiationNeeded() async {
+            await negotiationNeededHandler?()
+        }
+    }
+
+    private final class FakeP2PRuntime: RoomP2PMediaRuntimeAdapter {
+        private(set) var peerConnections: [FakeP2PPeerConnection] = []
+        private(set) var captureAudioCount = 0
+        private(set) var captureVideoCount = 0
+        private(set) var captureScreenCount = 0
+
+        func createPeerConnection(configuration: RoomP2PRtcConfigurationOptions) async throws -> RoomP2PPeerConnectionAdapter {
+            XCTAssertEqual(configuration.iceServers.first?.urls.first, "stun:stun.l.google.com:19302")
+            let peer = FakeP2PPeerConnection(label: "peer-\(peerConnections.count + 1)")
+            peerConnections.append(peer)
+            return peer
+        }
+
+        func captureUserMedia(kind: String, deviceId: String?) async throws -> RoomP2PCapturedTrack? {
+            switch kind {
+            case "audio":
+                captureAudioCount += 1
+            case "video":
+                captureVideoCount += 1
+            default:
+                break
+            }
+
+            let track = FakeP2PTrack(
+                id: "\(kind)-local-\(kind == "audio" ? captureAudioCount : captureVideoCount)",
+                kind: kind,
+                deviceId: deviceId
+            )
+            return RoomP2PCapturedTrack(
+                kind: kind,
+                track: track,
+                stream: FakeP2PStream(label: "\(kind)-stream"),
+                stopOnCleanup: true
+            )
+        }
+
+        func captureDisplayMedia() async throws -> RoomP2PCapturedTrack? {
+            captureScreenCount += 1
+            let track = FakeP2PTrack(id: "screen-local-\(captureScreenCount)", kind: "video")
+            return RoomP2PCapturedTrack(
+                kind: "screen",
+                track: track,
+                stream: FakeP2PStream(label: "screen-stream"),
+                stopOnCleanup: true
+            )
+        }
+
+        func destroy() {}
+    }
 
     override func tearDown() {
         MockRoomURLProtocol.requestHandler = nil
+        roomP2PMediaRuntimeFactoryOverride = nil
         super.tearDown()
     }
 
@@ -1405,6 +1604,82 @@ final class RoomMediaTransportIosUnitTests: XCTestCase {
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(fakeClient.leaveCallCount, 1)
     }
+
+    func test_p2p_transport_connects_and_publishes_local_audio() async throws {
+        let room = RoomClient(
+            baseUrl: "https://edgebase.fun",
+            namespace: "game",
+            roomId: "room-1",
+            tokenManager: TokenManager(storage: MemoryTokenStorage())
+        )
+        let socket = FakeRoomWebSocketTask()
+        room.attachSocketForTesting(socket)
+        room.handleMessageForTesting([
+            "type": "auth_success",
+            "userId": "user-1",
+            "connectionId": "conn-1",
+        ])
+        room.handleMessageForTesting([
+            "type": "members_sync",
+            "members": [
+                [
+                    "memberId": "member-self",
+                    "userId": "user-1",
+                    "connectionId": "conn-1",
+                    "state": [:],
+                ],
+                [
+                    "memberId": "member-remote",
+                    "userId": "user-2",
+                    "connectionId": "conn-2",
+                    "state": [:],
+                ],
+            ],
+        ])
+
+        let runtime = FakeP2PRuntime()
+        roomP2PMediaRuntimeFactoryOverride = { runtime }
+
+        let transport = room.media.transport(
+            RoomMediaTransportOptions(
+                provider: .p2p,
+                p2p: RoomP2PMediaTransportOptions()
+            )
+        )
+        defer {
+            transport.destroy()
+            room.leave()
+        }
+
+        let sessionId = try await transport.connect(nil)
+        XCTAssertEqual(sessionId, "member-self")
+        XCTAssertEqual(runtime.peerConnections.count, 1)
+
+        let audioTask = Task { try await transport.enableAudio(nil) }
+        let mediaFrame = try waitForRoomMessage(socket, index: 1)
+        XCTAssertEqual(mediaFrame["type"] as? String, "media")
+        XCTAssertEqual(mediaFrame["operation"] as? String, "publish")
+        XCTAssertEqual(mediaFrame["kind"] as? String, "audio")
+        XCTAssertEqual((mediaFrame["payload"] as? [String: Any])?["providerSessionId"] as? String, "member-self")
+
+        room.handleMessageForTesting([
+            "type": "media_result",
+            "operation": "publish",
+            "kind": "audio",
+            "requestId": try XCTUnwrap(mediaFrame["requestId"] as? String),
+        ])
+
+        let signalFrame = try waitForRoomMessage(socket, index: 2)
+        XCTAssertEqual(signalFrame["type"] as? String, "signal")
+        XCTAssertEqual(signalFrame["event"] as? String, "edgebase.media.p2p.offer")
+        XCTAssertEqual(signalFrame["memberId"] as? String, "member-remote")
+        room.handleMessageForTesting([
+            "type": "signal_sent",
+            "requestId": try XCTUnwrap(signalFrame["requestId"] as? String),
+        ])
+        _ = try await audioTask.value
+    }
+
 }
 
 // ─── P. DocRef 구조 검증 ────────────────────────────────────────────────────

@@ -52,6 +52,7 @@ public class RoomClient {
     private static final long ROOM_EXPLICIT_LEAVE_CLOSE_DELAY_MS = 40L;
     private static final String ROOM_MEDIA_DOCS_URL = "https://edgebase.fun/docs/room/media";
     private static volatile RoomCloudflareRealtimeKitClientFactory defaultCloudflareRealtimeKitClientFactory;
+    private static volatile RoomP2PMediaTransportFactory defaultP2PMediaTransportFactory;
 
     interface RoomSocket {
         void send(String msg);
@@ -190,9 +191,102 @@ public class RoomClient {
         }
     }
 
+    public static final class RoomP2PIceServerOptions {
+        private List<String> urls = List.of("stun:stun.l.google.com:19302");
+        private String username;
+        private String credential;
+
+        public List<String> getUrls() {
+            return urls;
+        }
+
+        public RoomP2PIceServerOptions setUrls(List<String> urls) {
+            this.urls = (urls == null || urls.isEmpty())
+                    ? List.of("stun:stun.l.google.com:19302")
+                    : List.copyOf(urls);
+            return this;
+        }
+
+        public String getUsername() {
+            return username;
+        }
+
+        public RoomP2PIceServerOptions setUsername(String username) {
+            this.username = username;
+            return this;
+        }
+
+        public String getCredential() {
+            return credential;
+        }
+
+        public RoomP2PIceServerOptions setCredential(String credential) {
+            this.credential = credential;
+            return this;
+        }
+    }
+
+    public static final class RoomP2PRtcConfigurationOptions {
+        private List<RoomP2PIceServerOptions> iceServers = List.of(new RoomP2PIceServerOptions());
+
+        public List<RoomP2PIceServerOptions> getIceServers() {
+            return iceServers;
+        }
+
+        public RoomP2PRtcConfigurationOptions setIceServers(List<RoomP2PIceServerOptions> iceServers) {
+            this.iceServers = (iceServers == null || iceServers.isEmpty())
+                    ? List.of(new RoomP2PIceServerOptions())
+                    : List.copyOf(iceServers);
+            return this;
+        }
+    }
+
+    public static final class RoomP2PMediaTransportOptions {
+        private String signalPrefix = "edgebase.media.p2p";
+        private RoomP2PRtcConfigurationOptions rtcConfiguration = new RoomP2PRtcConfigurationOptions();
+        private long currentMemberTimeoutMs = 10_000L;
+
+        public String getSignalPrefix() {
+            return signalPrefix;
+        }
+
+        public RoomP2PMediaTransportOptions setSignalPrefix(String signalPrefix) {
+            this.signalPrefix = signalPrefix == null || signalPrefix.isBlank()
+                    ? "edgebase.media.p2p"
+                    : signalPrefix;
+            return this;
+        }
+
+        public RoomP2PRtcConfigurationOptions getRtcConfiguration() {
+            return rtcConfiguration;
+        }
+
+        public RoomP2PMediaTransportOptions setRtcConfiguration(RoomP2PRtcConfigurationOptions rtcConfiguration) {
+            this.rtcConfiguration = rtcConfiguration == null
+                    ? new RoomP2PRtcConfigurationOptions()
+                    : rtcConfiguration;
+            return this;
+        }
+
+        public long getCurrentMemberTimeoutMs() {
+            return currentMemberTimeoutMs;
+        }
+
+        public RoomP2PMediaTransportOptions setCurrentMemberTimeoutMs(long currentMemberTimeoutMs) {
+            this.currentMemberTimeoutMs = Math.max(0L, currentMemberTimeoutMs);
+            return this;
+        }
+    }
+
+    @FunctionalInterface
+    public interface RoomP2PMediaTransportFactory {
+        RoomMediaTransport create(RoomClient room, RoomP2PMediaTransportOptions options);
+    }
+
     public static final class RoomMediaTransportOptions {
         private RoomMediaTransportProvider provider = RoomMediaTransportProvider.CLOUDFLARE_REALTIMEKIT;
         private RoomCloudflareRealtimeKitTransportOptions cloudflareRealtimeKit = new RoomCloudflareRealtimeKitTransportOptions();
+        private RoomP2PMediaTransportOptions p2p = new RoomP2PMediaTransportOptions();
 
         public RoomMediaTransportProvider getProvider() {
             return provider;
@@ -211,6 +305,15 @@ public class RoomClient {
             this.cloudflareRealtimeKit = cloudflareRealtimeKit == null
                     ? new RoomCloudflareRealtimeKitTransportOptions()
                     : cloudflareRealtimeKit;
+            return this;
+        }
+
+        public RoomP2PMediaTransportOptions getP2P() {
+            return p2p;
+        }
+
+        public RoomMediaTransportOptions setP2P(RoomP2PMediaTransportOptions p2p) {
+            this.p2p = p2p == null ? new RoomP2PMediaTransportOptions() : p2p;
             return this;
         }
     }
@@ -338,6 +441,12 @@ public class RoomClient {
             RoomCloudflareRealtimeKitClientFactory clientFactory
     ) {
         defaultCloudflareRealtimeKitClientFactory = clientFactory;
+    }
+
+    public static void setDefaultP2PMediaTransportFactory(
+            RoomP2PMediaTransportFactory transportFactory
+    ) {
+        defaultP2PMediaTransportFactory = transportFactory;
     }
 
     /** Room namespace (e.g. 'game', 'chat'). */
@@ -2360,6 +2469,9 @@ public class RoomClient {
             RoomMediaTransportOptions resolved = options == null ? new RoomMediaTransportOptions() : options;
             if (resolved.getProvider() == RoomMediaTransportProvider.CLOUDFLARE_REALTIMEKIT) {
                 return new RoomCloudflareMediaTransport(resolved.getCloudflareRealtimeKit());
+            }
+            if (defaultP2PMediaTransportFactory != null) {
+                return defaultP2PMediaTransportFactory.create(RoomClient.this, resolved.getP2P());
             }
             throw new UnsupportedOperationException(
                     "P2P room media transport is not yet available in the Java core SDK. See " + ROOM_MEDIA_DOCS_URL

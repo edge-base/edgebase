@@ -8,9 +8,9 @@
 
 Client-side Swift package for EdgeBase.
 
-Use this package for iOS and macOS app code that needs auth, database access,
-storage, push, analytics, functions, room support, and service-key workflows in
-trusted environments.
+Use this package for iOS app code that needs auth, database access, storage,
+push, analytics, functions, room support, and service-key workflows in trusted
+environments.
 
 EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
 
@@ -58,20 +58,19 @@ let client = EdgeBaseClient("https://your-project.edgebase.fun")
 ## Room Media Transport
 
 The Swift Room surface includes `room.media.transport(...)` with
-`cloudflare_realtimekit` as the currently available provider on iOS.
+`cloudflare_realtimekit` and `p2p` on iOS.
 
 Important runtime note:
 
-- the package itself builds for iOS and macOS
-- the bundled RealtimeKit transport is currently wired for iOS
-- macOS keeps the same API surface, but `room.media.transport(...)` currently reports unavailable at runtime
-- `p2p` is still in progress on Swift
+- the package currently targets iOS
+- the bundled `cloudflare_realtimekit` and `p2p` transports are wired for iOS
+- Swift P2P screen sharing is still pending additional iOS-specific wiring
 
 Current verification note:
 
-- `swift test` passes
+- targeted iOS simulator package tests pass through `xcodebuild test`
 - iOS simulator builds succeeded in the current smoke matrix
-- macOS still keeps the same API surface but not the RealtimeKit runtime
+- Swift P2P currently has package-level tests, but not a native live media E2E harness yet
 
 Read more:
 

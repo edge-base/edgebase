@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "EdgeBase",
-    platforms: [.iOS(.v15), .macOS(.v12), .tvOS(.v15), .watchOS(.v8)],
+    platforms: [.iOS(.v15)],
     products: [
         .library(name: "EdgeBase", targets: ["EdgeBase"]),
     ],
@@ -14,7 +14,8 @@ let package = Package(
     targets: [
         .target(name: "EdgeBase", dependencies: [
             .product(name: "EdgeBaseCore", package: "core"),
-            .product(name: "RealtimeKit", package: "RealtimeKitCoreiOS", condition: .when(platforms: [.iOS])),
+            .product(name: "RealtimeKit", package: "RealtimeKitCoreiOS"),
+            .product(name: "RTKWebRTC", package: "RealtimeKitCoreiOS"),
         ], path: "Sources", resources: [
             .process("Resources"),
         ]),

@@ -110,6 +110,10 @@ public class ClientEdgeBase {
                 RoomCloudflareRealtimeKitAndroid.maybeRegisterDefaultTransportFactory();
             } catch (Throwable ignored) {
             }
+            try {
+                RoomP2PMediaAndroid.maybeRegisterDefaultTransportFactory();
+            } catch (Throwable ignored) {
+            }
         }
 
         this.auth.onBeforeSignOut(() -> {

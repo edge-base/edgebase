@@ -18,8 +18,10 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoomClientLeaveTest {
@@ -427,6 +429,96 @@ class RoomClientLeaveTest {
             room.destroy();
         } finally {
             server.stop(0);
+        }
+    }
+
+    @Test
+    void p2p_transport_uses_registered_factory_when_available() {
+        RoomClient room = new RoomClient("http://localhost:8688", "game", "room-1", () -> "token");
+        AtomicReference<RoomClient.RoomP2PMediaTransportOptions> capturedOptions = new AtomicReference<>();
+        RoomClient.RoomMediaTransport fakeTransport = new RoomClient.RoomMediaTransport() {
+            @Override
+            public CompletableFuture<String> connect(Map<String, Object> payload) {
+                return CompletableFuture.completedFuture("member-self");
+            }
+
+            @Override
+            public CompletableFuture<Object> enableAudio(Map<String, Object> payload) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Object> enableVideo(Map<String, Object> payload) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Object> startScreenShare(Map<String, Object> payload) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Void> disableAudio() {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Void> disableVideo() {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Void> stopScreenShare() {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Void> setMuted(String kind, boolean muted) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Void> switchDevices(Map<String, Object> payload) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public RoomClient.Subscription onRemoteTrack(java.util.function.Consumer<RoomClient.RoomMediaRemoteTrackEvent> handler) {
+                return () -> {};
+            }
+
+            @Override
+            public String getSessionId() {
+                return "member-self";
+            }
+
+            @Override
+            public Object getPeerConnection() {
+                return null;
+            }
+
+            @Override
+            public void destroy() {
+            }
+        };
+
+        RoomClient.setDefaultP2PMediaTransportFactory((client, options) -> {
+            capturedOptions.set(options);
+            return fakeTransport;
+        });
+
+        try {
+            RoomClient.RoomMediaTransport transport = room.media.transport(
+                    new RoomClient.RoomMediaTransportOptions()
+                            .setProvider(RoomClient.RoomMediaTransportProvider.P2P)
+                            .setP2P(new RoomClient.RoomP2PMediaTransportOptions().setSignalPrefix("edgebase.custom.p2p"))
+            );
+
+            assertSame(fakeTransport, transport);
+            assertEquals("edgebase.custom.p2p", capturedOptions.get().getSignalPrefix());
+        } finally {
+            RoomClient.setDefaultP2PMediaTransportFactory(null);
+            room.destroy();
         }
     }
 

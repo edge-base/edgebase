@@ -1,11 +1,8 @@
 import Foundation
-
-#if canImport(RealtimeKit) && os(iOS)
 import RealtimeKit
 import UIKit
-#endif
 
-private let roomMediaDocsURL = "https://edgebase.fun/docs/room/media"
+let roomMediaDocsURL = "https://edgebase.fun/docs/room/media"
 
 public typealias RoomMediaTransportConnectPayload = [String: Any]
 
@@ -83,13 +80,16 @@ public struct RoomCloudflareRealtimeKitTransportOptions {
 public struct RoomMediaTransportOptions {
     public var provider: RoomMediaTransportProvider
     public var cloudflareRealtimeKit: RoomCloudflareRealtimeKitTransportOptions?
+    public var p2p: RoomP2PMediaTransportOptions?
 
     public init(
         provider: RoomMediaTransportProvider = .cloudflareRealtimeKit,
-        cloudflareRealtimeKit: RoomCloudflareRealtimeKitTransportOptions? = nil
+        cloudflareRealtimeKit: RoomCloudflareRealtimeKitTransportOptions? = nil,
+        p2p: RoomP2PMediaTransportOptions? = nil
     ) {
         self.provider = provider
         self.cloudflareRealtimeKit = cloudflareRealtimeKit
+        self.p2p = p2p
     }
 }
 
@@ -538,7 +538,7 @@ private final class _RoomCloudflareTransportParticipantListener: RoomCloudflareP
     }
 }
 
-private struct RoomMediaTransportError: LocalizedError {
+struct RoomMediaTransportError: LocalizedError {
     let message: String
 
     init(_ message: String) {
@@ -551,7 +551,6 @@ private struct RoomMediaTransportError: LocalizedError {
 }
 
 private func defaultCloudflareRealtimeKitClientFactory() -> RoomCloudflareRealtimeKitClientFactory? {
-#if canImport(RealtimeKit) && os(iOS)
     return { options in
         let meeting = RealtimeKitiOSClientBuilder().build()
         let meetingInfo = RtkMeetingInfo(
@@ -577,12 +576,8 @@ private func defaultCloudflareRealtimeKitClientFactory() -> RoomCloudflareRealti
 
         return NativeRoomCloudflareRealtimeKitClientAdapter(meeting: meeting)
     }
-#else
-    return nil
-#endif
 }
 
-#if canImport(RealtimeKit) && os(iOS)
 private final class NativeRoomCloudflareRealtimeKitClientAdapter: NSObject, RoomCloudflareRealtimeKitClientAdapter {
     private let meeting: RealtimeKitClient
     private let bridge = NativeRoomCloudflareParticipantsBridge()
@@ -823,7 +818,6 @@ private final class NativeRoomCloudflareParticipantsBridge: NSObject, RtkPartici
         )
     }
 }
-#endif
 
 extension RoomMediaNamespace {
     public func transport(_ options: RoomMediaTransportOptions = RoomMediaTransportOptions()) -> any RoomMediaTransport {
@@ -834,7 +828,10 @@ extension RoomMediaNamespace {
                 options: options.cloudflareRealtimeKit ?? RoomCloudflareRealtimeKitTransportOptions()
             )
         case .p2p:
-            return UnsupportedRoomMediaTransport(provider: .p2p)
+            return RoomP2PMediaTransport(
+                room: room,
+                options: options.p2p ?? RoomP2PMediaTransportOptions()
+            )
         }
     }
 }
