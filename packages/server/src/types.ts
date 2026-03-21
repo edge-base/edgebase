@@ -68,6 +68,8 @@ export interface Env {
   CAPTCHA_SITE_KEY?: string;
   /** Cloudflare Realtime app ID for SFU session control. */
   CF_REALTIME_APP_ID?: string;
+  /** Cloudflare RealtimeKit preset name used when creating participant tokens. */
+  CF_REALTIME_PRESET_NAME?: string;
   /** Cloudflare Realtime app secret for SFU session control. */
   CF_REALTIME_APP_SECRET?: string;
   /** Optional override for the Cloudflare Realtime API base URL. */

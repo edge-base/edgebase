@@ -637,3 +637,8 @@ roomRoute.openapi(closeRoomRealtimeTracks, async (c) =>
     requireAuth: true,
     validatedJson: c.req.valid('json'),
   }));
+
+roomRoute.post('/media/cloudflare_realtimekit/session', async (c) =>
+  proxyRoomDoRequest(c, '/media/cloudflare_realtimekit/session', 'POST', {
+    requireAuth: true,
+  }));
