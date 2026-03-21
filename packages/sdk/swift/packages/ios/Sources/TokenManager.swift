@@ -216,10 +216,14 @@ public actor TokenManager: TokenManageable {
     }
 
     /// Register auth state change handler.
-    /// Immediately fires with current state on subscription (matches JS SDK behavior).
+    /// If there is an active session, fires immediately with the current user
+    /// (matches JS SDK behavior). Nil is not emitted on registration since it's
+    /// the default state and would race with async Task-based callers like RoomClient.
     public func onAuthStateChange(_ handler: @escaping ([String: Any]?) -> Void) {
         authStateHandlers.append(handler)
-        handler(currentUser())
+        if let user = currentUser() {
+            handler(user)
+        }
     }
 
     /// Notify all auth state change handlers.

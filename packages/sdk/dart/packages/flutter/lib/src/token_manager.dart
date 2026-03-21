@@ -86,13 +86,10 @@ class TokenManager implements core.TokenManager {
   /// Current user parsed from JWT.
   TokenUser? get currentUser => _currentUser;
 
-  /// Stream of auth state changes.
-  /// Immediately emits the current user state on subscription (matches JS SDK),
-  /// then streams subsequent changes.
-  Stream<TokenUser?> get onAuthStateChange async* {
-    yield _currentUser;
-    yield* _authStateController.stream;
-  }
+  /// Broadcast stream of auth state changes.
+  /// Use [currentUser] for the initial state — the stream only emits on
+  /// subsequent changes (matching the Firebase/Dart convention).
+  Stream<TokenUser?> get onAuthStateChange => _authStateController.stream;
 
   /// Check if the current access token is expired (with 30s buffer).
   bool get isTokenExpired {
