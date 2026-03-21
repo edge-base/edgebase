@@ -143,11 +143,9 @@ class HttpClient:
         url = self._build_url(path)
         headers = self._auth_headers()
         max_retries = 3
-        last_response = None
         for attempt in range(max_retries + 1):
             try:
                 response = self._client.request(method, url, params=params, json=json_body, headers=headers)
-                last_response = response
             except Exception as exc:
                 if attempt < 2 and self._is_retryable_transport_error(exc):
                     time.sleep(0.05 * (attempt + 1))
@@ -158,7 +156,8 @@ class HttpClient:
                 time.sleep(delay)
                 continue
             return self._parse_response(response)
-        return self._parse_response(last_response)
+        # Final attempt exhausted (e.g., persistent 429) — parse last response as-is
+        return self._parse_response(response)
 
     def _build_url(self, path: str) -> str:
         if path.startswith("/api/"):

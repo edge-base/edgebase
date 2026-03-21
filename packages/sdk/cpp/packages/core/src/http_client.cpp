@@ -8,6 +8,7 @@
 #include <thread>
 #include <chrono>
 #include <cstdlib>
+#include <random>
 
 namespace client {
 
@@ -121,7 +122,8 @@ struct HttpClient::Impl {
       Result result = perform(method, url, body, extraHeaders);
       if (result.statusCode == 429 && attempt < 3) {
         int baseDelayMs = 1000 * (1 << attempt);
-        int jitter = rand() % (baseDelayMs / 4 + 1);
+        static thread_local std::mt19937 rng{std::random_device{}()};
+        int jitter = std::uniform_int_distribution<int>(0, baseDelayMs / 4)(rng);
         int delayMs = std::min(baseDelayMs + jitter, 10000);
         std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
         continue;
