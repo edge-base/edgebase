@@ -104,6 +104,27 @@ module EdgebaseCore
 
     private
 
+    def parse_retry_after_delay(response, attempt)
+      base_delay = 1.0 * (2 ** attempt)
+      retry_after = response["retry-after"] || response["Retry-After"]
+      if retry_after
+        begin
+          seconds = Integer(retry_after)
+          base_delay = seconds.to_f if seconds > 0
+        rescue ArgumentError
+          # ignore non-integer Retry-After
+        end
+      end
+      jitter = rand * base_delay * 0.25
+      [base_delay + jitter, 10.0].min
+    end
+
+    RETRYABLE_ERRORS = [
+      Net::OpenTimeout, Net::ReadTimeout, Errno::ECONNREFUSED,
+      Errno::ECONNRESET, Errno::ENETUNREACH, Errno::EHOSTUNREACH,
+      SocketError, EOFError
+    ].freeze
+
     def request(method, path, params: nil, json_body: nil)
       url = build_url(path)
       if params && !params.empty?
@@ -111,22 +132,46 @@ module EdgebaseCore
         url = "#{url}?#{query}"
       end
 
-      uri = URI(url)
-      http = build_http(uri)
+      max_retries = 3
+      last_response = nil
 
-      req = case method
-            when "GET"    then Net::HTTP::Get.new(uri)
-            when "POST"   then Net::HTTP::Post.new(uri)
-            when "PATCH"  then Net::HTTP::Patch.new(uri)
-            when "PUT"    then Net::HTTP::Put.new(uri)
-            when "DELETE" then Net::HTTP::Delete.new(uri)
-            else Net::HTTP::Get.new(uri)
-            end
+      (max_retries + 1).times do |attempt|
+        uri = URI(url)
+        http = build_http(uri)
 
-      auth_headers.each { |k, v| req[k] = v }
-      req.body = JSON.generate(json_body) if json_body
+        req = case method
+              when "GET"    then Net::HTTP::Get.new(uri)
+              when "POST"   then Net::HTTP::Post.new(uri)
+              when "PATCH"  then Net::HTTP::Patch.new(uri)
+              when "PUT"    then Net::HTTP::Put.new(uri)
+              when "DELETE" then Net::HTTP::Delete.new(uri)
+              else Net::HTTP::Get.new(uri)
+              end
 
-      parse_response(http.request(req))
+        auth_headers.each { |k, v| req[k] = v }
+        req.body = JSON.generate(json_body) if json_body
+
+        begin
+          response = http.request(req)
+          last_response = response
+        rescue *RETRYABLE_ERRORS => e
+          if attempt < 2
+            sleep(0.05 * (attempt + 1))
+            next
+          end
+          raise EdgeBaseError.new(0, "Request failed: #{e.message}")
+        end
+
+        if response.code.to_i == 429 && attempt < max_retries
+          delay = parse_retry_after_delay(response, attempt)
+          sleep(delay)
+          next
+        end
+
+        return parse_response(response)
+      end
+
+      parse_response(last_response)
     end
 
     def build_url(path)

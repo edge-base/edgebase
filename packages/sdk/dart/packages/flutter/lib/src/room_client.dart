@@ -1144,8 +1144,10 @@ class RoomClient {
   }
 
   void _scheduleReconnect() {
-    final delay =
+    final baseDelay =
         _options.reconnectBaseDelay * pow(2, _reconnectAttempts).toInt();
+    final jitter = (baseDelay * 0.25 * (DateTime.now().millisecondsSinceEpoch % 100) / 100).round();
+    final delay = baseDelay + jitter;
     _reconnectAttempts++;
     _reconnectInfo = {'attempt': _reconnectAttempts};
     _setConnectionState('reconnecting');

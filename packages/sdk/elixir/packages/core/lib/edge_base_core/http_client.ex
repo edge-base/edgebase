@@ -2,6 +2,7 @@ defmodule EdgeBaseCore.HttpClient do
   alias EdgeBaseCore.Error
 
   @max_transport_retries 2
+  @max_rate_limit_retries 3
 
   defstruct base_url: nil, service_key: nil, bearer_token: nil
 
@@ -89,7 +90,7 @@ defmodule EdgeBaseCore.HttpClient do
         _ -> {to_charlist(url), headers, to_charlist(content_type), body || ""}
       end
 
-    case request_with_retry(method, http_request, request_fun) do
+    case request_with_rate_limit_retry(method, http_request, request_fun, opts, 0) do
       {:ok, {{_, status_code, _}, _response_headers, response_body}} ->
         parse_response(status_code, response_body, Keyword.get(opts, :raw, false))
 
@@ -186,6 +187,42 @@ defmodule EdgeBaseCore.HttpClient do
       {:ok, decoded} -> decoded
       {:error, _reason} -> body
     end
+  end
+
+  defp request_with_rate_limit_retry(method, http_request, request_fun, opts, attempt) do
+    case request_with_retry(method, http_request, request_fun) do
+      {:ok, {{_, 429, _}, response_headers, _response_body}} = _result when attempt < @max_rate_limit_retries ->
+        delay = parse_retry_after_delay(response_headers, attempt)
+        Process.sleep(delay)
+        request_with_rate_limit_retry(method, http_request, request_fun, opts, attempt + 1)
+
+      result ->
+        result
+    end
+  end
+
+  defp parse_retry_after_delay(response_headers, attempt) do
+    base_delay_ms = 1000 * (1 <<< attempt)
+
+    retry_after =
+      Enum.find_value(response_headers, fn
+        {key, value} when is_list(key) ->
+          if to_string(key) |> String.downcase() == "retry-after", do: to_string(value)
+        _ -> nil
+      end)
+
+    base_delay_ms =
+      case retry_after do
+        nil -> base_delay_ms
+        val ->
+          case Integer.parse(to_string(val)) do
+            {seconds, _} when seconds > 0 -> seconds * 1000
+            _ -> base_delay_ms
+          end
+      end
+
+    jitter = :rand.uniform(round(base_delay_ms * 0.25))
+    min(base_delay_ms + jitter, 10000)
   end
 
   defp request_with_retry(method, http_request, request_fun, attempt \\ 0) do

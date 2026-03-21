@@ -83,6 +83,14 @@ public actor HttpClient {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw EdgeBaseError(statusCode: 0, message: "Invalid response")
         }
+        if httpResponse.statusCode == 429 {
+            let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
+            var baseDelayMs: Double = 1000
+            if let header = retryAfter, let seconds = Double(header), seconds > 0 { baseDelayMs = seconds * 1000 }
+            let jitter = Double.random(in: 0...(baseDelayMs * 0.25))
+            try await Task.sleep(nanoseconds: UInt64(min(baseDelayMs + jitter, 10000) * 1_000_000))
+            return try await getRaw(path)
+        }
         if httpResponse.statusCode >= 400 {
             throw EdgeBaseError.fromJSON(data, statusCode: httpResponse.statusCode)
         }
@@ -127,6 +135,14 @@ public actor HttpClient {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw EdgeBaseError(statusCode: 0, message: "Invalid response")
         }
+        if httpResponse.statusCode == 429 {
+            let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
+            var baseDelayMs: Double = 1000
+            if let header = retryAfter, let seconds = Double(header), seconds > 0 { baseDelayMs = seconds * 1000 }
+            let jitter = Double.random(in: 0...(baseDelayMs * 0.25))
+            try await Task.sleep(nanoseconds: UInt64(min(baseDelayMs + jitter, 10000) * 1_000_000))
+            return try await postMultipart(path, fileData: fileData, fileName: fileName, fieldName: fieldName, fileContentType: fileContentType, fields: fields)
+        }
         if httpResponse.statusCode >= 400 {
             throw EdgeBaseError.fromJSON(data, statusCode: httpResponse.statusCode)
         }
@@ -152,10 +168,36 @@ public actor HttpClient {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw EdgeBaseError(statusCode: 0, message: "Invalid response")
         }
+        if httpResponse.statusCode == 429 {
+            let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
+            var baseDelayMs: Double = 1000
+            if let header = retryAfter, let seconds = Double(header), seconds > 0 { baseDelayMs = seconds * 1000 }
+            let jitter = Double.random(in: 0...(baseDelayMs * 0.25))
+            try await Task.sleep(nanoseconds: UInt64(min(baseDelayMs + jitter, 10000) * 1_000_000))
+            return try await postRaw(path, data: data, contentType: contentType, queryParams: queryParams)
+        }
         if httpResponse.statusCode >= 400 {
             throw EdgeBaseError.fromJSON(responseData, statusCode: httpResponse.statusCode)
         }
         return try JSONSerialization.jsonObject(with: responseData)
+    }
+
+    // MARK: - Retry Helpers
+
+    private func retryDelay(retryAfterHeader: String?, attempt: Int) -> UInt64 {
+        var baseDelayMs: Double = 1000 * pow(2.0, Double(attempt))
+        if let header = retryAfterHeader, let seconds = Double(header), seconds > 0 {
+            baseDelayMs = seconds * 1000
+        }
+        let jitter = Double.random(in: 0...(baseDelayMs * 0.25))
+        return UInt64(min(baseDelayMs + jitter, 10000) * 1_000_000)
+    }
+
+    private func isRetryableTransportError(_ error: Error) -> Bool {
+        let msg = String(describing: error).lowercased()
+        return msg.contains("timeout") || msg.contains("timed out") ||
+            msg.contains("connection") || msg.contains("reset") ||
+            msg.contains("refused") || msg.contains("network")
     }
 
     // MARK: - Private
@@ -166,7 +208,8 @@ public actor HttpClient {
         body: [String: Any]? = nil,
         queryParams: [String: String]? = nil,
         skipAuth: Bool = false,
-        isRetry: Bool = false
+        isRetry: Bool = false,
+        rateLimitAttempt: Int = 0
     ) async throws -> Any {
         let url = buildURL(path: "/api\(path)", queryParams: queryParams)
         var req = URLRequest(url: url)
@@ -183,10 +226,28 @@ public actor HttpClient {
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
 
-        let (data, response) = try await session.data(for: req)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            if rateLimitAttempt < 2 && isRetryableTransportError(error) {
+                try await Task.sleep(nanoseconds: UInt64(50_000_000 * (rateLimitAttempt + 1)))
+                return try await request(method: method, path: path, body: body, queryParams: queryParams, skipAuth: skipAuth, isRetry: isRetry, rateLimitAttempt: rateLimitAttempt + 1)
+            }
+            throw error
+        }
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw EdgeBaseError(statusCode: 0, message: "Invalid response")
+        }
+
+        // 429 retry with Retry-After
+        if httpResponse.statusCode == 429 && rateLimitAttempt < 3 {
+            let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
+            let delay = retryDelay(retryAfterHeader: retryAfter, attempt: rateLimitAttempt)
+            try await Task.sleep(nanoseconds: delay)
+            return try await request(method: method, path: path, body: body, queryParams: queryParams, skipAuth: skipAuth, isRetry: isRetry, rateLimitAttempt: rateLimitAttempt + 1)
         }
 
         // 401 auto-retry with token refresh

@@ -150,56 +150,101 @@ func (c *HTTPClient) getAccessToken() string {
 	return c.serviceKey
 }
 
-func (c *HTTPClient) do(ctx context.Context, method, path string, body interface{}) (map[string]interface{}, error) {
-	var bodyReader io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return nil, fmt.Errorf("marshal body: %w", err)
+func parseRetryAfterDelay(header string, attempt int) time.Duration {
+	baseDelay := time.Duration(1000*(1<<attempt)) * time.Millisecond
+	if header != "" {
+		if seconds, err := strconv.Atoi(header); err == nil && seconds > 0 {
+			baseDelay = time.Duration(seconds) * time.Second
 		}
-		bodyReader = bytes.NewReader(b)
+	}
+	jitter := time.Duration(float64(baseDelay) * 0.25 * float64(time.Now().UnixNano()%100) / 100)
+	delay := baseDelay + jitter
+	if delay > 10*time.Second {
+		delay = 10 * time.Second
+	}
+	return delay
+}
+
+func isRetryableTransportError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	for _, keyword := range []string{"timeout", "connection", "reset", "refused", "network", "eof", "broken pipe"} {
+		if strings.Contains(msg, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *HTTPClient) do(ctx context.Context, method, path string, body interface{}) (map[string]interface{}, error) {
+	maxRetries := 3
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		var bodyReader io.Reader
+		if body != nil {
+			b, err := json.Marshal(body)
+			if err != nil {
+				return nil, fmt.Errorf("marshal body: %w", err)
+			}
+			bodyReader = bytes.NewReader(b)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bodyReader)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if token := c.getAccessToken(); token != "" {
+			req.Header.Set("X-EdgeBase-Service-Key", token)
+		}
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			lastErr = err
+			if attempt < 2 && isRetryableTransportError(err) {
+				time.Sleep(time.Duration(50*(attempt+1)) * time.Millisecond)
+				continue
+			}
+			return nil, fmt.Errorf("network error: %w", err)
+		}
+
+		respBody, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		// 429 retry with Retry-After
+		if resp.StatusCode == 429 && attempt < maxRetries {
+			delay := parseRetryAfterDelay(resp.Header.Get("Retry-After"), attempt)
+			time.Sleep(delay)
+			continue
+		}
+
+		if resp.StatusCode >= 400 {
+			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+		}
+
+		if len(respBody) == 0 || resp.StatusCode == 204 {
+			return nil, nil
+		}
+
+		var arrResult []interface{}
+		if json.Unmarshal(respBody, &arrResult) == nil {
+			return map[string]interface{}{"items": arrResult}, nil
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(respBody, &result); err != nil {
+			return nil, fmt.Errorf("unmarshal response: %w", err)
+		}
+		return result, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bodyReader)
-	if err != nil {
-		return nil, err
+	if lastErr != nil {
+		return nil, fmt.Errorf("network error after retries: %w", lastErr)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	// Token refresh failed — proceed as unauthenticated
-	if token := c.getAccessToken(); token != "" {
-		req.Header.Set("X-EdgeBase-Service-Key", token)
-	}
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("network error: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	if len(respBody) == 0 || resp.StatusCode == 204 {
-		return nil, nil
-	}
-
-	// Try array response
-	var arrResult []interface{}
-	if json.Unmarshal(respBody, &arrResult) == nil {
-		return map[string]interface{}{"items": arrResult}, nil
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
-	}
-	return result, nil
+	return nil, fmt.Errorf("request failed after retries")
 }
 
 func (c *HTTPClient) Get(ctx context.Context, path string) (map[string]interface{}, error) {

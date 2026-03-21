@@ -1053,7 +1053,9 @@ public class RoomClient {
         if (!intentionallyLeft && !waitingForAuth && reconnectAttempts < maxReconnectAttempts
                 && !"kicked".equals(connectionState) && !"auth_lost".equals(connectionState)) {
             int attempt = reconnectAttempts + 1;
-            long delay = Math.min(reconnectBaseDelayMs * (1L << reconnectAttempts), 30000L);
+            long baseDelay = Math.min(reconnectBaseDelayMs * (1L << reconnectAttempts), 30000L);
+            long jitter = (long) (baseDelay * 0.25 * Math.random());
+            long delay = baseDelay + jitter;
             reconnectAttempts++;
             beginReconnectAttempt(attempt);
             scheduler.schedule(() -> {

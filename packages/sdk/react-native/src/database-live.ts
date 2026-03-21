@@ -431,7 +431,9 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
   }
 
   private scheduleReconnect(channel: string): void {
-    const delay = this.options.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts);
+    const baseDelay = this.options.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts);
+    const jitter = Math.random() * baseDelay * 0.25;
+    const delay = baseDelay + jitter;
     this.reconnectAttempts++;
     setTimeout(() => { this.connect(channel).catch(() => {}); }, Math.min(delay, 30000));
   }

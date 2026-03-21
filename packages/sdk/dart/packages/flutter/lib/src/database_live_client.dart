@@ -6,6 +6,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'token_manager.dart';
 import 'auth_refresh.dart';
@@ -75,8 +76,10 @@ bool _matchesDatabaseLiveChannel(
   if (parts.length == 2) return parts[1] == change.table;
   if (parts.length == 3) return parts[2] == change.table;
   if (parts.length == 4) {
-    if (parts[2] == change.table) return parts[3] == change.id;
-    return parts[3] == change.table;
+    // Could be dblive:ns:table:docId or dblive:ns:instanceId:table
+    if (parts[2] == change.table && parts[3] == change.id) return true;
+    if (parts[3] == change.table) return true;
+    return false;
   }
   return parts[3] == change.table && parts[4] == change.id;
 }
@@ -289,7 +292,7 @@ class DatabaseLiveClient implements core.DatabaseLiveClient {
 
     if (type == 'error') {
       final code = json['code'] as String?;
-      if (code == 'AUTH_FAILED') {
+      if (code == 'AUTH_FAILED' || code == 'NOT_AUTHENTICATED') {
         _handleAuthenticationFailure();
       }
     }
@@ -305,8 +308,10 @@ class DatabaseLiveClient implements core.DatabaseLiveClient {
   void _tryReconnect() {
     if (_reconnectAttempts >= _options.maxReconnectAttempts) return;
     _reconnectTimer?.cancel();
-    final delay = _options.reconnectDelay * (_reconnectAttempts + 1);
-    _reconnectTimer = Timer(delay, () {
+    final baseDelay = _options.reconnectDelay * math.pow(2, _reconnectAttempts).toInt();
+    final jitter = (baseDelay.inMilliseconds * 0.25 * (DateTime.now().millisecondsSinceEpoch % 100) / 100).round();
+    final cappedDelay = Duration(milliseconds: math.min(baseDelay.inMilliseconds + jitter, 30000));
+    _reconnectTimer = Timer(cappedDelay, () {
       _reconnectAttempts++;
       connect(channel: _currentChannel);
     });
@@ -457,6 +462,13 @@ class DatabaseLiveClient implements core.DatabaseLiveClient {
   void _handleAuthenticationFailure() {
     _authenticated = false;
     _waitingForAuth = _subscriptions.isNotEmpty;
+    // Attempt reconnection with fresh token if subscriptions are active
+    if (_subscriptions.isNotEmpty) {
+      _channel?.sink.close();
+      _connected = false;
+      _channel = null;
+      _tryReconnect();
+    }
   }
 
   void _refreshAuth() {

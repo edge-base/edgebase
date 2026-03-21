@@ -1935,7 +1935,9 @@ export class RoomClient {
 
   private scheduleReconnect(): void {
     const attempt = this.reconnectAttempts + 1;
-    const delay = this.options.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts);
+    const baseDelay = this.options.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts);
+    const jitter = Math.random() * baseDelay * 0.25;
+    const delay = baseDelay + jitter;
     this.reconnectAttempts++;
     this.reconnectInfo = { attempt };
     this.setConnectionState('reconnecting');

@@ -219,7 +219,8 @@ class HttpClient(
         body: Map<String, Any?>? = null,
         isPublic: Boolean = false,
         isRetry: Boolean = false,
-        queryParams: Map<String, String>? = null
+        queryParams: Map<String, String>? = null,
+        rateLimitAttempt: Int = 0
     ): Any? {
         val url = buildUrl(path, queryParams)
         val requestBody = body?.let { mapToJsonString(it) }
@@ -250,6 +251,16 @@ class HttpClient(
                 // Add request metadata headers
                 addContextHeaders(this)
             }
+        }
+
+        // 429 retry with Retry-After header
+        if (response.status.value == 429 && rateLimitAttempt < 3) {
+            val retryAfter = response.headers["Retry-After"]
+            val baseDelayMs = retryAfter?.toLongOrNull()?.let { it * 1000 }
+                ?: (1000L * (1L shl rateLimitAttempt))
+            val jitter = (baseDelayMs * 0.25 * Math.random()).toLong()
+            delay(minOf(baseDelayMs + jitter, 10000L))
+            return request(method, path, body, isPublic, isRetry, queryParams, rateLimitAttempt + 1)
         }
 
         // Handle 401 — retry once after token refresh

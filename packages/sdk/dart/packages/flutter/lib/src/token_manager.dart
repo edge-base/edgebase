@@ -131,10 +131,10 @@ class TokenManager implements core.TokenManager {
       _refreshCompleter!.complete(_accessToken);
       return _accessToken;
     } catch (_) {
-      // Refresh failed — clear tokens (session invalid)
-      await clearTokens();
-      _refreshCompleter!.complete(null);
-      return null;
+      // Refresh failed — return existing token for graceful degradation
+      // (matches Swift/Kotlin behavior; session cleared on explicit sign-out)
+      _refreshCompleter!.complete(_accessToken);
+      return _accessToken;
     } finally {
       _isRefreshing = false;
       _refreshCompleter = null;

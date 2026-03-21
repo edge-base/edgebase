@@ -81,6 +81,21 @@ public sealed class JbHttpClient : IDisposable
             req.Headers.TryAddWithoutValidation("Accept-Language", _locale);
     }
 
+    private static long ParseRetryAfterDelay(System.Net.Http.HttpResponseMessage resp, int attempt)
+    {
+        long baseDelayMs = 1000L * (1L << attempt);
+        if (resp.Headers.TryGetValues("Retry-After", out var values))
+        {
+            foreach (var v in values)
+            {
+                if (long.TryParse(v, out long seconds) && seconds > 0)
+                { baseDelayMs = seconds * 1000; break; }
+            }
+        }
+        long jitter = (long)(baseDelayMs * 0.25 * new Random().NextDouble());
+        return Math.Min(baseDelayMs + jitter, 10000);
+    }
+
     private async Task<Dictionary<string, object?>> SendAsync(
         System.Net.Http.HttpRequestMessage req,
         CancellationToken ct = default,
@@ -95,7 +110,17 @@ public sealed class JbHttpClient : IDisposable
         catch (System.Net.Http.HttpRequestException ex)
         {
             // Network-level errors (connection refused, DNS failure, etc.)
-            // must be wrapped as EdgeBaseException so callers can catch a single type.
+            // Retry transport errors up to 2 times before wrapping.
+            if (_retryCount < 2)
+            {
+                await Task.Delay(50 * (_retryCount + 1), ct);
+                var retry = new System.Net.Http.HttpRequestMessage(req.Method, req.RequestUri);
+                if (req.Content != null)
+                    retry.Content = new System.Net.Http.StringContent(
+                        await req.Content.ReadAsStringAsync(),
+                        System.Text.Encoding.UTF8, "application/json");
+                return await SendAsync(retry, ct, _retryCount + 1);
+            }
             throw new EdgeBaseException(0, ex.Message, ex);
         }
         var body = await resp.Content.ReadAsStringAsync();
@@ -110,6 +135,17 @@ public sealed class JbHttpClient : IDisposable
                     await req.Content.ReadAsStringAsync(),
                     System.Text.Encoding.UTF8, "application/json");
             return await SendAsync(retry, ct, _retryCount + 1);
+        }
+        if ((int)resp.StatusCode == 429 && _retryCount < 3)
+        {
+            long delayMs = ParseRetryAfterDelay(resp, _retryCount);
+            await Task.Delay((int)delayMs, ct);
+            var retry2 = new System.Net.Http.HttpRequestMessage(req.Method, req.RequestUri);
+            if (req.Content != null)
+                retry2.Content = new System.Net.Http.StringContent(
+                    await req.Content.ReadAsStringAsync(),
+                    System.Text.Encoding.UTF8, "application/json");
+            return await SendAsync(retry2, ct, _retryCount + 1);
         }
         if (!resp.IsSuccessStatusCode)
             throw new EdgeBaseException((int)resp.StatusCode, body);

@@ -417,7 +417,9 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
                 isAuthenticated = false
                 stopHeartbeat()
                 if shouldReconnect && !waitingForAuth && reconnectAttempts < maxReconnectAttempts {
-                    let delay = min(reconnectBaseDelay * pow(2.0, Double(reconnectAttempts)), 30.0)
+                    let baseDelay = min(reconnectBaseDelay * pow(2.0, Double(reconnectAttempts)), 30.0)
+                    let jitter = Double.random(in: 0...(baseDelay * 0.25))
+                    let delay = baseDelay + jitter
                     reconnectAttempts += 1
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     try? await connect()
