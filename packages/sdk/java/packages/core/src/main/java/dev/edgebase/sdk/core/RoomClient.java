@@ -245,6 +245,7 @@ public class RoomClient {
         private String signalPrefix = "edgebase.media.p2p";
         private RoomP2PRtcConfigurationOptions rtcConfiguration = new RoomP2PRtcConfigurationOptions();
         private long currentMemberTimeoutMs = 10_000L;
+        private RoomP2PMediaTransportFactory transportFactory;
 
         public String getSignalPrefix() {
             return signalPrefix;
@@ -274,6 +275,15 @@ public class RoomClient {
 
         public RoomP2PMediaTransportOptions setCurrentMemberTimeoutMs(long currentMemberTimeoutMs) {
             this.currentMemberTimeoutMs = Math.max(0L, currentMemberTimeoutMs);
+            return this;
+        }
+
+        public RoomP2PMediaTransportFactory getTransportFactory() {
+            return transportFactory;
+        }
+
+        public RoomP2PMediaTransportOptions setTransportFactory(RoomP2PMediaTransportFactory transportFactory) {
+            this.transportFactory = transportFactory;
             return this;
         }
     }
@@ -2382,7 +2392,8 @@ public class RoomClient {
                 return defaultCloudflareRealtimeKitClientFactory;
             }
             throw new UnsupportedOperationException(
-                    "Cloudflare RealtimeKit room media requires the EdgeBase Android runtime package. See " + ROOM_MEDIA_DOCS_URL
+                    "Cloudflare RealtimeKit room media requires either cloudflareRealtimeKit.clientFactory " +
+                            "or the EdgeBase Android runtime package. See " + ROOM_MEDIA_DOCS_URL
             );
         }
 
@@ -2470,11 +2481,17 @@ public class RoomClient {
             if (resolved.getProvider() == RoomMediaTransportProvider.CLOUDFLARE_REALTIMEKIT) {
                 return new RoomCloudflareMediaTransport(resolved.getCloudflareRealtimeKit());
             }
+            RoomP2PMediaTransportOptions p2pOptions =
+                    resolved.getP2P() == null ? new RoomP2PMediaTransportOptions() : resolved.getP2P();
+            if (p2pOptions.getTransportFactory() != null) {
+                return p2pOptions.getTransportFactory().create(RoomClient.this, p2pOptions);
+            }
             if (defaultP2PMediaTransportFactory != null) {
-                return defaultP2PMediaTransportFactory.create(RoomClient.this, resolved.getP2P());
+                return defaultP2PMediaTransportFactory.create(RoomClient.this, p2pOptions);
             }
             throw new UnsupportedOperationException(
-                    "P2P room media requires the EdgeBase Android runtime package. See " + ROOM_MEDIA_DOCS_URL
+                    "P2P room media requires either p2p.transportFactory or the EdgeBase Android runtime package. " +
+                            "See " + ROOM_MEDIA_DOCS_URL
             );
         }
 

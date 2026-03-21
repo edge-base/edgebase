@@ -136,10 +136,17 @@ Current provider status:
 - `p2p`
   Available on Android when the bundled Android WebRTC runtime is present
 
-The shared Java Room surface exposes the same transport API everywhere, but the actual
-managed media runtime currently targets Android. If you are using the Android package,
-add Cloudflare's Android runtime so the default `cloudflare_realtimekit` and `p2p`
-transports can attach to a foreground Activity:
+The shared Java Room surface exposes the same transport API everywhere.
+
+- On Android, `edgebase-android-java` auto-registers the built-in
+  `cloudflare_realtimekit` and `p2p` runtimes when the matching Android runtime
+  packages are present.
+- On the base/core artifact, the same API stays usable through explicit adapter
+  injection: `cloudflareRealtimeKit.clientFactory` for Cloudflare RealtimeKit and
+  `p2p.transportFactory` for P2P.
+
+If you are using the Android package, add Cloudflare's Android runtime so the default
+`cloudflare_realtimekit` and `p2p` transports can attach to a foreground Activity:
 
 ```groovy
 implementation 'com.cloudflare.realtimekit:core-android:1.5.5'
@@ -148,7 +155,7 @@ implementation 'com.cloudflare.realtimekit:core-android:1.5.5'
 Current verification note:
 
 - the Android transport registry and module-level media tests pass
-- the Java Room media runtime should currently be treated as Android-focused rather than a generic desktop Java media runtime
+- the Java core artifact now has explicit adapter-injection coverage for both `cloudflare_realtimekit` and `p2p`
 - Android host-app smoke builds succeeded with AGP 8.6+ and compileSdk 35+
 - Java Android `p2p` currently uses the Android WebRTC runtime through reflection; screen share requires passing `screenCaptureIntent` in the transport payload
 

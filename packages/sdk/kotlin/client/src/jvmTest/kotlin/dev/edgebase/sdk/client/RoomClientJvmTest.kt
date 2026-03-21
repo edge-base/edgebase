@@ -16,6 +16,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class RoomClientJvmTest {
@@ -100,6 +101,22 @@ class RoomClientJvmTest {
         fun emitAudio(participant: RoomCloudflareParticipantSnapshot, enabled: Boolean) {
             listeners.forEach { it.onAudioUpdate(participant, enabled) }
         }
+    }
+
+    private class FakeP2PTransport : RoomMediaTransport {
+        override suspend fun connect(payload: RoomMediaTransportConnectPayload): String = "desktop-member"
+        override suspend fun enableAudio(payload: Map<String, Any?>): Any? = "audio"
+        override suspend fun enableVideo(payload: Map<String, Any?>): Any? = "video"
+        override suspend fun startScreenShare(payload: Map<String, Any?>): Any? = "screen"
+        override suspend fun disableAudio() = Unit
+        override suspend fun disableVideo() = Unit
+        override suspend fun stopScreenShare() = Unit
+        override suspend fun setMuted(kind: String, muted: Boolean) = Unit
+        override suspend fun switchDevices(payload: Map<String, Any?>) = Unit
+        override fun onRemoteTrack(handler: (RoomMediaRemoteTrackEvent) -> Unit): Subscription = Subscription {}
+        override fun getSessionId(): String? = "desktop-member"
+        override fun getPeerConnection(): Any? = null
+        override fun destroy() = Unit
     }
 
     private class FakeRoomSocketHandle : RoomSocketHandle {
@@ -518,6 +535,34 @@ class RoomClientJvmTest {
         } finally {
             server.stop(0)
         }
+    }
+
+    @Test
+    fun p2pTransport_uses_explicit_transport_factory_on_jvm() {
+        val room = RoomClient(
+            "http://localhost:8688",
+            "media",
+            "room-1",
+            NoOpTokenManager(),
+        )
+        val fakeTransport = FakeP2PTransport()
+
+        val transport = room.media.transport(
+            RoomMediaTransportOptions(
+                provider = RoomMediaTransportProvider.p2p,
+                p2p = RoomP2PMediaTransportOptions(
+                    transportFactory = RoomP2PMediaTransportFactory { providedRoom, options ->
+                        assertSame(room, providedRoom)
+                        assertEquals("desktop.signal", options.signalPrefix)
+                        fakeTransport
+                    },
+                    signalPrefix = "desktop.signal",
+                ),
+            ),
+        )
+
+        assertSame(fakeTransport, transport)
+        room.destroy()
     }
 
     private fun waitForMessage(socket: FakeRoomSocketHandle, index: Int): JsonObject {

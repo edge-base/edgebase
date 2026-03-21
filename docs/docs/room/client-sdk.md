@@ -35,7 +35,7 @@ supported SDK matrix, but it remains a best-effort path that depends more
 heavily on client network conditions.
 
 :::note Unified Namespace Availability
-The unified namespace surface is available across the JavaScript/TypeScript, Dart, Swift, Kotlin, Java, C#, and C++ Room SDKs. Method names and casing follow each platform's conventions (for example, `room.State.*` in C# and `room->state.*` in C++).
+The unified namespace surface is available across the JavaScript/TypeScript, Dart, Swift, Kotlin, and Java Room SDKs. Method names and casing follow each platform's conventions.
 
 Legacy flat methods still exist as compatibility fallbacks, so older examples and the mapping tables below may still show `room.send(...)`, `room.getSharedState()`, and related APIs.
 :::
@@ -90,7 +90,7 @@ dependencies {
 }
 ```
 
-The shared Room client compiles across Android, JVM, JS, and Apple targets. Room Media transport runtime support is currently strongest on Android.
+The shared Room client compiles across Android, JVM, JS, and Apple targets. Built-in Room Media runtime ships on Android, iOS, and JS browser; JVM/macOS use explicit `cloudflareRealtimeKit.clientFactory` and `p2p.transportFactory` injection.
 
 </TabItem>
 <TabItem value="java" label="Java">
@@ -329,13 +329,15 @@ await room.signals.send('chat.message', { text: 'hello' });
 The rest of this page keeps the flat compatibility methods documented because they are still useful as cross-SDK fallbacks and map cleanly to the unified namespaces.
 
 :::note Room Media transport status
-`room.media.transport(...)` is active on the Web, React Native, Flutter, Swift iOS, Java Android, Kotlin Android, and Kotlin iOS Room SDKs.
+`room.media.transport(...)` is active on the Web, React Native, Flutter, Swift iOS, Java Android, Kotlin Android, Kotlin iOS, Kotlin JS, Kotlin JVM/macOS, and the Java core artifact.
 
 The provider mix is still rolling out:
 
 - Web, React Native, and Flutter support `cloudflare_realtimekit` and `p2p`
-- Swift iOS and Java Android currently support `cloudflare_realtimekit` and `p2p`
-- Kotlin currently supports `cloudflare_realtimekit` and `p2p` on Android and iOS
+- Swift iOS and Java Android ship built-in `cloudflare_realtimekit` and `p2p`
+- Kotlin ships built-in `cloudflare_realtimekit` and `p2p` on Android, iOS, and JS (browser)
+- Kotlin JVM/macOS use `cloudflareRealtimeKit.clientFactory` and `p2p.transportFactory`
+- Java core uses `cloudflareRealtimeKit.clientFactory` and `p2p.transportFactory`
 
 Verification is still deepest on the web live-media path. Mobile SDKs now have build and transport smoke coverage, but native live media E2E is not yet identical across every platform.
 :::

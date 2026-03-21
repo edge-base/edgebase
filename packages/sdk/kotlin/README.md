@@ -12,6 +12,11 @@ for `:core`, `:client`, and `:admin`.
 
 **Supported targets:** Android, iOS, JS (browser), JVM (desktop/server)
 
+Built-in Room Media runtime is currently available on Android, iOS, and JS (browser).
+JVM and macOS targets use the same Room client surface, but their Room Media path is
+adapter-driven: pass `cloudflareRealtimeKit.clientFactory` or `p2p.transportFactory`
+when you create the transport.
+
 EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
 
 This package is one part of the wider EdgeBase platform. For the full platform, CLI, Admin Dashboard, server runtime, docs, and all public SDKs, see the main repository: [edge-base/edgebase](https://github.com/edge-base/edgebase).
@@ -21,7 +26,7 @@ This package is one part of the wider EdgeBase platform. For the full platform, 
 | Module | Artifact | Targets |
 | --- | --- | --- |
 | `:core` | `com.github.edge-base.edgebase:edgebase-core:v0.1.5` | current JitPack route publishes the JVM variant of the shared runtime |
-| `:client` | `com.github.edge-base.edgebase:edgebase-client:v0.1.5` | current JitPack route publishes the JVM variant of the client runtime |
+| `:client` | `com.github.edge-base.edgebase:edgebase-client:v0.1.5` | current JitPack route publishes the JVM variant of the client runtime; built-in Room Media ships on Android/iOS/JS and adapter-driven Room Media is available on JVM |
 | `:admin` | `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.1.5` | JVM only |
 
 If you build from the monorepo directly, depend on the Gradle modules under
@@ -76,20 +81,23 @@ client.destroy()
 
 ## Room Media Transport
 
-The Kotlin client surface includes `room.media.transport(...)` with both
-`cloudflare_realtimekit` and `p2p` wired on Android and iOS.
+The Kotlin client surface includes `room.media.transport(...)` everywhere. Built-in
+`cloudflare_realtimekit` and `p2p` ship on Android, iOS, and JS (browser). JVM/macOS
+use the same transport API through explicit adapter injection.
 
 Important runtime note:
 
 - the Kotlin Multiplatform room surface compiles across Android, iOS, macOS, JS, and JVM
-- the Room Media runtime providers (`cloudflare_realtimekit` and `p2p`) are currently supported on Android and iOS
-- JS, JVM, and macOS targets still share the broader Room model types, but are outside the built-in Room Media runtime support matrix
+- built-in Room Media runtime providers (`cloudflare_realtimekit` and `p2p`) ship on Android, iOS, and JS (browser)
+- JVM and macOS targets use the same API through `cloudflareRealtimeKit.clientFactory` and `p2p.transportFactory`
 
 Current verification note:
 
-- Android, iOS simulator, macOS, and JS targets all compile from the monorepo
+- Android, iOS simulator, macOS, JVM, and JS targets all compile from the monorepo
 - Android runtime/provider selection is verified for both `cloudflare_realtimekit` and `p2p`
 - iOS simulator tests now verify built-in factory availability for both `cloudflare_realtimekit` and `p2p`
+- JS browser tests now verify built-in factory availability for both `cloudflare_realtimekit` and `p2p`
+- JVM tests verify explicit `cloudflareRealtimeKit.clientFactory` and `p2p.transportFactory` injection paths
 - the strongest runtime paths today are Android host-app builds plus iOS simulator transport coverage
 - Android host-app smoke builds succeeded once the app used AGP 8.6+ and compileSdk 35+
 

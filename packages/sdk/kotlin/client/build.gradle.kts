@@ -221,6 +221,7 @@ kotlin {
         val jsMain by getting {
             dependencies {
                 implementation("io.ktor:ktor-client-js:3.1.0")
+                implementation(npm("@cloudflare/realtimekit", "1.2.5"))
             }
         }
 

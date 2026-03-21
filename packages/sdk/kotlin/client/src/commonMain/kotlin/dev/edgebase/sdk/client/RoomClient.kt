@@ -1577,11 +1577,14 @@ class RoomMediaNamespace(internal val client: RoomClient) {
                     room = client,
                     options = options.cloudflareRealtimeKit ?: RoomCloudflareRealtimeKitTransportOptions(),
                 )
-            RoomMediaTransportProvider.p2p ->
-                RoomP2PMediaTransport(
-                    room = client,
-                    options = options.p2p ?: RoomP2PMediaTransportOptions(),
-                )
+            RoomMediaTransportProvider.p2p -> {
+                val p2pOptions = options.p2p ?: RoomP2PMediaTransportOptions()
+                p2pOptions.transportFactory?.create(client, p2pOptions)
+                    ?: RoomP2PMediaTransport(
+                        room = client,
+                        options = p2pOptions,
+                    )
+            }
         }
     }
 

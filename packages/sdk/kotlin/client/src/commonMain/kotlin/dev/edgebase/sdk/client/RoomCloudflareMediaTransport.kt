@@ -306,7 +306,8 @@ internal class RoomCloudflareMediaTransport(
         return options.clientFactory
             ?: defaultCloudflareRealtimeKitClientFactory()
             ?: throw UnsupportedOperationException(
-                "Cloudflare RealtimeKit room media requires the edgebase-kotlin supported room-media runtime (Android or iOS). See $ROOM_MEDIA_DOCS_URL",
+                "Cloudflare RealtimeKit room media requires either cloudflareRealtimeKit.clientFactory " +
+                    "or a built-in runtime on Android, iOS, or JS browser. See $ROOM_MEDIA_DOCS_URL",
             )
     }
 
@@ -366,29 +367,5 @@ internal class RoomCloudflareMediaTransport(
         remoteTrackHandlers.values.toList().forEach { handler ->
             handler(event)
         }
-    }
-}
-
-internal class UnsupportedRoomMediaTransport(
-    private val provider: RoomMediaTransportProvider,
-) : RoomMediaTransport {
-    override suspend fun connect(payload: RoomMediaTransportConnectPayload): String = throw unsupported()
-    override suspend fun enableAudio(payload: Map<String, Any?>): Any? = throw unsupported()
-    override suspend fun enableVideo(payload: Map<String, Any?>): Any? = throw unsupported()
-    override suspend fun startScreenShare(payload: Map<String, Any?>): Any? = throw unsupported()
-    override suspend fun disableAudio(): Unit = throw unsupported()
-    override suspend fun disableVideo(): Unit = throw unsupported()
-    override suspend fun stopScreenShare(): Unit = throw unsupported()
-    override suspend fun setMuted(kind: String, muted: Boolean): Unit = throw unsupported()
-    override suspend fun switchDevices(payload: Map<String, Any?>): Unit = throw unsupported()
-    override fun onRemoteTrack(handler: (RoomMediaRemoteTrackEvent) -> Unit): Subscription = Subscription {}
-    override fun getSessionId(): String? = null
-    override fun getPeerConnection(): Any? = null
-    override fun destroy() {}
-
-    private fun unsupported(): UnsupportedOperationException {
-        return UnsupportedOperationException(
-            "${provider.name} room media requires the edgebase-kotlin supported room-media runtime (Android or iOS). See $ROOM_MEDIA_DOCS_URL",
-        )
     }
 }

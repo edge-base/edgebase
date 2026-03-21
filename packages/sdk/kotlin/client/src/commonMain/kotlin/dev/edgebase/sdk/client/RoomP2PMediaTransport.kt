@@ -30,6 +30,10 @@ data class RoomP2PRtcConfigurationOptions(
     val iceServers: List<RoomP2PIceServerOptions> = ROOM_P2P_DEFAULT_ICE_SERVERS,
 )
 
+fun interface RoomP2PMediaTransportFactory {
+    fun create(room: RoomClient, options: RoomP2PMediaTransportOptions): RoomMediaTransport
+}
+
 internal fun interface RoomP2PMediaRuntimeFactory {
     fun create(): RoomP2PMediaRuntimeAdapter
 }
@@ -38,6 +42,7 @@ data class RoomP2PMediaTransportOptions(
     val signalPrefix: String = ROOM_P2P_DEFAULT_SIGNAL_PREFIX,
     val rtcConfiguration: RoomP2PRtcConfigurationOptions = RoomP2PRtcConfigurationOptions(),
     val currentMemberTimeoutMs: Long = ROOM_P2P_DEFAULT_MEMBER_READY_TIMEOUT_MS,
+    val transportFactory: RoomP2PMediaTransportFactory? = null,
 )
 
 internal var roomP2PMediaRuntimeFactoryOverride: RoomP2PMediaRuntimeFactory? = null
@@ -762,7 +767,8 @@ internal class RoomP2PMediaTransport(
         runtime?.let { return it }
         val factory = roomP2PMediaRuntimeFactoryOverride ?: defaultP2PMediaRuntimeFactory()
             ?: throw UnsupportedOperationException(
-                "P2P room media requires the edgebase-kotlin supported room-media runtime (Android or iOS). See $ROOM_P2P_DOCS_URL",
+                "P2P room media requires either p2p.transportFactory or a built-in runtime on " +
+                    "Android, iOS, or JS browser. See $ROOM_P2P_DOCS_URL",
             )
         return factory.create().also { runtime = it }
     }

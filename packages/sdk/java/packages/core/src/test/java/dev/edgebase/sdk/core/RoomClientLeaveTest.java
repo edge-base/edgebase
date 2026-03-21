@@ -522,6 +522,95 @@ class RoomClientLeaveTest {
         }
     }
 
+    @Test
+    void p2p_transport_uses_explicit_factory_when_supplied() {
+        RoomClient room = new RoomClient("http://localhost:8688", "game", "room-1", () -> "token");
+        AtomicReference<RoomClient.RoomP2PMediaTransportOptions> capturedOptions = new AtomicReference<>();
+        RoomClient.RoomMediaTransport fakeTransport = new RoomClient.RoomMediaTransport() {
+            @Override
+            public CompletableFuture<String> connect(Map<String, Object> payload) {
+                return CompletableFuture.completedFuture("member-self");
+            }
+
+            @Override
+            public CompletableFuture<Object> enableAudio(Map<String, Object> payload) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Object> enableVideo(Map<String, Object> payload) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Object> startScreenShare(Map<String, Object> payload) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Void> disableAudio() {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Void> disableVideo() {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Void> stopScreenShare() {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Void> setMuted(String kind, boolean muted) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<Void> switchDevices(Map<String, Object> payload) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public RoomClient.Subscription onRemoteTrack(java.util.function.Consumer<RoomClient.RoomMediaRemoteTrackEvent> handler) {
+                return () -> {};
+            }
+
+            @Override
+            public String getSessionId() {
+                return "member-self";
+            }
+
+            @Override
+            public Object getPeerConnection() {
+                return null;
+            }
+
+            @Override
+            public void destroy() {
+            }
+        };
+
+        RoomClient.RoomMediaTransport transport = room.media.transport(
+                new RoomClient.RoomMediaTransportOptions()
+                        .setProvider(RoomClient.RoomMediaTransportProvider.P2P)
+                        .setP2P(
+                                new RoomClient.RoomP2PMediaTransportOptions()
+                                        .setSignalPrefix("edgebase.core.p2p")
+                                        .setTransportFactory((client, options) -> {
+                                            assertSame(room, client);
+                                            capturedOptions.set(options);
+                                            return fakeTransport;
+                                        })
+                        )
+        );
+
+        assertSame(fakeTransport, transport);
+        assertEquals("edgebase.core.p2p", capturedOptions.get().getSignalPrefix());
+        room.destroy();
+    }
+
     private static void writeResponse(HttpExchange exchange, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
