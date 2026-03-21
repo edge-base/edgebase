@@ -1,0 +1,173 @@
+<!-- Generated from packages/sdk/python/packages/admin/llms.txt. Do not edit directly; update the source llms.txt and rerun `node tools/agent-skill-gen/generate.mjs`. -->
+
+# edgebase-admin
+
+Use this file as a quick-reference contract for AI coding assistants working with the `edgebase-admin` Python package.
+
+## Package Boundary
+
+Use `edgebase-admin` for trusted, service-key-backed server workloads.
+
+This package is the slim Python admin SDK. It is the right choice when you need admin auth, service-key database access, storage management, raw SQL, functions, analytics, push, or native Cloudflare resources without the broader `edgebase` umbrella package.
+
+Today, this is also the main public PyPI entry point for the Python SDK line.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/python/packages/admin/README.md
+- SDK overview: https://edgebase.fun/docs/sdks
+- Admin SDK guide: https://edgebase.fun/docs/sdks/client-vs-server
+- Admin SDK reference: https://edgebase.fun/docs/admin-sdk/reference
+- Admin users: https://edgebase.fun/docs/authentication/admin-users
+- Database admin SDK: https://edgebase.fun/docs/database/admin-sdk
+- Storage: https://edgebase.fun/docs/storage/upload-download
+- Analytics admin SDK: https://edgebase.fun/docs/analytics/admin-sdk
+- Push admin SDK: https://edgebase.fun/docs/push/admin-sdk
+- Native resources: https://edgebase.fun/docs/server/native-resources
+
+If docs, snippets, and assumptions disagree, prefer the current package API over guessed patterns from another runtime.
+
+## Canonical Examples
+
+### Create an admin client
+
+```python
+import os
+
+from edgebase_admin import create_admin_client
+
+admin = create_admin_client(
+    "https://your-project.edgebase.fun",
+    service_key=os.environ["EDGEBASE_SERVICE_KEY"],
+)
+```
+
+### Query data
+
+```python
+posts = (
+    admin.db("shared")
+    .table("posts")
+    .where("published", "==", True)
+    .order_by("createdAt", "desc")
+    .limit(20)
+    .get_list()
+)
+```
+
+### Manage users
+
+```python
+page = admin.admin_auth.list_users(limit=20)
+
+user = admin.admin_auth.create_user(
+    "june@example.com",
+    "securePassword",
+    data={"displayName": "June", "role": "editor"},
+)
+
+admin.admin_auth.set_custom_claims(user["id"], {"plan": "pro"})
+```
+
+### Storage
+
+```python
+bucket = admin.storage().bucket("avatars")
+
+bucket.upload("user-1.jpg", file_bytes, content_type="image/jpeg")
+signed = bucket.create_signed_url("user-1.jpg", expires_in="1h")
+```
+
+### Functions and analytics
+
+```python
+result = admin.functions().post("jobs/send-welcome-email", {"userId": "user-123"})
+
+admin.analytics().track(
+    "user_upgraded",
+    {"plan": "pro", "amount": 29.99},
+    user_id="user_123",
+)
+```
+
+### Native resources
+
+```python
+admin.kv("cache").set("homepage", "ready", ttl=300)
+rows = admin.d1("analytics").query("SELECT 1", [])
+matches = admin.vector("embeddings").search([0.1, 0.2, 0.3], top_k=5)
+```
+
+## Common Mistakes
+
+- use `create_admin_client(...)` or `AdminClient(...)`, not a browser/client SDK factory
+- `admin.admin_auth` is a property, not a method
+- `admin.storage()`, `admin.functions()`, `admin.analytics()`, and `admin.push()` are methods
+- `admin.db(namespace="shared", instance_id=None)` uses an optional positional instance id
+- `table.get()` does not exist; use `table.get_list()` for lists or `table.get_one(id)` / `table.doc(id).get()` for a single record
+- `AdminClient.sql(...)` requires a non-empty query string
+- `admin.admin_auth.create_user(...)` accepts optional profile fields via `data=...`
+- `create_signed_upload_url(path, expires_in=...)` expects seconds as an `int`
+- `admin.vector(...)` and `admin.vectorize(...)` are both valid; `vectorize()` is just an alias
+
+## Quick Reference
+
+```python
+# Initialize
+admin = create_admin_client(base_url, service_key=service_key)
+
+# Admin auth (property)
+admin.admin_auth.get_user(user_id)                           # dict
+admin.admin_auth.create_user(email, password, data=None)     # dict
+admin.admin_auth.update_user(user_id, data)                  # dict
+admin.admin_auth.delete_user(user_id)                        # dict
+admin.admin_auth.list_users(limit=20, cursor=None)           # dict
+admin.admin_auth.set_custom_claims(user_id, claims)          # None
+admin.admin_auth.revoke_all_sessions(user_id)                # None
+admin.admin_auth.disable_mfa(user_id)                        # None
+
+# Database
+admin.db("shared").table("posts").get_list()                 # ListResult
+admin.db("shared").table("posts").get_one("id-1")           # dict
+admin.db("shared").table("posts").insert(record)            # dict
+admin.db("shared").table("posts").update("id-1", data)      # dict
+admin.db("shared").table("posts").delete("id-1")            # dict
+admin.sql("shared", None, query, params)                    # list
+
+# Storage
+bucket = admin.storage().bucket("avatars")
+bucket.get_url("user-1.jpg")                                # str
+bucket.upload("user-1.jpg", file_bytes, content_type="image/jpeg")   # dict
+bucket.download("user-1.jpg")                               # bytes
+bucket.get_metadata("user-1.jpg")                           # FileInfo
+bucket.update_metadata("user-1.jpg", metadata)              # dict
+bucket.list(prefix="", limit=100, offset=0)                 # list[FileInfo]
+bucket.list_page(prefix="", limit=100, cursor=None)         # FileListResult
+bucket.create_signed_url("user-1.jpg", expires_in="1h")     # SignedUrlResult
+bucket.create_signed_upload_url("large.zip", expires_in=600) # SignedUrlResult
+
+# Functions / analytics / push
+admin.functions().get("health", query=None)                 # Any
+admin.functions().post("jobs/run", body={})                 # Any
+admin.analytics().overview(range="7d")                      # dict
+admin.analytics().track(name, properties=None, user_id=None) # None
+admin.analytics().track_batch(events)                       # None
+admin.analytics().query_events(metric="list", range="7d")   # Any
+admin.push().send(user_id, payload)                         # dict
+admin.push().send_many(user_ids, payload)                   # dict
+admin.push().send_to_token(token, payload, platform=None)   # dict
+admin.push().send_to_topic(topic, payload)                  # dict
+admin.push().broadcast(payload)                             # dict
+admin.push().get_tokens(user_id)                            # list[dict]
+admin.push().get_logs(user_id, limit=None)                  # list[dict]
+
+# Native resources
+admin.kv("cache").get("key")                                # str | None
+admin.kv("cache").set("key", "value", ttl=300)              # None
+admin.kv("cache").list(prefix=None, limit=None, cursor=None) # dict
+admin.kv("cache").delete("key")                             # None
+admin.d1("analytics").exec("SELECT 1", [])                  # list
+admin.d1("analytics").query("SELECT 1", [])                 # list
+admin.vector("embeddings").search([0.1, 0.2], top_k=5)      # list[dict]
+admin.vectorize("embeddings").search([0.1, 0.2], top_k=5)   # list[dict]
+```

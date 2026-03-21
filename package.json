@@ -15,6 +15,8 @@
         "test:turbo": "turbo run test",
         "dev:turbo": "turbo run dev",
         "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+        "skills:generate": "node ./tools/agent-skill-gen/generate.mjs",
+        "skills:list-generated": "node ./tools/agent-skill-gen/list-generated-paths.mjs",
         "release:sync": "node ./scripts/sync-release-versions.mjs",
         "release:check": "node ./scripts/check-release-versions.mjs",
         "release:set": "node ./scripts/set-release-version.mjs",

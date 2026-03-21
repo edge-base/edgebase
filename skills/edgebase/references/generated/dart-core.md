@@ -1,0 +1,122 @@
+<!-- Generated from packages/sdk/dart/packages/core/llms.txt. Do not edit directly; update the source llms.txt and rerun `node tools/agent-skill-gen/generate.mjs`. -->
+
+# EdgeBase Dart Core SDK
+
+Use this file as a quick-reference contract for AI coding assistants working with `edgebase_core`.
+
+## Package Boundary
+
+Use `edgebase_core` when you intentionally want low-level EdgeBase building blocks in Dart.
+
+Most apps should not start here. Flutter apps should usually use `edgebase_flutter`. Trusted server-side code should usually use `edgebase_admin`.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/dart/packages/core/README.md
+- Database client SDK: https://edgebase.fun/docs/database/client-sdk
+- Database admin SDK: https://edgebase.fun/docs/database/admin-sdk
+- Database subscriptions: https://edgebase.fun/docs/database/subscriptions
+- Storage docs: https://edgebase.fun/docs/storage
+
+If docs, examples, and assumptions disagree, prefer the current package API and official docs over guessed patterns.
+
+## Canonical Examples
+
+### Create a low-level client
+
+```dart
+import 'package:edgebase_core/edgebase_core.dart';
+
+final httpClient = HttpClient(
+  baseUrl: 'https://your-project.edgebase.fun',
+  contextManager: ContextManager(),
+);
+```
+
+### Create a generated DB API and table reference
+
+```dart
+final api = GeneratedDbApi(httpClient);
+
+final posts = DbRef(api, 'app').table('posts');
+
+final result = await posts
+    .where('published', '==', true)
+    .limit(20)
+    .getList();
+```
+
+### Work with an instance database
+
+```dart
+final docs = DbRef(api, 'workspace', instanceId: 'ws-1')
+    .table('documents');
+```
+
+### Upload a file and create a signed URL
+
+```dart
+final storage = StorageClient(httpClient);
+
+await storage.upload(
+  'uploads',
+  'hello.bin',
+  [1, 2, 3, 4],
+  contentType: 'application/octet-stream',
+);
+
+final signed = await storage
+    .bucket('uploads')
+    .createSignedUrl('hello.bin', expiresIn: 3600);
+```
+
+### Atomic field operations
+
+```dart
+await posts.doc('post-1').update({
+  'views': increment(1),
+  'temporaryField': deleteField(),
+});
+```
+
+## Hard Rules
+
+- `DbRef(api, namespace, instanceId: ...)` uses a named `instanceId` parameter in Dart
+- `table.getOne(id)` or `table.doc(id).get()` returns a single document
+- `updateMany(...)` and `deleteMany()` require at least one `where(...)` filter
+- `StorageClient.bucket(name).upload(...)` expects `Uint8List`
+- `StorageClient.upload(bucketName, key, List<int>, ...)` is the convenience overload for plain byte lists
+- storage signed URL helpers use `expiresIn` as an integer number of seconds like `3600`, not a JS string like `'1h'`
+- `TableRef.onSnapshot()` requires a `databaseLive` instance wired into the `DbRef` or it throws
+- `HttpClient` can work with a `tokenManager`, a `serviceKey`, or neither depending on the integration
+- `ContextManager` is legacy compatibility state; routing uses explicit `DbRef(api, namespace, instanceId: ...)`
+
+## Common Mistakes
+
+- do not treat `edgebase_core` as the default app SDK unless you truly need low-level primitives
+- do not use JS-style positional instance ids; use `instanceId: 'ws-1'`
+- do not call `updateMany()` or `deleteMany()` without a filter chain first
+- do not pass a plain `List<int>` to `bucket.upload(...)`; wrap it as `Uint8List` or use `storage.upload(...)`
+- do not use `'1h'` for `createSignedUrl(..., expiresIn: ...)`; Dart storage APIs expect integer seconds
+- do not assume this package handles auth sessions for you; token management is protocol-level here
+
+## Quick Reference
+
+```text
+HttpClient({ baseUrl, contextManager, tokenManager?, serviceKey?, client?, requestTimeout? }) -> HttpClient
+GeneratedDbApi(httpClient)                                               -> GeneratedDbApi
+DbRef(api, namespace, { instanceId?, databaseLive? })                    -> DbRef
+db.table(name)                                                           -> TableRef
+table.getList()                                                          -> Future<ListResult<Map<String, dynamic>>>
+table.getOne(id)                                                         -> Future<Map<String, dynamic>>
+table.insert(data)                                                       -> Future<Map<String, dynamic>>
+table.doc(id).update(data)                                               -> Future<Map<String, dynamic>>
+table.where(...).updateMany(data)                                        -> Future<BatchResult>
+table.where(...).deleteMany()                                            -> Future<BatchResult>
+table.onSnapshot({ filters?, serverFilters? })                           -> Stream<DbChange>
+storage.upload(bucketName, key, data, ...)                               -> Future<FileInfo>
+storage.bucket(name).upload(key, Uint8List, ...)                         -> Future<FileInfo>
+storage.bucket(name).createSignedUrl(key, { expiresIn? })                -> Future<SignedUrlResult>
+increment(value)                                                         -> Map<String, dynamic>
+deleteField()                                                            -> Map<String, dynamic>
+```

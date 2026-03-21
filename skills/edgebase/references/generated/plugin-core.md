@@ -1,0 +1,107 @@
+<!-- Generated from packages/plugins/core/llms.txt. Do not edit directly; update the source llms.txt and rerun `node tools/agent-skill-gen/generate.mjs`. -->
+
+# EdgeBase Plugin Core
+
+Use this file as a quick-reference contract for AI coding assistants working with `@edge-base/plugin-core`.
+
+## Package Boundary
+
+Use `@edge-base/plugin-core` for authoring installable EdgeBase plugins.
+
+Do not use it for regular application code. For browser apps use `@edge-base/web`. For trusted server code use `@edge-base/admin`. For SSR cookie helpers use `@edge-base/ssr`.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/plugins/core/README.md
+- Plugins overview: https://edgebase.fun/docs/plugins
+- Creating plugins: https://edgebase.fun/docs/plugins/creating-plugins
+- Plugin API reference: https://edgebase.fun/docs/plugins/api-reference
+- Using plugins: https://edgebase.fun/docs/plugins/using-plugins
+
+## Canonical Examples
+
+### Define a plugin
+
+```ts
+import { definePlugin } from '@edge-base/plugin-core';
+
+interface MyPluginConfig {
+  apiKey: string;
+}
+
+export const myPlugin = definePlugin<MyPluginConfig>({
+  name: 'my-plugin',
+  version: '0.1.0',
+  tables: {
+    items: {
+      schema: {
+        title: { type: 'string', required: true },
+      },
+    },
+  },
+  functions: {
+    ping: {
+      trigger: { type: 'http', method: 'GET' },
+      handler: async (ctx) => {
+        return Response.json({
+          ok: true,
+          configured: !!ctx.pluginConfig.apiKey,
+        });
+      },
+    },
+  },
+});
+```
+
+### Use plugin config inside a hook
+
+```ts
+hooks: {
+  afterSignUp: async (ctx) => {
+    const apiKey = ctx.pluginConfig.apiKey;
+    await ctx.admin.table('my-plugin/customers').insert({
+      userId: ctx.data.after.id,
+      apiKeyPresent: !!apiKey,
+    });
+  },
+}
+```
+
+### Use mock context in tests
+
+```ts
+import { createMockContext } from '@edge-base/plugin-core';
+
+const ctx = createMockContext({
+  pluginConfig: { apiKey: 'test-key' },
+});
+```
+
+## Hard Rules
+
+- `definePlugin<TConfig>()` returns a factory: `(userConfig: TConfig) => PluginInstance`
+- `ctx.pluginConfig` is injected automatically into plugin functions, hooks, `onInstall`, and migrations
+- plugin table and function keys are local names; EdgeBase applies plugin namespacing at integration time
+- `ctx.admin` is an admin-level surface and bypasses access rules
+- `dbBlock` defaults to `'shared'` when omitted
+- `provider` defaults to `'do'` when omitted
+- semver-keyed migrations must be idempotent
+- `EDGEBASE_PLUGIN_API_VERSION` is only needed when manually constructing a `PluginInstance`; normal plugin authors should rely on `definePlugin()`
+
+## Common Mistakes
+
+- do not export a raw `PluginInstance` unless you have a strong reason; use `definePlugin()`
+- do not assume plugin code runs in a separate server process; it is bundled into the same EdgeBase runtime
+- do not put app-specific secrets directly in module scope when they should come from `userConfig`
+- do not treat plugin tables as globally named; plugin namespacing matters
+- do not use this package for normal app code imports
+
+## Quick Reference
+
+```text
+definePlugin<TConfig>(definition)           -> returns plugin factory
+createMockContext(options?)                 -> mock typed context for tests
+EDGEBASE_PLUGIN_API_VERSION                 -> public plugin contract version
+ctx.pluginConfig                            -> plugin instance config captured by closure
+ctx.admin                                   -> admin-level server access inside plugin handlers
+```

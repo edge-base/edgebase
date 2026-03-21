@@ -1,0 +1,61 @@
+<!-- Generated from packages/sdk/scala/packages/core/llms.txt. Do not edit directly; update the source llms.txt and rerun `node tools/agent-skill-gen/generate.mjs`. -->
+
+# EdgeBase Scala Core
+
+Use this file as a quick-reference contract for AI coding assistants working with the
+Scala core wrapper package.
+
+## Package Boundary
+
+Use `edgebase-core-scala` only in trusted JVM-side code that needs Scala wrappers for
+the shared runtime.
+
+This package does not provide the admin entrypoint. It provides wrapper types over the
+Java core SDK instead.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/scala/packages/core/README.md
+- Root README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/scala/README.md
+- SDK Overview: https://edgebase.fun/docs/sdks
+
+## Public Artifact
+
+- `com.github.edge-base.edgebase:edgebase-core-scala:v0.1.5`
+
+## Canonical Examples
+
+### Wrapper types
+
+```scala
+import dev.edgebase.sdk.scala.core._
+```
+
+### Error handling
+
+```scala
+try {
+  // core wrapper call
+} catch {
+  case e: EdgeBaseError => println(e.statusCode)
+}
+```
+
+## Hard Rules
+
+- do not use this package as the public admin entrypoint
+- keep Service Key workflows in `edgebase-admin-scala`
+- prefer Scala collections and `Option` instead of Java null-heavy shapes
+
+## Quick Reference
+
+```text
+EdgeBaseError   -> RuntimeException
+ListResult      -> Scala list wrapper
+BatchResult     -> Scala batch wrapper
+UpsertResult    -> Scala upsert wrapper
+DbRef           -> namespace reference
+TableRef        -> query builder
+DocRef          -> record reference
+StorageClient   -> storage wrapper
+```

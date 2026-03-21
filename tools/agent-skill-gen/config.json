@@ -1,0 +1,17 @@
+{
+  "outputDir": "skills/edgebase/references/generated",
+  "extraReferences": [
+    {
+      "source": "packages/cli/llms.txt",
+      "output": "cli.md"
+    },
+    {
+      "source": "packages/create-edgebase/llms.txt",
+      "output": "create-edgebase.md"
+    },
+    {
+      "source": "packages/plugins/core/llms.txt",
+      "output": "plugin-core.md"
+    }
+  ]
+}
