@@ -57,12 +57,11 @@ function parseArgs(argv) {
 }
 
 async function ensureSharedBuild() {
-  const sharedDistPath = path.join(repoRootDir, 'packages', 'shared', 'dist', 'index.js');
+  const sharedDir = path.join(repoRootDir, 'packages', 'shared');
+  const sharedDistPath = path.join(sharedDir, 'dist', 'index.js');
   if (existsSync(sharedDistPath)) return;
 
-  const buildResult = await runCommand('pnpm', ['--dir', 'packages/shared', 'build'], {
-    cwd: repoRootDir,
-  });
+  const buildResult = await runCommand('pnpm', ['build'], { cwd: sharedDir });
   if (buildResult.code !== 0) {
     throw new Error(`Failed to build packages/shared (exit ${buildResult.code ?? 'unknown'})`);
   }
@@ -80,19 +79,9 @@ async function startServer() {
 
   const { child, logStream } = spawnLogged(
     'pnpm',
-    [
-      '--dir',
-      'packages/server',
-      'exec',
-      'wrangler',
-      'dev',
-      '--config',
-      'wrangler.test.toml',
-      '--port',
-      port,
-    ],
+    ['exec', 'wrangler', 'dev', '--config', 'wrangler.test.toml', '--port', port],
     {
-      cwd: repoRootDir,
+      cwd: path.join(repoRootDir, 'packages', 'server'),
       env,
       logPath,
     },
@@ -114,15 +103,9 @@ async function startMockFcm() {
 
   const { child, logStream } = spawnLogged(
     'pnpm',
-    [
-      '--dir',
-      'packages/cli',
-      'exec',
-      'tsx',
-      path.join(repoRootDir, 'scripts', 'mock-fcm-server.ts'),
-    ],
+    ['exec', 'tsx', path.join(repoRootDir, 'scripts', 'mock-fcm-server.ts')],
     {
-      cwd: repoRootDir,
+      cwd: path.join(repoRootDir, 'packages', 'cli'),
       env: {
         MOCK_FCM_PORT: port,
         ...defaultTempEnv('mock-fcm-server'),

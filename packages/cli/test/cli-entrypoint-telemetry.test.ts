@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { pnpmCommand } from '../src/lib/pnpm.js';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const tempDirs: string[] = [];
@@ -15,7 +16,7 @@ function createHomeDir(): string {
 }
 
 function runCli(homeDir: string, args: string[]): string {
-  return execFileSync('pnpm', ['exec', 'tsx', 'src/index.ts', ...args], {
+  return execFileSync(pnpmCommand(), ['exec', 'tsx', 'src/index.ts', ...args], {
     cwd: packageDir,
     encoding: 'utf-8',
     env: {
@@ -69,7 +70,7 @@ describe('CLI entrypoint telemetry', () => {
 
     runCli(homeDir, ['telemetry', 'enable']);
 
-    const result = spawnSync('pnpm', ['exec', 'tsx', 'src/index.ts', 'definitely-missing'], {
+    const result = spawnSync(pnpmCommand(), ['exec', 'tsx', 'src/index.ts', 'definitely-missing'], {
       cwd: packageDir,
       encoding: 'utf-8',
       env: {

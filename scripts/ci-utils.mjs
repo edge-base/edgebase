@@ -20,6 +20,11 @@ export function resolveCommand(command) {
   return command;
 }
 
+function shouldUseShell(resolvedCommand, requestedShell) {
+  if (requestedShell !== undefined) return requestedShell;
+  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedCommand);
+}
+
 export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -38,17 +43,20 @@ export function tailFile(filePath, lineCount = 200) {
 }
 
 export async function runCommand(command, args, options = {}) {
-  const child = spawn(resolveCommand(command), args, {
+  const resolvedCommand = resolveCommand(command);
+  const child = spawn(resolvedCommand, args, {
     cwd: options.cwd,
     env: options.env ? { ...process.env, ...options.env } : process.env,
     stdio: options.stdio ?? 'inherit',
-    shell: options.shell ?? false,
+    shell: shouldUseShell(resolvedCommand, options.shell),
     detached: options.detached ?? false,
     windowsHide: true,
   });
 
   return new Promise((resolve, reject) => {
-    child.on('error', reject);
+    child.on('error', (error) =>
+      reject(new Error(`Failed to start ${resolvedCommand}: ${error.message}`)),
+    );
     child.on('exit', (code, signal) => {
       resolve({ code, signal, child });
     });
@@ -58,11 +66,12 @@ export async function runCommand(command, args, options = {}) {
 export function spawnLogged(command, args, options = {}) {
   ensureDir(path.dirname(options.logPath));
   const logStream = createWriteStream(options.logPath, { flags: 'w' });
-  const child = spawn(resolveCommand(command), args, {
+  const resolvedCommand = resolveCommand(command);
+  const child = spawn(resolvedCommand, args, {
     cwd: options.cwd,
     env: options.env ? { ...process.env, ...options.env } : process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
-    shell: options.shell ?? false,
+    shell: shouldUseShell(resolvedCommand, options.shell),
     detached: options.detached ?? false,
     windowsHide: true,
   });
