@@ -507,6 +507,7 @@ private:
   std::map<std::string, PendingVoidRequest> pending_admin_requests_;
   std::map<std::string, PendingVoidRequest> pending_member_state_requests_;
   std::map<std::string, PendingVoidRequest> pending_media_requests_;
+  mutable std::mutex pending_requests_mx_;
 
   // ── Handler lists (keyed by ID for reliable unsubscribe) ───────────────
   std::atomic<int> next_handler_id_{1};
@@ -565,8 +566,6 @@ private:
   void reject_pending_void(std::map<std::string, PendingVoidRequest> &pending,
                            const std::string &request_id,
                            const std::string &message);
-  void reject_all_pending_void(std::map<std::string, PendingVoidRequest> &pending,
-                               const std::string &reason);
   Subscription on_signal(const std::string &event, SignalHandler handler);
   Subscription on_any_signal(AnySignalHandler handler);
   Subscription on_members_sync(MembersSyncHandler handler);
