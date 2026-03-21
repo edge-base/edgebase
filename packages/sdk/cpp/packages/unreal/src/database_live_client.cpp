@@ -145,10 +145,10 @@ void DatabaseLiveClient::dispatchMessage(const std::string &raw) {
 
     std::lock_guard<std::mutex> lk(handlersMx_);
     for (auto &[id, entry] : snapshotHandlers_) {
-      if ((!messageChannel.empty() && entry.first == messageChannel) ||
+      if ((!messageChannel.empty() && entry.channel == messageChannel) ||
           (messageChannel.empty() &&
-           entry.first == normalizeDatabaseLiveChannel(change.table)))
-        entry.second(change);
+           entry.channel == normalizeDatabaseLiveChannel(change.table)))
+        entry.handler(change);
     }
   }
 
@@ -168,7 +168,8 @@ int DatabaseLiveClient::onSnapshot(const std::string &tableName,
   const std::string channel = normalizeDatabaseLiveChannel(tableName);
   {
     std::lock_guard<std::mutex> lk(handlersMx_);
-    snapshotHandlers_[id] = {channel, std::move(handler)};
+    snapshotHandlers_[id] = {channel, std::move(handler), serverFilters,
+                             serverOrFilters};
   }
 
   // Store server-side filters for recovery

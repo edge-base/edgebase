@@ -463,19 +463,19 @@ class AdminAuthClient {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("email", email);
         body.put("password", password);
-        return http.post("/auth/signup", body);
+        return http.post("/auth/admin/users", body);
     }
 
     JsonObject listUsers(int limit) {
-        return http.get("/auth/users", Collections.singletonMap("limit", String.valueOf(limit)));
+        return http.get("/auth/admin/users", Collections.singletonMap("limit", String.valueOf(limit)));
     }
 
     JsonObject getUser(String userId) {
-        return http.get("/auth/users/" + userId, null);
+        return http.get("/auth/admin/users/" + userId, null);
     }
 
     void deleteUser(String userId) {
-        http.delete("/auth/users/" + userId);
+        http.delete("/auth/admin/users/" + userId);
     }
 }
 
