@@ -429,7 +429,7 @@ public final class RoomCloudflareMediaTransport: RoomMediaTransport {
             return factory
         }
         throw RoomMediaTransportError(
-            "Cloudflare RealtimeKit transport is unavailable on this platform. See \(roomMediaDocsURL)"
+            "Cloudflare RealtimeKit room media requires the EdgeBase Swift iOS runtime. See \(roomMediaDocsURL)"
         )
     }
 
@@ -501,7 +501,7 @@ private final class UnsupportedRoomMediaTransport: RoomMediaTransport {
 
     private func unsupported() -> Error {
         RoomMediaTransportError(
-            "\(provider.rawValue) room media transport is not available in EdgeBase Swift yet. See \(roomMediaDocsURL)"
+            "\(provider.rawValue) room media requires the EdgeBase Swift iOS runtime. See \(roomMediaDocsURL)"
         )
     }
 }

@@ -131,9 +131,8 @@ The main client APIs are:
 
 - Web, React Native, and Flutter support `cloudflare_realtimekit` and `p2p`
 - Swift iOS currently supports `cloudflare_realtimekit` and `p2p`; P2P screen share requires an app-provided `RTKRTCVideoTrack` source (for example ReplayKit-backed capture) passed to `transport.startScreenShare(...)`
-- Kotlin currently exposes the same transport API everywhere, with Android wiring both `cloudflare_realtimekit` and `p2p` first
-- Java currently exposes the same transport API, with Android wiring both `cloudflare_realtimekit` and `p2p`
-- C#/Unity and C++/Unreal expose aligned placeholder entry points that currently return a "not available yet" error and point back to this guide
+- Kotlin currently wires both `cloudflare_realtimekit` and `p2p` on Android
+- Java currently wires both `cloudflare_realtimekit` and `p2p` on Android
 
 If you need the broadest cross-SDK parity today, use `cloudflare_realtimekit`.
 
@@ -143,8 +142,6 @@ For a production-oriented support matrix today:
 
 - `cloudflare_realtimekit`: Web, React Native, Flutter, Swift iOS, Java Android, Kotlin Android
 - `p2p`: Web, React Native, Flutter, Swift iOS, Java Android, Kotlin Android
-- Kotlin non-Android targets: API surface only, no built-in media runtime yet
-- C#/Unity and C++/Unreal: placeholder transport entry points only
 :::
 
 ## Access Control

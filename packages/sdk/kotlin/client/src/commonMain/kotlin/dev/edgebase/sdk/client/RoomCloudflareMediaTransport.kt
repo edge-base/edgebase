@@ -306,7 +306,7 @@ internal class RoomCloudflareMediaTransport(
         return options.clientFactory
             ?: defaultCloudflareRealtimeKitClientFactory()
             ?: throw UnsupportedOperationException(
-                "Cloudflare RealtimeKit room media transport is unavailable on this platform. See $ROOM_MEDIA_DOCS_URL",
+                "Cloudflare RealtimeKit room media requires the edgebase-kotlin Android runtime. See $ROOM_MEDIA_DOCS_URL",
             )
     }
 
@@ -388,7 +388,7 @@ internal class UnsupportedRoomMediaTransport(
 
     private fun unsupported(): UnsupportedOperationException {
         return UnsupportedOperationException(
-            "${provider.name} room media transport is not yet available in edgebase-kotlin. See $ROOM_MEDIA_DOCS_URL",
+            "${provider.name} room media requires the edgebase-kotlin Android runtime. See $ROOM_MEDIA_DOCS_URL",
         )
     }
 }

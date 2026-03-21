@@ -762,7 +762,7 @@ internal class RoomP2PMediaTransport(
         runtime?.let { return it }
         val factory = roomP2PMediaRuntimeFactoryOverride ?: defaultP2PMediaRuntimeFactory()
             ?: throw UnsupportedOperationException(
-                "P2P room media transport is not yet available in edgebase-kotlin. See $ROOM_P2P_DOCS_URL",
+                "P2P room media requires the edgebase-kotlin Android runtime. See $ROOM_P2P_DOCS_URL",
             )
         return factory.create().also { runtime = it }
     }

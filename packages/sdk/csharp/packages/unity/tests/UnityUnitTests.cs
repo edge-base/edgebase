@@ -955,46 +955,6 @@ namespace EdgeBase.Tests
             room.Dispose();
         }
 
-        [Fact]
-        public async Task Media_transport_placeholder_reports_docs_link()
-        {
-            var room = new RoomClient("http://localhost", "game", "room-transport", () => "token");
-            var transport = room.Media.Transport();
-            var error = await Assert.ThrowsAsync<RoomClient.RoomMediaTransportUnavailableException>(() => transport.Connect());
-
-            Assert.Equal("cloudflare_realtimekit", transport.Provider);
-            Assert.Contains("https://edgebase.fun/docs/room/media", error.Message);
-            Assert.Equal("https://edgebase.fun/docs/room/media", error.DocumentationUrl);
-
-            room.Dispose();
-        }
-
-        [Fact]
-        public async Task Media_transport_placeholder_respects_requested_provider()
-        {
-            var room = new RoomClient("http://localhost", "game", "room-transport-p2p", () => "token");
-            var transport = room.Media.transport(new RoomClient.RoomMediaTransportOptions { provider = "p2p" });
-            var error = await Assert.ThrowsAsync<RoomClient.RoomMediaTransportUnavailableException>(() => transport.enableAudio());
-
-            Assert.Equal("p2p", transport.Provider);
-            Assert.Contains("provider 'p2p'", error.Message);
-
-            room.Dispose();
-        }
-
-        [Fact]
-        public async Task Cloudflare_realtimekit_namespace_placeholder_reports_docs_link()
-        {
-            var room = new RoomClient("http://localhost", "game", "room-cloudflare", () => "token");
-            var error = await Assert.ThrowsAsync<RoomClient.RoomMediaTransportUnavailableException>(
-                () => room.Media.CloudflareRealtimeKit.CreateSession()
-            );
-
-            Assert.Contains("cloudflare_realtimekit", error.Message);
-            Assert.Equal("https://edgebase.fun/docs/room/media", error.DocumentationUrl);
-
-            room.Dispose();
-        }
     }
 
     // ─── F-2. EdgeBase.Room() factory method test ─────────────────────────

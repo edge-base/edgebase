@@ -329,14 +329,13 @@ await room.signals.send('chat.message', { text: 'hello' });
 The rest of this page keeps the flat compatibility methods documented because they are still useful as cross-SDK fallbacks and map cleanly to the unified namespaces.
 
 :::note Room Media transport status
-`room.media.transport(...)` is already active on the Web, React Native, Flutter, Swift iOS, Kotlin, and Java Room SDKs.
+`room.media.transport(...)` is active on the Web, React Native, Flutter, Swift iOS, Java Android, and Kotlin Android Room SDKs.
 
 The provider mix is still rolling out:
 
 - Web, React Native, and Flutter support `cloudflare_realtimekit` and `p2p`
 - Swift iOS and Java Android currently support `cloudflare_realtimekit` and `p2p`
-- Kotlin currently supports `cloudflare_realtimekit` and `p2p` on Android, while other KMP targets keep the same API surface but still return a not-yet-available runtime error
-- C#/Unity and C++/Unreal expose matching Room Media transport/provider entry points, but those provider implementations still return a "not available yet" error and point to [Room Media](/docs/room/media)
+- Kotlin currently supports `cloudflare_realtimekit` and `p2p` on Android
 
 Verification is still deepest on the web live-media path. Mobile SDKs now have build and transport smoke coverage, but native live media E2E is not yet identical across every platform.
 :::

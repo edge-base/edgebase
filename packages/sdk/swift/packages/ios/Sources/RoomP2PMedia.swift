@@ -827,7 +827,7 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
         if let runtime { return runtime }
         let factory = roomP2PMediaRuntimeFactoryOverride ?? defaultP2PMediaRuntimeFactory()
         guard let factory else {
-            throw RoomMediaTransportError("P2P room media transport is not yet available in EdgeBase Swift. See \(roomMediaDocsURL)")
+            throw RoomMediaTransportError("P2P room media requires the EdgeBase Swift iOS runtime. See \(roomMediaDocsURL)")
         }
         let runtime = factory()
         self.runtime = runtime

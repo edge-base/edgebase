@@ -2382,7 +2382,7 @@ public class RoomClient {
                 return defaultCloudflareRealtimeKitClientFactory;
             }
             throw new UnsupportedOperationException(
-                    "Cloudflare RealtimeKit room media transport is unavailable on this platform. See " + ROOM_MEDIA_DOCS_URL
+                    "Cloudflare RealtimeKit room media requires the EdgeBase Android runtime package. See " + ROOM_MEDIA_DOCS_URL
             );
         }
 
@@ -2474,7 +2474,7 @@ public class RoomClient {
                 return defaultP2PMediaTransportFactory.create(RoomClient.this, resolved.getP2P());
             }
             throw new UnsupportedOperationException(
-                    "P2P room media transport is not yet available in the Java core SDK. See " + ROOM_MEDIA_DOCS_URL
+                    "P2P room media requires the EdgeBase Android runtime package. See " + ROOM_MEDIA_DOCS_URL
             );
         }
 
