@@ -102,6 +102,7 @@ kotlin {
                 implementation("androidx.fragment:fragment:1.6.2")
                 implementation("androidx.core:core:1.12.0")
                 implementation("com.cloudflare.realtimekit:core:1.5.5")
+                implementation("com.cloudflare.realtimekit:webrtc-kmp-android:0.125.13")
             }
         }
 

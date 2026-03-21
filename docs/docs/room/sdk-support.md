@@ -56,16 +56,16 @@ If you are looking for the "server side" of Room, the correct destination is [Se
   - React Native: `cloudflare_realtimekit` and `p2p`
   - Flutter: `cloudflare_realtimekit` and `p2p`
   - Swift iOS: `cloudflare_realtimekit`
-  - Kotlin client: Android runtime currently supports `cloudflare_realtimekit`; other KMP targets keep the API surface but currently return transport-unavailable
+  - Kotlin client: Android runtime currently supports `cloudflare_realtimekit` and `p2p`; other KMP targets keep the API surface but currently return transport-unavailable
   - Java core / Android package: Android runtime currently supports `cloudflare_realtimekit`
   - C#/Unity and C++/Unreal: matching placeholder entry points that redirect to [Room Media](/docs/room/media)
 - Verified smoke builds in the current matrix:
   - React Native: host-app smoke builds succeeded on both iOS simulator and Android debug
   - Flutter: host-app smoke builds succeeded on Web, macOS, Android, and an Apple Silicon iOS simulator via direct Xcode device build
-  - Kotlin: JS, iOS simulator, macOS, and Android targets compile successfully
+  - Kotlin: JS, iOS simulator, iOS device, macOS, JVM, and Android targets compile successfully; Android unit tests verify provider selection for `cloudflare_realtimekit` and `p2p`
 - Swift: package tests and iOS simulator build succeeded with `cloudflare_realtimekit`
 - Java / Kotlin Android: package/runtime integration is verified through module builds, targeted transport tests, and Android host-app debug builds
-- `p2p` is still pending on Swift, Kotlin, and Java. Other server-only SDKs intentionally do not expose Room Media transport providers.
+- `p2p` is still pending on Swift and Java. Kotlin currently ships it on Android only. Other server-only SDKs intentionally do not expose Room Media transport providers.
 
 :::note
 The strongest fully-verified Room Media paths today are Web, React Native, Flutter, and Android-native Java/Kotlin host builds. Swift and Android-native runtimes are progressing well, but the Kotlin multiplatform runtime is still Android-first rather than uniform across every KMP target.

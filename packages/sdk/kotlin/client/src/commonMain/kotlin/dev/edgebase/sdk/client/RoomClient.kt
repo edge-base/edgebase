@@ -1329,6 +1329,9 @@ class RoomClient(
             (member["connectionId"] as? String)?.let { put("connectionId", it) }
             (member["connectionCount"] as? Number)?.let { put("connectionCount", it.toInt()) }
             (member["role"] as? String)?.let { put("role", it) }
+            (member["name"] as? String)?.let { put("name", it) }
+            (member["picture"] as? String)?.let { put("picture", it) }
+            (member["customParticipantId"] as? String)?.let { put("customParticipantId", it) }
             put("state", normalizeState(member["state"]))
         }.toMutableMap()
     }
@@ -1575,7 +1578,10 @@ class RoomMediaNamespace(internal val client: RoomClient) {
                     options = options.cloudflareRealtimeKit ?: RoomCloudflareRealtimeKitTransportOptions(),
                 )
             RoomMediaTransportProvider.p2p ->
-                UnsupportedRoomMediaTransport(RoomMediaTransportProvider.p2p)
+                RoomP2PMediaTransport(
+                    room = client,
+                    options = options.p2p ?: RoomP2PMediaTransportOptions(),
+                )
         }
     }
 

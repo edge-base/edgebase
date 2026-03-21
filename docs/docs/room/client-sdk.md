@@ -329,7 +329,8 @@ The rest of this page keeps the flat compatibility methods documented because th
 The provider mix is still rolling out:
 
 - Web, React Native, and Flutter support `cloudflare_realtimekit` and `p2p`
-- Swift iOS, Kotlin, and Java currently support `cloudflare_realtimekit`
+- Swift iOS and Java currently support `cloudflare_realtimekit`
+- Kotlin currently supports `cloudflare_realtimekit` and `p2p` on Android, while other KMP targets keep the same API surface but still return a not-yet-available runtime error
 - C#/Unity and C++/Unreal expose matching Room Media transport/provider entry points, but those provider implementations still return a "not available yet" error and point to [Room Media](/docs/room/media)
 :::
 

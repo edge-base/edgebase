@@ -53,6 +53,7 @@ data class RoomCloudflareRealtimeKitTransportOptions(
 data class RoomMediaTransportOptions(
     val provider: RoomMediaTransportProvider = RoomMediaTransportProvider.cloudflare_realtimekit,
     val cloudflareRealtimeKit: RoomCloudflareRealtimeKitTransportOptions? = null,
+    val p2p: RoomP2PMediaTransportOptions? = null,
 )
 
 data class RoomCloudflareRealtimeKitClientFactoryOptions(
@@ -124,6 +125,7 @@ interface RoomCloudflareRealtimeKitClientAdapter {
 }
 
 internal expect fun defaultCloudflareRealtimeKitClientFactory(): RoomCloudflareRealtimeKitClientFactory?
+internal expect fun defaultP2PMediaRuntimeFactory(): RoomP2PMediaRuntimeFactory?
 
 internal class RoomCloudflareMediaTransport(
     private val room: RoomClient,

@@ -129,7 +129,7 @@ The main client APIs are:
 
 - Web, React Native, and Flutter support `cloudflare_realtimekit` and `p2p`
 - Swift iOS currently supports `cloudflare_realtimekit`
-- Kotlin currently exposes the same transport API everywhere, with `cloudflare_realtimekit` wired on Android first
+- Kotlin currently exposes the same transport API everywhere, with Android wiring both `cloudflare_realtimekit` and `p2p` first
 - Java currently exposes the same transport API, with `cloudflare_realtimekit` wired through the Android runtime package
 - C#/Unity and C++/Unreal expose aligned placeholder entry points that currently return a "not available yet" error and point back to this guide
 

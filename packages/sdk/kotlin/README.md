@@ -76,19 +76,19 @@ client.destroy()
 
 ## Room Media Transport
 
-The Kotlin client surface includes `room.media.transport(...)` with `cloudflare_realtimekit`
-as the currently available provider on Android.
+The Kotlin client surface includes `room.media.transport(...)` with both
+`cloudflare_realtimekit` and `p2p` wired on Android.
 
 Important runtime note:
 
 - the Kotlin Multiplatform room surface compiles across Android, iOS, macOS, JS, and JVM
-- the built-in `cloudflare_realtimekit` runtime is currently wired on Android
+- the built-in `cloudflare_realtimekit` and `p2p` runtimes are currently wired on Android
 - Apple/JS/JVM targets keep the same API surface but currently report transport-unavailable at runtime
-- `p2p` is still in progress on the Kotlin runtime everywhere
 
 Current verification note:
 
 - Android, iOS simulator, macOS, and JS targets all compile from the monorepo
+- Android runtime/provider selection is verified for both `cloudflare_realtimekit` and `p2p`
 - the strongest runtime path today is Android
 - other KMP targets should currently be treated as surface-compatible but not media-runtime-complete
 - Android host-app smoke builds succeeded once the app used AGP 8.6+ and compileSdk 35+
