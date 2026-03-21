@@ -27,6 +27,8 @@ export class ClientAnalytics {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly FLUSH_INTERVAL = 5_000;  // 5 seconds
   private readonly MAX_BATCH = 20;           // 20 events per batch
+  private consecutiveFailures = 0;
+  private readonly MAX_CONSECUTIVE_FAILURES = 3;
 
   private boundVisibilityHandler: (() => void) | null = null;
   private boundPageHideHandler: (() => void) | null = null;
@@ -93,9 +95,14 @@ export class ClientAnalytics {
       } else {
         await this.httpClient.post(ApiPaths.TRACK_EVENTS, payload);
       }
+      this.consecutiveFailures = 0;
     } catch {
-      // Failed — re-queue for one retry (don't retry infinitely)
-      this.queue.unshift(...batch);
+      this.consecutiveFailures++;
+      if (this.consecutiveFailures <= this.MAX_CONSECUTIVE_FAILURES) {
+        // Re-queue for retry (up to MAX_CONSECUTIVE_FAILURES times)
+        this.queue.unshift(...batch);
+      }
+      // Beyond limit: drop the batch to prevent unbounded memory growth
     }
 
     // If there are still events in the queue, schedule another flush

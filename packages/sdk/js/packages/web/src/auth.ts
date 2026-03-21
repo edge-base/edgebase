@@ -5,6 +5,7 @@
  *: signUp with data
  */
 
+import { EdgeBaseError } from '@edge-base/core';
 import type { HttpClient, GeneratedDbApi } from '@edge-base/core';
 import type { TokenManager, TokenUser, AuthStateChangeHandler } from './token-manager.js';
 import { resolveCaptchaToken } from './turnstile.js';
@@ -526,7 +527,11 @@ export class AuthClient {
   /** Update current user's profile */
   async updateProfile(data: UpdateProfileOptions): Promise<TokenUser> {
     const result = await this.core.authUpdateProfile(data) as Partial<AuthResult>;
-    return this.syncAuthResult(result)!;
+    const user = this.syncAuthResult(result);
+    if (!user) {
+      throw new EdgeBaseError(500, 'Profile update succeeded but no user data was returned.');
+    }
+    return user;
   }
 
   /**
@@ -540,7 +545,11 @@ export class AuthClient {
    */
   async updateLocale(locale: string): Promise<TokenUser> {
     const result = await this.core.authUpdateProfile({ locale }) as Partial<AuthResult>;
-    return this.syncAuthResult(result)!;
+    const user = this.syncAuthResult(result);
+    if (!user) {
+      throw new EdgeBaseError(500, 'Locale update succeeded but no user data was returned.');
+    }
+    return user;
   }
 
   // ─── Email Verification & Password Reset (M14,) ───

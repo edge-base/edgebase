@@ -44,13 +44,22 @@ function loadTurnstileScript(): Promise<void> {
   if (scriptLoading) return scriptLoading;
 
   scriptLoading = new Promise<void>((resolve, reject) => {
+    const POLL_TIMEOUT_MS = 10_000;
+    const POLL_INTERVAL_MS = 50;
+
+    const pollForTurnstile = (startedAt: number) => {
+      if (window.turnstile) { scriptLoaded = true; resolve(); return; }
+      if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+        scriptLoading = null;
+        reject(new Error('Turnstile script loaded but window.turnstile not available'));
+        return;
+      }
+      setTimeout(() => pollForTurnstile(startedAt), POLL_INTERVAL_MS);
+    };
+
     // Check if already in DOM
     if (document.querySelector(`script[src^="${TURNSTILE_SCRIPT_URL}"]`)) {
-      const check = () => {
-        if (window.turnstile) { scriptLoaded = true; resolve(); }
-        else setTimeout(check, 50);
-      };
-      check();
+      pollForTurnstile(Date.now());
       return;
     }
 
@@ -59,11 +68,7 @@ function loadTurnstileScript(): Promise<void> {
     script.async = true;
     script.defer = true;
     script.onload = () => {
-      const check = () => {
-        if (window.turnstile) { scriptLoaded = true; resolve(); }
-        else setTimeout(check, 50);
-      };
-      check();
+      pollForTurnstile(Date.now());
     };
     script.onerror = () => {
       scriptLoading = null;
