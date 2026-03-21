@@ -150,10 +150,17 @@ function parsePath(urlPath: string): string[] {
 }
 
 function sanitizeForLog(value: string): string {
+  const escape = String.fromCharCode(27);
+  const ansiPattern = new RegExp(`${escape}\\[[0-9;]*[A-Za-z]`, 'g');
   return value
-    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
+    .replace(ansiPattern, '')
     .replace(/[\r\n\t]+/g, ' ')
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, '?');
+    .split('')
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      return code <= 0x1f || (code >= 0x7f && code <= 0x9f) ? '?' : char;
+    })
+    .join('');
 }
 
 function isDynamicDbBlock(
