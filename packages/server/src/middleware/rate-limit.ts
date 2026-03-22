@@ -50,17 +50,17 @@ export const RATE_LIMIT_DEFAULTS: Record<string, { requests: number; windowSec: 
   events:      { requests: 100,        windowSec: 60 },
 };
 
-// Dev mode defaults: 10x higher to accommodate React strict mode double-rendering,
-// hot-reload page refreshes, and onSnapshot polling during development.
+// Dev mode defaults: significantly higher to accommodate React strict mode double-rendering,
+// hot-reload page refreshes, onSnapshot polling, and multi-client testing during development.
 export const RATE_LIMIT_DEV_DEFAULTS: Record<string, { requests: number; windowSec: number }> = {
   global:      { requests: 10_000_000, windowSec: 60 },
-  db:          { requests: 1000,       windowSec: 60 },
-  storage:     { requests: 500,        windowSec: 60 },
-  functions:   { requests: 500,        windowSec: 60 },
-  auth:        { requests: 300,        windowSec: 60 },
+  db:          { requests: 5000,       windowSec: 60 },
+  storage:     { requests: 1000,       windowSec: 60 },
+  functions:   { requests: 1000,       windowSec: 60 },
+  auth:        { requests: 500,        windowSec: 60 },
   authSignin:  { requests: 100,        windowSec: 60 },
   authSignup:  { requests: 100,        windowSec: 60 },
-  events:      { requests: 1000,       windowSec: 60 },
+  events:      { requests: 5000,       windowSec: 60 },
 };
 
 // ─── Window parser ───
@@ -256,7 +256,7 @@ export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) =
   if (!counter.check(counterKey, requests, windowSec)) {
     c.header('Retry-After', String(counter.getRetryAfter(counterKey)));
     return c.json(
-      { code: 429, message: 'Too many requests. Please try again later.' },
+      { code: 429, message: 'Too many requests. Please try again later.', group },
       429,
     );
   }
@@ -268,7 +268,7 @@ export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) =
     if (!success) {
       c.header('Retry-After', '60');
       return c.json(
-        { code: 429, message: 'Too many requests. Please try again later.' },
+        { code: 429, message: 'Too many requests. Please try again later.', group },
         429,
       );
     }
@@ -282,7 +282,7 @@ export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) =
     if (!counter.check(globalKey, globalLimit.requests, globalLimit.windowSec)) {
       c.header('Retry-After', String(counter.getRetryAfter(globalKey)));
       return c.json(
-        { code: 429, message: 'Too many requests. Please try again later.' },
+        { code: 429, message: 'Too many requests. Please try again later.', group },
         429,
       );
     }
@@ -294,7 +294,7 @@ export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) =
       if (!success) {
         c.header('Retry-After', '60');
         return c.json(
-          { code: 429, message: 'Too many requests. Please try again later.' },
+          { code: 429, message: 'Too many requests. Please try again later.', group },
           429,
         );
       }
