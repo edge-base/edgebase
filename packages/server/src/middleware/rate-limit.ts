@@ -282,7 +282,7 @@ export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) =
     if (!counter.check(globalKey, globalLimit.requests, globalLimit.windowSec)) {
       c.header('Retry-After', String(counter.getRetryAfter(globalKey)));
       return c.json(
-        { code: 429, message: 'Too many requests. Please try again later.', group },
+        { code: 429, message: 'Too many requests. Please try again later.', group: 'global' },
         429,
       );
     }
@@ -294,7 +294,7 @@ export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) =
       if (!success) {
         c.header('Retry-After', '60');
         return c.json(
-          { code: 429, message: 'Too many requests. Please try again later.', group },
+          { code: 429, message: 'Too many requests. Please try again later.', group: 'global' },
           429,
         );
       }

@@ -546,7 +546,10 @@ export class RoomClient {
         this.requestCloudflareRealtimeKitMedia('session', 'POST', payload),
     },
     transport: (options?: RoomMediaTransportOptions): RoomMediaTransport => {
-      const provider = options?.provider ?? 'p2p';
+      // Infer provider from options: if cloudflareRealtimeKit config is present, use it;
+      // otherwise default to p2p for zero-config local development.
+      const hasCloudflareConfig = options && 'cloudflareRealtimeKit' in options && (options as RoomCloudflareRealtimeKitTransportFactoryOptions).cloudflareRealtimeKit != null;
+      const provider = options?.provider ?? (hasCloudflareConfig ? 'cloudflare_realtimekit' : 'p2p');
       if (provider === 'p2p') {
         const p2pOptions = (options as RoomP2PTransportFactoryOptions | undefined)?.p2p;
         return new RoomP2PMediaTransport(this, p2pOptions);

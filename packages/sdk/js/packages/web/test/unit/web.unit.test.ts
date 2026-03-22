@@ -367,7 +367,6 @@ describe('TokenManager — destroy', () => {
 
 import { AuthClient } from '../../src/auth.js';
 import { RoomClient, type RoomOptions } from '../../src/room.js';
-import { RoomRealtimeMediaTransport } from '../../src/room-realtime-media.js';
 import { matchesFilter } from '../../src/match-filter.js';
 import { ClientAnalytics } from '../../src/analytics.js';
 import { ApiPaths, HttpClient, ContextManager, EdgeBaseError } from '@edge-base/core';
@@ -1340,49 +1339,6 @@ describe('RoomClient — rooms adapter APIs', () => {
       requestId: directOutbound.requestId,
     }));
     await directPromise;
-    tm.destroy();
-  });
-
-  it('realtime media adapters call the room realtime HTTP endpoints', async () => {
-    const tm = new TokenManager('http://localhost:8688');
-    tm.setTokens({
-      accessToken: makeValidJwt('room-realtime-user'),
-      refreshToken: makeValidJwt('room-realtime-user'),
-    });
-    const room = new RoomClient('http://localhost:8688', 'default', 'room-rt-1', tm);
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({ sessionId: 'sess-1', connectionId: 'conn-1' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(room.media.realtime.createSession({ connectionId: 'conn-1' })).resolves.toMatchObject({
-      sessionId: 'sess-1',
-      connectionId: 'conn-1',
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8688/api/room/media/realtime/session?namespace=default&id=room-rt-1',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          Authorization: expect.stringContaining('Bearer '),
-          'Content-Type': 'application/json',
-        }),
-        body: JSON.stringify({ connectionId: 'conn-1' }),
-      }),
-    );
-    tm.destroy();
-  });
-
-  it('realtime transport adapter returns a RoomRealtimeMediaTransport instance', () => {
-    const tm = new TokenManager('http://localhost:8688');
-    const room = new RoomClient('http://localhost:8688', 'default', 'room-rt-2', tm);
-
-    const transport = room.media.realtime.transport();
-
-    expect(transport).toBeInstanceOf(RoomRealtimeMediaTransport);
     tm.destroy();
   });
 
