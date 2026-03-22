@@ -141,6 +141,15 @@ export const initCommand = new Command('init')
           : '.gitignore (already exists)',
     );
 
+    logManagedMarkdownStatus('AGENTS.md', ensureScaffoldManagedMarkdown(
+      join(projectDir, 'AGENTS.md'),
+      EDGEBASE_AGENTS_GUIDANCE,
+    ));
+    logManagedMarkdownStatus('.github/copilot-instructions.md', ensureScaffoldManagedMarkdown(
+      join(projectDir, '.github', 'copilot-instructions.md'),
+      EDGEBASE_COPILOT_GUIDANCE,
+    ));
+
     ensureRuntimeScaffold(projectDir);
     console.log(chalk.green('  ✓'), '.edgebase/runtime scaffold');
 
@@ -341,6 +350,43 @@ const GITIGNORE_RULES = [
 ] as const;
 
 const GITIGNORE_TEMPLATE = `${GITIGNORE_RULES.join('\n')}\n`;
+
+const EDGEBASE_GUIDANCE_START = '<!-- edgebase:ai-hints:start -->';
+const EDGEBASE_GUIDANCE_END = '<!-- edgebase:ai-hints:end -->';
+
+const EDGEBASE_AGENTS_GUIDANCE = `${EDGEBASE_GUIDANCE_START}
+# EdgeBase AI Instructions
+
+This repository uses EdgeBase.
+
+- If a task touches \`edgebase.config.ts\`, \`functions/\`, auth, database, storage, rooms, or deploy flows, use the installed \`edgebase\` skill first when it is available.
+- Choose the SDK by runtime and trust boundary before writing code:
+  - browser or other untrusted JS/TS client -> client/web SDK
+  - trusted backend using Service Keys -> admin SDK
+  - server code acting as the current cookie-authenticated user -> SSR SDK
+- If the repo already imports a specific \`@edge-base/*\` package, follow that package boundary instead of guessing.
+- Prefer local contracts over guesses:
+  - \`edgebase.config.ts\`
+  - \`functions/\`
+  - \`package.json\` scripts
+  - installed \`llms.txt\` files under \`node_modules/@edge-base/*/llms.txt\` and \`node_modules/create-edgebase/llms.txt\`
+- Never expose service keys in browser, mobile, desktop, or game client code.
+${EDGEBASE_GUIDANCE_END}
+`;
+
+const EDGEBASE_COPILOT_GUIDANCE = `${EDGEBASE_GUIDANCE_START}
+# EdgeBase Copilot Instructions
+
+- Use the installed \`edgebase\` skill for EdgeBase-specific work when it is available.
+- Inspect \`edgebase.config.ts\`, \`functions/\`, and the imported \`@edge-base/*\` package before generating code.
+- Choose the SDK by trust boundary:
+  - browser or other untrusted client -> client/web SDK
+  - trusted backend with Service Keys -> admin SDK
+  - server code acting as the current cookie-authenticated user -> SSR SDK
+- Prefer installed \`llms.txt\` files under \`node_modules/@edge-base/*/llms.txt\` and \`node_modules/create-edgebase/llms.txt\` over guessed package surfaces.
+- Never place service keys in shipped client code.
+${EDGEBASE_GUIDANCE_END}
+`;
 
 function resolveLocalCliEntry(projectDir: string): string | null {
   let currentDir = resolve(projectDir);
@@ -559,6 +605,58 @@ function ensureScaffoldGitignore(gitignorePath: string): boolean {
   const prefix = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
   writeFileSync(gitignorePath, `${existing}${prefix}${missingRules.join('\n')}\n`, 'utf-8');
   return true;
+}
+
+function logManagedMarkdownStatus(fileLabel: string, status: 'created' | 'updated' | 'unchanged'): void {
+  console.log(
+    status === 'created' || status === 'updated' ? chalk.green('  ✓') : chalk.yellow('  ⏭'),
+    status === 'created'
+      ? fileLabel
+      : status === 'updated'
+        ? `${fileLabel} (updated)`
+        : `${fileLabel} (already exists)`,
+  );
+}
+
+function ensureScaffoldManagedMarkdown(
+  filePath: string,
+  block: string,
+): 'created' | 'updated' | 'unchanged' {
+  const normalizedBlock = block.endsWith('\n') ? block : `${block}\n`;
+  mkdirSync(dirname(filePath), { recursive: true });
+
+  if (!existsSync(filePath)) {
+    writeFileSync(filePath, normalizedBlock, 'utf-8');
+    return 'created';
+  }
+
+  const existing = readFileSync(filePath, 'utf-8');
+  const next = upsertManagedBlock(existing, normalizedBlock);
+
+  if (next === existing) {
+    return 'unchanged';
+  }
+
+  writeFileSync(filePath, next, 'utf-8');
+  return 'updated';
+}
+
+function upsertManagedBlock(existing: string, block: string): string {
+  const startIndex = existing.indexOf(EDGEBASE_GUIDANCE_START);
+  const endIndex = existing.indexOf(EDGEBASE_GUIDANCE_END);
+
+  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+    const before = existing.slice(0, startIndex);
+    const after = existing.slice(endIndex + EDGEBASE_GUIDANCE_END.length);
+    return `${before}${block}${after.startsWith('\n') || after.length === 0 ? '' : '\n'}${after}`;
+  }
+
+  if (existing.length === 0) {
+    return block;
+  }
+
+  const separator = existing.endsWith('\n\n') ? '' : existing.endsWith('\n') ? '\n' : '\n\n';
+  return `${existing}${separator}${block}`;
 }
 
 function ensureStringMap(

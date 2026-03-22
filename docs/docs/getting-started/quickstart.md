@@ -18,6 +18,8 @@ npm create edgebase@latest my-app
 That's it — one command. `create-edgebase` scaffolds the project, installs the local EdgeBase packages, and starts the dev server.
 If you only want the files without starting a persistent session, use `npm create edgebase@latest my-app -- --no-dev`.
 
+The scaffold also writes EdgeBase-specific AI hint files into `AGENTS.md` and `.github/copilot-instructions.md` so coding agents can recognize the project structure and pick the right SDK/package boundary more reliably.
+
 The scaffolded project structure:
 
 ```
@@ -46,6 +48,10 @@ cd my-app
 npx edgebase dev
 ```
 Open the dashboard manually at `http://localhost:8787/admin`, or use `npx edgebase dev --open` if you want the browser opened automatically.
+:::
+
+:::tip Using AI?
+If an agent is helping with the setup, have it read [Use EdgeBase With AI](/docs/getting-started/ai) before it generates runtime-specific code.
 :::
 
 ## 2. Install an SDK

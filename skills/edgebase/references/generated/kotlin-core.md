@@ -1,0 +1,58 @@
+<!-- Generated from packages/sdk/kotlin/core/llms.txt. Do not edit directly; update the source llms.txt and rerun `node tools/agent-skill-gen/generate.mjs`. -->
+
+# EdgeBase Kotlin Core
+
+Use this file as a quick-reference contract for AI coding assistants working with the
+Kotlin shared runtime module.
+
+## Package Boundary
+
+Use the core module only as a shared dependency for the Kotlin client and admin SDKs.
+
+It does not expose the app-facing `ClientEdgeBase` or the server-facing `AdminEdgeBase`
+entrypoints.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/kotlin/core/README.md
+- Root README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/kotlin/README.md
+- SDK Overview: https://edgebase.fun/docs/sdks
+
+## Public Artifact
+
+- `com.github.edge-base.edgebase:edgebase-core:v0.1.5`
+- this is the current JitPack JVM publication for the shared `:core` module
+
+## Canonical Examples
+
+### HTTP and query helpers
+
+```kotlin
+// Shared runtime helpers live in the core module.
+```
+
+### Error handling
+
+```kotlin
+try {
+    // core call
+} catch (e: EdgeBaseError) {
+    println(e.statusCode)
+}
+```
+
+## Hard Rules
+
+- do not use the core module as the public app entrypoint
+- keep client-specific auth/session behavior in `:client`
+- keep Service Key workflows in `:admin`
+
+## Quick Reference
+
+```text
+HttpClient                   -> shared HTTP client
+TableRef                     -> shared query builder
+DbRef                        -> shared namespace reference
+EdgeBaseError                -> exception type
+FieldOps                     -> atomic field helpers
+```

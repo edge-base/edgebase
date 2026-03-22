@@ -1,0 +1,3 @@
+interface:
+  display_name: "EdgeBase"
+  short_description: "Route EdgeBase tasks to the right CLI or SDK reference"

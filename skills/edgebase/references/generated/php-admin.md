@@ -1,0 +1,118 @@
+<!-- Generated from packages/sdk/php/packages/admin/llms.txt. Do not edit directly; update the source llms.txt and rerun `node tools/agent-skill-gen/generate.mjs`. -->
+
+# EdgeBase PHP Admin SDK
+
+Use this file as a quick-reference contract for AI coding assistants working with `edgebase/admin`.
+
+## Package Boundary
+
+Use `edgebase/admin` only in trusted server-side PHP environments.
+
+Do not ship this package to browsers, mobile clients, or untrusted code. It is meant for backend APIs, workers, cron jobs, and other places where a Service Key can stay private.
+
+`edgebase/admin` is the intended public Composer package name, but the current monorepo still needs a Packagist-compatible publish path before that install works from Packagist.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/php/packages/admin/README.md
+- Database Admin SDK: https://edgebase.fun/docs/database/admin-sdk
+- Admin users: https://edgebase.fun/docs/authentication/admin-users
+- Storage: https://edgebase.fun/docs/storage/upload-download
+- Push Admin SDK: https://edgebase.fun/docs/push/admin-sdk
+- Analytics Admin SDK: https://edgebase.fun/docs/analytics/admin-sdk
+- Admin SDK reference: https://edgebase.fun/docs/admin-sdk/reference
+
+If docs, examples, and assumptions disagree, prefer the current package API and the official docs over guessed patterns.
+
+## Canonical Examples
+
+### Create an admin client
+
+```php
+use EdgeBase\Admin\AdminClient;
+
+$admin = new AdminClient(
+    'https://your-project.edgebase.fun',
+    getenv('EDGEBASE_SERVICE_KEY') ?: ''
+);
+```
+
+### Query a table
+
+```php
+$posts = $admin->db('app')->table('posts');
+$rows = $posts->where('status', '==', 'published')->get();
+```
+
+### Manage users
+
+```php
+$created = $admin->adminAuth->createUser([
+    'email' => 'june@example.com',
+    'password' => 'pass1234',
+    'displayName' => 'June',
+]);
+
+$admin->adminAuth->setCustomClaims($created['id'], [
+    'role' => 'moderator',
+]);
+```
+
+### Execute SQL
+
+```php
+$rows = $admin->sql(
+    'workspace',
+    'ws-1',
+    'SELECT * FROM documents WHERE status = ?',
+    ['published']
+);
+```
+
+### Send push and query analytics
+
+```php
+$admin->push()->send('user-123', [
+    'title' => 'Hello',
+    'body' => 'From the admin SDK',
+]);
+
+$overview = $admin->analytics()->overview(['range' => '7d']);
+```
+
+## Hard Rules
+
+- keep Service Keys on trusted servers only
+- `adminAuth` and `storage` are properties on `AdminClient`
+- `push()`, `functions()`, `analytics()`, `kv()`, `d1()`, and `vector()` are methods that return clients
+- `admin.sql(namespace, id, query, params?)` always uses an explicit namespace, and uses `null` for the instance ID on single-instance blocks
+- `admin.broadcast(channel, event, payload?)` is server-side broadcast
+- `adminAuth->createUser()` expects an array payload, not positional arguments
+- `functions()` exposes `call()`, `get()`, `post()`, `put()`, `patch()`, and `delete()`
+- `destroy()` is a no-op cleanup hook
+
+## Common Mistakes
+
+- do not use `edgebase/admin` in client-side PHP code
+- do not call `sql('SELECT ...')` without a namespace
+- do not pass the instance ID as a named array; pass it as the second argument to `db()`
+- do not copy JavaScript promise-based examples into PHP
+- do not expect `push()` or `analytics()` to be properties
+
+## Quick Reference
+
+```text
+new AdminClient(url, serviceKey)                -> AdminClient
+$admin->adminAuth                               -> AdminAuthClient
+$admin->storage                                 -> StorageClient
+$admin->db(namespace, instanceId = null)        -> DbRef
+$admin->sql(namespace, id, query, params = [])   -> array
+$admin->broadcast(channel, event, payload = []) -> void
+$admin->push()                                  -> PushClient
+$admin->functions()                             -> FunctionsClient
+$admin->analytics()                             -> AnalyticsClient
+$admin->kv(namespace)                           -> KvClient
+$admin->d1(database)                            -> D1Client
+$admin->vector(index)                           -> VectorizeClient
+$admin->destroy()                               -> void
+```

@@ -52,6 +52,7 @@ const sidebars = {
           link: {type: 'doc', id: 'getting-started/introduction'},
           items: [
             'getting-started/quickstart',
+            'getting-started/ai',
             'getting-started/configuration',
             'getting-started/deployment',
             'getting-started/self-hosting',

@@ -56,6 +56,8 @@ npm create edgebase@latest my-app
 
 This package ships with an `llms.txt` file for AI-assisted scaffolding.
 
+For the higher-level SDK and trust-boundary rules, start with the official [Use EdgeBase With AI](https://edgebase.fun/docs/getting-started/ai) guide and then read this package's `llms.txt` for scaffold-specific details.
+
 You can find it:
 
 - after install: `node_modules/create-edgebase/llms.txt`
@@ -115,9 +117,11 @@ Typical outputs include:
 - `functions/`
 - `package.json` with local EdgeBase dev dependencies and scripts
 - `.gitignore` entries for local secrets and generated files
+- `AGENTS.md` and `.github/copilot-instructions.md` with EdgeBase-specific AI guidance
 - local runtime metadata under `.edgebase/` during development and deploy flows
 
 If the target directory already contains `package.json` or `.gitignore`, the scaffold merges EdgeBase-specific entries instead of blindly replacing the file.
+If the target directory already contains `AGENTS.md` or `.github/copilot-instructions.md`, the scaffold preserves existing content and refreshes the managed EdgeBase guidance block.
 
 ## What Happens Next
 

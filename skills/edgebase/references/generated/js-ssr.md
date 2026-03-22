@@ -1,0 +1,98 @@
+<!-- Generated from packages/sdk/js/packages/ssr/llms.txt. Do not edit directly; update the source llms.txt and rerun `node tools/agent-skill-gen/generate.mjs`. -->
+
+# EdgeBase JS SSR SDK
+
+Use this file as a quick-reference contract for AI coding assistants working with `@edge-base/ssr`.
+
+## Package Boundary
+
+Use `@edge-base/ssr` for server-side code that should act as the current cookie-authenticated user.
+
+Do not use it for browser bundles or client-side sign-in UI. Use `@edge-base/web` there. Do not use it for Service Key admin work; use `@edge-base/admin`.
+
+## Source Of Truth
+
+- Package README: https://github.com/edge-base/edgebase/blob/main/packages/sdk/js/packages/ssr/README.md
+- Next.js guide: https://edgebase.fun/docs/sdks/nextjs
+- Client vs server SDKs: https://edgebase.fun/docs/sdks/client-vs-server
+- Authentication: https://edgebase.fun/docs/authentication
+- Database client SDK: https://edgebase.fun/docs/database/client-sdk
+
+## Canonical Examples
+
+### Create a server client
+
+```ts
+import { createServerClient } from '@edge-base/ssr';
+
+const client = createServerClient(process.env.EDGEBASE_URL!, {
+  cookies: {
+    get: (name) => cookieStore.get(name)?.value,
+    set: (name, value, options) => cookieStore.set(name, value, options),
+    delete: (name) => cookieStore.delete(name),
+  },
+});
+```
+
+### Read the current user
+
+```ts
+const user = client.getUser();
+```
+
+### Query data on the server
+
+```ts
+const posts = await client
+  .db('app')
+  .table('posts')
+  .where('published', '==', true)
+  .getList();
+```
+
+### Write cookies after an OAuth callback
+
+```ts
+client.setSession({
+  accessToken,
+  refreshToken,
+});
+```
+
+### Clear the session
+
+```ts
+client.clearSession();
+```
+
+## Hard Rules
+
+- `createServerClient(url, options)` requires a cookie adapter
+- the cookie adapter must implement `get(name)`, `set(name, value, options?)`, and `delete(name)`
+- `getUser()` is synchronous and returns decoded JWT payload data or `null`
+- `getSession()` is synchronous
+- `setSession()` and `clearSession()` are synchronous cookie operations
+- `client.db(namespace, id?)` takes the instance id positionally
+- this package exposes `db`, `storage`, and `functions`
+- this package does not expose browser auth flows, database live, rooms, or push
+
+## Common Mistakes
+
+- do not call browser-only auth methods like `client.auth.signIn()` here; this package does not expose them
+- do not use `@edge-base/ssr` in client components
+- do not confuse `getUser()` with a server-side verification call; it decodes the cookie token payload
+- if you need privileged admin access or Service Key behavior, use `@edge-base/admin`
+- if you need browser auth state listeners or realtime UI, use `@edge-base/web`
+
+## Quick Reference
+
+```text
+createServerClient(url, { cookies, cookieOptions?, serviceKey? }) -> ServerEdgeBase
+client.getUser()                                                  -> ServerUser | null
+client.getSession()                                               -> { accessToken, refreshToken }
+client.setSession(tokens)                                         -> void
+client.clearSession()                                             -> void
+client.db(namespace, id?)                                         -> DbRef
+client.storage                                                    -> StorageClient
+client.functions                                                  -> FunctionsClient
+```

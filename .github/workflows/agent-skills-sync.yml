@@ -1,0 +1,110 @@
+name: Agent Skills Sync
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+    paths:
+      - 'skills/edgebase/**'
+      - 'tools/agent-skill-gen/**'
+      - 'packages/cli/llms.txt'
+      - 'packages/create-edgebase/llms.txt'
+      - 'packages/plugins/core/llms.txt'
+      - 'packages/sdk/**/llms.txt'
+      - 'package.json'
+  workflow_dispatch:
+    inputs:
+      sync_mode:
+        description: Sync branch or tag
+        required: false
+        default: branch
+        type: choice
+        options:
+          - branch
+          - tag
+      tag_name:
+        description: Tag name to mirror when sync_mode=tag
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-skills-sync-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.sync_mode == 'tag' && (github.event.inputs.tag_name || 'missing-tag') || 'main') || (github.ref_type == 'tag' && github.ref_name || 'main') }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync EdgeBase agent-skills repo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check push token
+        env:
+          EDGEBASE_AGENT_SKILLS_PUSH_TOKEN: ${{ secrets.EDGEBASE_AGENT_SKILLS_PUSH_TOKEN }}
+        run: |
+          if [[ -z "${EDGEBASE_AGENT_SKILLS_PUSH_TOKEN}" ]]; then
+            echo "::error::Missing secret EDGEBASE_AGENT_SKILLS_PUSH_TOKEN."
+            echo "::error::Create a token with contents:write access to the public agent-skills repository."
+            exit 1
+          fi
+
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.sync_mode == 'tag' && github.event.inputs.tag_name || 'main') || github.ref }}
+
+      - name: Configure sync target
+        id: config
+        env:
+          INPUT_SYNC_MODE: ${{ github.event.inputs.sync_mode }}
+          INPUT_TAG_NAME: ${{ github.event.inputs.tag_name }}
+          AGENT_SKILLS_REPO: ${{ vars.AGENT_SKILLS_REPO }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_REF_TYPE: ${{ github.ref_type }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          destination_repo="${AGENT_SKILLS_REPO:-edge-base/agent-skills}"
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            sync_mode="${INPUT_SYNC_MODE:-branch}"
+            if [[ "$sync_mode" == "tag" ]]; then
+              ref_name="${INPUT_TAG_NAME:-}"
+              if [[ -z "$ref_name" ]]; then
+                echo "::error::workflow_dispatch tag sync requires tag_name."
+                exit 1
+              fi
+            else
+              ref_name="main"
+            fi
+          else
+            if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+              sync_mode="tag"
+              ref_name="$GITHUB_REF_NAME"
+            else
+              sync_mode="branch"
+              ref_name="main"
+            fi
+          fi
+
+          echo "destination_repo=$destination_repo" >> "$GITHUB_OUTPUT"
+          echo "sync_mode=$sync_mode" >> "$GITHUB_OUTPUT"
+          echo "ref_name=$ref_name" >> "$GITHUB_OUTPUT"
+
+      - name: Sync public agent-skills repository
+        env:
+          EDGEBASE_AGENT_SKILLS_PUSH_TOKEN: ${{ secrets.EDGEBASE_AGENT_SKILLS_PUSH_TOKEN }}
+        run: |
+          chmod +x ./scripts/sync-agent-skills-repo.sh
+          ./scripts/sync-agent-skills-repo.sh \
+            "${{ steps.config.outputs.destination_repo }}" \
+            "${{ steps.config.outputs.sync_mode }}" \
+            "${{ steps.config.outputs.ref_name }}" \
+            "${EDGEBASE_AGENT_SKILLS_PUSH_TOKEN}" \
+            "${{ steps.config.outputs.destination_repo }}"

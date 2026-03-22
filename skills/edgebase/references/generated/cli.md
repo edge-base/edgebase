@@ -1,3 +1,5 @@
+<!-- Generated from packages/cli/llms.txt. Do not edit directly; update the source llms.txt and rerun `node tools/agent-skill-gen/generate.mjs`. -->
+
 # EdgeBase CLI
 
 Use this file as a quick-reference contract for AI coding assistants working with `@edge-base/cli`.

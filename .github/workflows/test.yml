@@ -68,10 +68,62 @@ jobs:
       - name: Regenerate Smoke Tests
         run: pnpm dlx tsx tools/smoke-gen/generate-smoke.ts
 
+      - name: Regenerate EdgeBase skill references
+        run: node tools/agent-skill-gen/generate.mjs
+
+      - name: Verify EdgeBase skill bundle
+        run: node tools/agent-skill-gen/verify.mjs
+
+      - name: Verify exported EdgeBase agent-skills repo
+        run: |
+          EXPORT_DIR="$(mktemp -d)"
+          node tools/agent-skill-gen/export.mjs --out-dir="$EXPORT_DIR"
+          node tools/agent-skill-gen/verify-export.mjs --dir="$EXPORT_DIR"
+          rm -rf "$EXPORT_DIR"
+
       - name: Check for drift
         run: |
-          mapfile -t GENERATED_PATHS < <(node tools/sdk-codegen/list-generated-paths.mjs)
-          git diff --exit-code -- "${GENERATED_PATHS[@]}" || (echo "Generated code is out of date. Run generators and commit." && exit 1)
+          check_generated_paths_clean() {
+            local label="$1"
+            shift
+
+            if ! git diff --exit-code -- "$@"; then
+              echo "${label} are out of date. Run generators and commit."
+              exit 1
+            fi
+
+            local untracked
+            untracked="$(git ls-files --others --exclude-standard -- "$@")"
+            if [ -n "$untracked" ]; then
+              echo "${label} include untracked files. Run generators and commit:"
+              echo "$untracked"
+              exit 1
+            fi
+          }
+
+          read_generated_paths() {
+            local label="$1"
+            shift
+            local output
+
+            if ! output="$("$@")"; then
+              echo "Failed to list ${label}."
+              exit 1
+            fi
+
+            if [ -z "$output" ]; then
+              echo "${label} path list is empty."
+              exit 1
+            fi
+
+            mapfile -t GENERATED_PATHS <<<"$output"
+          }
+
+          read_generated_paths "Generated code" node tools/sdk-codegen/list-generated-paths.mjs
+          check_generated_paths_clean "Generated code" "${GENERATED_PATHS[@]}"
+
+          read_generated_paths "Generated skill references" node tools/agent-skill-gen/list-generated-paths.mjs
+          check_generated_paths_clean "Generated skill references" "${GENERATED_PATHS[@]}"
 
   # ─── 5. JS SDK 단위 테스트 ──────────────────────────────────────────────────
   sdk-js-unit:
@@ -871,6 +923,7 @@ jobs:
   test-summary:
     name: Test Summary
     needs:
+      - generated-code-check
       - server-unit
       - openapi-check
       - sdk-js-unit
@@ -902,6 +955,7 @@ jobs:
       - name: Report
         run: |
           echo "=== Test Summary ==="
+          echo "Generated Code Drift: ${{ needs.generated-code-check.result }}"
           echo "Server Unit: ${{ needs.server-unit.result }}"
           echo "OpenAPI Check: ${{ needs.openapi-check.result }}"
           echo "JS SDK Unit: ${{ needs.sdk-js-unit.result }}"

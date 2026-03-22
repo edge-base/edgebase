@@ -195,3 +195,5 @@ Server route definition (Hono + Zod)
 This architecture also makes EdgeBase a strong fit for AI-assisted development. Instead of splitting your backend across dashboard clicks, policy DSLs, and project-side state, EdgeBase keeps more of the contract in code.
 
 Schema, access rules, hooks, functions, and type generation can stay in one repo and one TypeScript workflow. That lets an agent update the backend in one patch and makes review, diffs, and iteration much simpler.
+
+For the practical routing rules that keep agents on the right SDK and trust boundary, see [Use EdgeBase With AI](/docs/getting-started/ai).
