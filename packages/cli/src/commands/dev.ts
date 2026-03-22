@@ -455,7 +455,7 @@ function generateDevSecret(): string {
 }
 
 function resolveWorkerVarBindings(sidecarPort?: number): string[] {
-  const vars: string[] = [];
+  const vars: string[] = ['EDGEBASE_ALLOW_PUBLIC_ADMIN_SETUP:1'];
 
   if (sidecarPort) {
     vars.push(`EDGEBASE_DEV_SIDECAR_PORT:${sidecarPort}`);

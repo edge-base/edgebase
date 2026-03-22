@@ -100,6 +100,8 @@ export interface Env {
   EDGEBASE_USE_TEST_CONFIG?: string;
 
   // ─── Dev Mode ───
+  /** Enables browser-based first-admin setup for the local dev server. */
+  EDGEBASE_ALLOW_PUBLIC_ADMIN_SETUP?: string;
   /** Schema Editor sidecar port — set by CLI dev command via --var */
   EDGEBASE_DEV_SIDECAR_PORT?: string;
 }
