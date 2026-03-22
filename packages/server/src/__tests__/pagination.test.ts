@@ -45,11 +45,11 @@ describe('parsePagination', () => {
   });
 
   it('rejects negative offset', () => {
-    expect(parsePagination('20', '-10')).toEqual({ limit: 100, offset: 0 });
+    expect(parsePagination('20', '-10')).toEqual({ limit: 20, offset: 0 });
   });
 
   it('rejects NaN offset', () => {
-    expect(parsePagination('20', 'xyz')).toEqual({ limit: 100, offset: 0 });
+    expect(parsePagination('20', 'xyz')).toEqual({ limit: 20, offset: 0 });
   });
 
   it('rejects Infinity limit', () => {

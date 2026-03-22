@@ -560,7 +560,7 @@ describe('3-way sync: QUERY_PARAM_KEYS ↔ Zod queryParamsSchema', () => {
 describe('buildListQuery — exact params verification', () => {
   it('no filters → params contains only default limit', () => {
     const { params } = buildListQuery('t', {});
-    expect(params).toEqual([20]);
+    expect(params).toEqual([100]);
   });
 
   it('no filters → countParams is empty array', () => {
@@ -722,7 +722,7 @@ describe('buildSubstringSearchQuery', () => {
     const { sql, params } = buildSubstringSearchQuery('posts', '준규', { fields: ['title', 'content'] });
     expect(sql).toContain('instr(lower(CAST("title" AS TEXT)), lower(?)) > 0');
     expect(sql).toContain('instr(lower(CAST("content" AS TEXT)), lower(?)) > 0');
-    expect(params).toEqual(['준규', '준규', 20]);
+    expect(params).toEqual(['준규', '준규', 100]);
   });
 
   it('passes the raw term through the SQLite instr() fallback', () => {
