@@ -10,7 +10,7 @@ import { parsePagination } from '../lib/pagination.js';
 describe('parsePagination', () => {
   // ── Defaults ──
   it('returns defaults when no params provided', () => {
-    expect(parsePagination(undefined, undefined)).toEqual({ limit: 20, offset: 0 });
+    expect(parsePagination(undefined, undefined)).toEqual({ limit: 100, offset: 0 });
   });
 
   // ── Valid values ──
@@ -23,37 +23,41 @@ describe('parsePagination', () => {
   });
 
   // ── Limit clamping ──
-  it('clamps limit to 100', () => {
-    expect(parsePagination('999', '0')).toEqual({ limit: 100, offset: 0 });
+  it('clamps limit to 1000', () => {
+    expect(parsePagination('9999', '0')).toEqual({ limit: 1000, offset: 0 });
+  });
+
+  it('accepts limit within range (500)', () => {
+    expect(parsePagination('500', '0')).toEqual({ limit: 500, offset: 0 });
   });
 
   it('rejects limit=0 (falls back to default)', () => {
-    expect(parsePagination('0', '0')).toEqual({ limit: 20, offset: 0 });
+    expect(parsePagination('0', '0')).toEqual({ limit: 100, offset: 0 });
   });
 
   // ── REGRESSION: negative and NaN values ──
   it('rejects negative limit', () => {
-    expect(parsePagination('-5', '0')).toEqual({ limit: 20, offset: 0 });
+    expect(parsePagination('-5', '0')).toEqual({ limit: 100, offset: 0 });
   });
 
   it('rejects NaN limit', () => {
-    expect(parsePagination('abc', '0')).toEqual({ limit: 20, offset: 0 });
+    expect(parsePagination('abc', '0')).toEqual({ limit: 100, offset: 0 });
   });
 
   it('rejects negative offset', () => {
-    expect(parsePagination('20', '-10')).toEqual({ limit: 20, offset: 0 });
+    expect(parsePagination('20', '-10')).toEqual({ limit: 100, offset: 0 });
   });
 
   it('rejects NaN offset', () => {
-    expect(parsePagination('20', 'xyz')).toEqual({ limit: 20, offset: 0 });
+    expect(parsePagination('20', 'xyz')).toEqual({ limit: 100, offset: 0 });
   });
 
   it('rejects Infinity limit', () => {
-    expect(parsePagination('Infinity', '0')).toEqual({ limit: 20, offset: 0 });
+    expect(parsePagination('Infinity', '0')).toEqual({ limit: 100, offset: 0 });
   });
 
   // ── Empty string (same as undefined) ──
   it('treats empty strings as defaults', () => {
-    expect(parsePagination('', '')).toEqual({ limit: 20, offset: 0 });
+    expect(parsePagination('', '')).toEqual({ limit: 100, offset: 0 });
   });
 });

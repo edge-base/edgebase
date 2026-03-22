@@ -232,9 +232,9 @@ describe('1-04 query — buildSearchQuery', () => {
     expect(params).toContain(10);
   });
 
-  it('기본 limit = 20, offset = 0', () => {
+  it('기본 limit = 100, offset = 0', () => {
     const { params } = buildSearchQuery('posts', 'search');
-    expect(params).toContain(20);
+    expect(params).toContain(100);
     expect(params).not.toContain(0);
   });
 

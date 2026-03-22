@@ -657,10 +657,10 @@ function buildLimitClause(
   const _bt = bt ?? new BindTracker('sqlite');
 
   if (!pagination) {
-    return { limitClause: `LIMIT ${_bt.next()}`, limitParams: [20] }; // Default limit
+    return { limitClause: `LIMIT ${_bt.next()}`, limitParams: [100] }; // Default limit
   }
 
-  const limit = pagination.limit ?? pagination.perPage ?? 20;
+  const limit = pagination.limit ?? pagination.perPage ?? 100;
 
   // Cursor-based: no offset
   if (pagination.after || pagination.before) {
