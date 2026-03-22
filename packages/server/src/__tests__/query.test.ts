@@ -79,10 +79,10 @@ describe('buildListQuery — no filters', () => {
     expect(sql).toContain('LIMIT');
   });
 
-  it('default limit is 20', () => {
+  it('default limit is 100', () => {
     const { params } = buildListQuery('posts', {});
-    // params should contain 20 as default limit
-    expect(params).toContain(20);
+    // params should contain 100 as default limit
+    expect(params).toContain(100);
   });
 
   it('generates countSql for non-cursor pagination', () => {
@@ -313,9 +313,9 @@ describe('buildSearchQuery', () => {
     expect(sql).toContain('"posts_fts"');
   });
 
-  it('default limit 20, offset 0', () => {
+  it('default limit 100, offset 0', () => {
     const { params } = buildSearchQuery('posts', 'q');
-    expect(params[1]).toBe(20);
+    expect(params[1]).toBe(100);
     expect(params[2]).toBeUndefined();
   });
 
@@ -560,7 +560,7 @@ describe('3-way sync: QUERY_PARAM_KEYS ↔ Zod queryParamsSchema', () => {
 describe('buildListQuery — exact params verification', () => {
   it('no filters → params contains only default limit', () => {
     const { params } = buildListQuery('t', {});
-    expect(params).toEqual([20]);
+    expect(params).toEqual([100]);
   });
 
   it('no filters → countParams is empty array', () => {
@@ -722,7 +722,7 @@ describe('buildSubstringSearchQuery', () => {
     const { sql, params } = buildSubstringSearchQuery('posts', '준규', { fields: ['title', 'content'] });
     expect(sql).toContain('instr(lower(CAST("title" AS TEXT)), lower(?)) > 0');
     expect(sql).toContain('instr(lower(CAST("content" AS TEXT)), lower(?)) > 0');
-    expect(params).toEqual(['준규', '준규', 20]);
+    expect(params).toEqual(['준규', '준규', 100]);
   });
 
   it('passes the raw term through the SQLite instr() fallback', () => {
