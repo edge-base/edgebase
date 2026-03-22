@@ -33,7 +33,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: agent-skills-sync-${{ github.ref }}
+  group: agent-skills-sync-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.sync_mode == 'tag' && (github.event.inputs.tag_name || 'missing-tag') || 'main') || (github.ref_type == 'tag' && github.ref_name || 'main') }}
   cancel-in-progress: false
 
 jobs:
