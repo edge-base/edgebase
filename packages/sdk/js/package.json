@@ -1,60 +1,60 @@
 {
-  "name": "@edge-base/sdk",
-  "version": "0.1.5",
-  "private": true,
-  "description": "EdgeBase SDK — unified JavaScript/TypeScript client for EdgeBase",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/edge-base/edgebase.git",
-    "directory": "packages/sdk/js"
-  },
-  "homepage": "https://edgebase.fun",
-  "bugs": "https://github.com/edge-base/edgebase/issues",
-  "keywords": [
-    "edgebase",
-    "sdk",
-    "baas",
-    "backend",
-    "cloudflare-workers",
-    "database-live"
-  ],
-  "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+    "name": "@edge-base/sdk",
+    "version": "0.2.0",
+    "private": true,
+    "description": "EdgeBase SDK — unified JavaScript/TypeScript client for EdgeBase",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/edge-base/edgebase.git",
+        "directory": "packages/sdk/js"
+    },
+    "homepage": "https://edgebase.fun",
+    "bugs": "https://github.com/edge-base/edgebase/issues",
+    "keywords": [
+        "edgebase",
+        "sdk",
+        "baas",
+        "backend",
+        "cloudflare-workers",
+        "database-live"
+    ],
+    "type": "module",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "require": "./dist/index.cjs"
+        }
+    },
+    "sideEffects": false,
+    "files": [
+        "dist"
+    ],
+    "publishConfig": {
+        "access": "public"
+    },
+    "scripts": {
+        "build": "tsup",
+        "lint": "eslint src/",
+        "test": "TMPDIR=/tmp vitest run",
+        "test:e2e": "node ./scripts/run-e2e.mjs",
+        "dev": "tsc --watch",
+        "prepack": "pnpm run build"
+    },
+    "dependencies": {
+        "@edge-base/shared": "workspace:*",
+        "@edge-base/core": "workspace:*",
+        "@edge-base/web": "workspace:*",
+        "@edge-base/admin": "workspace:*"
+    },
+    "devDependencies": {
+        "tsup": "^8.0.0",
+        "typescript": "^5.7.0",
+        "vitest": "^3.0.0",
+        "happy-dom": "^16.0.0"
     }
-  },
-  "sideEffects": false,
-  "files": [
-    "dist"
-  ],
-  "publishConfig": {
-    "access": "public"
-  },
-  "scripts": {
-    "build": "tsup",
-    "lint": "eslint src/",
-    "test": "TMPDIR=/tmp vitest run",
-    "test:e2e": "node ./scripts/run-e2e.mjs",
-    "dev": "tsc --watch",
-    "prepack": "pnpm run build"
-  },
-  "dependencies": {
-    "@edge-base/shared": "workspace:*",
-    "@edge-base/core": "workspace:*",
-    "@edge-base/web": "workspace:*",
-    "@edge-base/admin": "workspace:*"
-  },
-  "devDependencies": {
-    "tsup": "^8.0.0",
-    "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "happy-dom": "^16.0.0"
-  }
 }

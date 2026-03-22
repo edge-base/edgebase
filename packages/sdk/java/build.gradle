@@ -3,7 +3,7 @@ plugins {
     id 'maven-publish'
 }
 
-def edgebaseReleaseVersion = '0.1.5'
+def edgebaseReleaseVersion = '0.2.0'
 def edgebaseGroup = System.getenv('JITPACK') ? 'com.github.edge-base.edgebase' : 'dev.edgebase'
 def edgebaseVersion = System.getenv('JITPACK') ? (System.getenv('VERSION') ?: "v${edgebaseReleaseVersion}") : edgebaseReleaseVersion
 

@@ -56,7 +56,7 @@ You can find it:
 ```scala
 resolvers += "jitpack" at "https://jitpack.io"
 
-libraryDependencies += "com.github.edge-base.edgebase" % "edgebase-admin-scala" % "v0.1.5"
+libraryDependencies += "com.github.edge-base.edgebase" % "edgebase-admin-scala" % "v0.2.0"
 ```
 
 This package wraps the Java admin runtime, so it stays JVM-only and publishes as a single Scala/JVM artifact.

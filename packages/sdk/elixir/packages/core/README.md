@@ -48,7 +48,7 @@ You can find it:
 ## Installation
 
 ```elixir
-{:edgebase_core, "~> 0.1.5"}
+{:edgebase_core, "~> 0.2.0"}
 ```
 
 If you consume the monorepo directly, use the path dependency already configured in this repository.
