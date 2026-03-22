@@ -14,6 +14,7 @@
 - [ ] I updated docs, examples, or generated outputs if needed.
 - [ ] I kept the change focused and scoped to a clear problem.
 - [ ] I considered compatibility, migration, or rollout impact.
+- [ ] If this PR does not target `main` or `develop`, I understand CodeQL may appear as `neutral` here and must be green on the final PR to `main`/`develop`.
 
 ## Breaking Changes
 

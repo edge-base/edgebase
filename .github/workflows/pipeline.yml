@@ -2,6 +2,9 @@ name: Pipeline
 
 on:
   pull_request:
+    # Intentionally limited to final PRs targeting protected branches.
+    # Stacked PRs against intermediate codex/* branches may therefore show
+    # GitHub's CodeQL code-scanning check as neutral/no-result, which is expected.
     types: [opened, synchronize, reopened]
     branches: [main, develop]
   push:
