@@ -21,6 +21,11 @@ export interface ITokenManager {
   clearTokens(): void;
 }
 
+/** Unified subscription handle — call unsubscribe() to stop listening. */
+export interface Subscription {
+  unsubscribe(): void;
+}
+
 /** Database-live change event — matches the actual DatabaseLiveClient callback shape. */
 export interface IDbChange<T = Record<string, unknown>> {
   changeType: 'added' | 'modified' | 'removed';
@@ -39,7 +44,7 @@ export interface IDatabaseLiveSubscriber {
     clientFilters?: unknown,
     serverFilters?: unknown,
     serverOrFilters?: unknown,
-  ): () => void;
+  ): Subscription;
 }
 
 /**
