@@ -435,7 +435,7 @@ async function handleList(
     total = Number(countResult.rows[0]?.total ?? 0);
   }
 
-  const perPage = queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 20;
+  const perPage = queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 100;
   const page = queryOpts.pagination?.page ?? 1;
   // Always include cursor/hasMore like DO does — clients can start cursor pagination from any page
   const hasMore = items.length === perPage;
@@ -497,7 +497,7 @@ async function handleSearch(
 
   let items: Record<string, unknown>[];
   let total = 0;
-  const limit = queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 20;
+  const limit = queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 100;
   const offset = queryOpts.pagination?.offset ?? ((queryOpts.pagination?.page ?? 1) - 1) * limit;
   const searchQuery = buildSearchQuery(tableName, searchTerm, {
     pagination: queryOpts.pagination,

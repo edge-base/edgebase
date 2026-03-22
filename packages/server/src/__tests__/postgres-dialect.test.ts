@@ -43,7 +43,7 @@ describe('PostgreSQL dialect — bind params', () => {
     const { sql, params } = buildListQuery('products', {}, 'postgres');
     expect(sql).toContain('LIMIT $1');
     expect(sql).not.toContain('?');
-    expect(params).toEqual([20]);
+    expect(params).toEqual([100]);
   });
 
   it('buildListQuery with offset → $1 OFFSET $2', () => {
@@ -71,7 +71,7 @@ describe('PostgreSQL dialect — bind params', () => {
     expect(sql).toContain('"status" = $1');
     expect(sql).toContain('"price" > $2');
     expect(sql).toContain('LIMIT $3');
-    expect(params).toEqual(['active', 100, 20]);
+    expect(params).toEqual(['active', 100, 100]);
   });
 
   it('buildListQuery cursor after → $1 for cursor, $2 for limit', () => {
