@@ -7,7 +7,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,17 +19,20 @@ class RoomClientLeaveTest {
     private static final class FakeRoomSocket implements RoomClient.RoomSocket {
         final List<String> events = new CopyOnWriteArrayList<>();
         final List<JSONObject> messages = new CopyOnWriteArrayList<>();
+        final CountDownLatch leaveLifecycle = new CountDownLatch(2);
 
         @Override
         public void send(String msg) {
             JSONObject payload = new JSONObject(msg);
             messages.add(payload);
             events.add("send:" + payload.getString("type"));
+            leaveLifecycle.countDown();
         }
 
         @Override
         public void close() {
             events.add("close");
+            leaveLifecycle.countDown();
         }
     }
 
@@ -38,7 +43,7 @@ class RoomClientLeaveTest {
         room.attachSocketForTesting(fakeSocket, true, true, true);
 
         room.leave();
-        Thread.sleep(100L);
+        assertTrue(fakeSocket.leaveLifecycle.await(1, TimeUnit.SECONDS));
 
         assertEquals(List.of("send:leave", "close"), fakeSocket.events);
         room.destroy();
