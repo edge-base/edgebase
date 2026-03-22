@@ -34,6 +34,24 @@ function fail(message) {
   process.exit(1);
 }
 
+function extractHttpUrls(markdown) {
+  return Array.from(markdown.matchAll(/https?:\/\/[^\s)]+/g), (match) => match[0]);
+}
+
+function hasExpectedGuideUrl(markdown) {
+  for (const candidate of extractHttpUrls(markdown)) {
+    try {
+      const url = new URL(candidate);
+      if (url.hostname === 'edgebase.fun' && url.pathname === '/docs/getting-started/ai') {
+        return true;
+      }
+    } catch {
+      // Ignore malformed URLs and continue scanning the exported README.
+    }
+  }
+  return false;
+}
+
 const { dir, publicRepo } = parseArgs(process.argv.slice(2));
 
 const readmePath = resolve(dir, 'README.md');
@@ -58,7 +76,7 @@ if (!readme.includes(publicRepo)) {
   fail(`Exported README.md must mention ${publicRepo}.`);
 }
 
-if (!readme.includes('https://edgebase.fun/docs/getting-started/ai')) {
+if (!hasExpectedGuideUrl(readme)) {
   fail('Exported README.md must link to the official EdgeBase AI guide.');
 }
 

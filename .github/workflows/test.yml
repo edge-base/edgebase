@@ -603,6 +603,7 @@ jobs:
   test-summary:
     name: Test Summary
     needs:
+      - generated-code-check
       - server-unit
       - openapi-check
       - sdk-js-unit
@@ -624,6 +625,7 @@ jobs:
       - name: Report
         run: |
           echo "=== Test Summary ==="
+          echo "Generated Code Drift: ${{ needs.generated-code-check.result }}"
           echo "Server Unit: ${{ needs.server-unit.result }}"
           echo "OpenAPI Check: ${{ needs.openapi-check.result }}"
           echo "JS SDK Unit: ${{ needs.sdk-js-unit.result }}"
