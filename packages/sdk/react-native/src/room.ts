@@ -9,7 +9,7 @@
  *   - namespace + roomId identification (replaces single roomId)
  */
 import type { TokenManager, TokenUser } from './token-manager.js';
-import { EdgeBaseError } from '@edge-base/core';
+import { EdgeBaseError, type Subscription } from '@edge-base/core';
 import { refreshAccessToken } from './auth-refresh.js';
 import {
   RoomCloudflareMediaTransport,
@@ -35,9 +35,8 @@ export interface RoomOptions {
   connectionTimeout?: number;
 }
 
-export interface Subscription {
-  unsubscribe(): void;
-}
+// Re-export Subscription from core for backwards compatibility
+export type { Subscription };
 
 export type SharedStateHandler = (state: Record<string, unknown>, changes: Record<string, unknown>) => void;
 export type PlayerStateHandler = (state: Record<string, unknown>, changes: Record<string, unknown>) => void;
