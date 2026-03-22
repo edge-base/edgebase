@@ -74,6 +74,13 @@ jobs:
       - name: Verify EdgeBase skill bundle
         run: node tools/agent-skill-gen/verify.mjs
 
+      - name: Verify exported EdgeBase agent-skills repo
+        run: |
+          EXPORT_DIR="$(mktemp -d)"
+          node tools/agent-skill-gen/export.mjs --out-dir="$EXPORT_DIR"
+          node tools/agent-skill-gen/verify-export.mjs --dir="$EXPORT_DIR"
+          rm -rf "$EXPORT_DIR"
+
       - name: Check for drift
         run: |
           check_generated_paths_clean() {
