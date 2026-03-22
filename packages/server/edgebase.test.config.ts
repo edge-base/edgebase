@@ -553,11 +553,13 @@ export default defineConfig({
 
         'test-media-admin': {
             public: true,
+            rateLimit: { actions: 100 },
             runtime: {
                 target: 'rooms',
             },
             access: {
                 admin: (auth) => auth?.email?.startsWith('admin-') === true,
+                signal: (_auth, _roomId, event) => event.startsWith('edgebase.media.p2p.'),
                 media: {
                     subscribe: (auth) => auth?.email?.startsWith('blind-') !== true,
                     publish: (auth, _roomId, kind) => {
@@ -626,6 +628,35 @@ export default defineConfig({
                                 muted,
                             },
                         });
+                    },
+                },
+            },
+        },
+
+        'test-media-screen-share': {
+            public: true,
+            rateLimit: { actions: 100 },
+            runtime: {
+                target: 'rooms',
+            },
+            access: {
+                admin: (auth) => auth?.email?.startsWith('admin-') === true,
+                signal: (_auth, _roomId, event) => event.startsWith('edgebase.media.p2p.'),
+                media: {
+                    subscribe: () => true,
+                    publish: () => true,
+                    control: () => true,
+                },
+            },
+            hooks: {
+                media: {
+                    beforePublish: (kind) => {
+                        if (kind === 'video') {
+                            return { trackId: 'hook-video-track' };
+                        }
+                        if (kind === 'screen') {
+                            return { trackId: 'hook-screen-track' };
+                        }
                     },
                 },
             },

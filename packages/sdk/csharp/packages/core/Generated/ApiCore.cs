@@ -201,6 +201,42 @@ public class GeneratedDbApi
     public Task<Dictionary<string, object?>> OauthLinkCallbackAsync(string provider, CancellationToken ct = default)
         => _http.GetAsync($"/api/auth/oauth/link/{EncodePathParam(provider)}/callback", ct);
 
+    /// <summary>Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count</summary>
+    public Task<Dictionary<string, object?>> DbSingleCountRecordsAsync(string @namespace, string table, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.GetWithQueryAsync($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/count", query, ct);
+
+    /// <summary>Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search</summary>
+    public Task<Dictionary<string, object?>> DbSingleSearchRecordsAsync(string @namespace, string table, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.GetWithQueryAsync($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/search", query, ct);
+
+    /// <summary>Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}</summary>
+    public Task<Dictionary<string, object?>> DbSingleGetRecordAsync(string @namespace, string table, string id, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.GetWithQueryAsync($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/{EncodePathParam(id)}", query, ct);
+
+    /// <summary>Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}</summary>
+    public Task<Dictionary<string, object?>> DbSingleUpdateRecordAsync(string @namespace, string table, string id, object? body = null, CancellationToken ct = default)
+        => _http.PatchAsync($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/{EncodePathParam(id)}", body, ct);
+
+    /// <summary>Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}</summary>
+    public Task<Dictionary<string, object?>> DbSingleDeleteRecordAsync(string @namespace, string table, string id, CancellationToken ct = default)
+        => _http.DeleteAsync($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/{EncodePathParam(id)}", ct);
+
+    /// <summary>List records from a single-instance table — GET /api/db/{namespace}/tables/{table}</summary>
+    public Task<Dictionary<string, object?>> DbSingleListRecordsAsync(string @namespace, string table, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.GetWithQueryAsync($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}", query, ct);
+
+    /// <summary>Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}</summary>
+    public Task<Dictionary<string, object?>> DbSingleInsertRecordAsync(string @namespace, string table, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.PostAsyncWithQuery($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}", body, query, ct);
+
+    /// <summary>Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch</summary>
+    public Task<Dictionary<string, object?>> DbSingleBatchRecordsAsync(string @namespace, string table, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.PostAsyncWithQuery($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/batch", body, query, ct);
+
+    /// <summary>Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter</summary>
+    public Task<Dictionary<string, object?>> DbSingleBatchByFilterAsync(string @namespace, string table, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.PostAsyncWithQuery($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/batch-by-filter", body, query, ct);
+
     /// <summary>Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count</summary>
     public Task<Dictionary<string, object?>> DbCountRecordsAsync(string @namespace, string instanceId, string table, Dictionary<string, string>? query = null, CancellationToken ct = default)
         => _http.GetWithQueryAsync($"/api/db/{EncodePathParam(@namespace)}/{EncodePathParam(instanceId)}/tables/{EncodePathParam(table)}/count", query, ct);
@@ -369,45 +405,13 @@ public class GeneratedDbApi
     public Task<Dictionary<string, object?>> CloseRoomRealtimeTracksAsync(object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
         => _http.PutAsyncWithQuery("/api/room/media/realtime/tracks/close", body, query, ct);
 
+    /// <summary>Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session</summary>
+    public Task<Dictionary<string, object?>> CreateRoomCloudflareRealtimeKitSessionAsync(object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.PostAsyncWithQuery("/api/room/media/cloudflare_realtimekit/session", body, query, ct);
+
     /// <summary>Track custom events — POST /api/analytics/track</summary>
     public Task<Dictionary<string, object?>> TrackEventsAsync(object? body = null, CancellationToken ct = default)
         => _http.PostAsync("/api/analytics/track", body, ct);
-
-    /// <summary>Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count</summary>
-    public Task<Dictionary<string, object?>> DbSingleCountRecordsAsync(string @namespace, string table, Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.GetWithQueryAsync($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/count", query, ct);
-
-    /// <summary>Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search</summary>
-    public Task<Dictionary<string, object?>> DbSingleSearchRecordsAsync(string @namespace, string table, Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.GetWithQueryAsync($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/search", query, ct);
-
-    /// <summary>Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}</summary>
-    public Task<Dictionary<string, object?>> DbSingleGetRecordAsync(string @namespace, string table, string id, Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.GetWithQueryAsync($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/{EncodePathParam(id)}", query, ct);
-
-    /// <summary>Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}</summary>
-    public Task<Dictionary<string, object?>> DbSingleUpdateRecordAsync(string @namespace, string table, string id, object? body = null, CancellationToken ct = default)
-        => _http.PatchAsync($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/{EncodePathParam(id)}", body, ct);
-
-    /// <summary>Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}</summary>
-    public Task<Dictionary<string, object?>> DbSingleDeleteRecordAsync(string @namespace, string table, string id, CancellationToken ct = default)
-        => _http.DeleteAsync($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/{EncodePathParam(id)}", ct);
-
-    /// <summary>List records from a single-instance table — GET /api/db/{namespace}/tables/{table}</summary>
-    public Task<Dictionary<string, object?>> DbSingleListRecordsAsync(string @namespace, string table, Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.GetWithQueryAsync($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}", query, ct);
-
-    /// <summary>Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}</summary>
-    public Task<Dictionary<string, object?>> DbSingleInsertRecordAsync(string @namespace, string table, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.PostAsyncWithQuery($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}", body, query, ct);
-
-    /// <summary>Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch</summary>
-    public Task<Dictionary<string, object?>> DbSingleBatchRecordsAsync(string @namespace, string table, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.PostAsyncWithQuery($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/batch", body, query, ct);
-
-    /// <summary>Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter</summary>
-    public Task<Dictionary<string, object?>> DbSingleBatchByFilterAsync(string @namespace, string table, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.PostAsyncWithQuery($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/batch-by-filter", body, query, ct);
 }
 
 
@@ -443,18 +447,22 @@ public static class ApiPaths
     public const string ADMIN_GET_AUTH_SETTINGS = "/admin/api/data/auth/settings";
     public const string ADMIN_BACKUP_GET_CONFIG = "/admin/api/data/backup/config";
     public const string ADMIN_BACKUP_DUMP_D1 = "/admin/api/data/backup/dump-d1";
+    public const string ADMIN_BACKUP_DUMP_DATA = "/admin/api/data/backup/dump-data";
     public const string ADMIN_BACKUP_DUMP_DO = "/admin/api/data/backup/dump-do";
     public const string ADMIN_BACKUP_LIST_DOS = "/admin/api/data/backup/list-dos";
     public const string ADMIN_BACKUP_RESTORE_D1 = "/admin/api/data/backup/restore-d1";
+    public const string ADMIN_BACKUP_RESTORE_DATA = "/admin/api/data/backup/restore-data";
     public const string ADMIN_BACKUP_RESTORE_DO = "/admin/api/data/backup/restore-do";
     public const string ADMIN_CLEANUP_ANON = "/admin/api/data/cleanup-anon";
     public const string ADMIN_GET_CONFIG_INFO = "/admin/api/data/config-info";
+    public const string ADMIN_DESTROY_APP = "/admin/api/data/destroy-app";
     public const string ADMIN_GET_DEV_INFO = "/admin/api/data/dev-info";
     public const string ADMIN_GET_EMAIL_TEMPLATES = "/admin/api/data/email/templates";
     public const string ADMIN_LIST_FUNCTIONS = "/admin/api/data/functions";
     public const string ADMIN_GET_LOGS = "/admin/api/data/logs";
     public const string ADMIN_GET_RECENT_LOGS = "/admin/api/data/logs/recent";
     public const string ADMIN_GET_MONITORING = "/admin/api/data/monitoring";
+    public static string AdminListNamespaceInstances(string @namespace) => $"/admin/api/data/namespaces/{@namespace}/instances";
     public const string ADMIN_GET_OVERVIEW = "/admin/api/data/overview";
     public const string ADMIN_GET_PUSH_LOGS = "/admin/api/data/push/logs";
     public const string ADMIN_TEST_PUSH_SEND = "/admin/api/data/push/test-send";
@@ -583,6 +591,7 @@ public static class ApiPaths
     public const string PUSH_UNREGISTER = "/api/push/unregister";
     public const string CONNECT_ROOM = "/api/room";
     public const string CHECK_ROOM_CONNECTION = "/api/room/connect-check";
+    public const string CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session";
     public const string RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate";
     public const string GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";
     public const string CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";

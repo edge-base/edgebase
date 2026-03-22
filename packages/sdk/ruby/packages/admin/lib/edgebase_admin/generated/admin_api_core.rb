@@ -265,6 +265,11 @@ module EdgebaseAdmin
       @http.get("/admin/api/data/schema")
     end
 
+    # List instance suggestions for a dynamic namespace — GET /admin/api/data/namespaces/{namespace}/instances
+    def admin_list_namespace_instances(namespace, query: nil)
+      @http.get("/admin/api/data/namespaces/#{CGI.escape(namespace).gsub('+', '%20')}/instances", params: query)
+    end
+
     # Export table data as JSON — GET /admin/api/data/tables/{name}/export
     def admin_export_table(name)
       @http.get("/admin/api/data/tables/#{CGI.escape(name).gsub('+', '%20')}/export")
@@ -275,14 +280,14 @@ module EdgebaseAdmin
       @http.get("/admin/api/data/logs")
     end
 
-    # Get realtime monitoring stats — GET /admin/api/data/monitoring
+    # Get live monitoring stats — GET /admin/api/data/monitoring
     def admin_get_monitoring()
       @http.get("/admin/api/data/monitoring")
     end
 
     # Get analytics dashboard data — GET /admin/api/data/analytics
-    def admin_get_analytics()
-      @http.get("/admin/api/data/analytics")
+    def admin_get_analytics(query: nil)
+      @http.get("/admin/api/data/analytics", params: query)
     end
 
     # Query analytics events for admin dashboard — GET /admin/api/data/analytics/events
@@ -291,8 +296,8 @@ module EdgebaseAdmin
     end
 
     # Get project overview for dashboard home — GET /admin/api/data/overview
-    def admin_get_overview()
-      @http.get("/admin/api/data/overview")
+    def admin_get_overview(query: nil)
+      @http.get("/admin/api/data/overview", params: query)
     end
 
     # Get dev mode status and sidecar port — GET /admin/api/data/dev-info
@@ -395,6 +400,16 @@ module EdgebaseAdmin
       @http.post("/admin/api/data/backup/restore-d1", body)
     end
 
+    # Dump data namespace tables for admin-side migrations — POST /admin/api/data/backup/dump-data
+    def admin_backup_dump_data(body = nil)
+      @http.post("/admin/api/data/backup/dump-data", body)
+    end
+
+    # Restore data namespace tables for admin-side migrations — POST /admin/api/data/backup/restore-data
+    def admin_backup_restore_data(body = nil)
+      @http.post("/admin/api/data/backup/restore-data", body)
+    end
+
     # Get backup config — GET /admin/api/data/backup/config
     def admin_backup_get_config()
       @http.get("/admin/api/data/backup/config")
@@ -418,6 +433,11 @@ module EdgebaseAdmin
     # Change admin password — PUT /admin/api/data/admins/{id}/password
     def admin_change_password(id, body = nil)
       @http.put("/admin/api/data/admins/#{CGI.escape(id).gsub('+', '%20')}/password", body)
+    end
+
+    # Delete all Cloudflare resources and the Worker itself (self-destruct) — POST /admin/api/data/destroy-app
+    def admin_destroy_app(body = nil)
+      @http.post("/admin/api/data/destroy-app", body)
     end
 
     # List all DO instances — POST /admin/api/backup/list-dos

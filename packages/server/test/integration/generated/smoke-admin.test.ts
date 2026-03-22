@@ -800,6 +800,13 @@ describe('Smoke: admin', () => {
     expect(status).toBeLessThan(500);
   });
 
+  it('adminListNamespaceInstances: GET /admin/api/data/namespaces/{namespace}/instances → not 5xx', async () => {
+    const { status, data } = await api('GET', '/admin/api/data/namespaces/test/instances', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+    });
+    expect(status).toBeLessThan(500);
+  });
+
   it('adminExportTable: GET /admin/api/data/tables/{name}/export → not 5xx', async () => {
     const { status, data } = await api('GET', '/admin/api/data/tables/posts/export', {
       headers: { 'X-EdgeBase-Service-Key': SK },
@@ -1070,6 +1077,40 @@ describe('Smoke: admin', () => {
     expect(status).toBeLessThan(500);
   });
 
+  it('adminBackupDumpData: POST /admin/api/data/backup/dump-data → not 5xx', async () => {
+    const { status, data } = await api('POST', '/admin/api/data/backup/dump-data', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('adminBackupDumpData: bad input → 400', async () => {
+    const { status } = await api('POST', '/admin/api/data/backup/dump-data', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
+  it('adminBackupRestoreData: POST /admin/api/data/backup/restore-data → not 5xx', async () => {
+    const { status, data } = await api('POST', '/admin/api/data/backup/restore-data', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('adminBackupRestoreData: bad input → 400', async () => {
+    const { status } = await api('POST', '/admin/api/data/backup/restore-data', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
   it('adminBackupGetConfig: GET /admin/api/data/backup/config → not 5xx', async () => {
     const { status, data } = await api('GET', '/admin/api/data/backup/config', {
       headers: { 'X-EdgeBase-Service-Key': SK },
@@ -1118,6 +1159,23 @@ describe('Smoke: admin', () => {
 
   it('adminChangePassword: bad input → 400', async () => {
     const { status } = await api('PUT', '/admin/api/data/admins/smoke-test-id-000/password', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
+  it('adminDestroyApp: POST /admin/api/data/destroy-app → not 5xx', async () => {
+    const { status, data } = await api('POST', '/admin/api/data/destroy-app', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('adminDestroyApp: bad input → 400', async () => {
+    const { status } = await api('POST', '/admin/api/data/destroy-app', {
       headers: { 'X-EdgeBase-Service-Key': SK },
       body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
     });

@@ -155,6 +155,76 @@ Once you create a client, these are the main surfaces you will use:
 - `client.push`
   Register device tokens and listen for foreground push messages
 
+## Room Media Transport
+
+Flutter now exposes the same top-level room media transport entrypoint as the web and React Native SDKs:
+
+```dart
+final room = client.room('calls', 'demo-room');
+await room.join();
+
+final transport = room.media.transport(
+  const RoomMediaTransportOptions(
+    provider: 'cloudflare_realtimekit',
+  ),
+);
+
+await transport.connect({
+  'name': 'June',
+  'customParticipantId': 'flutter-june',
+});
+
+await transport.enableAudio();
+final localVideoView = await transport.enableVideo();
+```
+
+Flutter currently supports these room media providers:
+
+- `cloudflare_realtimekit`
+  Managed media sessions through Cloudflare RealtimeKit
+- `p2p`
+  Direct peer-to-peer media with signaling over `room.signals`
+
+Install the matching optional runtime dependencies alongside `edgebase_flutter`:
+
+```bash
+flutter pub add realtimekit_core
+flutter pub add flutter_webrtc
+```
+
+Current host-app smoke builds have been verified on Web, macOS, Android, and an Apple Silicon iOS simulator via direct Xcode device build.
+
+Additional integration notes:
+
+- Android host apps need Java 11+ compile options and core library desugaring enabled
+- when you use both `realtimekit_core` and `flutter_webrtc`, exclude the older `com.github.davidliu:audioswitch` dependency from the app to avoid duplicate classes
+- generic `flutter build ios --simulator` can still trip over universal simulator linking, but direct arm64 simulator builds through Xcode succeeded in the current smoke matrix
+
+Example Android app-level configuration:
+
+```kotlin
+android {
+  compileOptions {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+    isCoreLibraryDesugaringEnabled = true
+  }
+}
+
+dependencies {
+  coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+}
+
+configurations.all {
+  exclude(group = "com.github.davidliu", module = "audioswitch")
+}
+```
+
+Read more:
+
+- [Room Media Overview](https://edgebase.fun/docs/room/media)
+- [Room Media Setup](https://edgebase.fun/docs/room/media-setup)
+
 ## Authentication
 
 ### Email and password

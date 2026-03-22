@@ -107,18 +107,20 @@ export interface GeneratedAdminApi {
   adminCreateSignedUrl(name: string, body: unknown): Promise<unknown>;
   /** Get full schema structure from config — GET /admin/api/data/schema */
   adminGetSchema(): Promise<unknown>;
+  /** List instance suggestions for a dynamic namespace — GET /admin/api/data/namespaces/{namespace}/instances */
+  adminListNamespaceInstances(namespace: string, query: Record<string, string>): Promise<unknown>;
   /** Export table data as JSON — GET /admin/api/data/tables/{name}/export */
   adminExportTable(name: string): Promise<unknown>;
   /** Get request logs — GET /admin/api/data/logs */
   adminGetLogs(): Promise<unknown>;
-  /** Get realtime monitoring stats — GET /admin/api/data/monitoring */
+  /** Get live monitoring stats — GET /admin/api/data/monitoring */
   adminGetMonitoring(): Promise<unknown>;
   /** Get analytics dashboard data — GET /admin/api/data/analytics */
-  adminGetAnalytics(): Promise<unknown>;
+  adminGetAnalytics(query: Record<string, string>): Promise<unknown>;
   /** Query analytics events for admin dashboard — GET /admin/api/data/analytics/events */
   adminGetAnalyticsEvents(): Promise<unknown>;
   /** Get project overview for dashboard home — GET /admin/api/data/overview */
-  adminGetOverview(): Promise<unknown>;
+  adminGetOverview(query: Record<string, string>): Promise<unknown>;
   /** Get dev mode status and sidecar port — GET /admin/api/data/dev-info */
   adminGetDevInfo(): Promise<unknown>;
   /** Execute raw SQL query — POST /admin/api/data/sql */
@@ -159,6 +161,10 @@ export interface GeneratedAdminApi {
   adminBackupDumpD1(): Promise<unknown>;
   /** Restore D1 database from backup — POST /admin/api/data/backup/restore-d1 */
   adminBackupRestoreD1(body: unknown): Promise<unknown>;
+  /** Dump data namespace tables for admin-side migrations — POST /admin/api/data/backup/dump-data */
+  adminBackupDumpData(body: unknown): Promise<unknown>;
+  /** Restore data namespace tables for admin-side migrations — POST /admin/api/data/backup/restore-data */
+  adminBackupRestoreData(body: unknown): Promise<unknown>;
   /** Get backup config — GET /admin/api/data/backup/config */
   adminBackupGetConfig(): Promise<unknown>;
   /** List admin accounts — GET /admin/api/data/admins */
@@ -169,6 +175,8 @@ export interface GeneratedAdminApi {
   adminDeleteAdmin(id: string): Promise<unknown>;
   /** Change admin password — PUT /admin/api/data/admins/{id}/password */
   adminChangePassword(id: string, body: unknown): Promise<unknown>;
+  /** Delete all Cloudflare resources and the Worker itself (self-destruct) — POST /admin/api/data/destroy-app */
+  adminDestroyApp(body: unknown): Promise<unknown>;
   /** List all DO instances — POST /admin/api/backup/list-dos */
   backupListDOs(body: unknown): Promise<unknown>;
   /** Return parsed config snapshot — GET /admin/api/backup/config */
@@ -415,6 +423,10 @@ export class DefaultAdminApi implements GeneratedAdminApi {
     return this.transport.request('GET', '/admin/api/data/schema');
   }
 
+  async adminListNamespaceInstances(namespace: string, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('GET', `/admin/api/data/namespaces/${namespace}/instances`, { query });
+  }
+
   async adminExportTable(name: string): Promise<unknown> {
     return this.transport.request('GET', `/admin/api/data/tables/${name}/export`);
   }
@@ -427,16 +439,16 @@ export class DefaultAdminApi implements GeneratedAdminApi {
     return this.transport.request('GET', '/admin/api/data/monitoring');
   }
 
-  async adminGetAnalytics(): Promise<unknown> {
-    return this.transport.request('GET', '/admin/api/data/analytics');
+  async adminGetAnalytics(query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('GET', '/admin/api/data/analytics', { query });
   }
 
   async adminGetAnalyticsEvents(): Promise<unknown> {
     return this.transport.request('GET', '/admin/api/data/analytics/events');
   }
 
-  async adminGetOverview(): Promise<unknown> {
-    return this.transport.request('GET', '/admin/api/data/overview');
+  async adminGetOverview(query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('GET', '/admin/api/data/overview', { query });
   }
 
   async adminGetDevInfo(): Promise<unknown> {
@@ -519,6 +531,14 @@ export class DefaultAdminApi implements GeneratedAdminApi {
     return this.transport.request('POST', '/admin/api/data/backup/restore-d1', { body });
   }
 
+  async adminBackupDumpData(body: unknown): Promise<unknown> {
+    return this.transport.request('POST', '/admin/api/data/backup/dump-data', { body });
+  }
+
+  async adminBackupRestoreData(body: unknown): Promise<unknown> {
+    return this.transport.request('POST', '/admin/api/data/backup/restore-data', { body });
+  }
+
   async adminBackupGetConfig(): Promise<unknown> {
     return this.transport.request('GET', '/admin/api/data/backup/config');
   }
@@ -537,6 +557,10 @@ export class DefaultAdminApi implements GeneratedAdminApi {
 
   async adminChangePassword(id: string, body: unknown): Promise<unknown> {
     return this.transport.request('PUT', `/admin/api/data/admins/${id}/password`, { body });
+  }
+
+  async adminDestroyApp(body: unknown): Promise<unknown> {
+    return this.transport.request('POST', '/admin/api/data/destroy-app', { body });
   }
 
   async backupListDOs(body: unknown): Promise<unknown> {

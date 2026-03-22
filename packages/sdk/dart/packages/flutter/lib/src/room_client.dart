@@ -19,10 +19,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:edgebase_core/src/generated/api_core.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
+import 'package:realtimekit_core_platform_interface/realtimekit_core_platform_interface.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'auth_refresh.dart';
 import 'token_manager.dart';
+
+part 'room_cloudflare_media.dart';
+part 'room_p2p_media.dart';
 
 const _roomExplicitLeaveCloseDelay = Duration(milliseconds: 40);
 
@@ -120,6 +125,94 @@ typedef MediaDeviceHandler = void Function(
   Map<String, dynamic> member,
   Map<String, dynamic> change,
 );
+typedef RoomCloudflareRealtimeKitCreateSessionRequest = Map<String, dynamic>;
+typedef RoomCloudflareRealtimeKitCreateSessionResponse = Map<String, dynamic>;
+typedef RoomMediaTransportConnectPayload = Map<String, dynamic>;
+
+class RoomMediaRemoteTrackEvent {
+  final String kind;
+  final Object? track;
+  final Object? view;
+  final String? providerSessionId;
+  final String? participantId;
+  final String? customParticipantId;
+  final String? userId;
+  final Map<String, dynamic>? participant;
+
+  const RoomMediaRemoteTrackEvent({
+    required this.kind,
+    this.track,
+    this.view,
+    this.providerSessionId,
+    this.participantId,
+    this.customParticipantId,
+    this.userId,
+    this.participant,
+  });
+}
+
+abstract class RoomMediaTransport {
+  Future<String> connect([RoomMediaTransportConnectPayload? payload]);
+  Future<Object?> enableAudio([Map<String, dynamic>? payload]);
+  Future<Object?> enableVideo([Map<String, dynamic>? payload]);
+  Future<Object?> startScreenShare([Map<String, dynamic>? payload]);
+  Future<void> disableAudio();
+  Future<void> disableVideo();
+  Future<void> stopScreenShare();
+  Future<void> setMuted(String kind, bool muted);
+  Future<void> switchDevices(Map<String, dynamic> payload);
+  RoomSubscription onRemoteTrack(
+    void Function(RoomMediaRemoteTrackEvent event) handler,
+  );
+  String? getSessionId();
+  Object? getPeerConnection();
+  void destroy();
+}
+
+class RoomCloudflareRealtimeKitTransportOptions {
+  final bool autoSubscribe;
+  final String baseDomain;
+  final RoomCloudflareRealtimeKitClientFactory? clientFactory;
+
+  const RoomCloudflareRealtimeKitTransportOptions({
+    this.autoSubscribe = true,
+    this.baseDomain = 'dyte.io',
+    this.clientFactory,
+  });
+}
+
+abstract class RoomP2PMediaDevicesAdapter {
+  Future<MediaStream> getUserMedia(Map<String, dynamic> mediaConstraints);
+  Future<MediaStream> getDisplayMedia(Map<String, dynamic> mediaConstraints);
+}
+
+class RoomP2PMediaTransportOptions {
+  final Map<String, dynamic>? rtcConfiguration;
+  final Future<RTCPeerConnection> Function(
+    Map<String, dynamic> configuration,
+  )? peerConnectionFactory;
+  final RoomP2PMediaDevicesAdapter? mediaDevices;
+  final String signalPrefix;
+
+  const RoomP2PMediaTransportOptions({
+    this.rtcConfiguration,
+    this.peerConnectionFactory,
+    this.mediaDevices,
+    this.signalPrefix = 'edgebase.media.p2p',
+  });
+}
+
+class RoomMediaTransportOptions {
+  final String provider;
+  final RoomCloudflareRealtimeKitTransportOptions? cloudflareRealtimeKit;
+  final RoomP2PMediaTransportOptions? p2p;
+
+  const RoomMediaTransportOptions({
+    this.provider = 'cloudflare_realtimekit',
+    this.cloudflareRealtimeKit,
+    this.p2p,
+  });
+}
 
 /// Handler for reconnect lifecycle.
 typedef ReconnectHandler = void Function(Map<String, dynamic> info);
@@ -260,6 +353,64 @@ class RoomClient {
           'Failed to get room metadata: ${response.statusCode} ${response.reasonPhrase}');
     }
     return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> _requestCloudflareRealtimeKitMedia(
+    String path,
+    String method, [
+    Map<String, dynamic>? payload,
+  ]) {
+    return _requestRoomMedia('cloudflare_realtimekit', path, method, payload);
+  }
+
+  Future<Map<String, dynamic>> _requestRoomMedia(
+    String providerPath,
+    String path,
+    String method, [
+    Map<String, dynamic>? payload,
+  ]) async {
+    final token = await _tokenManager.getAccessToken(
+      (refreshToken) => refreshAccessToken(_baseUrl, refreshToken),
+    );
+    if (token == null) {
+      throw Exception('Authentication required');
+    }
+
+    final uri = Uri.parse(
+      '${_baseUrl.replaceAll(RegExp(r'/$'), '')}/api/room/media/$providerPath/$path',
+    ).replace(queryParameters: {
+      'namespace': namespace,
+      'id': roomId,
+    });
+
+    final headers = {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    };
+    final response = switch (method) {
+      'GET' => await http.get(uri, headers: headers),
+      'PUT' => await http.put(
+          uri,
+          headers: headers,
+          body: jsonEncode(payload ?? <String, dynamic>{}),
+        ),
+      _ => await http.post(
+          uri,
+          headers: headers,
+          body: jsonEncode(payload ?? <String, dynamic>{}),
+        ),
+    };
+    final decoded = response.body.isEmpty
+        ? <String, dynamic>{}
+        : (jsonDecode(response.body) as Map<String, dynamic>);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        decoded['message'] ??
+            'Room media request failed: ${response.statusCode}',
+      );
+    }
+
+    return decoded;
   }
 
   // ── Connection Lifecycle ──
@@ -504,7 +655,8 @@ class RoomClient {
 
   List<Map<String, dynamic>> listMembers() => _cloneListOfMaps(_members);
 
-  List<Map<String, dynamic>> listMediaMembers() => _cloneListOfMaps(_mediaMembers);
+  List<Map<String, dynamic>> listMediaMembers() =>
+      _cloneListOfMaps(_mediaMembers);
 
   Future<void> sendSignal(
     String event, [
@@ -1317,8 +1469,7 @@ class RoomClient {
     final memberId = member['memberId'] as String?;
     if (memberId == null || memberId.isEmpty) return;
 
-    final index =
-        _members.indexWhere((entry) => entry['memberId'] == memberId);
+    final index = _members.indexWhere((entry) => entry['memberId'] == memberId);
     if (index >= 0) {
       _members[index] = member;
     } else {
@@ -1330,8 +1481,7 @@ class RoomClient {
   void _removeMember(String memberId) {
     _members.removeWhere((member) => member['memberId'] == memberId);
     _mediaMembers.removeWhere(
-      (mediaMember) =>
-          _asMap(mediaMember['member'])['memberId'] == memberId,
+      (mediaMember) => _asMap(mediaMember['member'])['memberId'] == memberId,
     );
   }
 
@@ -1497,8 +1647,7 @@ Map<String, dynamic>? _normalizeTrack(dynamic value) {
     if (track['deviceId'] != null) 'deviceId': track['deviceId'],
     'muted': track['muted'] == true,
     if (track['publishedAt'] != null) 'publishedAt': track['publishedAt'],
-    if (track['adminDisabled'] != null)
-      'adminDisabled': track['adminDisabled'],
+    if (track['adminDisabled'] != null) 'adminDisabled': track['adminDisabled'],
   };
 }
 
@@ -1636,18 +1785,54 @@ class RoomMediaDevicesNamespace {
       _client.switchMediaDevices(payload);
 }
 
+class RoomCloudflareRealtimeKitNamespace {
+  final RoomClient _client;
+  RoomCloudflareRealtimeKitNamespace(this._client);
+
+  Future<RoomCloudflareRealtimeKitCreateSessionResponse> createSession([
+    RoomCloudflareRealtimeKitCreateSessionRequest? payload,
+  ]) =>
+      _client._requestCloudflareRealtimeKitMedia(
+        'session',
+        'POST',
+        payload,
+      );
+}
+
 class RoomMediaNamespace {
   final RoomClient _client;
   late final RoomMediaKindNamespace audio;
   late final RoomMediaKindNamespace video;
   late final RoomScreenMediaNamespace screen;
   late final RoomMediaDevicesNamespace devices;
+  late final RoomCloudflareRealtimeKitNamespace cloudflareRealtimeKit;
 
   RoomMediaNamespace(this._client) {
     audio = RoomMediaKindNamespace(_client, 'audio');
     video = RoomMediaKindNamespace(_client, 'video');
     screen = RoomScreenMediaNamespace(_client);
     devices = RoomMediaDevicesNamespace(_client);
+    cloudflareRealtimeKit = RoomCloudflareRealtimeKitNamespace(_client);
+  }
+
+  RoomMediaTransport transport([RoomMediaTransportOptions? options]) {
+    final resolved = options ?? const RoomMediaTransportOptions();
+    switch (resolved.provider) {
+      case 'cloudflare_realtimekit':
+        return RoomCloudflareMediaTransport(
+          _client,
+          resolved.cloudflareRealtimeKit,
+        );
+      case 'p2p':
+        return RoomP2PMediaTransport(
+          _client,
+          resolved.p2p,
+        );
+      default:
+        throw UnsupportedError(
+          'Unknown room media transport provider: ${resolved.provider}',
+        );
+    }
   }
 
   List<Map<String, dynamic>> list() => _client.listMediaMembers();
@@ -1666,8 +1851,7 @@ class RoomSessionNamespace {
   RoomSessionNamespace(this._client);
 
   RoomSubscription onError(ErrorHandler handler) => _client.onError(handler);
-  RoomSubscription onKicked(KickedHandler handler) =>
-      _client.onKicked(handler);
+  RoomSubscription onKicked(KickedHandler handler) => _client.onKicked(handler);
   RoomSubscription onReconnect(ReconnectHandler handler) =>
       _client.onReconnect(handler);
   RoomSubscription onConnectionStateChange(ConnectionStateHandler handler) =>

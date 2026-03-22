@@ -464,7 +464,25 @@ room.admin.stopScreenShare(memberId)        → Promise<void>
 room.meta.get()                             → Promise<Record<string, unknown>>
 ```
 
-#### Realtime (WebRTC) — HTTP Wrappers
+#### Room Media Transport (Recommended)
+
+```
+room.media.transport({provider?: 'cloudflare_realtimekit'|'p2p'}) → RoomMediaTransport
+
+const transport = room.media.transport({
+  provider: 'cloudflare_realtimekit'
+});
+
+await transport.connect();
+await transport.enableAudio();
+await transport.enableVideo();
+transport.onRemoteTrack(event => { ... });
+```
+
+- `cloudflare_realtimekit` is the default managed provider
+- `p2p` is a STUN-only best-effort mesh provider
+
+#### Realtime (WebRTC) — Legacy Low-Level Wrappers
 
 ```
 room.media.realtime.createSession(payload?) → Promise<{sessionId, sessionDescription?}>
@@ -474,7 +492,7 @@ room.media.realtime.renegotiate({sessionId, sessionDescription})        → Prom
 room.media.realtime.closeTracks({sessionId, tracks: [{mid}]})           → Promise<{sessionDescription?, tracks?}>
 ```
 
-For higher-level WebRTC transport, use the built-in room transport or the `RoomRealtimeMediaTransport` export from `@edge-base/web`:
+For raw WebRTC/SFU flows, `RoomRealtimeMediaTransport` is still available:
 ```
 const transport = room.media.realtime.transport({ autoSubscribe: true });
 await transport.connect();

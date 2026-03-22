@@ -15,6 +15,14 @@ import {
   RoomRealtimeMediaTransport,
   type RoomRealtimeMediaTransportOptions,
 } from './room-realtime-media.js';
+import {
+  RoomCloudflareMediaTransport,
+  type RoomCloudflareMediaTransportOptions,
+} from './room-cloudflare-media.js';
+import {
+  RoomP2PMediaTransport,
+  type RoomP2PMediaTransportOptions,
+} from './room-p2p-media.js';
 
 // ─── Types ───
 
@@ -198,6 +206,80 @@ export interface RoomRealtimeCloseTracksRequest {
   unpublish?: { kind?: RoomMediaKind };
 }
 
+export interface RoomCloudflareRealtimeKitCreateSessionRequest {
+  connectionId?: string;
+  customParticipantId?: string;
+  name?: string;
+  picture?: string;
+}
+
+export interface RoomCloudflareRealtimeKitCreateSessionResponse {
+  sessionId: string;
+  meetingId: string;
+  participantId: string;
+  authToken: string;
+  presetName: string;
+  connectionId?: string;
+  reused?: boolean;
+}
+
+export interface RoomMediaTransportConnectPayload {
+  connectionId?: string;
+  customParticipantId?: string;
+  name?: string;
+  picture?: string;
+  correlationId?: string;
+  thirdparty?: boolean;
+  sessionDescription?: RoomRealtimeSessionDescription;
+}
+
+export interface RoomMediaRemoteTrackEvent {
+  kind: RoomMediaKind;
+  track: MediaStreamTrack;
+  stream?: MediaStream;
+  trackName?: string;
+  providerSessionId?: string;
+  participantId?: string;
+  customParticipantId?: string;
+  userId?: string;
+}
+
+export interface RoomMediaTransport {
+  connect(payload?: RoomMediaTransportConnectPayload): Promise<string>;
+  enableAudio(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
+  enableVideo(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
+  startScreenShare(constraints?: unknown): Promise<MediaStreamTrack>;
+  disableAudio(): Promise<void>;
+  disableVideo(): Promise<void>;
+  stopScreenShare(): Promise<void>;
+  setMuted(kind: Extract<RoomMediaKind, 'audio' | 'video'>, muted: boolean): Promise<void>;
+  switchDevices(payload: {
+    audioInputId?: string;
+    videoInputId?: string;
+    screenInputId?: string;
+  }): Promise<void>;
+  onRemoteTrack(handler: (event: RoomMediaRemoteTrackEvent) => void): Subscription;
+  getSessionId(): string | null;
+  getPeerConnection(): RTCPeerConnection | null;
+  destroy(): void;
+}
+
+export type RoomMediaTransportProvider = 'cloudflare_realtimekit' | 'p2p';
+
+export interface RoomCloudflareRealtimeKitTransportFactoryOptions {
+  provider?: 'cloudflare_realtimekit';
+  cloudflareRealtimeKit?: RoomCloudflareMediaTransportOptions;
+}
+
+export interface RoomP2PTransportFactoryOptions {
+  provider: 'p2p';
+  p2p?: RoomP2PMediaTransportOptions;
+}
+
+export type RoomMediaTransportOptions =
+  | RoomCloudflareRealtimeKitTransportFactoryOptions
+  | RoomP2PTransportFactoryOptions;
+
 // ─── Helpers ───
 
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -295,6 +377,38 @@ export class RoomClient {
   private waitingForAuth = false;
   private joinRequested = false;
   private unsubAuthState: (() => void) | null = null;
+  private browserNetworkListenersAttached = false;
+  private readonly browserOfflineHandler = () => {
+    if (this.intentionallyLeft || !this.joinRequested) {
+      return;
+    }
+
+    if (this.connectionState === 'connected') {
+      this.setConnectionState('reconnecting');
+    }
+
+    if (isSocketOpenOrConnecting(this.ws)) {
+      try {
+        this.ws?.close();
+      } catch {
+        // Socket may already be closing.
+      }
+    }
+  };
+  private readonly browserOnlineHandler = () => {
+    if (
+      this.intentionallyLeft
+      || !this.joinRequested
+      || this.connectingPromise
+      || isSocketOpenOrConnecting(this.ws)
+    ) {
+      return;
+    }
+
+    if (this.connectionState === 'reconnecting' || this.connectionState === 'disconnected') {
+      this.ensureConnection().catch(() => {});
+    }
+  };
 
   // ─── Pending send() requests (requestId → { resolve, reject, timeout }) ───
   private pendingRequests = new Map<string, {
@@ -368,6 +482,22 @@ export class RoomClient {
 
   readonly members = {
     list: (): RoomMember[] => cloneValue(this._members),
+    current: (): RoomMember | null => {
+      const connectionId = this.currentConnectionId;
+      if (connectionId) {
+        const byConnection = this._members.find((member) => member.connectionId === connectionId);
+        if (byConnection) {
+          return cloneValue(byConnection);
+        }
+      }
+
+      const userId = this.currentUserId;
+      if (!userId) {
+        return null;
+      }
+      const member = this._members.find((entry) => entry.userId === userId) ?? null;
+      return member ? cloneValue(member) : null;
+    },
     onSync: (handler: (members: RoomMember[]) => void): Subscription => this.onMembersSync(handler),
     onJoin: (handler: (member: RoomMember) => void): Subscription => this.onMemberJoin(handler),
     onLeave: (handler: (member: RoomMember, reason: RoomMemberLeaveReason) => void): Subscription =>
@@ -413,6 +543,21 @@ export class RoomClient {
         videoInputId?: string;
         screenInputId?: string;
       }): Promise<void> => this.switchMediaDevices(payload),
+    },
+    cloudflareRealtimeKit: {
+      createSession: (payload?: RoomCloudflareRealtimeKitCreateSessionRequest): Promise<RoomCloudflareRealtimeKitCreateSessionResponse> =>
+        this.requestCloudflareRealtimeKitMedia('session', 'POST', payload),
+    },
+    transport: (options?: RoomMediaTransportOptions): RoomMediaTransport => {
+      const provider = options?.provider ?? 'cloudflare_realtimekit';
+      if (provider === 'p2p') {
+        const p2pOptions = (options as RoomP2PTransportFactoryOptions | undefined)?.p2p;
+        return new RoomP2PMediaTransport(this, p2pOptions);
+      }
+
+      const cloudflareOptions =
+        (options as RoomCloudflareRealtimeKitTransportFactoryOptions | undefined)?.cloudflareRealtimeKit;
+      return new RoomCloudflareMediaTransport(this, cloudflareOptions);
     },
     realtime: {
       createSession: (payload?: RoomRealtimeCreateSessionRequest): Promise<RoomRealtimeCreateSessionResponse> =>
@@ -468,6 +613,7 @@ export class RoomClient {
     this.unsubAuthState = this.tokenManager.onAuthStateChange((user) => {
       this.handleAuthStateChange(user);
     });
+    this.attachBrowserNetworkListeners();
   }
 
   // ─── State Accessors ───
@@ -514,6 +660,23 @@ export class RoomClient {
     method: 'GET' | 'POST' | 'PUT',
     payload?: unknown,
   ): Promise<T> {
+    return this.requestRoomMedia<T>('realtime', path, method, payload);
+  }
+
+  private async requestCloudflareRealtimeKitMedia<T>(
+    path: string,
+    method: 'GET' | 'POST' | 'PUT',
+    payload?: unknown,
+  ): Promise<T> {
+    return this.requestRoomMedia<T>('cloudflare_realtimekit', path, method, payload);
+  }
+
+  private async requestRoomMedia<T>(
+    providerPath: string,
+    path: string,
+    method: 'GET' | 'POST' | 'PUT',
+    payload?: unknown,
+  ): Promise<T> {
     const token = await this.tokenManager.getAccessToken(
       (refreshToken) => refreshAccessToken(this.baseUrl, refreshToken),
     );
@@ -521,7 +684,7 @@ export class RoomClient {
       throw new EdgeBaseError(401, 'Authentication required');
     }
 
-    const url = new URL(`${this.baseUrl.replace(/\/$/, '')}/api/room/media/realtime/${path}`);
+    const url = new URL(`${this.baseUrl.replace(/\/$/, '')}/api/room/media/${providerPath}/${path}`);
     url.searchParams.set('namespace', this.namespace);
     url.searchParams.set('id', this.roomId);
 
@@ -538,7 +701,7 @@ export class RoomClient {
     if (!response.ok) {
       throw new EdgeBaseError(
         response.status,
-        (typeof data.message === 'string' && data.message) || `Realtime media request failed: ${response.statusText}`,
+        (typeof data.message === 'string' && data.message) || `Room media request failed: ${response.statusText}`,
       );
     }
 
@@ -597,6 +760,7 @@ export class RoomClient {
    */
   destroy(): void {
     this.leave();
+    this.detachBrowserNetworkListeners();
     this.unsubAuthState?.();
     this.unsubAuthState = null;
 
@@ -1977,6 +2141,52 @@ export class RoomClient {
     const httpUrl = this.baseUrl.replace(/\/$/, '');
     const wsUrl = httpUrl.replace(/^http/, 'ws');
     return `${wsUrl}/api/room?namespace=${encodeURIComponent(this.namespace)}&id=${encodeURIComponent(this.roomId)}`;
+  }
+
+  private attachBrowserNetworkListeners(): void {
+    if (this.browserNetworkListenersAttached) {
+      return;
+    }
+
+    const eventTarget = typeof globalThis !== 'undefined'
+      && typeof (globalThis as typeof globalThis & {
+        addEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
+      }).addEventListener === 'function'
+      ? globalThis as typeof globalThis & {
+        addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
+      }
+      : null;
+
+    if (!eventTarget) {
+      return;
+    }
+
+    eventTarget.addEventListener('offline', this.browserOfflineHandler);
+    eventTarget.addEventListener('online', this.browserOnlineHandler);
+    this.browserNetworkListenersAttached = true;
+  }
+
+  private detachBrowserNetworkListeners(): void {
+    if (!this.browserNetworkListenersAttached) {
+      return;
+    }
+
+    const eventTarget = typeof globalThis !== 'undefined'
+      && typeof (globalThis as typeof globalThis & {
+        removeEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
+      }).removeEventListener === 'function'
+      ? globalThis as typeof globalThis & {
+        removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
+      }
+      : null;
+
+    if (!eventTarget) {
+      return;
+    }
+
+    eventTarget.removeEventListener('offline', this.browserOfflineHandler);
+    eventTarget.removeEventListener('online', this.browserOnlineHandler);
+    this.browserNetworkListenersAttached = false;
   }
 
   private scheduleReconnect(): void {

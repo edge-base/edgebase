@@ -954,6 +954,7 @@ namespace EdgeBase.Tests
 
             room.Dispose();
         }
+
     }
 
     // ─── F-2. EdgeBase.Room() factory method test ─────────────────────────

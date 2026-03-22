@@ -275,6 +275,11 @@ public class GeneratedAdminApi {
         return http.get("/admin/api/data/schema");
     }
 
+    /** List instance suggestions for a dynamic namespace — GET /admin/api/data/namespaces/{namespace}/instances */
+    public Object adminListNamespaceInstances(String namespace, Map<String, String> query) throws EdgeBaseError {
+        return http.getWithQuery("/admin/api/data/namespaces/" + encodePathParam(namespace) + "/instances", query);
+    }
+
     /** Export table data as JSON — GET /admin/api/data/tables/{name}/export */
     public Object adminExportTable(String name) throws EdgeBaseError {
         return http.get("/admin/api/data/tables/" + encodePathParam(name) + "/export");
@@ -285,14 +290,14 @@ public class GeneratedAdminApi {
         return http.get("/admin/api/data/logs");
     }
 
-    /** Get realtime monitoring stats — GET /admin/api/data/monitoring */
+    /** Get live monitoring stats — GET /admin/api/data/monitoring */
     public Object adminGetMonitoring() throws EdgeBaseError {
         return http.get("/admin/api/data/monitoring");
     }
 
     /** Get analytics dashboard data — GET /admin/api/data/analytics */
-    public Object adminGetAnalytics() throws EdgeBaseError {
-        return http.get("/admin/api/data/analytics");
+    public Object adminGetAnalytics(Map<String, String> query) throws EdgeBaseError {
+        return http.getWithQuery("/admin/api/data/analytics", query);
     }
 
     /** Query analytics events for admin dashboard — GET /admin/api/data/analytics/events */
@@ -301,8 +306,8 @@ public class GeneratedAdminApi {
     }
 
     /** Get project overview for dashboard home — GET /admin/api/data/overview */
-    public Object adminGetOverview() throws EdgeBaseError {
-        return http.get("/admin/api/data/overview");
+    public Object adminGetOverview(Map<String, String> query) throws EdgeBaseError {
+        return http.getWithQuery("/admin/api/data/overview", query);
     }
 
     /** Get dev mode status and sidecar port — GET /admin/api/data/dev-info */
@@ -405,6 +410,16 @@ public class GeneratedAdminApi {
         return http.post("/admin/api/data/backup/restore-d1", body);
     }
 
+    /** Dump data namespace tables for admin-side migrations — POST /admin/api/data/backup/dump-data */
+    public Object adminBackupDumpData(Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/admin/api/data/backup/dump-data", body);
+    }
+
+    /** Restore data namespace tables for admin-side migrations — POST /admin/api/data/backup/restore-data */
+    public Object adminBackupRestoreData(Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/admin/api/data/backup/restore-data", body);
+    }
+
     /** Get backup config — GET /admin/api/data/backup/config */
     public Object adminBackupGetConfig() throws EdgeBaseError {
         return http.get("/admin/api/data/backup/config");
@@ -428,6 +443,11 @@ public class GeneratedAdminApi {
     /** Change admin password — PUT /admin/api/data/admins/{id}/password */
     public Object adminChangePassword(String id, Map<String, ?> body) throws EdgeBaseError {
         return http.put("/admin/api/data/admins/" + encodePathParam(id) + "/password", body);
+    }
+
+    /** Delete all Cloudflare resources and the Worker itself (self-destruct) — POST /admin/api/data/destroy-app */
+    public Object adminDestroyApp(Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/admin/api/data/destroy-app", body);
     }
 
     /** List all DO instances — POST /admin/api/backup/list-dos */

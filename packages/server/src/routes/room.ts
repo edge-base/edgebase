@@ -70,6 +70,12 @@ const roomRealtimeCreateSessionBodySchema = z.object({
   thirdparty: z.boolean().optional().openapi({ description: 'Forward Cloudflare Realtime thirdparty mode' }),
   sessionDescription: roomRealtimeSessionDescriptionSchema.optional(),
 });
+const roomCloudflareRealtimeKitCreateSessionBodySchema = z.object({
+  connectionId: z.string().optional().openapi({ description: 'Specific room connection ID to bind the Cloudflare RealtimeKit participant to' }),
+  customParticipantId: z.string().optional().openapi({ description: 'Optional custom participant identifier for the provisioned RealtimeKit participant' }),
+  name: z.string().optional().openapi({ description: 'Optional display name for the provisioned RealtimeKit participant' }),
+  picture: z.string().optional().openapi({ description: 'Optional avatar URL for the provisioned RealtimeKit participant' }),
+});
 const roomRealtimeCreateSessionResponseSchema = z.object({
   sessionId: z.string().openapi({ description: 'Realtime provider session ID' }),
   sessionDescription: roomRealtimeSessionDescriptionSchema.optional(),
@@ -77,6 +83,15 @@ const roomRealtimeCreateSessionResponseSchema = z.object({
   errorDescription: z.string().optional(),
   connectionId: z.string().optional().openapi({ description: 'Room connection ID associated with the session' }),
   reused: z.boolean().optional().openapi({ description: 'Whether an existing provider session was reused' }),
+});
+const roomCloudflareRealtimeKitCreateSessionResponseSchema = z.object({
+  sessionId: z.string().openapi({ description: 'Cloudflare RealtimeKit participant ID' }),
+  meetingId: z.string().openapi({ description: 'Cloudflare RealtimeKit meeting ID backing the room session' }),
+  participantId: z.string().openapi({ description: 'Cloudflare RealtimeKit participant ID' }),
+  authToken: z.string().openapi({ description: 'RealtimeKit auth token for the provisioned participant' }),
+  presetName: z.string().optional().openapi({ description: 'RealtimeKit preset used for the provisioned participant' }),
+  connectionId: z.string().optional().openapi({ description: 'Room connection ID associated with the session' }),
+  reused: z.boolean().optional().openapi({ description: 'Whether an existing provider participant was reused' }),
 });
 const roomRealtimeSessionStateSchema = z.object({
   sessionId: z.string().openapi({ description: 'Realtime provider session ID' }),
@@ -525,6 +540,27 @@ const createRoomRealtimeSession = createRoute({
   },
 });
 
+const createRoomCloudflareRealtimeKitSession = createRoute({
+  operationId: 'createRoomCloudflareRealtimeKitSession',
+  method: 'post',
+  path: '/media/cloudflare_realtimekit/session',
+  tags: ['client'],
+  summary: 'Create a room Cloudflare RealtimeKit session',
+  description: 'Creates a Cloudflare RealtimeKit session for the authenticated room member.',
+  request: {
+    query: roomQuerySchema,
+    body: { content: { 'application/json': { schema: roomCloudflareRealtimeKitCreateSessionBodySchema } }, required: false },
+  },
+  responses: {
+    200: { description: 'Cloudflare RealtimeKit session created', content: { 'application/json': { schema: roomCloudflareRealtimeKitCreateSessionResponseSchema } } },
+    400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
+    401: { description: 'Authentication required', content: { 'application/json': { schema: errorResponseSchema } } },
+    403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
+    404: { description: 'Room runtime not found', content: { 'application/json': { schema: errorResponseSchema } } },
+    409: { description: 'Conflicting existing published media', content: { 'application/json': { schema: errorResponseSchema } } },
+  },
+});
+
 const createRoomRealtimeIceServers = createRoute({
   operationId: 'createRoomRealtimeIceServers',
   method: 'post',
@@ -634,6 +670,12 @@ roomRoute.openapi(renegotiateRoomRealtimeSession, async (c) =>
 
 roomRoute.openapi(closeRoomRealtimeTracks, async (c) =>
   proxyRoomDoRequest(c, '/media/realtime/tracks/close', 'PUT', {
+    requireAuth: true,
+    validatedJson: c.req.valid('json'),
+  }));
+
+roomRoute.openapi(createRoomCloudflareRealtimeKitSession, async (c) =>
+  proxyRoomDoRequest(c, '/media/cloudflare_realtimekit/session', 'POST', {
     requireAuth: true,
     validatedJson: c.req.valid('json'),
   }));

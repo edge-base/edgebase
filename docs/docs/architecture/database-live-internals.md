@@ -289,7 +289,7 @@ onDestroy ─── Cleanup, final save, hibernate
 | **State Size Warning** | `ROOM_STATE_WARNING` event fires when cumulative state reaches 80% of `maxStateSize` |
 | **Members** | `room.members` — built-in presence tracking with join/leave events and TTL cleanup |
 | **Signals** | `room.signals` — lightweight pub/sub for custom coordination (WebRTC signaling, cursors) |
-| **Media Metadata** *(alpha)* | `room.media` — track audio/video/screen publish/mute state for conferencing UIs |
+| **Media Metadata** *(beta)* | `room.media` — track audio/video/screen publish/mute state for conferencing UIs |
 
 ### Room Configuration Defaults
 

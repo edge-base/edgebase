@@ -115,6 +115,7 @@ const DEFAULT_MEMBER_RECONNECT_TIMEOUT_MS = 30000;
 const SIGNAL_DENIED = Symbol('rooms.signal.denied');
 const MEDIA_DENIED = Symbol('rooms.media.denied');
 const WEBSOCKET_OPEN = 1;
+const CLOUDFLARE_REALTIME_KIT_MEETING_STORAGE_KEY = 'cloudflareRealtimeKitMeetingId';
 
 function computeStateDelta(
   previous: Record<string, unknown>,
@@ -146,9 +147,15 @@ export class RoomsDO extends RoomRuntimeBaseDO {
   private readonly memberRoles = new Map<string, string>();
   private readonly memberMediaStates = new Map<string, RoomMemberMediaState>();
   private readonly memberRealtimeSessions = new Map<string, RoomMemberRealtimeSession>();
+  private cloudflareRealtimeKitMeetingId: string | null = null;
+  private cloudflareRealtimeKitMeetingIdPromise: Promise<string> | null = null;
 
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === '/media/cloudflare_realtimekit/session' && request.method === 'POST') {
+      return this.handleCloudflareRealtimeKitSessionCreate(request, url);
+    }
 
     if (url.pathname === '/media/realtime/session') {
       if (request.method === 'POST') return this.handleRealtimeSessionCreate(request, url);
@@ -173,6 +180,53 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     return super.fetch(request);
+  }
+
+  private async handleCloudflareRealtimeKitSessionCreate(request: Request, url: URL): Promise<Response> {
+    try {
+      const body = await this.readJsonBody<{
+        connectionId?: string;
+        customParticipantId?: string;
+        name?: string;
+        picture?: string;
+      }>(request);
+      const { memberId, connectionId, meta } = await this.authenticateRealtimeRequest(
+        request,
+        url,
+        typeof body.connectionId === 'string' ? body.connectionId : undefined,
+      );
+      if (this.hasPublishedTracks(memberId)) {
+        return this.jsonResponse(409, {
+          code: 409,
+          message: 'Unpublish existing room media before creating a new Cloudflare RealtimeKit session',
+        });
+      }
+
+      const config = this.getCloudflareRealtimeKitConfig();
+      const meetingId = await this.ensureCloudflareRealtimeKitMeetingId(config);
+      const participant = await this.createCloudflareRealtimeKitParticipant(config, meetingId, {
+        customParticipantId: this.buildCloudflareRealtimeKitParticipantId(memberId, body.customParticipantId),
+        name: typeof body.name === 'string' && body.name.trim()
+          ? body.name.trim()
+          : meta.auth?.email ?? meta.userId ?? memberId,
+        picture: typeof body.picture === 'string' && body.picture.trim() ? body.picture.trim() : undefined,
+      });
+
+      return this.jsonResponse(200, {
+        sessionId: participant.id,
+        meetingId,
+        participantId: participant.id,
+        authToken: participant.token,
+        presetName: participant.presetName ?? config.presetName,
+        connectionId,
+        reused: false,
+      });
+    } catch (err) {
+      return this.jsonResponse(400, {
+        code: 400,
+        message: err instanceof Error ? err.message : 'Failed to create Cloudflare RealtimeKit session',
+      });
+    }
   }
 
   private async handleRealtimeSessionCreate(request: Request, url: URL): Promise<Response> {
@@ -420,6 +474,154 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
   private buildRealtimeClient() {
     return createCloudflareRealtimeClient(this.env as unknown as Env);
+  }
+
+  private getCloudflareRealtimeKitConfig(): {
+    accountId: string;
+    apiToken: string;
+    appId: string;
+    presetName: string;
+  } {
+    const env = this.env as unknown as Env;
+    const accountId = env.CF_ACCOUNT_ID?.trim();
+    const apiToken = env.CF_API_TOKEN?.trim();
+    const appId = env.CF_REALTIME_APP_ID?.trim();
+    const presetName = env.CF_REALTIME_PRESET_NAME?.trim() || 'group_call_participant';
+
+    if (!accountId || !apiToken || !appId) {
+      throw new Error(
+        'Cloudflare Realtime is not configured. Set CF_ACCOUNT_ID, CF_API_TOKEN, and CF_REALTIME_APP_ID.',
+      );
+    }
+
+    return { accountId, apiToken, appId, presetName };
+  }
+
+  private buildCloudflareRealtimeKitParticipantId(memberId: string, provided?: string): string {
+    const trimmed = typeof provided === 'string' ? provided.trim() : '';
+    if (trimmed) {
+      return trimmed;
+    }
+
+    return [
+      this.namespace ?? 'room',
+      this.roomId ?? 'unknown',
+      memberId,
+      Date.now().toString(36),
+    ].join(':');
+  }
+
+  private async ensureCloudflareRealtimeKitMeetingId(config: {
+    accountId: string;
+    apiToken: string;
+    appId: string;
+  }): Promise<string> {
+    if (this.cloudflareRealtimeKitMeetingId) {
+      return this.cloudflareRealtimeKitMeetingId;
+    }
+
+    if (this.cloudflareRealtimeKitMeetingIdPromise) {
+      return this.cloudflareRealtimeKitMeetingIdPromise;
+    }
+
+    this.cloudflareRealtimeKitMeetingIdPromise = (async () => {
+      const storedMeetingId = await this.ctx.storage.get<string>(CLOUDFLARE_REALTIME_KIT_MEETING_STORAGE_KEY);
+      if (storedMeetingId) {
+        this.cloudflareRealtimeKitMeetingId = storedMeetingId;
+        return storedMeetingId;
+      }
+
+      const response = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(config.accountId)}`
+          + `/realtime/kit/${encodeURIComponent(config.appId)}/meetings`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${config.apiToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title: `${this.namespace ?? 'room'}::${this.roomId ?? 'unknown'}`,
+          }),
+        },
+      );
+      const data = await this.parseCloudflareApiEnvelope<{ id: string }>(response);
+      this.cloudflareRealtimeKitMeetingId = data.id;
+      await this.ctx.storage.put(CLOUDFLARE_REALTIME_KIT_MEETING_STORAGE_KEY, data.id);
+      return data.id;
+    })();
+
+    try {
+      return await this.cloudflareRealtimeKitMeetingIdPromise;
+    } finally {
+      this.cloudflareRealtimeKitMeetingIdPromise = null;
+    }
+  }
+
+  private async createCloudflareRealtimeKitParticipant(
+    config: {
+      accountId: string;
+      apiToken: string;
+      appId: string;
+      presetName: string;
+    },
+    meetingId: string,
+    payload: {
+      customParticipantId: string;
+      name?: string;
+      picture?: string;
+    },
+  ): Promise<{ id: string; token: string; presetName?: string }> {
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(config.accountId)}`
+        + `/realtime/kit/${encodeURIComponent(config.appId)}`
+        + `/meetings/${encodeURIComponent(meetingId)}/participants`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          custom_participant_id: payload.customParticipantId,
+          preset_name: config.presetName,
+          name: payload.name,
+          picture: payload.picture,
+        }),
+      },
+    );
+
+    const data = await this.parseCloudflareApiEnvelope<{
+      id: string;
+      token: string;
+      preset_name?: string;
+    }>(response);
+
+    return {
+      id: data.id,
+      token: data.token,
+      presetName: data.preset_name,
+    };
+  }
+
+  private async parseCloudflareApiEnvelope<T>(response: Response): Promise<T> {
+    const payload = (await response.json().catch(() => ({}))) as {
+      success?: boolean;
+      errors?: Array<{ message?: string }>;
+      messages?: Array<{ message?: string }>;
+      result?: T;
+      data?: T;
+    };
+
+    if (!response.ok || payload.success === false) {
+      const message =
+        payload.errors?.find((entry) => typeof entry.message === 'string')?.message
+        ?? payload.messages?.find((entry) => typeof entry.message === 'string')?.message
+        ?? `Cloudflare API request failed (${response.status})`;
+      throw new Error(message);
+    }
+
+    return (payload.data ?? payload.result ?? {}) as T;
   }
 
   private async authenticateRealtimeRequest(

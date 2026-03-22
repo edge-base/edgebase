@@ -262,6 +262,11 @@ class GeneratedAdminApi(private val http: HttpClient) {
     suspend fun adminGetSchema(): Any? =
         http.get("/admin/api/data/schema")
 
+    /** List instance suggestions for a dynamic namespace — GET /admin/api/data/namespaces/{namespace}/instances */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun adminListNamespaceInstances(namespace: String, query: Map<String, String>? = null): Any? =
+        http.get("/admin/api/data/namespaces/${platformUrlEncode(namespace)}/instances", query)
+
     /** Export table data as JSON — GET /admin/api/data/tables/{name}/export */
     @Suppress("UNCHECKED_CAST")
     suspend fun adminExportTable(name: String): Any? =
@@ -272,15 +277,15 @@ class GeneratedAdminApi(private val http: HttpClient) {
     suspend fun adminGetLogs(): Any? =
         http.get("/admin/api/data/logs")
 
-    /** Get realtime monitoring stats — GET /admin/api/data/monitoring */
+    /** Get live monitoring stats — GET /admin/api/data/monitoring */
     @Suppress("UNCHECKED_CAST")
     suspend fun adminGetMonitoring(): Any? =
         http.get("/admin/api/data/monitoring")
 
     /** Get analytics dashboard data — GET /admin/api/data/analytics */
     @Suppress("UNCHECKED_CAST")
-    suspend fun adminGetAnalytics(): Any? =
-        http.get("/admin/api/data/analytics")
+    suspend fun adminGetAnalytics(query: Map<String, String>? = null): Any? =
+        http.get("/admin/api/data/analytics", query)
 
     /** Query analytics events for admin dashboard — GET /admin/api/data/analytics/events */
     @Suppress("UNCHECKED_CAST")
@@ -289,8 +294,8 @@ class GeneratedAdminApi(private val http: HttpClient) {
 
     /** Get project overview for dashboard home — GET /admin/api/data/overview */
     @Suppress("UNCHECKED_CAST")
-    suspend fun adminGetOverview(): Any? =
-        http.get("/admin/api/data/overview")
+    suspend fun adminGetOverview(query: Map<String, String>? = null): Any? =
+        http.get("/admin/api/data/overview", query)
 
     /** Get dev mode status and sidecar port — GET /admin/api/data/dev-info */
     @Suppress("UNCHECKED_CAST")
@@ -392,6 +397,16 @@ class GeneratedAdminApi(private val http: HttpClient) {
     suspend fun adminBackupRestoreD1(body: Map<String, Any?> = emptyMap()): Any? =
         http.post("/admin/api/data/backup/restore-d1", body)
 
+    /** Dump data namespace tables for admin-side migrations — POST /admin/api/data/backup/dump-data */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun adminBackupDumpData(body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/admin/api/data/backup/dump-data", body)
+
+    /** Restore data namespace tables for admin-side migrations — POST /admin/api/data/backup/restore-data */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun adminBackupRestoreData(body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/admin/api/data/backup/restore-data", body)
+
     /** Get backup config — GET /admin/api/data/backup/config */
     @Suppress("UNCHECKED_CAST")
     suspend fun adminBackupGetConfig(): Any? =
@@ -416,6 +431,11 @@ class GeneratedAdminApi(private val http: HttpClient) {
     @Suppress("UNCHECKED_CAST")
     suspend fun adminChangePassword(id: String, body: Map<String, Any?> = emptyMap()): Any? =
         http.put("/admin/api/data/admins/${platformUrlEncode(id)}/password", body)
+
+    /** Delete all Cloudflare resources and the Worker itself (self-destruct) — POST /admin/api/data/destroy-app */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun adminDestroyApp(body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/admin/api/data/destroy-app", body)
 
     /** List all DO instances — POST /admin/api/backup/list-dos */
     @Suppress("UNCHECKED_CAST")

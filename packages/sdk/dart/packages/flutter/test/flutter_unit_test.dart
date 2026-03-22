@@ -881,5 +881,51 @@ void main() {
 
       room.leave();
     });
+
+    test('creates a cloudflare realtimekit session through the provider endpoint',
+        () async {
+      server.listen((request) async {
+        if (request.uri.path == '/api/room/media/cloudflare_realtimekit/session') {
+          expect(request.method, 'POST');
+          expect(
+            request.headers.value('authorization'),
+            startsWith('Bearer '),
+          );
+          expect(request.uri.queryParameters['namespace'], 'game');
+          expect(request.uri.queryParameters['id'], 'room-1');
+
+          final body = await utf8.decoder.bind(request).join();
+          final decoded = jsonDecode(body) as Map<String, dynamic>;
+          expect(decoded['name'], 'Flutter User');
+          expect(decoded['customParticipantId'], 'flutter-user-1');
+
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode({
+            'sessionId': 'session-1',
+            'meetingId': 'meeting-1',
+            'participantId': 'participant-1',
+            'authToken': 'auth-token-1',
+            'presetName': 'default',
+          }));
+          await request.response.close();
+          return;
+        }
+
+        request.response.statusCode = HttpStatus.notFound;
+        await request.response.close();
+      });
+
+      final room = RoomClient(baseUrl, 'game', 'room-1', tokenManager);
+      final session = await room.media.cloudflareRealtimeKit.createSession({
+        'name': 'Flutter User',
+        'customParticipantId': 'flutter-user-1',
+      });
+
+      expect(session['sessionId'], 'session-1');
+      expect(session['meetingId'], 'meeting-1');
+      expect(session['participantId'], 'participant-1');
+      expect(session['authToken'], 'auth-token-1');
+      expect(session['presetName'], 'default');
+    });
   });
 }

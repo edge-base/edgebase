@@ -220,6 +220,10 @@ class GeneratedAdminApi:
         """Get full schema structure from config — GET /admin/api/data/schema"""
         return self._http.get("/admin/api/data/schema")
 
+    def admin_list_namespace_instances(self, namespace: str, query: dict[str, str] | None = None) -> Any:
+        """List instance suggestions for a dynamic namespace — GET /admin/api/data/namespaces/{namespace}/instances"""
+        return self._http.get(f"/admin/api/data/namespaces/{urllib.parse.quote(namespace, safe='')}/instances", params=query)
+
     def admin_export_table(self, name: str) -> Any:
         """Export table data as JSON — GET /admin/api/data/tables/{name}/export"""
         return self._http.get(f"/admin/api/data/tables/{urllib.parse.quote(name, safe='')}/export")
@@ -229,20 +233,20 @@ class GeneratedAdminApi:
         return self._http.get("/admin/api/data/logs")
 
     def admin_get_monitoring(self) -> Any:
-        """Get realtime monitoring stats — GET /admin/api/data/monitoring"""
+        """Get live monitoring stats — GET /admin/api/data/monitoring"""
         return self._http.get("/admin/api/data/monitoring")
 
-    def admin_get_analytics(self) -> Any:
+    def admin_get_analytics(self, query: dict[str, str] | None = None) -> Any:
         """Get analytics dashboard data — GET /admin/api/data/analytics"""
-        return self._http.get("/admin/api/data/analytics")
+        return self._http.get("/admin/api/data/analytics", params=query)
 
     def admin_get_analytics_events(self) -> Any:
         """Query analytics events for admin dashboard — GET /admin/api/data/analytics/events"""
         return self._http.get("/admin/api/data/analytics/events")
 
-    def admin_get_overview(self) -> Any:
+    def admin_get_overview(self, query: dict[str, str] | None = None) -> Any:
         """Get project overview for dashboard home — GET /admin/api/data/overview"""
-        return self._http.get("/admin/api/data/overview")
+        return self._http.get("/admin/api/data/overview", params=query)
 
     def admin_get_dev_info(self) -> Any:
         """Get dev mode status and sidecar port — GET /admin/api/data/dev-info"""
@@ -324,6 +328,14 @@ class GeneratedAdminApi:
         """Restore D1 database from backup — POST /admin/api/data/backup/restore-d1"""
         return self._http.post("/admin/api/data/backup/restore-d1", body)
 
+    def admin_backup_dump_data(self, body: Any) -> Any:
+        """Dump data namespace tables for admin-side migrations — POST /admin/api/data/backup/dump-data"""
+        return self._http.post("/admin/api/data/backup/dump-data", body)
+
+    def admin_backup_restore_data(self, body: Any) -> Any:
+        """Restore data namespace tables for admin-side migrations — POST /admin/api/data/backup/restore-data"""
+        return self._http.post("/admin/api/data/backup/restore-data", body)
+
     def admin_backup_get_config(self) -> Any:
         """Get backup config — GET /admin/api/data/backup/config"""
         return self._http.get("/admin/api/data/backup/config")
@@ -343,6 +355,10 @@ class GeneratedAdminApi:
     def admin_change_password(self, id: str, body: Any) -> Any:
         """Change admin password — PUT /admin/api/data/admins/{id}/password"""
         return self._http.put(f"/admin/api/data/admins/{urllib.parse.quote(id, safe='')}/password", body)
+
+    def admin_destroy_app(self, body: Any) -> Any:
+        """Delete all Cloudflare resources and the Worker itself (self-destruct) — POST /admin/api/data/destroy-app"""
+        return self._http.post("/admin/api/data/destroy-app", body)
 
     def backup_list_dos(self, body: Any) -> Any:
         """List all DO instances — POST /admin/api/backup/list-dos"""

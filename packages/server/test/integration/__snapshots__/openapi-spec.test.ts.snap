@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`OpenAPI spec stability > operation list matches snapshot 1`] = `196`;
+exports[`OpenAPI spec stability > operation list matches snapshot 1`] = `197`;
 
 exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
 [
@@ -179,6 +179,7 @@ exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
   "POST /api/push/topic/subscribe",
   "POST /api/push/topic/unsubscribe",
   "POST /api/push/unregister",
+  "POST /api/room/media/cloudflare_realtimekit/session",
   "POST /api/room/media/realtime/session",
   "POST /api/room/media/realtime/tracks/new",
   "POST /api/room/media/realtime/turn",

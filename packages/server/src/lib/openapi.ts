@@ -49,6 +49,7 @@ const USER_BEARER_PATHS = new Set([
 
 const USER_BEARER_PREFIXES = [
   '/api/room/media/realtime/',
+  '/api/room/media/cloudflare_realtimekit/',
 ];
 
 const SERVICE_KEY_ONLY_PATHS = new Set([

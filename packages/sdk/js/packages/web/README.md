@@ -334,6 +334,31 @@ Use rooms when you need:
 - multiplayer coordination
 - media/session-style realtime flows
 
+### Room Media Transports
+
+`room.media.transport()` is the high-level browser transport entry point.
+
+```ts
+const transport = room.media.transport({
+  provider: 'cloudflare_realtimekit',
+});
+
+await transport.connect();
+await transport.enableAudio();
+await transport.enableVideo();
+```
+
+Available providers:
+
+- `cloudflare_realtimekit`
+  Default managed media path backed by the Room Media control plane
+- `p2p`
+  STUN-only best-effort mesh for lightweight direct calls
+
+The lower-level `room.media.realtime.*` HTTP wrappers and `RoomRealtimeMediaTransport`
+export still exist for raw WebRTC/SFU flows, but `room.media.transport()` is the
+recommended browser entry point for new room media integrations.
+
 Read more: [Room Client SDK](https://edgebase.fun/docs/room/client-sdk)
 
 ## Which EdgeBase Package Should You Use?

@@ -4963,6 +4963,1497 @@
         }
       }
     },
+    "/api/db/{namespace}/tables/{table}/count": {
+      "get": {
+        "operationId": "dbSingleCountRecords",
+        "tags": [
+          "client"
+        ],
+        "summary": "Count records in a single-instance table",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Database namespace",
+              "example": "app"
+            },
+            "required": true,
+            "description": "Database namespace",
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Table name",
+              "example": "posts"
+            },
+            "required": true,
+            "description": "Table name",
+            "name": "table",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Max items to return",
+              "example": "20"
+            },
+            "required": false,
+            "description": "Max items to return",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Offset for pagination",
+              "example": "0"
+            },
+            "required": false,
+            "description": "Offset for pagination",
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Page number (1-based)",
+              "example": "1"
+            },
+            "required": false,
+            "description": "Page number (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Items per page",
+              "example": "20"
+            },
+            "required": false,
+            "description": "Items per page",
+            "name": "perPage",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Cursor for next page"
+            },
+            "required": false,
+            "description": "Cursor for next page",
+            "name": "after",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Cursor for previous page"
+            },
+            "required": false,
+            "description": "Cursor for previous page",
+            "name": "before",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sort: field:asc,field2:desc",
+              "example": "createdAt:desc"
+            },
+            "required": false,
+            "description": "Sort: field:asc,field2:desc",
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "JSON-encoded filter tuples",
+              "example": "[[\"status\",\"==\",\"active\"]]"
+            },
+            "required": false,
+            "description": "JSON-encoded filter tuples",
+            "name": "filter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "JSON-encoded OR filter tuples"
+            },
+            "required": false,
+            "description": "JSON-encoded OR filter tuples",
+            "name": "orFilter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated field names to return"
+            },
+            "required": false,
+            "description": "Comma-separated field names to return",
+            "name": "fields",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Full-text search query"
+            },
+            "required": false,
+            "description": "Full-text search query",
+            "name": "search",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Count result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/db/{namespace}/tables/{table}/search": {
+      "get": {
+        "operationId": "dbSingleSearchRecords",
+        "tags": [
+          "client"
+        ],
+        "summary": "Search records in a single-instance table",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Database namespace",
+              "example": "app"
+            },
+            "required": true,
+            "description": "Database namespace",
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Table name",
+              "example": "posts"
+            },
+            "required": true,
+            "description": "Table name",
+            "name": "table",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Max items to return",
+              "example": "20"
+            },
+            "required": false,
+            "description": "Max items to return",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Offset for pagination",
+              "example": "0"
+            },
+            "required": false,
+            "description": "Offset for pagination",
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Page number (1-based)",
+              "example": "1"
+            },
+            "required": false,
+            "description": "Page number (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Items per page",
+              "example": "20"
+            },
+            "required": false,
+            "description": "Items per page",
+            "name": "perPage",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Cursor for next page"
+            },
+            "required": false,
+            "description": "Cursor for next page",
+            "name": "after",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Cursor for previous page"
+            },
+            "required": false,
+            "description": "Cursor for previous page",
+            "name": "before",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sort: field:asc,field2:desc",
+              "example": "createdAt:desc"
+            },
+            "required": false,
+            "description": "Sort: field:asc,field2:desc",
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "JSON-encoded filter tuples",
+              "example": "[[\"status\",\"==\",\"active\"]]"
+            },
+            "required": false,
+            "description": "JSON-encoded filter tuples",
+            "name": "filter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "JSON-encoded OR filter tuples"
+            },
+            "required": false,
+            "description": "JSON-encoded OR filter tuples",
+            "name": "orFilter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated field names to return"
+            },
+            "required": false,
+            "description": "Comma-separated field names to return",
+            "name": "fields",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Full-text search query"
+            },
+            "required": false,
+            "description": "Full-text search query",
+            "name": "search",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      "description": "Result items"
+                    },
+                    "total": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Total count (offset mode)"
+                    },
+                    "hasMore": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "description": "More pages available (cursor mode)"
+                    },
+                    "cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Cursor for next page"
+                    },
+                    "page": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Current page (offset mode)"
+                    },
+                    "perPage": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Items per page (offset mode)"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total",
+                    "hasMore",
+                    "cursor",
+                    "page",
+                    "perPage"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/db/{namespace}/tables/{table}/{id}": {
+      "get": {
+        "operationId": "dbSingleGetRecord",
+        "tags": [
+          "client"
+        ],
+        "summary": "Get a single record from a single-instance table",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Database namespace",
+              "example": "app"
+            },
+            "required": true,
+            "description": "Database namespace",
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Table name",
+              "example": "posts"
+            },
+            "required": true,
+            "description": "Table name",
+            "name": "table",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Record ID"
+            },
+            "required": true,
+            "description": "Record ID",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated field names to return"
+            },
+            "required": false,
+            "description": "Comma-separated field names to return",
+            "name": "fields",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Record found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "A single database record"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "dbSingleUpdateRecord",
+        "tags": [
+          "client"
+        ],
+        "summary": "Update a record in a single-instance table",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Database namespace",
+              "example": "app"
+            },
+            "required": true,
+            "description": "Database namespace",
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Table name",
+              "example": "posts"
+            },
+            "required": true,
+            "description": "Table name",
+            "name": "table",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Record ID"
+            },
+            "required": true,
+            "description": "Record ID",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "A single database record"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "dbSingleDeleteRecord",
+        "tags": [
+          "client"
+        ],
+        "summary": "Delete a record from a single-instance table",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Database namespace",
+              "example": "app"
+            },
+            "required": true,
+            "description": "Database namespace",
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Table name",
+              "example": "posts"
+            },
+            "required": true,
+            "description": "Table name",
+            "name": "table",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Record ID"
+            },
+            "required": true,
+            "description": "Record ID",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/db/{namespace}/tables/{table}": {
+      "get": {
+        "operationId": "dbSingleListRecords",
+        "tags": [
+          "client"
+        ],
+        "summary": "List records from a single-instance table",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Database namespace",
+              "example": "app"
+            },
+            "required": true,
+            "description": "Database namespace",
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Table name",
+              "example": "posts"
+            },
+            "required": true,
+            "description": "Table name",
+            "name": "table",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Max items to return",
+              "example": "20"
+            },
+            "required": false,
+            "description": "Max items to return",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Offset for pagination",
+              "example": "0"
+            },
+            "required": false,
+            "description": "Offset for pagination",
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Page number (1-based)",
+              "example": "1"
+            },
+            "required": false,
+            "description": "Page number (1-based)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Items per page",
+              "example": "20"
+            },
+            "required": false,
+            "description": "Items per page",
+            "name": "perPage",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Cursor for next page"
+            },
+            "required": false,
+            "description": "Cursor for next page",
+            "name": "after",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Cursor for previous page"
+            },
+            "required": false,
+            "description": "Cursor for previous page",
+            "name": "before",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sort: field:asc,field2:desc",
+              "example": "createdAt:desc"
+            },
+            "required": false,
+            "description": "Sort: field:asc,field2:desc",
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "JSON-encoded filter tuples",
+              "example": "[[\"status\",\"==\",\"active\"]]"
+            },
+            "required": false,
+            "description": "JSON-encoded filter tuples",
+            "name": "filter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "JSON-encoded OR filter tuples"
+            },
+            "required": false,
+            "description": "JSON-encoded OR filter tuples",
+            "name": "orFilter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated field names to return"
+            },
+            "required": false,
+            "description": "Comma-separated field names to return",
+            "name": "fields",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Full-text search query"
+            },
+            "required": false,
+            "description": "Full-text search query",
+            "name": "search",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      "description": "Result items"
+                    },
+                    "total": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Total count (offset mode)"
+                    },
+                    "hasMore": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "description": "More pages available (cursor mode)"
+                    },
+                    "cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Cursor for next page"
+                    },
+                    "page": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Current page (offset mode)"
+                    },
+                    "perPage": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Items per page (offset mode)"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total",
+                    "hasMore",
+                    "cursor",
+                    "page",
+                    "perPage"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "dbSingleInsertRecord",
+        "tags": [
+          "client"
+        ],
+        "summary": "Insert a record into a single-instance table",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Database namespace",
+              "example": "app"
+            },
+            "required": true,
+            "description": "Database namespace",
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Table name",
+              "example": "posts"
+            },
+            "required": true,
+            "description": "Table name",
+            "name": "table",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Set to \"true\" for upsert mode"
+            },
+            "required": false,
+            "description": "Set to \"true\" for upsert mode",
+            "name": "upsert",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Column to use for conflict detection in upsert mode"
+            },
+            "required": false,
+            "description": "Column to use for conflict detection in upsert mode",
+            "name": "conflictTarget",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated (upsert)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "A single database record"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "A single database record"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/db/{namespace}/tables/{table}/batch": {
+      "post": {
+        "operationId": "dbSingleBatchRecords",
+        "tags": [
+          "client"
+        ],
+        "summary": "Batch insert records into a single-instance table",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Database namespace",
+              "example": "app"
+            },
+            "required": true,
+            "description": "Database namespace",
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Table name",
+              "example": "posts"
+            },
+            "required": true,
+            "description": "Table name",
+            "name": "table",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Set to \"true\" for upsert mode"
+            },
+            "required": false,
+            "description": "Set to \"true\" for upsert mode",
+            "name": "upsert",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Column to use for conflict detection in upsert mode"
+            },
+            "required": false,
+            "description": "Column to use for conflict detection in upsert mode",
+            "name": "conflictTarget",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Batch result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/db/{namespace}/tables/{table}/batch-by-filter": {
+      "post": {
+        "operationId": "dbSingleBatchByFilter",
+        "tags": [
+          "client"
+        ],
+        "summary": "Batch update/delete records by filter in a single-instance table",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Database namespace",
+              "example": "app"
+            },
+            "required": true,
+            "description": "Database namespace",
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Table name",
+              "example": "posts"
+            },
+            "required": true,
+            "description": "Table name",
+            "name": "table",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Set to \"true\" for upsert mode"
+            },
+            "required": false,
+            "description": "Set to \"true\" for upsert mode",
+            "name": "upsert",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Column to use for conflict detection in upsert mode"
+            },
+            "required": false,
+            "description": "Column to use for conflict detection in upsert mode",
+            "name": "conflictTarget",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Batch result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/db/{namespace}/{instanceId}/tables/{table}/count": {
       "get": {
         "operationId": "dbCountRecords",
@@ -5082,11 +6573,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "JSON-encoded filter tuples. Each tuple is [field, operator, value]. Operators: ==, !=, >, <, >=, <=, contains, contains-any, in, not in, not-in",
+              "description": "JSON-encoded filter tuples",
               "example": "[[\"status\",\"==\",\"active\"]]"
             },
             "required": false,
-            "description": "JSON-encoded filter tuples. Each tuple is [field, operator, value]. Operators: ==, !=, >, <, >=, <=, contains, contains-any, in, not in, not-in",
+            "description": "JSON-encoded filter tuples",
             "name": "filter",
             "in": "query"
           },
@@ -5308,11 +6799,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "JSON-encoded filter tuples. Each tuple is [field, operator, value]. Operators: ==, !=, >, <, >=, <=, contains, contains-any, in, not in, not-in",
+              "description": "JSON-encoded filter tuples",
               "example": "[[\"status\",\"==\",\"active\"]]"
             },
             "required": false,
-            "description": "JSON-encoded filter tuples. Each tuple is [field, operator, value]. Operators: ==, !=, >, <, >=, <=, contains, contains-any, in, not in, not-in",
+            "description": "JSON-encoded filter tuples",
             "name": "filter",
             "in": "query"
           },
@@ -5962,11 +7453,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "JSON-encoded filter tuples. Each tuple is [field, operator, value]. Operators: ==, !=, >, <, >=, <=, contains, contains-any, in, not in, not-in",
+              "description": "JSON-encoded filter tuples",
               "example": "[[\"status\",\"==\",\"active\"]]"
             },
             "required": false,
-            "description": "JSON-encoded filter tuples. Each tuple is [field, operator, value]. Operators: ==, !=, >, <, >=, <=, contains, contains-any, in, not in, not-in",
+            "description": "JSON-encoded filter tuples",
             "name": "filter",
             "in": "query"
           },
@@ -13416,6 +14907,249 @@
         ]
       }
     },
+    "/api/room/media/cloudflare_realtimekit/session": {
+      "post": {
+        "operationId": "createRoomCloudflareRealtimeKitSession",
+        "tags": [
+          "client"
+        ],
+        "summary": "Create a room Cloudflare RealtimeKit session",
+        "description": "Creates a Cloudflare RealtimeKit session for the authenticated room member.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Room namespace"
+            },
+            "required": true,
+            "description": "Room namespace",
+            "name": "namespace",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Room ID"
+            },
+            "required": true,
+            "description": "Room ID",
+            "name": "id",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "connectionId": {
+                    "type": "string",
+                    "description": "Specific room connection ID to bind the Cloudflare RealtimeKit participant to"
+                  },
+                  "customParticipantId": {
+                    "type": "string",
+                    "description": "Optional custom participant identifier for the provisioned RealtimeKit participant"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Optional display name for the provisioned RealtimeKit participant"
+                  },
+                  "picture": {
+                    "type": "string",
+                    "description": "Optional avatar URL for the provisioned RealtimeKit participant"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cloudflare RealtimeKit session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "description": "Cloudflare RealtimeKit participant ID"
+                    },
+                    "meetingId": {
+                      "type": "string",
+                      "description": "Cloudflare RealtimeKit meeting ID backing the room session"
+                    },
+                    "participantId": {
+                      "type": "string",
+                      "description": "Cloudflare RealtimeKit participant ID"
+                    },
+                    "authToken": {
+                      "type": "string",
+                      "description": "RealtimeKit auth token for the provisioned participant"
+                    },
+                    "presetName": {
+                      "type": "string",
+                      "description": "RealtimeKit preset used for the provisioned participant"
+                    },
+                    "connectionId": {
+                      "type": "string",
+                      "description": "Room connection ID associated with the session"
+                    },
+                    "reused": {
+                      "type": "boolean",
+                      "description": "Whether an existing provider participant was reused"
+                    }
+                  },
+                  "required": [
+                    "sessionId",
+                    "meetingId",
+                    "participantId",
+                    "authToken"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Room runtime not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicting existing published media",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "userBearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/analytics/query": {
       "get": {
         "operationId": "queryAnalytics",
@@ -13459,11 +15193,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Group by interval (hour, day, week)",
+              "description": "Group by interval (minute, tenMinute, hour, day)",
               "example": "hour"
             },
             "required": false,
-            "description": "Group by interval (hour, day, week)",
+            "description": "Group by interval (minute, tenMinute, hour, day)",
             "name": "groupBy",
             "in": "query"
           },
@@ -13485,6 +15219,17 @@
             "required": false,
             "description": "Custom ISO end time",
             "name": "end",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Exclude a category from the result set",
+              "example": "admin"
+            },
+            "required": false,
+            "description": "Exclude a category from the result set",
+            "name": "excludeCategory",
             "in": "query"
           }
         ],
@@ -13686,11 +15431,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Group by interval (hour, day, week)",
+              "description": "Group by interval (minute, tenMinute, hour, day)",
               "example": "hour"
             },
             "required": false,
-            "description": "Group by interval (hour, day, week)",
+            "description": "Group by interval (minute, tenMinute, hour, day)",
             "name": "groupBy",
             "in": "query"
           },
@@ -15241,6 +16986,117 @@
         ]
       }
     },
+    "/admin/api/data/namespaces/{namespace}/instances": {
+      "get": {
+        "operationId": "adminListNamespaceInstances",
+        "tags": [
+          "admin"
+        ],
+        "summary": "List instance suggestions for a dynamic namespace",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Instance suggestions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearerAuth": []
+          },
+          {
+            "serviceKeyAuth": []
+          }
+        ]
+      }
+    },
     "/admin/api/data/tables/{name}/export": {
       "get": {
         "operationId": "adminExportTable",
@@ -15345,7 +17201,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "Get realtime monitoring stats",
+        "summary": "Get live monitoring stats",
         "responses": {
           "200": {
             "description": "Monitoring stats",
@@ -15377,6 +17233,83 @@
           "admin"
         ],
         "summary": "Get analytics dashboard data",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Time range (e.g. 1h, 6h, 24h, 7d, 30d)",
+              "example": "24h"
+            },
+            "required": false,
+            "description": "Time range (e.g. 1h, 6h, 24h, 7d, 30d)",
+            "name": "range",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter by category",
+              "example": "db"
+            },
+            "required": false,
+            "description": "Filter by category",
+            "name": "category",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Metric type (overview, timeSeries, breakdown, topEndpoints)",
+              "example": "overview"
+            },
+            "required": false,
+            "description": "Metric type (overview, timeSeries, breakdown, topEndpoints)",
+            "name": "metric",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional group-by override (minute, tenMinute, hour, day)",
+              "example": "hour"
+            },
+            "required": false,
+            "description": "Optional group-by override (minute, tenMinute, hour, day)",
+            "name": "groupBy",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Custom ISO start time"
+            },
+            "required": false,
+            "description": "Custom ISO start time",
+            "name": "start",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Custom ISO end time"
+            },
+            "required": false,
+            "description": "Custom ISO end time",
+            "name": "end",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Exclude a category from the result set",
+              "example": "admin"
+            },
+            "required": false,
+            "description": "Exclude a category from the result set",
+            "name": "excludeCategory",
+            "in": "query"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Analytics data",
@@ -15439,6 +17372,30 @@
           "admin"
         ],
         "summary": "Get project overview for dashboard home",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Time range (e.g. 1h, 6h, 24h, 7d, 30d)",
+              "example": "24h"
+            },
+            "required": false,
+            "description": "Time range (e.g. 1h, 6h, 24h, 7d, 30d)",
+            "name": "range",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional group-by override (minute, tenMinute, hour, day)",
+              "example": "hour"
+            },
+            "required": false,
+            "description": "Optional group-by override (minute, tenMinute, hour, day)",
+            "name": "groupBy",
+            "in": "query"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Overview data",
@@ -16711,6 +18668,224 @@
         ]
       }
     },
+    "/admin/api/data/backup/dump-data": {
+      "post": {
+        "operationId": "adminBackupDumpData",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Dump data namespace tables for admin-side migrations",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "namespace": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "namespace"
+                ],
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Namespace dump",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearerAuth": []
+          },
+          {
+            "serviceKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/api/data/backup/restore-data": {
+      "post": {
+        "operationId": "adminBackupRestoreData",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Restore data namespace tables for admin-side migrations",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "namespace": {
+                    "type": "string"
+                  },
+                  "tables": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      }
+                    }
+                  },
+                  "skipWipe": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "namespace",
+                  "tables"
+                ],
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Namespace restored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearerAuth": []
+          },
+          {
+            "serviceKeyAuth": []
+          }
+        ]
+      }
+    },
     "/admin/api/data/backup/config": {
       "get": {
         "operationId": "adminBackupGetConfig",
@@ -16912,6 +19087,146 @@
                   "type": "object",
                   "additionalProperties": {},
                   "description": "JSON response"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearerAuth": []
+          },
+          {
+            "serviceKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/admin/api/data/destroy-app": {
+      "post": {
+        "operationId": "adminDestroyApp",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete all Cloudflare resources and the Worker itself (self-destruct)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirm": {
+                    "type": "string",
+                    "enum": [
+                      "DELETE_ALL_RESOURCES"
+                    ]
+                  }
+                },
+                "required": [
+                  "confirm"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Destruction result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "deleted": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "failed": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "resource": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "resource",
+                          "error"
+                        ]
+                      }
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "deleted",
+                    "failed",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
                 }
               }
             }
@@ -18066,1504 +20381,7 @@
           }
         ]
       }
-    },
-    "/api/db/{namespace}/tables/{table}/count": {
-      "get": {
-        "operationId": "dbSingleCountRecords",
-        "tags": [
-          "client"
-        ],
-        "summary": "Count records in a single-instance table",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "Database namespace",
-              "example": "app"
-            },
-            "required": true,
-            "description": "Database namespace",
-            "name": "namespace",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Table name",
-              "example": "posts"
-            },
-            "required": true,
-            "description": "Table name",
-            "name": "table",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Max items to return",
-              "example": "20"
-            },
-            "required": false,
-            "description": "Max items to return",
-            "name": "limit",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Offset for pagination",
-              "example": "0"
-            },
-            "required": false,
-            "description": "Offset for pagination",
-            "name": "offset",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Page number (1-based)",
-              "example": "1"
-            },
-            "required": false,
-            "description": "Page number (1-based)",
-            "name": "page",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Items per page",
-              "example": "20"
-            },
-            "required": false,
-            "description": "Items per page",
-            "name": "perPage",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Cursor for next page"
-            },
-            "required": false,
-            "description": "Cursor for next page",
-            "name": "after",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Cursor for previous page"
-            },
-            "required": false,
-            "description": "Cursor for previous page",
-            "name": "before",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Sort: field:asc,field2:desc",
-              "example": "createdAt:desc"
-            },
-            "required": false,
-            "description": "Sort: field:asc,field2:desc",
-            "name": "sort",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "JSON-encoded filter tuples. Each tuple is [field, operator, value]. Operators: ==, !=, >, <, >=, <=, contains, contains-any, in, not in, not-in",
-              "example": "[[\"status\",\"==\",\"active\"]]"
-            },
-            "required": false,
-            "description": "JSON-encoded filter tuples. Each tuple is [field, operator, value]. Operators: ==, !=, >, <, >=, <=, contains, contains-any, in, not in, not-in",
-            "name": "filter",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "JSON-encoded OR filter tuples"
-            },
-            "required": false,
-            "description": "JSON-encoded OR filter tuples",
-            "name": "orFilter",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Comma-separated field names to return"
-            },
-            "required": false,
-            "description": "Comma-separated field names to return",
-            "name": "fields",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Full-text search query"
-            },
-            "required": false,
-            "description": "Full-text search query",
-            "name": "search",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Count result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {},
-                  "description": "JSON response"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/db/{namespace}/tables/{table}/search": {
-      "get": {
-        "operationId": "dbSingleSearchRecords",
-        "tags": [
-          "client"
-        ],
-        "summary": "Search records in a single-instance table",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "Database namespace",
-              "example": "app"
-            },
-            "required": true,
-            "description": "Database namespace",
-            "name": "namespace",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Table name",
-              "example": "posts"
-            },
-            "required": true,
-            "description": "Table name",
-            "name": "table",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Max items to return",
-              "example": "20"
-            },
-            "required": false,
-            "description": "Max items to return",
-            "name": "limit",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Offset for pagination",
-              "example": "0"
-            },
-            "required": false,
-            "description": "Offset for pagination",
-            "name": "offset",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Page number (1-based)",
-              "example": "1"
-            },
-            "required": false,
-            "description": "Page number (1-based)",
-            "name": "page",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Items per page",
-              "example": "20"
-            },
-            "required": false,
-            "description": "Items per page",
-            "name": "perPage",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Cursor for next page"
-            },
-            "required": false,
-            "description": "Cursor for next page",
-            "name": "after",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Cursor for previous page"
-            },
-            "required": false,
-            "description": "Cursor for previous page",
-            "name": "before",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Sort: field:asc,field2:desc",
-              "example": "createdAt:desc"
-            },
-            "required": false,
-            "description": "Sort: field:asc,field2:desc",
-            "name": "sort",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "JSON-encoded filter tuples. Each tuple is [field, operator, value]. Operators: ==, !=, >, <, >=, <=, contains, contains-any, in, not in, not-in",
-              "example": "[[\"status\",\"==\",\"active\"]]"
-            },
-            "required": false,
-            "description": "JSON-encoded filter tuples. Each tuple is [field, operator, value]. Operators: ==, !=, >, <, >=, <=, contains, contains-any, in, not in, not-in",
-            "name": "filter",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "JSON-encoded OR filter tuples"
-            },
-            "required": false,
-            "description": "JSON-encoded OR filter tuples",
-            "name": "orFilter",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Comma-separated field names to return"
-            },
-            "required": false,
-            "description": "Comma-separated field names to return",
-            "name": "fields",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Full-text search query"
-            },
-            "required": false,
-            "description": "Full-text search query",
-            "name": "search",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Search results",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": {}
-                      },
-                      "description": "Result items"
-                    },
-                    "total": {
-                      "type": [
-                        "number",
-                        "null"
-                      ],
-                      "description": "Total count (offset mode)"
-                    },
-                    "hasMore": {
-                      "type": [
-                        "boolean",
-                        "null"
-                      ],
-                      "description": "More pages available (cursor mode)"
-                    },
-                    "cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "description": "Cursor for next page"
-                    },
-                    "page": {
-                      "type": [
-                        "number",
-                        "null"
-                      ],
-                      "description": "Current page (offset mode)"
-                    },
-                    "perPage": {
-                      "type": [
-                        "number",
-                        "null"
-                      ],
-                      "description": "Items per page (offset mode)"
-                    }
-                  },
-                  "required": [
-                    "items",
-                    "total",
-                    "hasMore",
-                    "cursor",
-                    "page",
-                    "perPage"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/db/{namespace}/tables/{table}/{id}": {
-      "get": {
-        "operationId": "dbSingleGetRecord",
-        "tags": [
-          "client"
-        ],
-        "summary": "Get a single record from a single-instance table",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "Database namespace",
-              "example": "app"
-            },
-            "required": true,
-            "description": "Database namespace",
-            "name": "namespace",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Table name",
-              "example": "posts"
-            },
-            "required": true,
-            "description": "Table name",
-            "name": "table",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Record ID"
-            },
-            "required": true,
-            "description": "Record ID",
-            "name": "id",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Comma-separated field names to return"
-            },
-            "required": false,
-            "description": "Comma-separated field names to return",
-            "name": "fields",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Record found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {},
-                  "description": "A single database record"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "operationId": "dbSingleUpdateRecord",
-        "tags": [
-          "client"
-        ],
-        "summary": "Update a record in a single-instance table",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "Database namespace",
-              "example": "app"
-            },
-            "required": true,
-            "description": "Database namespace",
-            "name": "namespace",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Table name",
-              "example": "posts"
-            },
-            "required": true,
-            "description": "Table name",
-            "name": "table",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Record ID"
-            },
-            "required": true,
-            "description": "Record ID",
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": {}
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Updated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {},
-                  "description": "A single database record"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "operationId": "dbSingleDeleteRecord",
-        "tags": [
-          "client"
-        ],
-        "summary": "Delete a record from a single-instance table",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "Database namespace",
-              "example": "app"
-            },
-            "required": true,
-            "description": "Database namespace",
-            "name": "namespace",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Table name",
-              "example": "posts"
-            },
-            "required": true,
-            "description": "Table name",
-            "name": "table",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Record ID"
-            },
-            "required": true,
-            "description": "Record ID",
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Deleted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {},
-                  "description": "JSON response"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/db/{namespace}/tables/{table}": {
-      "get": {
-        "operationId": "dbSingleListRecords",
-        "tags": [
-          "client"
-        ],
-        "summary": "List records from a single-instance table",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "Database namespace",
-              "example": "app"
-            },
-            "required": true,
-            "description": "Database namespace",
-            "name": "namespace",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Table name",
-              "example": "posts"
-            },
-            "required": true,
-            "description": "Table name",
-            "name": "table",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Max items to return",
-              "example": "20"
-            },
-            "required": false,
-            "description": "Max items to return",
-            "name": "limit",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Offset for pagination",
-              "example": "0"
-            },
-            "required": false,
-            "description": "Offset for pagination",
-            "name": "offset",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Page number (1-based)",
-              "example": "1"
-            },
-            "required": false,
-            "description": "Page number (1-based)",
-            "name": "page",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Items per page",
-              "example": "20"
-            },
-            "required": false,
-            "description": "Items per page",
-            "name": "perPage",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Cursor for next page"
-            },
-            "required": false,
-            "description": "Cursor for next page",
-            "name": "after",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Cursor for previous page"
-            },
-            "required": false,
-            "description": "Cursor for previous page",
-            "name": "before",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Sort: field:asc,field2:desc",
-              "example": "createdAt:desc"
-            },
-            "required": false,
-            "description": "Sort: field:asc,field2:desc",
-            "name": "sort",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "JSON-encoded filter tuples. Each tuple is [field, operator, value]. Operators: ==, !=, >, <, >=, <=, contains, contains-any, in, not in, not-in",
-              "example": "[[\"status\",\"==\",\"active\"]]"
-            },
-            "required": false,
-            "description": "JSON-encoded filter tuples. Each tuple is [field, operator, value]. Operators: ==, !=, >, <, >=, <=, contains, contains-any, in, not in, not-in",
-            "name": "filter",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "JSON-encoded OR filter tuples"
-            },
-            "required": false,
-            "description": "JSON-encoded OR filter tuples",
-            "name": "orFilter",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Comma-separated field names to return"
-            },
-            "required": false,
-            "description": "Comma-separated field names to return",
-            "name": "fields",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Full-text search query"
-            },
-            "required": false,
-            "description": "Full-text search query",
-            "name": "search",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": {}
-                      },
-                      "description": "Result items"
-                    },
-                    "total": {
-                      "type": [
-                        "number",
-                        "null"
-                      ],
-                      "description": "Total count (offset mode)"
-                    },
-                    "hasMore": {
-                      "type": [
-                        "boolean",
-                        "null"
-                      ],
-                      "description": "More pages available (cursor mode)"
-                    },
-                    "cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "description": "Cursor for next page"
-                    },
-                    "page": {
-                      "type": [
-                        "number",
-                        "null"
-                      ],
-                      "description": "Current page (offset mode)"
-                    },
-                    "perPage": {
-                      "type": [
-                        "number",
-                        "null"
-                      ],
-                      "description": "Items per page (offset mode)"
-                    }
-                  },
-                  "required": [
-                    "items",
-                    "total",
-                    "hasMore",
-                    "cursor",
-                    "page",
-                    "perPage"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "operationId": "dbSingleInsertRecord",
-        "tags": [
-          "client"
-        ],
-        "summary": "Insert a record into a single-instance table",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "Database namespace",
-              "example": "app"
-            },
-            "required": true,
-            "description": "Database namespace",
-            "name": "namespace",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Table name",
-              "example": "posts"
-            },
-            "required": true,
-            "description": "Table name",
-            "name": "table",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Set to \"true\" for upsert mode"
-            },
-            "required": false,
-            "description": "Set to \"true\" for upsert mode",
-            "name": "upsert",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Column to use for conflict detection in upsert mode"
-            },
-            "required": false,
-            "description": "Column to use for conflict detection in upsert mode",
-            "name": "conflictTarget",
-            "in": "query"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": {}
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Updated (upsert)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {},
-                  "description": "A single database record"
-                }
-              }
-            }
-          },
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {},
-                  "description": "A single database record"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/db/{namespace}/tables/{table}/batch": {
-      "post": {
-        "operationId": "dbSingleBatchRecords",
-        "tags": [
-          "client"
-        ],
-        "summary": "Batch insert records into a single-instance table",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "Database namespace",
-              "example": "app"
-            },
-            "required": true,
-            "description": "Database namespace",
-            "name": "namespace",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Table name",
-              "example": "posts"
-            },
-            "required": true,
-            "description": "Table name",
-            "name": "table",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Set to \"true\" for upsert mode"
-            },
-            "required": false,
-            "description": "Set to \"true\" for upsert mode",
-            "name": "upsert",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Column to use for conflict detection in upsert mode"
-            },
-            "required": false,
-            "description": "Column to use for conflict detection in upsert mode",
-            "name": "conflictTarget",
-            "in": "query"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": {}
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Batch result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {},
-                  "description": "JSON response"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/db/{namespace}/tables/{table}/batch-by-filter": {
-      "post": {
-        "operationId": "dbSingleBatchByFilter",
-        "tags": [
-          "client"
-        ],
-        "summary": "Batch update/delete records by filter in a single-instance table",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "Database namespace",
-              "example": "app"
-            },
-            "required": true,
-            "description": "Database namespace",
-            "name": "namespace",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Table name",
-              "example": "posts"
-            },
-            "required": true,
-            "description": "Table name",
-            "name": "table",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Set to \"true\" for upsert mode"
-            },
-            "required": false,
-            "description": "Set to \"true\" for upsert mode",
-            "name": "upsert",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Column to use for conflict detection in upsert mode"
-            },
-            "required": false,
-            "description": "Column to use for conflict detection in upsert mode",
-            "name": "conflictTarget",
-            "in": "query"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": {}
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Batch result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {},
-                  "description": "JSON response"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
-  "webhooks": {},
-  "servers": [
-    {
-      "url": "http://127.0.0.1:8799",
-      "description": "Current EdgeBase instance"
-    }
-  ]
+  "webhooks": {}
 }

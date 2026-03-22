@@ -11,6 +11,14 @@
 import type { TokenManager, TokenUser } from './token-manager.js';
 import { EdgeBaseError } from '@edge-base/core';
 import { refreshAccessToken } from './auth-refresh.js';
+import {
+  RoomCloudflareMediaTransport,
+  type RoomCloudflareMediaTransportOptions,
+} from './room-cloudflare-media.js';
+import {
+  RoomP2PMediaTransport,
+  type RoomP2PMediaTransportOptions,
+} from './room-p2p-media.js';
 
 // ─── Types ───
 
@@ -76,6 +84,7 @@ export interface RoomMediaTrack {
   muted: boolean;
   publishedAt?: number;
   adminDisabled?: boolean;
+  providerSessionId?: string;
 }
 
 export interface RoomMemberMediaKindState {
@@ -85,6 +94,7 @@ export interface RoomMemberMediaKindState {
   deviceId?: string;
   publishedAt?: number;
   adminDisabled?: boolean;
+  providerSessionId?: string;
 }
 
 export interface RoomMemberMediaState {
@@ -103,6 +113,77 @@ export interface RoomMediaDeviceChange {
   kind: RoomMediaKind;
   deviceId: string;
 }
+
+export interface RoomCloudflareRealtimeKitCreateSessionRequest {
+  connectionId?: string;
+  customParticipantId?: string;
+  name?: string;
+  picture?: string;
+}
+
+export interface RoomCloudflareRealtimeKitCreateSessionResponse {
+  sessionId: string;
+  meetingId: string;
+  participantId: string;
+  authToken: string;
+  presetName: string;
+  connectionId?: string;
+  reused?: boolean;
+}
+
+export interface RoomMediaTransportConnectPayload {
+  connectionId?: string;
+  customParticipantId?: string;
+  name?: string;
+  picture?: string;
+}
+
+export interface RoomMediaRemoteTrackEvent {
+  kind: RoomMediaKind;
+  track: MediaStreamTrack;
+  stream?: MediaStream;
+  trackName?: string;
+  providerSessionId?: string;
+  participantId?: string;
+  customParticipantId?: string;
+  userId?: string;
+}
+
+export interface RoomMediaTransport {
+  connect(payload?: RoomMediaTransportConnectPayload): Promise<string>;
+  enableAudio(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
+  enableVideo(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
+  startScreenShare(constraints?: unknown): Promise<MediaStreamTrack>;
+  disableAudio(): Promise<void>;
+  disableVideo(): Promise<void>;
+  stopScreenShare(): Promise<void>;
+  setMuted(kind: Extract<RoomMediaKind, 'audio' | 'video'>, muted: boolean): Promise<void>;
+  switchDevices(payload: {
+    audioInputId?: string;
+    videoInputId?: string;
+    screenInputId?: string;
+  }): Promise<void>;
+  onRemoteTrack(handler: (event: RoomMediaRemoteTrackEvent) => void): Subscription;
+  getSessionId(): string | null;
+  getPeerConnection(): RTCPeerConnection | null;
+  destroy(): void;
+}
+
+export type RoomMediaTransportProvider = 'cloudflare_realtimekit' | 'p2p';
+
+export interface RoomCloudflareRealtimeKitTransportFactoryOptions {
+  provider?: 'cloudflare_realtimekit';
+  cloudflareRealtimeKit?: RoomCloudflareMediaTransportOptions;
+}
+
+export interface RoomP2PTransportFactoryOptions {
+  provider: 'p2p';
+  p2p?: RoomP2PMediaTransportOptions;
+}
+
+export type RoomMediaTransportOptions =
+  | RoomCloudflareRealtimeKitTransportFactoryOptions
+  | RoomP2PTransportFactoryOptions;
 
 // ─── Helpers ───
 
@@ -274,6 +355,22 @@ export class RoomClient {
 
   readonly members = {
     list: (): RoomMember[] => cloneValue(this._members),
+    current: (): RoomMember | null => {
+      const connectionId = this.currentConnectionId;
+      if (connectionId) {
+        const byConnection = this._members.find((member) => member.connectionId === connectionId);
+        if (byConnection) {
+          return cloneValue(byConnection);
+        }
+      }
+
+      const userId = this.currentUserId;
+      if (!userId) {
+        return null;
+      }
+      const member = this._members.find((entry) => entry.userId === userId) ?? null;
+      return member ? cloneValue(member) : null;
+    },
     onSync: (handler: (members: RoomMember[]) => void): Subscription => this.onMembersSync(handler),
     onJoin: (handler: (member: RoomMember) => void): Subscription => this.onMemberJoin(handler),
     onLeave: (handler: (member: RoomMember, reason: RoomMemberLeaveReason) => void): Subscription =>
@@ -319,6 +416,23 @@ export class RoomClient {
         videoInputId?: string;
         screenInputId?: string;
       }): Promise<void> => this.switchMediaDevices(payload),
+    },
+    cloudflareRealtimeKit: {
+      createSession: (
+        payload?: RoomCloudflareRealtimeKitCreateSessionRequest,
+      ): Promise<RoomCloudflareRealtimeKitCreateSessionResponse> =>
+        this.requestCloudflareRealtimeKitMedia('session', 'POST', payload),
+    },
+    transport: (options?: RoomMediaTransportOptions): RoomMediaTransport => {
+      const provider = options?.provider ?? 'cloudflare_realtimekit';
+      if (provider === 'p2p') {
+        const p2pOptions = (options as RoomP2PTransportFactoryOptions | undefined)?.p2p;
+        return new RoomP2PMediaTransport(this, p2pOptions);
+      }
+
+      const cloudflareOptions =
+        (options as RoomCloudflareRealtimeKitTransportFactoryOptions | undefined)?.cloudflareRealtimeKit;
+      return new RoomCloudflareMediaTransport(this, cloudflareOptions);
     },
     onTrack: (handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription =>
       this.onMediaTrack(handler),
@@ -382,6 +496,51 @@ export class RoomClient {
    */
   async getMetadata(): Promise<Record<string, unknown>> {
     return RoomClient.getMetadata(this.baseUrl, this.namespace, this.roomId);
+  }
+
+  private async requestCloudflareRealtimeKitMedia<T>(
+    path: string,
+    method: 'GET' | 'POST' | 'PUT',
+    payload?: unknown,
+  ): Promise<T> {
+    return this.requestRoomMedia('cloudflare_realtimekit', path, method, payload);
+  }
+
+  private async requestRoomMedia<T>(
+    providerPath: string,
+    path: string,
+    method: 'GET' | 'POST' | 'PUT',
+    payload?: unknown,
+  ): Promise<T> {
+    const token = await this.tokenManager.getAccessToken(
+      (refreshToken) => refreshAccessToken(this.baseUrl, refreshToken),
+    );
+    if (!token) {
+      throw new EdgeBaseError(401, 'Authentication required');
+    }
+
+    const url = new URL(`${this.baseUrl.replace(/\/$/, '')}/api/room/media/${providerPath}/${path}`);
+    url.searchParams.set('namespace', this.namespace);
+    url.searchParams.set('id', this.roomId);
+
+    const response = await fetch(url.toString(), {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: method === 'GET' ? undefined : JSON.stringify(payload ?? {}),
+    });
+
+    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!response.ok) {
+      throw new EdgeBaseError(
+        response.status,
+        (typeof data.message === 'string' && data.message) || `Room media request failed: ${response.statusText}`,
+      );
+    }
+
+    return data as T;
   }
 
   /**

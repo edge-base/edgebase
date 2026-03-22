@@ -270,6 +270,11 @@ impl<'a> GeneratedAdminApi<'a> {
         self.http.get("/admin/api/data/schema").await
     }
 
+    /// List instance suggestions for a dynamic namespace — GET /admin/api/data/namespaces/{namespace}/instances
+    pub async fn admin_list_namespace_instances(&self, namespace: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.get_with_query(&format!("/admin/api/data/namespaces/{}/instances", encode_path_param(namespace)), query).await
+    }
+
     /// Export table data as JSON — GET /admin/api/data/tables/{name}/export
     pub async fn admin_export_table(&self, name: &str) -> Result<Value, Error> {
         self.http.get(&format!("/admin/api/data/tables/{}/export", encode_path_param(name))).await
@@ -280,14 +285,14 @@ impl<'a> GeneratedAdminApi<'a> {
         self.http.get("/admin/api/data/logs").await
     }
 
-    /// Get realtime monitoring stats — GET /admin/api/data/monitoring
+    /// Get live monitoring stats — GET /admin/api/data/monitoring
     pub async fn admin_get_monitoring(&self) -> Result<Value, Error> {
         self.http.get("/admin/api/data/monitoring").await
     }
 
     /// Get analytics dashboard data — GET /admin/api/data/analytics
-    pub async fn admin_get_analytics(&self) -> Result<Value, Error> {
-        self.http.get("/admin/api/data/analytics").await
+    pub async fn admin_get_analytics(&self, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.get_with_query("/admin/api/data/analytics", query).await
     }
 
     /// Query analytics events for admin dashboard — GET /admin/api/data/analytics/events
@@ -296,8 +301,8 @@ impl<'a> GeneratedAdminApi<'a> {
     }
 
     /// Get project overview for dashboard home — GET /admin/api/data/overview
-    pub async fn admin_get_overview(&self) -> Result<Value, Error> {
-        self.http.get("/admin/api/data/overview").await
+    pub async fn admin_get_overview(&self, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.get_with_query("/admin/api/data/overview", query).await
     }
 
     /// Get dev mode status and sidecar port — GET /admin/api/data/dev-info
@@ -400,6 +405,16 @@ impl<'a> GeneratedAdminApi<'a> {
         self.http.post("/admin/api/data/backup/restore-d1", body).await
     }
 
+    /// Dump data namespace tables for admin-side migrations — POST /admin/api/data/backup/dump-data
+    pub async fn admin_backup_dump_data(&self, body: &Value) -> Result<Value, Error> {
+        self.http.post("/admin/api/data/backup/dump-data", body).await
+    }
+
+    /// Restore data namespace tables for admin-side migrations — POST /admin/api/data/backup/restore-data
+    pub async fn admin_backup_restore_data(&self, body: &Value) -> Result<Value, Error> {
+        self.http.post("/admin/api/data/backup/restore-data", body).await
+    }
+
     /// Get backup config — GET /admin/api/data/backup/config
     pub async fn admin_backup_get_config(&self) -> Result<Value, Error> {
         self.http.get("/admin/api/data/backup/config").await
@@ -423,6 +438,11 @@ impl<'a> GeneratedAdminApi<'a> {
     /// Change admin password — PUT /admin/api/data/admins/{id}/password
     pub async fn admin_change_password(&self, id: &str, body: &Value) -> Result<Value, Error> {
         self.http.put(&format!("/admin/api/data/admins/{}/password", encode_path_param(id)), body).await
+    }
+
+    /// Delete all Cloudflare resources and the Worker itself (self-destruct) — POST /admin/api/data/destroy-app
+    pub async fn admin_destroy_app(&self, body: &Value) -> Result<Value, Error> {
+        self.http.post("/admin/api/data/destroy-app", body).await
     }
 
     /// List all DO instances — POST /admin/api/backup/list-dos

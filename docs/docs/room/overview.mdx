@@ -27,7 +27,7 @@ This feature is in **beta**. Core behavior is stable and ready to try, but some 
 - **Hooks**: [Server Hooks and Actions](/docs/room/server) covers lifecycle hooks such as `onCreate`, `onJoin`, `onLeave`, and `onDestroy`.
 - **Triggers**: Room is not a trigger-based surface.
 - **Handlers**: [Server Hooks and Actions](/docs/room/server) also covers `handlers.actions` and `handlers.timers`.
-- **Capabilities**: [State (Room State)](/docs/room/state), [Meta (Room Info)](/docs/room/meta), [Members (Presence)](/docs/room/members), [Signals (Broadcast)](/docs/room/signals), and [Media (Voice/Video)](/docs/room/media) *(alpha)* are the five primary Room surfaces.
+- **Capabilities**: [State (Room State)](/docs/room/state), [Meta (Room Info)](/docs/room/meta), [Members (Presence)](/docs/room/members), [Signals (Broadcast)](/docs/room/signals), and [Media (Voice/Video)](/docs/room/media) *(beta)* are the five primary Room surfaces.
 :::
 
 ## What is Room?
@@ -40,7 +40,7 @@ Room combines five core real-time capabilities in one primitive:
 - **`room.meta`** (room info) — public-safe room metadata for lobby cards, pre-join summaries, and matchmaking
 - **`room.members`** (presence) — built-in presence tracking and ephemeral member state
 - **`room.signals`** (broadcast) — lightweight pub/sub for chat, cursors, WebRTC signaling, and other transient events
-- **`room.media`** (voice/video) — audio/video/screenshare publish, mute, and device state for conferencing UIs *(alpha)*
+- **`room.media`** (voice/video) — audio/video/screenshare publish, mute, and device state for conferencing UIs *(beta)*
 
 And the client surface includes two companion namespaces around those five capabilities:
 
@@ -250,7 +250,7 @@ Step 1's `handlers.actions.INCREMENT` runs on the server. `setSharedState` trigg
 | `room.meta.*` | Public-safe room metadata, including pre-join fetches |
 | `room.members.*` | Presence list, member join/leave events, and ephemeral member state |
 | `room.signals.*` | Fire-and-forget room events and direct member targeting |
-| `room.media.*` *(alpha)* | Audio/video/screen publish, mute, device, and track state |
+| `room.media.*` *(beta)* | Audio/video/screen publish, mute, device, and track state |
 | `room.admin.*` | Moderation controls such as kick, mute, and role changes |
 | `room.session.*` | Errors, reconnect notifications, kicked events, and connection state |
 

@@ -39,6 +39,15 @@ export type {
   RoomMemberMediaState,
   RoomMediaMember,
   RoomMediaDeviceChange,
+  RoomCloudflareRealtimeKitCreateSessionRequest,
+  RoomCloudflareRealtimeKitCreateSessionResponse,
+  RoomMediaTransportConnectPayload,
+  RoomMediaRemoteTrackEvent,
+  RoomMediaTransport,
+  RoomMediaTransportProvider,
+  RoomCloudflareRealtimeKitTransportFactoryOptions,
+  RoomP2PTransportFactoryOptions,
+  RoomMediaTransportOptions,
 } from './room.js';
 
 // ─── Turnstile / Captcha ───

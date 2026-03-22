@@ -20,7 +20,7 @@ On the newer Room SDKs, the preferred public shape is a unified namespace surfac
 - `room.meta`
 - `room.members`
 - `room.signals`
-- `room.media` *(alpha)*
+- `room.media` *(beta)*
 
 Two companion namespaces round out the client runtime:
 
@@ -29,8 +29,13 @@ Two companion namespaces round out the client runtime:
 
 Legacy flat methods such as `room.send(...)`, `room.getSharedState()`, and `room.onMessage(...)` still exist for compatibility. Prefer the unified namespaces when your SDK supports them. See [SDK Support](/docs/room/sdk-support).
 
+For production-oriented room media today, prefer `room.media.transport()` with
+the default `cloudflare_realtimekit` provider. `p2p` is also available on the
+supported SDK matrix, but it remains a best-effort path that depends more
+heavily on client network conditions.
+
 :::note Unified Namespace Availability
-The unified namespace surface is available across the JavaScript/TypeScript, Dart, Swift, Kotlin, Java, C#, and C++ Room SDKs. Method names and casing follow each platform's conventions (for example, `room.State.*` in C# and `room->state.*` in C++).
+The unified namespace surface is available across the JavaScript/TypeScript, Dart, Swift, Kotlin, and Java Room SDKs. Method names and casing follow each platform's conventions.
 
 Legacy flat methods still exist as compatibility fallbacks, so older examples and the mapping tables below may still show `room.send(...)`, `room.getSharedState()`, and related APIs.
 :::
@@ -69,7 +74,7 @@ dependencies: [
 ]
 ```
 
-Minimum: iOS 15+ / macOS 12+
+Minimum: iOS 15+
 
 </TabItem>
 <TabItem value="kotlin" label="Kotlin">
@@ -85,7 +90,7 @@ dependencies {
 }
 ```
 
-Works on Android, JVM, iOS (via Kotlin Multiplatform).
+The shared Room client compiles across Android, JVM, JS, and Apple targets. Built-in Room Media runtime ships on Android, iOS, and JS browser; JVM/macOS use explicit `cloudflareRealtimeKit.clientFactory` and `p2p.transportFactory` injection.
 
 </TabItem>
 <TabItem value="java" label="Java">
@@ -301,7 +306,7 @@ The unified Room surface groups the product around the same live-session model u
 | `room.meta` | Public-safe metadata before or after joining |
 | `room.members` | Presence list, member join/leave events, and ephemeral member state |
 | `room.signals` | Fire-and-forget room events and direct member sends |
-| `room.media` *(alpha)* | Audio/video/screen publish, mute, device, and track state |
+| `room.media` *(beta)* | Audio/video/screen publish, mute, device, and track state |
 | `room.admin` | Moderation controls like kick, mute, disable video, and role changes |
 | `room.session` | Errors, reconnects, kicked events, and connection state |
 
@@ -322,6 +327,20 @@ await room.signals.send('chat.message', { text: 'hello' });
 ```
 
 The rest of this page keeps the flat compatibility methods documented because they are still useful as cross-SDK fallbacks and map cleanly to the unified namespaces.
+
+:::note Room Media transport status
+`room.media.transport(...)` is active on the Web, React Native, Flutter, Swift iOS, Java Android, Kotlin Android, Kotlin iOS, Kotlin JS, Kotlin JVM/macOS, and the Java core artifact.
+
+The provider mix is still rolling out:
+
+- Web, React Native, and Flutter support `cloudflare_realtimekit` and `p2p`
+- Swift iOS and Java Android ship built-in `cloudflare_realtimekit` and `p2p`
+- Kotlin ships built-in `cloudflare_realtimekit` and `p2p` on Android, iOS, and JS (browser)
+- Kotlin JVM/macOS use `cloudflareRealtimeKit.clientFactory` and `p2p.transportFactory`
+- Java core uses `cloudflareRealtimeKit.clientFactory` and `p2p.transportFactory`
+
+Verification is still deepest on the web live-media path. Mobile SDKs now have build and transport smoke coverage, but native live media E2E is not yet identical across every platform.
+:::
 
 | Preferred namespace API | Compatibility API |
 | --- | --- |
@@ -1087,7 +1106,7 @@ The unified Room namespaces are currently implemented in the SDKs listed on [SDK
 | `room.meta` | `get()` |
 | `room.members` | `list()`, `onSync()`, `onJoin()`, `onLeave()`, `setState()`, `clearState()`, `onStateChange()` |
 | `room.signals` | `send()`, `sendTo()`, `on()`, `onAny()` |
-| `room.media` *(alpha)* | `list()`, `audio.enable()`, `audio.setMuted()`, `video.enable()`, `screen.start()`, `devices.switch()`, `onTrack()` |
+| `room.media` *(beta)* | `list()`, `audio.enable()`, `audio.setMuted()`, `video.enable()`, `screen.start()`, `devices.switch()`, `onTrack()` |
 | `room.admin` | `kick()`, `mute()`, `block()`, `setRole()`, `disableVideo()`, `stopScreenShare()` |
 | `room.session` | `onError()`, `onKicked()`, `onReconnect()`, `onConnectionStateChange()` |
 

@@ -1526,6 +1526,55 @@ describe('RN RoomClient — rooms adapter APIs', () => {
     tm.destroy();
   });
 
+  it('cloudflareRealtimeKit session create가 provider endpoint를 호출한다', async () => {
+    const tm = new TokenManager('http://localhost:8688', createMockStorage());
+    await tm.ready();
+    tm.setTokens({
+      accessToken: makeValidJwt('rn-room-cloudflare'),
+      refreshToken: makeValidJwt('rn-room-cloudflare'),
+    });
+
+    const room = new RoomClient('http://localhost:8688', 'media', 'room-cloudflare', tm);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({
+        sessionId: 'session-1',
+        meetingId: 'meeting-1',
+        participantId: 'participant-1',
+        authToken: 'auth-token-1',
+        presetName: 'default',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const result = await room.media.cloudflareRealtimeKit.createSession({
+      name: 'React Native User',
+      customParticipantId: 'rn-user-1',
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'http://localhost:8688/api/room/media/cloudflare_realtimekit/session?namespace=media&id=room-cloudflare',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /),
+          'Content-Type': 'application/json',
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      sessionId: 'session-1',
+      meetingId: 'meeting-1',
+      participantId: 'participant-1',
+      authToken: 'auth-token-1',
+      presetName: 'default',
+    });
+
+    fetchSpy.mockRestore();
+    tm.destroy();
+  });
+
   it('session adapter가 connection state와 reconnect 콜백을 방출한다', () => {
     vi.useFakeTimers();
     const { room, tm } = createConnectedRoom('session');

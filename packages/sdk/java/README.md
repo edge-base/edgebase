@@ -107,6 +107,70 @@ String url = client.storage().bucket("avatars").getUrl("profile.png");
 client.destroy();
 ```
 
+## Room Media Transport
+
+The shared Java Room surface now exposes the same top-level media transport entrypoint as the web SDK:
+
+```java
+RoomClient room = client.room("calls", "demo-room");
+room.join().join();
+
+RoomClient.RoomMediaTransport transport = room.media.transport(
+    new RoomClient.RoomMediaTransportOptions()
+        .setProvider(RoomClient.RoomMediaTransportProvider.CLOUDFLARE_REALTIMEKIT)
+);
+
+transport.connect(Map.of(
+    "name", "June",
+    "customParticipantId", "java-june"
+)).join();
+
+transport.enableAudio().join();
+transport.enableVideo().join();
+```
+
+Current provider status:
+
+- `cloudflare_realtimekit`
+  Available on Android when the Cloudflare RealtimeKit Android runtime is present
+- `p2p`
+  Available on Android when the bundled Android WebRTC runtime is present
+
+The shared Java Room surface exposes the same transport API everywhere.
+
+- On Android, `edgebase-android-java` auto-registers the built-in
+  `cloudflare_realtimekit` and `p2p` runtimes when the matching Android runtime
+  packages are present.
+- On the base/core artifact, the same API stays usable through explicit adapter
+  injection: `cloudflareRealtimeKit.clientFactory` for Cloudflare RealtimeKit and
+  `p2p.transportFactory` for P2P.
+
+If you are using the Android package, add Cloudflare's Android runtime so the default
+`cloudflare_realtimekit` and `p2p` transports can attach to a foreground Activity:
+
+```groovy
+implementation 'com.cloudflare.realtimekit:core-android:1.5.5'
+```
+
+Current verification note:
+
+- the Android transport registry and module-level media tests pass
+- the Java core artifact now has explicit adapter-injection coverage for both `cloudflare_realtimekit` and `p2p`
+- Android host-app smoke builds succeeded with AGP 8.6+ and compileSdk 35+
+- Java Android `p2p` currently uses the Android WebRTC runtime through reflection; screen share requires passing `screenCaptureIntent` in the transport payload
+
+Current Android host-app baseline:
+
+- Android Gradle Plugin `8.6+`
+- `compileSdk 35+`
+- `android.useAndroidX=true`
+- `android.enableJetifier=true`
+
+Read more:
+
+- [Room Media Overview](https://edgebase.fun/docs/room/media)
+- [Room Media Setup](https://edgebase.fun/docs/room/media-setup)
+
 ### Server SDK (Spring / Ktor / Backend)
 
 ```java

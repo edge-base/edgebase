@@ -10,8 +10,10 @@ import TabItem from '@theme/TabItem';
 
 # Media (Voice/Video)
 
-:::caution Alpha
-This feature is in **alpha**. APIs and behavior may change without notice. Not recommended for production use.
+:::info Beta
+This feature is in **beta**. The default `cloudflare_realtimekit` path is the
+production-oriented provider. Some provider/platform combinations still have
+explicit support limits documented below.
 :::
 
 `room.media` is the media-state layer of Room.
@@ -82,31 +84,7 @@ room.media.video.enable(Map.of("deviceId", "cam-2")).join();
 room.media.screen.start(Map.of()).join();
 
 room.media.onTrack((track, member) -> attachTrack(track, member));
-room.media.devices.switchInputs(Map.of("audioInputId", "mic-2")).join();
-```
-
-</TabItem>
-<TabItem value="csharp" label="C#/Unity">
-
-```csharp
-await room.Media.Audio.Enable(new Dictionary<string, object?> { ["deviceId"] = "mic-1" });
-await room.Media.Video.Enable(new Dictionary<string, object?> { ["deviceId"] = "cam-2" });
-await room.Media.Screen.Start();
-
-room.Media.OnTrack((track, member) => AttachTrack(track, member));
-await room.Media.Devices.Switch(new Dictionary<string, object?> { ["audioInputId"] = "mic-2" });
-```
-
-</TabItem>
-<TabItem value="cpp" label="C++/Unreal">
-
-```cpp
-room->media.audio.enable({{"deviceId", "mic-1"}}, []() {}, [](const std::string&) {});
-room->media.video.enable({{"deviceId", "cam-2"}}, []() {}, [](const std::string&) {});
-room->media.screen.start(json::object(), []() {}, [](const std::string&) {});
-
-room->media.on_track([](const json& track, const json& member) { attach_track(track, member); });
-room->media.devices.set({{"audioInputId", "mic-2"}}, []() {}, [](const std::string&) {});
+room.media.devices.switch(Map.of("audioInputId", "mic-2")).join();
 ```
 
 </TabItem>
@@ -123,6 +101,24 @@ The main client APIs are:
 - `room.media.onTrackRemoved(...)`
 - `room.media.onStateChange(...)`
 - `room.media.onDeviceChange(...)`
+
+:::note Transport provider availability
+`room.media.transport(...)` is currently available across multiple client SDKs, but the provider mix is not identical everywhere yet.
+
+- Web, React Native, and Flutter support `cloudflare_realtimekit` and `p2p`
+- Swift iOS currently supports `cloudflare_realtimekit` and `p2p`; P2P screen share requires an app-provided `RTKRTCVideoTrack` source (for example ReplayKit-backed capture) passed to `transport.startScreenShare(...)`
+- Kotlin ships built-in `cloudflare_realtimekit` and `p2p` on Android, iOS, and JS (browser), and uses `cloudflareRealtimeKit.clientFactory` / `p2p.transportFactory` on JVM/macOS
+- Java ships built-in `cloudflare_realtimekit` and `p2p` on Android, and uses `cloudflareRealtimeKit.clientFactory` / `p2p.transportFactory` on the core artifact
+
+If you need the broadest cross-SDK parity today, use `cloudflare_realtimekit`.
+
+If you need the strongest already-proven live-media path today, the web SDK still has the deepest end-to-end coverage.
+
+For a production-oriented support matrix today:
+
+- `cloudflare_realtimekit`: Web, React Native, Flutter, Swift iOS, Java Android, Kotlin Android, Kotlin iOS, Kotlin JS (browser), Kotlin JVM/macOS via `clientFactory`, Java core via `clientFactory`
+- `p2p`: Web, React Native, Flutter, Swift iOS, Java Android, Kotlin Android, Kotlin iOS, Kotlin JS (browser), Kotlin JVM/macOS via `transportFactory`, Java core via `transportFactory`
+:::
 
 ## Access Control
 

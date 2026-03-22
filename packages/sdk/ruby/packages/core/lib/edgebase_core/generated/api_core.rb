@@ -237,6 +237,51 @@ module EdgebaseCore
       @http.get("/auth/oauth/link/#{CGI.escape(provider).gsub('+', '%20')}/callback")
     end
 
+    # Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
+    def db_single_count_records(namespace, table, query: nil)
+      @http.get("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/count", params: query)
+    end
+
+    # Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search
+    def db_single_search_records(namespace, table, query: nil)
+      @http.get("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/search", params: query)
+    end
+
+    # Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}
+    def db_single_get_record(namespace, table, id, query: nil)
+      @http.get("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/#{CGI.escape(id).gsub('+', '%20')}", params: query)
+    end
+
+    # Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}
+    def db_single_update_record(namespace, table, id, body = nil)
+      @http.patch("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/#{CGI.escape(id).gsub('+', '%20')}", body)
+    end
+
+    # Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}
+    def db_single_delete_record(namespace, table, id)
+      @http.delete("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/#{CGI.escape(id).gsub('+', '%20')}")
+    end
+
+    # List records from a single-instance table — GET /api/db/{namespace}/tables/{table}
+    def db_single_list_records(namespace, table, query: nil)
+      @http.get("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}", params: query)
+    end
+
+    # Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}
+    def db_single_insert_record(namespace, table, body = nil, query: nil)
+      @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}", body, params: query)
+    end
+
+    # Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch
+    def db_single_batch_records(namespace, table, body = nil, query: nil)
+      @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/batch", body, params: query)
+    end
+
+    # Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
+    def db_single_batch_by_filter(namespace, table, body = nil, query: nil)
+      @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/batch-by-filter", body, params: query)
+    end
+
     # Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
     def db_count_records(namespace, instance_id, table, query: nil)
       @http.get("/db/#{CGI.escape(namespace).gsub('+', '%20')}/#{CGI.escape(instance_id).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/count", params: query)
@@ -447,54 +492,14 @@ module EdgebaseCore
       @http.put("/room/media/realtime/tracks/close", body, params: query)
     end
 
+    # Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
+    def create_room_cloudflare_realtime_kit_session(body = nil, query: nil)
+      @http.post("/room/media/cloudflare_realtimekit/session", body, params: query)
+    end
+
     # Track custom events — POST /api/analytics/track
     def track_events(body = nil)
       @http.post("/analytics/track", body)
-    end
-
-    # Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
-    def db_single_count_records(namespace, table, query: nil)
-      @http.get("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/count", params: query)
-    end
-
-    # Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search
-    def db_single_search_records(namespace, table, query: nil)
-      @http.get("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/search", params: query)
-    end
-
-    # Get a single record from a single-instance table — GET /api/db/{namespace}/tables/{table}/{id}
-    def db_single_get_record(namespace, table, id, query: nil)
-      @http.get("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/#{CGI.escape(id).gsub('+', '%20')}", params: query)
-    end
-
-    # Update a record in a single-instance table — PATCH /api/db/{namespace}/tables/{table}/{id}
-    def db_single_update_record(namespace, table, id, body = nil)
-      @http.patch("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/#{CGI.escape(id).gsub('+', '%20')}", body)
-    end
-
-    # Delete a record from a single-instance table — DELETE /api/db/{namespace}/tables/{table}/{id}
-    def db_single_delete_record(namespace, table, id)
-      @http.delete("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/#{CGI.escape(id).gsub('+', '%20')}")
-    end
-
-    # List records from a single-instance table — GET /api/db/{namespace}/tables/{table}
-    def db_single_list_records(namespace, table, query: nil)
-      @http.get("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}", params: query)
-    end
-
-    # Insert a record into a single-instance table — POST /api/db/{namespace}/tables/{table}
-    def db_single_insert_record(namespace, table, body = nil, query: nil)
-      @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}", body, params: query)
-    end
-
-    # Batch insert records into a single-instance table — POST /api/db/{namespace}/tables/{table}/batch
-    def db_single_batch_records(namespace, table, body = nil, query: nil)
-      @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/batch", body, params: query)
-    end
-
-    # Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
-    def db_single_batch_by_filter(namespace, table, body = nil, query: nil)
-      @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/batch-by-filter", body, params: query)
     end
   end
 
@@ -525,12 +530,15 @@ module EdgebaseCore
     ADMIN_GET_AUTH_SETTINGS = "/admin/api/data/auth/settings"
     ADMIN_BACKUP_GET_CONFIG = "/admin/api/data/backup/config"
     ADMIN_BACKUP_DUMP_D1 = "/admin/api/data/backup/dump-d1"
+    ADMIN_BACKUP_DUMP_DATA = "/admin/api/data/backup/dump-data"
     ADMIN_BACKUP_DUMP_DO = "/admin/api/data/backup/dump-do"
     ADMIN_BACKUP_LIST_DOS = "/admin/api/data/backup/list-dos"
     ADMIN_BACKUP_RESTORE_D1 = "/admin/api/data/backup/restore-d1"
+    ADMIN_BACKUP_RESTORE_DATA = "/admin/api/data/backup/restore-data"
     ADMIN_BACKUP_RESTORE_DO = "/admin/api/data/backup/restore-do"
     ADMIN_CLEANUP_ANON = "/admin/api/data/cleanup-anon"
     ADMIN_GET_CONFIG_INFO = "/admin/api/data/config-info"
+    ADMIN_DESTROY_APP = "/admin/api/data/destroy-app"
     ADMIN_GET_DEV_INFO = "/admin/api/data/dev-info"
     ADMIN_GET_EMAIL_TEMPLATES = "/admin/api/data/email/templates"
     ADMIN_LIST_FUNCTIONS = "/admin/api/data/functions"
@@ -613,6 +621,7 @@ module EdgebaseCore
     PUSH_UNREGISTER = "/api/push/unregister"
     CONNECT_ROOM = "/api/room"
     CHECK_ROOM_CONNECTION = "/api/room/connect-check"
+    CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session"
     RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate"
     GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
     CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
@@ -633,6 +642,10 @@ module EdgebaseCore
 
     def self.admin_change_password(id)
       "/admin/api/data/admins/#{id}/password"
+    end
+
+    def self.admin_list_namespace_instances(namespace)
+      "/admin/api/data/namespaces/#{namespace}/instances"
     end
 
     def self.admin_list_bucket_objects(name)
