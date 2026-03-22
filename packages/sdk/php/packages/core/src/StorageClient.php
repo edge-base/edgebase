@@ -235,7 +235,7 @@ class StorageBucket
             $body['contentType'] = $contentType;
         }
         /** @var array<string, mixed> $data */
-        $data = $this->client->post("/storage/{$this->name}/upload/resumable/init", $body);
+        $data = $this->client->post("/storage/{$this->name}/multipart/create", $body);
         return (string) ($data['uploadId'] ?? '');
     }
 
@@ -251,15 +251,32 @@ class StorageBucket
         int $offset,
         bool $isLastChunk = false,
     ): ?array {
+        $partNumber = $offset + 1;
         /** @var array<string, mixed>|null $result */
         $result = $this->client->postMultipart(
-            "/storage/{$this->name}/upload/resumable/{$uploadId}",
+            "/storage/{$this->name}/multipart/upload-part?uploadId=" . rawurlencode($uploadId)
+            . '&partNumber=' . rawurlencode((string) $partNumber)
+            . '&key=' . rawurlencode($path),
             $path,
             $path,
             $chunk,
             'application/octet-stream',
         );
-        return $isLastChunk && is_array($result) ? $result : null;
+
+        if (!$isLastChunk || !is_array($result)) {
+            return null;
+        }
+
+        /** @var array<string, mixed>|null $completed */
+        $completed = $this->client->post("/storage/{$this->name}/multipart/complete", [
+            'uploadId' => $uploadId,
+            'key' => $path,
+            'parts' => [[
+                'partNumber' => (int) ($result['partNumber'] ?? $partNumber),
+                'etag' => (string) ($result['etag'] ?? ''),
+            ]],
+        ]);
+
+        return is_array($completed) ? $completed : null;
     }
 }
-

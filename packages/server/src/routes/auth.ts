@@ -114,9 +114,7 @@ function isReleaseMode(env: Env): boolean {
 
 function shouldExposeAuthTestSecrets(env: Env): boolean {
   return env.EDGEBASE_TEST === '1'
-    || env.EDGEBASE_TEST === 'true'
-    || env.EDGEBASE_USE_TEST_CONFIG === '1'
-    || env.EDGEBASE_USE_TEST_CONFIG === 'true';
+    || env.EDGEBASE_TEST === 'true';
 }
 
 function requireAuth(auth: AuthContext | null): string {
