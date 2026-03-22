@@ -71,6 +71,7 @@ edgebase/
 2. Update documentation if your change affects the public API
 3. Write a clear PR description explaining **what** and **why**
 4. One feature per PR — keep changes focused
+5. If you use stacked PRs, treat CodeQL as required on the final PR targeting `main` or `develop`. Intermediate PRs against temporary branches may show GitHub's CodeQL code-scanning check as `neutral` because the main pipeline does not run there.
 
 ## Commit Messages
 
