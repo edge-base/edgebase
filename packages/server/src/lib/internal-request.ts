@@ -2,17 +2,14 @@ import type { Context } from 'hono';
 import type { HonoEnv } from './hono.js';
 import type { Env } from '../types.js';
 
-export function isTrustedInternalRequestUrl(url: string): boolean {
-  try {
-    const host = new URL(url).host;
-    return host === 'internal' || host === 'do';
-  } catch {
-    return false;
-  }
+export function isTrustedInternalRequestUrl(_url: string): boolean {
+  // Requests are only trusted when the runtime marks them internal via context.
+  // URL hosts (including 'do' / 'internal') can be spoofed in self-hosted or proxy setups.
+  return false;
 }
 
 export function isTrustedInternalContext(c: Pick<Context<HonoEnv>, 'get' | 'req'>): boolean {
-  return c.get('isInternalRequest' as never) === true || isTrustedInternalRequestUrl(c.req.url);
+  return c.get('isInternalRequest' as never) === true;
 }
 
 export function buildInternalHandlerContext(options: {

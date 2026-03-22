@@ -21,16 +21,16 @@ function makeContext(
 }
 
 describe('internal request helpers', () => {
-  it('isTrustedInternalRequestUrl only trusts worker-internal hosts', () => {
-    expect(isTrustedInternalRequestUrl('http://internal/api/db/shared')).toBe(true);
-    expect(isTrustedInternalRequestUrl('http://do/internal/functions/reindex')).toBe(true);
+  it('isTrustedInternalRequestUrl never trusts hostnames', () => {
+    expect(isTrustedInternalRequestUrl('http://internal/api/db/shared')).toBe(false);
+    expect(isTrustedInternalRequestUrl('http://do/internal/functions/reindex')).toBe(false);
     expect(isTrustedInternalRequestUrl('http://localhost:8787/api/db/shared')).toBe(false);
     expect(isTrustedInternalRequestUrl('not-a-url')).toBe(false);
   });
 
-  it('isTrustedInternalContext accepts explicit internal flags or trusted internal hosts', () => {
+  it('isTrustedInternalContext only accepts explicit internal flags', () => {
     expect(isTrustedInternalContext(makeContext('http://localhost/api/db/shared', true))).toBe(true);
-    expect(isTrustedInternalContext(makeContext('http://do/api/db/shared'))).toBe(true);
+    expect(isTrustedInternalContext(makeContext('http://do/api/db/shared'))).toBe(false);
     expect(isTrustedInternalContext(makeContext('http://example.com/api/db/shared'))).toBe(false);
   });
 
