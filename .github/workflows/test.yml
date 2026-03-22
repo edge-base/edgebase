@@ -763,6 +763,167 @@ jobs:
               "$UNREAL_BUILD_DIR/unit_test"
               "$UNREAL_BUILD_DIR/e2e_test"'
 
+  # ─── Role Contract Catalog ──────────────────────────────────────────────────
+  sdk-role-contract-catalog:
+    name: SDK Role Contract Catalog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - name: Verify role contract catalog
+        run: node ./scripts/sdk-role-contracts.mjs verify
+
+  # ─── Role Contract Gates ───────────────────────────────────────────────────
+  sdk-admin-contract:
+    name: SDK Admin Contract
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - sdk-role-contract-catalog
+      - sdk-go-e2e
+      - sdk-js-e2e
+      - sdk-python-e2e
+      - sdk-java-e2e
+      - sdk-kotlin-e2e
+      - sdk-dart-e2e
+      - sdk-rust-e2e
+      - sdk-csharp-e2e
+      - sdk-php-e2e
+      - sdk-elixir-e2e
+      - sdk-scala-e2e
+      - sdk-ruby-e2e
+    steps:
+      - name: Enforce admin contract coverage
+        run: |
+          results=(
+            "${{ needs.sdk-role-contract-catalog.result }}"
+            "${{ needs.sdk-go-e2e.result }}"
+            "${{ needs.sdk-js-e2e.result }}"
+            "${{ needs.sdk-python-e2e.result }}"
+            "${{ needs.sdk-java-e2e.result }}"
+            "${{ needs.sdk-kotlin-e2e.result }}"
+            "${{ needs.sdk-dart-e2e.result }}"
+            "${{ needs.sdk-rust-e2e.result }}"
+            "${{ needs.sdk-csharp-e2e.result }}"
+            "${{ needs.sdk-php-e2e.result }}"
+            "${{ needs.sdk-elixir-e2e.result }}"
+            "${{ needs.sdk-scala-e2e.result }}"
+            "${{ needs.sdk-ruby-e2e.result }}"
+          )
+          for result in "${results[@]}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "admin contract dependency failed: $result"
+              exit 1
+            fi
+          done
+
+  sdk-core-contract:
+    name: SDK Core Contract
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - sdk-role-contract-catalog
+      - sdk-go-e2e
+      - sdk-js-e2e
+      - sdk-python-e2e
+      - sdk-java-e2e
+      - sdk-kotlin-e2e
+      - sdk-dart-e2e
+      - sdk-rust-e2e
+      - sdk-php-e2e
+      - sdk-swift-e2e
+      - sdk-cpp-e2e
+    steps:
+      - name: Enforce core contract coverage
+        run: |
+          results=(
+            "${{ needs.sdk-role-contract-catalog.result }}"
+            "${{ needs.sdk-go-e2e.result }}"
+            "${{ needs.sdk-js-e2e.result }}"
+            "${{ needs.sdk-python-e2e.result }}"
+            "${{ needs.sdk-java-e2e.result }}"
+            "${{ needs.sdk-kotlin-e2e.result }}"
+            "${{ needs.sdk-dart-e2e.result }}"
+            "${{ needs.sdk-rust-e2e.result }}"
+            "${{ needs.sdk-php-e2e.result }}"
+            "${{ needs.sdk-swift-e2e.result }}"
+            "${{ needs.sdk-cpp-e2e.result }}"
+          )
+          for result in "${results[@]}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "core contract dependency failed: $result"
+              exit 1
+            fi
+          done
+
+  sdk-client-contract:
+    name: SDK Client Contract
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - sdk-role-contract-catalog
+      - sdk-js-e2e
+      - sdk-react-native-e2e
+      - sdk-java-e2e
+      - sdk-kotlin-e2e
+      - sdk-dart-e2e
+      - sdk-csharp-e2e
+      - sdk-swift-e2e
+      - sdk-cpp-e2e
+    steps:
+      - name: Enforce client contract coverage
+        run: |
+          results=(
+            "${{ needs.sdk-role-contract-catalog.result }}"
+            "${{ needs.sdk-js-e2e.result }}"
+            "${{ needs.sdk-react-native-e2e.result }}"
+            "${{ needs.sdk-java-e2e.result }}"
+            "${{ needs.sdk-kotlin-e2e.result }}"
+            "${{ needs.sdk-dart-e2e.result }}"
+            "${{ needs.sdk-csharp-e2e.result }}"
+            "${{ needs.sdk-swift-e2e.result }}"
+            "${{ needs.sdk-cpp-e2e.result }}"
+          )
+          for result in "${results[@]}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "client contract dependency failed: $result"
+              exit 1
+            fi
+          done
+
+  sdk-client-auth-verify-contract:
+    name: SDK Client Auth Verify Contract
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - sdk-role-contract-catalog
+      - sdk-js-e2e
+      - sdk-react-native-e2e
+      - sdk-java-e2e
+      - sdk-kotlin-e2e
+      - sdk-dart-e2e
+      - sdk-swift-e2e
+    steps:
+      - name: Enforce client auth verify contract coverage
+        run: |
+          results=(
+            "${{ needs.sdk-role-contract-catalog.result }}"
+            "${{ needs.sdk-js-e2e.result }}"
+            "${{ needs.sdk-react-native-e2e.result }}"
+            "${{ needs.sdk-java-e2e.result }}"
+            "${{ needs.sdk-kotlin-e2e.result }}"
+            "${{ needs.sdk-dart-e2e.result }}"
+            "${{ needs.sdk-swift-e2e.result }}"
+          )
+          for result in "${results[@]}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "client auth verify contract dependency failed: $result"
+              exit 1
+            fi
+          done
+
   # ─── Mutation Testing (PR only) ─────────────────────────────────────────────
   mutation-test:
     name: Mutation Testing
@@ -896,6 +1057,11 @@ jobs:
       - sdk-scala-e2e
       - sdk-ruby-e2e
       - sdk-cpp-e2e
+      - sdk-role-contract-catalog
+      - sdk-admin-contract
+      - sdk-core-contract
+      - sdk-client-contract
+      - sdk-client-auth-verify-contract
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -927,3 +1093,8 @@ jobs:
           echo "Scala E2E: ${{ needs.sdk-scala-e2e.result }}"
           echo "Ruby E2E: ${{ needs.sdk-ruby-e2e.result }}"
           echo "C++ E2E: ${{ needs.sdk-cpp-e2e.result }}"
+          echo "Role Contract Catalog: ${{ needs.sdk-role-contract-catalog.result }}"
+          echo "Admin Contract: ${{ needs.sdk-admin-contract.result }}"
+          echo "Core Contract: ${{ needs.sdk-core-contract.result }}"
+          echo "Client Contract: ${{ needs.sdk-client-contract.result }}"
+          echo "Client Auth Verify Contract: ${{ needs.sdk-client-auth-verify-contract.result }}"

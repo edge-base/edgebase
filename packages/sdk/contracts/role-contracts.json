@@ -1,0 +1,93 @@
+{
+  "roles": {
+    "admin": {
+      "description": "Trusted server/admin SDK contract",
+      "checkpoints": [
+        "admin-auth",
+        "functions",
+        "database-crud",
+        "database-query",
+        "storage-basic",
+        "storage-advanced"
+      ],
+      "targets": [
+        { "sdk": "go", "job": "sdk-go-e2e", "mode": "adapted", "sources": ["packages/sdk/go/edgebase_e2e_test.go"] },
+        { "sdk": "js", "job": "sdk-js-e2e", "mode": "native", "sources": ["packages/sdk/js/packages/admin/test/e2e/admin.e2e.test.ts", "packages/sdk/js/packages/admin/test/e2e/property.e2e.test.ts"] },
+        { "sdk": "python", "job": "sdk-python-e2e", "mode": "native", "sources": ["packages/sdk/python/packages/admin/tests/test_admin_e2e.py"] },
+        { "sdk": "java", "job": "sdk-java-e2e", "mode": "native", "sources": ["packages/sdk/java/packages/admin/src/test/java/dev/edgebase/sdk/admin/AdminE2ETest.java"] },
+        { "sdk": "kotlin", "job": "sdk-kotlin-e2e", "mode": "native", "sources": ["packages/sdk/kotlin/admin/src/test/kotlin/dev/edgebase/sdk/admin/AdminEdgeBaseE2ETest.kt"] },
+        { "sdk": "dart", "job": "sdk-dart-e2e", "mode": "native", "sources": ["packages/sdk/dart/packages/admin/test/admin_e2e_test.dart"] },
+        { "sdk": "rust", "job": "sdk-rust-e2e", "mode": "adapted", "sources": ["packages/sdk/rust/tests/e2e.rs"] },
+        { "sdk": "csharp", "job": "sdk-csharp-e2e", "mode": "native", "sources": ["packages/sdk/csharp/packages/admin/tests/AdminE2ETests.cs"] },
+        { "sdk": "php", "job": "sdk-php-e2e", "mode": "native", "sources": ["packages/sdk/php/packages/admin/tests/e2e/AdminClientE2ETest.php"] },
+        { "sdk": "elixir", "job": "sdk-elixir-e2e", "mode": "native", "sources": ["packages/sdk/elixir/packages/admin/test/admin_e2e_test.exs"] },
+        { "sdk": "scala", "job": "sdk-scala-e2e", "mode": "native", "sources": ["packages/sdk/scala/packages/admin/src/test/scala/dev/edgebase/sdk/scala/admin/AdminEdgeBaseE2ETest.scala"] },
+        { "sdk": "ruby", "job": "sdk-ruby-e2e", "mode": "native", "sources": ["packages/sdk/ruby/packages/admin/test/test_admin_e2e.rb"] }
+      ]
+    },
+    "core": {
+      "description": "Common core SDK contract",
+      "checkpoints": [
+        "database-crud",
+        "database-query",
+        "batch",
+        "upsert",
+        "field-ops",
+        "storage-basic",
+        "storage-advanced",
+        "error-handling"
+      ],
+      "targets": [
+        { "sdk": "go", "job": "sdk-go-e2e", "mode": "adapted", "sources": ["packages/sdk/go/edgebase_e2e_test.go"] },
+        { "sdk": "js", "job": "sdk-js-e2e", "mode": "native", "sources": ["packages/sdk/js/packages/core/test/e2e/core.e2e.test.ts"] },
+        { "sdk": "python", "job": "sdk-python-e2e", "mode": "native", "sources": ["packages/sdk/python/packages/core/tests/test_core_e2e.py"] },
+        { "sdk": "java", "job": "sdk-java-e2e", "mode": "native", "sources": ["packages/sdk/java/packages/core/src/test/java/dev/edgebase/sdk/core/CoreE2ETest.java"] },
+        { "sdk": "kotlin", "job": "sdk-kotlin-e2e", "mode": "native", "sources": ["packages/sdk/kotlin/core/src/androidUnitTest/kotlin/io/edgebase/sdk/EdgeBaseE2ETest.kt"] },
+        { "sdk": "dart", "job": "sdk-dart-e2e", "mode": "native", "sources": ["packages/sdk/dart/packages/core/test/core_e2e_test.dart"] },
+        { "sdk": "rust", "job": "sdk-rust-e2e", "mode": "adapted", "sources": ["packages/sdk/rust/tests/e2e.rs"] },
+        { "sdk": "php", "job": "sdk-php-e2e", "mode": "native", "sources": ["packages/sdk/php/packages/core/tests/e2e/CoreCrudE2ETest.php", "packages/sdk/php/packages/core/tests/e2e/CoreStorageE2ETest.php"] },
+        { "sdk": "swift", "job": "sdk-swift-e2e", "mode": "native", "sources": ["packages/sdk/swift/packages/core/Tests/CoreE2ETests.swift"] },
+        { "sdk": "cpp", "job": "sdk-cpp-e2e", "mode": "native", "sources": ["packages/sdk/cpp/packages/core/tests/e2e_tests.cpp"] }
+      ]
+    },
+    "client": {
+      "description": "Client runtime SDK contract excluding browser lifecycle specifics",
+      "checkpoints": [
+        "auth-basic",
+        "database-crud",
+        "database-query",
+        "storage-basic",
+        "functions-invoke"
+      ],
+      "targets": [
+        { "sdk": "js", "job": "sdk-js-e2e", "mode": "native", "sources": ["packages/sdk/js/packages/web/test/e2e/web.e2e.test.ts"] },
+        { "sdk": "react-native", "job": "sdk-react-native-e2e", "mode": "native", "sources": ["packages/sdk/react-native/test/e2e/rn.e2e.test.ts"] },
+        { "sdk": "java", "job": "sdk-java-e2e", "mode": "native", "sources": ["packages/sdk/java/packages/android/src/test/java/dev/edgebase/sdk/client/AndroidE2ETest.java"] },
+        { "sdk": "kotlin", "job": "sdk-kotlin-e2e", "mode": "native", "sources": ["packages/sdk/kotlin/client/src/androidUnitTest/kotlin/dev/edgebase/sdk/client/ClientEdgeBaseE2ETest.kt"] },
+        { "sdk": "dart", "job": "sdk-dart-e2e", "mode": "native", "sources": ["packages/sdk/dart/packages/flutter/test/flutter_e2e_test.dart"] },
+        { "sdk": "csharp", "job": "sdk-csharp-e2e", "mode": "native", "sources": ["packages/sdk/csharp/packages/unity/tests/UnityE2ETests.cs"] },
+        { "sdk": "swift", "job": "sdk-swift-e2e", "mode": "native", "sources": ["packages/sdk/swift/packages/ios/Tests/IosE2ETests.swift"] },
+        { "sdk": "cpp", "job": "sdk-cpp-e2e", "mode": "native", "sources": ["packages/sdk/cpp/packages/unreal/tests/e2e_tests.cpp"] }
+      ]
+    },
+    "client-auth-verify": {
+      "description": "Client auth verification loop contract",
+      "checkpoints": [
+        "magic-link",
+        "email-otp",
+        "phone-otp",
+        "password-reset",
+        "email-verify",
+        "email-change"
+      ],
+      "targets": [
+        { "sdk": "js", "job": "sdk-js-e2e", "mode": "native", "sources": ["packages/sdk/js/test/web.e2e.test.ts"] },
+        { "sdk": "react-native", "job": "sdk-react-native-e2e", "mode": "native", "sources": ["packages/sdk/react-native/test/e2e/rn.e2e.test.ts"] },
+        { "sdk": "java", "job": "sdk-java-e2e", "mode": "native", "sources": ["packages/sdk/java/packages/android/src/test/java/dev/edgebase/sdk/client/AndroidE2ETest.java"] },
+        { "sdk": "kotlin", "job": "sdk-kotlin-e2e", "mode": "native", "sources": ["packages/sdk/kotlin/client/src/jvmTest/kotlin/dev/edgebase/sdk/client/ClientEdgeBaseJvmAuthE2ETest.kt", "packages/sdk/kotlin/client/src/androidUnitTest/kotlin/dev/edgebase/sdk/client/ClientEdgeBaseE2ETest.kt"] },
+        { "sdk": "dart", "job": "sdk-dart-e2e", "mode": "native", "sources": ["packages/sdk/dart/packages/flutter/test/flutter_e2e_test.dart"] },
+        { "sdk": "swift", "job": "sdk-swift-e2e", "mode": "native", "sources": ["packages/sdk/swift/packages/ios/Tests/IosE2ETests.swift"] }
+      ]
+    }
+  }
+}
