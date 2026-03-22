@@ -21,6 +21,26 @@ export interface ITokenManager {
   clearTokens(): void;
 }
 
+/** Unified subscription handle — call unsubscribe() to stop listening. */
+export interface Subscription {
+  unsubscribe(): void;
+  /** @deprecated Call `.unsubscribe()` instead. Callable form kept for backward-compat. */
+  (): void;
+}
+
+/**
+ * Create a Subscription that is both callable (legacy `unsub()`) and has
+ * an `.unsubscribe()` method (new unified pattern).  This keeps backward
+ * compatibility for plain-JS callers that stored `const unsub = onSnapshot(…); unsub();`.
+ */
+export function createSubscription(teardown: () => void): Subscription {
+  const fn = Object.assign(
+    function callableUnsubscribe() { teardown(); },
+    { unsubscribe: () => { teardown(); } },
+  );
+  return fn as unknown as Subscription;
+}
+
 /** Database-live change event — matches the actual DatabaseLiveClient callback shape. */
 export interface IDbChange<T = Record<string, unknown>> {
   changeType: 'added' | 'modified' | 'removed';
@@ -39,7 +59,7 @@ export interface IDatabaseLiveSubscriber {
     clientFilters?: unknown,
     serverFilters?: unknown,
     serverOrFilters?: unknown,
-  ): () => void;
+  ): Subscription;
 }
 
 /**

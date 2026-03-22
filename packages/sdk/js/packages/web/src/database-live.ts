@@ -1,5 +1,6 @@
 import type { TokenManager, TokenUser } from './token-manager.js';
-import type { ContextManager, IDatabaseLiveSubscriber } from '@edge-base/core';
+import { createSubscription } from '@edge-base/core';
+import type { ContextManager, IDatabaseLiveSubscriber, Subscription as CoreSubscription } from '@edge-base/core';
 import { EdgeBaseError } from '@edge-base/core';
 import { refreshAccessToken } from './auth-refresh.js';
 
@@ -15,7 +16,7 @@ interface DbChange<T = Record<string, unknown>> {
   timestamp: string;
 }
 
-interface Subscription {
+interface InternalSubscription {
   channel: string;
   handler: (change: DbChange) => void;
   filters?: Record<string, unknown>;
@@ -32,7 +33,7 @@ export interface DatabaseLiveOptions {
 export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
   private ws: WebSocket | null = null;
   private connectingPromise: Promise<void> | null = null;
-  private subscriptions = new Map<string, Subscription[]>();
+  private subscriptions = new Map<string, InternalSubscription[]>();
   private connectedChannels = new Set<string>();
   private channelFilters = new Map<string, FilterTuple[]>();
   private channelOrFilters = new Map<string, FilterTuple[]>();
@@ -74,8 +75,8 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
     clientFilters?: unknown,
     serverFilters?: unknown,
     serverOrFilters?: unknown,
-  ): () => void {
-    const sub: Subscription = {
+  ): CoreSubscription {
+    const sub: InternalSubscription = {
       channel,
       handler: callback as (change: DbChange) => void,
       filters: clientFilters as Record<string, unknown> | undefined,
@@ -95,7 +96,7 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
       // Errors surface through the normal auth/socket flow.
     });
 
-    return () => {
+    return createSubscription(() => {
       const subs = this.subscriptions.get(channel);
       if (!subs) return;
       const idx = subs.indexOf(sub);
@@ -110,15 +111,15 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
         this.recomputeChannelFilters(channel);
         this.sendSubscribe(channel);
       }
-    };
+    });
   }
 
-  onError(handler: ErrorHandler): () => void {
+  onError(handler: ErrorHandler): CoreSubscription {
     this.errorHandlers.push(handler);
-    return () => {
+    return createSubscription(() => {
       const idx = this.errorHandlers.indexOf(handler);
       if (idx >= 0) this.errorHandlers.splice(idx, 1);
-    };
+    });
   }
 
   async connect(channel: string): Promise<void> {

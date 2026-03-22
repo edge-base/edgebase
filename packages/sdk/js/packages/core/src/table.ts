@@ -17,7 +17,7 @@ import type { HttpClient } from './http.js';
 import { ApiPaths, type GeneratedDbApi } from './generated/api-core.js';
 import { serializeFieldOps } from './field-ops.js';
 import { EdgeBaseError } from './errors.js';
-import type { IDatabaseLiveSubscriber, IDbChange, FilterMatchFn } from './types.js';
+import type { IDatabaseLiveSubscriber, IDbChange, FilterMatchFn, Subscription } from './types.js';
 
 /** Filter tuple: [field, operator, value] */
 export type FilterTuple = [string, string, unknown];
@@ -301,7 +301,7 @@ export class DocRef<T = Record<string, unknown>> {
    *   console.log('Post updated:', post);
    * });
    */
-  onSnapshot(callback: (data: T | null, change: IDbChange<T>) => void): () => void {
+  onSnapshot(callback: (data: T | null, change: IDbChange<T>) => void): Subscription {
     if (!this.databaseLiveClient) {
       throw new EdgeBaseError(500, 'IDatabaseLiveSubscriber not available');
     }
@@ -701,7 +701,7 @@ export class TableRef<T = Record<string, unknown>> {
   onSnapshot(
     callback: (snapshot: TableSnapshot<T>) => void,
     options?: { serverFilter?: boolean },
-  ): () => void {
+  ): Subscription {
     if (!this.databaseLiveClient) {
       throw new EdgeBaseError(500, 'IDatabaseLiveSubscriber not available');
     }
