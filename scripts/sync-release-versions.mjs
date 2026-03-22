@@ -1,7 +1,34 @@
+import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RELEASE_TARGETS, RELEASE_VERSION_REFERENCES } from './release-targets.mjs';
 import { getSourceVersion, isValidSemver, updateTargetVersion, updateVersionReference, summarizeTargets } from './release-version-utils.mjs';
+
+const REPO_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+
+function regenerateGeneratedSkillReferences() {
+  const result = spawnSync(process.execPath, ['tools/agent-skill-gen/generate.mjs'], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  if (output.trim().length > 0) {
+    process.stdout.write(output);
+    if (!output.endsWith('\n')) {
+      process.stdout.write('\n');
+    }
+  }
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.status !== 0) {
+    throw new Error(`Failed to regenerate generated skill references (exit ${result.status ?? 1}).`);
+  }
+}
 
 export function syncReleaseVersions(version = getSourceVersion()) {
   if (!isValidSemver(version)) {
@@ -35,6 +62,10 @@ export function syncReleaseVersions(version = getSourceVersion()) {
     const status = result.changed ? 'updated' : 'already synced';
     console.log(`- ${result.label}: ${status} (${result.path})`);
   }
+
+  console.log();
+  console.log('Regenerating generated skill references...');
+  regenerateGeneratedSkillReferences();
 
   return {
     targets: results,

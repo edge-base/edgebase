@@ -20,7 +20,7 @@ It supplies the shared primitives used by both higher-level Java SDKs.
 
 ## Public Artifact
 
-- `com.github.edge-base.edgebase:edgebase-core-java:v0.1.5`
+- `com.github.edge-base.edgebase:edgebase-core-java:v0.2.0`
 
 ## Canonical Examples
 
