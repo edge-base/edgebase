@@ -196,7 +196,10 @@ export class RoomsDO extends RoomRuntimeBaseDO {
         typeof body.connectionId === 'string' ? body.connectionId : undefined,
       );
       if (this.hasPublishedTracks(memberId)) {
-        throw new Error('Unpublish existing room media before creating a new Cloudflare RealtimeKit session');
+        return this.jsonResponse(409, {
+          code: 409,
+          message: 'Unpublish existing room media before creating a new Cloudflare RealtimeKit session',
+        });
       }
 
       const config = this.getCloudflareRealtimeKitConfig();
