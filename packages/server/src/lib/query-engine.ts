@@ -660,7 +660,7 @@ function buildLimitClause(
     return { limitClause: `LIMIT ${_bt.next()}`, limitParams: [100] }; // Default limit
   }
 
-  const limit = pagination.limit ?? pagination.perPage ?? 100;
+  const limit = Math.min(pagination.limit ?? pagination.perPage ?? 100, 1000);
 
   // Cursor-based: no offset
   if (pagination.after || pagination.before) {

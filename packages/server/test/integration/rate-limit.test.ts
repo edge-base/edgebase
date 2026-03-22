@@ -497,10 +497,11 @@ describe('1-20 rate-limit — HTTP 429 실제 트리거', () => {
 
     // Verify JSON body
     const data = await res.json();
-    expect(data).toEqual({
+    expect(data).toMatchObject({
       code: 429,
       message: 'Too many requests. Please try again later.',
     });
+    expect(data.group).toBeTruthy();
 
     // Verify Retry-After header
     const retryAfter = res.headers.get('Retry-After');
