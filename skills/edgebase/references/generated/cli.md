@@ -73,6 +73,7 @@ edgebase --json --non-interactive deploy
 - remote commands often require `EDGEBASE_URL`
 - Service Key protected flows require `EDGEBASE_SERVICE_KEY`
 - destructive commands like `destroy` and `backup restore` should be preceded by dry runs or explicit confirmation
+- `edgebase init` creates `AGENTS.md` and `.github/copilot-instructions.md` so generated projects keep EdgeBase-specific AI guidance close to the code
 
 ## Quick Reference
 

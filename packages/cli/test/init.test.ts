@@ -48,6 +48,8 @@ describe('CLI: init command', () => {
     expect(existsSync(join(testDir, '.env.development.example'))).toBe(true);
     expect(existsSync(join(testDir, '.env.release.example'))).toBe(true);
     expect(existsSync(join(testDir, '.gitignore'))).toBe(true);
+    expect(existsSync(join(testDir, 'AGENTS.md'))).toBe(true);
+    expect(existsSync(join(testDir, '.github', 'copilot-instructions.md'))).toBe(true);
     expect(existsSync(join(testDir, 'package.json'))).toBe(true);
     expect(existsSync(join(testDir, 'wrangler.toml'))).toBe(true);
     expect(existsSync(join(testDir, 'node_modules', '@edge-base', 'shared', 'package.json'))).toBe(true);
@@ -165,6 +167,58 @@ describe('CLI: init command', () => {
     expect(gitignore.match(/^dist\/$/gm)).toHaveLength(1);
   });
 
+  it('should create EdgeBase AI hint files for generated projects', async () => {
+    const { initCommand } = await import('../src/commands/init.js');
+
+    await initCommand.parseAsync([testDir, '--no-dev'], { from: 'user' });
+
+    const agents = readFileSync(join(testDir, 'AGENTS.md'), 'utf-8');
+    const copilot = readFileSync(join(testDir, '.github', 'copilot-instructions.md'), 'utf-8');
+
+    expect(agents).toContain('# EdgeBase AI Instructions');
+    expect(agents).toContain('use the installed `edgebase` skill first');
+    expect(agents).toContain('Never expose service keys');
+    expect(copilot).toContain('# EdgeBase Copilot Instructions');
+    expect(copilot).toContain('Choose the SDK by trust boundary');
+    expect(copilot).toContain('node_modules/@edge-base/*/llms.txt');
+  });
+
+  it('should preserve existing guidance files while refreshing the managed EdgeBase block', async () => {
+    const { initCommand } = await import('../src/commands/init.js');
+
+    writeFileSync(
+      join(testDir, 'AGENTS.md'),
+      [
+        '# Team Notes',
+        '',
+        'Keep changelogs short.',
+        '',
+        '<!-- edgebase:ai-hints:start -->',
+        'old block',
+        '<!-- edgebase:ai-hints:end -->',
+        '',
+      ].join('\n'),
+    );
+    mkdirSync(join(testDir, '.github'), { recursive: true });
+    writeFileSync(
+      join(testDir, '.github', 'copilot-instructions.md'),
+      ['# Existing Copilot Rules', '', 'Prefer small diffs.'].join('\n'),
+    );
+
+    await initCommand.parseAsync([testDir, '--no-dev'], { from: 'user' });
+
+    const agents = readFileSync(join(testDir, 'AGENTS.md'), 'utf-8');
+    const copilot = readFileSync(join(testDir, '.github', 'copilot-instructions.md'), 'utf-8');
+
+    expect(agents).toContain('# Team Notes');
+    expect(agents).toContain('Keep changelogs short.');
+    expect(agents).not.toContain('old block');
+    expect(agents).toContain('# EdgeBase AI Instructions');
+    expect(copilot).toContain('# Existing Copilot Rules');
+    expect(copilot).toContain('Prefer small diffs.');
+    expect(copilot).toContain('# EdgeBase Copilot Instructions');
+  });
+
   it('should forward --open to dev when auto-starting', async () => {
     const { initCommand } = await import('../src/commands/init.js');
 
@@ -218,6 +272,8 @@ describe('CLI: init command', () => {
     const packageJson = readFileSync(join(testDir, 'package.json'), 'utf-8');
     const wranglerToml = readFileSync(join(testDir, 'wrangler.toml'), 'utf-8');
     const functionTemplate = readFileSync(join(testDir, 'functions', 'health.ts'), 'utf-8');
+    const agents = readFileSync(join(testDir, 'AGENTS.md'), 'utf-8');
+    const copilot = readFileSync(join(testDir, '.github', 'copilot-instructions.md'), 'utf-8');
     const runtimeConfigShim = readFileSync(join(testDir, '.edgebase', 'runtime', 'server', 'src', 'generated-config.ts'), 'utf-8');
     const runtimeTestConfigShim = readFileSync(join(testDir, '.edgebase', 'runtime', 'server', 'edgebase.test.config.ts'), 'utf-8');
     const runtimeAdminIndex = readFileSync(join(testDir, '.edgebase', 'runtime', 'server', 'admin-build', 'index.html'), 'utf-8');
@@ -240,6 +296,8 @@ describe('CLI: init command', () => {
     expect(runtimeAdminIndex).toContain('base: "/admin"');
     expect(functionTemplate).toContain('export const GET');
     expect(functionTemplate).toContain('ok: true');
+    expect(agents).toContain('This repository uses EdgeBase.');
+    expect(copilot).toContain('Use the installed `edgebase` skill');
   });
 
   it('should derive unique package and worker names for generic edgebase folders', async () => {

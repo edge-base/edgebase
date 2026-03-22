@@ -71,6 +71,9 @@ jobs:
       - name: Regenerate EdgeBase skill references
         run: node tools/agent-skill-gen/generate.mjs
 
+      - name: Verify EdgeBase skill bundle
+        run: node tools/agent-skill-gen/verify.mjs
+
       - name: Check for drift
         run: |
           check_generated_paths_clean() {

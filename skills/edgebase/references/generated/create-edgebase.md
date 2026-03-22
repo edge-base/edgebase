@@ -57,6 +57,8 @@ EDGEBASE_CREATE_SKIP_INSTALL=1 npm create edgebase@latest my-app -- --no-dev
 - starts `npm run dev` unless `--no-dev` is passed
 - forwards `--open` to the local development flow when requested
 - merges EdgeBase entries into existing `package.json` and `.gitignore` files instead of replacing them wholesale
+- writes `AGENTS.md` and `.github/copilot-instructions.md` so AI tools can discover EdgeBase-specific guidance inside the generated project
+- refreshes the managed EdgeBase guidance block if those AI hint files already exist
 
 ## Common Mistakes
 
