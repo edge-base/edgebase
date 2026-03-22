@@ -92,6 +92,10 @@ export interface Env {
   EDGEBASE_EMAIL_API_URL?: string;
   /** Optional override for SMS delivery in deployed/local mock environments. */
   EDGEBASE_SMS_API_URL?: string;
+  /** Test-only flag set by wrangler.test.toml for SDK E2E flows. */
+  EDGEBASE_TEST?: string;
+  /** Test-only flag that prefers the bundled test config at startup. */
+  EDGEBASE_USE_TEST_CONFIG?: string;
 
   // ─── Dev Mode ───
   /** Schema Editor sidecar port — set by CLI dev command via --var */

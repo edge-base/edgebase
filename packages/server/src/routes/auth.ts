@@ -108,6 +108,17 @@ authRoute.onError((err, c) => {
 
 // ─── Helpers ───
 
+function isReleaseMode(env: Env): boolean {
+  return parseConfig(env)?.release ?? false;
+}
+
+function shouldExposeAuthTestSecrets(env: Env): boolean {
+  return env.EDGEBASE_TEST === '1'
+    || env.EDGEBASE_TEST === 'true'
+    || env.EDGEBASE_USE_TEST_CONFIG === '1'
+    || env.EDGEBASE_USE_TEST_CONFIG === 'true';
+}
+
 function requireAuth(auth: AuthContext | null): string {
   if (!auth) {
     throw new EdgeBaseError(401, 'Authentication required.', undefined, 'unauthenticated');
@@ -1288,6 +1299,7 @@ authRoute.openapi(signinMagicLink, async (c) => {
   const record = await lookupEmail(getAuthDb(c), body.email);
 
   const db = getAuthDb(c);
+  const exposeTestSecrets = shouldExposeAuthTestSecrets(c.env);
   let debugToken: string | undefined;
   let debugActionUrl: string | undefined;
 
@@ -1327,9 +1339,12 @@ authRoute.openapi(signinMagicLink, async (c) => {
       type: 'magic-link',
       state: redirect.state,
     });
+    if (exposeTestSecrets) {
+      debugToken = token;
+      debugActionUrl = magicLinkUrl;
+    }
     if (!provider) {
-      const release = config?.release ?? false;
-      if (!release) {
+      if (!isReleaseMode(c.env)) {
         console.warn('[MagicLink] Email provider not configured. Token:', token);
         debugToken = token;
         debugActionUrl = magicLinkUrl;
@@ -1417,6 +1432,10 @@ authRoute.openapi(signinMagicLink, async (c) => {
         type: 'magic-link',
         state: redirect.state,
       });
+      if (exposeTestSecrets) {
+        debugToken = token;
+        debugActionUrl = magicLinkUrl;
+      }
       if (provider) {
         const locale = resolveEmailLocale(c.env, reqLocale);
         const html = renderMagicLink({
@@ -1431,8 +1450,7 @@ authRoute.openapi(signinMagicLink, async (c) => {
           resolveSubject(c.env, 'magicLink', defaultSubject, locale), html, locale,
         ).catch(() => {});
       } else {
-        const release = config?.release ?? false;
-        if (!release) {
+        if (!isReleaseMode(c.env)) {
           debugToken = token;
           debugActionUrl = magicLinkUrl;
         }
@@ -1591,6 +1609,7 @@ authRoute.openapi(signinPhone, async (c) => {
   // Look up phone in D1
   const record = await lookupPhone(getAuthDb(c), phone);
 
+  const exposeTestSecrets = shouldExposeAuthTestSecrets(c.env);
   let devCode: string | undefined;
 
   const db = getAuthDb(c);
@@ -1602,6 +1621,7 @@ authRoute.openapi(signinPhone, async (c) => {
     if (!user) return c.json({ ok: true });
 
     const code = generateOTP();
+    if (exposeTestSecrets) devCode = code;
 
     // Store OTP in KV with 5 min TTL
     await c.env.KV.put(
@@ -1623,8 +1643,7 @@ authRoute.openapi(signinPhone, async (c) => {
         `Your ${appName} verification code is: ${code}. Valid for 5 minutes.`,
       );
     } else {
-      const release = parseConfig(c.env)?.release ?? false;
-      if (!release) {
+      if (!isReleaseMode(c.env)) {
         console.warn('[Phone] SMS provider not configured. OTP:', code);
         devCode = code;
       }
@@ -1654,6 +1673,7 @@ authRoute.openapi(signinPhone, async (c) => {
       await authService.updateUser(db, userId, { phone, phoneVerified: false });
 
       const code = generateOTP();
+      if (exposeTestSecrets) devCode = code;
 
       // Store OTP in KV
       await c.env.KV.put(
@@ -1675,8 +1695,7 @@ authRoute.openapi(signinPhone, async (c) => {
           `Your ${appName} verification code is: ${code}. Valid for 5 minutes.`,
         );
       } else {
-        const release = parseConfig(c.env)?.release ?? false;
-        if (!release) {
+        if (!isReleaseMode(c.env)) {
           console.warn('[Phone] SMS provider not configured. OTP:', code);
           devCode = code;
         }
@@ -1690,8 +1709,7 @@ authRoute.openapi(signinPhone, async (c) => {
   }
 
   // Return OTP code only in dev mode (SMS provider not configured) for testing
-  const release = parseConfig(c.env)?.release ?? false;
-  return c.json(devCode && !release ? { ok: true, code: devCode } : { ok: true });
+  return c.json(devCode ? { ok: true, code: devCode } : { ok: true });
 });
 
 // POST /verify-phone — verify OTP → create session
@@ -1871,6 +1889,7 @@ authRoute.openapi(linkPhone, async (c) => {
   }
 
   const code = generateOTP();
+  const exposeTestSecrets = shouldExposeAuthTestSecrets(c.env);
 
   // Store link OTP in KV (separate key pattern)
   await c.env.KV.put(
@@ -1891,14 +1910,13 @@ authRoute.openapi(linkPhone, async (c) => {
       phone,
       `Your ${appName} phone linking code is: ${code}. Valid for 5 minutes.`,
     );
-    return c.json({ ok: true });
+    return c.json(exposeTestSecrets ? { ok: true, code } : { ok: true });
   } else {
-    const release = parseConfig(c.env)?.release ?? false;
-    if (!release) {
+    if (!isReleaseMode(c.env)) {
       console.warn('[Phone] SMS provider not configured. Link OTP:', code);
       return c.json({ ok: true, code });
     }
-    return c.json({ ok: true });
+    return c.json(exposeTestSecrets ? { ok: true, code } : { ok: true });
   }
 });
 
@@ -2048,6 +2066,7 @@ authRoute.openapi(signinEmailOtp, async (c) => {
   // Look up email in D1
   const record = await lookupEmail(getAuthDb(c), email);
 
+  const exposeTestSecrets = shouldExposeAuthTestSecrets(c.env);
   let devCode: string | undefined;
 
   const db = getAuthDb(c);
@@ -2059,6 +2078,7 @@ authRoute.openapi(signinEmailOtp, async (c) => {
     if (!user) return c.json({ ok: true });
 
     const code = generateOTP();
+    if (exposeTestSecrets) devCode = code;
 
     // Store OTP in KV with 5 min TTL
     await c.env.KV.put(
@@ -2079,8 +2099,7 @@ authRoute.openapi(signinEmailOtp, async (c) => {
         resolveSubject(c.env, 'emailOtp', defaultSubject, locale), html, locale,
       );
     } else {
-      const release = parseConfig(c.env)?.release ?? false;
-      if (!release) {
+      if (!isReleaseMode(c.env)) {
         console.warn('[EmailOTP] Email provider not configured. OTP:', code);
         devCode = code;
       }
@@ -2117,6 +2136,7 @@ authRoute.openapi(signinEmailOtp, async (c) => {
       });
 
       const code = generateOTP();
+      if (exposeTestSecrets) devCode = code;
 
       // Store OTP in KV
       await c.env.KV.put(
@@ -2137,8 +2157,7 @@ authRoute.openapi(signinEmailOtp, async (c) => {
           resolveSubject(c.env, 'emailOtp', defaultSubject, locale), html, locale,
         );
       } else {
-        const release = parseConfig(c.env)?.release ?? false;
-        if (!release) {
+        if (!isReleaseMode(c.env)) {
           console.warn('[EmailOTP] Email provider not configured. OTP:', code);
           devCode = code;
         }
@@ -2152,8 +2171,7 @@ authRoute.openapi(signinEmailOtp, async (c) => {
   }
 
   // Return OTP code only in dev mode (email provider not configured) for testing
-  const release = parseConfig(c.env)?.release ?? false;
-  return c.json(devCode && !release ? { ok: true, code: devCode } : { ok: true });
+  return c.json(devCode ? { ok: true, code: devCode } : { ok: true });
 });
 
 // POST /verify-email-otp — verify OTP → create session
@@ -3007,8 +3025,8 @@ authRoute.openapi(changeEmail, async (c) => {
     }
   }
 
-  const release = parseConfig(c.env)?.release ?? false;
-  if (!release) {
+  const exposeTestSecrets = shouldExposeAuthTestSecrets(c.env);
+  if (exposeTestSecrets || !isReleaseMode(c.env)) {
     const emailCfg = getEmailConfig(c.env);
     const fallbackVerifyUrl = emailCfg?.emailChangeUrl
       ? emailCfg.emailChangeUrl.replace('{token}', token)
@@ -3986,8 +4004,7 @@ authRoute.openapi(requestEmailVerification, async (c) => {
 
   const provider = createEmailProvider(getEmailConfig(c.env), c.env);
   if (!provider) {
-    const release = parseConfig(c.env)?.release ?? false;
-    if (!release) {
+    if (shouldExposeAuthTestSecrets(c.env) || !isReleaseMode(c.env)) {
       console.warn('[VerifyEmail] Email provider not configured. Verification email not sent. Token:', token);
       return c.json({ ok: true, message: 'Email provider not configured.', token, actionUrl: verifyUrl });
     }
@@ -4008,7 +4025,9 @@ authRoute.openapi(requestEmailVerification, async (c) => {
     resolveSubject(c.env, 'verification', defaultSubject, locale), html, locale,
   );
 
-  return c.json({ ok: result.success, messageId: result.messageId });
+  return c.json(shouldExposeAuthTestSecrets(c.env)
+    ? { ok: result.success, messageId: result.messageId, token, actionUrl: verifyUrl }
+    : { ok: result.success, messageId: result.messageId });
 });
 
 // POST /verify-email — KV token→shardId lookup → direct Shard call
@@ -4139,8 +4158,7 @@ authRoute.openapi(requestPasswordReset, async (c) => {
 
   const provider = createEmailProvider(getEmailConfig(c.env), c.env);
   if (!provider) {
-    const release = parseConfig(c.env)?.release ?? false;
-    if (!release) {
+    if (shouldExposeAuthTestSecrets(c.env) || !isReleaseMode(c.env)) {
       console.warn('[Auth] Email provider not configured. Reset email not sent. Token:', token);
       return c.json({ ok: true, message: 'Email provider not configured.', token, actionUrl: resetUrl });
     }
@@ -4161,7 +4179,9 @@ authRoute.openapi(requestPasswordReset, async (c) => {
     resolveSubject(c.env, 'passwordReset', defaultSubject, locale), html, locale,
   );
 
-  return c.json({ ok: result.success, messageId: result.messageId });
+  return c.json(shouldExposeAuthTestSecrets(c.env)
+    ? { ok: result.success, messageId: result.messageId, token, actionUrl: resetUrl }
+    : { ok: result.success, messageId: result.messageId });
 });
 
 // POST /reset-password — KV token→shardId lookup → direct Shard call

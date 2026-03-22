@@ -1186,6 +1186,15 @@ describe('Web E2E — Push Full Flow', () => {
 // ─── 15. Auth verify-loop SDK coverage ──────────────────────────────────────
 
 describe('Web E2E — Auth verify loops', () => {
+  function expectSecret(
+    data: any,
+    field: 'token' | 'code',
+    route: string,
+  ): string {
+    expect(typeof data?.[field], `${route} must expose ${field} in test mode`).toBe('string');
+    return data[field] as string;
+  }
+
   it('magic link request + verifyMagicLink → currentUser populated', async () => {
     const client = createClient(BASE_URL);
     const email = uniqueEmail('web-magic');
@@ -1205,14 +1214,12 @@ describe('Web E2E — Auth verify loops', () => {
         state: 'web-magic-state-verify',
       });
       expect(res.ok).toBe(true);
-
-      if (typeof data?.token === 'string') {
-        const result = await client.auth.verifyMagicLink(data.token);
-        expect(result.accessToken).toBeTruthy();
-        expect(result.refreshToken).toBeTruthy();
-        expect(result.user?.email).toBe(email);
-        expect(client.auth.currentUser?.email).toBe(email);
-      }
+      const token = expectSecret(data, 'token', '/signin/magic-link');
+      const result = await client.auth.verifyMagicLink(token);
+      expect(result.accessToken).toBeTruthy();
+      expect(result.refreshToken).toBeTruthy();
+      expect(result.user?.email).toBe(email);
+      expect(client.auth.currentUser?.email).toBe(email);
     } finally {
       client.destroy();
     }
@@ -1227,13 +1234,11 @@ describe('Web E2E — Auth verify loops', () => {
 
       const { res, data } = await authApi('POST', '/signin/email-otp', { email });
       expect(res.ok).toBe(true);
-
-      if (typeof data?.code === 'string') {
-        const result = await client.auth.verifyEmailOtp({ email, code: data.code });
-        expect(result.accessToken).toBeTruthy();
-        expect(result.refreshToken).toBeTruthy();
-        expect(result.user?.email).toBe(email);
-      }
+      const code = expectSecret(data, 'code', '/signin/email-otp');
+      const result = await client.auth.verifyEmailOtp({ email, code });
+      expect(result.accessToken).toBeTruthy();
+      expect(result.refreshToken).toBeTruthy();
+      expect(result.user?.email).toBe(email);
     } finally {
       client.destroy();
     }
@@ -1248,13 +1253,11 @@ describe('Web E2E — Auth verify loops', () => {
 
       const { res, data } = await authApi('POST', '/signin/phone', { phone });
       expect(res.ok).toBe(true);
-
-      if (typeof data?.code === 'string') {
-        const result = await client.auth.verifyPhone({ phone, code: data.code });
-        expect(result.accessToken).toBeTruthy();
-        expect(result.user?.phone).toBe(phone);
-        expect(result.user?.phoneVerified).toBe(true);
-      }
+      const code = expectSecret(data, 'code', '/signin/phone');
+      const result = await client.auth.verifyPhone({ phone, code });
+      expect(result.accessToken).toBeTruthy();
+      expect(result.user?.phone).toBe(phone);
+      expect(result.user?.phoneVerified).toBe(true);
     } finally {
       client.destroy();
     }
@@ -1281,13 +1284,11 @@ describe('Web E2E — Auth verify loops', () => {
         state: 'web-reset-state-verify',
       });
       expect(res.ok).toBe(true);
-
-      if (typeof data?.token === 'string') {
-        await expect(client.auth.resetPassword(data.token, newPassword)).resolves.toBeUndefined();
-        await client.auth.signOut();
-        const signIn = await client.auth.signIn({ email, password: newPassword });
-        expect('accessToken' in signIn && !!signIn.accessToken).toBe(true);
-      }
+      const token = expectSecret(data, 'token', '/request-password-reset');
+      await expect(client.auth.resetPassword(token, newPassword)).resolves.toBeUndefined();
+      await client.auth.signOut();
+      const signIn = await client.auth.signIn({ email, password: newPassword });
+      expect('accessToken' in signIn && !!signIn.accessToken).toBe(true);
     } finally {
       client.destroy();
     }
@@ -1317,13 +1318,11 @@ describe('Web E2E — Auth verify loops', () => {
         signup.accessToken,
       );
       expect(res.ok).toBe(true);
-
-      if (typeof data?.token === 'string') {
-        await expect(client.auth.verifyEmail(data.token)).resolves.toBeUndefined();
-        const me = await authApi('GET', '/me', undefined, signup.accessToken);
-        expect(me.res.ok).toBe(true);
-        expect(me.data?.user?.verified).toBe(true);
-      }
+      const token = expectSecret(data, 'token', '/request-email-verification');
+      await expect(client.auth.verifyEmail(token)).resolves.toBeUndefined();
+      const me = await authApi('GET', '/me', undefined, signup.accessToken);
+      expect(me.res.ok).toBe(true);
+      expect(me.data?.user?.verified).toBe(true);
     } finally {
       client.destroy();
     }
@@ -1341,14 +1340,12 @@ describe('Web E2E — Auth verify loops', () => {
 
       const { res, data } = await authApi('POST', '/link/phone', { phone }, signup.accessToken);
       expect(res.ok).toBe(true);
-
-      if (typeof data?.code === 'string') {
-        await expect(client.auth.verifyLinkPhone({ phone, code: data.code })).resolves.toBeUndefined();
-        const me = await authApi('GET', '/me', undefined, signup.accessToken);
-        expect(me.res.ok).toBe(true);
-        expect(me.data?.user?.phone).toBe(phone);
-        expect(me.data?.user?.phoneVerified).toBe(true);
-      }
+      const code = expectSecret(data, 'code', '/link/phone');
+      await expect(client.auth.verifyLinkPhone({ phone, code })).resolves.toBeUndefined();
+      const me = await authApi('GET', '/me', undefined, signup.accessToken);
+      expect(me.res.ok).toBe(true);
+      expect(me.data?.user?.phone).toBe(phone);
+      expect(me.data?.user?.phoneVerified).toBe(true);
     } finally {
       client.destroy();
     }
@@ -1383,13 +1380,11 @@ describe('Web E2E — Auth verify loops', () => {
         signup.accessToken,
       );
       expect(res.ok).toBe(true);
-
-      if (typeof data?.token === 'string') {
-        await expect(client.auth.verifyEmailChange(data.token)).resolves.toBeUndefined();
-        await client.auth.signOut();
-        const signIn = await client.auth.signIn({ email: newEmail, password });
-        expect('accessToken' in signIn && !!signIn.accessToken).toBe(true);
-      }
+      const token = expectSecret(data, 'token', '/change-email');
+      await expect(client.auth.verifyEmailChange(token)).resolves.toBeUndefined();
+      await client.auth.signOut();
+      const signIn = await client.auth.signIn({ email: newEmail, password });
+      expect('accessToken' in signIn && !!signIn.accessToken).toBe(true);
     } finally {
       client.destroy();
     }

@@ -54,7 +54,6 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../core ${CMAKE_CURRENT_BINARY_DIR}
 # ── Unreal client library (Auth, DatabaseLive, EdgeBase entry) ────────────────────
 
 add_library(edgebase_unreal STATIC
-  src/auth_client.cpp
   src/database_live_client.cpp
   src/turnstile_provider.cpp
 )

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import type { FunctionDefinition } from '@edge-base/shared';
 import { OpenAPIHono } from '../lib/hono.js';
 import { setConfig } from '../lib/do-router.js';
 import {
@@ -77,14 +78,14 @@ function httpFunction(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   handler: (ctx: Record<string, any>) => Promise<unknown> | unknown,
   path?: string,
-) {
+): FunctionDefinition {
   return {
     trigger: {
       type: 'http' as const,
       method,
       ...(path ? { path } : {}),
     },
-    handler,
+    handler: async (ctx: unknown) => handler(ctx as Record<string, any>),
   };
 }
 

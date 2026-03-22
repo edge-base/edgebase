@@ -18,9 +18,6 @@ final class StorageClient
 
 final class StorageBucket
 {
-    /** @var array<string, array{key: string, contentType: string, chunks: array<int, string>}> */
-    private static array $compatUploads = [];
-
     public function __construct(private readonly \EdgeBase\Core\StorageBucket $inner)
     {
     }
@@ -72,13 +69,7 @@ final class StorageBucket
 
     public function initiateResumableUpload(string $path, string $contentType = ''): string
     {
-        $uploadId = 'compat-' . bin2hex(random_bytes(8));
-        self::$compatUploads[$uploadId] = [
-            'key' => $path,
-            'contentType' => $contentType !== '' ? $contentType : 'application/octet-stream',
-            'chunks' => [],
-        ];
-        return $uploadId;
+        return $this->inner->initiateResumableUpload($path, $contentType);
     }
 
     public function resumeUpload(
@@ -94,29 +85,7 @@ final class StorageBucket
         } else {
             $offset = $offsetOrOptions;
         }
-        unset($offset);
 
-        if (!isset(self::$compatUploads[$uploadId])) {
-            self::$compatUploads[$uploadId] = [
-                'key' => $path,
-                'contentType' => 'application/octet-stream',
-                'chunks' => [],
-            ];
-        }
-
-        self::$compatUploads[$uploadId]['chunks'][] = $chunk;
-
-        if (!$isLastChunk) {
-            return null;
-        }
-
-        $state = self::$compatUploads[$uploadId];
-        unset(self::$compatUploads[$uploadId]);
-
-        return $this->inner->upload(
-            $state['key'],
-            implode('', $state['chunks']),
-            $state['contentType'],
-        );
+        return $this->inner->resumeUpload($path, $uploadId, $chunk, (int) $offset, $isLastChunk);
     }
 }
