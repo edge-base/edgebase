@@ -605,7 +605,7 @@ jobs:
               cd ../admin
               dart test test/admin_e2e_test.dart -r expanded
               cd ../flutter
-              dart test test/flutter_e2e_test.dart -r expanded'
+              flutter test test/flutter_e2e_test.dart -r expanded'
 
   # ─── 20. Rust SDK E2E ───────────────────────────────────────────────────────
   sdk-rust-e2e:

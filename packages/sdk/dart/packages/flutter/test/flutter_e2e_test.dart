@@ -4,7 +4,7 @@
 //
 // 실행:
 //   BASE_URL=http://localhost:8688 SERVICE_KEY=test-service-key-for-admin \
-//     dart test test/flutter_e2e_test.dart -v
+//     flutter test test/flutter_e2e_test.dart -r expanded
 //
 // 원칙: mock 금지, 실서버 기반
 
