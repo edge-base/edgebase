@@ -365,7 +365,7 @@ async function handleList(
     total = Number(countResult.rows[0]?.total ?? 0);
   }
 
-  const perPage = queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 20;
+  const perPage = queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 100;
   const page = queryOpts.pagination?.page ?? 1;
   const hasMore = queryOpts.pagination?.after || queryOpts.pagination?.before
     ? items.length >= perPage
@@ -428,7 +428,7 @@ async function handleSearch(
   const ftsFields = tableConfig.fts?.length
     ? tableConfig.fts
     : getTextFields(tableConfig);
-  const limit = queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 20;
+  const limit = queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 100;
   const offset = queryOpts.pagination?.offset ?? ((queryOpts.pagination?.page ?? 1) - 1) * limit;
   const searchQuery = buildSearchQuery(tableName, searchTerm, {
     pagination: queryOpts.pagination,

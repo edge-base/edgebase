@@ -470,7 +470,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       if (countSql && countParams) {
         const countResult = [...this.sql(countSql, ...countParams)];
         const total = (countResult[0]?.total as number) ?? 0;
-        const perPage = options.pagination?.perPage ?? options.pagination?.limit ?? 20;
+        const perPage = options.pagination?.perPage ?? options.pagination?.limit ?? 100;
         response.total = total;
         response.page = options.pagination?.page ?? 1;
         response.perPage = perPage;
@@ -478,7 +478,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
 
       // Cursor pagination: always include cursor and hasMore when items exist
       // so clients can start cursor-based pagination from any page (including the first)
-      const limit = options.pagination?.limit ?? options.pagination?.perPage ?? 20;
+      const limit = options.pagination?.limit ?? options.pagination?.perPage ?? 100;
       const hasMore = normalizedRows.length === limit;
       response.hasMore = hasMore;
       if (normalizedRows.length > 0) {
@@ -516,7 +516,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         return c.json({ items: [] });
       }
 
-      const limit = options.pagination?.limit ?? options.pagination?.perPage ?? 20;
+      const limit = options.pagination?.limit ?? options.pagination?.perPage ?? 100;
       const offset = options.pagination?.offset ?? ((options.pagination?.page ?? 1) - 1) * limit;
 
       const tableConfig = this.getTableConfig(name);
