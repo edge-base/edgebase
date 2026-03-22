@@ -56,6 +56,8 @@ npm create edgebase@latest my-app
 
 This package ships with an `llms.txt` file for AI-assisted scaffolding.
 
+For the higher-level SDK and trust-boundary rules, start with the official [Use EdgeBase With AI](https://edgebase.fun/docs/getting-started/ai) guide and then read this package's `llms.txt` for scaffold-specific details.
+
 You can find it:
 
 - after install: `node_modules/create-edgebase/llms.txt`

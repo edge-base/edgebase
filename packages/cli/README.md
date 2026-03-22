@@ -47,6 +47,8 @@ Use it to:
 
 This package ships with an `llms.txt` file for AI-assisted CLI usage.
 
+For the canonical runtime-routing rules across the whole platform, start with [Use EdgeBase With AI](https://edgebase.fun/docs/getting-started/ai) and then read this package's `llms.txt` for CLI-specific command behavior.
+
 You can find it:
 
 - after install: `node_modules/@edge-base/cli/llms.txt`

@@ -58,6 +58,10 @@ if (!readme.includes(publicRepo)) {
   fail(`Exported README.md must mention ${publicRepo}.`);
 }
 
+if (!readme.includes('https://edgebase.fun/docs/getting-started/ai')) {
+  fail('Exported README.md must link to the official EdgeBase AI guide.');
+}
+
 const generatedFiles = readdirSync(referencesDir).filter((name) => name.endsWith('.md'));
 if (generatedFiles.length === 0) {
   fail('Exported skill bundle does not include any generated reference files.');

@@ -108,5 +108,6 @@ EdgeBase provides SDKs for **14 languages**:
 ## Next Steps
 
 - [**Quickstart**](/docs/getting-started/quickstart) -- Get running in 5 minutes
+- [**Use EdgeBase With AI**](/docs/getting-started/ai) -- Route agents to the right SDK and trust boundary
 - [**Configuration**](/docs/getting-started/configuration) -- Set up your `edgebase.config.ts`
 - [**Deployment**](/docs/getting-started/deployment) -- Choose your deployment mode
