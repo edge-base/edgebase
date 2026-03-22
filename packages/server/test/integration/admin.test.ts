@@ -214,13 +214,28 @@ describe('1-21 admin — static asset fallbacks', () => {
 // ─── 1. Admin Setup ────────────────────────────────────────────────────────────
 
 describe('1-21 admin — setup', () => {
-  it('GET /admin/api/setup/status → { needsSetup: boolean }', async () => {
+  it('GET /admin/api/setup/status → setup method metadata', async () => {
     const { status, data } = await api('GET', '/admin/api/setup/status');
     expect(status).toBe(200);
     expect(typeof data.needsSetup).toBe('boolean');
+    expect(typeof data.publicSetupAllowed).toBe('boolean');
+    expect(['cli', 'browser', 'login']).toContain(data.setupMethod);
   });
 
-  it('setup — JWT_ADMIN_SECRET 누락 시 admin row를 남기지 않음', async () => {
+  it('release mode에서는 public setup을 차단한다', async () => {
+    await resetAdminState();
+
+    const { status, data } = await api('POST', '/admin/api/setup', {
+      email: 'admin@test.com',
+      password: 'Admin1234!',
+    });
+
+    expect(status).toBe(403);
+    expect(data?.message).toContain('Public admin setup is disabled');
+    expect(await adminCount()).toBe(0);
+  });
+
+  it('local dev mode setup — JWT_ADMIN_SECRET 누락 시 admin row를 남기지 않음', async () => {
     await resetAdminState();
     const before = await adminCount();
     expect(before).toBe(0);
@@ -228,7 +243,10 @@ describe('1-21 admin — setup', () => {
     const { status, data } = await apiWithEnv(
       'POST',
       '/admin/api/setup',
-      { JWT_ADMIN_SECRET: undefined },
+      {
+        EDGEBASE_CONFIG: JSON.stringify({ release: false }),
+        JWT_ADMIN_SECRET: undefined,
+      },
       {
         email: 'missing-secret@test.com',
         password: 'Admin1234!',
@@ -244,27 +262,68 @@ describe('1-21 admin — setup', () => {
     expect(setupStatus.data?.needsSetup).toBe(true);
   });
 
-  it('setup 완료 후 재시도 → 400', async () => {
-    // First setup may succeed or fail (if already exists)
-    const first = await api('POST', '/admin/api/setup', {
+  it('local dev setup 완료 후 재시도 → 400', async () => {
+    await resetAdminState();
+
+    const first = await apiWithEnv('POST', '/admin/api/setup', {
+      EDGEBASE_CONFIG: JSON.stringify({ release: false }),
+    }, {
       email: 'admin@test.com',
       password: 'Admin1234!',
     });
-    // Second setup MUST fail
-    const second = await api('POST', '/admin/api/setup', {
+    expect(first.status).toBe(201);
+
+    const second = await apiWithEnv('POST', '/admin/api/setup', {
+      EDGEBASE_CONFIG: JSON.stringify({ release: false }),
+    }, {
       email: 'admin2@test.com',
       password: 'Admin1234!',
     });
     expect(second.status).toBe(400);
   });
 
-  it('setup — email 미누락 → 400', async () => {
-    const { status } = await api('POST', '/admin/api/setup', { password: 'Admin1234!' });
-    expect([400, 400].includes(status)).toBe(true);
+  it('non-release setup does not depend on the request host header', async () => {
+    await resetAdminState();
+
+    const res = await worker.fetch(
+      new Request('http://example.invalid/admin/api/setup', {
+        method: 'POST',
+        headers: {
+          'X-EdgeBase-Service-Key': SK,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: 'host-check@test.com',
+          password: 'Admin1234!',
+        }),
+      }),
+      {
+        ...(globalThis as any).env,
+        EDGEBASE_CONFIG: JSON.stringify({ release: false }),
+      } as any,
+      {
+        waitUntil() {},
+        passThroughOnException() {},
+      } as unknown as ExecutionContext,
+    );
+
+    expect(res.status).toBe(201);
+    expect(await adminCount()).toBe(1);
   });
 
-  it('setup — 8자 미만 비밀번호 → 400', async () => {
-    const { status } = await api('POST', '/admin/api/setup', {
+  it('local dev setup — email 누락 → 400', async () => {
+    await resetAdminState();
+    const { status } = await apiWithEnv('POST', '/admin/api/setup', {
+      EDGEBASE_CONFIG: JSON.stringify({ release: false }),
+    }, { password: 'Admin1234!' });
+    expect(status).toBe(400);
+  });
+
+  it('local dev setup — 8자 미만 비밀번호 → 400', async () => {
+    await resetAdminState();
+    const { status } = await apiWithEnv('POST', '/admin/api/setup', {
+      EDGEBASE_CONFIG: JSON.stringify({ release: false }),
+    }, {
       email: `short-${Date.now()}@test.com`,
       password: 'short',
     });
@@ -278,8 +337,7 @@ describe('1-21 admin — login / refresh', () => {
   let adminRefreshToken: string;
 
   beforeAll(async () => {
-    // Attempt setup first (may already exist)
-    await api('POST', '/admin/api/setup', {
+    await api('POST', '/admin/api/data/admins', {
       email: 'admin@test.com',
       password: 'Admin1234!',
     });

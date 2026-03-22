@@ -156,6 +156,12 @@ admin =
 Never use the Service Key in client-side code. It has full admin access to your backend.
 :::
 
+## Operational Notes
+
+- Initial admin bootstrap is a one-time operation. In release deployments, use `npx edgebase admin bootstrap` or the guided `deploy` / `docker run` flow instead of relying on a browser setup page.
+- To change an admin password later, use the dashboard settings page or `npx edgebase admin reset-password`.
+- To move an admin account to a new email, add a new admin with the new email first, confirm that it can sign in, then remove the old admin. This avoids locking yourself out during the transition.
+
 ## Operations
 
 <Tabs groupId="sdk-language">

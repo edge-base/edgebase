@@ -29,7 +29,7 @@ import {
 } from '../lib/auth-redirect.js';
 import {
   signAccessToken, signRefreshToken, verifyRefreshTokenWithFallback,
-  parseDuration, decodeTokenUnsafe, TokenExpiredError,
+  parseDuration, TokenExpiredError,
 } from '../lib/jwt.js';
 import { generateId } from '../lib/uuid.js';
 import { captchaMiddleware } from '../middleware/captcha-verify.js';
@@ -2754,11 +2754,27 @@ authRoute.openapi(signout, async (c) => {
     refreshToken: body.refreshToken,
   });
 
-  const payload = decodeTokenUnsafe(body.refreshToken);
-  if (!payload?.sub) throw new EdgeBaseError(401, 'Invalid refresh token.', undefined, 'invalid-refresh-token');
-
   const db = getAuthDb(c);
-  const userId = payload.sub as string;
+  let tokenPayload;
+  try {
+    tokenPayload = await verifyRefreshTokenWithFallback(
+      body.refreshToken,
+      getUserSecret(c.env),
+      c.env.JWT_USER_SECRET_OLD,
+      c.env.JWT_USER_SECRET_OLD_AT,
+    );
+  } catch (err) {
+    if (err instanceof TokenExpiredError) {
+      throw new EdgeBaseError(401, 'Refresh token expired.', undefined, 'refresh-token-expired');
+    }
+    throw new EdgeBaseError(401, 'Invalid refresh token.', undefined, 'invalid-refresh-token');
+  }
+
+  const userId = tokenPayload.sub;
+  const sessionResult = await authService.getSessionByRefreshToken(db, body.refreshToken, userId);
+  if (!sessionResult) {
+    throw new EdgeBaseError(401, 'Invalid refresh token.', undefined, 'invalid-refresh-token');
+  }
 
   // beforeSignOut hook — blocking
   await executeAuthHook(c.env, c.executionCtx, 'beforeSignOut', { userId }, { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });

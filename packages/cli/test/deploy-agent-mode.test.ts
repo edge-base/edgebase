@@ -102,7 +102,10 @@ describe('deploy command agent mode', () => {
   it('rethrows structured destructive-change prompts instead of converting them into generic failures', async () => {
     const { deployCommand } = await import('../src/commands/deploy.js');
 
-    await expect(deployCommand.parseAsync([], { from: 'user' })).rejects.toMatchObject({
+    await expect(deployCommand.parseAsync([
+      '--bootstrap-admin-email',
+      'admin@example.com',
+    ], { from: 'user' })).rejects.toMatchObject({
       payload: expect.objectContaining({
         status: 'needs_input',
         code: 'destructive_confirmation_required',

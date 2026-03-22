@@ -231,6 +231,12 @@ npx edgebase keys rotate-jwt
 
 `keys rotate-jwt` writes the previous JWT secrets back as `*_OLD` values so refresh-token grace periods can continue to work after rotation. Redeploy after rotating JWT secrets.
 
+Bootstrap the first admin account for a deployed project:
+
+```bash
+npx edgebase admin bootstrap --url https://my-worker.workers.dev --service-key <service-key> --email admin@example.com
+```
+
 Reset an admin password:
 
 ```bash
@@ -293,6 +299,7 @@ Build and run the Docker image:
 npx edgebase docker build
 npx edgebase docker run
 npx edgebase docker run --port 3000 --detach
+npx edgebase docker run --bootstrap-admin-email admin@example.com
 ```
 
 Set up shell completion:

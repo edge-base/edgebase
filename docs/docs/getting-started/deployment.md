@@ -19,6 +19,8 @@ On first deploy, EdgeBase automatically handles Cloudflare authentication:
 2. Opens browser login if needed (no manual `wrangler login` required)
 3. Detects your account ID and configures `wrangler.toml` automatically
 
+For `release: true` deployments, the CLI also asks for a bootstrap admin email. If the deployed instance does not have any admin accounts yet, the CLI prompts for the first admin password and creates that account through a Service Key protected admin path instead of exposing a public browser setup form.
+
 | Feature | Detail |
 |---------|--------|
 | Cold start | ~0ms |
@@ -51,7 +53,7 @@ npx edgebase docker build
 npx edgebase docker run
 ```
 
-`docker run` automatically creates `.env.release` with secure random JWT secrets if the file doesn't exist yet. To customize secrets or use an existing file:
+`docker run` automatically creates `.env.release` with secure random JWT secrets and a root `SERVICE_KEY` if the file doesn't exist yet. It also asks for the bootstrap admin email before starting the container, then creates the first admin account over the protected admin API if none exist yet. To customize secrets or use an existing file:
 
 ```bash
 npx edgebase docker run --env-file .env.release
@@ -63,11 +65,11 @@ npx edgebase docker run --env-file .env.release
 |----------|----------|-------------|
 | `JWT_USER_SECRET` | Yes | Signs user authentication tokens (auto-generated) |
 | `JWT_ADMIN_SECRET` | Yes | Signs admin dashboard tokens (auto-generated) |
-| `SERVICE_KEY` | Optional | Server-side API key for [Admin SDKs](/docs/admin-sdk/reference) |
+| `SERVICE_KEY` | Yes | Root server-side API key used for admin bootstrap, recovery, and [Admin SDKs](/docs/admin-sdk/reference) |
 | `DB_POSTGRES_*_URL` | Optional | PostgreSQL connection string (used by DB blocks or auth configured with `provider: 'postgres'`; legacy `provider: 'neon'` configs still work) |
 
 :::tip
-`JWT_USER_SECRET` and `JWT_ADMIN_SECRET` are auto-generated when you first run `npx edgebase docker run`. You only need to set them manually if you want to keep existing tokens valid across re-deployments.
+`JWT_USER_SECRET`, `JWT_ADMIN_SECRET`, and `SERVICE_KEY` are auto-generated when you first run `npx edgebase docker run`. You only need to set them manually if you want to keep existing tokens valid or preserve an existing Service Key across re-deployments.
 :::
 
 Or run the equivalent container command yourself:
@@ -165,7 +167,7 @@ npx edgebase secret set JWT_ADMIN_SECRET
 ```
 
 :::info
-`SERVICE_KEY` is auto-generated on first deploy — you don't need to set it manually.
+`SERVICE_KEY` is auto-generated on first deploy — you don't need to set it manually. The deploy command uses that same key to create the first admin account if the project does not already have one.
 :::
 
 ### Docker / Direct

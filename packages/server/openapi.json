@@ -188,6 +188,32 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
           }
         }
       }

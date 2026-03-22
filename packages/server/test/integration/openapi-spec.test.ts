@@ -95,6 +95,7 @@ describe('OpenAPI spec stability', () => {
     expect(spec.paths?.['/api/storage/{bucket}/upload']?.post?.requestBody?.content).toHaveProperty(
       'multipart/form-data',
     );
+    expect(spec.paths?.['/admin/api/setup']?.post?.responses).toHaveProperty('403');
   });
 
   it('every path has an operationId', async () => {

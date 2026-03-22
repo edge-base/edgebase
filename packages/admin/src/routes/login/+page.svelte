@@ -13,7 +13,9 @@
 	let error = $state('');
 	let loading = $state(false);
 	let needsSetup = $state<boolean | null>(null);
+	let publicSetupAllowed = $state(false);
 	let setupStatusError = $state('');
+	let setupMessage = $state('');
 
 	function isLocalOrigin(url: URL): boolean {
 		return url.hostname === 'localhost' || url.hostname === '127.0.0.1';
@@ -24,9 +26,13 @@
 	const adminResetCommand = $derived(
 		isLocalDashboard ? 'npx edgebase admin reset-password --local' : 'npx edgebase admin reset-password'
 	);
+	const adminBootstrapCommand = $derived(
+		`npx edgebase admin bootstrap --url ${$page.url.origin} --service-key <service-key>`
+	);
 	const showInvalidCredentialsHint = $derived(
 		(error.toLowerCase().includes('invalid') || error.toLowerCase().includes('credentials')) && needsSetup === false
 	);
+	const showCliBootstrapNotice = $derived(needsSetup === true && !publicSetupAllowed);
 
 	// Check if already logged in
 	$effect(() => {
@@ -47,6 +53,8 @@
 		try {
 			const data = await fetchSetupStatus();
 			needsSetup = data.needsSetup;
+			publicSetupAllowed = data.publicSetupAllowed ?? false;
+			setupMessage = data.message ?? '';
 		} catch {
 			setupStatusError = 'Could not reach the admin server. Make sure the fresh dev server is still running, then retry.';
 		}
@@ -58,14 +66,18 @@
 			error = setupStatusError || 'Setup status is still loading.';
 			return;
 		}
-		if (!email || !password) {
-			error = 'Email and password are required.';
-			return;
-		}
-		if (needsSetup && password.length < 8) {
-			error = 'Password must be at least 8 characters.';
-			return;
-		}
+			if (!email || !password) {
+				error = 'Email and password are required.';
+				return;
+			}
+			if (needsSetup && !publicSetupAllowed) {
+				error = 'This deployment requires CLI bootstrap before the admin dashboard can be used.';
+				return;
+			}
+			if (needsSetup && password.length < 8) {
+				error = 'Password must be at least 8 characters.';
+				return;
+			}
 
 		error = '';
 		loading = true;
@@ -93,7 +105,7 @@
 				{#if needsSetup === null}
 					{setupStatusError ? 'Admin server unavailable' : 'Loading...'}
 				{:else if needsSetup}
-					Create your admin account
+					{publicSetupAllowed ? 'Create your admin account' : 'Finish admin bootstrap from the CLI'}
 				{:else}
 					Sign in to Admin Dashboard
 				{/if}
@@ -108,73 +120,90 @@
 			<Button type="button" variant="secondary" onclick={() => void checkSetupStatus()}>
 				Retry Connection
 			</Button>
-		{:else if needsSetup !== null}
-			{#if needsSetup}
-				<div class="setup-notice">
-					<div class="setup-notice__icon">🚀</div>
-					<div class="setup-notice__text">
-						<strong>Welcome!</strong> This is your first time setting up EdgeBase.
-						Enter your email and a password below to create the admin account.
+			{:else if needsSetup !== null}
+				{#if showCliBootstrapNotice}
+					<div class="setup-notice">
+						<div class="setup-notice__icon">🛡️</div>
+						<div class="setup-notice__text">
+							<strong>Admin setup moved to the CLI.</strong>
+							{setupMessage || 'Create the first admin from your project directory so production deployments never expose a public setup form.'}
+						</div>
 					</div>
-				</div>
-			{/if}
-
-			<form class="login-form" onsubmit={handleSubmit}>
-				{#if error}
-					<div class="login-error">
-						<p class="login-error__msg">{error}</p>
-						{#if showInvalidCredentialsHint}
-							<p class="login-error__hint">Admin password recovery is handled through the CLI. Use the recovery command shown below instead of email reset.</p>
-						{/if}
-					</div>
-				{/if}
-
-				<div class="login-field">
-					<label class="login-label" for="email">{needsSetup ? 'Admin Email' : 'Email'}</label>
-					<Input
-						id="email"
-						type="email"
-						placeholder="admin@example.com"
-						bind:value={email}
-						autocomplete="email"
-					/>
-				</div>
-
-				<div class="login-field">
-					<label class="login-label" for="password">{needsSetup ? 'Choose Password' : 'Password'}</label>
-					<Input
-						id="password"
-						type="password"
-						placeholder={needsSetup ? 'Min 8 characters' : 'Enter your password'}
-						bind:value={password}
-						autocomplete={needsSetup ? 'new-password' : 'current-password'}
-					/>
-					{#if needsSetup}
-						<span class="login-hint">This will be your admin login password.</span>
-					{/if}
-				</div>
-
-				<Button type="submit" variant="primary" {loading}>
-					{needsSetup ? 'Create Admin Account' : 'Sign In'}
-				</Button>
-
-				{#if !needsSetup}
 					<div class="login-recovery">
-						<p class="login-recovery__title">Forgot password?</p>
-						<code class="login-recovery__code">{adminResetCommand}</code>
+						<p class="login-recovery__title">Run this once from your project folder</p>
+						<code class="login-recovery__code">{adminBootstrapCommand}</code>
 						<p class="login-recovery__hint">
-							{#if isLocalDashboard}
-								Run this in your project folder. `--local` updates the local D1 admin account used by the dev server.
-							{:else}
-								Run this in your project folder. The CLI will use your configured Service Key or Cloudflare access for recovery.
-							{/if}
+							Use the same bootstrap admin email you deployed with. The command only creates the first admin when none exist.
 						</p>
 					</div>
+				{:else}
+					{#if needsSetup}
+					<div class="setup-notice">
+						<div class="setup-notice__icon">🚀</div>
+						<div class="setup-notice__text">
+							<strong>Welcome!</strong> This is your first time setting up EdgeBase.
+							Enter your email and a password below to create the admin account.
+						</div>
+					</div>
+					{/if}
+
+					<form class="login-form" onsubmit={handleSubmit}>
+						{#if error}
+							<div class="login-error">
+								<p class="login-error__msg">{error}</p>
+								{#if showInvalidCredentialsHint}
+									<p class="login-error__hint">Admin password recovery is handled through the CLI. Use the recovery command shown below instead of email reset.</p>
+								{/if}
+							</div>
+						{/if}
+
+						<div class="login-field">
+							<label class="login-label" for="email">{needsSetup ? 'Admin Email' : 'Email'}</label>
+							<Input
+								id="email"
+								type="email"
+								placeholder="admin@example.com"
+								bind:value={email}
+								autocomplete="email"
+							/>
+						</div>
+
+						<div class="login-field">
+							<label class="login-label" for="password">{needsSetup ? 'Choose Password' : 'Password'}</label>
+							<Input
+								id="password"
+								type="password"
+								placeholder={needsSetup ? 'Min 8 characters' : 'Enter your password'}
+								bind:value={password}
+								autocomplete={needsSetup ? 'new-password' : 'current-password'}
+							/>
+							{#if needsSetup}
+								<span class="login-hint">This will be your admin login password.</span>
+							{/if}
+						</div>
+
+						<Button type="submit" variant="primary" {loading}>
+							{needsSetup ? 'Create Admin Account' : 'Sign In'}
+						</Button>
+
+						{#if !needsSetup}
+							<div class="login-recovery">
+								<p class="login-recovery__title">Forgot password?</p>
+								<code class="login-recovery__code">{adminResetCommand}</code>
+								<p class="login-recovery__hint">
+									{#if isLocalDashboard}
+										Run this in your project folder. `--local` updates the local D1 admin account used by the dev server.
+									{:else}
+										Run this in your project folder. The CLI will use your configured Service Key or Cloudflare access for recovery.
+									{/if}
+								</p>
+							</div>
+						{/if}
+					</form>
 				{/if}
-			</form>
-		{/if}
+			{/if}
+		</div>
 	</div>
-</div>
 
 <style>
 	.login-page {

@@ -119,6 +119,15 @@ function quoteSqlIdentifier(identifier: string): string {
   return `"${identifier}"`;
 }
 
+function isPublicAdminSetupAllowed(env: Env): boolean {
+  try {
+    const config = parseConfig(env);
+    return config.release !== true;
+  } catch {
+    return false;
+  }
+}
+
 interface MonitoringStats {
   subsystem?: string;
   activeConnections: number;
@@ -361,7 +370,16 @@ const adminSetupStatus = createRoute({
 adminRoute.openapi(adminSetupStatus, async (c) => {
   await ensureAuthSchema(getAuthDb(c));
   const exists = await adminExists(getAuthDb(c));
-  return c.json({ needsSetup: !exists });
+  const needsSetup = !exists;
+  const publicSetupAllowed = needsSetup ? isPublicAdminSetupAllowed(c.env) : false;
+  return c.json({
+    needsSetup,
+    publicSetupAllowed,
+    setupMethod: needsSetup ? (publicSetupAllowed ? 'browser' : 'cli') : 'login',
+    message: needsSetup && !publicSetupAllowed
+      ? 'Public admin setup is disabled for this deployment. Run `npx edgebase admin bootstrap` with a Service Key, or use the deploy/docker bootstrap flow instead.'
+      : undefined,
+  });
 });
 
 // POST /admin/api/setup — create the first admin account
@@ -387,6 +405,7 @@ const adminSetup = createRoute({
   responses: {
     201: { description: 'Admin created', content: { 'application/json': { schema: jsonResponseSchema } } },
     400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
+    403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
   },
 });
 
@@ -394,6 +413,14 @@ adminRoute.openapi(adminSetup, async (c) => {
   await ensureAuthSchema(getAuthDb(c));
   const exists = await adminExists(getAuthDb(c));
   if (exists) throw new EdgeBaseError(400, 'Admin account already exists. Use login instead.', undefined, 'already-exists');
+  if (!isPublicAdminSetupAllowed(c.env)) {
+    throw new EdgeBaseError(
+      403,
+      'Public admin setup is disabled for this deployment. Run `npx edgebase admin bootstrap` with a Service Key, or use the deploy/docker bootstrap flow instead.',
+      undefined,
+      'forbidden',
+    );
+  }
 
   const body = await c.req.json<{ email: string; password: string }>();
   if (!body.email || !body.password) throw new EdgeBaseError(400, 'Email and password are required.', undefined, 'validation-failed');
