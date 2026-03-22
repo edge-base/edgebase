@@ -165,7 +165,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
         with:
           gradle-version: '8.13'
       - name: Kotlin unit tests (Unix)
@@ -191,7 +191,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
         with:
           gradle-version: '8.13'
       - name: Java unit tests
@@ -208,7 +208,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@0ca7a949e71ae44c8e688a51c5e7e93b2c87e295
         with:
           channel: stable
       - name: Dart core unit
@@ -231,7 +231,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
       - name: Rust core unit tests
         run: cargo test --lib
         working-directory: packages/sdk/rust/packages/core
@@ -461,6 +461,308 @@ jobs:
           run_swift_suite IosSwiftLangE2ETests
           EOF
 
+  # ─── 17. Java SDK E2E ───────────────────────────────────────────────────────
+  sdk-java-e2e:
+    name: Java SDK E2E
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+        with:
+          gradle-version: '8.13'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start EdgeBase test server and run Java E2E
+        run: |
+          node ./scripts/run-with-services.mjs --server --mock-fcm --cwd packages/sdk/java -- \
+            gradle \
+            test --tests io.edgebase.sdk.JavaE2ETest \
+            :packages:core:test --tests dev.edgebase.sdk.core.CoreE2ETest \
+            :packages:admin:test --tests dev.edgebase.sdk.admin.AdminE2ETest \
+            :packages:android:test --tests dev.edgebase.sdk.client.AndroidE2ETest
+
+  # ─── 18. Kotlin SDK E2E ─────────────────────────────────────────────────────
+  sdk-kotlin-e2e:
+    name: Kotlin SDK E2E
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+        with:
+          gradle-version: '8.13'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start EdgeBase test server and run Kotlin E2E
+        run: |
+          node ./scripts/run-with-services.mjs --server --mock-fcm --cwd packages/sdk/kotlin -- \
+            bash -lc './gradlew \
+              :core:testDebugUnitTest --tests io.edgebase.sdk.KotlinE2ETest \
+              :client:jvmTest --tests dev.edgebase.sdk.client.ClientEdgeBaseJvmAuthE2ETest \
+              :client:testDebugUnitTest --tests dev.edgebase.sdk.client.ClientEdgeBaseE2ETest \
+              :admin:test --tests dev.edgebase.sdk.admin.AdminEdgeBaseE2ETest'
+
+  # ─── 19. Dart SDK E2E ───────────────────────────────────────────────────────
+  sdk-dart-e2e:
+    name: Dart SDK E2E
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - uses: subosito/flutter-action@0ca7a949e71ae44c8e688a51c5e7e93b2c87e295
+        with:
+          channel: stable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start EdgeBase test server and run Dart E2E
+        run: |
+          node ./scripts/run-with-services.mjs --server --mock-fcm -- \
+            bash -lc 'set -euo pipefail
+              cd packages/sdk/dart/packages/core
+              dart test test/core_e2e_test.dart -r expanded
+              cd ../admin
+              dart test test/admin_e2e_test.dart -r expanded
+              cd ../flutter
+              dart test test/flutter_e2e_test.dart -r expanded'
+
+  # ─── 20. Rust SDK E2E ───────────────────────────────────────────────────────
+  sdk-rust-e2e:
+    name: Rust SDK E2E
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start EdgeBase test server and run Rust E2E
+        run: |
+          node ./scripts/run-with-services.mjs --server --mock-fcm --cwd packages/sdk/rust -- \
+            bash -lc 'set -euo pipefail
+              cargo test --test e2e -- --nocapture
+              cargo test --test e2e_room -- --nocapture'
+
+  # ─── 21. C# SDK E2E ─────────────────────────────────────────────────────────
+  sdk-csharp-e2e:
+    name: C# SDK E2E
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start EdgeBase test server and run C# E2E
+        run: |
+          node ./scripts/run-with-services.mjs --server --mock-fcm -- \
+            bash -lc 'set -euo pipefail
+              dotnet test packages/sdk/csharp/packages/admin/tests/EdgeBase.Admin.Tests.csproj --filter "FullyQualifiedName~E2E" -v normal
+              dotnet test packages/sdk/csharp/packages/unity/tests/EdgeBase.Unity.Tests.csproj --filter "FullyQualifiedName~E2E" -v normal'
+
+  # ─── 22. PHP SDK E2E ────────────────────────────────────────────────────────
+  sdk-php-e2e:
+    name: PHP SDK E2E
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          extensions: curl, json
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install PHP SDK dependencies
+        run: composer install --no-interaction --prefer-dist
+        working-directory: packages/sdk/php
+      - name: Start EdgeBase test server and run PHP E2E
+        run: |
+          node ./scripts/run-with-services.mjs --server --mock-fcm --cwd packages/sdk/php -- \
+            vendor/bin/phpunit --colors=always
+
+  # ─── 23. Elixir SDK E2E ─────────────────────────────────────────────────────
+  sdk-elixir-e2e:
+    name: Elixir SDK E2E
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: '1'
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - uses: erlef/setup-beam@ee09b1e59bb240681c382eb1f0abc6a04af72764
+        with:
+          elixir-version: '1.17.3'
+          otp-version: '27.1'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare Elixir tooling
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+      - name: Start EdgeBase test server and run Elixir E2E
+        run: |
+          node ./scripts/run-with-services.mjs --server -- \
+            bash -lc 'set -euo pipefail
+              cd packages/sdk/elixir/packages/core
+              mix deps.get
+              mix test
+              cd ../admin
+              mix deps.get
+              mix test'
+
+  # ─── 24. Scala SDK E2E ──────────────────────────────────────────────────────
+  sdk-scala-e2e:
+    name: Scala SDK E2E
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+        with:
+          gradle-version: '8.13'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build Java SDK jars required by Scala tests
+        run: gradle :packages:core:jar :packages:admin:jar
+        working-directory: packages/sdk/java
+      - name: Start EdgeBase test server and run Scala E2E
+        run: |
+          node ./scripts/run-with-services.mjs --server --cwd packages/sdk/scala -- \
+            gradle test
+
+  # ─── 25. Ruby SDK E2E ───────────────────────────────────────────────────────
+  sdk-ruby-e2e:
+    name: Ruby SDK E2E
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f
+        with:
+          ruby-version: '3.2'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start EdgeBase test server and run Ruby E2E
+        run: |
+          node ./scripts/run-with-services.mjs --server -- \
+            bash -lc 'set -euo pipefail
+              cd packages/sdk/ruby/packages/core
+              ruby -Ilib -Itest test/test_core_unit.rb
+              cd ../admin
+              ruby -Ilib -I../core/lib -Itest test/test_admin_unit.rb
+              ruby -Ilib -I../core/lib -Itest test/test_admin_e2e.rb'
+
+  # ─── 26. C++ SDK E2E ────────────────────────────────────────────────────────
+  sdk-cpp-e2e:
+    name: C++ SDK E2E
+    runs-on: ubuntu-latest
+    needs: [server-unit]
+    env:
+      EDGEBASE_E2E_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev ninja-build
+      - name: Start EdgeBase test server and run C++ E2E
+        run: |
+          node ./scripts/run-with-services.mjs --server --mock-fcm -- \
+            bash -lc 'set -euo pipefail
+              CORE_BUILD_DIR="${RUNNER_TEMP}/edgebase-cpp-core-build"
+              UNREAL_BUILD_DIR="${RUNNER_TEMP}/edgebase-cpp-unreal-build"
+              cmake -S packages/sdk/cpp/packages/core/tests -B "$CORE_BUILD_DIR" -G Ninja
+              cmake --build "$CORE_BUILD_DIR" --parallel
+              "$CORE_BUILD_DIR/unit_test"
+              "$CORE_BUILD_DIR/e2e_test"
+              cmake -S packages/sdk/cpp/packages/unreal -B "$UNREAL_BUILD_DIR" -G Ninja
+              cmake --build "$UNREAL_BUILD_DIR" --parallel
+              "$UNREAL_BUILD_DIR/unit_test"
+              "$UNREAL_BUILD_DIR/e2e_test"'
+
   # ─── Mutation Testing (PR only) ─────────────────────────────────────────────
   mutation-test:
     name: Mutation Testing
@@ -580,10 +882,20 @@ jobs:
       - sdk-go-unit
       - sdk-react-native-unit
       - sdk-js-e2e
+      - sdk-java-e2e
+      - sdk-kotlin-e2e
+      - sdk-dart-e2e
       - sdk-go-e2e
       - sdk-python-e2e
+      - sdk-rust-e2e
+      - sdk-csharp-e2e
       - sdk-react-native-e2e
       - sdk-swift-e2e
+      - sdk-php-e2e
+      - sdk-elixir-e2e
+      - sdk-scala-e2e
+      - sdk-ruby-e2e
+      - sdk-cpp-e2e
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -601,7 +913,17 @@ jobs:
           echo "Go Unit: ${{ needs.sdk-go-unit.result }}"
           echo "React Native Unit: ${{ needs.sdk-react-native-unit.result }}"
           echo "JS SDK E2E: ${{ needs.sdk-js-e2e.result }}"
+          echo "Java E2E: ${{ needs.sdk-java-e2e.result }}"
+          echo "Kotlin E2E: ${{ needs.sdk-kotlin-e2e.result }}"
+          echo "Dart E2E: ${{ needs.sdk-dart-e2e.result }}"
           echo "Go E2E: ${{ needs.sdk-go-e2e.result }}"
           echo "Python E2E: ${{ needs.sdk-python-e2e.result }}"
+          echo "Rust E2E: ${{ needs.sdk-rust-e2e.result }}"
+          echo "C# E2E: ${{ needs.sdk-csharp-e2e.result }}"
           echo "React Native E2E: ${{ needs.sdk-react-native-e2e.result }}"
           echo "Swift E2E: ${{ needs.sdk-swift-e2e.result }}"
+          echo "PHP E2E: ${{ needs.sdk-php-e2e.result }}"
+          echo "Elixir E2E: ${{ needs.sdk-elixir-e2e.result }}"
+          echo "Scala E2E: ${{ needs.sdk-scala-e2e.result }}"
+          echo "Ruby E2E: ${{ needs.sdk-ruby-e2e.result }}"
+          echo "C++ E2E: ${{ needs.sdk-cpp-e2e.result }}"

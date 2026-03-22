@@ -11,11 +11,45 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { createClient } from '../../src/index.js';
 
 const BASE_URL = process.env['BASE_URL'] || 'http://localhost:8688';
 const SERVICE_KEY = process.env['SERVICE_KEY'] || 'test-service-key-for-admin';
 
 const PREFIX = `web-e2e-${Date.now()}`;
+
+async function authApi(
+  method: string,
+  path: string,
+  body?: unknown,
+  accessToken?: string,
+) {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
+  }
+  const res = await fetch(`${BASE_URL}/api/auth${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  return { res, data };
+}
+
+function uniqueEmail(label: string) {
+  return `${label}-${crypto.randomUUID().slice(0, 8)}@test.com`;
+}
+
+function uniquePhone() {
+  const digits = Array.from({ length: 10 }, () => Math.floor(Math.random() * 10)).join('');
+  return `+1${digits}`;
+}
 
 // ─── 1. Auth E2E ──────────────────────────────────────────────────────────────
 
@@ -1146,5 +1180,213 @@ describe('Web E2E — Push Full Flow', () => {
     });
     const tokenData = await tokens.json() as any;
     expect(tokenData.items).toHaveLength(0);
+  });
+});
+
+// ─── 15. Auth verify-loop SDK coverage ──────────────────────────────────────
+
+describe('Web E2E — Auth verify loops', () => {
+  function expectSecret(
+    data: any,
+    field: 'token' | 'code',
+    route: string,
+  ): string {
+    expect(typeof data?.[field], `${route} must expose ${field} in test mode`).toBe('string');
+    return data[field] as string;
+  }
+
+  it('magic link request + verifyMagicLink → currentUser populated', async () => {
+    const client = createClient(BASE_URL);
+    const email = uniqueEmail('web-magic');
+
+    try {
+      await expect(
+        client.auth.signInWithMagicLink({
+          email,
+          redirectUrl: 'http://localhost:4173/auth/magic',
+          state: 'web-magic-state',
+        }),
+      ).resolves.toBeUndefined();
+
+      const { res, data } = await authApi('POST', '/signin/magic-link', {
+        email,
+        redirectUrl: 'http://localhost:4173/auth/magic',
+        state: 'web-magic-state-verify',
+      });
+      expect(res.ok).toBe(true);
+      const token = expectSecret(data, 'token', '/signin/magic-link');
+      const result = await client.auth.verifyMagicLink(token);
+      expect(result.accessToken).toBeTruthy();
+      expect(result.refreshToken).toBeTruthy();
+      expect(result.user?.email).toBe(email);
+      expect(client.auth.currentUser?.email).toBe(email);
+    } finally {
+      client.destroy();
+    }
+  });
+
+  it('email OTP request + verifyEmailOtp → session created', async () => {
+    const client = createClient(BASE_URL);
+    const email = uniqueEmail('web-email-otp');
+
+    try {
+      await expect(client.auth.signInWithEmailOtp({ email })).resolves.toBeUndefined();
+
+      const { res, data } = await authApi('POST', '/signin/email-otp', { email });
+      expect(res.ok).toBe(true);
+      const code = expectSecret(data, 'code', '/signin/email-otp');
+      const result = await client.auth.verifyEmailOtp({ email, code });
+      expect(result.accessToken).toBeTruthy();
+      expect(result.refreshToken).toBeTruthy();
+      expect(result.user?.email).toBe(email);
+    } finally {
+      client.destroy();
+    }
+  });
+
+  it('phone OTP request + verifyPhone → verified phone session', async () => {
+    const client = createClient(BASE_URL);
+    const phone = uniquePhone();
+
+    try {
+      await expect(client.auth.signInWithPhone({ phone })).resolves.toBeUndefined();
+
+      const { res, data } = await authApi('POST', '/signin/phone', { phone });
+      expect(res.ok).toBe(true);
+      const code = expectSecret(data, 'code', '/signin/phone');
+      const result = await client.auth.verifyPhone({ phone, code });
+      expect(result.accessToken).toBeTruthy();
+      expect(result.user?.phone).toBe(phone);
+      expect(result.user?.phoneVerified).toBe(true);
+    } finally {
+      client.destroy();
+    }
+  });
+
+  it('requestPasswordReset + resetPassword → new password sign-in works', async () => {
+    const client = createClient(BASE_URL);
+    const email = uniqueEmail('web-reset');
+    const oldPassword = 'WebReset123!';
+    const newPassword = 'WebReset456!';
+
+    try {
+      await client.auth.signUp({ email, password: oldPassword });
+      await expect(
+        client.auth.requestPasswordReset(email, {
+          redirectUrl: 'http://localhost:4173/auth/reset',
+          state: 'web-reset-state',
+        }),
+      ).resolves.toBeUndefined();
+
+      const { res, data } = await authApi('POST', '/request-password-reset', {
+        email,
+        redirectUrl: 'http://localhost:4173/auth/reset',
+        state: 'web-reset-state-verify',
+      });
+      expect(res.ok).toBe(true);
+      const token = expectSecret(data, 'token', '/request-password-reset');
+      await expect(client.auth.resetPassword(token, newPassword)).resolves.toBeUndefined();
+      await client.auth.signOut();
+      const signIn = await client.auth.signIn({ email, password: newPassword });
+      expect('accessToken' in signIn && !!signIn.accessToken).toBe(true);
+    } finally {
+      client.destroy();
+    }
+  });
+
+  it('requestEmailVerification + verifyEmail → me reflects verified user', async () => {
+    const client = createClient(BASE_URL);
+    const email = uniqueEmail('web-verify-email');
+    const password = 'WebVerify123!';
+
+    try {
+      const signup = await client.auth.signUp({ email, password });
+      await expect(
+        client.auth.requestEmailVerification({
+          redirectUrl: 'http://localhost:4173/auth/verify',
+          state: 'verify-email-state',
+        }),
+      ).resolves.toBeUndefined();
+
+      const { res, data } = await authApi(
+        'POST',
+        '/request-email-verification',
+        {
+          redirectUrl: 'http://localhost:4173/auth/verify',
+          state: 'verify-email-state-verify',
+        },
+        signup.accessToken,
+      );
+      expect(res.ok).toBe(true);
+      const token = expectSecret(data, 'token', '/request-email-verification');
+      await expect(client.auth.verifyEmail(token)).resolves.toBeUndefined();
+      const me = await authApi('GET', '/me', undefined, signup.accessToken);
+      expect(me.res.ok).toBe(true);
+      expect(me.data?.user?.verified).toBe(true);
+    } finally {
+      client.destroy();
+    }
+  });
+
+  it('linkWithPhone + verifyLinkPhone → current account gains verified phone', async () => {
+    const client = createClient(BASE_URL);
+    const email = uniqueEmail('web-link-phone');
+    const password = 'WebLinkPhone123!';
+    const phone = uniquePhone();
+
+    try {
+      const signup = await client.auth.signUp({ email, password });
+      await expect(client.auth.linkWithPhone({ phone })).resolves.toBeUndefined();
+
+      const { res, data } = await authApi('POST', '/link/phone', { phone }, signup.accessToken);
+      expect(res.ok).toBe(true);
+      const code = expectSecret(data, 'code', '/link/phone');
+      await expect(client.auth.verifyLinkPhone({ phone, code })).resolves.toBeUndefined();
+      const me = await authApi('GET', '/me', undefined, signup.accessToken);
+      expect(me.res.ok).toBe(true);
+      expect(me.data?.user?.phone).toBe(phone);
+      expect(me.data?.user?.phoneVerified).toBe(true);
+    } finally {
+      client.destroy();
+    }
+  });
+
+  it('changeEmail + verifyEmailChange → new email sign-in works', async () => {
+    const client = createClient(BASE_URL);
+    const oldEmail = uniqueEmail('web-email-change-old');
+    const newEmail = uniqueEmail('web-email-change-new');
+    const password = 'WebChangeEmail123!';
+
+    try {
+      const signup = await client.auth.signUp({ email: oldEmail, password });
+      await expect(
+        client.auth.changeEmail({
+          newEmail,
+          password,
+          redirectUrl: 'http://localhost:4173/auth/change-email',
+          state: 'change-email-state',
+        }),
+      ).resolves.toBeUndefined();
+
+      const { res, data } = await authApi(
+        'POST',
+        '/change-email',
+        {
+          newEmail,
+          password,
+          redirectUrl: 'http://localhost:4173/auth/change-email',
+          state: 'change-email-state-verify',
+        },
+        signup.accessToken,
+      );
+      expect(res.ok).toBe(true);
+      const token = expectSecret(data, 'token', '/change-email');
+      await expect(client.auth.verifyEmailChange(token)).resolves.toBeUndefined();
+      await client.auth.signOut();
+      const signIn = await client.auth.signIn({ email: newEmail, password });
+      expect('accessToken' in signIn && !!signIn.accessToken).toBe(true);
+    } finally {
+      client.destroy();
+    }
   });
 });

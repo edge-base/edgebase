@@ -25,8 +25,17 @@ module EdgebaseAdmin
     end
 
     # Send a push notification directly to a specific FCM token.
-    def send_to_token(token, payload, platform: nil)
-      body = { "token" => token, "payload" => payload }
+    def send_to_token(token, payload = nil, platform: nil, **payload_keywords)
+      normalized_payload =
+        if payload.is_a?(Hash)
+          payload.merge(payload_keywords.transform_keys(&:to_s))
+        elsif payload.nil? && !payload_keywords.empty?
+          payload_keywords.transform_keys(&:to_s)
+        else
+          payload || {}
+        end
+
+      body = { "token" => token, "payload" => normalized_payload }
       body["platform"] = platform if platform
       @admin_core.push_send_to_token(body)
     end

@@ -370,7 +370,7 @@ import { RoomClient, type RoomOptions } from '../../src/room.js';
 import { RoomRealtimeMediaTransport } from '../../src/room-realtime-media.js';
 import { matchesFilter } from '../../src/match-filter.js';
 import { ClientAnalytics } from '../../src/analytics.js';
-import { HttpClient, ContextManager, EdgeBaseError } from '@edge-base/core';
+import { ApiPaths, HttpClient, ContextManager, EdgeBaseError } from '@edge-base/core';
 
 // ─── E. TokenManager — expired token handling ────────────────────────────────
 
@@ -2121,6 +2121,125 @@ describe('ClientAnalytics — method signatures', () => {
     analytics.destroy();
     // track after destroy should still work (queue only, no crash)
     expect(() => analytics.track('late_event')).not.toThrow();
+    tm.destroy();
+  });
+});
+
+describe('ClientAnalytics — lifecycle behavior', () => {
+  function makeAnalyticsHarness() {
+    const tm = new TokenManager('http://localhost:8688');
+    const cm = new ContextManager();
+    const http = new HttpClient({
+      baseUrl: 'http://localhost:8688',
+      tokenManager: tm,
+      contextManager: cm,
+    });
+    const analytics = new ClientAnalytics(http, 'http://localhost:8688');
+    return { analytics, http, tm };
+  }
+
+  it('flushes immediately when the batch threshold is reached', async () => {
+    const { analytics, http, tm } = makeAnalyticsHarness();
+    const postSpy = vi.spyOn(http, 'post').mockResolvedValue(undefined as never);
+
+    for (let i = 0; i < 20; i++) {
+      analytics.track(`event-${i}`, { idx: i });
+    }
+    await Promise.resolve();
+
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(postSpy).toHaveBeenCalledWith(ApiPaths.TRACK_EVENTS, {
+      events: expect.arrayContaining([
+        expect.objectContaining({ name: 'event-0', properties: { idx: 0 } }),
+      ]),
+    });
+
+    analytics.destroy();
+    tm.destroy();
+  });
+
+  it('flushes queued events when the timer expires', async () => {
+    vi.useFakeTimers();
+    const { analytics, http, tm } = makeAnalyticsHarness();
+    const postSpy = vi.spyOn(http, 'post').mockResolvedValue(undefined as never);
+
+    analytics.track('timer-event', { source: 'timer' });
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(postSpy).toHaveBeenCalledWith(ApiPaths.TRACK_EVENTS, {
+      events: [
+        expect.objectContaining({ name: 'timer-event', properties: { source: 'timer' } }),
+      ],
+    });
+
+    analytics.destroy();
+    tm.destroy();
+    vi.useRealTimers();
+  });
+
+  it('requeues failed flushes and retries on the next timer tick', async () => {
+    vi.useFakeTimers();
+    const { analytics, http, tm } = makeAnalyticsHarness();
+    const postSpy = vi.spyOn(http, 'post')
+      .mockRejectedValueOnce(new Error('temporary analytics failure'))
+      .mockResolvedValue(undefined as never);
+
+    analytics.track('retry-event');
+    await analytics.flush();
+    expect(postSpy).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(postSpy).toHaveBeenCalledTimes(2);
+
+    analytics.destroy();
+    tm.destroy();
+    vi.useRealTimers();
+  });
+
+  it('destroy sends the remaining queue with navigator.sendBeacon', () => {
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    const sendBeacon = vi.fn(() => true);
+    vi.stubGlobal('window', { addEventListener, removeEventListener });
+    vi.stubGlobal('document', { visibilityState: 'visible' });
+    vi.stubGlobal('navigator', { sendBeacon });
+
+    const { analytics, tm } = makeAnalyticsHarness();
+    analytics.track('destroy-event', { path: '/pricing' });
+    analytics.destroy();
+
+    expect(sendBeacon).toHaveBeenCalledTimes(1);
+    expect(sendBeacon).toHaveBeenCalledWith(
+      'http://localhost:8688' + ApiPaths.TRACK_EVENTS,
+      expect.any(Blob),
+    );
+    expect(removeEventListener).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
+    expect(removeEventListener).toHaveBeenCalledWith('pagehide', expect.any(Function));
+
+    tm.destroy();
+  });
+
+  it('visibilitychange hidden triggers a beacon flush', () => {
+    const listeners = new Map<string, () => void>();
+    const addEventListener = vi.fn((type: string, listener: () => void) => {
+      listeners.set(type, listener);
+    });
+    const removeEventListener = vi.fn();
+    const sendBeacon = vi.fn(() => true);
+    const documentMock = { visibilityState: 'visible' };
+    vi.stubGlobal('window', { addEventListener, removeEventListener });
+    vi.stubGlobal('document', documentMock);
+    vi.stubGlobal('navigator', { sendBeacon });
+
+    const { analytics, tm } = makeAnalyticsHarness();
+    analytics.track('hidden-event');
+    documentMock.visibilityState = 'hidden';
+    listeners.get('visibilitychange')?.();
+
+    expect(sendBeacon).toHaveBeenCalledTimes(1);
+
+    analytics.destroy();
     tm.destroy();
   });
 });

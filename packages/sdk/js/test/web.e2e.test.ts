@@ -387,7 +387,7 @@ describe('js-web:storage — upload / download / list / delete', () => {
   });
 
   it('list → files 배열', async () => {
-    const res = await fetch(`${SERVER}/api/storage/avatars/list`, {
+    const res = await fetch(`${SERVER}/api/storage/avatars?limit=50`, {
       headers: { 'X-EdgeBase-Service-Key': 'test-service-key-for-admin' },
     });
     const data = await res.json() as any;

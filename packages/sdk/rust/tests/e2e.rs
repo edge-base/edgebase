@@ -1021,10 +1021,20 @@ async fn e2e_60_storage_multiple_buckets() {
 mod admin_services {
     use super::*;
 
+async fn ensure_sql_posts_table(admin: &EdgeBase, title: &str) {
+    admin
+        .db("shared", None)
+        .table("posts")
+        .insert(&serde_json::json!({ "title": title }))
+        .await
+        .expect("seed posts row");
+}
+
 #[tokio::test]
 async fn e2e_61_sql_simple_query() {
     let admin = admin();
-    let rows = admin.sql("shared", None, "SELECT id FROM posts LIMIT 5", &[])
+    ensure_sql_posts_table(&admin, &format!("{}-sql-simple", unique_prefix())).await;
+    let rows = admin.sql::<()>("shared", None, "SELECT id FROM posts LIMIT 5", &[])
         .await.expect("sql failed");
     let _ = rows;
 }
@@ -1032,7 +1042,8 @@ async fn e2e_61_sql_simple_query() {
 #[tokio::test]
 async fn e2e_62_sql_count_query() {
     let admin = admin();
-    let rows = admin.sql("shared", None, "SELECT COUNT(*) as cnt FROM posts", &[])
+    ensure_sql_posts_table(&admin, &format!("{}-sql-count", unique_prefix())).await;
+    let rows = admin.sql::<()>("shared", None, "SELECT COUNT(*) as cnt FROM posts", &[])
         .await.expect("sql count");
     let _ = rows;
 }
@@ -1041,8 +1052,7 @@ async fn e2e_62_sql_count_query() {
 async fn e2e_63_sql_with_where_clause() {
     let admin = admin();
     let prefix = unique_prefix();
-    admin.db("shared", None).table("posts")
-        .insert(&serde_json::json!({ "title": prefix })).await.unwrap();
+    ensure_sql_posts_table(&admin, &prefix).await;
 
     let rows = admin.sql("shared", None, "SELECT id, title FROM posts WHERE title = ?", &[&prefix])
         .await.expect("sql with where");
@@ -1052,7 +1062,8 @@ async fn e2e_63_sql_with_where_clause() {
 #[tokio::test]
 async fn e2e_64_sql_empty_result() {
     let admin = admin();
-    let rows = admin.sql("shared", None, "SELECT id FROM posts WHERE id = 'nonexistent-sql-999'", &[])
+    ensure_sql_posts_table(&admin, &format!("{}-sql-empty", unique_prefix())).await;
+    let rows = admin.sql::<()>("shared", None, "SELECT id FROM posts WHERE id = 'nonexistent-sql-999'", &[])
         .await.expect("sql empty");
     let _ = rows;
 }
@@ -1060,7 +1071,8 @@ async fn e2e_64_sql_empty_result() {
 #[tokio::test]
 async fn e2e_65_sql_select_star() {
     let admin = admin();
-    let rows = admin.sql("shared", None, "SELECT * FROM posts LIMIT 1", &[])
+    ensure_sql_posts_table(&admin, &format!("{}-sql-star", unique_prefix())).await;
+    let rows = admin.sql::<()>("shared", None, "SELECT * FROM posts LIMIT 1", &[])
         .await.expect("sql select star");
     let _ = rows;
 }
@@ -1771,7 +1783,7 @@ async fn e2e_100_full_lifecycle_end_to_end() {
     ).await.unwrap();
 
     // 8. SQL query
-    let _ = admin.sql("shared", None, "SELECT COUNT(*) FROM posts", &[]).await.unwrap();
+    let _ = admin.sql::<()>("shared", None, "SELECT COUNT(*) FROM posts", &[]).await.unwrap();
 
     // 9. Verify record
     let fetched = admin.db("shared", None).table("posts")
