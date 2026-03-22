@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -648,6 +649,7 @@ final class RoomP2PMediaAndroid {
                 return;
             }
 
+            remoteTrackKinds.put(key, kind);
             Map<String, Object> participant = findMember(memberId);
             RoomClient.RoomMediaRemoteTrackEvent event = new RoomClient.RoomMediaRemoteTrackEvent(
                     kind,
@@ -670,8 +672,7 @@ final class RoomP2PMediaAndroid {
             if ("audio".equals(normalized)) {
                 return normalized;
             }
-            List<String> videoLikeKinds = getPublishedVideoLikeKinds(memberId);
-            return videoLikeKinds.size() == 1 ? videoLikeKinds.get(0) : null;
+            return getNextUnassignedPublishedVideoLikeKind(memberId);
         }
 
         private void flushPendingRemoteTracks(String memberId, String roomKind) {
@@ -715,6 +716,31 @@ final class RoomP2PMediaAndroid {
                 return kinds;
             }
             return List.of();
+        }
+
+        private String getNextUnassignedPublishedVideoLikeKind(String memberId) {
+            List<String> publishedKinds = getPublishedVideoLikeKinds(memberId);
+            if (publishedKinds.isEmpty()) {
+                return null;
+            }
+
+            Set<String> assignedKinds = new LinkedHashSet<>();
+            for (String key : emittedRemoteTracks) {
+                if (!key.startsWith(memberId + ":")) {
+                    continue;
+                }
+                String kind = remoteTrackKinds.get(key);
+                if ("video".equals(kind) || "screen".equals(kind)) {
+                    assignedKinds.add(kind);
+                }
+            }
+
+            for (String kind : publishedKinds) {
+                if (!assignedKinds.contains(kind)) {
+                    return kind;
+                }
+            }
+            return null;
         }
 
         private void rememberLocalTrack(String kind, CapturedTrack captured) {

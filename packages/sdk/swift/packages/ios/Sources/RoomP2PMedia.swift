@@ -684,6 +684,7 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
         let key = buildTrackKey(memberId: memberId, trackId: track.id)
         guard emittedRemoteTracks.insert(key).inserted else { return }
 
+        remoteTrackKinds[key] = kind
         let participant = room.members.list().first { ($0["memberId"] as? String) == memberId } ?? ["memberId": memberId]
         let event = RoomMediaRemoteTrackEvent(
             kind: kind,
@@ -705,9 +706,7 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
     private func resolveFallbackRemoteTrackKind(memberId: String, track: RoomP2PMediaTrackAdapter) -> String? {
         guard let normalizedKind = normalizeTrackKind(track.kind) else { return nil }
         if normalizedKind == "audio" { return normalizedKind }
-        let videoLikeKinds = getPublishedVideoLikeKinds(memberId: memberId)
-        guard videoLikeKinds.count == 1 else { return nil }
-        return videoLikeKinds.first
+        return getNextUnassignedPublishedVideoLikeKind(memberId: memberId)
     }
 
     private func flushPendingRemoteTracks(memberId: String, roomKind: String) {
@@ -734,6 +733,20 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
             }
         }
         return kinds.values
+    }
+
+    private func getNextUnassignedPublishedVideoLikeKind(memberId: String) -> String? {
+        let publishedKinds = getPublishedVideoLikeKinds(memberId: memberId)
+        guard !publishedKinds.isEmpty else { return nil }
+
+        var assignedKinds = OrderedSet<String>()
+        for key in emittedRemoteTracks where key.hasPrefix("\(memberId):") {
+            if let kind = remoteTrackKinds[key], kind == "video" || kind == "screen" {
+                assignedKinds.append(kind)
+            }
+        }
+
+        return publishedKinds.first(where: { !assignedKinds.values.contains($0) })
     }
 
     private func rememberLocalTrack(kind: String, captured: RoomP2PCapturedTrack) {

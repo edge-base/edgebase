@@ -838,6 +838,7 @@ class RoomP2PMediaTransport implements RoomMediaTransport {
     }
 
     _emittedRemoteTracks.add(key);
+    _remoteTrackKinds[key] = kind;
     final participant = _room.members
         .list()
         .cast<Map<String, dynamic>?>()
@@ -874,11 +875,7 @@ class RoomP2PMediaTransport implements RoomMediaTransport {
       return 'audio';
     }
 
-    final videoLikeKinds = _getPublishedVideoLikeKinds(memberId);
-    if (videoLikeKinds.length != 1) {
-      return null;
-    }
-    return videoLikeKinds.first;
+    return _getNextUnassignedPublishedVideoLikeKind(memberId);
   }
 
   void _flushPendingRemoteTracks(String memberId, String roomKind) {
@@ -912,6 +909,31 @@ class RoomP2PMediaTransport implements RoomMediaTransport {
     }
 
     return kinds.toList();
+  }
+
+  String? _getNextUnassignedPublishedVideoLikeKind(String memberId) {
+    final publishedKinds = _getPublishedVideoLikeKinds(memberId);
+    if (publishedKinds.isEmpty) {
+      return null;
+    }
+
+    final assignedKinds = <String>{};
+    for (final key in _emittedRemoteTracks) {
+      if (!key.startsWith('$memberId:')) {
+        continue;
+      }
+      final kind = _remoteTrackKinds[key];
+      if (kind == 'video' || kind == 'screen') {
+        assignedKinds.add(kind!);
+      }
+    }
+
+    for (final kind in publishedKinds) {
+      if (!assignedKinds.contains(kind)) {
+        return kind;
+      }
+    }
+    return null;
   }
 
   Future<_RoomP2PLocalTrackState?> _captureUserMediaTrack(

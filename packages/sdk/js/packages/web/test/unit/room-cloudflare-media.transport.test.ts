@@ -171,6 +171,16 @@ class FakeMeeting implements RoomCloudflareKitClient {
   leave = vi.fn(async () => {});
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function createTransport(options?: {
   createSession?: (payload?: RoomCloudflareRealtimeKitCreateSessionRequest) => Promise<RoomCloudflareRealtimeKitCreateSessionResponse>;
   meeting?: FakeMeeting;
@@ -250,6 +260,24 @@ describe('RoomCloudflareMediaTransport', () => {
     expect(meeting.join).toHaveBeenCalledTimes(1);
     expect(transport.getSessionId()).toBe('sess-1');
     expect(transport.getPeerConnection()).toBeNull();
+  });
+
+  it('cancels an in-flight connect when the transport is destroyed', async () => {
+    const meeting = new FakeMeeting();
+    const initDeferred = createDeferred<RoomCloudflareKitClient>();
+    const { transport } = createTransport({
+      clientFactory: {
+        init: vi.fn(() => initDeferred.promise),
+      },
+    });
+
+    const connectPromise = transport.connect();
+    transport.destroy();
+    initDeferred.resolve(meeting);
+
+    await expect(connectPromise).rejects.toThrow('Cloudflare media transport was destroyed during connect.');
+    expect(meeting.join).not.toHaveBeenCalled();
+    expect(transport.getSessionId()).toBeNull();
   });
 
   it('rejects caller-provided session descriptions because the transport owns provider signaling', async () => {

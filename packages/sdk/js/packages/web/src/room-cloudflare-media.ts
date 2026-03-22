@@ -107,6 +107,7 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
   private readonly remoteTrackIds = new Map<string, string>();
   private clientFactoryPromise: Promise<RoomCloudflareKitClientFactory> | null = null;
   private connectPromise: Promise<string> | null = null;
+  private lifecycleVersion = 0;
   private meeting: RoomCloudflareKitClient | null = null;
   private sessionId: string | null = null;
   private joinedMapSubscriptionsAttached = false;
@@ -162,8 +163,11 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
     }
 
     const connectPromise = (async () => {
+      const lifecycleVersion = this.lifecycleVersion;
       const session = await this.room.media.cloudflareRealtimeKit.createSession(payload);
+      this.assertConnectStillActive(lifecycleVersion);
       const factory = await this.resolveClientFactory();
+      this.assertConnectStillActive(lifecycleVersion);
       const meeting = await factory.init({
         authToken: session.authToken,
         defaults: {
@@ -171,6 +175,7 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
           video: false,
         },
       });
+      this.assertConnectStillActive(lifecycleVersion, meeting);
 
       this.meeting = meeting;
       this.sessionId = session.sessionId;
@@ -178,10 +183,15 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
 
       try {
         await meeting.join();
+        this.assertConnectStillActive(lifecycleVersion, meeting);
         this.syncAllParticipants();
         return session.sessionId;
       } catch (error) {
-        this.cleanupMeeting();
+        if (this.meeting === meeting) {
+          this.cleanupMeeting();
+        } else {
+          this.leaveMeetingSilently(meeting);
+        }
         throw error;
       }
     })();
@@ -332,6 +342,8 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
   }
 
   destroy(): void {
+    this.lifecycleVersion += 1;
+    this.connectPromise = null;
     for (const kind of this.localTracks.keys()) {
       this.releaseLocalTrack(kind);
     }
@@ -544,8 +556,23 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
     this.meeting = null;
     this.sessionId = null;
 
-    if (meeting) {
-      void meeting.leave().catch(() => {});
+    this.leaveMeetingSilently(meeting);
+  }
+
+  private assertConnectStillActive(lifecycleVersion: number, meeting?: RoomCloudflareKitClient): void {
+    if (lifecycleVersion === this.lifecycleVersion) {
+      return;
     }
+    if (meeting) {
+      this.leaveMeetingSilently(meeting);
+    }
+    throw new Error('Cloudflare media transport was destroyed during connect.');
+  }
+
+  private leaveMeetingSilently(meeting: RoomCloudflareKitClient | null): void {
+    if (!meeting) {
+      return;
+    }
+    void meeting.leave().catch(() => {});
   }
 }

@@ -416,4 +416,46 @@ describe('RoomP2PMediaTransport', () => {
       providerSessionId: 'member-2',
     }));
   });
+
+  it('maps dual video-like fallback tracks when video and screen are both published', async () => {
+    vi.stubGlobal('MediaStream', FakeMediaStream as unknown as typeof MediaStream);
+
+    const remoteMember = { memberId: 'member-2', userId: 'member-2', state: {} };
+    const mediaMembers: RoomMediaMember[] = [
+      {
+        member: remoteMember,
+        state: {},
+        tracks: [
+          { kind: 'video', trackId: 'room-video-track', muted: false },
+          { kind: 'screen', trackId: 'room-screen-track', muted: false },
+        ],
+      },
+    ];
+    const { transport, peerConnections } = createTransport({
+      currentMember: {
+        memberId: 'member-1',
+        userId: 'member-1',
+        state: {},
+      },
+      members: [
+        { memberId: 'member-1', userId: 'member-1', state: {} },
+        remoteMember,
+      ],
+      mediaMembers,
+    });
+
+    const remoteEvents: string[] = [];
+    transport.onRemoteTrack((event) => {
+      remoteEvents.push(`${event.kind}:${event.track.id}`);
+    });
+    await transport.connect();
+
+    peerConnections[0]?.emitRemoteTrack(new FakeTrack('webrtc-video-track', 'video') as unknown as MediaStreamTrack);
+    peerConnections[0]?.emitRemoteTrack(new FakeTrack('webrtc-screen-track', 'video') as unknown as MediaStreamTrack);
+
+    expect(remoteEvents).toEqual([
+      'video:webrtc-video-track',
+      'screen:webrtc-screen-track',
+    ]);
+  });
 });

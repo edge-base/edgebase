@@ -317,6 +317,107 @@ void main() {
       transport.destroy();
     });
 
+    test('cancels an in-flight cloudflare connect when destroyed', () async {
+      server.listen((request) async {
+        if (request.uri.path == '/api/room') {
+          final ws = await WebSocketTransformer.upgrade(request);
+          ws.listen((message) {
+            final decoded =
+                jsonDecode(message as String) as Map<String, dynamic>;
+
+            if (decoded['type'] == 'auth') {
+              ws.add(jsonEncode({
+                'type': 'auth_success',
+                'userId': 'user-1',
+                'connectionId': 'conn-1',
+              }));
+              return;
+            }
+
+            if (decoded['type'] == 'join') {
+              ws.add(jsonEncode({
+                'type': 'sync',
+                'sharedState': <String, dynamic>{},
+                'sharedVersion': 0,
+                'playerState': <String, dynamic>{},
+                'playerVersion': 0,
+              }));
+              ws.add(jsonEncode({
+                'type': 'members_sync',
+                'members': [
+                  {
+                    'memberId': 'user-1',
+                    'userId': 'user-1',
+                    'connectionId': 'conn-1',
+                    'connectionCount': 1,
+                    'state': <String, dynamic>{},
+                  },
+                ],
+              }));
+              return;
+            }
+          });
+          return;
+        }
+
+        if (request.uri.path ==
+            '/api/room/media/cloudflare_realtimekit/session') {
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode({
+            'sessionId': 'session-destroy',
+            'meetingId': 'meeting-destroy',
+            'participantId': 'participant-destroy',
+            'authToken': 'auth-token-destroy',
+            'presetName': 'default',
+          }));
+          await request.response.close();
+          return;
+        }
+
+        request.response.statusCode = HttpStatus.notFound;
+        await request.response.close();
+      });
+
+      final room = RoomClient(baseUrl, 'game', 'room-1', tokenManager);
+      await room.join();
+
+      final initCompleter = Completer<RoomCloudflareRealtimeKitClientAdapter>();
+      final fakeClient = _FakeCloudflareClientAdapter();
+      final transport = room.media.transport(
+        RoomMediaTransportOptions(
+          cloudflareRealtimeKit: RoomCloudflareRealtimeKitTransportOptions(
+            clientFactory: ({
+              required authToken,
+              displayName,
+              enableAudio = false,
+              enableVideo = false,
+              baseDomain = 'dyte.io',
+            }) =>
+                initCompleter.future,
+          ),
+        ),
+      );
+
+      final connectFuture = transport.connect({'name': 'Flutter User'});
+      transport.destroy();
+      initCompleter.complete(fakeClient);
+
+      await expectLater(
+        connectFuture,
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('destroyed during connect'),
+          ),
+        ),
+      );
+      expect(fakeClient.joinCalled, isFalse);
+      expect(transport.getSessionId(), isNull);
+
+      room.leave();
+    });
+
     test('p2p connects, publishes local media, and emits remote video tracks',
         () async {
       final frames = <Map<String, dynamic>>[];

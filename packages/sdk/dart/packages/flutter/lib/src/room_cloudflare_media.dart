@@ -99,6 +99,7 @@ class RoomCloudflareMediaTransport implements RoomMediaTransport {
   String? _providerSessionId;
   RoomCloudflareParticipantListener? _participantListener;
   Future<String>? _connectFuture;
+  int _lifecycleVersion = 0;
 
   RoomCloudflareMediaTransport(
     this._room, [
@@ -116,8 +117,10 @@ class RoomCloudflareMediaTransport implements RoomMediaTransport {
     }
 
     final connectFuture = () async {
+      final lifecycleVersion = _lifecycleVersion;
       final session =
           await _room.media.cloudflareRealtimeKit.createSession(payload);
+      _assertConnectStillActive(lifecycleVersion);
       final client = await _resolveClientFactory().call(
         authToken: session['authToken'] as String,
         displayName: payload?['name'] as String?,
@@ -125,6 +128,7 @@ class RoomCloudflareMediaTransport implements RoomMediaTransport {
         enableVideo: false,
         baseDomain: _options.baseDomain,
       );
+      _assertConnectStillActive(lifecycleVersion, client);
 
       _client = client;
       _sessionId = session['sessionId'] as String?;
@@ -134,14 +138,25 @@ class RoomCloudflareMediaTransport implements RoomMediaTransport {
 
       try {
         await client.joinRoom();
+        _assertConnectStillActive(lifecycleVersion, client);
         _syncParticipants(client.joinedParticipants);
         return _sessionId ?? session['sessionId'] as String;
       } catch (error) {
-        client.removeListener(_participantListener!);
-        _participantListener = null;
-        _client = null;
-        _sessionId = null;
-        _providerSessionId = null;
+        final listener = _participantListener;
+        if (identical(_client, client)) {
+          if (listener != null) {
+            client.removeListener(listener);
+          }
+          _participantListener = null;
+          _client = null;
+          _sessionId = null;
+          _providerSessionId = null;
+        } else {
+          if (listener != null) {
+            client.removeListener(listener);
+          }
+          unawaited(client.leaveRoom());
+        }
         rethrow;
       }
     }();
@@ -261,6 +276,7 @@ class RoomCloudflareMediaTransport implements RoomMediaTransport {
 
   @override
   void destroy() {
+    _lifecycleVersion += 1;
     final client = _client;
     final participantListener = _participantListener;
     _client = null;
@@ -274,6 +290,19 @@ class RoomCloudflareMediaTransport implements RoomMediaTransport {
       client.removeListener(participantListener);
       unawaited(client.leaveRoom());
     }
+  }
+
+  void _assertConnectStillActive(
+    int lifecycleVersion, [
+    RoomCloudflareRealtimeKitClientAdapter? client,
+  ]) {
+    if (lifecycleVersion == _lifecycleVersion) {
+      return;
+    }
+    if (client != null) {
+      unawaited(client.leaveRoom());
+    }
+    throw StateError('Cloudflare media transport was destroyed during connect.');
   }
 
   RoomCloudflareRealtimeKitClientFactory _resolveClientFactory() {

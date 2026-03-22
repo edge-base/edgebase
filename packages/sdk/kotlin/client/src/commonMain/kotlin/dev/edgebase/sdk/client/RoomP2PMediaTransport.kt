@@ -674,6 +674,7 @@ internal class RoomP2PMediaTransport(
         val key = buildTrackKey(memberId, track.id)
         if (!emittedRemoteTracks.add(key)) return
 
+        remoteTrackKinds[key] = kind
         val participant = room.members.list().firstOrNull { it["memberId"] == memberId }
         val event = RoomMediaRemoteTrackEvent(
             kind = kind,
@@ -698,9 +699,7 @@ internal class RoomP2PMediaTransport(
         val normalizedKind = normalizeTrackKind(track.kind) ?: return null
         if (normalizedKind == "audio") return normalizedKind
 
-        val videoLikeKinds = getPublishedVideoLikeKinds(memberId)
-        if (videoLikeKinds.size != 1) return null
-        return videoLikeKinds.firstOrNull()
+        return getNextUnassignedPublishedVideoLikeKind(memberId)
     }
 
     private fun flushPendingRemoteTracks(memberId: String, roomKind: String) {
@@ -728,6 +727,22 @@ internal class RoomP2PMediaTransport(
             }
         }
         return kinds.toList()
+    }
+
+    private fun getNextUnassignedPublishedVideoLikeKind(memberId: String): String? {
+        val publishedKinds = getPublishedVideoLikeKinds(memberId)
+        if (publishedKinds.isEmpty()) return null
+
+        val assignedKinds = mutableSetOf<String>()
+        emittedRemoteTracks.forEach { key ->
+            if (!key.startsWith("$memberId:")) return@forEach
+            val kind = remoteTrackKinds[key]
+            if (kind == "video" || kind == "screen") {
+                assignedKinds += kind
+            }
+        }
+
+        return publishedKinds.firstOrNull { it !in assignedKinds }
     }
 
     private fun rememberLocalTrack(kind: String, captured: RoomP2PCapturedTrack) {

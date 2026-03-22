@@ -186,6 +186,16 @@ class FakeMeeting implements RoomCloudflareKitClient {
   leave = vi.fn(async () => {});
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 class FakeSender {
   constructor(public track: MediaStreamTrack | null) {}
 
@@ -466,6 +476,24 @@ describe('RN RoomCloudflareMediaTransport', () => {
     remoteParticipant.emitAudio(new FakeTrack('remote-audio', 'audio') as unknown as MediaStreamTrack);
 
     expect(remoteEvents).toEqual(['audio:remote-audio:participant-2']);
+  });
+
+  it('cancels an in-flight connect when the transport is destroyed', async () => {
+    const meeting = new FakeMeeting();
+    const initDeferred = createDeferred<RoomCloudflareKitClient>();
+    const { transport } = createCloudflareTransport({
+      clientFactory: {
+        init: vi.fn(() => initDeferred.promise),
+      },
+    });
+
+    const connectPromise = transport.connect();
+    transport.destroy();
+    initDeferred.resolve(meeting);
+
+    await expect(connectPromise).rejects.toThrow('Cloudflare media transport was destroyed during connect.');
+    expect(meeting.join).not.toHaveBeenCalled();
+    expect(transport.getSessionId()).toBeNull();
   });
 });
 

@@ -682,6 +682,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     }
 
     this.emittedRemoteTracks.add(key);
+    this.remoteTrackKinds.set(key, kind);
     const participant = this.findMember(memberId);
     const payload: RoomMediaRemoteTrackEvent = {
       kind,
@@ -708,12 +709,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       return 'audio';
     }
 
-    const videoLikeTracks = this.getPublishedVideoLikeKinds(memberId);
-    if (videoLikeTracks.length !== 1) {
-      return null;
-    }
-
-    return videoLikeTracks[0] ?? null;
+    return this.getNextUnassignedPublishedVideoLikeKind(memberId);
   }
 
   private flushPendingRemoteTracks(memberId: string, roomKind: RoomMediaKind): void {
@@ -742,6 +738,26 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     }
 
     return Array.from(publishedKinds);
+  }
+
+  private getNextUnassignedPublishedVideoLikeKind(memberId: string): Extract<RoomMediaKind, 'video' | 'screen'> | null {
+    const publishedKinds = this.getPublishedVideoLikeKinds(memberId);
+    if (publishedKinds.length === 0) {
+      return null;
+    }
+
+    const assignedKinds = new Set<Extract<RoomMediaKind, 'video' | 'screen'>>();
+    for (const key of this.emittedRemoteTracks) {
+      if (!key.startsWith(`${memberId}:`)) {
+        continue;
+      }
+      const kind = this.remoteTrackKinds.get(key);
+      if (kind === 'video' || kind === 'screen') {
+        assignedKinds.add(kind);
+      }
+    }
+
+    return publishedKinds.find((kind) => !assignedKinds.has(kind)) ?? null;
   }
 
   private closePeer(memberId: string): void {
