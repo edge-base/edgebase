@@ -497,7 +497,7 @@ describe('TableRef.onSnapshot', () => {
       subscriber: {
         onSnapshot: vi.fn((_channel, callback) => {
           changeHandler = callback as typeof changeHandler;
-          return vi.fn();
+          return { unsubscribe: vi.fn() };
         }),
       },
       emit(change: { changeType: 'added' | 'modified' | 'removed'; data: unknown; docId: string }) {

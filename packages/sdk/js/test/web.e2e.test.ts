@@ -243,16 +243,16 @@ describe('js-web:db — TableRef via client.db()', () => {
       });
 
       const received = new Promise<{ items: any[]; changes: { added: any[]; modified: any[]; removed: any[] } }>((resolve, reject) => {
-        let unsubscribe = () => {};
+        let sub: { unsubscribe(): void } = { unsubscribe: () => {} };
         const timeout = setTimeout(() => {
-          unsubscribe();
+          sub.unsubscribe();
           reject(new Error('Timed out waiting for database-live insert'));
         }, 4000);
 
-        unsubscribe = subscriber.db('shared').table<any>('posts').onSnapshot((snapshot) => {
+        sub = subscriber.db('shared').table<any>('posts').onSnapshot((snapshot) => {
           if (snapshot.changes.added.some((item: any) => item.title === title)) {
             clearTimeout(timeout);
-            unsubscribe();
+            sub.unsubscribe();
             resolve(snapshot);
           }
         });
