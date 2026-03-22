@@ -648,7 +648,7 @@ function upsertManagedBlock(existing: string, block: string): string {
   if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
     const before = existing.slice(0, startIndex);
     const after = existing.slice(endIndex + EDGEBASE_GUIDANCE_END.length);
-    return `${before}${block}${after.startsWith('\n') || after.length === 0 ? '' : '\n'}${after}`.replace(/\n{3,}/g, '\n\n');
+    return `${before}${block}${after.startsWith('\n') || after.length === 0 ? '' : '\n'}${after}`;
   }
 
   if (existing.length === 0) {

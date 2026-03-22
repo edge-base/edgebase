@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, parse, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +18,11 @@ function parseArgs(argv) {
 
   for (const arg of argv) {
     if (arg.startsWith('--out-dir=')) {
-      options.outDir = resolve(ROOT, arg.slice('--out-dir='.length).trim());
+      const rawOutDir = arg.slice('--out-dir='.length).trim();
+      if (rawOutDir.length === 0) {
+        throw new Error('--out-dir must not be empty.');
+      }
+      options.outDir = resolve(ROOT, rawOutDir);
       continue;
     }
     if (arg.startsWith('--public-repo=')) {
@@ -27,6 +31,16 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+function assertSafeOutputDir(outDir) {
+  if (outDir === ROOT) {
+    throw new Error('--out-dir must not resolve to the repository root.');
+  }
+
+  if (outDir === parse(outDir).root) {
+    throw new Error('--out-dir must not resolve to the filesystem root.');
+  }
 }
 
 function writeRepoReadme(outputDir, publicRepo) {
@@ -73,6 +87,8 @@ function main() {
   const skillSourceDir = resolve(ROOT, 'skills/edgebase');
   const skillOutDir = resolve(outDir, 'skills/edgebase');
   const licenseSource = resolve(ROOT, 'LICENSE');
+
+  assertSafeOutputDir(outDir);
 
   if (!existsSync(skillSourceDir)) {
     throw new Error('Missing skills/edgebase source directory.');

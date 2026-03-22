@@ -15,6 +15,14 @@ function fail(message) {
   process.exit(1);
 }
 
+function parseFrontmatter(markdown) {
+  const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!match) {
+    return null;
+  }
+  return match[1];
+}
+
 if (!existsSync(SKILL_PATH)) {
   fail('Missing skills/edgebase/SKILL.md');
 }
@@ -25,16 +33,17 @@ if (!existsSync(OPENAI_YAML_PATH)) {
 
 const skillBody = readFileSync(SKILL_PATH, 'utf-8');
 const openaiYaml = readFileSync(OPENAI_YAML_PATH, 'utf-8');
+const frontmatter = parseFrontmatter(skillBody);
 
-if (!/^---\s*[\s\S]*?^---\s*$/m.test(skillBody)) {
+if (frontmatter === null) {
   fail('skills/edgebase/SKILL.md is missing YAML frontmatter.');
 }
 
-if (!/^name:\s*edgebase\s*$/m.test(skillBody)) {
+if (!/^name:\s*edgebase\s*$/m.test(frontmatter)) {
   fail('skills/edgebase/SKILL.md frontmatter must include name: edgebase');
 }
 
-if (!/^description:\s*.+$/m.test(skillBody)) {
+if (!/^description:\s*.+$/m.test(frontmatter)) {
   fail('skills/edgebase/SKILL.md frontmatter must include a description.');
 }
 

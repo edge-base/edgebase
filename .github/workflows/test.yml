@@ -101,11 +101,29 @@ jobs:
             fi
           }
 
-          mapfile -t GENERATED_PATHS < <(node tools/sdk-codegen/list-generated-paths.mjs)
+          read_generated_paths() {
+            local label="$1"
+            shift
+            local output
+
+            if ! output="$("$@")"; then
+              echo "Failed to list ${label}."
+              exit 1
+            fi
+
+            if [ -z "$output" ]; then
+              echo "${label} path list is empty."
+              exit 1
+            fi
+
+            mapfile -t GENERATED_PATHS <<<"$output"
+          }
+
+          read_generated_paths "Generated code" node tools/sdk-codegen/list-generated-paths.mjs
           check_generated_paths_clean "Generated code" "${GENERATED_PATHS[@]}"
 
-          mapfile -t SKILL_PATHS < <(node tools/agent-skill-gen/list-generated-paths.mjs)
-          check_generated_paths_clean "Generated skill references" "${SKILL_PATHS[@]}"
+          read_generated_paths "Generated skill references" node tools/agent-skill-gen/list-generated-paths.mjs
+          check_generated_paths_clean "Generated skill references" "${GENERATED_PATHS[@]}"
 
   # ─── 5. JS SDK 단위 테스트 ──────────────────────────────────────────────────
   sdk-js-unit:

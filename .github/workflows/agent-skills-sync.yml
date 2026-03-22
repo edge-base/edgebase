@@ -56,7 +56,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.sync_mode == 'tag' && github.event.inputs.tag_name || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.sync_mode == 'tag' && github.event.inputs.tag_name || 'main') || github.ref }}
 
       - name: Configure sync target
         id: config

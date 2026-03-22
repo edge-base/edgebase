@@ -219,6 +219,35 @@ describe('CLI: init command', () => {
     expect(copilot).toContain('# EdgeBase Copilot Instructions');
   });
 
+  it('should preserve user-authored spacing outside the managed EdgeBase block', async () => {
+    const { initCommand } = await import('../src/commands/init.js');
+
+    writeFileSync(
+      join(testDir, 'AGENTS.md'),
+      [
+        '# Team Notes',
+        '',
+        'Keep changelogs short.',
+        '',
+        '',
+        '<!-- edgebase:ai-hints:start -->',
+        'old block',
+        '<!-- edgebase:ai-hints:end -->',
+        '',
+        '',
+        'Preserve this spacing.',
+        '',
+      ].join('\n'),
+    );
+
+    await initCommand.parseAsync([testDir, '--no-dev'], { from: 'user' });
+
+    const agents = readFileSync(join(testDir, 'AGENTS.md'), 'utf-8');
+
+    expect(agents).toMatch(/Keep changelogs short\.\n{3,}<!-- edgebase:ai-hints:start -->/);
+    expect(agents).toMatch(/<!-- edgebase:ai-hints:end -->\n{3,}Preserve this spacing\./);
+  });
+
   it('should forward --open to dev when auto-starting', async () => {
     const { initCommand } = await import('../src/commands/init.js');
 
