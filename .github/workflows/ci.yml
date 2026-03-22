@@ -176,19 +176,8 @@ jobs:
       - name: Test Swift SDK iOS package
         shell: bash
         run: |
-          SIM_ID=$(xcrun simctl list devices available --json | python3 -c '
-import json, sys
-devices = json.load(sys.stdin)["devices"]
-preferred = ["iPhone 16", "iPhone 16 Pro", "iPhone 15", "iPhone 15 Pro"]
-available = [device for runtime in devices.values() for device in runtime if device.get("isAvailable")]
-for name in preferred:
-    for device in available:
-        if device.get("name") == name:
-            print(device["udid"])
-            raise SystemExit(0)
-if available:
-    print(available[0]["udid"])
-')
+          SIM_JSON="$(xcrun simctl list devices available --json)"
+          SIM_ID="$(printf '%s' "$SIM_JSON" | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; preferred=[\"iPhone 16\",\"iPhone 16 Pro\",\"iPhone 15\",\"iPhone 15 Pro\"]; available=[device for runtime in devices.values() for device in runtime if device.get(\"isAvailable\")]; print(next((device[\"udid\"] for name in preferred for device in available if device.get(\"name\")==name), available[0][\"udid\"] if available else \"\"))')"
           test -n "$SIM_ID"
           xcodebuild test -scheme EdgeBase -destination "id=$SIM_ID"
         working-directory: packages/sdk/swift/packages/ios
