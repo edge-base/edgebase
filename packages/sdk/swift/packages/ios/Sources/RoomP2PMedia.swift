@@ -1,9 +1,19 @@
 import Foundation
 import AVFoundation
+#if canImport(RTKWebRTC)
 import RTKWebRTC
+#endif
 
 let roomP2PDefaultSignalPrefix = "edgebase.media.p2p"
 let roomP2PDefaultMemberReadyTimeoutMs: UInt64 = 10_000
+
+#if canImport(RTKWebRTC)
+public typealias RoomP2PNativeVideoTrack = RTKRTCVideoTrack
+public typealias RoomP2PNativeMediaStream = RTKRTCMediaStream
+#else
+public typealias RoomP2PNativeVideoTrack = AnyObject
+public typealias RoomP2PNativeMediaStream = AnyObject
+#endif
 
 public struct RoomP2PIceServerOptions: Sendable {
     public var urls: [String]
@@ -46,14 +56,14 @@ public struct RoomP2PMediaTransportOptions: Sendable {
 }
 
 public struct RoomP2PScreenShareSource {
-    public let track: RTKRTCVideoTrack
-    public let stream: RTKRTCMediaStream?
+    public let track: RoomP2PNativeVideoTrack
+    public let stream: RoomP2PNativeMediaStream?
     public let deviceId: String?
     public let stopHandler: (() -> Void)?
 
     public init(
-        track: RTKRTCVideoTrack,
-        stream: RTKRTCMediaStream? = nil,
+        track: RoomP2PNativeVideoTrack,
+        stream: RoomP2PNativeMediaStream? = nil,
         deviceId: String? = nil,
         stopHandler: (() -> Void)? = nil
     ) {
@@ -775,6 +785,7 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
     }
 
     private func resolveScreenShareCapture(_ payload: [String: Any]?) async throws -> RoomP2PCapturedTrack {
+#if canImport(RTKWebRTC)
         if let source = payload?["source"] as? RoomP2PScreenShareSource {
             return buildInjectedScreenCapture(
                 track: source.track,
@@ -803,11 +814,21 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
             "P2P screen sharing on iOS requires an app-provided RTKRTCVideoTrack " +
             "(payload['source'], payload['videoTrack'], or payload['track']). See \(roomMediaDocsURL)"
         )
+#else
+        if let captured = try await resolveRuntime().captureDisplayMedia() {
+            return captured
+        }
+
+        throw RoomMediaTransportError(
+            "P2P screen sharing on this host requires the EdgeBase Swift iOS runtime. See \(roomMediaDocsURL)"
+        )
+#endif
     }
 
+#if canImport(RTKWebRTC)
     private func buildInjectedScreenCapture(
-        track: RTKRTCVideoTrack,
-        stream: RTKRTCMediaStream?,
+        track: RoomP2PNativeVideoTrack,
+        stream: RoomP2PNativeMediaStream?,
         deviceId: String?,
         stopHandler: (() -> Void)?
     ) -> RoomP2PCapturedTrack {
@@ -832,6 +853,7 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
             stopOnCleanup: stopHandler != nil
         )
     }
+#endif
 
     private func ensureConnectedMemberId() async throws -> String {
         if let localMemberId { return localMemberId }
@@ -918,6 +940,7 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
     }
 
     private func buildView(kind: String, track: RoomP2PMediaTrackAdapter, stream: RoomP2PMediaStreamAdapter, isLocal: Bool) -> AnyObject? {
+#if canImport(RTKWebRTC)
         let createView = {
             () -> AnyObject? in
         guard kind == "video" || kind == "screen",
@@ -938,6 +961,9 @@ public final class RoomP2PMediaTransport: RoomMediaTransport {
             view = createView()
         }
         return view
+#else
+        return stream.asAny() as AnyObject?
+#endif
     }
 }
 
@@ -953,11 +979,16 @@ private struct OrderedSet<Element: Hashable> {
 }
 
 private func defaultP2PMediaRuntimeFactory() -> RoomP2PMediaRuntimeFactory? {
+#if canImport(RTKWebRTC)
     return {
         NativeRoomP2PMediaRuntime()
     }
+#else
+    return nil
+#endif
 }
 
+#if canImport(RTKWebRTC)
 private final class NativeRoomP2PMediaRuntime: RoomP2PMediaRuntimeAdapter {
     private let factory = RTKRTCPeerConnectionFactory()
 
@@ -1379,3 +1410,4 @@ private final class NativeRoomP2PMediaStream: RoomP2PMediaStreamAdapter {
         stream
     }
 }
+#endif

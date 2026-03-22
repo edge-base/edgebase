@@ -1,6 +1,8 @@
 import XCTest
 import Foundation
+#if canImport(RTKWebRTC)
 import RTKWebRTC
+#endif
 @testable import EdgeBase
 
 private final class MockRoomURLProtocol: URLProtocol, @unchecked Sendable {
@@ -1683,6 +1685,7 @@ final class RoomMediaTransportIosUnitTests: XCTestCase {
         _ = try await audioTask.value
     }
 
+#if canImport(RTKWebRTC)
     func test_p2p_transport_accepts_injected_ios_screen_share_source() async throws {
         let room = RoomClient(
             baseUrl: "https://edgebase.fun",
@@ -1789,6 +1792,7 @@ final class RoomMediaTransportIosUnitTests: XCTestCase {
         try await stopTask.value
         XCTAssertTrue(didStopInjectedTrack)
     }
+#endif
 
     func test_p2p_transport_reports_ios_screen_share_requirement_without_source() async throws {
         let room = RoomClient(
@@ -1830,10 +1834,17 @@ final class RoomMediaTransportIosUnitTests: XCTestCase {
             _ = try await transport.startScreenShare(nil)
             XCTFail("Expected startScreenShare to throw when no injected source is provided")
         } catch {
+#if canImport(RTKWebRTC)
             XCTAssertTrue(
                 String(describing: error).contains("RTKRTCVideoTrack"),
                 "Expected iOS screen-share source guidance in error, got: \(error)"
             )
+#else
+            XCTAssertTrue(
+                String(describing: error).contains("EdgeBase Swift iOS runtime"),
+                "Expected host-runtime guidance in error, got: \(error)"
+            )
+#endif
         }
     }
 

@@ -247,6 +247,12 @@ final class RoomP2PMediaAndroid {
         public CompletableFuture<Void> switchDevices(Map<String, Object> payload) {
             return CompletableFuture.runAsync(() -> {
                 boolean changed = false;
+                String nextAudioInput = payload == null ? null : stringValue(payload.get("audioInputId"));
+                if (nextAudioInput != null && localTracks.containsKey("audio")) {
+                    rememberLocalTrack("audio", runtime.captureAudioTrack(nextAudioInput));
+                    changed = true;
+                }
+
                 String nextVideoInput = payload == null ? null : stringValue(payload.get("videoInputId"));
                 if (nextVideoInput != null && localTracks.containsKey("video")) {
                     rememberLocalTrack("video", runtime.captureVideoTrack(nextVideoInput));

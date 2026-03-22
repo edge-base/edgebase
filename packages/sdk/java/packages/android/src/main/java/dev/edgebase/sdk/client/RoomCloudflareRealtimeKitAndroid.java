@@ -135,6 +135,7 @@ final class RoomCloudflareRealtimeKitAndroid {
         );
         init.invoke(
                 meeting,
+                meetingInfo,
                 createFunction0Proxy(function0Class, onSuccess),
                 createFunction1Proxy(function1Class, onFailure)
         );

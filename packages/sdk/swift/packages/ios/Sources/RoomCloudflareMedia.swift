@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(RealtimeKit)
 import RealtimeKit
+#endif
 
 let roomMediaDocsURL = "https://edgebase.fun/docs/room/media"
 
@@ -511,6 +513,7 @@ struct RoomMediaTransportError: LocalizedError {
 }
 
 private func defaultCloudflareRealtimeKitClientFactory() -> RoomCloudflareRealtimeKitClientFactory? {
+#if canImport(RealtimeKit)
     return { options in
         let meeting = RealtimeKitiOSClientBuilder().build()
         let meetingInfo = RtkMeetingInfo(
@@ -536,8 +539,12 @@ private func defaultCloudflareRealtimeKitClientFactory() -> RoomCloudflareRealti
 
         return NativeRoomCloudflareRealtimeKitClientAdapter(meeting: meeting)
     }
+#else
+    return nil
+#endif
 }
 
+#if canImport(RealtimeKit)
 private final class NativeRoomCloudflareRealtimeKitClientAdapter: NSObject, RoomCloudflareRealtimeKitClientAdapter {
     private let meeting: RealtimeKitClient
     private let bridge = NativeRoomCloudflareParticipantsBridge()
@@ -791,6 +798,7 @@ private final class NativeRoomCloudflareParticipantsBridge: NSObject, RtkPartici
         )
     }
 }
+#endif
 
 extension RoomMediaNamespace {
     public func transport(_ options: RoomMediaTransportOptions = RoomMediaTransportOptions()) -> any RoomMediaTransport {
