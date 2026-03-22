@@ -478,7 +478,7 @@ Use [Issues](https://github.com/edge-base/edgebase/issues) for bug reports and a
 ## Security
 
 If you discover a security vulnerability, please email **edgebase52@gmail.com** instead of opening a public issue.
-Automated security checks also run in CI via CodeQL, Semgrep, and Snyk.
+Automated security checks also run in CI via CodeQL and Semgrep.
 
 ## License
 

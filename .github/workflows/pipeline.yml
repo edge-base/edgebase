@@ -33,8 +33,3 @@ jobs:
     name: CodeQL
     uses: ./.github/workflows/codeql.yml
     secrets: inherit
-
-  # snyk:
-  #   name: Snyk
-  #   uses: ./.github/workflows/snyk.yml
-  #   secrets: inherit
