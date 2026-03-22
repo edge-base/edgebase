@@ -11,10 +11,7 @@
 import type { TokenManager, TokenUser } from './token-manager.js';
 import { EdgeBaseError, createSubscription, type Subscription } from '@edge-base/core';
 import { refreshAccessToken } from './auth-refresh.js';
-import {
-  RoomRealtimeMediaTransport,
-  type RoomRealtimeMediaTransportOptions,
-} from './room-realtime-media.js';
+import type { RoomRealtimeMediaTransportOptions } from './room-realtime-media.js';
 import {
   RoomCloudflareMediaTransport,
   type RoomCloudflareMediaTransportOptions,
@@ -549,7 +546,10 @@ export class RoomClient {
         this.requestCloudflareRealtimeKitMedia('session', 'POST', payload),
     },
     transport: (options?: RoomMediaTransportOptions): RoomMediaTransport => {
-      const provider = options?.provider ?? 'cloudflare_realtimekit';
+      // Infer provider from options: if cloudflareRealtimeKit config is present, use it;
+      // otherwise default to p2p for zero-config local development.
+      const hasCloudflareConfig = options && 'cloudflareRealtimeKit' in options && (options as RoomCloudflareRealtimeKitTransportFactoryOptions).cloudflareRealtimeKit != null;
+      const provider = options?.provider ?? (hasCloudflareConfig ? 'cloudflare_realtimekit' : 'p2p');
       if (provider === 'p2p') {
         const p2pOptions = (options as RoomP2PTransportFactoryOptions | undefined)?.p2p;
         return new RoomP2PMediaTransport(this, p2pOptions);
@@ -558,20 +558,6 @@ export class RoomClient {
       const cloudflareOptions =
         (options as RoomCloudflareRealtimeKitTransportFactoryOptions | undefined)?.cloudflareRealtimeKit;
       return new RoomCloudflareMediaTransport(this, cloudflareOptions);
-    },
-    realtime: {
-      createSession: (payload?: RoomRealtimeCreateSessionRequest): Promise<RoomRealtimeCreateSessionResponse> =>
-        this.requestRealtimeMedia('session', 'POST', payload),
-      getIceServers: (payload?: RoomRealtimeIceServersRequest): Promise<RoomRealtimeIceServersResponse> =>
-        this.requestRealtimeMedia('turn', 'POST', payload),
-      addTracks: (payload: RoomRealtimeTracksRequest): Promise<RoomRealtimeTracksResponse> =>
-        this.requestRealtimeMedia('tracks/new', 'POST', payload),
-      renegotiate: (payload: RoomRealtimeRenegotiateRequest): Promise<RoomRealtimeTracksResponse> =>
-        this.requestRealtimeMedia('renegotiate', 'PUT', payload),
-      closeTracks: (payload: RoomRealtimeCloseTracksRequest): Promise<RoomRealtimeTracksResponse> =>
-        this.requestRealtimeMedia('tracks/close', 'PUT', payload),
-      transport: (options?: RoomRealtimeMediaTransportOptions): RoomRealtimeMediaTransport =>
-        new RoomRealtimeMediaTransport(this, options),
     },
     onTrack: (handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription =>
       this.onMediaTrack(handler),
@@ -653,14 +639,6 @@ export class RoomClient {
       throw new EdgeBaseError(res.status, `Failed to get room metadata: ${res.statusText}`);
     }
     return res.json() as Promise<Record<string, unknown>>;
-  }
-
-  private async requestRealtimeMedia<T>(
-    path: string,
-    method: 'GET' | 'POST' | 'PUT',
-    payload?: unknown,
-  ): Promise<T> {
-    return this.requestRoomMedia<T>('realtime', path, method, payload);
   }
 
   private async requestCloudflareRealtimeKitMedia<T>(
