@@ -9,6 +9,7 @@ const workflowPath = path.join(repoRoot, '.github/workflows/test.yml');
 
 const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
 const workflowText = fs.readFileSync(workflowPath, 'utf8');
+const sourceCache = new Map();
 
 const discovery = {
   admin: [
@@ -48,7 +49,7 @@ const discovery = {
     { sdk: 'cpp', sources: ['packages/sdk/cpp/packages/unreal/tests/e2e_tests.cpp'] }
   ],
   'client-auth-verify': [
-    { sdk: 'js', sources: ['packages/sdk/js/test/web.e2e.test.ts'] },
+    { sdk: 'js', sources: ['packages/sdk/js/packages/web/test/e2e/web.e2e.test.ts'] },
     { sdk: 'react-native', sources: ['packages/sdk/react-native/test/e2e/rn.e2e.test.ts'] },
     { sdk: 'java', sources: ['packages/sdk/java/packages/android/src/test/java/dev/edgebase/sdk/client/AndroidE2ETest.java'] },
     { sdk: 'kotlin', sources: ['packages/sdk/kotlin/client/src/jvmTest/kotlin/dev/edgebase/sdk/client/ClientEdgeBaseJvmAuthE2ETest.kt'] },
@@ -61,20 +62,100 @@ function relExists(relPath) {
   return fs.existsSync(path.join(repoRoot, relPath));
 }
 
+function readRel(relPath) {
+  if (!sourceCache.has(relPath)) {
+    sourceCache.set(relPath, fs.readFileSync(path.join(repoRoot, relPath), 'utf8'));
+  }
+  return sourceCache.get(relPath);
+}
+
+function sortStrings(values) {
+  return [...values].sort();
+}
+
 function discoverRoleTargets(role) {
   return (discovery[role] ?? [])
-    .filter(entry => entry.sources.every(relExists))
-    .map(entry => entry.sdk)
+    .filter((entry) => entry.sources.every(relExists))
+    .map((entry) => entry.sdk)
     .sort();
 }
 
 function getCatalogTargets(role) {
-  return (catalog.roles?.[role]?.targets ?? []).map(target => target.sdk).sort();
+  return (catalog.roles?.[role]?.targets ?? []).map((target) => target.sdk).sort();
 }
 
 function ensureWorkflowJob(jobName) {
   const pattern = new RegExp(`^\\s{2}${jobName}:\\s*$`, 'm');
   return pattern.test(workflowText);
+}
+
+function getRoleTargetMap(role) {
+  const declared = catalog.roles?.[role];
+  return new Map((declared?.targets ?? []).map((target) => [target.sdk, target]));
+}
+
+function normalizeEvidence(role, checkpoint, rawEvidence, targetMap) {
+  if (!rawEvidence || typeof rawEvidence !== 'object' || Array.isArray(rawEvidence)) {
+    throw new Error(`Role '${role}' checkpoint '${checkpoint}' must define an evidence object.`);
+  }
+
+  const entries = rawEvidence.entries;
+  if (!Array.isArray(entries)) {
+    throw new Error(`Role '${role}' checkpoint '${checkpoint}' must define an entries array.`);
+  }
+
+  const reason = rawEvidence.reason;
+  if (entries.length === 0 && typeof reason !== 'string') {
+    throw new Error(
+      `Role '${role}' checkpoint '${checkpoint}' has no evidence entries and must declare a reason.`
+    );
+  }
+
+  const coveredTargets = new Set();
+  for (const [index, entry] of entries.entries()) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`Role '${role}' checkpoint '${checkpoint}' entry #${index + 1} must be an object.`);
+    }
+
+    const { sdk, source, pattern } = entry;
+    if (typeof sdk !== 'string' || !targetMap.has(sdk)) {
+      throw new Error(`Role '${role}' checkpoint '${checkpoint}' entry #${index + 1} references unknown sdk '${sdk}'.`);
+    }
+    if (typeof source !== 'string') {
+      throw new Error(`Role '${role}' checkpoint '${checkpoint}' entry #${index + 1} must define a source.`);
+    }
+    if (!relExists(source)) {
+      throw new Error(`Role '${role}' checkpoint '${checkpoint}' entry #${index + 1} references missing source '${source}'.`);
+    }
+
+    const target = targetMap.get(sdk);
+    if (!target.sources.includes(source)) {
+      throw new Error(
+        `Role '${role}' checkpoint '${checkpoint}' entry #${index + 1} uses source '${source}' outside target '${sdk}' sources.`
+      );
+    }
+
+    if (typeof pattern !== 'string' || pattern.length === 0) {
+      throw new Error(`Role '${role}' checkpoint '${checkpoint}' entry #${index + 1} must define a non-empty pattern.`);
+    }
+    if (!readRel(source).includes(pattern)) {
+      throw new Error(
+        `Role '${role}' checkpoint '${checkpoint}' entry #${index + 1} pattern not found in '${source}': ${pattern}`
+      );
+    }
+
+    coveredTargets.add(sdk);
+  }
+
+  const missingTargets = sortStrings([...targetMap.keys()].filter((sdk) => !coveredTargets.has(sdk)));
+  const status = entries.length === 0 ? 'gap' : missingTargets.length === 0 ? 'covered' : 'partial';
+
+  return {
+    status,
+    reason,
+    coveredTargets: sortStrings(coveredTargets),
+    missingTargets
+  };
 }
 
 function verifyRole(role) {
@@ -106,33 +187,78 @@ function verifyRole(role) {
       }
     }
   }
+
+  const evidence = declared.evidence ?? {};
+  const checkpointSet = new Set(declared.checkpoints);
+
+  for (const checkpoint of declared.checkpoints) {
+    if (!(checkpoint in evidence)) {
+      throw new Error(`Role '${role}' checkpoint '${checkpoint}' is missing an evidence declaration.`);
+    }
+  }
+
+  for (const checkpoint of Object.keys(evidence)) {
+    if (!checkpointSet.has(checkpoint)) {
+      throw new Error(`Role '${role}' evidence declares unknown checkpoint '${checkpoint}'.`);
+    }
+  }
+
+  const targetMap = getRoleTargetMap(role);
+  const checkpoints = declared.checkpoints.map((checkpoint) => ({
+    checkpoint,
+    ...normalizeEvidence(role, checkpoint, evidence[checkpoint], targetMap)
+  }));
+
+  return {
+    role,
+    targets: declared.targets.map((target) => `${target.sdk}:${target.mode}`),
+    checkpoints
+  };
 }
 
-function printSummary() {
-  for (const [role, spec] of Object.entries(catalog.roles)) {
-    const targets = spec.targets.map(target => `${target.sdk}:${target.mode}`).join(', ');
-    console.log(`${role}: ${targets}`);
+function printSummary(results) {
+  for (const result of results) {
+    const counts = result.checkpoints.reduce(
+      (acc, checkpoint) => {
+        acc[checkpoint.status] += 1;
+        return acc;
+      },
+      { covered: 0, partial: 0, gap: 0 }
+    );
+
+    console.log(
+      `${result.role}: targets=${result.targets.join(', ')} | checkpoints covered=${counts.covered} partial=${counts.partial} gap=${counts.gap}`
+    );
+
+    for (const checkpoint of result.checkpoints) {
+      const coverage = checkpoint.coveredTargets.length > 0 ? checkpoint.coveredTargets.join(', ') : '(none)';
+      const missing = checkpoint.missingTargets.length > 0 ? checkpoint.missingTargets.join(', ') : '(none)';
+      const suffix = checkpoint.reason ? ` | reason: ${checkpoint.reason}` : '';
+      console.log(
+        `  - ${checkpoint.checkpoint}: ${checkpoint.status} | covered=${coverage} | missing=${missing}${suffix}`
+      );
+    }
   }
 }
 
 const [, , command = 'verify', roleArg] = process.argv;
 
 if (command === 'summary') {
-  printSummary();
+  const roles = roleArg ? [roleArg] : Object.keys(catalog.roles);
+  const results = roles.map((role) => verifyRole(role));
+  printSummary(results);
   process.exit(0);
 }
 
 if (command === 'verify' && roleArg) {
-  verifyRole(roleArg);
-  console.log(`verified role '${roleArg}'`);
+  const result = verifyRole(roleArg);
+  printSummary([result]);
   process.exit(0);
 }
 
 if (command === 'verify') {
-  for (const role of Object.keys(catalog.roles)) {
-    verifyRole(role);
-  }
-  printSummary();
+  const results = Object.keys(catalog.roles).map((role) => verifyRole(role));
+  printSummary(results);
   process.exit(0);
 }
 

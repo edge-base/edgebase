@@ -23,7 +23,83 @@
         { "sdk": "elixir", "job": "sdk-elixir-e2e", "mode": "native", "sources": ["packages/sdk/elixir/packages/admin/test/admin_e2e_test.exs"] },
         { "sdk": "scala", "job": "sdk-scala-e2e", "mode": "native", "sources": ["packages/sdk/scala/packages/admin/src/test/scala/dev/edgebase/sdk/scala/admin/AdminEdgeBaseE2ETest.scala"] },
         { "sdk": "ruby", "job": "sdk-ruby-e2e", "mode": "native", "sources": ["packages/sdk/ruby/packages/admin/test/test_admin_e2e.rb"] }
-      ]
+      ],
+      "evidence": {
+        "admin-auth": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/admin/test/e2e/admin.e2e.test.ts",
+              "pattern": "it('createUser → id 반환'"
+            },
+            {
+              "sdk": "php",
+              "source": "packages/sdk/php/packages/admin/tests/e2e/AdminClientE2ETest.php",
+              "pattern": "public function test_admin_auth_delete_user_and_verify(): void"
+            }
+          ]
+        },
+        "functions": {
+          "entries": [],
+          "reason": "Public repo does not yet contain service-backed admin SDK function invocation tests in the role target suites."
+        },
+        "database-crud": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/admin/test/e2e/admin.e2e.test.ts",
+              "pattern": "it('insert → id'"
+            },
+            {
+              "sdk": "php",
+              "source": "packages/sdk/php/packages/admin/tests/e2e/AdminClientE2ETest.php",
+              "pattern": "public function test_db_delete_then_get_throws(): void"
+            }
+          ]
+        },
+        "database-query": {
+          "entries": [
+            {
+              "sdk": "php",
+              "source": "packages/sdk/php/packages/admin/tests/e2e/AdminClientE2ETest.php",
+              "pattern": "public function test_where_filter_finds_record(): void"
+            },
+            {
+              "sdk": "php",
+              "source": "packages/sdk/php/packages/admin/tests/e2e/AdminClientE2ETest.php",
+              "pattern": "public function test_order_by_limit(): void"
+            }
+          ]
+        },
+        "storage-basic": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/admin/test/e2e/admin.e2e.test.ts",
+              "pattern": "it('upload + getUrl'"
+            },
+            {
+              "sdk": "php",
+              "source": "packages/sdk/php/packages/admin/tests/e2e/AdminClientE2ETest.php",
+              "pattern": "public function test_storage_upload_and_download(): void"
+            }
+          ]
+        },
+        "storage-advanced": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/admin/test/e2e/admin.e2e.test.ts",
+              "pattern": "it('upload + signedUrl'"
+            },
+            {
+              "sdk": "rust",
+              "source": "packages/sdk/rust/tests/e2e.rs",
+              "pattern": "async fn e2e_56_storage_resumable_upload() {"
+            }
+          ]
+        }
+      }
     },
     "core": {
       "description": "Common core SDK contract",
@@ -48,7 +124,121 @@
         { "sdk": "php", "job": "sdk-php-e2e", "mode": "native", "sources": ["packages/sdk/php/packages/core/tests/e2e/CoreCrudE2ETest.php", "packages/sdk/php/packages/core/tests/e2e/CoreStorageE2ETest.php"] },
         { "sdk": "swift", "job": "sdk-swift-e2e", "mode": "native", "sources": ["packages/sdk/swift/packages/core/Tests/CoreE2ETests.swift"] },
         { "sdk": "cpp", "job": "sdk-cpp-e2e", "mode": "native", "sources": ["packages/sdk/cpp/packages/core/tests/e2e_tests.cpp"] }
-      ]
+      ],
+      "evidence": {
+        "database-crud": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/core/test/e2e/core.e2e.test.ts",
+              "pattern": "it('insert → id 반환'"
+            },
+            {
+              "sdk": "swift",
+              "source": "packages/sdk/swift/packages/core/Tests/CoreE2ETests.swift",
+              "pattern": "func test_crud_chain_insert_read_update_delete() async throws {"
+            }
+          ]
+        },
+        "database-query": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/core/test/e2e/core.e2e.test.ts",
+              "pattern": "it('where == 필터 → 해당 레코드만 반환'"
+            },
+            {
+              "sdk": "swift",
+              "source": "packages/sdk/swift/packages/core/Tests/CoreE2ETests.swift",
+              "pattern": "func test_orderBy_desc() async throws {"
+            }
+          ]
+        },
+        "batch": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/core/test/e2e/core.e2e.test.ts",
+              "pattern": "it('insertMany → N개 반환'"
+            },
+            {
+              "sdk": "swift",
+              "source": "packages/sdk/swift/packages/core/Tests/CoreE2ETests.swift",
+              "pattern": "func test_insertMany() async throws {"
+            }
+          ]
+        },
+        "upsert": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/core/test/e2e/core.e2e.test.ts",
+              "pattern": "it('upsert 새 레코드 → action === \"inserted\"'"
+            },
+            {
+              "sdk": "swift",
+              "source": "packages/sdk/swift/packages/core/Tests/CoreE2ETests.swift",
+              "pattern": "func test_upsert_updates_existing() async throws {"
+            }
+          ]
+        },
+        "field-ops": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/core/test/e2e/core.e2e.test.ts",
+              "pattern": "it('increment → viewCount 증가'"
+            },
+            {
+              "sdk": "swift",
+              "source": "packages/sdk/swift/packages/core/Tests/CoreE2ETests.swift",
+              "pattern": "func test_deleteField() async throws {"
+            }
+          ]
+        },
+        "storage-basic": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/core/test/e2e/core.e2e.test.ts",
+              "pattern": "it('upload + download text file'"
+            },
+            {
+              "sdk": "swift",
+              "source": "packages/sdk/swift/packages/core/Tests/CoreE2ETests.swift",
+              "pattern": "func test_upload_and_download() async throws {"
+            }
+          ]
+        },
+        "storage-advanced": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/core/test/e2e/core.e2e.test.ts",
+              "pattern": "it('initiateResumableUpload + getUploadParts + resumeUpload complete successfully'"
+            },
+            {
+              "sdk": "swift",
+              "source": "packages/sdk/swift/packages/core/Tests/CoreE2ETests.swift",
+              "pattern": "func test_signed_upload_url() async throws {"
+            }
+          ]
+        },
+        "error-handling": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/core/test/e2e/core.e2e.test.ts",
+              "pattern": "it('getOne 없는 id → 에러'"
+            },
+            {
+              "sdk": "python",
+              "source": "packages/sdk/python/packages/core/tests/test_core_e2e.py",
+              "pattern": "def test_error_has_status_code(self, admin):"
+            }
+          ]
+        }
+      }
     },
     "client": {
       "description": "Client runtime SDK contract excluding browser lifecycle specifics",
@@ -68,7 +258,69 @@
         { "sdk": "csharp", "job": "sdk-csharp-e2e", "mode": "native", "sources": ["packages/sdk/csharp/packages/unity/tests/UnityE2ETests.cs"] },
         { "sdk": "swift", "job": "sdk-swift-e2e", "mode": "native", "sources": ["packages/sdk/swift/packages/ios/Tests/IosE2ETests.swift"] },
         { "sdk": "cpp", "job": "sdk-cpp-e2e", "mode": "native", "sources": ["packages/sdk/cpp/packages/unreal/tests/e2e_tests.cpp"] }
-      ]
+      ],
+      "evidence": {
+        "auth-basic": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/web/test/e2e/web.e2e.test.ts",
+              "pattern": "it('signup → accessToken + user.id'"
+            },
+            {
+              "sdk": "swift",
+              "source": "packages/sdk/swift/packages/ios/Tests/IosE2ETests.swift",
+              "pattern": "func test_signUp_signIn_signOut_chain() async throws {"
+            }
+          ]
+        },
+        "database-crud": {
+          "entries": [
+            {
+              "sdk": "csharp",
+              "source": "packages/sdk/csharp/packages/unity/tests/UnityE2ETests.cs",
+              "pattern": "public async Task Sequential_operations_insert_read_update_delete()"
+            },
+            {
+              "sdk": "dart",
+              "source": "packages/sdk/dart/packages/flutter/test/flutter_e2e_test.dart",
+              "pattern": "test('create → getOne → same record', () async {"
+            }
+          ]
+        },
+        "database-query": {
+          "entries": [
+            {
+              "sdk": "dart",
+              "source": "packages/sdk/dart/packages/flutter/test/flutter_e2e_test.dart",
+              "pattern": "test('where filter → only matching records', () async {"
+            },
+            {
+              "sdk": "swift",
+              "source": "packages/sdk/swift/packages/ios/Tests/IosE2ETests.swift",
+              "pattern": "func test_orderBy_and_limit() async throws {"
+            }
+          ]
+        },
+        "storage-basic": {
+          "entries": [
+            {
+              "sdk": "java",
+              "source": "packages/sdk/java/packages/android/src/test/java/dev/edgebase/sdk/client/AndroidE2ETest.java",
+              "pattern": "void test_storage_upload_download_roundtrip_with_auth() {"
+            },
+            {
+              "sdk": "csharp",
+              "source": "packages/sdk/csharp/packages/unity/tests/UnityE2ETests.cs",
+              "pattern": "public async Task Storage_upload_and_download_with_auth()"
+            }
+          ]
+        },
+        "functions-invoke": {
+          "entries": [],
+          "reason": "Public repo does not yet contain service-backed client SDK function invocation tests in the role target suites."
+        }
+      }
     },
     "client-auth-verify": {
       "description": "Client auth verification loop contract",
@@ -81,13 +333,69 @@
         "email-change"
       ],
       "targets": [
-        { "sdk": "js", "job": "sdk-js-e2e", "mode": "native", "sources": ["packages/sdk/js/test/web.e2e.test.ts"] },
+        { "sdk": "js", "job": "sdk-js-e2e", "mode": "native", "sources": ["packages/sdk/js/packages/web/test/e2e/web.e2e.test.ts"] },
         { "sdk": "react-native", "job": "sdk-react-native-e2e", "mode": "native", "sources": ["packages/sdk/react-native/test/e2e/rn.e2e.test.ts"] },
         { "sdk": "java", "job": "sdk-java-e2e", "mode": "native", "sources": ["packages/sdk/java/packages/android/src/test/java/dev/edgebase/sdk/client/AndroidE2ETest.java"] },
         { "sdk": "kotlin", "job": "sdk-kotlin-e2e", "mode": "native", "sources": ["packages/sdk/kotlin/client/src/jvmTest/kotlin/dev/edgebase/sdk/client/ClientEdgeBaseJvmAuthE2ETest.kt", "packages/sdk/kotlin/client/src/androidUnitTest/kotlin/dev/edgebase/sdk/client/ClientEdgeBaseE2ETest.kt"] },
         { "sdk": "dart", "job": "sdk-dart-e2e", "mode": "native", "sources": ["packages/sdk/dart/packages/flutter/test/flutter_e2e_test.dart"] },
         { "sdk": "swift", "job": "sdk-swift-e2e", "mode": "native", "sources": ["packages/sdk/swift/packages/ios/Tests/IosE2ETests.swift"] }
-      ]
+      ],
+      "evidence": {
+        "magic-link": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/web/test/e2e/web.e2e.test.ts",
+              "pattern": "it('magic link request + verifyMagicLink → currentUser populated', async () => {"
+            }
+          ]
+        },
+        "email-otp": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/web/test/e2e/web.e2e.test.ts",
+              "pattern": "it('email OTP request + verifyEmailOtp → session created', async () => {"
+            }
+          ]
+        },
+        "phone-otp": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/web/test/e2e/web.e2e.test.ts",
+              "pattern": "it('phone OTP request + verifyPhone → verified phone session', async () => {"
+            }
+          ]
+        },
+        "password-reset": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/web/test/e2e/web.e2e.test.ts",
+              "pattern": "it('requestPasswordReset + resetPassword → new password sign-in works', async () => {"
+            }
+          ]
+        },
+        "email-verify": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/web/test/e2e/web.e2e.test.ts",
+              "pattern": "it('requestEmailVerification + verifyEmail → me reflects verified user', async () => {"
+            }
+          ]
+        },
+        "email-change": {
+          "entries": [
+            {
+              "sdk": "js",
+              "source": "packages/sdk/js/packages/web/test/e2e/web.e2e.test.ts",
+              "pattern": "it('changeEmail + verifyEmailChange → new email sign-in works', async () => {"
+            }
+          ]
+        }
+      }
     }
   }
 }
