@@ -9,7 +9,7 @@
  *   - namespace + roomId identification (replaces single roomId)
  */
 import type { TokenManager, TokenUser } from './token-manager.js';
-import { EdgeBaseError, type Subscription } from '@edge-base/core';
+import { EdgeBaseError, createSubscription, type Subscription } from '@edge-base/core';
 import { refreshAccessToken } from './auth-refresh.js';
 import {
   RoomRealtimeMediaTransport,
@@ -39,8 +39,9 @@ export interface RoomOptions {
   connectionTimeout?: number;
 }
 
-// Re-export Subscription from core for backwards compatibility
+// Re-export Subscription + helper from core for backwards compatibility
 export type { Subscription };
+export { createSubscription };
 
 export type SharedStateHandler = (state: Record<string, unknown>, changes: Record<string, unknown>) => void;
 export type PlayerStateHandler = (state: Record<string, unknown>, changes: Record<string, unknown>) => void;
@@ -823,32 +824,28 @@ export class RoomClient {
    * Subscribe to shared state changes.
    * Called on full sync and on each shared_delta.
    *
-   * @returns Subscription with unsubscribe()
+   * @returns Subscription (callable & .unsubscribe())
    */
   onSharedState(handler: SharedStateHandler): Subscription {
     this.sharedStateHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const idx = this.sharedStateHandlers.indexOf(handler);
         if (idx >= 0) this.sharedStateHandlers.splice(idx, 1);
-      },
-    };
+      });
   }
 
   /**
    * Subscribe to player state changes.
    * Called on full sync and on each player_delta.
    *
-   * @returns Subscription with unsubscribe()
+   * @returns Subscription (callable & .unsubscribe())
    */
   onPlayerState(handler: PlayerStateHandler): Subscription {
     this.playerStateHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const idx = this.playerStateHandlers.indexOf(handler);
         if (idx >= 0) this.playerStateHandlers.splice(idx, 1);
-      },
-    };
+      });
   }
 
   /**
@@ -857,59 +854,51 @@ export class RoomClient {
    * @example
    * room.onMessage('game_over', (data) => { console.log(data.winner); });
    *
-   * @returns Subscription with unsubscribe()
+   * @returns Subscription (callable & .unsubscribe())
    */
   onMessage(messageType: string, handler: MessageHandler): Subscription {
     if (!this.messageHandlers.has(messageType)) {
       this.messageHandlers.set(messageType, []);
     }
     this.messageHandlers.get(messageType)!.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const handlers = this.messageHandlers.get(messageType);
         if (handlers) {
           const idx = handlers.indexOf(handler);
           if (idx >= 0) handlers.splice(idx, 1);
         }
-      },
-    };
+      });
   }
 
   /**
    * Subscribe to ALL messages regardless of type.
    *
-   * @returns Subscription with unsubscribe()
+   * @returns Subscription (callable & .unsubscribe())
    */
   onAnyMessage(handler: (messageType: string, data: unknown) => void): Subscription {
     this.allMessageHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const idx = this.allMessageHandlers.indexOf(handler);
         if (idx >= 0) this.allMessageHandlers.splice(idx, 1);
-      },
-    };
+      });
   }
 
   /** Subscribe to errors */
   onError(handler: ErrorHandler): Subscription {
     this.errorHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const idx = this.errorHandlers.indexOf(handler);
         if (idx >= 0) this.errorHandlers.splice(idx, 1);
-      },
-    };
+      });
   }
 
   /** Subscribe to kick events */
   onKicked(handler: KickedHandler): Subscription {
     this.kickedHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const idx = this.kickedHandlers.indexOf(handler);
         if (idx >= 0) this.kickedHandlers.splice(idx, 1);
-      },
-    };
+      });
   }
 
   private onSignal(
@@ -920,134 +909,110 @@ export class RoomClient {
       this.signalHandlers.set(event, []);
     }
     this.signalHandlers.get(event)!.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const handlers = this.signalHandlers.get(event);
         if (!handlers) return;
         const index = handlers.indexOf(handler);
         if (index >= 0) handlers.splice(index, 1);
-      },
-    };
+      });
   }
 
   private onAnySignal(
     handler: (event: string, payload: unknown, meta: RoomSignalMeta) => void,
   ): Subscription {
     this.anySignalHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const index = this.anySignalHandlers.indexOf(handler);
         if (index >= 0) this.anySignalHandlers.splice(index, 1);
-      },
-    };
+      });
   }
 
   private onMembersSync(handler: (members: RoomMember[]) => void): Subscription {
     this.memberSyncHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const index = this.memberSyncHandlers.indexOf(handler);
         if (index >= 0) this.memberSyncHandlers.splice(index, 1);
-      },
-    };
+      });
   }
 
   private onMemberJoin(handler: (member: RoomMember) => void): Subscription {
     this.memberJoinHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const index = this.memberJoinHandlers.indexOf(handler);
         if (index >= 0) this.memberJoinHandlers.splice(index, 1);
-      },
-    };
+      });
   }
 
   private onMemberLeave(
     handler: (member: RoomMember, reason: RoomMemberLeaveReason) => void,
   ): Subscription {
     this.memberLeaveHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const index = this.memberLeaveHandlers.indexOf(handler);
         if (index >= 0) this.memberLeaveHandlers.splice(index, 1);
-      },
-    };
+      });
   }
 
   private onMemberStateChange(
     handler: (member: RoomMember, state: Record<string, unknown>) => void,
   ): Subscription {
     this.memberStateHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const index = this.memberStateHandlers.indexOf(handler);
         if (index >= 0) this.memberStateHandlers.splice(index, 1);
-      },
-    };
+      });
   }
 
   private onReconnect(handler: (info: RoomReconnectInfo) => void): Subscription {
     this.reconnectHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const index = this.reconnectHandlers.indexOf(handler);
         if (index >= 0) this.reconnectHandlers.splice(index, 1);
-      },
-    };
+      });
   }
 
   private onConnectionStateChange(handler: (state: RoomConnectionState) => void): Subscription {
     this.connectionStateHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const index = this.connectionStateHandlers.indexOf(handler);
         if (index >= 0) this.connectionStateHandlers.splice(index, 1);
-      },
-    };
+      });
   }
 
   private onMediaTrack(handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription {
     this.mediaTrackHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const index = this.mediaTrackHandlers.indexOf(handler);
         if (index >= 0) this.mediaTrackHandlers.splice(index, 1);
-      },
-    };
+      });
   }
 
   private onMediaTrackRemoved(handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription {
     this.mediaTrackRemovedHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const index = this.mediaTrackRemovedHandlers.indexOf(handler);
         if (index >= 0) this.mediaTrackRemovedHandlers.splice(index, 1);
-      },
-    };
+      });
   }
 
   private onMediaStateChange(
     handler: (member: RoomMember, state: RoomMemberMediaState) => void,
   ): Subscription {
     this.mediaStateHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const index = this.mediaStateHandlers.indexOf(handler);
         if (index >= 0) this.mediaStateHandlers.splice(index, 1);
-      },
-    };
+      });
   }
 
   private onMediaDeviceChange(
     handler: (member: RoomMember, change: RoomMediaDeviceChange) => void,
   ): Subscription {
     this.mediaDeviceHandlers.push(handler);
-    return {
-      unsubscribe: () => {
+    return createSubscription(() => {
         const index = this.mediaDeviceHandlers.indexOf(handler);
         if (index >= 0) this.mediaDeviceHandlers.splice(index, 1);
-      },
-    };
+      });
   }
 
   private async sendSignal(

@@ -1,4 +1,5 @@
 import type { TokenManager, TokenUser } from './token-manager.js';
+import { createSubscription } from '@edge-base/core';
 import type { ContextManager, IDatabaseLiveSubscriber, Subscription as CoreSubscription } from '@edge-base/core';
 import { EdgeBaseError } from '@edge-base/core';
 import { refreshAccessToken } from './auth-refresh.js';
@@ -95,34 +96,30 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
       // Errors surface through the normal auth/socket flow.
     });
 
-    return {
-      unsubscribe: () => {
-        const subs = this.subscriptions.get(channel);
-        if (!subs) return;
-        const idx = subs.indexOf(sub);
-        if (idx >= 0) subs.splice(idx, 1);
-        if (subs.length === 0) {
-          this.subscriptions.delete(channel);
-          this.channelFilters.delete(channel);
-          this.channelOrFilters.delete(channel);
-          this.sendUnsubscribe(channel);
-        } else {
-          // Recompute filters from remaining subscribers and re-send to server
-          this.recomputeChannelFilters(channel);
-          this.sendSubscribe(channel);
-        }
-      },
-    };
+    return createSubscription(() => {
+      const subs = this.subscriptions.get(channel);
+      if (!subs) return;
+      const idx = subs.indexOf(sub);
+      if (idx >= 0) subs.splice(idx, 1);
+      if (subs.length === 0) {
+        this.subscriptions.delete(channel);
+        this.channelFilters.delete(channel);
+        this.channelOrFilters.delete(channel);
+        this.sendUnsubscribe(channel);
+      } else {
+        // Recompute filters from remaining subscribers and re-send to server
+        this.recomputeChannelFilters(channel);
+        this.sendSubscribe(channel);
+      }
+    });
   }
 
   onError(handler: ErrorHandler): CoreSubscription {
     this.errorHandlers.push(handler);
-    return {
-      unsubscribe: () => {
-        const idx = this.errorHandlers.indexOf(handler);
-        if (idx >= 0) this.errorHandlers.splice(idx, 1);
-      },
-    };
+    return createSubscription(() => {
+      const idx = this.errorHandlers.indexOf(handler);
+      if (idx >= 0) this.errorHandlers.splice(idx, 1);
+    });
   }
 
   async connect(channel: string): Promise<void> {

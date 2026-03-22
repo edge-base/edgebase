@@ -1,3 +1,4 @@
+import { createSubscription } from './room.js';
 import type {
   RoomCloudflareRealtimeKitCreateSessionRequest,
   RoomCloudflareRealtimeKitCreateSessionResponse,
@@ -368,14 +369,12 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
 
   onRemoteTrack(handler: (event: RoomMediaRemoteTrackEvent) => void): Subscription {
     this.remoteTrackHandlers.push(handler);
-    return {
-      unsubscribe: () => {
-        const index = this.remoteTrackHandlers.indexOf(handler);
-        if (index >= 0) {
-          this.remoteTrackHandlers.splice(index, 1);
-        }
-      },
-    };
+    return createSubscription(() => {
+      const index = this.remoteTrackHandlers.indexOf(handler);
+      if (index >= 0) {
+        this.remoteTrackHandlers.splice(index, 1);
+      }
+    });
   }
 
   destroy(): void {

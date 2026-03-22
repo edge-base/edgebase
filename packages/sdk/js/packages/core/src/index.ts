@@ -7,6 +7,7 @@
 
 // Abstract interfaces for decoupling
 export type { ITokenManager, ITokenPair, IDatabaseLiveSubscriber, IDbChange, FilterMatchFn, Subscription } from './types.js';
+export { createSubscription } from './types.js';
 
 // HTTP
 export { HttpClient, type HttpClientOptions } from './http.js';
