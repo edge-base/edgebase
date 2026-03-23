@@ -90,14 +90,14 @@ jobs:
       - name: Build CLI package
         run: pnpm --dir packages/cli build
 
+      - name: Build JS SDK core package
+        run: pnpm --dir packages/sdk/js/packages/core build
+
       - name: Build server package
         run: pnpm --dir packages/server build
 
       - name: Build admin dashboard
         run: pnpm --dir packages/admin build
-
-      - name: Build JS SDK core package
-        run: pnpm --dir packages/sdk/js/packages/core build
 
       - name: Build JS SDK web package
         run: pnpm --dir packages/sdk/js/packages/web build

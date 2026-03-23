@@ -1,6 +1,6 @@
 name: edgebase_admin
 description: EdgeBase Admin SDK — server-side admin operations.
-version: 0.2.0
+version: 0.2.1
 homepage: https://github.com/edge-base/edgebase/tree/main/packages/sdk/dart/packages/admin
 repository: https://github.com/edge-base/edgebase/tree/main/packages/sdk/dart/packages/admin
 
@@ -8,7 +8,7 @@ environment:
   sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
-  edgebase_core: ^0.2.0
+  edgebase_core: ^0.2.1
   http: ^1.2.0
 
 dev_dependencies:
