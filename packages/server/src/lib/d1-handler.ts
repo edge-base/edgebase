@@ -406,13 +406,13 @@ async function handleList(
   } catch {
     // FTS table may not exist — fall back to substring search
     if (queryOpts.search) {
-      const fields = tableConfig.schema ? Object.keys(tableConfig.schema).filter(k => tableConfig.schema![k] !== false) : ['id'];
+      const searchFields = tableConfig.schema ? Object.keys(tableConfig.schema).filter(k => tableConfig.schema![k] !== false) : ['id'];
       query = buildSubstringSearchQuery(tableName, queryOpts.search, {
         pagination: queryOpts.pagination,
         filters: queryOpts.filters,
         orFilters: queryOpts.orFilters,
         sort: queryOpts.sort,
-        fields,
+        fields: queryOpts.fields?.length ? queryOpts.fields : searchFields,
       }, 'sqlite');
       result = await executeD1Query(resolved.db, query.sql, query.params);
     } else {

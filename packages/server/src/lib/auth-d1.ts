@@ -405,6 +405,14 @@ export async function ensureAuthSchema(db: AuthDb): Promise<void> {
     .filter((s) => s.length > 0);
 
   await db.batch(statements.map((sql) => ({ sql })));
+
+  // Migrate existing _users tables: add lastSignedInAt if missing
+  try {
+    await db.run('ALTER TABLE _users ADD COLUMN lastSignedInAt TEXT', []);
+  } catch {
+    // Column already exists — safe to ignore
+  }
+
   schemaInitialized = true;
 }
 

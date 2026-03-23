@@ -24,6 +24,15 @@
 	let namespaces = $derived($namespaceNames);
 	let selectedNamespace = $state('shared');
 
+	let isDynamicNamespace = $derived.by(() => {
+		const schema = $schemaStore.schema;
+		for (const table of Object.values(schema)) {
+			const def = table as { namespace?: string; dynamic?: boolean };
+			if (def.namespace === selectedNamespace && def.dynamic) return true;
+		}
+		return false;
+	});
+
 	let SqlEditorComponent = $state<typeof import('$lib/components/ui/SqlEditor.svelte').default | null>(null);
 
 	let cmSchema = $derived((() => {
@@ -48,6 +57,10 @@
 
 	async function execute() {
 		if (!sql.trim()) return;
+		if (isDynamicNamespace) {
+			toastError('Dynamic namespaces require a target instance. Use the Query tab on a specific table instead.');
+			return;
+		}
 		executing = true;
 
 		try {
@@ -110,10 +123,14 @@
 					{/each}
 				</select>
 			</div>
-			<Button variant="primary" size="sm" onclick={execute} loading={executing} disabled={executing || !sql.trim()}>
+			<Button variant="primary" size="sm" onclick={execute} loading={executing} disabled={executing || !sql.trim() || isDynamicNamespace}>
 				{executing ? 'Executing...' : 'Execute'}
 			</Button>
-			<span class="sql-page__shortcut">{typeof navigator !== 'undefined' && navigator.platform?.includes('Mac') ? '\u2318' : 'Ctrl'}+Enter</span>
+			{#if isDynamicNamespace}
+				<span class="sql-page__dynamic-warn">Dynamic namespace — use table Query tab</span>
+			{:else}
+				<span class="sql-page__shortcut">{typeof navigator !== 'undefined' && navigator.platform?.includes('Mac') ? '\u2318' : 'Ctrl'}+Enter</span>
+			{/if}
 		</div>
 
 		<div class="sql-page__editor">
@@ -213,6 +230,11 @@
 	.sql-page__shortcut {
 		font-size: 11px;
 		color: var(--color-text-tertiary);
+	}
+
+	.sql-page__dynamic-warn {
+		font-size: 11px;
+		color: var(--color-warning, #f59e0b);
 	}
 
 	.sql-page__editor {

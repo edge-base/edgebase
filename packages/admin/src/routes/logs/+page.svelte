@@ -180,8 +180,9 @@
 		const status = getStatusCode(entry);
 		if (status >= 500) return 'error';
 		if (status >= 400) return 'warn';
-		if (status >= 300 && status < 304) return 'warn';
-		if (status >= 200 || status === 304) return 'info';
+		if (status === 304) return 'info';
+		if (status >= 300) return 'warn';
+		if (status >= 200) return 'info';
 		if (status > 0) return 'debug';
 		return '';
 	}
