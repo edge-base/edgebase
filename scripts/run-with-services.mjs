@@ -67,8 +67,20 @@ async function ensureSharedBuild() {
   }
 }
 
+async function ensureCoreBuild() {
+  const coreDir = path.join(repoRootDir, 'packages', 'sdk', 'js', 'packages', 'core');
+  const coreDistPath = path.join(coreDir, 'dist', 'index.js');
+  if (existsSync(coreDistPath)) return;
+
+  const buildResult = await runCommand('pnpm', ['build'], { cwd: coreDir });
+  if (buildResult.code !== 0) {
+    throw new Error(`Failed to build packages/sdk/js/packages/core (exit ${buildResult.code ?? 'unknown'})`);
+  }
+}
+
 async function startServer() {
   await ensureSharedBuild();
+  await ensureCoreBuild();
 
   const port = process.env['EDGEBASE_TEST_PORT'] ?? '8688';
   const logPath =
