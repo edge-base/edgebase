@@ -28,6 +28,7 @@ import type {
 import { getDbDoName, getD1BindingName, callDO, shouldRouteToD1 } from './do-router.js';
 import { executeDoSql } from './do-sql.js';
 import { D1AuthDb, type AuthDb } from './auth-db-adapter.js';
+import { ensureAuthSchema } from './auth-d1.js';
 import { handleD1Request } from './d1-handler.js';
 import { handlePgRequest } from './postgres-handler.js';
 import { buildInternalHandlerContext } from './internal-request.js';
@@ -1105,9 +1106,19 @@ export function buildAdminAuthContext(options: AdminAuthOptions): AdminAuthConte
         if (data.displayName && data.displayName.length > 200) {
           throw new Error('Display name must not exceed 200 characters.');
         }
-        const role = data.role?.trim() || 'user';
+        // Role validation (mirrors normalizeOptionalRole in routes/admin-auth.ts)
+        let role = 'user';
+        if (data.role !== undefined) {
+          if (typeof data.role !== 'string') throw new Error('Role must be a non-empty string.');
+          const trimmed = data.role.trim();
+          if (!trimmed) throw new Error('Role must be a non-empty string.');
+          if (trimmed.length > 100) throw new Error('Role must not exceed 100 characters.');
+          role = trimmed;
+        }
 
         const db = new D1AuthDb(d1Database);
+        // Ensure auth tables exist (critical for fresh databases)
+        await ensureAuthSchema(db);
         const user = await createManagedAdminUser(
           db,
           {
