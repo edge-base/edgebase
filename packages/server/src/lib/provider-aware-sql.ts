@@ -45,11 +45,204 @@ function readDollarQuoteToken(query: string, index: number): string | null {
   return match?.[0] ?? null;
 }
 
+const SQL_OPERATOR_CHARS = '+-*/<>=~!@#%^&|`?:';
+const PRECEDING_WORDS_THAT_EXPECT_EXPRESSION = new Set([
+  'ALL',
+  'AND',
+  'ANY',
+  'ARRAY',
+  'AS',
+  'BETWEEN',
+  'BY',
+  'CASE',
+  'DISTINCT',
+  'ELSE',
+  'EXISTS',
+  'FILTER',
+  'FROM',
+  'GROUP',
+  'HAVING',
+  'ILIKE',
+  'IN',
+  'INTO',
+  'IS',
+  'JOIN',
+  'LIKE',
+  'LIMIT',
+  'NOT',
+  'OFFSET',
+  'ON',
+  'OR',
+  'ORDER',
+  'OVER',
+  'PARTITION',
+  'RETURNING',
+  'SELECT',
+  'SET',
+  'SIMILAR',
+  'THEN',
+  'TO',
+  'UNION',
+  'UPDATE',
+  'USING',
+  'VALUES',
+  'WHEN',
+  'WHERE',
+]);
+const FOLLOWING_WORDS_THAT_DO_NOT_START_EXPRESSION = new Set([
+  'AND',
+  'AS',
+  'BY',
+  'ELSE',
+  'END',
+  'EXCEPT',
+  'FETCH',
+  'FILTER',
+  'FOR',
+  'FROM',
+  'GROUP',
+  'HAVING',
+  'INTERSECT',
+  'INTO',
+  'JOIN',
+  'LIMIT',
+  'NULLS',
+  'OFFSET',
+  'ON',
+  'OR',
+  'ORDER',
+  'OVER',
+  'PARTITION',
+  'RETURNING',
+  'THEN',
+  'UNION',
+  'USING',
+  'WHEN',
+  'WHERE',
+  'WINDOW',
+]);
+
+type SqlContextToken =
+  | { kind: 'word'; value: string }
+  | { kind: 'number' | 'param' | 'operator' }
+  | { kind: 'open-paren' | 'close-paren' | 'open-bracket' | 'close-bracket' }
+  | { kind: 'comma' | 'semicolon' | 'quote' | 'other' };
+
+function isOperatorChar(char: string): boolean {
+  return SQL_OPERATOR_CHARS.includes(char);
+}
+
+function isWordChar(char: string): boolean {
+  return /[A-Za-z0-9_$]/.test(char);
+}
+
+function readPreviousSqlToken(query: string, index: number): SqlContextToken | null {
+  let i = index - 1;
+  while (i >= 0 && /\s/.test(query[i]!)) i--;
+  if (i < 0) return null;
+
+  const char = query[i]!;
+  if (char === '(') return { kind: 'open-paren' };
+  if (char === ')') return { kind: 'close-paren' };
+  if (char === '[') return { kind: 'open-bracket' };
+  if (char === ']') return { kind: 'close-bracket' };
+  if (char === ',') return { kind: 'comma' };
+  if (char === ';') return { kind: 'semicolon' };
+  if (char === "'" || char === '"') return { kind: 'quote' };
+
+  if (isOperatorChar(char)) {
+    let start = i;
+    while (start > 0 && isOperatorChar(query[start - 1]!)) start--;
+    return { kind: 'operator' };
+  }
+
+  if (isWordChar(char)) {
+    let start = i;
+    while (start > 0 && isWordChar(query[start - 1]!)) start--;
+    const token = query.slice(start, i + 1);
+    if (/^\$\d+$/.test(token)) return { kind: 'param' };
+    if (/^\d+(?:\.\d+)?$/.test(token)) return { kind: 'number' };
+    return { kind: 'word', value: token.toUpperCase() };
+  }
+
+  return { kind: 'other' };
+}
+
+function readNextSqlToken(query: string, index: number): SqlContextToken | null {
+  let i = index + 1;
+  while (i < query.length && /\s/.test(query[i]!)) i++;
+  if (i >= query.length) return null;
+
+  const char = query[i]!;
+  if (char === '(') return { kind: 'open-paren' };
+  if (char === ')') return { kind: 'close-paren' };
+  if (char === '[') return { kind: 'open-bracket' };
+  if (char === ']') return { kind: 'close-bracket' };
+  if (char === ',') return { kind: 'comma' };
+  if (char === ';') return { kind: 'semicolon' };
+  if (char === "'" || char === '"') return { kind: 'quote' };
+
+  if (isOperatorChar(char)) {
+    let end = i + 1;
+    while (end < query.length && isOperatorChar(query[end]!)) end++;
+    return { kind: 'operator' };
+  }
+
+  if (isWordChar(char)) {
+    let end = i + 1;
+    while (end < query.length && isWordChar(query[end]!)) end++;
+    const token = query.slice(i, end);
+    if (/^\$\d+$/.test(token)) return { kind: 'param' };
+    if (/^\d+(?:\.\d+)?$/.test(token)) return { kind: 'number' };
+    return { kind: 'word', value: token.toUpperCase() };
+  }
+
+  return { kind: 'other' };
+}
+
+function canTokenEndExpression(token: SqlContextToken | null): boolean {
+  if (!token) return false;
+  switch (token.kind) {
+    case 'word':
+      return !PRECEDING_WORDS_THAT_EXPECT_EXPRESSION.has(token.value);
+    case 'number':
+    case 'param':
+    case 'close-paren':
+    case 'close-bracket':
+    case 'quote':
+      return true;
+    default:
+      return false;
+  }
+}
+
+function canTokenStartExpression(token: SqlContextToken | null): boolean {
+  if (!token) return false;
+  switch (token.kind) {
+    case 'word':
+      return !FOLLOWING_WORDS_THAT_DO_NOT_START_EXPRESSION.has(token.value);
+    case 'number':
+    case 'param':
+    case 'open-paren':
+    case 'open-bracket':
+    case 'quote':
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isQuestionBindPlaceholder(query: string, index: number): boolean {
+  const previousToken = readPreviousSqlToken(query, index);
+  const nextToken = readNextSqlToken(query, index);
+  return !(canTokenEndExpression(previousToken) && (canTokenStartExpression(nextToken) || nextToken?.kind === 'operator'));
+}
+
 function scanSqlPlaceholders(query: string): {
-  questionPlaceholderCount: number;
+  questionPlaceholderIndexes: number[];
   sawPostgresPlaceholder: boolean;
 } {
-  let questionPlaceholderCount = 0;
+  const questionPlaceholderIndexes: number[] = [];
   let sawPostgresPlaceholder = false;
   let state: 'code' | 'single' | 'double' | 'line-comment' | 'block-comment' | 'dollar-quote' =
     'code';
@@ -133,15 +326,18 @@ function scanSqlPlaceholders(query: string): {
       }
     }
     if (char === '?') {
-      questionPlaceholderCount++;
+      if (isQuestionBindPlaceholder(query, i)) {
+        questionPlaceholderIndexes.push(i);
+      }
     }
   }
 
-  return { questionPlaceholderCount, sawPostgresPlaceholder };
+  return { questionPlaceholderIndexes, sawPostgresPlaceholder };
 }
 
 export function normalizePostgresSqlPlaceholders(query: string, expectedParamCount = 0): string {
-  const { questionPlaceholderCount, sawPostgresPlaceholder } = scanSqlPlaceholders(query);
+  const { questionPlaceholderIndexes, sawPostgresPlaceholder } = scanSqlPlaceholders(query);
+  const questionPlaceholderCount = questionPlaceholderIndexes.length;
   if (questionPlaceholderCount === 0) {
     return query;
   }
@@ -162,6 +358,7 @@ export function normalizePostgresSqlPlaceholders(query: string, expectedParamCou
   let state: 'code' | 'single' | 'double' | 'line-comment' | 'block-comment' | 'dollar-quote' =
     'code';
   let dollarQuoteToken = '';
+  const placeholderIndexes = new Set(questionPlaceholderIndexes);
 
   for (let i = 0; i < query.length; i++) {
     const char = query[i]!;
@@ -255,7 +452,7 @@ export function normalizePostgresSqlPlaceholders(query: string, expectedParamCou
         continue;
       }
     }
-    if (char === '?') {
+    if (char === '?' && placeholderIndexes.has(i)) {
       normalized += `$${paramIndex++}`;
       continue;
     }

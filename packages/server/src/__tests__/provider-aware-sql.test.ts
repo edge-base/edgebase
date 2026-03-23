@@ -28,18 +28,33 @@ describe('provider-aware raw SQL helpers', () => {
     ).toThrow('Cannot mix ? placeholders with PostgreSQL-style $n placeholders.');
   });
 
+  it('allows PostgreSQL question-mark operators alongside positional placeholders', () => {
+    expect(
+      normalizePostgresSqlPlaceholders(
+        "SELECT * FROM posts WHERE metadata ? 'featured' AND title = $1",
+        1,
+      ),
+    ).toBe("SELECT * FROM posts WHERE metadata ? 'featured' AND title = $1");
+  });
+
   it('leaves PostgreSQL question-mark operators alone when no params are provided', () => {
     expect(
       normalizePostgresSqlPlaceholders("SELECT * FROM posts WHERE metadata ? 'featured'", 0),
     ).toBe("SELECT * FROM posts WHERE metadata ? 'featured'");
   });
 
-  it('throws when question-mark placeholders do not match params length', () => {
-    expect(() =>
+  it('normalizes bind placeholders without touching PostgreSQL question-mark operators', () => {
+    expect(
       normalizePostgresSqlPlaceholders(
         "SELECT * FROM posts WHERE metadata ? 'featured' AND id = ?",
         1,
       ),
-    ).toThrow('PostgreSQL raw SQL placeholders do not match params length.');
+    ).toBe("SELECT * FROM posts WHERE metadata ? 'featured' AND id = $1");
+  });
+
+  it('treats SELECT-list question marks as bind placeholders, not operators', () => {
+    expect(normalizePostgresSqlPlaceholders('SELECT ?, ? FROM posts', 2)).toBe(
+      'SELECT $1, $2 FROM posts',
+    );
   });
 });
