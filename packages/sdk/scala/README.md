@@ -17,8 +17,8 @@ This package is one part of the wider EdgeBase platform. For the full platform, 
 
 | Module | Artifact | Notes |
 | --- | --- | --- |
-| `:packages:core` | `com.github.edge-base.edgebase:edgebase-core-scala:v0.2.1` | Scala wrappers for DB, storage, and shared result types |
-| `:packages:admin` | `com.github.edge-base.edgebase:edgebase-admin-scala:v0.2.1` | Server-side admin SDK built on top of the Java admin SDK |
+| `:packages:core` | `com.github.edge-base.edgebase:edgebase-core-scala:v0.2.2` | Scala wrappers for DB, storage, and shared result types |
+| `:packages:admin` | `com.github.edge-base.edgebase:edgebase-admin-scala:v0.2.2` | Server-side admin SDK built on top of the Java admin SDK |
 
 If you build from the monorepo directly, depend on the Scala projects under
 `packages/sdk/scala`.
@@ -29,8 +29,8 @@ If you build from the monorepo directly, depend on the Scala projects under
 resolvers += "jitpack" at "https://jitpack.io"
 
 libraryDependencies ++= Seq(
-  "com.github.edge-base.edgebase" % "edgebase-core-scala" % "v0.2.1",
-  "com.github.edge-base.edgebase" % "edgebase-admin-scala" % "v0.2.1"
+  "com.github.edge-base.edgebase" % "edgebase-core-scala" % "v0.2.2",
+  "com.github.edge-base.edgebase" % "edgebase-admin-scala" % "v0.2.2"
 )
 ```
 

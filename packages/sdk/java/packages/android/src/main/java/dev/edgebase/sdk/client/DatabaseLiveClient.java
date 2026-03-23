@@ -40,7 +40,7 @@ import java.util.function.Consumer;
  */
 class DatabaseLiveClient implements dev.edgebase.sdk.core.DatabaseLiveClient {
     private static final Gson gson = new Gson();
-    private static final String SDK_VERSION = "0.2.1";
+    private static final String SDK_VERSION = "0.2.2";
 
     private final String url;
     private final TokenManager tokenManager;
@@ -223,7 +223,7 @@ class DatabaseLiveClient implements dev.edgebase.sdk.core.DatabaseLiveClient {
     // ─── Auth ───
 
     /**
-     * Send a {@code {"type":"auth","token":"...","sdkVersion":"0.2.1"}} message.
+     * Send a {@code {"type":"auth","token":"...","sdkVersion":"0.2.2"}} message.
      * This is the only auth mechanism the server accepts for WebSocket connections.
      */
     private void sendAuthMessage() {

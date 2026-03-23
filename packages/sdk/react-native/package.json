@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/react-native",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "EdgeBase React Native SDK — iOS, Android, Web support",
     "license": "MIT",
     "repository": {

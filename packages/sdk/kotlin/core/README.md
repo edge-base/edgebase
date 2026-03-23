@@ -23,7 +23,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-core:v0.2.1")
+    implementation("com.github.edge-base.edgebase:edgebase-core:v0.2.2")
 }
 ```
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "edgebase-admin"
-version = "0.2.1"
+version = "0.2.2"
 description = "Python admin SDK for EdgeBase service-key workloads"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ license = "MIT"
 authors = [
     { name = "EdgeBase Team" }
 ]
-dependencies = ["edgebase-core>=0.2.1,<0.3.0"]
+dependencies = ["edgebase-core>=0.2.2,<0.3.0"]
 
 [project.urls]
 Homepage = "https://github.com/edge-base/edgebase/tree/main/packages/sdk/python/packages/admin"

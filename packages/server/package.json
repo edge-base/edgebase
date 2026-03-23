@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/server",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "EdgeBase runtime assets consumed by the EdgeBase CLI",
     "license": "MIT",
     "repository": {

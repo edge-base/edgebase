@@ -1,6 +1,6 @@
 [package]
 name = "edgebase-admin"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = "EdgeBase Admin SDK — server-side admin operations"
 license = "MIT"
@@ -10,7 +10,7 @@ repository = "https://github.com/edge-base/edgebase"
 documentation = "https://edgebase.fun/docs/admin-sdk/reference"
 
 [dependencies]
-edgebase-core = { version = "0.2.1", path = "../core" }
+edgebase-core = { version = "0.2.2", path = "../core" }
 reqwest = { version = "0.12", features = ["json", "multipart"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -25,9 +25,9 @@ This package is one part of the wider EdgeBase platform. For the full platform, 
 
 | Module | Artifact | Targets |
 | --- | --- | --- |
-| `:core` | `com.github.edge-base.edgebase:edgebase-core:v0.2.1` | current JitPack route publishes the JVM variant of the shared runtime |
-| `:client` | `com.github.edge-base.edgebase:edgebase-client:v0.2.1` | current JitPack route publishes the JVM variant of the client runtime; built-in Room Media ships on Android/iOS/JS and adapter-driven Room Media is available on JVM |
-| `:admin` | `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.2.1` | JVM only |
+| `:core` | `com.github.edge-base.edgebase:edgebase-core:v0.2.2` | current JitPack route publishes the JVM variant of the shared runtime |
+| `:client` | `com.github.edge-base.edgebase:edgebase-client:v0.2.2` | current JitPack route publishes the JVM variant of the client runtime; built-in Room Media ships on Android/iOS/JS and adapter-driven Room Media is available on JVM |
+| `:admin` | `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.2.2` | JVM only |
 
 If you build from the monorepo directly, depend on the Gradle modules under
 `packages/sdk/kotlin`. That path remains the way to consume the full Android, iOS,
@@ -43,9 +43,9 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-core:v0.2.1")
-    implementation("com.github.edge-base.edgebase:edgebase-client:v0.2.1")
-    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.2.1")
+    implementation("com.github.edge-base.edgebase:edgebase-core:v0.2.2")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.2.2")
+    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.2.2")
 }
 ```
 
@@ -127,7 +127,7 @@ Read more:
 
 ## Publication Notes
 
-- JitPack versions use the repository tag, for example `v0.2.1`
+- JitPack versions use the repository tag, for example `v0.2.2`
 - the public JitPack route validates the JVM publications of `:core` and `:client`
 - the umbrella root artifact `edgebase-kotlin` is intentionally excluded from public installs
 
