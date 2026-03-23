@@ -79,9 +79,11 @@ function parsePath(
   const instanceId = tablesIdx === 2 ? segments[1] : undefined;
   const rawTableName = segments[tablesIdx + 1];
   // Decode URL-encoded table names (e.g. 'plugin-a%2Fevents' → 'plugin-a/events')
+  // Use decoded name consistently in both tableName and directPath so that
+  // handler suffix parsing (doPath.replace(`/tables/${tableName}`, '')) matches.
   const tableName = decodeURIComponent(rawTableName);
   const rest = segments.slice(tablesIdx + 2);
-  const directPath = `/tables/${rawTableName}${rest.length ? '/' + rest.join('/') : ''}`;
+  const directPath = `/tables/${tableName}${rest.length ? '/' + rest.join('/') : ''}`;
 
   return { namespace, instanceId, tableName, directPath };
 }
