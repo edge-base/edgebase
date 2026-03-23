@@ -38,6 +38,7 @@
         "prepack": "pnpm --dir ../admin build && pnpm run build && node ./scripts/copy-admin-build.mjs"
     },
     "dependencies": {
+        "@edge-base/core": "workspace:*",
         "@edge-base/shared": "workspace:*",
         "@hono/zod-openapi": "^1.2.2",
         "@simplewebauthn/server": "^10",
