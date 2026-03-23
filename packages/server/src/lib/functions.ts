@@ -94,8 +94,14 @@ export interface FunctionAdminContext {
   db(namespace: string, id?: string): DbRef;
   /** Admin user management. */
   auth: AdminAuthContext;
-  /** Raw SQL on a DB namespace DO. */
-  sql(
+  /**
+   * Execute raw SQL with direct D1/DO binding access — no HTTP round-trip.
+   * Routes directly to D1 binding or Durable Object without network overhead.
+   *
+   * @example
+   * const rows = await ctx.admin.sqlWithDirectD1Access('shared', undefined, 'SELECT * FROM posts WHERE status = ?', ['published']);
+   */
+  sqlWithDirectD1Access(
     namespace: string,
     id: string | undefined,
     query: string,
@@ -997,7 +1003,8 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
     // ─── context.admin.db(namespace, id) — DB-first tenant access (§5) ───
     db: adminDb,
     auth: adminAuthContext,
-    async sql(
+    // ─── Direct D1/DO SQL — bypasses HTTP, fastest path for server functions ───
+    async sqlWithDirectD1Access(
       namespace: string,
       id: string | undefined,
       query: string,
@@ -1007,7 +1014,7 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
         const dbBlock = options.config.databases?.[namespace];
         const isDynamicNamespace = !!(dbBlock?.instance || dbBlock?.access?.canCreate || dbBlock?.access?.access);
         if (isDynamicNamespace && !id) {
-          throw new Error(`admin.sql() requires an id for dynamic namespace '${namespace}'.`);
+          throw new Error(`admin.sqlWithDirectD1Access() requires an id for dynamic namespace '${namespace}'.`);
         }
 
         if (!id && shouldRouteToD1(namespace, options.config)) {
@@ -1065,7 +1072,7 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
         return [];
       }
       throw new Error(
-        'admin.sql() requires workerUrl. Pass workerUrl to buildFunctionContext(), or use the external SDK.',
+        'admin.sqlWithDirectD1Access() requires workerUrl. Pass workerUrl to buildFunctionContext(), or use the external SDK.',
       );
     },
     async broadcast(

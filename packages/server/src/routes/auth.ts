@@ -659,17 +659,17 @@ export async function executeAuthHook(
           db: adminDb,
           table: (name: string) => adminDb('shared').table(name),
           auth: authAdmin,
-          async sql(namespace: string, id: string | undefined, query: string, params?: unknown[]) {
+          async sqlWithDirectD1Access(namespace: string, id: string | undefined, query: string, params?: unknown[]) {
             if (options.workerUrl && serviceKey) {
               const res = await fetch(`${options.workerUrl}/api/sql`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-EdgeBase-Service-Key': serviceKey },
                 body: JSON.stringify({ namespace, id, sql: query, params: params ?? [] }),
               });
-              if (!res.ok) throw new Error(`admin.sql() failed: ${res.status}`);
+              if (!res.ok) throw new Error(`admin.sqlWithDirectD1Access() failed: ${res.status}`);
               return res.json();
             }
-            throw new Error('admin.sql() requires workerUrl in auth hook context.');
+            throw new Error('admin.sqlWithDirectD1Access() requires workerUrl in auth hook context.');
           },
           async broadcast(channel: string, event: string, payload?: Record<string, unknown>) {
             if (options.workerUrl && serviceKey) {

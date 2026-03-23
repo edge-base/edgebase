@@ -99,8 +99,11 @@ export interface PluginAdminContext {
   db(namespace: string, id?: string): { table(name: string): PluginTableProxy };
   /** Admin user management. */
   auth: PluginAdminAuthContext;
-  /** Raw SQL on a DB namespace DO. */
-  sql(
+  /**
+   * Execute raw SQL with direct D1/DO access (no HTTP round-trip).
+   * Preferred over `table().sql\`...\`` in server/plugin contexts for performance.
+   */
+  sqlWithDirectD1Access(
     namespace: string,
     id: string | undefined,
     query: string,
@@ -689,7 +692,7 @@ export function createMockContext<TConfig = Record<string, unknown>>(options?: {
       return { table: createTableProxy };
     },
     auth: mockAuth,
-    async sql() {
+    async sqlWithDirectD1Access() {
       return [];
     },
     async broadcast() {},

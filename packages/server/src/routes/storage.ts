@@ -165,17 +165,17 @@ function buildStorageHookAdminContext(
     db: adminDb,
     table: (name: string) => adminDb('shared').table(name),
     auth: buildAdminAuthContext({ d1Database: env.AUTH_DB, serviceKey, workerUrl }),
-    async sql(namespace: string, id: string | undefined, query: string, params?: unknown[]) {
+    async sqlWithDirectD1Access(namespace: string, id: string | undefined, query: string, params?: unknown[]) {
       if (workerUrl && serviceKey) {
         const res = await fetch(`${workerUrl}/api/sql`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-EdgeBase-Service-Key': serviceKey },
           body: JSON.stringify({ namespace, id, sql: query, params: params ?? [] }),
         });
-        if (!res.ok) throw new Error(`admin.sql() failed: ${res.status}`);
+        if (!res.ok) throw new Error(`admin.sqlWithDirectD1Access() failed: ${res.status}`);
         return res.json();
       }
-      throw new Error('admin.sql() requires workerUrl in storage hook context.');
+      throw new Error('admin.sqlWithDirectD1Access() requires workerUrl in storage hook context.');
     },
     async broadcast(channel: string, event: string, payload?: Record<string, unknown>) {
       if (workerUrl && serviceKey) {
