@@ -1201,9 +1201,9 @@ async function handleBatch(
         emitDbLiveBatchEvent(c.env, resolved.namespace, tableName, allChanges),
       );
     } else {
-      for (const ch of allChanges) {
-        await emitDbLiveEvent(c.env, resolved.namespace, tableName, ch.type, ch.docId, ch.data);
-      }
+      await Promise.all(
+        allChanges.map(ch => emitDbLiveEvent(c.env, resolved.namespace, tableName, ch.type, ch.docId, ch.data)),
+      );
     }
   }
 
