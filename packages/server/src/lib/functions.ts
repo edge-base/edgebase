@@ -710,18 +710,20 @@ interface BuildAdminDbProxyOptions {
  * direct D1/PG/DO access (no HTTP round-trip).
  */
 export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAdminContext['db'] {
-  const transport = new InternalHttpTransport({
-    databaseNamespace: options.databaseNamespace,
-    config: options.config,
-    workerUrl: options.workerUrl,
-    serviceKey: options.serviceKey,
-    env: options.env,
-    executionCtx: options.executionCtx,
-    preferDirectDo: options.preferDirectDo,
-  });
-  const dbApi = new DefaultDbApi(transport);
-
   return (namespace: string, id?: string): DbRef => {
+    // Create a per-DbRef transport with explicit dbContext so that
+    // path parsing is unambiguous even when instanceId === 'tables'.
+    const transport = new InternalHttpTransport({
+      databaseNamespace: options.databaseNamespace,
+      config: options.config,
+      workerUrl: options.workerUrl,
+      serviceKey: options.serviceKey,
+      env: options.env,
+      executionCtx: options.executionCtx,
+      preferDirectDo: options.preferDirectDo,
+      dbContext: { namespace, instanceId: id },
+    });
+    const dbApi = new DefaultDbApi(transport);
     return new DbRef(dbApi, namespace, id);
   };
 }

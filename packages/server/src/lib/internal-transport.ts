@@ -22,6 +22,12 @@ export interface InternalTransportOptions {
   env?: Env;
   executionCtx?: ExecutionContext;
   preferDirectDo?: boolean;
+  /**
+   * When set, the transport knows this DbRef targets a specific
+   * namespace + optional instanceId. This avoids ambiguous path parsing
+   * when instanceId happens to be "tables".
+   */
+  dbContext?: { namespace: string; instanceId?: string };
 }
 
 /**
@@ -34,7 +40,20 @@ export interface InternalTransportOptions {
  * Returns namespace, optional instanceId, tableName, and directPath
  * (everything from /tables/... onward, which D1/PG handlers expect).
  */
-function parsePath(path: string): {
+/**
+ * Parse a DefaultDbApi path, optionally guided by known dbContext.
+ *
+ * When dbContext is provided (recommended), we know whether this is a
+ * static or dynamic DB, so we can unambiguously find the 'tables' keyword
+ * even when instanceId === 'tables'.
+ *
+ * Without dbContext, falls back to heuristic: first 'tables' at index 1
+ * means static, at index 2 means dynamic.
+ */
+function parsePath(
+  path: string,
+  dbContext?: { namespace: string; instanceId?: string },
+): {
   namespace: string;
   instanceId?: string;
   tableName: string;
@@ -44,24 +63,27 @@ function parsePath(path: string): {
   const stripped = path.replace(/^\/api\/db\//, '');
   const segments = stripped.split('/');
 
-  // segments[0] = namespace
-  // If segments[1] === 'tables' → static DB, else segments[1] = instanceId
-  if (segments[1] === 'tables') {
-    // Static: namespace/tables/tableName[/rest...]
-    const namespace = segments[0];
-    const tableName = segments[2];
-    const rest = segments.slice(3);
-    const directPath = `/tables/${tableName}${rest.length ? '/' + rest.join('/') : ''}`;
-    return { namespace, tableName, directPath };
+  let tablesIdx: number;
+  if (dbContext) {
+    // We know the shape: static has 'tables' at index 1, dynamic at index 2
+    tablesIdx = dbContext.instanceId ? 2 : 1;
   } else {
-    // Dynamic: namespace/instanceId/tables/tableName[/rest...]
-    const namespace = segments[0];
-    const instanceId = segments[1];
-    const tableName = segments[3];
-    const rest = segments.slice(4);
-    const directPath = `/tables/${tableName}${rest.length ? '/' + rest.join('/') : ''}`;
-    return { namespace, instanceId, tableName, directPath };
+    // Heuristic fallback: find first 'tables' keyword
+    tablesIdx = segments.indexOf('tables', 1);
   }
+  if (tablesIdx < 0 || segments[tablesIdx] !== 'tables') {
+    throw new Error(`Invalid DB path: missing 'tables' segment in ${path}`);
+  }
+
+  const namespace = segments[0];
+  const instanceId = tablesIdx === 2 ? segments[1] : undefined;
+  const rawTableName = segments[tablesIdx + 1];
+  // Decode URL-encoded table names (e.g. 'plugin-a%2Fevents' → 'plugin-a/events')
+  const tableName = decodeURIComponent(rawTableName);
+  const rest = segments.slice(tablesIdx + 2);
+  const directPath = `/tables/${rawTableName}${rest.length ? '/' + rest.join('/') : ''}`;
+
+  return { namespace, instanceId, tableName, directPath };
 }
 
 export class InternalHttpTransport implements HttpTransport {
@@ -72,6 +94,7 @@ export class InternalHttpTransport implements HttpTransport {
   private readonly env?: Env;
   private readonly executionCtx?: ExecutionContext;
   private readonly preferDirectDo: boolean;
+  private readonly dbContext?: { namespace: string; instanceId?: string };
 
   constructor(options: InternalTransportOptions) {
     this.databaseNamespace = options.databaseNamespace;
@@ -81,6 +104,7 @@ export class InternalHttpTransport implements HttpTransport {
     this.env = options.env;
     this.executionCtx = options.executionCtx;
     this.preferDirectDo = options.preferDirectDo ?? false;
+    this.dbContext = options.dbContext;
   }
 
   async request<T>(
@@ -88,7 +112,7 @@ export class InternalHttpTransport implements HttpTransport {
     path: string,
     options?: { query?: Record<string, string>; body?: unknown },
   ): Promise<T> {
-    const { namespace, instanceId, tableName, directPath } = parsePath(path);
+    const { namespace, instanceId, tableName, directPath } = parsePath(path, this.dbContext);
     const doName = getDbDoName(namespace, instanceId);
 
     // Build internal headers
