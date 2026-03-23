@@ -1094,15 +1094,28 @@ export function buildAdminAuthContext(options: AdminAuthOptions): AdminAuthConte
     }): Promise<Record<string, unknown>> {
       // Direct D1 path — works without service key (same as updateUser/deleteUser)
       if (d1Database) {
+        // Input validation (mirrors routes/admin-auth.ts guards)
+        if (!data.email || !data.password) throw new Error('Email and password are required.');
+        const email = data.email.trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          throw new Error('Invalid email format.');
+        }
+        if (data.password.length < 8) throw new Error('Password must be at least 8 characters.');
+        if (data.password.length > 256) throw new Error('Password must not exceed 256 characters.');
+        if (data.displayName && data.displayName.length > 200) {
+          throw new Error('Display name must not exceed 200 characters.');
+        }
+        const role = data.role?.trim() || 'user';
+
         const db = new D1AuthDb(d1Database);
         const user = await createManagedAdminUser(
           db,
           {
             userId: generateId(),
-            email: data.email.trim().toLowerCase(),
+            email,
             passwordHash: await hashPassword(data.password),
             displayName: data.displayName,
-            role: data.role || 'user',
+            role,
             verified: true,
           },
           { kv: kvNamespace },
