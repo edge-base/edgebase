@@ -25,9 +25,9 @@ the `:packages:admin` module exposes the trusted admin SDK for backend code.
 ## Public Artifacts
 
 - JitPack group: `com.github.edge-base.edgebase`
-- tags are versioned with the leading `v`, for example `v0.2.0`
-- `com.github.edge-base.edgebase:edgebase-core-scala:v0.2.0`
-- `com.github.edge-base.edgebase:edgebase-admin-scala:v0.2.0`
+- tags are versioned with the leading `v`, for example `v0.2.1`
+- `com.github.edge-base.edgebase:edgebase-core-scala:v0.2.1`
+- `com.github.edge-base.edgebase:edgebase-admin-scala:v0.2.1`
 - do not recommend the root `edgebase-scala` artifact for public installs
 
 ## Canonical Examples
