@@ -32,6 +32,7 @@
 			items: [
 				{ label: 'Tables', href: `${base}/database/tables`, icon: 'tables' },
 				{ label: 'ERD', href: `${base}/database/erd`, icon: 'erd' },
+				{ label: 'SQL', href: `${base}/database/sql`, icon: 'sql' },
 			],
 		},
 		{

@@ -240,8 +240,8 @@ function getLogStatusCode(log: Record<string, unknown>): number {
 function matchesLogLevel(status: number, level: string): boolean {
   const normalized = level.toLowerCase();
   if (normalized === 'error') return status >= 500;
-  if (normalized === 'warn') return status >= 300 && status < 500;
-  if (normalized === 'info') return status >= 200 && status < 300;
+  if (normalized === 'warn') return (status >= 300 && status < 500 && status !== 304);
+  if (normalized === 'info') return (status >= 200 && status < 300) || status === 304;
   return true;
 }
 

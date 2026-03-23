@@ -42,8 +42,10 @@
 	let dynamic = $derived(Boolean(tableDef?.dynamic));
 	let instanceDiscovery = $derived(tableDef?.instanceDiscovery);
 	let selectedInstanceId = $derived(normalizeInstanceId($page.url.searchParams.get('instance')));
-	let activeTab = $derived.by<TableTab>(() => {
-		const requested = $page.url.searchParams.get('tab');
+	let activeTab = $state<TableTab>('records');
+
+	function resolveTab(searchParams: URLSearchParams): TableTab {
+		const requested = searchParams.get('tab');
 		if (!tableDef) {
 			return requested === 'query' || requested === 'sql' ? 'query' : 'schema';
 		}
@@ -60,6 +62,10 @@
 			return requested;
 		}
 		return dynamic && !selectedInstanceId ? 'schema' : 'records';
+	}
+
+	$effect(() => {
+		activeTab = resolveTab($page.url.searchParams);
 	});
 	let instanceInput = $state('');
 	let instanceSuggestionsLoading = $state(false);
@@ -331,6 +337,7 @@
 		if (tab === 'query') {
 			void ensureTableSqlTabLoaded();
 		}
+		activeTab = tab;
 		void updateSearchParams((params) => {
 			if (tab === 'records') {
 				params.delete('tab');

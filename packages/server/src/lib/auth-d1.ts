@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS _users (
   disabled INTEGER DEFAULT 0,
   status TEXT DEFAULT 'active',
   locale TEXT DEFAULT 'en',
+  lastSignedInAt TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
@@ -309,6 +310,7 @@ CREATE TABLE IF NOT EXISTS _users (
   disabled INTEGER DEFAULT 0,
   status TEXT DEFAULT 'active',
   locale TEXT DEFAULT 'en',
+  lastSignedInAt TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
