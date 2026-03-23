@@ -99,14 +99,17 @@ describe('buildFunctionContext admin.db', () => {
 
   it('normalizes admin.sqlWithDirectD1Access worker responses to row arrays', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        rows: [{ total: 2 }],
-        items: [{ total: 2 }],
-        results: [{ total: 2 }],
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          rows: [{ total: 2 }],
+          items: [{ total: 2 }],
+          results: [{ total: 2 }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
     );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -129,7 +132,11 @@ describe('buildFunctionContext admin.db', () => {
       serviceKey: 'sk-test',
     });
 
-    const rows = await ctx.admin.sqlWithDirectD1Access('shared', undefined, 'SELECT COUNT(*) AS total FROM posts');
+    const rows = await ctx.admin.sqlWithDirectD1Access(
+      'shared',
+      undefined,
+      'SELECT COUNT(*) AS total FROM posts',
+    );
 
     expect(rows).toEqual([{ total: 2 }]);
     expect(fetchMock).toHaveBeenCalledWith(
@@ -149,26 +156,33 @@ describe('buildFunctionContext admin.db', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const stub = {
-      fetch: vi.fn()
+      fetch: vi
+        .fn()
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({
-            needsCreate: true,
-            namespace: 'workspace',
-            id: 'ws-1',
-          }), {
-            status: 201,
-            headers: { 'Content-Type': 'application/json' },
-          }),
+          new Response(
+            JSON.stringify({
+              needsCreate: true,
+              namespace: 'workspace',
+              id: 'ws-1',
+            }),
+            {
+              status: 201,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
         )
         .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          rows: [{ total: 3 }],
-          items: [{ total: 3 }],
-          results: [{ total: 3 }],
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+          new Response(
+            JSON.stringify({
+              rows: [{ total: 3 }],
+              items: [{ total: 3 }],
+              results: [{ total: 3 }],
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
         ),
     };
     const databaseNamespace = {
@@ -196,7 +210,12 @@ describe('buildFunctionContext admin.db', () => {
       serviceKey: 'sk-test',
     });
 
-    const rows = await ctx.admin.sqlWithDirectD1Access('workspace', 'ws-1', 'SELECT COUNT(*) AS total FROM members', []);
+    const rows = await ctx.admin.sqlWithDirectD1Access(
+      'workspace',
+      'ws-1',
+      'SELECT COUNT(*) AS total FROM members',
+      [],
+    );
 
     expect(rows).toEqual([{ total: 3 }]);
     expect(stub.fetch).toHaveBeenCalledTimes(2);
@@ -213,31 +232,85 @@ describe('buildFunctionContext admin.db', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('falls back to /api/sql for admin.db(...).table(...).sql tagged templates when only workerUrl is available', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          rows: [{ total: 2 }],
+          items: [{ total: 2 }],
+          results: [{ total: 2 }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/feed-summary'),
+      auth: null,
+      databaseNamespace: {} as DurableObjectNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      d1Database: {} as D1Database,
+      config: {
+        databases: {
+          shared: {
+            tables: {
+              posts: { schema: { title: { type: 'string' } } },
+            },
+          },
+        },
+      },
+      workerUrl: 'http://localhost:8787',
+      serviceKey: 'sk-test',
+    });
+
+    const rows = await ctx.admin.db('shared').table('posts').sql`
+      SELECT COUNT(*) AS total FROM posts WHERE status = ${'published'}
+    `;
+
+    expect(rows).toEqual([{ total: 2 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8787/api/sql',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
   it('routes admin.db(...).table(...).sql tagged templates through the direct SQL executor when env is available', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
     const stub = {
-      fetch: vi.fn()
+      fetch: vi
+        .fn()
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({
-            needsCreate: true,
-            namespace: 'workspace',
-            id: 'ws-1',
-          }), {
-            status: 201,
-            headers: { 'Content-Type': 'application/json' },
-          }),
+          new Response(
+            JSON.stringify({
+              needsCreate: true,
+              namespace: 'workspace',
+              id: 'ws-1',
+            }),
+            {
+              status: 201,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
         )
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({
-            rows: [{ total: 5 }],
-            items: [{ total: 5 }],
-            results: [{ total: 5 }],
-          }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          }),
+          new Response(
+            JSON.stringify({
+              rows: [{ total: 5 }],
+              items: [{ total: 5 }],
+              results: [{ total: 5 }],
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
         ),
     };
     const databaseNamespace = {
@@ -278,6 +351,145 @@ describe('buildFunctionContext admin.db', () => {
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it.each(['postgres', 'neon'] as const)(
+    'routes admin.db(...).table(...).sql tagged templates through the provider-aware direct SQL executor for %s',
+    async (provider) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              columns: ['literal', 'total'],
+              rows: [{ literal: '?', total: 5 }],
+              rowCount: 1,
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const databaseNamespace = {
+        idFromName: vi.fn().mockReturnValue('do-id'),
+        get: vi.fn(() => ({ fetch: vi.fn() })),
+      } as unknown as DurableObjectNamespace;
+
+      const ctx = buildFunctionContext({
+        request: new Request('http://localhost/api/functions/feed-summary'),
+        auth: null,
+        databaseNamespace,
+        authNamespace: {} as DurableObjectNamespace,
+        d1Database: {} as D1Database,
+        config: {
+          databases: {
+            shared: {
+              provider,
+              tables: {
+                posts: { schema: { title: { type: 'string' } } },
+              },
+            },
+          },
+        },
+        env: {
+          EDGEBASE_DEV_SIDECAR_PORT: '8788',
+          JWT_ADMIN_SECRET: 'jwt-secret',
+          DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
+        } as never,
+        workerUrl: 'http://localhost:8787',
+        serviceKey: 'sk-test',
+      });
+
+      const rows = await ctx.admin.db('shared').table('posts').sql`
+        SELECT '?' AS literal, COUNT(*) AS total FROM posts WHERE title = ${'owner'}
+      `;
+
+      expect(rows).toEqual([{ literal: '?', total: 5 }]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1]?.[0]).toBe('http://127.0.0.1:8788/postgres/query');
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? '{}'))).toEqual({
+        namespace: 'shared',
+        sql: "SELECT '?' AS literal, COUNT(*) AS total FROM posts WHERE title = $1",
+        params: ['owner'],
+      });
+      expect(
+        (databaseNamespace as unknown as { get: ReturnType<typeof vi.fn> }).get,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['postgres', 'neon'] as const)(
+    'routes admin.sqlWithDirectD1Access through the provider-aware direct SQL executor for %s',
+    async (provider) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              columns: ['total'],
+              rows: [{ total: 7 }],
+              rowCount: 1,
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const databaseNamespace = {
+        idFromName: vi.fn().mockReturnValue('do-id'),
+        get: vi.fn(() => ({ fetch: vi.fn() })),
+      } as unknown as DurableObjectNamespace;
+
+      const ctx = buildFunctionContext({
+        request: new Request('http://localhost/api/functions/feed-summary'),
+        auth: null,
+        databaseNamespace,
+        authNamespace: {} as DurableObjectNamespace,
+        d1Database: {} as D1Database,
+        config: {
+          databases: {
+            shared: {
+              provider,
+              tables: {
+                posts: { schema: { title: { type: 'string' } } },
+              },
+            },
+          },
+        },
+        env: {
+          EDGEBASE_DEV_SIDECAR_PORT: '8788',
+          JWT_ADMIN_SECRET: 'jwt-secret',
+          DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
+        } as never,
+        workerUrl: 'http://localhost:8787',
+        serviceKey: 'sk-test',
+      });
+
+      const rows = await ctx.admin.sqlWithDirectD1Access(
+        'shared',
+        undefined,
+        'SELECT COUNT(*) AS total FROM posts WHERE title = ?',
+        ['owner'],
+      );
+
+      expect(rows).toEqual([{ total: 7 }]);
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? '{}'))).toEqual({
+        namespace: 'shared',
+        sql: 'SELECT COUNT(*) AS total FROM posts WHERE title = $1',
+        params: ['owner'],
+      });
+      expect(
+        (databaseNamespace as unknown as { get: ReturnType<typeof vi.fn> }).get,
+      ).not.toHaveBeenCalled();
+    },
+  );
 
   it('routes admin.kv through the configured KV binding when env is available', async () => {
     const fetchMock = vi.fn();
@@ -351,10 +563,14 @@ describe('buildFunctionContext admin.db', () => {
       serviceKey: 'sk-test',
     });
 
-    const rows = await ctx.admin.d1('analytics').exec('SELECT COUNT(*) AS total FROM rollups WHERE runId = ?', ['r1']);
+    const rows = await ctx.admin
+      .d1('analytics')
+      .exec('SELECT COUNT(*) AS total FROM rollups WHERE runId = ?', ['r1']);
 
     expect(rows).toEqual([{ total: 4 }]);
-    expect(d1Binding.prepare).toHaveBeenCalledWith('SELECT COUNT(*) AS total FROM rollups WHERE runId = ?');
+    expect(d1Binding.prepare).toHaveBeenCalledWith(
+      'SELECT COUNT(*) AS total FROM rollups WHERE runId = ?',
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -372,7 +588,9 @@ describe('buildFunctionContext admin.db', () => {
     };
 
     const ctx = buildFunctionContext({
-      request: new Request('http://localhost/api/functions/mock/email/inbox/user@test.edgebase.fun'),
+      request: new Request(
+        'http://localhost/api/functions/mock/email/inbox/user@test.edgebase.fun',
+      ),
       auth: null,
       databaseNamespace: {} as DurableObjectNamespace,
       authNamespace: {} as DurableObjectNamespace,
@@ -383,10 +601,14 @@ describe('buildFunctionContext admin.db', () => {
       serviceKey: 'sk-test',
     });
 
-    const rows = await ctx.admin.d1('auth').exec('SELECT token FROM _email_tokens WHERE userId = ?', ['u1']);
+    const rows = await ctx.admin
+      .d1('auth')
+      .exec('SELECT token FROM _email_tokens WHERE userId = ?', ['u1']);
 
     expect(rows).toEqual([{ token: 'tok-1' }]);
-    expect(authBinding.prepare).toHaveBeenCalledWith('SELECT token FROM _email_tokens WHERE userId = ?');
+    expect(authBinding.prepare).toHaveBeenCalledWith(
+      'SELECT token FROM _email_tokens WHERE userId = ?',
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
