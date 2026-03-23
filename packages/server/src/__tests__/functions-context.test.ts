@@ -213,6 +213,72 @@ describe('buildFunctionContext admin.db', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('routes admin.db(...).table(...).sql tagged templates through the direct SQL executor when env is available', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const stub = {
+      fetch: vi.fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({
+            needsCreate: true,
+            namespace: 'workspace',
+            id: 'ws-1',
+          }), {
+            status: 201,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({
+            rows: [{ total: 5 }],
+            items: [{ total: 5 }],
+            results: [{ total: 5 }],
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        ),
+    };
+    const databaseNamespace = {
+      idFromName: vi.fn().mockReturnValue('do-id'),
+      get: vi.fn().mockReturnValue(stub),
+    } as unknown as DurableObjectNamespace;
+
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/feed-summary'),
+      auth: null,
+      databaseNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      d1Database: {} as D1Database,
+      config: {
+        databases: {
+          workspace: {
+            tables: {
+              members: { schema: { userId: { type: 'string' } } },
+            },
+          },
+        },
+      },
+      env: {} as never,
+      workerUrl: 'http://localhost:8787',
+      serviceKey: 'sk-test',
+    });
+
+    const rows = await ctx.admin.db('workspace', 'ws-1').table('members').sql`
+      SELECT COUNT(*) AS total FROM members WHERE role = ${'owner'}
+    `;
+
+    expect(rows).toEqual([{ total: 5 }]);
+    expect(stub.fetch).toHaveBeenCalledTimes(2);
+    const firstRequest = stub.fetch.mock.calls[0]?.[0] as Request;
+    await expect(firstRequest.json()).resolves.toEqual({
+      query: 'SELECT COUNT(*) AS total FROM members WHERE role = ?',
+      params: ['owner'],
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('routes admin.kv through the configured KV binding when env is available', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

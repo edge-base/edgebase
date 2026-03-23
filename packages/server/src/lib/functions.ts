@@ -799,8 +799,8 @@ export async function executeSqlWithDirectD1Access(
  * direct D1/PG/DO access (no HTTP round-trip).
  */
 export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAdminContext['db'] {
-  // Create HttpClient for sql() tagged template support on TableRef.
-  // Only available when workerUrl is set (routes through /api/sql endpoint).
+  // Create HttpClient fallback for sql() tagged template support on TableRef.
+  // Trusted server contexts also receive a direct SQL executor below.
   let httpClient: HttpClient | undefined;
   if (options.workerUrl) {
     httpClient = new HttpClient({
@@ -809,6 +809,24 @@ export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAd
       contextManager: new ContextManager(),
     });
   }
+  const sqlExecutor = (
+    namespace: string,
+    id: string | undefined,
+    query: string,
+    params?: unknown[],
+  ) => executeSqlWithDirectD1Access(
+    {
+      env: options.env,
+      config: options.config,
+      databaseNamespace: options.databaseNamespace,
+      workerUrl: options.workerUrl,
+      serviceKey: options.serviceKey,
+    },
+    namespace,
+    id,
+    query,
+    params,
+  );
 
   return (namespace: string, id?: string): DbRef => {
     // Create a per-DbRef transport with explicit dbContext so that
@@ -831,6 +849,7 @@ export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAd
       undefined,   // databaseLiveClient — not available server-side
       undefined,   // filterMatchFn
       httpClient,  // enables table().sql`...` tagged template
+      sqlExecutor,
     );
   };
 }

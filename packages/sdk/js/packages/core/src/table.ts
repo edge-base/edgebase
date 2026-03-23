@@ -62,6 +62,13 @@ export interface BatchByFilterResult {
   errors: Array<{ chunkIndex: number; chunkSize: number; error: EdgeBaseError }>;
 }
 
+export type TableSqlExecutor = (
+  namespace: string,
+  instanceId: string | undefined,
+  query: string,
+  params?: unknown[],
+) => Promise<unknown[]>;
+
 // ─── Database Live Channel Builder ───
 
 /**
@@ -352,11 +359,22 @@ export class TableRef<T = Record<string, unknown>> {
      * TODO: remove once admin core is wired.
      */
     private _httpClient?: HttpClient,
+    /** Optional direct SQL executor used by trusted server contexts. */
+    private _sqlExecutor?: TableSqlExecutor,
   ) {}
 
   /** Create a clone with current state (for immutable chaining) */
   private clone(): TableRef<T> {
-    const ref = new TableRef<T>(this.core, this.name, this.databaseLiveClient, this.filterMatchFn, this.namespace, this.instanceId, this._httpClient);
+    const ref = new TableRef<T>(
+      this.core,
+      this.name,
+      this.databaseLiveClient,
+      this.filterMatchFn,
+      this.namespace,
+      this.instanceId,
+      this._httpClient,
+      this._sqlExecutor,
+    );
     ref.filters = [...this.filters];
     ref.orFilters = [...this.orFilters];
     ref.sorts = [...this.sorts];
@@ -801,9 +819,6 @@ export class TableRef<T = Record<string, unknown>> {
    * `;
    */
   async sql(strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown[]> {
-    if (!this._httpClient) {
-      throw new EdgeBaseError(500, 'sql() requires HttpClient (admin-only method). Use context.admin.db(...).table(...).sql`...`');
-    }
     // Build parameterized query from tagged template — each ${} becomes ?
     let query = '';
     const params: unknown[] = [];
@@ -813,6 +828,12 @@ export class TableRef<T = Record<string, unknown>> {
         query += '?';
         params.push(values[i]);
       }
+    }
+    if (this._sqlExecutor) {
+      return this._sqlExecutor(this.namespace, this.instanceId, query.trim(), params);
+    }
+    if (!this._httpClient) {
+      throw new EdgeBaseError(500, 'sql() requires HttpClient or direct SQL executor (admin-only method).');
     }
     // §11: body uses { namespace, id, sql, params }
     // /api/sql is admin-only, tagged 'admin', lives in admin core — not client core.
@@ -852,6 +873,8 @@ export class DbRef {
      * TODO: remove once admin core is wired.
      */
     private _httpClient?: HttpClient,
+    /** Optional direct SQL executor used by trusted server contexts. */
+    private _sqlExecutor?: TableSqlExecutor,
   ) {}
 
   /**
@@ -869,6 +892,7 @@ export class DbRef {
       this.namespace,
       this.instanceId,
       this._httpClient,
+      this._sqlExecutor,
     );
   }
 }

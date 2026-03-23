@@ -13,7 +13,7 @@ export { createSubscription } from './types.js';
 export { HttpClient, type HttpClientOptions } from './http.js';
 
 // Table
-export { TableRef, DocRef, DbRef, OrBuilder, type ListResult, type TableSnapshot, type FilterTuple, type UpsertResult, type BatchByFilterResult } from './table.js';
+export { TableRef, DocRef, DbRef, OrBuilder, type ListResult, type TableSnapshot, type FilterTuple, type UpsertResult, type BatchByFilterResult, type TableSqlExecutor } from './table.js';
 
 // Storage
 export { StorageClient, StorageBucket, ResumableUploadError, type UploadTask, type FileInfo, type FileMetadata, type FileListResult, type UploadOptions, type UploadProgress, type DownloadOptions, type SignedUrlOptions, type SignedUrlResult, type SignedUploadUrlOptions, type SignedUploadUrlResult, type DeleteManyResult, type ListOptions, type StringFormat, type UploadPartInfo, type UploadPartsResult } from './storage.js';
