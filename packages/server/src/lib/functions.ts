@@ -28,16 +28,20 @@ import type {
 import { getDbDoName, getD1BindingName, callDO, shouldRouteToD1 } from './do-router.js';
 import { executeDoSql } from './do-sql.js';
 import { D1AuthDb, type AuthDb } from './auth-db-adapter.js';
+import { ensureAuthSchema } from './auth-d1.js';
 import { handleD1Request } from './d1-handler.js';
 import { handlePgRequest } from './postgres-handler.js';
 import { buildInternalHandlerContext } from './internal-request.js';
 import type { Env } from '../types.js';
 import { createSignedToken } from '../routes/storage.js';
 import {
+  createManagedAdminUser,
   deleteManagedAdminUser,
   normalizeAdminUserUpdates,
   updateManagedAdminUser,
 } from './admin-user-management.js';
+import { hashPassword } from './password.js';
+import { generateId } from './uuid.js';
 
 // ─── Function Context Types ───
 
@@ -1024,7 +1028,7 @@ interface AdminAuthOptions {
 /**
  * Build admin auth context for App Functions.
  * Uses AUTH_DB D1 directly for all operations (D1-first architecture).
- * Cross-shard operations (listUsers, createUser) also available via Worker HTTP relay
+ * Cross-shard operations (listUsers) also available via Worker HTTP relay
  * when workerUrl is provided.
  */
 export function buildAdminAuthContext(options: AdminAuthOptions): AdminAuthContext {
@@ -1089,10 +1093,49 @@ export function buildAdminAuthContext(options: AdminAuthOptions): AdminAuthConte
       displayName?: string;
       role?: string;
     }): Promise<Record<string, unknown>> {
+      // Direct D1 path — works without service key (same as updateUser/deleteUser)
+      if (d1Database) {
+        // Input validation (mirrors routes/admin-auth.ts guards)
+        if (!data.email || typeof data.email !== 'string') throw new Error('Email and password are required.');
+        if (!data.password || typeof data.password !== 'string') throw new Error('Email and password are required.');
+        const email = data.email.trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          throw new Error('Invalid email format.');
+        }
+        if (data.password.length < 8) throw new Error('Password must be at least 8 characters.');
+        if (data.password.length > 256) throw new Error('Password must not exceed 256 characters.');
+        if (data.displayName && data.displayName.length > 200) {
+          throw new Error('Display name must not exceed 200 characters.');
+        }
+        // Role validation (mirrors normalizeOptionalRole in routes/admin-auth.ts)
+        let role = 'user';
+        if (data.role !== undefined) {
+          if (typeof data.role !== 'string') throw new Error('Role must be a non-empty string.');
+          const trimmed = data.role.trim();
+          if (!trimmed) throw new Error('Role must be a non-empty string.');
+          if (trimmed.length > 100) throw new Error('Role must not exceed 100 characters.');
+          role = trimmed;
+        }
+
+        const db = new D1AuthDb(d1Database);
+        // Ensure auth tables exist (critical for fresh databases)
+        await ensureAuthSchema(db);
+        const user = await createManagedAdminUser(
+          db,
+          {
+            userId: generateId(),
+            email,
+            passwordHash: await hashPassword(data.password),
+            displayName: data.displayName,
+            role,
+            verified: true,
+          },
+          { kv: kvNamespace },
+        );
+        return authService.sanitizeUser(user, { includeAppMetadata: true });
+      }
       if (workerUrl && serviceKey) {
-        // HTTP relay: POST /api/auth/admin/users → Worker → D1
-        // createUser has complex side effects (email index, _users_public, etc.)
-        // so it routes through the admin route which handles the full flow.
+        // HTTP relay fallback: POST /api/auth/admin/users → Worker → D1
         const res = await fetch(`${workerUrl}/api/auth/admin/users`, {
           method: 'POST',
           headers: {
@@ -1111,7 +1154,7 @@ export function buildAdminAuthContext(options: AdminAuthOptions): AdminAuthConte
         return result.user;
       }
       throw new Error(
-        'admin.auth.createUser() is not available in this context (requires workerUrl). ' +
+        'admin.auth.createUser() is not available in this context (requires D1 or workerUrl). ' +
           'Pass workerUrl to buildFunctionContext(), or use the external SDK.',
       );
     },
