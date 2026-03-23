@@ -24,6 +24,12 @@
 	let namespaces = $derived($namespaceNames);
 	let selectedNamespace = $state('shared');
 
+	$effect(() => {
+		if (namespaces.length > 0 && !namespaces.includes(selectedNamespace)) {
+			selectedNamespace = namespaces.includes('shared') ? 'shared' : namespaces[0];
+		}
+	});
+
 	let isDynamicNamespace = $derived.by(() => {
 		const defs = $namespaceDefs;
 		return Boolean(defs[selectedNamespace]?.dynamic);
