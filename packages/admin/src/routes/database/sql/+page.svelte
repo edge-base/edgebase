@@ -99,7 +99,7 @@
 	}
 </script>
 
-<PageShell title="SQL Console" description="Execute SQL queries against your databases" docsUrl={databaseDocs}>
+<PageShell title="SQL Console" description="Execute SQL queries against your databases" docsHref={databaseDocs}>
 	<div class="sql-page">
 		<div class="sql-page__toolbar">
 			<div class="sql-page__ns">
