@@ -707,6 +707,92 @@ interface BuildAdminDbProxyOptions {
   preferDirectDo?: boolean;
 }
 
+// ─── Shared SQL executor — D1 direct → DO direct → HTTP fallback ───
+
+export interface SqlWithDirectD1AccessOptions {
+  env?: unknown;
+  config: EdgeBaseConfig;
+  databaseNamespace?: DurableObjectNamespace;
+  workerUrl?: string;
+  serviceKey?: string;
+}
+
+/**
+ * Execute raw SQL with the fastest available path:
+ * 1. D1 direct binding (no network hop)
+ * 2. Durable Object direct call
+ * 3. HTTP fallback via workerUrl
+ *
+ * Shared by buildFunctionContext, auth hooks, and storage hooks.
+ */
+export async function executeSqlWithDirectD1Access(
+  opts: SqlWithDirectD1AccessOptions,
+  namespace: string,
+  id: string | undefined,
+  query: string,
+  params?: unknown[],
+): Promise<unknown[]> {
+  if (opts.env) {
+    const dbBlock = opts.config.databases?.[namespace];
+    const isDynamicNamespace = !!(dbBlock?.instance || dbBlock?.access?.canCreate || dbBlock?.access?.access);
+    if (isDynamicNamespace && !id) {
+      throw new Error(`admin.sqlWithDirectD1Access() requires an id for dynamic namespace '${namespace}'.`);
+    }
+
+    if (!id && shouldRouteToD1(namespace, opts.config)) {
+      const bindingName = getD1BindingName(namespace);
+      const d1 = (opts.env as Record<string, unknown>)[bindingName] as D1Database | undefined;
+      if (!d1) {
+        throw new Error(`D1 binding '${bindingName}' not found.`);
+      }
+      try {
+        const stmt = d1.prepare(query);
+        const bound = params && params.length > 0 ? stmt.bind(...params) : stmt;
+        const result = await bound.all();
+        return (result.results ?? []) as unknown[];
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'SQL execution failed';
+        throw new Error(message);
+      }
+    }
+
+    if (opts.databaseNamespace) {
+      return executeDoSql({
+        databaseNamespace: opts.databaseNamespace,
+        namespace,
+        id,
+        query,
+        params: params ?? [],
+        internal: true,
+      });
+    }
+  }
+
+  if (opts.workerUrl && opts.serviceKey) {
+    const res = await fetch(`${opts.workerUrl}/api/sql`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-EdgeBase-Service-Key': opts.serviceKey,
+      },
+      body: JSON.stringify({ namespace, id, sql: query, params: params ?? [] }),
+    });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({ message: 'SQL execution failed' }))) as { message: string };
+      throw new Error(err.message);
+    }
+    const data = (await res.json()) as { rows?: unknown[]; items?: unknown[]; results?: unknown[] };
+    if (Array.isArray(data.rows)) return data.rows;
+    if (Array.isArray(data.items)) return data.items;
+    if (Array.isArray(data.results)) return data.results;
+    return [];
+  }
+
+  throw new Error(
+    'admin.sqlWithDirectD1Access() requires env or workerUrl.',
+  );
+}
+
 /**
  * Build the admin DB proxy that returns real DbRef/TableRef instances
  * from @edge-base/core, routed through InternalHttpTransport for
@@ -1003,78 +1089,18 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
     // ─── context.admin.db(namespace, id) — DB-first tenant access (§5) ───
     db: adminDb,
     auth: adminAuthContext,
-    // ─── Direct D1/DO SQL — bypasses HTTP, fastest path for server functions ───
-    async sqlWithDirectD1Access(
-      namespace: string,
-      id: string | undefined,
-      query: string,
-      params?: unknown[],
-    ): Promise<unknown[]> {
-      if (options.env) {
-        const dbBlock = options.config.databases?.[namespace];
-        const isDynamicNamespace = !!(dbBlock?.instance || dbBlock?.access?.canCreate || dbBlock?.access?.access);
-        if (isDynamicNamespace && !id) {
-          throw new Error(`admin.sqlWithDirectD1Access() requires an id for dynamic namespace '${namespace}'.`);
-        }
-
-        if (!id && shouldRouteToD1(namespace, options.config)) {
-          const bindingName = getD1BindingName(namespace);
-          const d1 = (options.env as unknown as Record<string, unknown>)[bindingName] as D1Database | undefined;
-          if (!d1) {
-            throw new Error(`D1 binding '${bindingName}' not found.`);
-          }
-          try {
-            const stmt = d1.prepare(query);
-            const bound = params && params.length > 0 ? stmt.bind(...params) : stmt;
-            const result = await bound.all();
-            const rows = (result.results ?? []) as unknown[];
-            return rows;
-          } catch (error) {
-            const message = error instanceof Error ? error.message : 'SQL execution failed';
-            throw new Error(message);
-          }
-        }
-
-        return executeDoSql({
+    // ─── Direct D1/DO SQL — delegates to shared executor ───
+    sqlWithDirectD1Access: (namespace: string, id: string | undefined, query: string, params?: unknown[]) =>
+      executeSqlWithDirectD1Access(
+        {
+          env: options.env,
+          config: options.config,
           databaseNamespace: options.databaseNamespace,
-          namespace,
-          id,
-          query,
-          params: params ?? [],
-          internal: true,
-        });
-      }
-
-      if (options.workerUrl && options.serviceKey) {
-        // HTTP route: POST /api/sql → Worker → DatabaseDO (§11)
-        const res = await fetch(`${options.workerUrl}/api/sql`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-EdgeBase-Service-Key': options.serviceKey,
-          },
-          body: JSON.stringify({ namespace, id, sql: query, params: params ?? [] }),
-        });
-        if (!res.ok) {
-          const err = (await res.json().catch(() => ({ message: 'SQL execution failed' }))) as {
-            message: string;
-          };
-          throw new Error(err.message);
-        }
-        const data = (await res.json()) as {
-          rows?: unknown[];
-          items?: unknown[];
-          results?: unknown[];
-        };
-        if (Array.isArray(data.rows)) return data.rows;
-        if (Array.isArray(data.items)) return data.items;
-        if (Array.isArray(data.results)) return data.results;
-        return [];
-      }
-      throw new Error(
-        'admin.sqlWithDirectD1Access() requires workerUrl. Pass workerUrl to buildFunctionContext(), or use the external SDK.',
-      );
-    },
+          workerUrl: options.workerUrl,
+          serviceKey: options.serviceKey,
+        },
+        namespace, id, query, params,
+      ),
     async broadcast(
       channel: string,
       event: string,

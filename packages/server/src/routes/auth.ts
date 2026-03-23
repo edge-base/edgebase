@@ -54,6 +54,7 @@ import {
   buildFunctionPushProxy,
   buildAdminAuthContext,
   buildAdminDbProxy,
+  executeSqlWithDirectD1Access,
   getWorkerUrl,
 } from '../lib/functions.js';
 import * as authService from '../lib/auth-d1-service.js';
@@ -659,18 +660,11 @@ export async function executeAuthHook(
           db: adminDb,
           table: (name: string) => adminDb('shared').table(name),
           auth: authAdmin,
-          async sqlWithDirectD1Access(namespace: string, id: string | undefined, query: string, params?: unknown[]) {
-            if (options.workerUrl && serviceKey) {
-              const res = await fetch(`${options.workerUrl}/api/sql`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-EdgeBase-Service-Key': serviceKey },
-                body: JSON.stringify({ namespace, id, sql: query, params: params ?? [] }),
-              });
-              if (!res.ok) throw new Error(`admin.sqlWithDirectD1Access() failed: ${res.status}`);
-              return res.json();
-            }
-            throw new Error('admin.sqlWithDirectD1Access() requires workerUrl in auth hook context.');
-          },
+          sqlWithDirectD1Access: (namespace: string, id: string | undefined, query: string, params?: unknown[]) =>
+            executeSqlWithDirectD1Access(
+              { env, config, databaseNamespace: env.DATABASE, workerUrl: options.workerUrl, serviceKey },
+              namespace, id, query, params,
+            ),
           async broadcast(channel: string, event: string, payload?: Record<string, unknown>) {
             if (options.workerUrl && serviceKey) {
               await fetch(`${options.workerUrl}/api/db/broadcast`, {
