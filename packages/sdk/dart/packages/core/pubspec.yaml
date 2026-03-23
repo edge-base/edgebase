@@ -1,6 +1,6 @@
 name: edgebase_core
 description: EdgeBase Core SDK — shared types, HTTP client, and table/storage operations.
-version: 0.2.0
+version: 0.2.1
 homepage: https://github.com/edge-base/edgebase/tree/main/packages/sdk/dart/packages/core
 repository: https://github.com/edge-base/edgebase/tree/main/packages/sdk/dart/packages/core
 
