@@ -17,8 +17,7 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["DatabaseDO", "AuthDO", "LogsDO"]
-new_classes = ["RoomsDO", "DatabaseLiveDO"]
+new_sqlite_classes = ["DatabaseDO", "AuthDO", "LogsDO", "DatabaseLiveDO", "RoomsDO"]
 
 # ─── R2 (local emulation) ───
 [[r2_buckets]]
