@@ -18,6 +18,12 @@ if [[ ! -f "$SHARED_DIST_PATH" ]]; then
   pnpm --dir packages/shared build
 fi
 
+CORE_DIST_PATH="${ROOT_DIR}/packages/sdk/js/packages/core/dist/index.js"
+if [[ ! -f "$CORE_DIST_PATH" ]]; then
+  echo "Core SDK build not found. Building packages/sdk/js/packages/core..."
+  pnpm --dir packages/sdk/js/packages/core build
+fi
+
 nohup env \
   TMPDIR="${TMPDIR:-/tmp}" \
   XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-/tmp}" \
