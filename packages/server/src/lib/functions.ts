@@ -25,12 +25,9 @@ import type {
   ScheduleTrigger,
   HttpTrigger,
 } from '@edge-base/shared';
-import { getDbDoName, getD1BindingName, callDO, shouldRouteToD1 } from './do-router.js';
+import { getD1BindingName, shouldRouteToD1 } from './do-router.js';
 import { executeDoSql } from './do-sql.js';
 import { D1AuthDb, type AuthDb } from './auth-db-adapter.js';
-import { handleD1Request } from './d1-handler.js';
-import { handlePgRequest } from './postgres-handler.js';
-import { buildInternalHandlerContext } from './internal-request.js';
 import type { Env } from '../types.js';
 import { createSignedToken } from '../routes/storage.js';
 import {
