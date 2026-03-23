@@ -44,6 +44,7 @@ import {
   buildFunctionPushProxy,
   buildAdminAuthContext,
   buildAdminDbProxy,
+  executeSqlWithDirectD1Access,
   getWorkerUrl,
 } from '../lib/functions.js';
 
@@ -165,18 +166,11 @@ function buildStorageHookAdminContext(
     db: adminDb,
     table: (name: string) => adminDb('shared').table(name),
     auth: buildAdminAuthContext({ d1Database: env.AUTH_DB, serviceKey, workerUrl }),
-    async sql(namespace: string, id: string | undefined, query: string, params?: unknown[]) {
-      if (workerUrl && serviceKey) {
-        const res = await fetch(`${workerUrl}/api/sql`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-EdgeBase-Service-Key': serviceKey },
-          body: JSON.stringify({ namespace, id, sql: query, params: params ?? [] }),
-        });
-        if (!res.ok) throw new Error(`admin.sql() failed: ${res.status}`);
-        return res.json();
-      }
-      throw new Error('admin.sql() requires workerUrl in storage hook context.');
-    },
+    sqlWithDirectD1Access: (namespace: string, id: string | undefined, query: string, params?: unknown[]) =>
+      executeSqlWithDirectD1Access(
+        { env, config, databaseNamespace: env.DATABASE, workerUrl, serviceKey },
+        namespace, id, query, params,
+      ),
     async broadcast(channel: string, event: string, payload?: Record<string, unknown>) {
       if (workerUrl && serviceKey) {
         await fetch(`${workerUrl}/api/db/broadcast`, {

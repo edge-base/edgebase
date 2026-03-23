@@ -350,7 +350,7 @@ function buildMigrationAdminContext(
       return doAdminDb(namespace, id);
     },
 
-    async sql(
+    async sqlWithDirectD1Access(
       namespace: string,
       id: string | undefined,
       query: string,
@@ -359,7 +359,7 @@ function buildMigrationAdminContext(
       const dbBlock = config.databases?.[namespace];
       const isDynamicNamespace = !!(dbBlock?.instance || dbBlock?.access?.canCreate || dbBlock?.access?.access);
       if (isDynamicNamespace && !id) {
-        throw new Error(`admin.sql() requires an id for dynamic namespace '${namespace}'.`);
+        throw new Error(`admin.sqlWithDirectD1Access() requires an id for dynamic namespace '${namespace}'.`);
       }
 
       const pgConnStr = resolvePgConnString(namespace);

@@ -97,7 +97,7 @@ describe('buildFunctionContext admin.db', () => {
     );
   });
 
-  it('normalizes admin.sql worker responses to row arrays', async () => {
+  it('normalizes admin.sqlWithDirectD1Access worker responses to row arrays', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         rows: [{ total: 2 }],
@@ -129,7 +129,7 @@ describe('buildFunctionContext admin.db', () => {
       serviceKey: 'sk-test',
     });
 
-    const rows = await ctx.admin.sql('shared', undefined, 'SELECT COUNT(*) AS total FROM posts');
+    const rows = await ctx.admin.sqlWithDirectD1Access('shared', undefined, 'SELECT COUNT(*) AS total FROM posts');
 
     expect(rows).toEqual([{ total: 2 }]);
     expect(fetchMock).toHaveBeenCalledWith(
@@ -144,7 +144,7 @@ describe('buildFunctionContext admin.db', () => {
     );
   });
 
-  it('routes admin.sql through the database DO when env is available', async () => {
+  it('routes admin.sqlWithDirectD1Access through the database DO when env is available', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
@@ -196,7 +196,7 @@ describe('buildFunctionContext admin.db', () => {
       serviceKey: 'sk-test',
     });
 
-    const rows = await ctx.admin.sql('workspace', 'ws-1', 'SELECT COUNT(*) AS total FROM members', []);
+    const rows = await ctx.admin.sqlWithDirectD1Access('workspace', 'ws-1', 'SELECT COUNT(*) AS total FROM members', []);
 
     expect(rows).toEqual([{ total: 3 }]);
     expect(stub.fetch).toHaveBeenCalledTimes(2);
