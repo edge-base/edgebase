@@ -412,7 +412,7 @@ async function handleList(
         filters: queryOpts.filters,
         orFilters: queryOpts.orFilters,
         sort: queryOpts.sort,
-        fields: queryOpts.fields?.length ? queryOpts.fields : searchFields,
+        fields: searchFields,
       }, 'sqlite');
       result = await executeD1Query(resolved.db, query.sql, query.params);
     } else {

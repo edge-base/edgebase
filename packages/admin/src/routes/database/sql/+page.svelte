@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { api } from '$lib/api';
 	import { toastError } from '$lib/stores/toast.svelte';
-	import { schemaStore, namespaceNames } from '$lib/stores/schema';
+	import { schemaStore, namespaceNames, namespaceDefs } from '$lib/stores/schema';
 	import { onMount } from 'svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -25,12 +25,8 @@
 	let selectedNamespace = $state('shared');
 
 	let isDynamicNamespace = $derived.by(() => {
-		const schema = $schemaStore.schema;
-		for (const table of Object.values(schema)) {
-			const def = table as { namespace?: string; dynamic?: boolean };
-			if (def.namespace === selectedNamespace && def.dynamic) return true;
-		}
-		return false;
+		const defs = $namespaceDefs;
+		return Boolean(defs[selectedNamespace]?.dynamic);
 	});
 
 	let SqlEditorComponent = $state<typeof import('$lib/components/ui/SqlEditor.svelte').default | null>(null);

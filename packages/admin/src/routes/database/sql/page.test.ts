@@ -42,6 +42,12 @@ const mocks = vi.hoisted(() => {
 				return () => undefined;
 			},
 		},
+		namespaceDefs: {
+			subscribe(run: (value: Record<string, { dynamic?: boolean }>) => void) {
+				run({ shared: { dynamic: false } });
+				return () => undefined;
+			},
+		},
 	};
 });
 
@@ -64,6 +70,7 @@ vi.mock('$lib/api', () => ({
 vi.mock('$lib/stores/schema', () => ({
 	schemaStore: mocks.schemaStore,
 	namespaceNames: mocks.namespaceNames,
+	namespaceDefs: mocks.namespaceDefs,
 }));
 
 vi.mock('$lib/stores/toast.svelte', () => ({
