@@ -34,10 +34,13 @@ import { buildInternalHandlerContext } from './internal-request.js';
 import type { Env } from '../types.js';
 import { createSignedToken } from '../routes/storage.js';
 import {
+  createManagedAdminUser,
   deleteManagedAdminUser,
   normalizeAdminUserUpdates,
   updateManagedAdminUser,
 } from './admin-user-management.js';
+import { hashPassword } from './password.js';
+import { generateId } from './uuid.js';
 
 // ─── Function Context Types ───
 
@@ -1024,7 +1027,7 @@ interface AdminAuthOptions {
 /**
  * Build admin auth context for App Functions.
  * Uses AUTH_DB D1 directly for all operations (D1-first architecture).
- * Cross-shard operations (listUsers, createUser) also available via Worker HTTP relay
+ * Cross-shard operations (listUsers) also available via Worker HTTP relay
  * when workerUrl is provided.
  */
 export function buildAdminAuthContext(options: AdminAuthOptions): AdminAuthContext {
@@ -1089,10 +1092,25 @@ export function buildAdminAuthContext(options: AdminAuthOptions): AdminAuthConte
       displayName?: string;
       role?: string;
     }): Promise<Record<string, unknown>> {
+      // Direct D1 path — works without service key (same as updateUser/deleteUser)
+      if (d1Database) {
+        const db = new D1AuthDb(d1Database);
+        const user = await createManagedAdminUser(
+          db,
+          {
+            userId: generateId(),
+            email: data.email.trim().toLowerCase(),
+            passwordHash: await hashPassword(data.password),
+            displayName: data.displayName,
+            role: data.role || 'user',
+            verified: true,
+          },
+          { kv: kvNamespace },
+        );
+        return authService.sanitizeUser(user, { includeAppMetadata: true });
+      }
       if (workerUrl && serviceKey) {
-        // HTTP relay: POST /api/auth/admin/users → Worker → D1
-        // createUser has complex side effects (email index, _users_public, etc.)
-        // so it routes through the admin route which handles the full flow.
+        // HTTP relay fallback: POST /api/auth/admin/users → Worker → D1
         const res = await fetch(`${workerUrl}/api/auth/admin/users`, {
           method: 'POST',
           headers: {
@@ -1111,7 +1129,7 @@ export function buildAdminAuthContext(options: AdminAuthOptions): AdminAuthConte
         return result.user;
       }
       throw new Error(
-        'admin.auth.createUser() is not available in this context (requires workerUrl). ' +
+        'admin.auth.createUser() is not available in this context (requires D1 or workerUrl). ' +
           'Pass workerUrl to buildFunctionContext(), or use the external SDK.',
       );
     },
