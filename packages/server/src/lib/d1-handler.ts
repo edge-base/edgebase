@@ -748,11 +748,9 @@ async function handleInsert(
     hookCtx.waitUntil(Promise.resolve(hook(inserted, hookCtx)).catch(() => {}));
   }
 
-  // Emit database-live event (fire-and-forget)
+  // Emit database-live event (await to ensure broadcast delivery)
   const eventType = isUpsert && isUpdate ? 'modified' : 'added';
-  c.executionCtx.waitUntil(
-    emitDbLiveEvent(c.env, resolved.namespace, tableName, eventType, String(inserted.id ?? ''), inserted),
-  );
+  await emitDbLiveEvent(c.env, resolved.namespace, tableName, eventType, String(inserted.id ?? ''), inserted);
   c.executionCtx.waitUntil(
     executeDbTriggers(
       tableName,
@@ -891,10 +889,8 @@ async function handleUpdate(
     );
   }
 
-  // Emit database-live event (fire-and-forget)
-  c.executionCtx.waitUntil(
-    emitDbLiveEvent(c.env, resolved.namespace, tableName, 'modified', id, updated),
-  );
+  // Emit database-live event (await to ensure broadcast delivery)
+  await emitDbLiveEvent(c.env, resolved.namespace, tableName, 'modified', id, updated);
   c.executionCtx.waitUntil(
     executeDbTriggers(
       tableName,
@@ -969,10 +965,8 @@ async function handleDelete(
     );
   }
 
-  // Emit database-live event (fire-and-forget)
-  c.executionCtx.waitUntil(
-    emitDbLiveEvent(c.env, resolved.namespace, tableName, 'removed', id, stripInternalFields(existingRow)),
-  );
+  // Emit database-live event (await to ensure broadcast delivery)
+  await emitDbLiveEvent(c.env, resolved.namespace, tableName, 'removed', id, stripInternalFields(existingRow));
   c.executionCtx.waitUntil(
     executeDbTriggers(
       tableName,
@@ -1208,9 +1202,7 @@ async function handleBatch(
       );
     } else {
       for (const ch of allChanges) {
-        c.executionCtx.waitUntil(
-          emitDbLiveEvent(c.env, resolved.namespace, tableName, ch.type, ch.docId, ch.data),
-        );
+        await emitDbLiveEvent(c.env, resolved.namespace, tableName, ch.type, ch.docId, ch.data);
       }
     }
   }
@@ -1306,9 +1298,7 @@ async function handleBatchByFilter(
   // Emit database-live events
   if (succeeded > 0) {
     const eventType = body.action === 'delete' ? 'removed' : 'modified';
-    c.executionCtx.waitUntil(
-      emitDbLiveEvent(c.env, resolved.namespace, tableName, eventType as 'modified' | 'removed', '_bulk', { action: body.action, count: succeeded }),
-    );
+    await emitDbLiveEvent(c.env, resolved.namespace, tableName, eventType as 'modified' | 'removed', '_bulk', { action: body.action, count: succeeded });
   }
 
   return c.json({ processed, succeeded });
