@@ -511,7 +511,7 @@ async function createSessionAndTokens(
 
   // Update lastSignedInAt on the user record
   try {
-    await db.prepare('UPDATE _users SET lastSignedInAt = ? WHERE id = ?').bind(now, userId).run();
+    await db.run('UPDATE _users SET lastSignedInAt = ? WHERE id = ?', [now, userId]);
   } catch {
     // Non-critical: don't block sign-in if this column doesn't exist yet
   }

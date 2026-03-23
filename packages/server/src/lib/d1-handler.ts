@@ -406,7 +406,7 @@ async function handleList(
   } catch {
     // FTS table may not exist — fall back to substring search
     if (queryOpts.search) {
-      const fields = tableConfig.fields ? Object.keys(tableConfig.fields) : ['id'];
+      const fields = tableConfig.schema ? Object.keys(tableConfig.schema).filter(k => tableConfig.schema![k] !== false) : ['id'];
       query = buildSubstringSearchQuery(tableName, queryOpts.search, {
         pagination: queryOpts.pagination,
         filters: queryOpts.filters,
