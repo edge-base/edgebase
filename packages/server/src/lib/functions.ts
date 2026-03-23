@@ -1096,7 +1096,8 @@ export function buildAdminAuthContext(options: AdminAuthOptions): AdminAuthConte
       // Direct D1 path — works without service key (same as updateUser/deleteUser)
       if (d1Database) {
         // Input validation (mirrors routes/admin-auth.ts guards)
-        if (!data.email || !data.password) throw new Error('Email and password are required.');
+        if (!data.email || typeof data.email !== 'string') throw new Error('Email and password are required.');
+        if (!data.password || typeof data.password !== 'string') throw new Error('Email and password are required.');
         const email = data.email.trim().toLowerCase();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
           throw new Error('Invalid email format.');
