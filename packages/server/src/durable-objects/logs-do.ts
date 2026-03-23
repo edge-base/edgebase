@@ -484,10 +484,10 @@ export class LogsDO extends DurableObject<LogsDOEnv> {
         whereParts.push('status >= ?');
         params.push(SERVER_ERROR_STATUS);
       } else if (level === 'warn') {
-        whereParts.push('status >= ? AND status < ?');
+        whereParts.push('(status >= ? AND status < ? AND status != 304)');
         params.push(300, SERVER_ERROR_STATUS);
       } else if (level === 'info') {
-        whereParts.push('status >= ? AND status < ?');
+        whereParts.push('(status >= ? AND status < ? OR status = 304)');
         params.push(200, 300);
       }
 

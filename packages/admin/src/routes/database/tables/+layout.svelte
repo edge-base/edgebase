@@ -50,7 +50,7 @@
 	const devModeNotice = 'Schema changes require dev mode. Start `pnpm dev` to create DB blocks, add tables, edit schema, or run upgrades.';
 
 	function topologyLabel(dynamic?: boolean): string {
-		return dynamic ? 'Per-tenant DB' : 'Single DB';
+		return dynamic ? 'Multi' : 'Single';
 	}
 
 	onMount(() => {
@@ -316,6 +316,8 @@
 	}
 
 	.tables-sidebar__name {
+		flex: 1;
+		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;

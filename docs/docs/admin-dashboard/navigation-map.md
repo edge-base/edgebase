@@ -16,6 +16,7 @@ This page tracks the current Admin Dashboard route surface in the shipped app.
 | Auth       | Email Templates | `/admin/auth/email-templates` | Template editing and preview                      |
 | Database   | Tables          | `/admin/database/tables`      | Schema explorer plus table-scoped records and query tools |
 | Database   | ERD             | `/admin/database/erd`         | Database-level relationship diagram grouped by DB block |
+| Database   | SQL             | `/admin/database/sql`         | Standalone SQL console with CodeMirror editor     |
 | Storage    | Files           | `/admin/storage`              | Bucket and object browser                         |
 | Functions  | Functions       | `/admin/functions`            | Registered function list and execution UI         |
 | Push       | Notifications   | `/admin/push`                 | Push notification management                      |
@@ -43,7 +44,7 @@ These routes exist in the dashboard codebase even when they are not shown as top
 | `/admin/database/new`            | Dev-only database block creation flow with optional Neon connection helpers |
 | `/admin/database/tables/new`     | New table creation flow                                              |
 | `/admin/database/tables/[table]` | Table detail with target-aware records, Query tab, create-row drawer, schema tools, and D1 → Postgres upgrade flow |
-| `/admin/database/sql`            | Legacy redirect to `/admin/database/tables`                          |
+| `/admin/database/sql`            | SQL console (also in primary navigation above)                       |
 | `/admin/storage/[bucket]`        | Bucket-specific object browser                                       |
 
 ## Coverage Note

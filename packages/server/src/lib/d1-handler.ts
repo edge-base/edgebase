@@ -399,8 +399,27 @@ async function handleList(
   }
 
   const queryOpts = parseQueryParams(Object.fromEntries(new URL(c.req.url).searchParams));
-  const { sql, params, countSql, countParams } = buildListQuery(tableName, queryOpts, 'sqlite');
-  const result = await executeD1Query(resolved.db, sql, params);
+  let query = buildListQuery(tableName, queryOpts, 'sqlite');
+  let result;
+  try {
+    result = await executeD1Query(resolved.db, query.sql, query.params);
+  } catch {
+    // FTS table may not exist — fall back to substring search
+    if (queryOpts.search) {
+      const searchFields = tableConfig.schema ? Object.keys(tableConfig.schema).filter(k => tableConfig.schema![k] !== false) : ['id'];
+      query = buildSubstringSearchQuery(tableName, queryOpts.search, {
+        pagination: queryOpts.pagination,
+        filters: queryOpts.filters,
+        orFilters: queryOpts.orFilters,
+        sort: queryOpts.sort,
+        fields: searchFields,
+      }, 'sqlite');
+      result = await executeD1Query(resolved.db, query.sql, query.params);
+    } else {
+      throw new Error('Query failed');
+    }
+  }
+  const { countSql, countParams } = query;
 
   // Apply read rules per row + normalize booleans/JSON
   let items = result.rows.map(r => normalizeRow(stripInternalFields(r), tableConfig));

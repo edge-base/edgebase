@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS _users (
   disabled INTEGER DEFAULT 0,
   status TEXT DEFAULT 'active',
   locale TEXT DEFAULT 'en',
+  lastSignedInAt TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
@@ -309,6 +310,7 @@ CREATE TABLE IF NOT EXISTS _users (
   disabled INTEGER DEFAULT 0,
   status TEXT DEFAULT 'active',
   locale TEXT DEFAULT 'en',
+  lastSignedInAt TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
@@ -403,6 +405,14 @@ export async function ensureAuthSchema(db: AuthDb): Promise<void> {
     .filter((s) => s.length > 0);
 
   await db.batch(statements.map((sql) => ({ sql })));
+
+  // Migrate existing _users tables: add lastSignedInAt if missing
+  try {
+    await db.run('ALTER TABLE _users ADD COLUMN lastSignedInAt TEXT', []);
+  } catch {
+    // Column already exists — safe to ignore
+  }
+
   schemaInitialized = true;
 }
 

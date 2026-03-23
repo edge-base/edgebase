@@ -509,6 +509,13 @@ async function createSessionAndTokens(
     metadata,
   });
 
+  // Update lastSignedInAt on the user record
+  try {
+    await db.run('UPDATE _users SET lastSignedInAt = ? WHERE id = ?', [now, userId]);
+  } catch {
+    // Non-critical: don't block sign-in if this column doesn't exist yet
+  }
+
   return { accessToken, refreshToken, sessionId };
 }
 

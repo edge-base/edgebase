@@ -194,7 +194,7 @@ export async function updateUser(
     'email', 'passwordHash', 'displayName', 'avatarUrl', 'emailVisibility',
     'role', 'status', 'verified', 'isAnonymous', 'locale', 'metadata', 'appMetadata',
     'customClaims', 'phone', 'phoneVerified', 'disabled', 'bannedUntil',
-    'lastSignInAt', 'updatedAt',
+    'lastSignInAt', 'lastSignedInAt', 'updatedAt',
   ]);
 
   const sets: string[] = [];
