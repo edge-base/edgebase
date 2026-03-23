@@ -20,7 +20,7 @@ EdgeBase ships with a built-in Admin Dashboard at `/admin` for local and product
 2. Create the first admin account.
 3. Sign in and verify tables/users/storage views.
 
-In local development and other non-release environments, the login screen can still create the first admin directly in the browser. In release deployments and self-hosted production setups, first-admin bootstrap moves to the CLI so `/admin` never exposes a public setup form:
+In local development started with `npx edgebase dev`, the login screen can still create the first admin directly in the browser. Other deployments, including non-release staging or self-hosted environments, bootstrap the first admin through the CLI so `/admin` never exposes a public setup form:
 
 ```bash
 npx edgebase admin bootstrap --url https://your-project.edgebase.fun --service-key <service-key>

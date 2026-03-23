@@ -238,6 +238,7 @@ describe('Wrangler dev arguments', () => {
 
     try {
       expect(_devInternals.resolveWorkerVarBindings(8788)).toEqual([
+        'EDGEBASE_ALLOW_PUBLIC_ADMIN_SETUP:1',
         'EDGEBASE_DEV_SIDECAR_PORT:8788',
         'EDGEBASE_INTERNAL_WORKER_URL:http://127.0.0.1:8787',
       ]);

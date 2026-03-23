@@ -214,6 +214,11 @@ describe('1-21 admin — static asset fallbacks', () => {
 // ─── 1. Admin Setup ────────────────────────────────────────────────────────────
 
 describe('1-21 admin — setup', () => {
+  const localDevSetupEnv = {
+    EDGEBASE_CONFIG: JSON.stringify({ release: false }),
+    EDGEBASE_ALLOW_PUBLIC_ADMIN_SETUP: '1',
+  } as const;
+
   it('GET /admin/api/setup/status → setup method metadata', async () => {
     const { status, data } = await api('GET', '/admin/api/setup/status');
     expect(status).toBe(200);
@@ -222,10 +227,54 @@ describe('1-21 admin — setup', () => {
     expect(['cli', 'browser', 'login']).toContain(data.setupMethod);
   });
 
-  it('release mode에서는 public setup을 차단한다', async () => {
+  it('default runtime에서는 CLI bootstrap이 필요하다', async () => {
     await resetAdminState();
 
-    const { status, data } = await api('POST', '/admin/api/setup', {
+    const { status, data } = await api('GET', '/admin/api/setup/status');
+
+    expect(status).toBe(200);
+    expect(data?.needsSetup).toBe(true);
+    expect(data?.publicSetupAllowed).toBe(false);
+    expect(data?.setupMethod).toBe('cli');
+    expect(data?.message).toContain('Public admin setup is disabled');
+  });
+
+  it('default runtime에서는 public setup을 차단한다', async () => {
+    await resetAdminState();
+
+    const res = await worker.fetch(
+      new Request('http://example.invalid/admin/api/setup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: 'admin@test.com',
+          password: 'Admin1234!',
+        }),
+      }),
+      {
+        ...(globalThis as any).env,
+      } as any,
+      {
+        waitUntil() {},
+        passThroughOnException() {},
+      } as unknown as ExecutionContext,
+    );
+    const data = await res.json().catch(() => null);
+
+    expect(res.status).toBe(403);
+    expect(data?.message).toContain('Public admin setup is disabled');
+    expect(await adminCount()).toBe(0);
+  });
+
+  it('release mode에서도 public setup을 차단한다', async () => {
+    await resetAdminState();
+
+    const { status, data } = await apiWithEnv('POST', '/admin/api/setup', {
+      EDGEBASE_CONFIG: JSON.stringify({ release: true }),
+      EDGEBASE_ALLOW_PUBLIC_ADMIN_SETUP: '1',
+    }, {
       email: 'admin@test.com',
       password: 'Admin1234!',
     });
@@ -244,7 +293,7 @@ describe('1-21 admin — setup', () => {
       'POST',
       '/admin/api/setup',
       {
-        EDGEBASE_CONFIG: JSON.stringify({ release: false }),
+        ...localDevSetupEnv,
         JWT_ADMIN_SECRET: undefined,
       },
       {
@@ -265,31 +314,26 @@ describe('1-21 admin — setup', () => {
   it('local dev setup 완료 후 재시도 → 400', async () => {
     await resetAdminState();
 
-    const first = await apiWithEnv('POST', '/admin/api/setup', {
-      EDGEBASE_CONFIG: JSON.stringify({ release: false }),
-    }, {
+    const first = await apiWithEnv('POST', '/admin/api/setup', localDevSetupEnv, {
       email: 'admin@test.com',
       password: 'Admin1234!',
     });
     expect(first.status).toBe(201);
 
-    const second = await apiWithEnv('POST', '/admin/api/setup', {
-      EDGEBASE_CONFIG: JSON.stringify({ release: false }),
-    }, {
+    const second = await apiWithEnv('POST', '/admin/api/setup', localDevSetupEnv, {
       email: 'admin2@test.com',
       password: 'Admin1234!',
     });
     expect(second.status).toBe(400);
   });
 
-  it('non-release setup does not depend on the request host header', async () => {
+  it('local dev flag가 있으면 service key 없이도 첫 admin을 생성할 수 있다', async () => {
     await resetAdminState();
 
     const res = await worker.fetch(
-      new Request('http://example.invalid/admin/api/setup', {
+      new Request('http://localhost/admin/api/setup', {
         method: 'POST',
         headers: {
-          'X-EdgeBase-Service-Key': SK,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -299,7 +343,7 @@ describe('1-21 admin — setup', () => {
       }),
       {
         ...(globalThis as any).env,
-        EDGEBASE_CONFIG: JSON.stringify({ release: false }),
+        ...localDevSetupEnv,
       } as any,
       {
         waitUntil() {},
@@ -313,17 +357,13 @@ describe('1-21 admin — setup', () => {
 
   it('local dev setup — email 누락 → 400', async () => {
     await resetAdminState();
-    const { status } = await apiWithEnv('POST', '/admin/api/setup', {
-      EDGEBASE_CONFIG: JSON.stringify({ release: false }),
-    }, { password: 'Admin1234!' });
+    const { status } = await apiWithEnv('POST', '/admin/api/setup', localDevSetupEnv, { password: 'Admin1234!' });
     expect(status).toBe(400);
   });
 
   it('local dev setup — 8자 미만 비밀번호 → 400', async () => {
     await resetAdminState();
-    const { status } = await apiWithEnv('POST', '/admin/api/setup', {
-      EDGEBASE_CONFIG: JSON.stringify({ release: false }),
-    }, {
+    const { status } = await apiWithEnv('POST', '/admin/api/setup', localDevSetupEnv, {
       email: `short-${Date.now()}@test.com`,
       password: 'short',
     });

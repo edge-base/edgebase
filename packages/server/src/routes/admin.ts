@@ -119,10 +119,16 @@ function quoteSqlIdentifier(identifier: string): string {
   return `"${identifier}"`;
 }
 
+// Browser bootstrap is opt-in and only enabled by the local dev workflow.
+function isPublicAdminSetupEnabled(env: Env): boolean {
+  return env.EDGEBASE_ALLOW_PUBLIC_ADMIN_SETUP === '1'
+    || env.EDGEBASE_ALLOW_PUBLIC_ADMIN_SETUP === 'true';
+}
+
 function isPublicAdminSetupAllowed(env: Env): boolean {
   try {
     const config = parseConfig(env);
-    return config.release !== true;
+    return config.release !== true && isPublicAdminSetupEnabled(env);
   } catch {
     return false;
   }
