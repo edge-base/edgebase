@@ -38,6 +38,8 @@ import {
   normalizeAdminUserUpdates,
   updateManagedAdminUser,
 } from './admin-user-management.js';
+import { DbRef, TableRef, DefaultDbApi } from '@edge-base/core';
+import { InternalHttpTransport } from './internal-transport.js';
 
 // ─── Function Context Types ───
 
@@ -46,21 +48,6 @@ export interface AuthContext {
   email?: string;
   isAnonymous?: boolean;
   custom?: Record<string, unknown>;
-}
-
-export interface TableProxy {
-  insert(data: Record<string, unknown>): Promise<Record<string, unknown>>;
-  upsert(
-    data: Record<string, unknown>,
-    options?: { conflictTarget?: string },
-  ): Promise<Record<string, unknown>>;
-  update(id: string, data: Record<string, unknown>): Promise<Record<string, unknown>>;
-  delete(id: string): Promise<{ deleted: boolean }>;
-  get(id: string): Promise<Record<string, unknown>>;
-  list(options?: {
-    limit?: number;
-    filter?: unknown;
-  }): Promise<{ items: Record<string, unknown>[] }>;
 }
 
 export interface AdminAuthContext {
@@ -89,18 +76,21 @@ export interface AdminAuthContext {
  */
 export interface FunctionAdminContext {
   /** Cross-DO table access — rules bypassed, Service Key authenticated. */
-  table(name: string): TableProxy;
+  table(name: string): TableRef;
   /**
    * Access a specific DB namespace instance (§5).
-   * Replaces forTenant() — aligned with Database-first architecture (#133).
+   * Uses the same TableRef from @edge-base/core as the client SDK,
+   * ensuring API parity (getList, getOne, where, orderBy, limit, etc.).
    *
    * @example
    * // Static DB
-   * context.admin.db('shared').table('posts').list()
+   * context.admin.db('shared').table('posts').getList()
    * // Dynamic DB (tenant/user)
-   * context.admin.db('workspace', 'ws-456').table('documents').list()
+   * context.admin.db('workspace', 'ws-456').table('documents').getList()
+   * // With query builder
+   * context.admin.db('shared').table('posts').where('status', '==', 'published').limit(10).getList()
    */
-  db(namespace: string, id?: string): { table(name: string): TableProxy };
+  db(namespace: string, id?: string): DbRef;
   /** Admin user management. */
   auth: AdminAuthContext;
   /** Raw SQL on a DB namespace DO. */
@@ -291,20 +281,21 @@ export interface FunctionContext {
    *
    * @example
    * // Static DB
-   * await context.db('shared').table('posts').list()
+   * await context.db('shared').table('posts').getList()
    * // Dynamic DB
-   * await context.db('workspace', 'ws-456').table('documents').list()
+   * await context.db('workspace', 'ws-456').table('documents').getList()
+   * // With query builder
+   * await context.db('shared').table('posts').where('status', '==', 'published').limit(10).getList()
    */
   db: FunctionAdminContext['db'];
   /**
-   * Server-side EdgeBase admin client (§5,).
+   * Server-side EdgeBase admin client (§5).
    * Use context.admin.db(namespace, id?).table(name) for all DB access.
+   * Uses the same TableRef from @edge-base/core as the client SDK.
    *
    * @example
-   * // Static DB
-   * await context.admin.db('shared').table('posts').list()
-   * // Dynamic DB
-   * await context.admin.db('workspace', 'ws-456').table('documents').list()
+   * await context.admin.db('shared').table('posts').getList()
+   * await context.admin.db('shared').table('posts').where('userId', '==', uid).getList()
    */
   admin: FunctionAdminContext;
   /**
@@ -697,284 +688,7 @@ export function wrapMethodExport(
   };
 }
 
-// ─── Table Proxy (Cross-DO) ───
-
-/**
- * Build a cross-DO table proxy.
- * All calls bypass access rules by using Service Key.
- */
-function buildTableProxy(
-  tableName: string,
-  namespace: DurableObjectNamespace,
-  config: EdgeBaseConfig,
-  workerUrl?: string,
-  serviceKey?: string,
-  env?: Env,
-  executionCtx?: ExecutionContext,
-  /** DB routing info (§5). If provided, overrides auto-detect. */
-  dbTarget?: { namespace: string; id?: string; doName: string },
-  routingOptions?: { preferDirectDo?: boolean },
-): TableProxy {
-  // Determine DO name: explicit DB target (§5) or auto-detect from config
-  let resolvedTarget: { namespace: string; id?: string; doName: string };
-  if (dbTarget) {
-    resolvedTarget = dbTarget;
-  } else {
-    // Auto-detect namespace for this table from config (§1)
-    let tableNamespace = 'shared';
-    for (const [ns, dbBlock] of Object.entries(config.databases ?? {})) {
-      if (dbBlock.tables?.[tableName]) {
-        tableNamespace = ns;
-        break;
-      }
-    }
-    resolvedTarget = {
-      namespace: tableNamespace,
-      doName: getDbDoName(tableNamespace),
-    };
-  }
-  const doName = resolvedTarget.doName;
-  const headers: Record<string, string> = { 'X-DO-Name': doName };
-  if (serviceKey) {
-    headers['X-EdgeBase-Service-Key'] = serviceKey;
-  }
-  // Add internal header to bypass rules
-  headers['X-EdgeBase-Internal'] = 'true';
-
-  const buildTablePath = (id?: string, query?: URLSearchParams): string => {
-    const base = resolvedTarget.id !== undefined
-      ? `/api/db/${resolvedTarget.namespace}/${resolvedTarget.id}/tables/${tableName}`
-      : `/api/db/${resolvedTarget.namespace}/tables/${tableName}`;
-    const withId = id ? `${base}/${id}` : base;
-    const search = query && Array.from(query.keys()).length > 0 ? `?${query.toString()}` : '';
-    return `${withId}${search}`;
-  };
-  const buildDirectTablePath = (id?: string, query?: URLSearchParams): string => {
-    const base = `/tables/${tableName}`;
-    const withId = id ? `${base}/${id}` : base;
-    const search = query && Array.from(query.keys()).length > 0 ? `?${query.toString()}` : '';
-    return `${withId}${search}`;
-  };
-
-  const requestViaWorker = async (
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
-    path: string,
-    body?: Record<string, unknown>,
-  ): Promise<Response> => {
-    return fetch(`${workerUrl}${path}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...headers,
-      },
-      body: body === undefined || method === 'GET' || method === 'DELETE'
-        ? undefined
-        : JSON.stringify(body),
-    });
-  };
-  const requestViaD1Handler = async (
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
-    directPath: string,
-    query?: URLSearchParams,
-    body?: Record<string, unknown>,
-  ): Promise<Response> => {
-    if (!env) {
-      throw new Error('D1 table proxy requires env.');
-    }
-
-    const request = new Request(
-      `http://internal/api/db/${resolvedTarget.namespace}${resolvedTarget.id ? `/${resolvedTarget.id}` : ''}${buildDirectTablePath(undefined, query).replace('/tables/' + tableName, directPath)}`,
-      {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-        },
-        body: body === undefined || method === 'GET' || method === 'DELETE'
-          ? undefined
-          : JSON.stringify(body),
-      },
-    );
-
-    return handleD1Request(
-      buildInternalHandlerContext({
-        env,
-        request,
-        body,
-        executionCtx,
-      }),
-      resolvedTarget.namespace,
-      tableName,
-      directPath,
-    );
-  };
-  const requestViaPgHandler = async (
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
-    directPath: string,
-    query?: URLSearchParams,
-    body?: Record<string, unknown>,
-  ): Promise<Response> => {
-    if (!env) {
-      throw new Error('PostgreSQL table proxy requires env.');
-    }
-
-    const request = new Request(
-      `http://internal/api/db/${resolvedTarget.namespace}${resolvedTarget.id ? `/${resolvedTarget.id}` : ''}${buildDirectTablePath(undefined, query).replace('/tables/' + tableName, directPath)}`,
-      {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-        },
-        body: body === undefined || method === 'GET' || method === 'DELETE'
-          ? undefined
-          : JSON.stringify(body),
-      },
-    );
-
-    return handlePgRequest(
-      buildInternalHandlerContext({
-        env,
-        request,
-        body,
-        executionCtx,
-      }),
-      resolvedTarget.namespace,
-      tableName,
-      directPath,
-    );
-  };
-  const requestViaDirectDo = async (
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
-    directPath: string,
-    body?: Record<string, unknown>,
-  ): Promise<Response> => {
-    const res = await callDO(namespace, doName, directPath, {
-      method,
-      body,
-      headers,
-    });
-
-    if (!resolvedTarget.id || res.status !== 201) {
-      return res;
-    }
-
-    const createPayload = await res.clone().json().catch(() => null) as
-      | { needsCreate?: boolean }
-      | null;
-    if (!createPayload?.needsCreate) {
-      return res;
-    }
-
-    return callDO(namespace, doName, directPath, {
-      method,
-      body,
-      headers: {
-        ...headers,
-        'X-DO-Create-Authorized': '1',
-      },
-    });
-  };
-  const requestTable = async (
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
-    id?: string,
-    body?: Record<string, unknown>,
-    query?: URLSearchParams,
-  ): Promise<Response> => {
-    const directPath = buildDirectTablePath(id);
-    const directPathWithQuery = buildDirectTablePath(id, query);
-    const provider = config.databases?.[resolvedTarget.namespace]?.provider;
-
-    if (!routingOptions?.preferDirectDo && shouldRouteToD1(resolvedTarget.namespace, config) && env) {
-      return requestViaD1Handler(method, directPath, query, body);
-    }
-    if ((provider === 'neon' || provider === 'postgres') && env) {
-      return requestViaPgHandler(method, directPath, query, body);
-    }
-    if (env) {
-      return requestViaDirectDo(method, directPathWithQuery, body);
-    }
-    if (workerUrl) {
-      return requestViaWorker(method, buildTablePath(id, query), body);
-    }
-    return requestViaDirectDo(method, directPathWithQuery, body);
-  };
-
-  const insert = async (data: Record<string, unknown>): Promise<Record<string, unknown>> => {
-    const res = await requestTable('POST', undefined, data);
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      throw new Error(`Cross-DO insert failed: ${err.message || res.status}`);
-    }
-    return (await res.json()) as Record<string, unknown>;
-  };
-
-  const upsert = async (
-    data: Record<string, unknown>,
-    options?: { conflictTarget?: string },
-  ): Promise<Record<string, unknown>> => {
-    const query = new URLSearchParams();
-    query.set('upsert', 'true');
-    if (options?.conflictTarget) {
-      query.set('conflictTarget', options.conflictTarget);
-    }
-
-    const res = await requestTable('POST', undefined, data, query);
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      throw new Error(`Cross-DO upsert failed: ${err.message || res.status}`);
-    }
-    return (await res.json()) as Record<string, unknown>;
-  };
-
-  const update = async (
-    id: string,
-    data: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> => {
-    const res = await requestTable('PATCH', id, data);
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      throw new Error(`Cross-DO update failed: ${err.message || res.status}`);
-    }
-    return (await res.json()) as Record<string, unknown>;
-  };
-
-  const del = async (id: string): Promise<{ deleted: boolean }> => {
-    const res = await requestTable('DELETE', id);
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      throw new Error(`Cross-DO delete failed: ${err.message || res.status}`);
-    }
-    return (await res.json()) as { deleted: boolean };
-  };
-
-  const get = async (id: string): Promise<Record<string, unknown>> => {
-    const res = await requestTable('GET', id);
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      throw new Error(`Cross-DO get failed: ${err.message || res.status}`);
-    }
-    return (await res.json()) as Record<string, unknown>;
-  };
-
-  const list = async (listOptions?: {
-    limit?: number;
-    filter?: unknown;
-  }): Promise<{ items: Record<string, unknown>[] }> => {
-    const query = new URLSearchParams();
-    if (listOptions?.limit) query.set('limit', String(listOptions.limit));
-    if (listOptions?.filter) query.set('filter', JSON.stringify(listOptions.filter));
-
-    const res = await requestTable('GET', undefined, undefined, query);
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      throw new Error(`Cross-DO list failed: ${err.message || res.status}`);
-    }
-    return (await res.json()) as { items: Record<string, unknown>[] };
-  };
-
-  return { insert, upsert, update, delete: del, get, list };
-}
+// ─── Admin DB Proxy (uses @edge-base/core TableRef via InternalHttpTransport) ───
 
 interface BuildAdminDbProxyOptions {
   databaseNamespace: DurableObjectNamespace;
@@ -986,25 +700,25 @@ interface BuildAdminDbProxyOptions {
   preferDirectDo?: boolean;
 }
 
+/**
+ * Build the admin DB proxy that returns real DbRef/TableRef instances
+ * from @edge-base/core, routed through InternalHttpTransport for
+ * direct D1/PG/DO access (no HTTP round-trip).
+ */
 export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAdminContext['db'] {
-  return (namespace: string, id?: string) => {
-    const doName = getDbDoName(namespace, id);
+  const transport = new InternalHttpTransport({
+    databaseNamespace: options.databaseNamespace,
+    config: options.config,
+    workerUrl: options.workerUrl,
+    serviceKey: options.serviceKey,
+    env: options.env,
+    executionCtx: options.executionCtx,
+    preferDirectDo: options.preferDirectDo,
+  });
+  const dbApi = new DefaultDbApi(transport);
 
-    return {
-      table(tableName: string): TableProxy {
-        return buildTableProxy(
-          tableName,
-          options.databaseNamespace,
-          options.config,
-          options.workerUrl,
-          options.serviceKey,
-          options.env,
-          options.executionCtx,
-          { namespace, id, doName },
-          { preferDirectDo: options.preferDirectDo },
-        );
-      },
-    };
+  return (namespace: string, id?: string): DbRef => {
+    return new DbRef(dbApi, namespace, id);
   };
 }
 

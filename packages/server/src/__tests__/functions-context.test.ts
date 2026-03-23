@@ -33,7 +33,7 @@ describe('buildFunctionContext admin.db', () => {
       workerUrl: 'http://localhost:8787',
     });
 
-    const result = await ctx.admin.db('shared').table('posts').list({ limit: 5 });
+    const result = await ctx.admin.db('shared').table('posts').limit(5).getList();
 
     expect(result.items).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledWith(

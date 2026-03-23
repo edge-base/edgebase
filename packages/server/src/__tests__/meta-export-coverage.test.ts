@@ -28,6 +28,7 @@ const UNTESTED_LIBS = new Set([
   'email-provider.ts',
   'email-translations.ts', // email i18n strings — used by auth email flows, tested via integration
   'functions.ts',
+  'internal-transport.ts', // internal transport adapter — tested indirectly via functions-context tests
   'hono.ts',
   'log-writer.ts',
   'plugin-migrations.ts',

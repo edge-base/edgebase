@@ -388,6 +388,9 @@ importers:
 
   packages/server:
     dependencies:
+      '@edge-base/core':
+        specifier: workspace:*
+        version: link:../sdk/js/packages/core
       '@edge-base/shared':
         specifier: workspace:*
         version: link:../shared
