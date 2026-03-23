@@ -1,7 +1,7 @@
 /**
  * Shared database live event emission helpers.
  *
- * Used by d1-handler.ts and postgres-handler.ts for fire-and-forget
+ * Used by d1-handler.ts and postgres-handler.ts for background
  * event delivery to DatabaseLiveDO after successful CUD operations.
  *
  * database-do.ts keeps its own internal version (uses DO env).
@@ -34,7 +34,7 @@ export function isDbLiveChannel(channel: string): boolean {
 
 /**
  * Emit a single CUD event to DatabaseLiveDO.
- * Mirrors database-do.ts emitDbLiveEvent() — fire-and-forget.
+ * Mirrors database-do.ts emitDbLiveEvent().
  */
 export function emitDbLiveEvent(
   env: Env,
@@ -87,25 +87,55 @@ export function emitDbLiveBatchEvent(
   return sendToDatabaseLiveDO(env, event, '/internal/batch-event');
 }
 
-/**
- * Fire-and-forget: send event to DatabaseLiveDO via stub.fetch().
- * Never blocks CRUD response — errors are silently ignored.
- */
-export function sendToDatabaseLiveDO(
+async function postToDatabaseLiveDO(
   env: Env,
   event: Record<string, unknown>,
   path = '/internal/event',
 ): Promise<void> {
-  try {
-    const doId = env.DATABASE_LIVE.idFromName(DATABASE_LIVE_HUB_DO_NAME);
-    const stub = env.DATABASE_LIVE.get(doId);
-    return stub.fetch(`http://internal${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(event),
-    }).then(() => undefined).catch(() => undefined);
-  } catch {
-    // Ignore — database live delivery should not block database operations
-    return Promise.resolve();
+  const liveNamespace = env.DATABASE_LIVE;
+  if (!liveNamespace) {
+    return;
   }
+
+  const doId = liveNamespace.idFromName(DATABASE_LIVE_HUB_DO_NAME);
+  const stub = liveNamespace.get(doId);
+  const response = await stub.fetch(`http://internal${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(event),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    const suffix = detail ? `: ${detail.slice(0, 200)}` : '';
+    throw new Error(`DatabaseLiveDO ${path} failed with ${response.status}${suffix}`);
+  }
+}
+
+/**
+ * Send an event to DatabaseLiveDO via stub.fetch().
+ * Callers should schedule this with waitUntil() when they want
+ * fire-and-forget request semantics without hiding delivery failures.
+ */
+export async function sendToDatabaseLiveDO(
+  env: Env,
+  event: Record<string, unknown>,
+  path = '/internal/event',
+): Promise<void> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await postToDatabaseLiveDO(env, event, path);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+
+  throw new Error('DatabaseLiveDO delivery failed.');
 }

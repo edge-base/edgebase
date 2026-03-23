@@ -288,6 +288,18 @@ function buildHookCtx(
   };
 }
 
+function scheduleDbLive(
+  executionCtx: ExecutionContext,
+  promise: Promise<void>,
+  context: string,
+): void {
+  executionCtx.waitUntil(
+    promise.catch((error) => {
+      console.warn(`[db-live] ${context} failed`, error);
+    }),
+  );
+}
+
 // ─── Utility ───
 
 function esc(name: string): string {
@@ -748,9 +760,13 @@ async function handleInsert(
     hookCtx.waitUntil(Promise.resolve(hook(inserted, hookCtx)).catch(() => {}));
   }
 
-  // Emit database-live event (await to ensure broadcast delivery)
+  // Emit database-live event in the background so writes stay fast.
   const eventType = isUpsert && isUpdate ? 'modified' : 'added';
-  await emitDbLiveEvent(c.env, resolved.namespace, tableName, eventType, String(inserted.id ?? ''), inserted);
+  scheduleDbLive(
+    c.executionCtx,
+    emitDbLiveEvent(c.env, resolved.namespace, tableName, eventType, String(inserted.id ?? ''), inserted),
+    `emit ${eventType} ${resolved.namespace}.${tableName}`,
+  );
   c.executionCtx.waitUntil(
     executeDbTriggers(
       tableName,
@@ -889,8 +905,11 @@ async function handleUpdate(
     );
   }
 
-  // Emit database-live event (await to ensure broadcast delivery)
-  await emitDbLiveEvent(c.env, resolved.namespace, tableName, 'modified', id, updated);
+  scheduleDbLive(
+    c.executionCtx,
+    emitDbLiveEvent(c.env, resolved.namespace, tableName, 'modified', id, updated),
+    `emit modified ${resolved.namespace}.${tableName}:${id}`,
+  );
   c.executionCtx.waitUntil(
     executeDbTriggers(
       tableName,
@@ -965,8 +984,11 @@ async function handleDelete(
     );
   }
 
-  // Emit database-live event (await to ensure broadcast delivery)
-  await emitDbLiveEvent(c.env, resolved.namespace, tableName, 'removed', id, stripInternalFields(existingRow));
+  scheduleDbLive(
+    c.executionCtx,
+    emitDbLiveEvent(c.env, resolved.namespace, tableName, 'removed', id, stripInternalFields(existingRow)),
+    `emit removed ${resolved.namespace}.${tableName}:${id}`,
+  );
   c.executionCtx.waitUntil(
     executeDbTriggers(
       tableName,
@@ -1197,12 +1219,20 @@ async function handleBatch(
   // Emit database-live events
   if (allChanges.length > 0) {
     if (allChanges.length >= 10) {
-      c.executionCtx.waitUntil(
+      scheduleDbLive(
+        c.executionCtx,
         emitDbLiveBatchEvent(c.env, resolved.namespace, tableName, allChanges),
+        `emit batch ${resolved.namespace}.${tableName} (${allChanges.length} changes)`,
       );
     } else {
-      await Promise.all(
-        allChanges.map(ch => emitDbLiveEvent(c.env, resolved.namespace, tableName, ch.type, ch.docId, ch.data)),
+      scheduleDbLive(
+        c.executionCtx,
+        Promise.all(
+          allChanges.map((ch) =>
+            emitDbLiveEvent(c.env, resolved.namespace, tableName, ch.type, ch.docId, ch.data),
+          ),
+        ).then(() => undefined),
+        `emit fan-out ${resolved.namespace}.${tableName} (${allChanges.length} changes)`,
       );
     }
   }
@@ -1298,7 +1328,18 @@ async function handleBatchByFilter(
   // Emit database-live events
   if (succeeded > 0) {
     const eventType = body.action === 'delete' ? 'removed' : 'modified';
-    await emitDbLiveEvent(c.env, resolved.namespace, tableName, eventType as 'modified' | 'removed', '_bulk', { action: body.action, count: succeeded });
+    scheduleDbLive(
+      c.executionCtx,
+      emitDbLiveEvent(
+        c.env,
+        resolved.namespace,
+        tableName,
+        eventType as 'modified' | 'removed',
+        '_bulk',
+        { action: body.action, count: succeeded },
+      ),
+      `emit bulk ${resolved.namespace}.${tableName} (${body.action})`,
+    );
   }
 
   return c.json({ processed, succeeded });

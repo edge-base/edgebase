@@ -53,4 +53,20 @@ describe('database-live emitter', () => {
     const payload = JSON.parse(fetch.mock.calls[0]![1].body as string);
     expect(payload.channel).toBe('dblive:workspace:ws-9:documents');
   });
+
+  it('rejects when the database-live DO responds with a server error', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 500 }));
+    const env = {
+      DATABASE_LIVE: {
+        idFromName: vi.fn((name: string) => name),
+        get: vi.fn().mockReturnValue({ fetch }),
+      },
+    } as any;
+
+    await expect(
+      emitDbLiveEvent(env, 'shared', 'posts', 'modified', 'post-1', { id: 'post-1' }),
+    ).rejects.toThrow(/DatabaseLiveDO .* failed with 500/);
+
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
 });
