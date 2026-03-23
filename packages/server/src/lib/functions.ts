@@ -39,7 +39,7 @@ import {
 } from './admin-user-management.js';
 import { hashPassword } from './password.js';
 import { generateId } from './uuid.js';
-import { DbRef, TableRef, DefaultDbApi } from '@edge-base/core';
+import { DbRef, TableRef, DefaultDbApi, HttpClient, ContextManager } from '@edge-base/core';
 import { InternalHttpTransport } from './internal-transport.js';
 
 // ─── Function Context Types ───
@@ -707,6 +707,17 @@ interface BuildAdminDbProxyOptions {
  * direct D1/PG/DO access (no HTTP round-trip).
  */
 export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAdminContext['db'] {
+  // Create HttpClient for sql() tagged template support on TableRef.
+  // Only available when workerUrl is set (routes through /api/sql endpoint).
+  let httpClient: HttpClient | undefined;
+  if (options.workerUrl) {
+    httpClient = new HttpClient({
+      baseUrl: options.workerUrl,
+      serviceKey: options.serviceKey,
+      contextManager: new ContextManager(),
+    });
+  }
+
   return (namespace: string, id?: string): DbRef => {
     // Create a per-DbRef transport with explicit dbContext so that
     // path parsing is unambiguous even when instanceId === 'tables'.
@@ -721,7 +732,14 @@ export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAd
       dbContext: { namespace, instanceId: id },
     });
     const dbApi = new DefaultDbApi(transport);
-    return new DbRef(dbApi, namespace, id);
+    return new DbRef(
+      dbApi,
+      namespace,
+      id,
+      undefined,   // databaseLiveClient — not available server-side
+      undefined,   // filterMatchFn
+      httpClient,  // enables table().sql`...` tagged template
+    );
   };
 }
 
