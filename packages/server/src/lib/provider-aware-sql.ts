@@ -247,6 +247,143 @@ function hasTaggedTemplateSqlMarkers(query: string): boolean {
   return query.includes(TABLE_SQL_PARAM_MARKER_PREFIX);
 }
 
+function isIdentifierContinuationChar(char: string | undefined): boolean {
+  return !!char && /[A-Za-z0-9_$]/.test(char);
+}
+
+function isEscapedPostgresStringStart(query: string, quoteIndex: number): boolean {
+  const prefix = query[quoteIndex - 1];
+  if (prefix !== 'e' && prefix !== 'E') {
+    return false;
+  }
+  return !isIdentifierContinuationChar(query[quoteIndex - 2]);
+}
+
+function unescapeEscapedPostgresQuestionOperators(query: string): string {
+  let normalized = '';
+  let state:
+    | 'code'
+    | 'single'
+    | 'escaped-single'
+    | 'double'
+    | 'line-comment'
+    | 'block-comment'
+    | 'dollar-quote' = 'code';
+  let dollarQuoteToken = '';
+
+  for (let i = 0; i < query.length; i++) {
+    const char = query[i]!;
+    const next = query[i + 1];
+
+    if (state === 'single') {
+      normalized += char;
+      if (char === "'" && next === "'") {
+        normalized += next;
+        i++;
+        continue;
+      }
+      if (char === "'") state = 'code';
+      continue;
+    }
+
+    if (state === 'escaped-single') {
+      normalized += char;
+      if (char === '\\' && next) {
+        normalized += next;
+        i++;
+        continue;
+      }
+      if (char === "'" && next === "'") {
+        normalized += next;
+        i++;
+        continue;
+      }
+      if (char === "'") state = 'code';
+      continue;
+    }
+
+    if (state === 'double') {
+      normalized += char;
+      if (char === '"' && next === '"') {
+        normalized += next;
+        i++;
+        continue;
+      }
+      if (char === '"') state = 'code';
+      continue;
+    }
+
+    if (state === 'line-comment') {
+      normalized += char;
+      if (char === '\n') state = 'code';
+      continue;
+    }
+
+    if (state === 'block-comment') {
+      normalized += char;
+      if (char === '*' && next === '/') {
+        normalized += next;
+        i++;
+        state = 'code';
+      }
+      continue;
+    }
+
+    if (state === 'dollar-quote') {
+      if (query.startsWith(dollarQuoteToken, i)) {
+        normalized += dollarQuoteToken;
+        i += dollarQuoteToken.length - 1;
+        state = 'code';
+        continue;
+      }
+      normalized += char;
+      continue;
+    }
+
+    if (char === "'") {
+      normalized += char;
+      state = isEscapedPostgresStringStart(query, i) ? 'escaped-single' : 'single';
+      continue;
+    }
+    if (char === '\\' && next === '?') {
+      normalized += '?';
+      i++;
+      continue;
+    }
+    if (char === '"') {
+      normalized += char;
+      state = 'double';
+      continue;
+    }
+    if (char === '-' && next === '-') {
+      normalized += '--';
+      i++;
+      state = 'line-comment';
+      continue;
+    }
+    if (char === '/' && next === '*') {
+      normalized += '/*';
+      i++;
+      state = 'block-comment';
+      continue;
+    }
+    if (char === '$') {
+      const dollarQuote = readDollarQuoteToken(query, i);
+      if (dollarQuote) {
+        normalized += dollarQuote;
+        i += dollarQuote.length - 1;
+        state = 'dollar-quote';
+        dollarQuoteToken = dollarQuote;
+        continue;
+      }
+    }
+
+    normalized += char;
+  }
+
+  return normalized;
+}
+
 function replaceTaggedTemplateSqlMarkers(
   query: string,
   style: 'postgres' | 'question',
@@ -267,6 +404,11 @@ function replaceTaggedTemplateSqlMarkers(
   if (markerCount === 0) {
     return query;
   }
+  if (style === 'postgres' && scanSqlPlaceholders(query).sawPostgresPlaceholder) {
+    throw new Error(
+      'Cannot mix tagged template interpolation with PostgreSQL-style $n placeholders.',
+    );
+  }
   if (markerCount !== expectedParamCount) {
     throw new Error(
       'Internal SQL parameter markers do not match params length. Rebuild the tagged template query and try again.',
@@ -280,7 +422,7 @@ function replaceTaggedTemplateSqlMarkers(
     }
   }
 
-  return replaced;
+  return style === 'postgres' ? unescapeEscapedPostgresQuestionOperators(replaced) : replaced;
 }
 
 function isEscapedQuestionMark(query: string, index: number): boolean {
@@ -432,13 +574,13 @@ export function normalizePostgresSqlPlaceholders(query: string, expectedParamCou
   const { questionPlaceholderIndexes, sawPostgresPlaceholder } = scanSqlPlaceholders(query);
   const questionPlaceholderCount = questionPlaceholderIndexes.length;
   if (questionPlaceholderCount === 0) {
-    return query;
+    return unescapeEscapedPostgresQuestionOperators(query);
   }
   if (sawPostgresPlaceholder) {
     throw new Error('Cannot mix ? placeholders with PostgreSQL-style $n placeholders.');
   }
   if (expectedParamCount === 0) {
-    return query;
+    return unescapeEscapedPostgresQuestionOperators(query);
   }
   if (questionPlaceholderCount !== expectedParamCount) {
     throw new Error(

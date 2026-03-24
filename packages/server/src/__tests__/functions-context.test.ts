@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildFunctionContext, getWorkerUrl } from '../lib/functions.js';
 
+function makeTaggedTemplateStrings(parts: string[]): TemplateStringsArray {
+  return Object.assign([...parts], { raw: [...parts] }) as unknown as TemplateStringsArray;
+}
+
 describe('buildFunctionContext admin.db', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -485,6 +489,131 @@ describe('buildFunctionContext admin.db', () => {
         sql: "SELECT COUNT(*) AS total\n        FROM posts\n        WHERE metadata @? '$.featured'\n          AND title = $1",
         params: ['owner'],
       });
+      expect(
+        (databaseNamespace as unknown as { get: ReturnType<typeof vi.fn> }).get,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['postgres', 'neon'] as const)(
+    'unescapes PostgreSQL @\\? operators when admin.db(...).table(...).sql uses tagged-template markers for %s',
+    async (provider) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              columns: ['total'],
+              rows: [{ total: 9 }],
+              rowCount: 1,
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const databaseNamespace = {
+        idFromName: vi.fn().mockReturnValue('do-id'),
+        get: vi.fn(() => ({ fetch: vi.fn() })),
+      } as unknown as DurableObjectNamespace;
+
+      const ctx = buildFunctionContext({
+        request: new Request('http://localhost/api/functions/feed-summary'),
+        auth: null,
+        databaseNamespace,
+        authNamespace: {} as DurableObjectNamespace,
+        d1Database: {} as D1Database,
+        config: {
+          databases: {
+            shared: {
+              provider,
+              tables: {
+                posts: { schema: { title: { type: 'string' } } },
+              },
+            },
+          },
+        },
+        env: {
+          EDGEBASE_DEV_SIDECAR_PORT: '8788',
+          JWT_ADMIN_SECRET: 'jwt-secret',
+          DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
+        } as never,
+        workerUrl: 'http://localhost:8787',
+        serviceKey: 'sk-test',
+      });
+
+      const rows = await ctx.admin.db('shared').table('posts').sql(
+        makeTaggedTemplateStrings([
+          "SELECT COUNT(*) AS total FROM posts WHERE metadata @\\? '$.featured' AND title = ",
+          '',
+        ]),
+        'owner',
+      );
+
+      expect(rows).toEqual([{ total: 9 }]);
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? '{}'))).toEqual({
+        namespace: 'shared',
+        sql: "SELECT COUNT(*) AS total FROM posts WHERE metadata @? '$.featured' AND title = $1",
+        params: ['owner'],
+      });
+      expect(
+        (databaseNamespace as unknown as { get: ReturnType<typeof vi.fn> }).get,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['postgres', 'neon'] as const)(
+    'rejects admin.db(...).table(...).sql tagged templates that mix interpolation with literal $n placeholders for %s',
+    async (provider) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+
+      const databaseNamespace = {
+        idFromName: vi.fn().mockReturnValue('do-id'),
+        get: vi.fn(() => ({ fetch: vi.fn() })),
+      } as unknown as DurableObjectNamespace;
+
+      const ctx = buildFunctionContext({
+        request: new Request('http://localhost/api/functions/feed-summary'),
+        auth: null,
+        databaseNamespace,
+        authNamespace: {} as DurableObjectNamespace,
+        d1Database: {} as D1Database,
+        config: {
+          databases: {
+            shared: {
+              provider,
+              tables: {
+                posts: { schema: { title: { type: 'string' } } },
+              },
+            },
+          },
+        },
+        env: {
+          EDGEBASE_DEV_SIDECAR_PORT: '8788',
+          JWT_ADMIN_SECRET: 'jwt-secret',
+          DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
+        } as never,
+        workerUrl: 'http://localhost:8787',
+        serviceKey: 'sk-test',
+      });
+
+      await expect(
+        ctx.admin.db('shared').table('posts').sql(
+          makeTaggedTemplateStrings([
+            'SELECT COUNT(*) AS total FROM posts WHERE tenant_id = $1 AND title = ',
+            '',
+          ]),
+          'owner',
+        ),
+      ).rejects.toThrow(
+        'Cannot mix tagged template interpolation with PostgreSQL-style $n placeholders.',
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
       expect(
         (databaseNamespace as unknown as { get: ReturnType<typeof vi.fn> }).get,
       ).not.toHaveBeenCalled();
