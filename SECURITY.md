@@ -4,7 +4,10 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
+| 0.2.x   | :white_check_mark: |
+| 0.1.x   | :x:                |
+
+We currently provide security fixes for the latest `0.x` minor release line only unless stated otherwise.
 
 ## Reporting a Vulnerability
 
