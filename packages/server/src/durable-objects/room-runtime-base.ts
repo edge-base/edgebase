@@ -48,6 +48,7 @@ export interface RoomDOEnv {
 
 export interface RoomWSMeta {
   authenticated: boolean;
+  authStateLost?: boolean;
   userId?: string;
   role?: string;
   auth?: SharedAuthContext;
@@ -70,6 +71,8 @@ const DEFAULT_DELTA_BATCH_MS = 50;
 const DEFAULT_RATE_LIMIT_ACTIONS = 10;
 const DEFAULT_RECONNECT_TIMEOUT_MS = 30000;
 const ROOM_CLIENT_LEAVE_CLOSE_CODE = 4005;
+const ROOM_AUTH_STATE_LOST_CLOSE_CODE = 4006;
+const ROOM_AUTH_STATE_LOST_CLOSE_REASON = 'Room authentication state lost';
 const EMPTY_ROOM_CLEANUP_DELAY_MS = 100;
 const DEFAULT_IDLE_TIMEOUT_SEC = 300;
 const ACTION_TIMEOUT_MS = 5000;
@@ -330,6 +333,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     const connectionId = crypto.randomUUID();
     const meta: RoomWSMeta = {
       authenticated: false,
+      authStateLost: false,
       connectionId,
       ip: request.headers.get('CF-Connecting-IP')
         || request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim()
@@ -407,7 +411,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
     // Everything else requires authentication
     if (!meta.authenticated) {
-      this.safeSend(ws, { type: 'error', code: 'NOT_AUTHENTICATED', message: 'Authenticate first' });
+      this.handleUnauthenticatedSocket(ws, meta);
       return;
     }
 
@@ -593,6 +597,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         new Request('http://internal/api/room/auth', { headers }),
       );
       meta.authenticated = true;
+      meta.authStateLost = false;
       meta.userId = auth.id;
       meta.role = auth.role;
       meta.auth = {
@@ -656,7 +661,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     msg: Record<string, unknown>,
   ): Promise<void> {
     if (!meta.authenticated || !meta.userId) {
-      this.safeSend(ws, { type: 'error', code: 'NOT_AUTHENTICATED', message: 'Authenticate first' });
+      this.handleUnauthenticatedSocket(ws, meta);
       return;
     }
 
@@ -1582,6 +1587,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
       const meta: RoomWSMeta = {
         authenticated: false, // Must re-auth after hibernation
+        authStateLost: true,
         connectionId,
         ip,
       };
@@ -1594,6 +1600,24 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   protected setWSMeta(ws: WebSocket, meta: RoomWSMeta): void {
     this._metaCache.set(ws, meta);
+  }
+
+  protected handleUnauthenticatedSocket(ws: WebSocket, meta: RoomWSMeta): void {
+    if (meta.authStateLost) {
+      this.safeSend(ws, {
+        type: 'error',
+        code: 'AUTH_STATE_LOST',
+        message: 'Room authentication state lost. Reconnect required.',
+      });
+      try {
+        ws.close(ROOM_AUTH_STATE_LOST_CLOSE_CODE, ROOM_AUTH_STATE_LOST_CLOSE_REASON);
+      } catch {
+        // Socket may already be closing.
+      }
+      return;
+    }
+
+    this.safeSend(ws, { type: 'error', code: 'NOT_AUTHENTICATED', message: 'Authenticate first' });
   }
 
   // ─── Config ───

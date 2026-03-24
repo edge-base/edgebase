@@ -884,12 +884,13 @@ function createConnectedRoom(roomId = 'room-1') {
   });
   const room = new RoomClient('http://localhost:8688', 'default', roomId, tm);
   const send = vi.fn();
+  const close = vi.fn();
 
-  (room as any).ws = { send } as WebSocket;
+  (room as any).ws = { send, close, readyState: 1 } as WebSocket;
   (room as any).connected = true;
   (room as any).authenticated = true;
 
-  return { room, tm, send };
+  return { room, tm, send, close };
 }
 
 describe('RoomClient — construction', () => {
@@ -1339,6 +1340,30 @@ describe('RoomClient — rooms adapter APIs', () => {
       requestId: directOutbound.requestId,
     }));
     await directPromise;
+    tm.destroy();
+  });
+
+  it('treats generic NOT_AUTHENTICATED signal failures as auth loss and forces reconnect recovery', async () => {
+    const { room, tm, send, close } = createConnectedRoom('signals-auth-loss');
+    const states: string[] = [];
+    room.session.onConnectionStateChange((state) => states.push(state));
+
+    const sendPromise = room.signals.send('chat.announce', { body: 'broadcast' });
+    const outbound = JSON.parse(send.mock.calls[0][0]) as Record<string, unknown>;
+    expect(outbound.type).toBe('signal');
+
+    (room as any).handleMessage(JSON.stringify({
+      type: 'error',
+      code: 'NOT_AUTHENTICATED',
+      message: 'Authenticate first',
+    }));
+
+    await expect(sendPromise).rejects.toMatchObject({
+      code: 401,
+      message: 'Room authentication lost: Authenticate first',
+    });
+    expect(close).toHaveBeenCalledWith(4006, 'Room authentication lost: Authenticate first');
+    expect(states).toContain('auth_lost');
     tm.destroy();
   });
 

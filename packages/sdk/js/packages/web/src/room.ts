@@ -322,6 +322,7 @@ function cloneRecord<T extends Record<string, unknown>>(value: T): T {
 const WS_CONNECTING = 0;
 const WS_OPEN = 1;
 const ROOM_EXPLICIT_LEAVE_CLOSE_CODE = 4005;
+const ROOM_AUTH_STATE_LOST_CLOSE_CODE = 4006;
 const ROOM_EXPLICIT_LEAVE_REASON = 'Client left room';
 const ROOM_EXPLICIT_LEAVE_CLOSE_DELAY_MS = 40;
 
@@ -1177,9 +1178,20 @@ export class RoomClient {
         this.ws = null;
         this.stopHeartbeat();
 
+        const closeMessage = event.reason?.trim()
+          ? `Room authentication lost: ${event.reason}`
+          : 'Room authentication lost';
+        const closeError = event.code === ROOM_AUTH_STATE_LOST_CLOSE_CODE
+          ? new EdgeBaseError(401, closeMessage)
+          : new EdgeBaseError(499, 'WebSocket connection lost');
+
+        if (event.code === ROOM_AUTH_STATE_LOST_CLOSE_CODE && this.connectionState !== 'auth_lost') {
+          this.setConnectionState('auth_lost');
+        }
+
         // Reject pending requests immediately so callers don't hang until timeout
         if (!this.intentionallyLeft) {
-          this.rejectAllPendingRequests(new EdgeBaseError(499, 'WebSocket connection lost'));
+          this.rejectAllPendingRequests(closeError);
         }
 
         if (event.code === 4004 && this.connectionState !== 'kicked') {
@@ -1702,8 +1714,14 @@ export class RoomClient {
   }
 
   private handleError(msg: Record<string, unknown>): void {
+    const code = typeof msg.code === 'string' ? msg.code : '';
+    const message = typeof msg.message === 'string' ? msg.message : '';
+    if (this.shouldTreatErrorAsAuthLoss(code)) {
+      this.handleRoomAuthStateLoss(message);
+    }
+
     for (const handler of this.errorHandlers) {
-      handler({ code: msg.code as string, message: msg.message as string });
+      handler({ code, message });
     }
   }
 
@@ -1786,6 +1804,42 @@ export class RoomClient {
         socket.close(4001, authError.message);
       } catch {
         // Ignore close failures — the server will time out stale sockets.
+      }
+    }
+  }
+
+  private shouldTreatErrorAsAuthLoss(code: string): boolean {
+    if (code === 'AUTH_STATE_LOST') {
+      return true;
+    }
+    if (code !== 'NOT_AUTHENTICATED') {
+      return false;
+    }
+    return this.authenticated || this.hasPendingRequests();
+  }
+
+  private hasPendingRequests(): boolean {
+    return this.pendingRequests.size > 0
+      || this.pendingSignalRequests.size > 0
+      || this.pendingAdminRequests.size > 0
+      || this.pendingMemberStateRequests.size > 0
+      || this.pendingMediaRequests.size > 0;
+  }
+
+  private handleRoomAuthStateLoss(message?: string): void {
+    const detail = message?.trim();
+    const authLossMessage = detail
+      ? `Room authentication lost: ${detail}`
+      : 'Room authentication lost';
+
+    this.setConnectionState('auth_lost');
+    this.rejectAllPendingRequests(new EdgeBaseError(401, authLossMessage));
+
+    if (this.ws && this.ws.readyState === WS_OPEN) {
+      try {
+        this.ws.close(ROOM_AUTH_STATE_LOST_CLOSE_CODE, authLossMessage);
+      } catch {
+        // Socket may already be closing.
       }
     }
   }
