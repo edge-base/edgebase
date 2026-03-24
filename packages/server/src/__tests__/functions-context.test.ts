@@ -52,6 +52,48 @@ describe('buildFunctionContext admin.db', () => {
     );
   });
 
+  it('preserves significant whitespace in dynamic admin.db instance ids', async () => {
+    const databaseFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ items: [{ id: 'm1' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const databaseNamespace = {
+      idFromName: vi.fn(() => 'workspace-id'),
+      get: vi.fn(() => ({ fetch: databaseFetch })),
+    } as unknown as DurableObjectNamespace;
+
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/feed-summary'),
+      auth: null,
+      databaseNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      d1Database: {} as D1Database,
+      config: {
+        databases: {
+          workspace: {
+            instance: true,
+            tables: {
+              members: { schema: { role: { type: 'string' } } },
+            },
+          },
+        },
+      },
+    });
+
+    await ctx.admin.db('workspace', ' ws-1 ').table('members').getList();
+
+    expect(databaseNamespace.idFromName).toHaveBeenCalledWith('workspace: ws-1 ');
+    expect(databaseFetch.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'X-DO-Name': 'workspace: ws-1 ',
+        }),
+      }),
+    );
+  });
+
   it('routes upsert calls through the worker with upsert query params', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: 'p1', title: 'Upserted', action: 'inserted' }), {
@@ -155,6 +197,46 @@ describe('buildFunctionContext admin.db', () => {
     );
   });
 
+  it('rejects instance ids for single-instance admin.sqlProviderAware calls before touching direct backends', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const databaseNamespace = {
+      idFromName: vi.fn(),
+      get: vi.fn(),
+    } as unknown as DurableObjectNamespace;
+
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/feed-summary'),
+      auth: null,
+      databaseNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      d1Database: {} as D1Database,
+      config: {
+        databases: {
+          shared: {
+            tables: {
+              posts: { schema: { title: { type: 'string' } } },
+            },
+          },
+        },
+      },
+      env: {
+        DB_D1_SHARED: {
+          prepare: vi.fn(),
+        },
+      } as never,
+    });
+
+    await expect(
+      ctx.admin.sqlProviderAware('shared', 'shadow', 'SELECT COUNT(*) AS total FROM posts'),
+    ).rejects.toThrow("instanceId is not allowed for single-instance namespace 'shared'");
+    expect(
+      (databaseNamespace as unknown as { get: ReturnType<typeof vi.fn> }).get,
+    ).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('routes admin.sqlWithDirectD1Access through the database DO when env is available', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -203,6 +285,7 @@ describe('buildFunctionContext admin.db', () => {
       config: {
         databases: {
           workspace: {
+            instance: true,
             tables: {
               members: { schema: { userId: { type: 'string' } } },
             },
@@ -331,6 +414,7 @@ describe('buildFunctionContext admin.db', () => {
       config: {
         databases: {
           workspace: {
+            instance: true,
             tables: {
               members: { schema: { userId: { type: 'string' } } },
             },

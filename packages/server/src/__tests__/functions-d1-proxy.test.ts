@@ -226,4 +226,58 @@ describe('buildFunctionContext admin.db D1 routing', () => {
     expect(workerFetch).not.toHaveBeenCalled();
     expect(databaseFetch).not.toHaveBeenCalled();
   });
+
+  it('rejects instance ids for single-instance namespaces before touching D1 handlers', async () => {
+    const handleD1Request = vi.fn();
+    vi.doMock('../lib/d1-handler.js', () => ({
+      handleD1Request,
+    }));
+
+    const workerFetch = vi.fn();
+    vi.stubGlobal('fetch', workerFetch);
+
+    const databaseFetch = vi.fn();
+    const { buildFunctionContext } = await import('../lib/functions.js');
+
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/save-room-signal'),
+      auth: null,
+      databaseNamespace: {
+        idFromName: vi.fn(() => 'shared-id'),
+        get: vi.fn(() => ({ fetch: databaseFetch })),
+      } as unknown as DurableObjectNamespace,
+      authNamespace: {
+        idFromName: vi.fn(() => 'auth-id'),
+        get: vi.fn(() => ({ fetch: vi.fn() })),
+      } as unknown as DurableObjectNamespace,
+      d1Database: {} as D1Database,
+      env: {
+        DATABASE: {} as DurableObjectNamespace,
+        AUTH: {} as DurableObjectNamespace,
+        AUTH_DB: {} as D1Database,
+        DB_D1_SHARED: {} as D1Database,
+      } as never,
+      executionCtx: { waitUntil: vi.fn() } as unknown as ExecutionContext,
+      config: {
+        databases: {
+          shared: {
+            tables: {
+              signals: {
+                schema: {
+                  title: { type: 'string', required: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    await expect(
+      ctx.admin.db('shared', 'shadow').table('signals').getList(),
+    ).rejects.toThrow("instanceId is not allowed for single-instance namespace 'shared'");
+    expect(handleD1Request).not.toHaveBeenCalled();
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(databaseFetch).not.toHaveBeenCalled();
+  });
 });

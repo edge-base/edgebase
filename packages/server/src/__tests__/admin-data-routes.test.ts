@@ -165,6 +165,35 @@ describe('admin data routes', () => {
     });
   });
 
+  it('rejects instanceId query params for single-instance record browsing', async () => {
+    setConfig(
+      createConfig({
+        shared: {
+          tables: {
+            posts: { schema: { title: { type: 'string' } } },
+          },
+        },
+      }),
+    );
+
+    const app = createApp();
+    const response = await app.request(
+      '/admin/api/data/tables/posts/records?instanceId=shadow',
+      {
+        headers: {
+          'X-EdgeBase-Service-Key': 'sk-root',
+        },
+      },
+      {} as Env,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 400,
+      message: "instanceId is not allowed for single-instance namespace 'shared'",
+    });
+  });
+
   it('routes dynamic record browsing to the scoped DO when instanceId is provided', async () => {
     setConfig(
       createConfig({

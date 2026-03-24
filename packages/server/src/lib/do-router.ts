@@ -13,6 +13,31 @@ import { counter } from '../middleware/rate-limit.js';
 
 const RUNTIME_CONFIG_GLOBAL_KEY = '__EDGEBASE_RUNTIME_CONFIG__';
 
+export type DbTargetValidationIssue =
+  | 'namespace_not_found'
+  | 'instance_id_empty'
+  | 'instance_id_invalid'
+  | 'instance_id_required'
+  | 'instance_id_not_allowed';
+
+export type DbTargetResolutionResult =
+  | {
+      ok: true;
+      value: {
+        namespace: string;
+        instanceId?: string;
+        dbBlock: DbBlock;
+        dynamic: boolean;
+      };
+    }
+  | {
+      ok: false;
+      issue: DbTargetValidationIssue;
+      status: 400 | 404;
+      namespace: string;
+      instanceId?: string;
+    };
+
 // ─── DO Instance ID Generation (§2) ───
 
 /**
@@ -50,6 +75,105 @@ export function parseDbDoName(doName: string): { namespace: string; id?: string 
   return {
     namespace: doName.slice(0, colonIdx),
     id: doName.slice(colonIdx + 1),
+  };
+}
+
+export function normalizeDbInstanceId(instanceId: string | null | undefined): string | undefined {
+  return typeof instanceId === 'string' ? instanceId : undefined;
+}
+
+export function formatDbTargetValidationIssue(
+  issue: DbTargetValidationIssue,
+  namespace: string,
+  options: {
+    namespaceLabel?: string;
+    instanceIdLabel?: string;
+    includeSectionRef?: boolean;
+  } = {},
+): string {
+  const namespaceLabel = options.namespaceLabel ?? 'Database';
+  const instanceIdLabel = options.instanceIdLabel ?? 'instanceId';
+  switch (issue) {
+    case 'namespace_not_found':
+      return `${namespaceLabel} '${namespace}' not found in config`;
+    case 'instance_id_empty':
+      return `${instanceIdLabel} must not be empty`;
+    case 'instance_id_invalid':
+      return options.includeSectionRef
+        ? `${instanceIdLabel} must not contain ':' (§2)`
+        : `${instanceIdLabel} must not contain ':'`;
+    case 'instance_id_required':
+      return `${instanceIdLabel} is required for dynamic namespace '${namespace}'`;
+    case 'instance_id_not_allowed':
+      return `${instanceIdLabel} is not allowed for single-instance namespace '${namespace}'`;
+  }
+}
+
+export function resolveDbTarget(
+  config: EdgeBaseConfig,
+  namespace: string,
+  instanceId?: string | null,
+): DbTargetResolutionResult {
+  const normalizedInstanceId = normalizeDbInstanceId(instanceId);
+  const dbBlock = config.databases?.[namespace];
+  if (!dbBlock) {
+    return {
+      ok: false,
+      issue: 'namespace_not_found',
+      status: 404,
+      namespace,
+      instanceId: normalizedInstanceId,
+    };
+  }
+
+  if (normalizedInstanceId !== undefined && normalizedInstanceId.trim().length === 0) {
+    return {
+      ok: false,
+      issue: 'instance_id_empty',
+      status: 400,
+      namespace,
+      instanceId: normalizedInstanceId,
+    };
+  }
+
+  if (normalizedInstanceId?.includes(':')) {
+    return {
+      ok: false,
+      issue: 'instance_id_invalid',
+      status: 400,
+      namespace,
+      instanceId: normalizedInstanceId,
+    };
+  }
+
+  const dynamic = isDynamicDbBlock(dbBlock);
+  if (dynamic && normalizedInstanceId === undefined) {
+    return {
+      ok: false,
+      issue: 'instance_id_required',
+      status: 400,
+      namespace,
+      instanceId: normalizedInstanceId,
+    };
+  }
+  if (!dynamic && normalizedInstanceId !== undefined) {
+    return {
+      ok: false,
+      issue: 'instance_id_not_allowed',
+      status: 400,
+      namespace,
+      instanceId: normalizedInstanceId,
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      namespace,
+      instanceId: normalizedInstanceId,
+      dbBlock,
+      dynamic,
+    },
   };
 }
 

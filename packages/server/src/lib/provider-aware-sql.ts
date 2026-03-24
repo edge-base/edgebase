@@ -1,7 +1,12 @@
 import type { EdgeBaseConfig } from '@edge-base/shared';
 import { executeD1Sql } from './d1-sql.js';
 import { executeDoSql } from './do-sql.js';
-import { getD1BindingName, shouldRouteToD1 } from './do-router.js';
+import {
+  formatDbTargetValidationIssue,
+  getD1BindingName,
+  resolveDbTarget,
+  shouldRouteToD1,
+} from './do-router.js';
 import {
   ensureLocalDevPostgresSchema,
   getLocalDevPostgresExecOptions,
@@ -710,23 +715,17 @@ export async function executeProviderAwareSql(
   query: string,
   params: unknown[] = [],
 ): Promise<ProviderAwareSqlResult> {
-  const dbBlock = opts.config.databases?.[namespace];
   const usesTaggedTemplateMarkers = hasTaggedTemplateSqlMarkers(query);
   const rewriteTaggedTemplateQuery = (style: 'postgres' | 'question') =>
     usesTaggedTemplateMarkers ? replaceTaggedTemplateSqlMarkers(query, style, params.length) : query;
-  const isDynamicNamespace = !!(
-    dbBlock?.instance ||
-    dbBlock?.access?.canCreate ||
-    dbBlock?.access?.access
-  );
-  if (isDynamicNamespace && !id) {
-    throw new Error(
-      `admin.sqlProviderAware() requires an id for dynamic namespace '${namespace}'.`,
-    );
+  const target = resolveDbTarget(opts.config, namespace, id);
+  if (!target.ok) {
+    throw new Error(formatDbTargetValidationIssue(target.issue, namespace));
   }
+  const { dbBlock, instanceId } = target.value;
 
   if (opts.env) {
-    if (!id && (dbBlock?.provider === 'neon' || dbBlock?.provider === 'postgres')) {
+    if (!instanceId && (dbBlock.provider === 'neon' || dbBlock.provider === 'postgres')) {
       const bindingName = getProviderBindingName(namespace);
       const envRecord = opts.env as unknown as Record<string, unknown>;
       const hyperdrive = envRecord[bindingName] as { connectionString?: string } | undefined;
@@ -759,7 +758,7 @@ export async function executeProviderAwareSql(
       );
     }
 
-    if (!id && shouldRouteToD1(namespace, opts.config)) {
+    if (!instanceId && shouldRouteToD1(namespace, opts.config)) {
       const bindingName = getD1BindingName(namespace);
       const d1 = (opts.env as unknown as Record<string, unknown>)[bindingName] as
         | D1Database
@@ -780,7 +779,7 @@ export async function executeProviderAwareSql(
       const rows = await executeDoSql({
         databaseNamespace: opts.databaseNamespace,
         namespace,
-        id,
+        id: instanceId,
         query: rewriteTaggedTemplateQuery('question'),
         params,
         internal: true,
@@ -800,7 +799,12 @@ export async function executeProviderAwareSql(
         'Content-Type': 'application/json',
         'X-EdgeBase-Service-Key': opts.serviceKey,
       },
-      body: JSON.stringify({ namespace, id, sql: rewriteTaggedTemplateQuery('question'), params }),
+      body: JSON.stringify({
+        namespace,
+        id: instanceId,
+        sql: rewriteTaggedTemplateQuery('question'),
+        params,
+      }),
     });
     if (!res.ok) {
       const err = (await res.json().catch(() => ({ message: 'SQL execution failed' }))) as {

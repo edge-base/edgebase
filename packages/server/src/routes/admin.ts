@@ -23,7 +23,16 @@ import {
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { generateId } from '../lib/uuid.js';
 import { validateKey, buildConstraintCtx, extractBearerToken, resolveServiceKeyCandidate } from '../lib/service-key.js';
-import { parseConfig, getDbDoName, getD1BindingName, shouldRouteToD1 } from '../lib/do-router.js';
+import {
+  formatDbTargetValidationIssue,
+  getD1BindingName,
+  getDbDoName,
+  isDynamicDbBlock,
+  normalizeDbInstanceId,
+  parseConfig,
+  resolveDbTarget,
+  shouldRouteToD1,
+} from '../lib/do-router.js';
 import { handleD1Request, d1BatchImport } from '../lib/d1-handler.js';
 import { fetchDOWithRetry } from '../lib/do-retry.js';
 import { dumpNamespaceTables } from '../lib/namespace-dump.js';
@@ -734,19 +743,6 @@ function getTableDO(env: Env, tableName: string, config: ReturnType<typeof parse
   return { stub: env.DATABASE.get(env.DATABASE.idFromName(doName)), doName };
 }
 
-function isDynamicDbBlock(
-  dbBlock: {
-    instance?: boolean;
-    access?: {
-      canCreate?: unknown;
-      access?: unknown;
-    };
-  } | undefined,
-): boolean {
-  if (!dbBlock) return false;
-  return !!(dbBlock.instance || dbBlock.access?.canCreate || dbBlock.access?.access);
-}
-
 function getEffectiveDbProvider(namespace: string, config: ReturnType<typeof parseConfig>): 'do' | 'd1' | 'postgres' | 'neon' {
   const dbBlock = config.databases?.[namespace];
   if (!dbBlock) return 'do';
@@ -763,10 +759,7 @@ function getEffectiveDbProvider(namespace: string, config: ReturnType<typeof par
 }
 
 function getRequestedInstanceId(c: { req: { query: (name: string) => string | undefined } }): string | undefined {
-  const raw = c.req.query('instanceId');
-  if (!raw) return undefined;
-  const trimmed = raw.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
+  return normalizeDbInstanceId(c.req.query('instanceId'));
 }
 
 function validateAdminTableInstanceId(
@@ -774,28 +767,27 @@ function validateAdminTableInstanceId(
   config: ReturnType<typeof parseConfig>,
   instanceId: string | undefined,
 ): Response | null {
-  const dynamic = isDynamicDbBlock(config.databases?.[namespace]);
-  if (!instanceId) {
-    if (dynamic) {
-      return new Response(
-        JSON.stringify({
-          code: 400,
-          message: `instanceId is required for dynamic namespace '${namespace}'`,
-        }),
-        {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
-    }
+  const target = resolveDbTarget(config, namespace, instanceId);
+  if (target.ok) {
     return null;
   }
-
-  if (instanceId.includes(':')) {
+  if (target.status !== 400) {
+    return new Response(
+      JSON.stringify({
+        code: target.status,
+        message: formatDbTargetValidationIssue(target.issue, namespace),
+      }),
+      {
+        status: target.status,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+  if (target.issue === 'instance_id_invalid') {
     return new Response(
       JSON.stringify({
         code: 400,
-        message: 'instanceId must not contain \':\'',
+        message: formatDbTargetValidationIssue(target.issue, namespace),
       }),
       {
         status: 400,
@@ -803,8 +795,16 @@ function validateAdminTableInstanceId(
       },
     );
   }
-
-  return null;
+  return new Response(
+    JSON.stringify({
+      code: 400,
+      message: formatDbTargetValidationIssue(target.issue, namespace),
+    }),
+    {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    },
+  );
 }
 
 async function restoreAdminNamespaceTables(
@@ -974,7 +974,7 @@ api.openapi(adminGetTableRecords, async (c) => {
   const name = c.req.param('name')!;
   const config = parseConfig(c.env);
   const namespace = findNamespaceForTable(name, config);
-  const instanceId = isDynamicDbBlock(config.databases?.[namespace]) ? getRequestedInstanceId(c) : undefined;
+  const instanceId = getRequestedInstanceId(c);
   const instanceError = validateAdminTableInstanceId(namespace, config, instanceId);
   if (instanceError) return instanceError;
 
@@ -1027,7 +1027,7 @@ api.openapi(adminCreateTableRecord, async (c) => {
   const name = c.req.param('name')!;
   const config = parseConfig(c.env);
   const namespace = findNamespaceForTable(name, config);
-  const instanceId = isDynamicDbBlock(config.databases?.[namespace]) ? getRequestedInstanceId(c) : undefined;
+  const instanceId = getRequestedInstanceId(c);
   const instanceError = validateAdminTableInstanceId(namespace, config, instanceId);
   if (instanceError) return instanceError;
 
@@ -1081,7 +1081,7 @@ api.openapi(adminUpdateTableRecord, async (c) => {
   const id = c.req.param('id')!;
   const config = parseConfig(c.env);
   const namespace = findNamespaceForTable(name, config);
-  const instanceId = isDynamicDbBlock(config.databases?.[namespace]) ? getRequestedInstanceId(c) : undefined;
+  const instanceId = getRequestedInstanceId(c);
   const instanceError = validateAdminTableInstanceId(namespace, config, instanceId);
   if (instanceError) return instanceError;
 
@@ -1129,7 +1129,7 @@ api.openapi(adminDeleteTableRecord, async (c) => {
   const id = c.req.param('id')!;
   const config = parseConfig(c.env);
   const namespace = findNamespaceForTable(name, config);
-  const instanceId = isDynamicDbBlock(config.databases?.[namespace]) ? getRequestedInstanceId(c) : undefined;
+  const instanceId = getRequestedInstanceId(c);
   const instanceError = validateAdminTableInstanceId(namespace, config, instanceId);
   if (instanceError) return instanceError;
 
