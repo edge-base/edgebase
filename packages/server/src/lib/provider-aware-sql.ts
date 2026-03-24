@@ -579,7 +579,7 @@ export async function executeProviderAwareSql(
   );
   if (isDynamicNamespace && !id) {
     throw new Error(
-      `admin.sqlWithDirectD1Access() requires an id for dynamic namespace '${namespace}'.`,
+      `admin.sqlProviderAware() requires an id for dynamic namespace '${namespace}'.`,
     );
   }
 
@@ -681,5 +681,5 @@ export async function executeProviderAwareSql(
     };
   }
 
-  throw new Error('admin.sqlWithDirectD1Access() requires env or workerUrl.');
+  throw new Error('admin.sqlProviderAware() requires env or workerUrl.');
 }

@@ -100,7 +100,16 @@ export interface FunctionAdminContext {
    * then falls back to the internal HTTP SQL route when needed.
    *
    * @example
-   * const rows = await ctx.admin.sqlWithDirectD1Access('shared', undefined, 'SELECT * FROM posts WHERE status = ?', ['published']);
+   * const rows = await ctx.admin.sqlProviderAware('shared', undefined, 'SELECT * FROM posts WHERE status = ?', ['published']);
+   */
+  sqlProviderAware(
+    namespace: string,
+    id: string | undefined,
+    query: string,
+    params?: unknown[],
+  ): Promise<unknown[]>;
+  /**
+   * @deprecated Use `sqlProviderAware()` instead.
    */
   sqlWithDirectD1Access(
     namespace: string,
@@ -730,9 +739,9 @@ interface BuildAdminDbProxyOptions {
   preferDirectDo?: boolean;
 }
 
-// ─── Shared SQL executor — D1 direct → DO direct → HTTP fallback ───
+// ─── Shared SQL executor — provider-aware direct paths → HTTP fallback ───
 
-export interface SqlWithDirectD1AccessOptions {
+export interface SqlProviderAwareOptions {
   env?: Env;
   config: EdgeBaseConfig;
   databaseNamespace?: DurableObjectNamespace;
@@ -749,8 +758,8 @@ export interface SqlWithDirectD1AccessOptions {
  *
  * Shared by buildFunctionContext, auth hooks, storage hooks, and plugin migrations.
  */
-export async function executeSqlWithDirectBindingAccess(
-  opts: SqlWithDirectD1AccessOptions,
+export async function executeSqlProviderAware(
+  opts: SqlProviderAwareOptions,
   namespace: string,
   id: string | undefined,
   query: string,
@@ -772,9 +781,9 @@ export async function executeSqlWithDirectBindingAccess(
   return result.rows;
 }
 
-// Kept as a backwards-compatible alias for internal callers and the public
-// App Functions admin context surface.
-export const executeSqlWithDirectD1Access = executeSqlWithDirectBindingAccess;
+// Backwards-compatible aliases for existing internal callers and public surfaces.
+export const executeSqlWithDirectBindingAccess = executeSqlProviderAware;
+export const executeSqlWithDirectD1Access = executeSqlProviderAware;
 
 /**
  * Build the admin DB proxy that returns real DbRef/TableRef instances
@@ -798,7 +807,7 @@ export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAd
     query: string,
     params?: unknown[],
   ) =>
-    executeSqlWithDirectBindingAccess(
+    executeSqlProviderAware(
       {
         env: options.env,
         config: options.config,
@@ -1086,6 +1095,25 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
     executionCtx: options.executionCtx,
     preferDirectDo: options.preferDirectDoDb,
   });
+  const sqlProviderAware = (
+    namespace: string,
+    id: string | undefined,
+    query: string,
+    params?: unknown[],
+  ) =>
+    executeSqlProviderAware(
+      {
+        env: options.env,
+        config: options.config,
+        databaseNamespace: options.databaseNamespace,
+        workerUrl: options.workerUrl,
+        serviceKey: options.serviceKey,
+      },
+      namespace,
+      id,
+      query,
+      params,
+    );
 
   // ─── context.admin — AdminEdgeBase-shaped internal proxy ───
   const admin: FunctionAdminContext = {
@@ -1095,25 +1123,8 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
     db: adminDb,
     auth: adminAuthContext,
     // ─── Direct provider-aware SQL — delegates to shared executor ───
-    sqlWithDirectD1Access: (
-      namespace: string,
-      id: string | undefined,
-      query: string,
-      params?: unknown[],
-    ) =>
-      executeSqlWithDirectBindingAccess(
-        {
-          env: options.env,
-          config: options.config,
-          databaseNamespace: options.databaseNamespace,
-          workerUrl: options.workerUrl,
-          serviceKey: options.serviceKey,
-        },
-        namespace,
-        id,
-        query,
-        params,
-      ),
+    sqlProviderAware,
+    sqlWithDirectD1Access: sqlProviderAware,
     async broadcast(
       channel: string,
       event: string,

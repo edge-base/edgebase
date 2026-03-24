@@ -97,7 +97,7 @@ describe('buildFunctionContext admin.db', () => {
     );
   });
 
-  it('normalizes admin.sqlWithDirectD1Access worker responses to row arrays', async () => {
+  it('normalizes admin.sqlProviderAware worker responses to row arrays', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -132,7 +132,7 @@ describe('buildFunctionContext admin.db', () => {
       serviceKey: 'sk-test',
     });
 
-    const rows = await ctx.admin.sqlWithDirectD1Access(
+    const rows = await ctx.admin.sqlProviderAware(
       'shared',
       undefined,
       'SELECT COUNT(*) AS total FROM posts',
@@ -492,7 +492,7 @@ describe('buildFunctionContext admin.db', () => {
   );
 
   it.each(['postgres', 'neon'] as const)(
-    'routes admin.sqlWithDirectD1Access through the provider-aware direct SQL executor for %s',
+    'routes admin.sqlProviderAware through the provider-aware direct SQL executor for %s',
     async (provider) => {
       const fetchMock = vi
         .fn()
@@ -542,7 +542,7 @@ describe('buildFunctionContext admin.db', () => {
         serviceKey: 'sk-test',
       });
 
-      const rows = await ctx.admin.sqlWithDirectD1Access(
+      const rows = await ctx.admin.sqlProviderAware(
         'shared',
         undefined,
         'SELECT COUNT(*) AS total FROM posts WHERE title = ?',
@@ -562,7 +562,7 @@ describe('buildFunctionContext admin.db', () => {
   );
 
   it.each(['postgres', 'neon'] as const)(
-    'preserves PostgreSQL @? operators when admin.sqlWithDirectD1Access uses the provider-aware direct SQL executor for %s',
+    'preserves PostgreSQL @? operators when admin.sqlProviderAware uses the provider-aware direct SQL executor for %s',
     async (provider) => {
       const fetchMock = vi
         .fn()
@@ -612,7 +612,7 @@ describe('buildFunctionContext admin.db', () => {
         serviceKey: 'sk-test',
       });
 
-      const rows = await ctx.admin.sqlWithDirectD1Access(
+      const rows = await ctx.admin.sqlProviderAware(
         'shared',
         undefined,
         "SELECT COUNT(*) AS total FROM posts WHERE metadata @? '$.featured' AND title = ?",

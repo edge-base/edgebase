@@ -335,6 +335,28 @@ function buildMigrationAdminContext(
     return directUrl ?? null;
   }
 
+  const sqlProviderAware = async (
+    namespace: string,
+    id: string | undefined,
+    query: string,
+    params?: unknown[],
+  ): Promise<unknown[]> => {
+    const result = await executeProviderAwareSql(
+      {
+        env,
+        config,
+        databaseNamespace: dbNamespace,
+        workerUrl,
+        serviceKey,
+      },
+      namespace,
+      id,
+      query,
+      params ?? [],
+    );
+    return result.rows as unknown[];
+  };
+
   return {
     db(namespace: string, id?: string) {
       const pgConnStr = resolvePgConnString(namespace);
@@ -351,26 +373,14 @@ function buildMigrationAdminContext(
       return doAdminDb(namespace, id);
     },
 
+    sqlProviderAware,
     async sqlWithDirectD1Access(
       namespace: string,
       id: string | undefined,
       query: string,
       params?: unknown[],
     ): Promise<unknown[]> {
-      const result = await executeProviderAwareSql(
-        {
-          env,
-          config,
-          databaseNamespace: dbNamespace,
-          workerUrl,
-          serviceKey,
-        },
-        namespace,
-        id,
-        query,
-        params ?? [],
-      );
-      return result.rows as unknown[];
+      return sqlProviderAware(namespace, id, query, params);
     },
 
     // ─── Convenience shortcut: table(name) → db('shared').table(name) ───
