@@ -235,7 +235,7 @@ describe('TableRef', () => {
     expect(sqlExecutor).toHaveBeenCalledWith(
       'shared',
       undefined,
-      'SELECT COUNT(*) AS total FROM posts WHERE status = ?',
+      `SELECT COUNT(*) AS total FROM posts WHERE status = ${TABLE_SQL_PARAM_MARKER_PREFIX}1${TABLE_SQL_PARAM_MARKER_SUFFIX}`,
       ['published'],
     );
     expect(httpClient.post).not.toHaveBeenCalled();
@@ -280,6 +280,8 @@ import {
   DocRef,
   DbRef,
   OrBuilder,
+  TABLE_SQL_PARAM_MARKER_PREFIX,
+  TABLE_SQL_PARAM_MARKER_SUFFIX,
   type ListResult,
   type BatchByFilterResult,
 } from '../../src/table.js';

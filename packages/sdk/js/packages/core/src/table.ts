@@ -69,6 +69,13 @@ export type TableSqlExecutor = (
   params?: unknown[],
 ) => Promise<unknown[]>;
 
+export const TABLE_SQL_PARAM_MARKER_PREFIX = '__EDGEBASE_SQL_PARAM_';
+export const TABLE_SQL_PARAM_MARKER_SUFFIX = '__';
+
+function buildTableSqlParamMarker(index: number): string {
+  return `${TABLE_SQL_PARAM_MARKER_PREFIX}${index}${TABLE_SQL_PARAM_MARKER_SUFFIX}`;
+}
+
 // ─── Database Live Channel Builder ───
 
 /**
@@ -933,14 +940,16 @@ export class TableRef<T = Record<string, unknown>> {
    * `;
    */
   async sql(strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown[]> {
-    // Build parameterized query from tagged template — each ${} becomes ?
+    // Build parameterized query from tagged template. Direct executors receive
+    // stable internal markers so PostgreSQL operator syntax stays unambiguous.
     let query = '';
     const params: unknown[] = [];
+    const useDirectMarkers = !!this._sqlExecutor;
     for (let i = 0; i < strings.length; i++) {
       query += strings[i];
       if (i < values.length) {
-        query += '?';
         params.push(values[i]);
+        query += useDirectMarkers ? buildTableSqlParamMarker(params.length) : '?';
       }
     }
     if (this._sqlExecutor) {

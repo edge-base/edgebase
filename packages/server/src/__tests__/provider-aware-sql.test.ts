@@ -52,6 +52,37 @@ describe('provider-aware raw SQL helpers', () => {
     ).toBe("SELECT * FROM posts WHERE metadata ? 'featured' AND id = $1");
   });
 
+  it('preserves PostgreSQL @? operators while still normalizing bind placeholders', () => {
+    expect(
+      normalizePostgresSqlPlaceholders(
+        "SELECT * FROM posts WHERE metadata @? '$.featured' AND id = ?",
+        1,
+      ),
+    ).toBe("SELECT * FROM posts WHERE metadata @? '$.featured' AND id = $1");
+  });
+
+  it('preserves PostgreSQL ?| operators while still normalizing bind placeholders', () => {
+    expect(
+      normalizePostgresSqlPlaceholders(
+        "SELECT * FROM posts WHERE tags ?| ARRAY['featured', 'pinned'] AND id = ?",
+        1,
+      ),
+    ).toBe("SELECT * FROM posts WHERE tags ?| ARRAY['featured', 'pinned'] AND id = $1");
+  });
+
+  it('supports escaped PostgreSQL question-mark operators as a raw SQL escape hatch', () => {
+    expect(
+      normalizePostgresSqlPlaceholders(
+        "SELECT * FROM posts WHERE metadata @\\? '$.featured' AND id = ?",
+        1,
+      ),
+    ).toBe("SELECT * FROM posts WHERE metadata @? '$.featured' AND id = $1");
+  });
+
+  it('still treats question marks after prefix operators as bind placeholders when an expression is expected', () => {
+    expect(normalizePostgresSqlPlaceholders('SELECT @?::int', 1)).toBe('SELECT @$1::int');
+  });
+
   it('treats SELECT-list question marks as bind placeholders, not operators', () => {
     expect(normalizePostgresSqlPlaceholders('SELECT ?, ? FROM posts', 2)).toBe(
       'SELECT $1, $2 FROM posts',

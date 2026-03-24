@@ -422,6 +422,76 @@ describe('buildFunctionContext admin.db', () => {
   );
 
   it.each(['postgres', 'neon'] as const)(
+    'preserves PostgreSQL @? operators when admin.db(...).table(...).sql uses the provider-aware direct SQL executor for %s',
+    async (provider) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              columns: ['total'],
+              rows: [{ total: 4 }],
+              rowCount: 1,
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const databaseNamespace = {
+        idFromName: vi.fn().mockReturnValue('do-id'),
+        get: vi.fn(() => ({ fetch: vi.fn() })),
+      } as unknown as DurableObjectNamespace;
+
+      const ctx = buildFunctionContext({
+        request: new Request('http://localhost/api/functions/feed-summary'),
+        auth: null,
+        databaseNamespace,
+        authNamespace: {} as DurableObjectNamespace,
+        d1Database: {} as D1Database,
+        config: {
+          databases: {
+            shared: {
+              provider,
+              tables: {
+                posts: { schema: { title: { type: 'string' } } },
+              },
+            },
+          },
+        },
+        env: {
+          EDGEBASE_DEV_SIDECAR_PORT: '8788',
+          JWT_ADMIN_SECRET: 'jwt-secret',
+          DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
+        } as never,
+        workerUrl: 'http://localhost:8787',
+        serviceKey: 'sk-test',
+      });
+
+      const rows = await ctx.admin.db('shared').table('posts').sql`
+        SELECT COUNT(*) AS total
+        FROM posts
+        WHERE metadata @? '$.featured'
+          AND title = ${'owner'}
+      `;
+
+      expect(rows).toEqual([{ total: 4 }]);
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? '{}'))).toEqual({
+        namespace: 'shared',
+        sql: "SELECT COUNT(*) AS total\n        FROM posts\n        WHERE metadata @? '$.featured'\n          AND title = $1",
+        params: ['owner'],
+      });
+      expect(
+        (databaseNamespace as unknown as { get: ReturnType<typeof vi.fn> }).get,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['postgres', 'neon'] as const)(
     'routes admin.sqlWithDirectD1Access through the provider-aware direct SQL executor for %s',
     async (provider) => {
       const fetchMock = vi
@@ -483,6 +553,76 @@ describe('buildFunctionContext admin.db', () => {
       expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? '{}'))).toEqual({
         namespace: 'shared',
         sql: 'SELECT COUNT(*) AS total FROM posts WHERE title = $1',
+        params: ['owner'],
+      });
+      expect(
+        (databaseNamespace as unknown as { get: ReturnType<typeof vi.fn> }).get,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['postgres', 'neon'] as const)(
+    'preserves PostgreSQL @? operators when admin.sqlWithDirectD1Access uses the provider-aware direct SQL executor for %s',
+    async (provider) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              columns: ['total'],
+              rows: [{ total: 6 }],
+              rowCount: 1,
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const databaseNamespace = {
+        idFromName: vi.fn().mockReturnValue('do-id'),
+        get: vi.fn(() => ({ fetch: vi.fn() })),
+      } as unknown as DurableObjectNamespace;
+
+      const ctx = buildFunctionContext({
+        request: new Request('http://localhost/api/functions/feed-summary'),
+        auth: null,
+        databaseNamespace,
+        authNamespace: {} as DurableObjectNamespace,
+        d1Database: {} as D1Database,
+        config: {
+          databases: {
+            shared: {
+              provider,
+              tables: {
+                posts: { schema: { title: { type: 'string' } } },
+              },
+            },
+          },
+        },
+        env: {
+          EDGEBASE_DEV_SIDECAR_PORT: '8788',
+          JWT_ADMIN_SECRET: 'jwt-secret',
+          DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
+        } as never,
+        workerUrl: 'http://localhost:8787',
+        serviceKey: 'sk-test',
+      });
+
+      const rows = await ctx.admin.sqlWithDirectD1Access(
+        'shared',
+        undefined,
+        "SELECT COUNT(*) AS total FROM posts WHERE metadata @? '$.featured' AND title = ?",
+        ['owner'],
+      );
+
+      expect(rows).toEqual([{ total: 6 }]);
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? '{}'))).toEqual({
+        namespace: 'shared',
+        sql: "SELECT COUNT(*) AS total FROM posts WHERE metadata @? '$.featured' AND title = $1",
         params: ['owner'],
       });
       expect(

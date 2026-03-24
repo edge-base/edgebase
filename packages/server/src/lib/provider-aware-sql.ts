@@ -45,6 +45,17 @@ function readDollarQuoteToken(query: string, index: number): string | null {
   return match?.[0] ?? null;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Keep this marker format in sync with @edge-base/core TableRef.sql().
+const TABLE_SQL_PARAM_MARKER_PREFIX = '__EDGEBASE_SQL_PARAM_';
+const TABLE_SQL_PARAM_MARKER_SUFFIX = '__';
+const TABLE_SQL_PARAM_MARKER_RE = new RegExp(
+  `${escapeRegExp(TABLE_SQL_PARAM_MARKER_PREFIX)}(\\d+)${escapeRegExp(TABLE_SQL_PARAM_MARKER_SUFFIX)}`,
+  'g',
+);
 const SQL_OPERATOR_CHARS = '+-*/<>=~!@#%^&|`?:';
 const PRECEDING_WORDS_THAT_EXPECT_EXPRESSION = new Set([
   'ALL',
@@ -232,10 +243,88 @@ function canTokenStartExpression(token: SqlContextToken | null): boolean {
   }
 }
 
-function isQuestionBindPlaceholder(query: string, index: number): boolean {
+function hasTaggedTemplateSqlMarkers(query: string): boolean {
+  return query.includes(TABLE_SQL_PARAM_MARKER_PREFIX);
+}
+
+function replaceTaggedTemplateSqlMarkers(
+  query: string,
+  style: 'postgres' | 'question',
+  expectedParamCount = 0,
+): string {
+  let markerCount = 0;
+  const seenIndexes = new Set<number>();
+  const replaced = query.replace(TABLE_SQL_PARAM_MARKER_RE, (_match, indexText: string) => {
+    const index = Number(indexText);
+    if (!Number.isInteger(index) || index < 1) {
+      throw new Error('Invalid internal SQL parameter marker index.');
+    }
+    markerCount++;
+    seenIndexes.add(index);
+    return style === 'postgres' ? `$${index}` : '?';
+  });
+
+  if (markerCount === 0) {
+    return query;
+  }
+  if (markerCount !== expectedParamCount) {
+    throw new Error(
+      'Internal SQL parameter markers do not match params length. Rebuild the tagged template query and try again.',
+    );
+  }
+  for (let index = 1; index <= expectedParamCount; index++) {
+    if (!seenIndexes.has(index)) {
+      throw new Error(
+        'Internal SQL parameter markers are out of sequence. Rebuild the tagged template query and try again.',
+      );
+    }
+  }
+
+  return replaced;
+}
+
+function isEscapedQuestionMark(query: string, index: number): boolean {
+  return query[index - 1] === '\\';
+}
+
+function isStandalonePostgresQuestionOperator(query: string, index: number): boolean {
   const previousToken = readPreviousSqlToken(query, index);
   const nextToken = readNextSqlToken(query, index);
-  return !(canTokenEndExpression(previousToken) && (canTokenStartExpression(nextToken) || nextToken?.kind === 'operator'));
+  return canTokenEndExpression(previousToken) && canTokenStartExpression(nextToken);
+}
+
+function isPrefixedPostgresQuestionOperator(query: string, index: number): boolean {
+  const nextChar = query[index + 1];
+  if (nextChar !== '|' && nextChar !== '&') {
+    return false;
+  }
+  return canTokenEndExpression(readPreviousSqlToken(query, index));
+}
+
+function isSuffixedPostgresQuestionOperator(query: string, index: number): boolean {
+  if (query[index - 1] !== '@') {
+    return false;
+  }
+  return (
+    canTokenEndExpression(readPreviousSqlToken(query, index - 1)) &&
+    canTokenStartExpression(readNextSqlToken(query, index))
+  );
+}
+
+function isQuestionBindPlaceholder(query: string, index: number): boolean {
+  if (isEscapedQuestionMark(query, index)) {
+    return false;
+  }
+  if (isSuffixedPostgresQuestionOperator(query, index)) {
+    return false;
+  }
+  if (isPrefixedPostgresQuestionOperator(query, index)) {
+    return false;
+  }
+  if (isStandalonePostgresQuestionOperator(query, index)) {
+    return false;
+  }
+  return true;
 }
 
 function scanSqlPlaceholders(query: string): {
@@ -293,6 +382,10 @@ function scanSqlPlaceholders(query: string): {
 
     if (char === "'") {
       state = 'single';
+      continue;
+    }
+    if (char === '\\' && next === '?') {
+      i++;
       continue;
     }
     if (char === '"') {
@@ -418,6 +511,11 @@ export function normalizePostgresSqlPlaceholders(query: string, expectedParamCou
       state = 'single';
       continue;
     }
+    if (char === '\\' && next === '?') {
+      normalized += '?';
+      i++;
+      continue;
+    }
     if (char === '"') {
       normalized += char;
       state = 'double';
@@ -471,6 +569,9 @@ export async function executeProviderAwareSql(
   params: unknown[] = [],
 ): Promise<ProviderAwareSqlResult> {
   const dbBlock = opts.config.databases?.[namespace];
+  const usesTaggedTemplateMarkers = hasTaggedTemplateSqlMarkers(query);
+  const rewriteTaggedTemplateQuery = (style: 'postgres' | 'question') =>
+    usesTaggedTemplateMarkers ? replaceTaggedTemplateSqlMarkers(query, style, params.length) : query;
   const isDynamicNamespace = !!(
     dbBlock?.instance ||
     dbBlock?.access?.canCreate ||
@@ -494,7 +595,9 @@ export async function executeProviderAwareSql(
         throw new Error(`PostgreSQL connection '${envKey}' not found.`);
       }
 
-      const normalizedSql = normalizePostgresSqlPlaceholders(query, params.length);
+      const normalizedSql = usesTaggedTemplateMarkers
+        ? rewriteTaggedTemplateQuery('postgres')
+        : normalizePostgresSqlPlaceholders(query, params.length);
       const localDevOptions = getLocalDevPostgresExecOptions(
         opts.env as unknown as Record<string, unknown>,
         namespace,
@@ -522,7 +625,7 @@ export async function executeProviderAwareSql(
       if (!d1) {
         throw new Error(`D1 binding '${bindingName}' not found.`);
       }
-      const result = await executeD1Sql(d1, query, params);
+      const result = await executeD1Sql(d1, rewriteTaggedTemplateQuery('question'), params);
       const rows = result.rows;
       return {
         columns: inferColumns(rows),
@@ -536,7 +639,7 @@ export async function executeProviderAwareSql(
         databaseNamespace: opts.databaseNamespace,
         namespace,
         id,
-        query,
+        query: rewriteTaggedTemplateQuery('question'),
         params,
         internal: true,
       });
@@ -555,7 +658,7 @@ export async function executeProviderAwareSql(
         'Content-Type': 'application/json',
         'X-EdgeBase-Service-Key': opts.serviceKey,
       },
-      body: JSON.stringify({ namespace, id, sql: query, params }),
+      body: JSON.stringify({ namespace, id, sql: rewriteTaggedTemplateQuery('question'), params }),
     });
     if (!res.ok) {
       const err = (await res.json().catch(() => ({ message: 'SQL execution failed' }))) as {
