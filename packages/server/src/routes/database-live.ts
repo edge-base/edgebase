@@ -9,7 +9,12 @@ import {
   DATABASE_LIVE_HUB_DO_NAME,
   isDbLiveChannel,
 } from '../lib/database-live-emitter.js';
-import { parseConfig } from '../lib/do-router.js';
+import {
+  formatDbTargetValidationIssue,
+  isDynamicDbBlock,
+  parseConfig,
+  resolveDbTarget,
+} from '../lib/do-router.js';
 import { validateKey, buildConstraintCtx } from '../lib/service-key.js';
 import { getTrustedClientIp } from '../lib/client-ip.js';
 import {
@@ -50,18 +55,107 @@ const dbConnectDiagnosticSchema = z.object({
   maxPending: z.number().optional(),
 });
 
-function resolveDatabaseLiveChannel(query: {
+function resolveStructuredDatabaseLiveChannel(
+  config: ReturnType<typeof parseConfig>,
+  query: {
+    namespace?: string;
+    instanceId?: string;
+    table?: string;
+    docId?: string;
+  },
+): { ok: true; channel: string } | { ok: false; message: string } {
+  if (!query.namespace || !query.table) {
+    return { ok: false, message: 'Database subscription target required' };
+  }
+
+  const target = resolveDbTarget(config, query.namespace, query.instanceId);
+  if (!target.ok) {
+    return {
+      ok: false,
+      message: formatDbTargetValidationIssue(target.issue, query.namespace),
+    };
+  }
+  if (!target.value.dbBlock.tables?.[query.table]) {
+    return {
+      ok: false,
+      message: `Table '${query.table}' not found in database '${query.namespace}'`,
+    };
+  }
+
+  const channel = buildDbLiveChannel(
+    query.namespace,
+    query.table,
+    target.value.instanceId,
+    query.docId,
+  );
+  if (!isDbLiveChannel(channel)) {
+    return { ok: false, message: 'Invalid database subscription target' };
+  }
+
+  return { ok: true, channel };
+}
+
+function resolveDatabaseLiveChannel(
+  config: ReturnType<typeof parseConfig>,
+  query: {
   channel?: string;
   namespace?: string;
   instanceId?: string;
   table?: string;
   docId?: string;
-}): string | null {
+}): { ok: true; channel: string } | { ok: false; message: string } {
   if (query.channel) {
-    return isDbLiveChannel(query.channel) ? query.channel : null;
+    if (!isDbLiveChannel(query.channel)) {
+      return {
+        ok: false,
+        message: `Database live only supports DB channels: ${query.channel}`,
+      };
+    }
+
+    const parts = query.channel.split(':');
+    const namespace = parts[1];
+    if (!namespace) {
+      return { ok: false, message: 'Database subscription target required' };
+    }
+
+    const dbBlock = config.databases?.[namespace];
+    if (!dbBlock) {
+      return {
+        ok: false,
+        message: formatDbTargetValidationIssue('namespace_not_found', namespace),
+      };
+    }
+
+    const dynamic = isDynamicDbBlock(dbBlock);
+    if (dynamic && parts.length < 4) {
+      return {
+        ok: false,
+        message: formatDbTargetValidationIssue('instance_id_required', namespace),
+      };
+    }
+    if (!dynamic && parts.length > 4) {
+      return {
+        ok: false,
+        message: formatDbTargetValidationIssue('instance_id_not_allowed', namespace),
+      };
+    }
+
+    const structured = dynamic
+      ? {
+          namespace,
+          instanceId: parts[2],
+          table: parts[3],
+          docId: parts[4],
+        }
+      : {
+          namespace,
+          table: parts[2],
+          docId: parts[3],
+        };
+    return resolveStructuredDatabaseLiveChannel(config, structured);
   }
-  if (!query.namespace || !query.table) return null;
-  return buildDbLiveChannel(query.namespace, query.table, query.instanceId, query.docId);
+
+  return resolveStructuredDatabaseLiveChannel(config, query);
 }
 
 function getPendingKey(ip: string): string {
@@ -85,7 +179,8 @@ const checkDatabaseConnection = createRoute({
 });
 
 databaseLiveRoute.openapi(checkDatabaseConnection, async (c) => {
-  const channel = resolveDatabaseLiveChannel({
+  const config = parseConfig(c.env);
+  const channelResult = resolveDatabaseLiveChannel(config, {
     channel: c.req.query('channel') ?? undefined,
     namespace: c.req.query('namespace') ?? undefined,
     instanceId: c.req.query('instanceId') ?? undefined,
@@ -93,14 +188,15 @@ databaseLiveRoute.openapi(checkDatabaseConnection, async (c) => {
     docId: c.req.query('docId') ?? undefined,
   });
 
-  if (!channel) {
+  if (!channelResult.ok) {
     return c.json({
       ok: false,
       type: 'db_connect_invalid_request',
       category: 'request',
-      message: 'Database subscription target required',
+      message: channelResult.message,
     }, 400);
   }
+  const channel = channelResult.channel;
 
   const ip = getTrustedClientIp(c.env, c.req) ?? 'unknown';
   const kvKey = getPendingKey(ip);
@@ -224,16 +320,18 @@ databaseLiveRoute.openapi(connectDatabaseSubscription, async (c) => {
     return c.json({ code: 400, message: 'Expected WebSocket upgrade' }, 400);
   }
 
-  const channel = resolveDatabaseLiveChannel({
+  const config = parseConfig(c.env);
+  const channelResult = resolveDatabaseLiveChannel(config, {
     channel: c.req.query('channel') ?? undefined,
     namespace: c.req.query('namespace') ?? undefined,
     instanceId: c.req.query('instanceId') ?? undefined,
     table: c.req.query('table') ?? undefined,
     docId: c.req.query('docId') ?? undefined,
   });
-  if (!channel) {
-    return c.json({ code: 400, message: 'Database subscription target required' }, 400);
+  if (!channelResult.ok) {
+    return c.json({ code: 400, message: channelResult.message }, 400);
   }
+  const channel = channelResult.channel;
 
   const ip = getTrustedClientIp(c.env, c.req) ?? 'unknown';
   const kvKey = getPendingKey(ip);

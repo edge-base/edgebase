@@ -8,7 +8,13 @@
  */
 import type { HttpTransport } from '@edge-base/core';
 import type { EdgeBaseConfig } from '@edge-base/shared';
-import { getDbDoName, callDO, shouldRouteToD1 } from './do-router.js';
+import {
+  callDO,
+  formatDbTargetValidationIssue,
+  getDbDoName,
+  resolveDbTarget,
+  shouldRouteToD1,
+} from './do-router.js';
 import { handleD1Request } from './d1-handler.js';
 import { handlePgRequest } from './postgres-handler.js';
 import { buildInternalHandlerContext } from './internal-request.js';
@@ -115,7 +121,12 @@ export class InternalHttpTransport implements HttpTransport {
     options?: { query?: Record<string, string>; body?: unknown },
   ): Promise<T> {
     const { namespace, instanceId, tableName, directPath } = parsePath(path, this.dbContext);
-    const doName = getDbDoName(namespace, instanceId);
+    const target = resolveDbTarget(this.config, namespace, instanceId);
+    if (!target.ok) {
+      throw new Error(formatDbTargetValidationIssue(target.issue, namespace));
+    }
+    const { instanceId: normalizedInstanceId } = target.value;
+    const doName = getDbDoName(namespace, normalizedInstanceId);
 
     // Build internal headers
     const headers: Record<string, string> = {
@@ -141,7 +152,7 @@ export class InternalHttpTransport implements HttpTransport {
     const res = await this.routeRequest(
       method as 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT',
       namespace,
-      instanceId,
+      normalizedInstanceId,
       tableName,
       directPath,
       doName,
@@ -174,36 +185,41 @@ export class InternalHttpTransport implements HttpTransport {
     query: URLSearchParams,
     body?: Record<string, unknown>,
   ): Promise<Response> {
+    const target = resolveDbTarget(this.config, namespace, instanceId);
+    if (!target.ok) {
+      throw new Error(formatDbTargetValidationIssue(target.issue, namespace));
+    }
+    const { dbBlock, dynamic, instanceId: normalizedInstanceId } = target.value;
     const queryString = Array.from(query.keys()).length > 0 ? `?${query.toString()}` : '';
     const directPathWithQuery = `${directPath}${queryString}`;
-    const provider = this.config.databases?.[namespace]?.provider;
+    const provider = dbBlock.provider;
     const httpMethod = method === 'PUT' ? 'PATCH' : method; // normalize PUT → PATCH
 
     // 1. D1 route
-    if (!this.preferDirectDo && shouldRouteToD1(namespace, this.config) && this.env) {
-      return this.requestViaD1Handler(httpMethod, namespace, instanceId, tableName, directPath, headers, query, body);
+    if (!this.preferDirectDo && !dynamic && shouldRouteToD1(namespace, this.config) && this.env) {
+      return this.requestViaD1Handler(httpMethod, namespace, normalizedInstanceId, tableName, directPath, headers, query, body);
     }
 
     // 2. PostgreSQL route
-    if ((provider === 'neon' || provider === 'postgres') && this.env) {
-      return this.requestViaPgHandler(httpMethod, namespace, instanceId, tableName, directPath, headers, query, body);
+    if (!dynamic && (provider === 'neon' || provider === 'postgres') && this.env) {
+      return this.requestViaPgHandler(httpMethod, namespace, normalizedInstanceId, tableName, directPath, headers, query, body);
     }
 
     // 3. Direct DO route
     if (this.env) {
-      return this.requestViaDirectDo(httpMethod, doName, directPathWithQuery, headers, body, !!instanceId);
+      return this.requestViaDirectDo(httpMethod, doName, directPathWithQuery, headers, body, dynamic);
     }
 
     // 4. Worker HTTP fallback
     if (this.workerUrl) {
-      const apiPath = instanceId
-        ? `/api/db/${namespace}/${instanceId}${directPathWithQuery}`
+      const apiPath = normalizedInstanceId
+        ? `/api/db/${namespace}/${normalizedInstanceId}${directPathWithQuery}`
         : `/api/db/${namespace}${directPathWithQuery}`;
       return this.requestViaWorker(httpMethod, apiPath, headers, body);
     }
 
     // 5. Fallback: direct DO
-    return this.requestViaDirectDo(httpMethod, doName, directPathWithQuery, headers, body, !!instanceId);
+    return this.requestViaDirectDo(httpMethod, doName, directPathWithQuery, headers, body, dynamic);
   }
 
   private async requestViaWorker(

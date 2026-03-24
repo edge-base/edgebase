@@ -23,7 +23,11 @@
  *    { namespace: 'workspace', id: 'ws-456', sql: 'SELECT * FROM documents', params: [] }
  */
 import { OpenAPIHono, createRoute, type HonoEnv } from '../lib/hono.js';
-import { parseConfig } from '../lib/do-router.js';
+import {
+  formatDbTargetValidationIssue,
+  parseConfig,
+  resolveDbTarget,
+} from '../lib/do-router.js';
 import { validateKey, buildConstraintCtx } from '../lib/service-key.js';
 import {
   zodDefaultHook,
@@ -65,6 +69,10 @@ const executeSql = createRoute({
       description: 'Forbidden',
       content: { 'application/json': { schema: errorResponseSchema } },
     },
+    404: {
+      description: 'Namespace not found',
+      content: { 'application/json': { schema: errorResponseSchema } },
+    },
   },
 });
 
@@ -84,30 +92,27 @@ sqlRoute.openapi(executeSql, async (c) => {
   if (id !== undefined && id !== null && typeof id !== 'string') {
     return c.json({ code: 400, message: 'id must be a string' }, 400);
   }
-  if (id && id.includes(':')) {
-    return c.json({ code: 400, message: "id must not contain ':' (§2)" }, 400);
-  }
   if (!sql || typeof sql !== 'string') {
     return c.json({ code: 400, message: 'sql is required' }, 400);
   }
 
   // Validate namespace is declared in databases config (§1)
   const config = parseConfig(c.env);
-  const dbBlock = config.databases?.[namespace];
-  if (!dbBlock) {
-    return c.json({ code: 404, message: `Namespace '${namespace}' not found in config` }, 404);
-  }
-  const isDynamicNamespace = !!(
-    dbBlock.instance ||
-    dbBlock.access?.canCreate ||
-    dbBlock.access?.access
-  );
-  if (isDynamicNamespace && !id) {
+  const target = resolveDbTarget(config, namespace, id);
+  if (!target.ok) {
     return c.json(
-      { code: 400, message: `id is required for dynamic namespace '${namespace}'` },
-      400,
+      {
+        code: target.status,
+        message: formatDbTargetValidationIssue(target.issue, namespace, {
+          namespaceLabel: 'Namespace',
+          instanceIdLabel: 'id',
+          includeSectionRef: target.issue === 'instance_id_invalid',
+        }),
+      },
+      target.status,
     );
   }
+  const { instanceId } = target.value;
 
   // Service Key required AND validated
   const { result: skResult } = validateKey(
@@ -133,7 +138,7 @@ sqlRoute.openapi(executeSql, async (c) => {
         databaseNamespace: c.env.DATABASE,
       },
       namespace,
-      id,
+      instanceId,
       sql,
       params ?? [],
     );

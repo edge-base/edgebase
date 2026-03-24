@@ -18,9 +18,12 @@ import {
   parseConfig,
   getTablesInNamespace,
   findTableNamespace,
+  formatDbTargetValidationIssue,
   callDO,
   callDOByHexId,
   isDynamicDbBlock,
+  normalizeDbInstanceId,
+  resolveDbTarget,
   shouldRouteToD1,
   getD1BindingName,
 } from '../lib/do-router.js';
@@ -664,6 +667,71 @@ describe('isDynamicDbBlock', () => {
       },
       tables: {},
     } as any)).toBe(true);
+  });
+});
+
+describe('normalizeDbInstanceId', () => {
+  it('trims non-empty ids', () => {
+    expect(normalizeDbInstanceId('  ws-1  ')).toBe('ws-1');
+  });
+
+  it('treats blank ids as undefined', () => {
+    expect(normalizeDbInstanceId('   ')).toBeUndefined();
+    expect(normalizeDbInstanceId(undefined)).toBeUndefined();
+    expect(normalizeDbInstanceId(null)).toBeUndefined();
+  });
+});
+
+describe('resolveDbTarget', () => {
+  const config = {
+    databases: {
+      shared: { tables: { posts: {} } },
+      workspace: { instance: true, tables: { members: {} } },
+    },
+  } as any;
+
+  it('resolves single-instance namespaces without instance ids', () => {
+    expect(resolveDbTarget(config, 'shared', undefined)).toEqual({
+      ok: true,
+      value: {
+        namespace: 'shared',
+        instanceId: undefined,
+        dbBlock: config.databases.shared,
+        dynamic: false,
+      },
+    });
+  });
+
+  it('rejects instance ids on single-instance namespaces', () => {
+    const result = resolveDbTarget(config, 'shared', 'shadow');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issue).toBe('instance_id_not_allowed');
+    expect(formatDbTargetValidationIssue(result.issue, 'shared')).toBe(
+      "instanceId is not allowed for single-instance namespace 'shared'",
+    );
+  });
+
+  it('requires instance ids on dynamic namespaces', () => {
+    const result = resolveDbTarget(config, 'workspace', undefined);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issue).toBe('instance_id_required');
+  });
+
+  it('rejects ids containing colons', () => {
+    const result = resolveDbTarget(config, 'workspace', 'ws:1');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issue).toBe('instance_id_invalid');
+  });
+
+  it('returns not-found when the namespace is missing', () => {
+    const result = resolveDbTarget(config, 'missing', undefined);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.status).toBe(404);
+    expect(result.issue).toBe('namespace_not_found');
   });
 });
 

@@ -22,7 +22,13 @@
  */
 import { OpenAPIHono, createRoute, z, type HonoEnv } from '../lib/hono.js';
 import type { Context } from 'hono';
-import { getDbDoName, isDynamicDbBlock, parseConfig, shouldRouteToD1 } from '../lib/do-router.js';
+import {
+  formatDbTargetValidationIssue,
+  getDbDoName,
+  parseConfig,
+  resolveDbTarget,
+  shouldRouteToD1,
+} from '../lib/do-router.js';
 import { fetchDOWithRetry } from '../lib/do-retry.js';
 import {
   queryParamsSchema, listResponseSchema, recordResponseSchema,
@@ -575,37 +581,17 @@ async function routeToDO(
   const tableName = decodeURIComponent(_tableName);
   // Check provider — route to D1 or PostgreSQL handler if not DO
   const config = parseConfig(c.env);
-  const dbBlock = config.databases?.[namespace];
-
-  if (!dbBlock) {
-    return c.json({ code: 404, message: `Database '${namespace}' not found in config.` }, 404);
+  const target = resolveDbTarget(config, namespace, instanceId);
+  if (!target.ok) {
+    return c.json({
+      code: target.status,
+      message: formatDbTargetValidationIssue(target.issue, namespace),
+    }, target.status);
   }
-
-  const dynamicDbBlock = isDynamicDbBlock(dbBlock);
-  if (!instanceId) {
-    if (dynamicDbBlock) {
-      return c.json({
-        code: 400,
-        message: `instanceId is required for dynamic namespace '${namespace}'`,
-      }, 400);
-    }
-  } else {
-    if (instanceId.includes(':')) {
-      return c.json({
-        code: 400,
-        message: 'instanceId must not contain \':\'',
-      }, 400);
-    }
-    if (!dynamicDbBlock) {
-      return c.json({
-        code: 400,
-        message: `instanceId is not allowed for single-instance namespace '${namespace}'`,
-      }, 400);
-    }
-  }
+  const { dbBlock, dynamic: dynamicDbBlock, instanceId: normalizedInstanceId } = target.value;
 
   // D1 route: single-instance namespaces without dynamic instanceId
-  if (!instanceId && shouldRouteToD1(namespace, config)) {
+  if (!normalizedInstanceId && shouldRouteToD1(namespace, config)) {
     return handleD1Request(c as unknown as Context<HonoEnv>, namespace, tableName, doPath);
   }
 
@@ -617,7 +603,7 @@ async function routeToDO(
   const requiresCreateAuthorization = dynamicDbBlock;
 
   // Build DO name: 'shared' | 'workspace:ws-456' (§2)
-  const doName = getDbDoName(namespace, instanceId);
+  const doName = getDbDoName(namespace, normalizedInstanceId);
 
   const doId = c.env.DATABASE.idFromName(doName);
   const stub = c.env.DATABASE.get(doId);
@@ -694,7 +680,9 @@ async function routeToDO(
         allowed = isServiceKey;
         if (!allowed && canCreateFn) {
           try {
-            allowed = await Promise.resolve(canCreateFn(auth ?? null, body.id ?? instanceId ?? namespace));
+            allowed = await Promise.resolve(
+              canCreateFn(auth ?? null, body.id ?? normalizedInstanceId ?? namespace),
+            );
           } catch {
             allowed = false; // fail-closed
           }

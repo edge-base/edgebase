@@ -25,7 +25,7 @@ import type {
   ScheduleTrigger,
   HttpTrigger,
 } from '@edge-base/shared';
-import { getD1BindingName } from './do-router.js';
+import { getD1BindingName, normalizeDbInstanceId } from './do-router.js';
 import { D1AuthDb, type AuthDb } from './auth-db-adapter.js';
 import { ensureAuthSchema } from './auth-d1.js';
 import type { Env } from '../types.js';
@@ -822,6 +822,7 @@ export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAd
     );
 
   return (namespace: string, id?: string): DbRef => {
+    const normalizedId = normalizeDbInstanceId(id);
     // Create a per-DbRef transport with explicit dbContext so that
     // path parsing is unambiguous even when instanceId === 'tables'.
     const transport = new InternalHttpTransport({
@@ -832,13 +833,13 @@ export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAd
       env: options.env,
       executionCtx: options.executionCtx,
       preferDirectDo: options.preferDirectDo,
-      dbContext: { namespace, instanceId: id },
+      dbContext: { namespace, instanceId: normalizedId },
     });
     const dbApi = new DefaultDbApi(transport);
     return new DbRef(
       dbApi,
       namespace,
-      id,
+      normalizedId,
       undefined, // databaseLiveClient — not available server-side
       undefined, // filterMatchFn
       httpClient, // enables table().sql`...` tagged template

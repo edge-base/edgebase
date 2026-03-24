@@ -48,6 +48,72 @@ describe('sql route', () => {
     });
   });
 
+  it('rejects ids for single-instance namespaces before touching any backend', async () => {
+    setConfig(
+      defineConfig({
+        databases: {
+          shared: {
+            tables: {
+              posts: { schema: { title: { type: 'string' } } },
+            },
+          },
+        },
+        serviceKeys: {
+          keys: [
+            {
+              kid: 'root',
+              tier: 'root',
+              scopes: ['*'],
+              secretSource: 'inline',
+              inlineSecret: 'sk-root',
+            },
+          ],
+        },
+      }),
+    );
+
+    const env = {
+      DATABASE: {
+        idFromName: vi.fn(),
+        get: vi.fn(),
+      },
+      DB_D1_SHARED: {
+        prepare: vi.fn(),
+      },
+    } as unknown as Env;
+
+    const app = createApp();
+    const response = await app.request(
+      '/api/sql',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-EdgeBase-Service-Key': 'sk-root',
+        },
+        body: JSON.stringify({
+          namespace: 'shared',
+          id: 'shadow',
+          sql: 'SELECT 1',
+        }),
+      },
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 400,
+      message: "id is not allowed for single-instance namespace 'shared'",
+    });
+    expect(
+      (env as unknown as { DATABASE: { get: ReturnType<typeof vi.fn> } }).DATABASE.get,
+    ).not.toHaveBeenCalled();
+    expect(
+      (env as unknown as { DB_D1_SHARED: { prepare: ReturnType<typeof vi.fn> } }).DB_D1_SHARED
+        .prepare,
+    ).not.toHaveBeenCalled();
+  });
+
   it('retries dynamic DO SQL after create handshake and forwards the DO name', async () => {
     setConfig(
       defineConfig({

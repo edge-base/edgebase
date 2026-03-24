@@ -155,6 +155,46 @@ describe('buildFunctionContext admin.db', () => {
     );
   });
 
+  it('rejects instance ids for single-instance admin.sqlProviderAware calls before touching direct backends', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const databaseNamespace = {
+      idFromName: vi.fn(),
+      get: vi.fn(),
+    } as unknown as DurableObjectNamespace;
+
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/feed-summary'),
+      auth: null,
+      databaseNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      d1Database: {} as D1Database,
+      config: {
+        databases: {
+          shared: {
+            tables: {
+              posts: { schema: { title: { type: 'string' } } },
+            },
+          },
+        },
+      },
+      env: {
+        DB_D1_SHARED: {
+          prepare: vi.fn(),
+        },
+      } as never,
+    });
+
+    await expect(
+      ctx.admin.sqlProviderAware('shared', 'shadow', 'SELECT COUNT(*) AS total FROM posts'),
+    ).rejects.toThrow("instanceId is not allowed for single-instance namespace 'shared'");
+    expect(
+      (databaseNamespace as unknown as { get: ReturnType<typeof vi.fn> }).get,
+    ).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('routes admin.sqlWithDirectD1Access through the database DO when env is available', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -203,6 +243,7 @@ describe('buildFunctionContext admin.db', () => {
       config: {
         databases: {
           workspace: {
+            instance: true,
             tables: {
               members: { schema: { userId: { type: 'string' } } },
             },
@@ -331,6 +372,7 @@ describe('buildFunctionContext admin.db', () => {
       config: {
         databases: {
           workspace: {
+            instance: true,
             tables: {
               members: { schema: { userId: { type: 'string' } } },
             },

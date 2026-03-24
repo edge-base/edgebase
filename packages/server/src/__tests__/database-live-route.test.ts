@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OpenAPIHono, type HonoEnv } from '../lib/hono.js';
 import { setConfig } from '../lib/do-router.js';
 import { databaseLiveRoute } from '../routes/database-live.js';
+import { defineConfig } from '@edge-base/shared';
 import type { Env } from '../types.js';
 
 interface MockKVStore {
@@ -52,6 +53,16 @@ describe('database live subscription route', () => {
   });
 
   it('reports connect-check readiness for explicit database params', async () => {
+    setConfig(defineConfig({
+      databases: {
+        shared: {
+          tables: {
+            posts: { schema: { title: { type: 'string' } } },
+          },
+        },
+      },
+    }));
+
     const kv = createMockKV();
     const app = createApp();
 
@@ -90,7 +101,78 @@ describe('database live subscription route', () => {
     });
   });
 
+  it('rejects structured targets that omit instanceId for dynamic namespaces', async () => {
+    setConfig(defineConfig({
+      databases: {
+        workspace: {
+          instance: true,
+          tables: {
+            posts: { schema: { title: { type: 'string' } } },
+          },
+        },
+      },
+    }));
+
+    const kv = createMockKV();
+    const app = createApp();
+
+    const response = await app.request('/api/db/connect-check?namespace=workspace&table=posts', {
+      method: 'GET',
+      headers: {
+        'CF-Connecting-IP': '127.0.0.1',
+      },
+    }, createMockEnv(kv));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      type: 'db_connect_invalid_request',
+      message: "instanceId is required for dynamic namespace 'workspace'",
+    });
+  });
+
+  it('rejects legacy channels that target dynamic namespaces without an instanceId', async () => {
+    setConfig(defineConfig({
+      databases: {
+        workspace: {
+          instance: true,
+          tables: {
+            posts: { schema: { title: { type: 'string' } } },
+          },
+        },
+      },
+    }));
+
+    const kv = createMockKV();
+    const app = createApp();
+
+    const response = await app.request('/api/db/connect-check?channel=dblive:workspace:posts', {
+      method: 'GET',
+      headers: {
+        'CF-Connecting-IP': '127.0.0.1',
+      },
+    }, createMockEnv(kv));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      type: 'db_connect_invalid_request',
+      message: "instanceId is required for dynamic namespace 'workspace'",
+    });
+  });
+
   it('proxies websocket subscribe requests through the database-owned path and releases pending slots', async () => {
+    setConfig(defineConfig({
+      databases: {
+        workspace: {
+          instance: true,
+          tables: {
+            posts: { schema: { title: { type: 'string' } } },
+          },
+        },
+      },
+    }));
+
     const kv = createMockKV();
     const app = createApp();
     let forwardedUrl = '';

@@ -122,11 +122,17 @@ describe('provider-aware raw SQL helpers', () => {
 
     const result = await executeProviderAwareSql(
       {
-        config: {},
+        config: {
+          databases: {
+            shared: {
+              tables: { posts: {} },
+            },
+          },
+        },
         workerUrl: 'http://localhost:8787',
         serviceKey: 'service-key',
       },
-      'workspace',
+      'shared',
       undefined,
       'SELECT ? AS id',
       ['p1'],
@@ -146,7 +152,7 @@ describe('provider-aware raw SQL helpers', () => {
           'X-EdgeBase-Service-Key': 'service-key',
         }),
         body: JSON.stringify({
-          namespace: 'workspace',
+          namespace: 'shared',
           id: undefined,
           sql: 'SELECT ? AS id',
           params: ['p1'],
