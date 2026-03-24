@@ -36,10 +36,11 @@ import { summarizeValidationErrors, validateInsert, validateUpdate } from './val
 import { buildEffectiveSchema } from './schema.js';
 import { generateId } from './uuid.js';
 import { parseUpdateBody } from './op-parser.js';
-import { emitDbLiveEvent, emitDbLiveBatchEvent, sendToDatabaseLiveDO } from './database-live-emitter.js';
+import { emitDbLiveEvent, emitDbLiveBatchEvent } from './database-live-emitter.js';
 import { isTrustedInternalContext } from './internal-request.js';
 import { executeDbTriggers } from './functions.js';
 import { forbiddenError, hookRejectedError, normalizeDatabaseError } from './errors.js';
+import { buildTableHookRuntimeServices } from './table-hook-runtime.js';
 
 // ─── Types ───
 
@@ -227,10 +228,11 @@ async function evalInsertRule(
 
 function buildHookCtx(
   db: D1Database,
-  tables: Record<string, TableConfig>,
   env: Env,
   executionCtx?: ExecutionContext,
 ): HookCtx {
+  const runtimeServices = buildTableHookRuntimeServices(parseConfig(env), env);
+
   return {
     db: {
       async get(table: string, id: string): Promise<Record<string, unknown> | null> {
@@ -266,20 +268,7 @@ function buildHookCtx(
         return result.rows.length > 0;
       },
     },
-    databaseLive: {
-      async broadcast(channel: string, event: string, data: unknown): Promise<void> {
-        await sendToDatabaseLiveDO(
-          env,
-          { channel, event, payload: data ?? {} },
-          '/internal/broadcast',
-        );
-      },
-    },
-    push: {
-      async send(_userId: string, _payload: { title?: string; body: string }): Promise<void> {
-        // Push notifications — same mechanism as DO (via Worker env)
-      },
-    },
+    ...runtimeServices,
     waitUntil(promise: Promise<unknown>): void {
       if (executionCtx) {
         executionCtx.waitUntil(promise);
@@ -448,7 +437,7 @@ async function handleList(
 
   // Apply onEnrich hook
   if (tableHooks?.onEnrich) {
-    const hookCtx = buildHookCtx(resolved.db, resolved.dbBlock.tables ?? {}, c.env, c.executionCtx);
+    const hookCtx = buildHookCtx(resolved.db, c.env, c.executionCtx);
     for (let i = 0; i < items.length; i++) {
       try {
         const enriched = await tableHooks.onEnrich(auth, items[i], hookCtx);
@@ -612,7 +601,7 @@ async function handleGet(
 
   // Apply onEnrich hook
   if (tableHooks?.onEnrich) {
-    const hookCtx = buildHookCtx(resolved.db, resolved.dbBlock.tables ?? {}, c.env, c.executionCtx);
+    const hookCtx = buildHookCtx(resolved.db, c.env, c.executionCtx);
     try {
       const enriched = await tableHooks.onEnrich(auth, row, hookCtx);
       if (enriched && typeof enriched === 'object') return c.json({ ...row, ...enriched });
@@ -678,7 +667,7 @@ async function handleInsert(
   }
 
   // Run beforeInsert hook
-  const hookCtx = buildHookCtx(resolved.db, resolved.dbBlock.tables ?? {}, c.env, c.executionCtx);
+  const hookCtx = buildHookCtx(resolved.db, c.env, c.executionCtx);
   if (tableHooks?.beforeInsert) {
     try {
       const transformed = await tableHooks.beforeInsert(auth, body, hookCtx);
@@ -845,7 +834,7 @@ async function handleUpdate(
   }
 
   // Run beforeUpdate hook
-  const hookCtx = buildHookCtx(resolved.db, resolved.dbBlock.tables ?? {}, c.env, c.executionCtx);
+  const hookCtx = buildHookCtx(resolved.db, c.env, c.executionCtx);
   if (tableHooks?.beforeUpdate) {
     try {
       const transformed = await tableHooks.beforeUpdate(auth, existingRow, body, hookCtx);
@@ -962,7 +951,7 @@ async function handleDelete(
   }
 
   // Run beforeDelete hook
-  const hookCtx = buildHookCtx(resolved.db, resolved.dbBlock.tables ?? {}, c.env, c.executionCtx);
+  const hookCtx = buildHookCtx(resolved.db, c.env, c.executionCtx);
   if (tableHooks?.beforeDelete) {
     try {
       await tableHooks.beforeDelete(auth, existingRow, hookCtx);

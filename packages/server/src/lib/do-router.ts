@@ -8,7 +8,7 @@
  *
  * Constraint: `id` must NOT contain `:` character.
  */
-import { materializeConfig, type EdgeBaseConfig } from '@edge-base/shared';
+import { materializeConfig, type EdgeBaseConfig, type DbBlock } from '@edge-base/shared';
 import { counter } from '../middleware/rate-limit.js';
 
 const RUNTIME_CONFIG_GLOBAL_KEY = '__EDGEBASE_RUNTIME_CONFIG__';
@@ -258,11 +258,19 @@ export function shouldRouteToD1(namespace: string, config: EdgeBaseConfig): bool
   if (dbBlock.provider === 'neon' || dbBlock.provider === 'postgres' || dbBlock.provider === 'do') return false;
 
   // Auto-detect: multi-tenant namespaces stay in DO
-  if (dbBlock.instance) return false;
-  if (dbBlock.access?.canCreate || dbBlock.access?.access) return false;
+  if (isDynamicDbBlock(dbBlock)) return false;
 
   // Default: single-instance → D1
   return true;
+}
+
+/**
+ * Dynamic DB blocks represent per-instance / multi-tenant storage and therefore
+ * require create/access authorization semantics that single-instance DB blocks do not.
+ */
+export function isDynamicDbBlock(dbBlock?: DbBlock): boolean {
+  if (!dbBlock) return false;
+  return Boolean(dbBlock.instance || dbBlock.access?.canCreate || dbBlock.access?.access);
 }
 
 /**

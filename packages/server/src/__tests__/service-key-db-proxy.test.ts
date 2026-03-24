@@ -375,6 +375,50 @@ describe('DB proxy service key forwarding', () => {
     await expect(response.json()).resolves.toEqual({ id: 'u1', name: 'June' });
   });
 
+  it('auto-retries single-instance provider=do namespaces when the DO asks for bootstrap authorization', async () => {
+    setConfig(defineConfig({
+      release: true,
+      databases: {
+        app: {
+          provider: 'do',
+          tables: {
+            posts: {
+              access: {
+                read: () => true,
+              },
+            },
+          },
+        },
+      },
+    }));
+
+    const forwardedHeaders: Headers[] = [];
+    let callCount = 0;
+    const app = createApp();
+    const response = await app.request('/api/db/app/tables/posts', {
+      method: 'GET',
+    }, createEnv((_input, init) => {
+      forwardedHeaders.push(new Headers(init?.headers));
+      callCount += 1;
+      if (callCount === 1) {
+        return new Response(JSON.stringify({ needsCreate: true, namespace: 'app' }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ items: [] });
+    expect(forwardedHeaders).toHaveLength(2);
+    expect(forwardedHeaders[0].get('X-DO-Create-Authorized')).toBeNull();
+    expect(forwardedHeaders[1].get('X-DO-Create-Authorized')).toBe('1');
+  });
+
   it('does not trust raw X-EdgeBase-Internal on public DB requests', async () => {
     setConfig(defineConfig({
       release: true,

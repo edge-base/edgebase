@@ -51,6 +51,7 @@ import {
 import { isTrustedInternalContext } from './internal-request.js';
 import { executeDbTriggers } from './functions.js';
 import { parseUpdateBody } from './op-parser.js';
+import { buildTableHookRuntimeServices } from './table-hook-runtime.js';
 
 // ─── Types ───
 
@@ -232,13 +233,14 @@ async function evalInsertRule(
 
 function buildHookCtx(
   connectionString: string,
-  tables: Record<string, TableConfig>,
+  env: Env,
   executionCtx?: ExecutionContext,
   queryExecutor?: PostgresExecutor,
 ): HookCtx {
   const query =
     queryExecutor ??
     ((sql: string, params: unknown[] = []) => executePostgresQuery(connectionString, sql, params));
+  const runtimeServices = buildTableHookRuntimeServices(parseConfig(env), env);
 
   return {
     db: {
@@ -279,17 +281,7 @@ function buildHookCtx(
         return result.rows.length > 0;
       },
     },
-    databaseLive: {
-      async broadcast(_channel: string, _event: string, _data: unknown): Promise<void> {
-        // HookCtx broadcast — not implemented for PostgreSQL provider (no direct env access)
-        // Use database-live subscription from client SDK instead
-      },
-    },
-    push: {
-      async send(_userId: string, _payload: { title?: string; body: string }): Promise<void> {
-        // Push notifications — same mechanism as DO (via Worker env)
-      },
-    },
+    ...runtimeServices,
     waitUntil(promise: Promise<unknown>): void {
       if (executionCtx) {
         executionCtx.waitUntil(promise);
@@ -358,7 +350,7 @@ async function handleList(
 
   // Apply onEnrich hook
   if (tableHooks?.onEnrich) {
-    const hookCtx = buildHookCtx(resolved.connectionString, resolved.dbBlock.tables ?? {}, c.executionCtx, query);
+    const hookCtx = buildHookCtx(resolved.connectionString, c.env, c.executionCtx, query);
     for (let i = 0; i < items.length; i++) {
       try {
         const enriched = await tableHooks.onEnrich(auth, items[i], hookCtx);
@@ -507,7 +499,7 @@ async function handleGet(
 
   // Apply onEnrich hook
   if (tableHooks?.onEnrich) {
-    const hookCtx = buildHookCtx(resolved.connectionString, resolved.dbBlock.tables ?? {}, c.executionCtx, query);
+    const hookCtx = buildHookCtx(resolved.connectionString, c.env, c.executionCtx, query);
     try {
       const enriched = await tableHooks.onEnrich(auth, row, hookCtx);
       if (enriched && typeof enriched === 'object') return c.json({ ...row, ...enriched });
@@ -558,7 +550,7 @@ async function handleInsert(
   }
 
   // Run beforeInsert hook
-  const requestHookCtx = buildHookCtx(resolved.connectionString, resolved.dbBlock.tables ?? {}, c.executionCtx, query);
+  const requestHookCtx = buildHookCtx(resolved.connectionString, c.env, c.executionCtx, query);
   if (tableHooks?.beforeInsert) {
     try {
       const transformed = await tableHooks.beforeInsert(auth, body, requestHookCtx);
@@ -612,7 +604,7 @@ async function handleInsert(
   // Run afterInsert hook (fire-and-forget)
   if (tableHooks?.afterInsert) {
     const hook = tableHooks.afterInsert;
-    const backgroundHookCtx = buildHookCtx(resolved.connectionString, resolved.dbBlock.tables ?? {}, c.executionCtx);
+    const backgroundHookCtx = buildHookCtx(resolved.connectionString, c.env, c.executionCtx);
     backgroundHookCtx.waitUntil(Promise.resolve(hook(inserted, backgroundHookCtx)).catch(() => {}));
   }
 
@@ -703,7 +695,7 @@ async function handleUpdate(
   }
 
   // Run beforeUpdate hook
-  const requestHookCtx = buildHookCtx(resolved.connectionString, resolved.dbBlock.tables ?? {}, c.executionCtx, query);
+  const requestHookCtx = buildHookCtx(resolved.connectionString, c.env, c.executionCtx, query);
   if (tableHooks?.beforeUpdate) {
     try {
       const transformed = await tableHooks.beforeUpdate(auth, existingRow, body, requestHookCtx);
@@ -740,7 +732,7 @@ async function handleUpdate(
   // Run afterUpdate hook (fire-and-forget)
   if (tableHooks?.afterUpdate) {
     const hook = tableHooks.afterUpdate;
-    const backgroundHookCtx = buildHookCtx(resolved.connectionString, resolved.dbBlock.tables ?? {}, c.executionCtx);
+    const backgroundHookCtx = buildHookCtx(resolved.connectionString, c.env, c.executionCtx);
     backgroundHookCtx.waitUntil(
       Promise.resolve(hook(existingRow, updated, backgroundHookCtx)).catch(() => {}),
     );
@@ -805,7 +797,7 @@ async function handleDelete(
   }
 
   // Run beforeDelete hook
-  const requestHookCtx = buildHookCtx(resolved.connectionString, resolved.dbBlock.tables ?? {}, c.executionCtx, query);
+  const requestHookCtx = buildHookCtx(resolved.connectionString, c.env, c.executionCtx, query);
   if (tableHooks?.beforeDelete) {
     try {
       await tableHooks.beforeDelete(auth, existingRow, requestHookCtx);
@@ -826,7 +818,7 @@ async function handleDelete(
   // Run afterDelete hook (fire-and-forget)
   if (tableHooks?.afterDelete) {
     const hook = tableHooks.afterDelete;
-    const backgroundHookCtx = buildHookCtx(resolved.connectionString, resolved.dbBlock.tables ?? {}, c.executionCtx);
+    const backgroundHookCtx = buildHookCtx(resolved.connectionString, c.env, c.executionCtx);
     backgroundHookCtx.waitUntil(
       Promise.resolve(hook(existingRow, backgroundHookCtx)).catch(() => {}),
     );

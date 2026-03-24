@@ -76,7 +76,7 @@ The CLI automatically:
 2. Merges plugin tables into your DB blocks (namespaced)
 3. Registers plugin functions and authentication hooks
 4. Bundles everything into a single Worker
-5. Runs plugin migrations (if plugin version changed)
+5. Lets the runtime reconcile pending plugin migrations lazily on the first relevant request or scheduled execution
 
 ## Managing Plugins
 

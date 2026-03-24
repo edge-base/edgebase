@@ -20,6 +20,7 @@ import {
   findTableNamespace,
   callDO,
   callDOByHexId,
+  isDynamicDbBlock,
   shouldRouteToD1,
   getD1BindingName,
 } from '../lib/do-router.js';
@@ -633,6 +634,38 @@ describe('callDOByHexId', () => {
 });
 
 // ─── J. shouldRouteToD1 ───────────────────────────────────────────────────────
+
+describe('isDynamicDbBlock', () => {
+  it('returns false for undefined db blocks', () => {
+    expect(isDynamicDbBlock()).toBe(false);
+  });
+
+  it('returns false for single-instance db blocks without create/access semantics', () => {
+    expect(isDynamicDbBlock({ tables: { posts: {} } } as any)).toBe(false);
+  });
+
+  it('returns true for db blocks with instance routing', () => {
+    expect(isDynamicDbBlock({ instance: true, tables: {} } as any)).toBe(true);
+  });
+
+  it('returns true for db blocks with canCreate rules', () => {
+    expect(isDynamicDbBlock({
+      access: {
+        canCreate: () => true,
+      },
+      tables: {},
+    } as any)).toBe(true);
+  });
+
+  it('returns true for db blocks with access rules', () => {
+    expect(isDynamicDbBlock({
+      access: {
+        access: () => true,
+      },
+      tables: {},
+    } as any)).toBe(true);
+  });
+});
 
 describe('shouldRouteToD1', () => {
   it('namespace not in config → false', () => {

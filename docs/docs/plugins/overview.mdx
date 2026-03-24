@@ -133,11 +133,12 @@ edgebase.config.ts  (plugins: [stripePlugin({...})])
   → mergePluginTables()  (namespace-prefixed merge into DB blocks)
   → materializeConfig()  (plugin tables become first-class config)
   → generateFunctionRegistry()  (plugin functions + hooks registered)
-  → runPluginMigrations()  (version-based migrations on deploy)
   → wrangler deploy
+  → first relevant runtime request / scheduled trigger
+  → executePluginMigrations()  (reconciles pending plugin migrations once per isolate)
 ```
 
-**Zero overhead**: Plugin code is part of the Worker bundle. The server runtime has no concept of "plugins" — it just executes registered functions and queries registered tables.
+**Low runtime overhead**: Plugin code is part of the Worker bundle. The runtime does not scan for plugins or dynamically import them; it executes the already-registered tables/functions and lazily reconciles plugin migrations when needed.
 
 ---
 
@@ -154,15 +155,16 @@ edgebase.config.ts  (plugins: [stripePlugin({...})])
                        │ build time
           ┌────────────┼────────────┐
           ▼            ▼            ▼
-   mergePluginTables  initFunctionRegistry  runPluginMigrations
-   (tables → DB)      (functions + auth/     (onInstall +
-                       storage hooks)        version migrations)
+   mergePluginTables  initFunctionRegistry   wrangler deploy
+   (tables → DB)      (functions + auth/
+                       storage hooks)
           │            │            │
           └────────────┼────────────┘
                        ▼
               Worker Bundle (single JS)
               — server sees: tables + functions
-              — no "plugin" concept at runtime
+              — runtime lazily reconciles plugin migrations
+                before plugin-capable routes and scheduled runs
 ```
 
 ---
