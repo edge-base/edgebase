@@ -1947,6 +1947,51 @@ describe('ClientEdgeBase (createClient) — construction', () => {
     tm.destroy();
   });
 
+  it('DatabaseLiveClient only waits for auth when no session is available', async () => {
+    installBrowserMocks();
+    const { DatabaseLiveClient } = await import('../../src/database-live.js');
+    const { EdgeBaseError } = await import('@edge-base/core');
+    const channel = 'dblive:shared:posts';
+
+    const tmNoSession = new TokenManager('http://localhost:8688');
+    const liveNoSession = new DatabaseLiveClient('http://localhost:8688', tmNoSession) as {
+      connectedChannels: Set<string>;
+      disconnect: () => void;
+      handleAuthenticationFailure: (error: unknown) => void;
+      scheduleReconnect: (channel: string) => void;
+      waitingForAuth: boolean;
+      ws: WebSocket | null;
+    };
+    liveNoSession.connectedChannels.add(channel);
+    liveNoSession.ws = { close: vi.fn() } as unknown as WebSocket;
+    const noSessionReconnect = vi.spyOn(liveNoSession, 'scheduleReconnect');
+    liveNoSession.handleAuthenticationFailure(new EdgeBaseError(401, 'Auth failed'));
+    expect(liveNoSession.waitingForAuth).toBe(true);
+    expect(noSessionReconnect).not.toHaveBeenCalled();
+    liveNoSession.disconnect();
+    tmNoSession.destroy();
+
+    const tmWithSession = new TokenManager('http://localhost:8688');
+    const token = makeValidJwt('u-db-live');
+    tmWithSession.setTokens({ accessToken: token, refreshToken: token });
+    const liveWithSession = new DatabaseLiveClient('http://localhost:8688', tmWithSession) as {
+      connectedChannels: Set<string>;
+      disconnect: () => void;
+      handleAuthenticationFailure: (error: unknown) => void;
+      scheduleReconnect: (channel: string) => void;
+      waitingForAuth: boolean;
+      ws: WebSocket | null;
+    };
+    liveWithSession.connectedChannels.add(channel);
+    liveWithSession.ws = { close: vi.fn() } as unknown as WebSocket;
+    const withSessionReconnect = vi.spyOn(liveWithSession, 'scheduleReconnect');
+    liveWithSession.handleAuthenticationFailure(new EdgeBaseError(401, 'Auth failed'));
+    expect(liveWithSession.waitingForAuth).toBe(false);
+    expect(withSessionReconnect).not.toHaveBeenCalled();
+    liveWithSession.disconnect();
+    tmWithSession.destroy();
+  });
+
   it('room() returns RoomClient (v2: namespace + roomId)', async () => {
     const { createClient } = await import('../../src/client.js');
     const client = createClient('http://localhost:8688');

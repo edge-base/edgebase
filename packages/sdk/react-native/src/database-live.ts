@@ -401,7 +401,9 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
         ? error
         : new EdgeBaseError(500, 'Database live authentication failed.');
 
-    this.waitingForAuth = authError.code === 401 && this.connectedChannels.size > 0;
+    this.waitingForAuth = authError.code === 401
+      && this.connectedChannels.size > 0
+      && !this.hasAuthContext();
     this.stopHeartbeat();
     this.connected = false;
     this.authenticated = false;

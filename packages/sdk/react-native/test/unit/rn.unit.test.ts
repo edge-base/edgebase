@@ -2261,6 +2261,50 @@ describe('RN ClientEdgeBase — 구조 검증', () => {
     live.disconnect();
     tm.destroy();
   });
+
+  it('DatabaseLiveClient auth failure는 세션이 없을 때만 waiting 상태로 남는다', async () => {
+    const channel = 'dblive:shared:posts';
+
+    const tmNoSession = new TokenManager('http://localhost:8688', createMockStorage());
+    await tmNoSession.ready();
+    const liveNoSession = new DatabaseLiveClient('http://localhost:8688', tmNoSession) as {
+      connectedChannels: Set<string>;
+      disconnect: () => void;
+      handleAuthenticationFailure: (error: unknown) => void;
+      scheduleReconnect: (channel: string) => void;
+      waitingForAuth: boolean;
+      ws: WebSocket | null;
+    };
+    liveNoSession.connectedChannels.add(channel);
+    liveNoSession.ws = { close: vi.fn() } as unknown as WebSocket;
+    const noSessionReconnect = vi.spyOn(liveNoSession, 'scheduleReconnect');
+    liveNoSession.handleAuthenticationFailure(new EdgeBaseError(401, 'Auth failed'));
+    expect(liveNoSession.waitingForAuth).toBe(true);
+    expect(noSessionReconnect).not.toHaveBeenCalled();
+    liveNoSession.disconnect();
+    tmNoSession.destroy();
+
+    const tmWithSession = new TokenManager('http://localhost:8688', createMockStorage());
+    await tmWithSession.ready();
+    const token = makeValidJwt('u-rn-db-live');
+    tmWithSession.setTokens({ accessToken: token, refreshToken: token });
+    const liveWithSession = new DatabaseLiveClient('http://localhost:8688', tmWithSession) as {
+      connectedChannels: Set<string>;
+      disconnect: () => void;
+      handleAuthenticationFailure: (error: unknown) => void;
+      scheduleReconnect: (channel: string) => void;
+      waitingForAuth: boolean;
+      ws: WebSocket | null;
+    };
+    liveWithSession.connectedChannels.add(channel);
+    liveWithSession.ws = { close: vi.fn() } as unknown as WebSocket;
+    const withSessionReconnect = vi.spyOn(liveWithSession, 'scheduleReconnect');
+    liveWithSession.handleAuthenticationFailure(new EdgeBaseError(401, 'Auth failed'));
+    expect(liveWithSession.waitingForAuth).toBe(false);
+    expect(withSessionReconnect).not.toHaveBeenCalled();
+    liveWithSession.disconnect();
+    tmWithSession.destroy();
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

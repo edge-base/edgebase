@@ -561,11 +561,19 @@ internal sealed class DatabaseLiveClient : IDisposable
 
     private void HandleAuthenticationFailure()
     {
-        _waitingForAuth = _subscribedChannels.Count > 0;
+        var hasSession = !string.IsNullOrEmpty(_http.GetRefreshToken());
+        _waitingForAuth = _subscribedChannels.Count > 0 && !hasSession;
         _authenticated = false;
         _ws?.Abort();
         _ws?.Dispose();
         _ws = null;
+
+        // Attempt reconnection with fresh token if subscriptions are active
+        if (_subscribedChannels.Count > 0 && hasSession)
+        {
+            _waitingForAuth = false;
+            _ = TryReconnectAsync();
+        }
     }
 }
 }
