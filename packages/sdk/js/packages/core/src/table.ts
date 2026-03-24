@@ -62,6 +62,20 @@ export interface BatchByFilterResult {
   errors: Array<{ chunkIndex: number; chunkSize: number; error: EdgeBaseError }>;
 }
 
+export type TableSqlExecutor = (
+  namespace: string,
+  instanceId: string | undefined,
+  query: string,
+  params?: unknown[],
+) => Promise<unknown[]>;
+
+export const TABLE_SQL_PARAM_MARKER_PREFIX = '__EDGEBASE_SQL_PARAM_';
+export const TABLE_SQL_PARAM_MARKER_SUFFIX = '__';
+
+function buildTableSqlParamMarker(index: number): string {
+  return `${TABLE_SQL_PARAM_MARKER_PREFIX}${index}${TABLE_SQL_PARAM_MARKER_SUFFIX}`;
+}
+
 // ─── Database Live Channel Builder ───
 
 /**
@@ -70,7 +84,12 @@ export interface BatchByFilterResult {
  *   Dynamic DB: dblive:workspace:ws-456:documents
  *   Single doc: dblive:shared:posts:{docId}
  */
-function buildDatabaseLiveChannel(namespace: string, instanceId: string | undefined, tableName: string, docId?: string): string {
+function buildDatabaseLiveChannel(
+  namespace: string,
+  instanceId: string | undefined,
+  tableName: string,
+  docId?: string,
+): string {
   const base = instanceId
     ? `dblive:${namespace}:${instanceId}:${tableName}`
     : `dblive:${namespace}:${tableName}`;
@@ -170,18 +189,26 @@ function coreGet<T>(
   if (instanceId) {
     // Dynamic DB
     switch (method) {
-      case 'list': return core.dbListRecords(namespace, instanceId, tablePath, q) as Promise<T>;
-      case 'get': return core.dbGetRecord(namespace, instanceId, tablePath, args.id!, q) as Promise<T>;
-      case 'count': return core.dbCountRecords(namespace, instanceId, tablePath, q) as Promise<T>;
-      case 'search': return core.dbSearchRecords(namespace, instanceId, tablePath, q) as Promise<T>;
+      case 'list':
+        return core.dbListRecords(namespace, instanceId, tablePath, q) as Promise<T>;
+      case 'get':
+        return core.dbGetRecord(namespace, instanceId, tablePath, args.id!, q) as Promise<T>;
+      case 'count':
+        return core.dbCountRecords(namespace, instanceId, tablePath, q) as Promise<T>;
+      case 'search':
+        return core.dbSearchRecords(namespace, instanceId, tablePath, q) as Promise<T>;
     }
   }
   // Single-instance DB
   switch (method) {
-    case 'list': return core.dbSingleListRecords(namespace, tablePath, q) as Promise<T>;
-    case 'get': return core.dbSingleGetRecord(namespace, tablePath, args.id!, q) as Promise<T>;
-    case 'count': return core.dbSingleCountRecords(namespace, tablePath, q) as Promise<T>;
-    case 'search': return core.dbSingleSearchRecords(namespace, tablePath, q) as Promise<T>;
+    case 'list':
+      return core.dbSingleListRecords(namespace, tablePath, q) as Promise<T>;
+    case 'get':
+      return core.dbSingleGetRecord(namespace, tablePath, args.id!, q) as Promise<T>;
+    case 'count':
+      return core.dbSingleCountRecords(namespace, tablePath, q) as Promise<T>;
+    case 'search':
+      return core.dbSingleSearchRecords(namespace, tablePath, q) as Promise<T>;
   }
 }
 
@@ -278,13 +305,23 @@ export class DocRef<T = Record<string, unknown>> {
 
   /** Get a single record */
   async get(): Promise<T> {
-    return coreGet<T>(this.core, 'get', this.namespace, this.instanceId, this.tableName, { id: this.id, query: {} });
+    return coreGet<T>(this.core, 'get', this.namespace, this.instanceId, this.tableName, {
+      id: this.id,
+      query: {},
+    });
   }
 
   /** Update a record (supports increment, deleteField) */
   async update(data: Partial<T>): Promise<T> {
     const serialized = serializeFieldOps(data as Record<string, unknown>);
-    return coreUpdate<T>(this.core, this.namespace, this.instanceId, this.tableName, this.id, serialized);
+    return coreUpdate<T>(
+      this.core,
+      this.namespace,
+      this.instanceId,
+      this.tableName,
+      this.id,
+      serialized,
+    );
   }
 
   /** Delete a record */
@@ -306,7 +343,12 @@ export class DocRef<T = Record<string, unknown>> {
       throw new EdgeBaseError(500, 'IDatabaseLiveSubscriber not available');
     }
 
-    const channel = buildDatabaseLiveChannel(this.namespace, this.instanceId, this.tableName, this.id);
+    const channel = buildDatabaseLiveChannel(
+      this.namespace,
+      this.instanceId,
+      this.tableName,
+      this.id,
+    );
     return this.databaseLiveClient.onSnapshot<T>(channel, (change) => {
       callback(change.data as T | null, change);
     });
@@ -352,11 +394,22 @@ export class TableRef<T = Record<string, unknown>> {
      * TODO: remove once admin core is wired.
      */
     private _httpClient?: HttpClient,
+    /** Optional direct SQL executor used by trusted server contexts. */
+    private _sqlExecutor?: TableSqlExecutor,
   ) {}
 
   /** Create a clone with current state (for immutable chaining) */
   private clone(): TableRef<T> {
-    const ref = new TableRef<T>(this.core, this.name, this.databaseLiveClient, this.filterMatchFn, this.namespace, this.instanceId, this._httpClient);
+    const ref = new TableRef<T>(
+      this.core,
+      this.name,
+      this.databaseLiveClient,
+      this.filterMatchFn,
+      this.namespace,
+      this.instanceId,
+      this._httpClient,
+      this._sqlExecutor,
+    );
     ref.filters = [...this.filters];
     ref.orFilters = [...this.orFilters];
     ref.sorts = [...this.sorts];
@@ -422,7 +475,6 @@ export class TableRef<T = Record<string, unknown>> {
     return ref;
   }
 
-
   /** Set full-text search query */
   search(query: string): TableRef<T> {
     const ref = this.clone();
@@ -458,7 +510,10 @@ export class TableRef<T = Record<string, unknown>> {
     const hasCursor = this.afterCursor !== undefined || this.beforeCursor !== undefined;
     const hasOffset = this.offsetValue !== undefined || this.pageValue !== undefined;
     if (hasCursor && hasOffset) {
-      throw new EdgeBaseError(400, 'Cannot use page()/offset() with after()/before() — choose offset or cursor pagination');
+      throw new EdgeBaseError(
+        400,
+        'Cannot use page()/offset() with after()/before() — choose offset or cursor pagination',
+      );
     }
 
     const query: Record<string, string> = {};
@@ -491,7 +546,15 @@ export class TableRef<T = Record<string, unknown>> {
 
   /** Get a document reference for single-record operations */
   doc(id: string): DocRef<T> {
-    return new DocRef<T>(this.core, this.namespace, this.instanceId, this.name, id, this.databaseLiveClient, this.filterMatchFn);
+    return new DocRef<T>(
+      this.core,
+      this.namespace,
+      this.instanceId,
+      this.name,
+      id,
+      this.databaseLiveClient,
+      this.filterMatchFn,
+    );
   }
 
   // ─── CRUD Methods ───
@@ -505,23 +568,40 @@ export class TableRef<T = Record<string, unknown>> {
     let data: Record<string, unknown>;
     if (this.searchQuery) {
       query.search = this.searchQuery;
-      data = await coreGet<Record<string, unknown>>(this.core, 'search', this.namespace, this.instanceId, this.name, { query });
+      data = await coreGet<Record<string, unknown>>(
+        this.core,
+        'search',
+        this.namespace,
+        this.instanceId,
+        this.name,
+        { query },
+      );
     } else {
-      data = await coreGet<Record<string, unknown>>(this.core, 'list', this.namespace, this.instanceId, this.name, { query });
+      data = await coreGet<Record<string, unknown>>(
+        this.core,
+        'list',
+        this.namespace,
+        this.instanceId,
+        this.name,
+        { query },
+      );
     }
     return {
       items: (data.items ?? []) as T[],
-      total: data.total !== undefined ? data.total as number | null : null,
-      page: data.page !== undefined ? data.page as number : null,
-      perPage: data.perPage !== undefined ? data.perPage as number : null,
-      hasMore: data.hasMore !== undefined ? data.hasMore as boolean : null,
-      cursor: data.cursor !== undefined ? data.cursor as string : null,
+      total: data.total !== undefined ? (data.total as number | null) : null,
+      page: data.page !== undefined ? (data.page as number) : null,
+      perPage: data.perPage !== undefined ? (data.perPage as number) : null,
+      hasMore: data.hasMore !== undefined ? (data.hasMore as boolean) : null,
+      cursor: data.cursor !== undefined ? (data.cursor as string) : null,
     };
   }
 
   /** Get a single record by ID. Use getList() for listing records. */
   async getOne(id: string): Promise<T> {
-    return coreGet<T>(this.core, 'get', this.namespace, this.instanceId, this.name, { id, query: {} });
+    return coreGet<T>(this.core, 'get', this.namespace, this.instanceId, this.name, {
+      id,
+      query: {},
+    });
   }
 
   /**
@@ -557,10 +637,20 @@ export class TableRef<T = Record<string, unknown>> {
   // ─── Special Methods ───
 
   /** Upsert: insert or update */
-  async upsert(data: Partial<T>, options?: { conflictTarget?: string }): Promise<T & { action: 'inserted' | 'updated' }> {
+  async upsert(
+    data: Partial<T>,
+    options?: { conflictTarget?: string },
+  ): Promise<T & { action: 'inserted' | 'updated' }> {
     const query: Record<string, string> = { upsert: 'true' };
     if (options?.conflictTarget) query.conflictTarget = options.conflictTarget;
-    return coreInsert<T & { action: 'inserted' | 'updated' }>(this.core, this.namespace, this.instanceId, this.name, data, query);
+    return coreInsert<T & { action: 'inserted' | 'updated' }>(
+      this.core,
+      this.namespace,
+      this.instanceId,
+      this.name,
+      data,
+      query,
+    );
   }
 
   /** Batch upsert */
@@ -571,7 +661,14 @@ export class TableRef<T = Record<string, unknown>> {
 
     // Fast path: no chunking needed
     if (items.length <= CHUNK_SIZE) {
-      const result = await coreBatch<{ inserted: T[] }>(this.core, this.namespace, this.instanceId, this.name, { inserts: items }, query);
+      const result = await coreBatch<{ inserted: T[] }>(
+        this.core,
+        this.namespace,
+        this.instanceId,
+        this.name,
+        { inserts: items },
+        query,
+      );
       return result.inserted;
     }
 
@@ -579,7 +676,14 @@ export class TableRef<T = Record<string, unknown>> {
     const allInserted: T[] = [];
     for (let i = 0; i < items.length; i += CHUNK_SIZE) {
       const chunk = items.slice(i, i + CHUNK_SIZE);
-      const result = await coreBatch<{ inserted: T[] }>(this.core, this.namespace, this.instanceId, this.name, { inserts: chunk }, query);
+      const result = await coreBatch<{ inserted: T[] }>(
+        this.core,
+        this.namespace,
+        this.instanceId,
+        this.name,
+        { inserts: chunk },
+        query,
+      );
       allInserted.push(...result.inserted);
     }
     return allInserted;
@@ -588,7 +692,14 @@ export class TableRef<T = Record<string, unknown>> {
   /** Count records matching filters */
   async count(): Promise<number> {
     const query = this.buildQueryParams();
-    const result = await coreGet<{ total: number }>(this.core, 'count', this.namespace, this.instanceId, this.name, { query });
+    const result = await coreGet<{ total: number }>(
+      this.core,
+      'count',
+      this.namespace,
+      this.instanceId,
+      this.name,
+      { query },
+    );
     return result.total;
   }
 
@@ -602,7 +713,13 @@ export class TableRef<T = Record<string, unknown>> {
 
     // Fast path: no chunking needed
     if (items.length <= CHUNK_SIZE) {
-      const result = await coreBatch<{ inserted: T[] }>(this.core, this.namespace, this.instanceId, this.name, { inserts: items });
+      const result = await coreBatch<{ inserted: T[] }>(
+        this.core,
+        this.namespace,
+        this.instanceId,
+        this.name,
+        { inserts: items },
+      );
       return result.inserted;
     }
 
@@ -610,7 +727,13 @@ export class TableRef<T = Record<string, unknown>> {
     const allInserted: T[] = [];
     for (let i = 0; i < items.length; i += CHUNK_SIZE) {
       const chunk = items.slice(i, i + CHUNK_SIZE);
-      const result = await coreBatch<{ inserted: T[] }>(this.core, this.namespace, this.instanceId, this.name, { inserts: chunk });
+      const result = await coreBatch<{ inserted: T[] }>(
+        this.core,
+        this.namespace,
+        this.instanceId,
+        this.name,
+        { inserts: chunk },
+      );
       allInserted.push(...result.inserted);
     }
     return allInserted;
@@ -662,7 +785,11 @@ export class TableRef<T = Record<string, unknown>> {
           body.update = update;
         }
         const result = await coreBatchByFilter<{ processed: number; succeeded: number }>(
-          this.core, this.namespace, this.instanceId, this.name, body,
+          this.core,
+          this.namespace,
+          this.instanceId,
+          this.name,
+          body,
         );
         totalProcessed += result.processed;
         totalSucceeded += result.succeeded;
@@ -709,15 +836,24 @@ export class TableRef<T = Record<string, unknown>> {
     const channel = buildDatabaseLiveChannel(this.namespace, this.instanceId, this.name);
     const currentFilters = [...this.filters];
     const currentOrFilters = [...this.orFilters];
-    const useServerFilter = options?.serverFilter === true && (currentFilters.length > 0 || currentOrFilters.length > 0);
+    const useServerFilter =
+      options?.serverFilter === true && (currentFilters.length > 0 || currentOrFilters.length > 0);
 
     // Accumulate state locally
     const items = new Map<string, T>();
-    const pendingChanges: { added: T[]; modified: T[]; removed: T[] } = { added: [], modified: [], removed: [] };
+    const pendingChanges: { added: T[]; modified: T[]; removed: T[] } = {
+      added: [],
+      modified: [],
+      removed: [],
+    };
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
     const flush = () => {
-      if (pendingChanges.added.length || pendingChanges.modified.length || pendingChanges.removed.length) {
+      if (
+        pendingChanges.added.length ||
+        pendingChanges.modified.length ||
+        pendingChanges.removed.length
+      ) {
         callback({
           items: Array.from(items.values()),
           changes: { ...pendingChanges },
@@ -747,7 +883,10 @@ export class TableRef<T = Record<string, unknown>> {
         if (hasFilterConstraints) {
           if (change.changeType === 'removed') {
             if (!hadItem) return;
-          } else if (!data || !matchesSnapshotFilters(data, currentFilters, currentOrFilters, this.filterMatchFn)) {
+          } else if (
+            !data ||
+            !matchesSnapshotFilters(data, currentFilters, currentOrFilters, this.filterMatchFn)
+          ) {
             if (hadItem) {
               const lastKnown = items.get(docId);
               items.delete(docId);
@@ -784,12 +923,12 @@ export class TableRef<T = Record<string, unknown>> {
   }
 
   /**
-   * Execute raw SQL on this table's DO.
+   * Execute raw SQL for this table's database namespace.
    * Tagged template — interpolated values are automatically extracted as bind params,
    * preventing SQL injection.
    *
-   * NOTE: Admin-only (/api/sql). Uses raw HttpClient since this endpoint is
-   * in the admin core, not the client core. Requires Service Key auth.
+   * NOTE: Admin-only. Trusted server contexts may use a direct SQL executor;
+   * other contexts fall back to the internal admin SQL route.
    *
    * @example
    * // In App Functions or server-side code
@@ -801,18 +940,26 @@ export class TableRef<T = Record<string, unknown>> {
    * `;
    */
   async sql(strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown[]> {
-    if (!this._httpClient) {
-      throw new EdgeBaseError(500, 'sql() requires HttpClient (admin-only method). Use context.admin.db(...).table(...).sql`...`');
-    }
-    // Build parameterized query from tagged template — each ${} becomes ?
+    // Build parameterized query from tagged template. Direct executors receive
+    // stable internal markers so PostgreSQL operator syntax stays unambiguous.
     let query = '';
     const params: unknown[] = [];
+    const useDirectMarkers = !!this._sqlExecutor;
     for (let i = 0; i < strings.length; i++) {
       query += strings[i];
       if (i < values.length) {
-        query += '?';
         params.push(values[i]);
+        query += useDirectMarkers ? buildTableSqlParamMarker(params.length) : '?';
       }
+    }
+    if (this._sqlExecutor) {
+      return this._sqlExecutor(this.namespace, this.instanceId, query.trim(), params);
+    }
+    if (!this._httpClient) {
+      throw new EdgeBaseError(
+        500,
+        'sql() requires HttpClient or direct SQL executor (admin-only method).',
+      );
     }
     // §11: body uses { namespace, id, sql, params }
     // /api/sql is admin-only, tagged 'admin', lives in admin core — not client core.
@@ -852,6 +999,8 @@ export class DbRef {
      * TODO: remove once admin core is wired.
      */
     private _httpClient?: HttpClient,
+    /** Optional direct SQL executor used by trusted server contexts. */
+    private _sqlExecutor?: TableSqlExecutor,
   ) {}
 
   /**
@@ -869,6 +1018,7 @@ export class DbRef {
       this.namespace,
       this.instanceId,
       this._httpClient,
+      this._sqlExecutor,
     );
   }
 }

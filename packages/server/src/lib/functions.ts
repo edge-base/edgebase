@@ -25,8 +25,7 @@ import type {
   ScheduleTrigger,
   HttpTrigger,
 } from '@edge-base/shared';
-import { getD1BindingName, shouldRouteToD1 } from './do-router.js';
-import { executeDoSql } from './do-sql.js';
+import { getD1BindingName } from './do-router.js';
 import { D1AuthDb, type AuthDb } from './auth-db-adapter.js';
 import { ensureAuthSchema } from './auth-d1.js';
 import type { Env } from '../types.js';
@@ -41,6 +40,7 @@ import { hashPassword } from './password.js';
 import { generateId } from './uuid.js';
 import { DbRef, TableRef, DefaultDbApi, HttpClient, ContextManager } from '@edge-base/core';
 import { InternalHttpTransport } from './internal-transport.js';
+import { executeProviderAwareSql } from './provider-aware-sql.js';
 
 // ─── Function Context Types ───
 
@@ -95,11 +95,21 @@ export interface FunctionAdminContext {
   /** Admin user management. */
   auth: AdminAuthContext;
   /**
-   * Execute raw SQL with direct D1/DO binding access — no HTTP round-trip.
-   * Routes directly to D1 binding or Durable Object without network overhead.
+   * Execute raw SQL through the fastest provider-aware path available.
+   * Uses direct PostgreSQL / Neon, D1, or DO execution when possible,
+   * then falls back to the internal HTTP SQL route when needed.
    *
    * @example
-   * const rows = await ctx.admin.sqlWithDirectD1Access('shared', undefined, 'SELECT * FROM posts WHERE status = ?', ['published']);
+   * const rows = await ctx.admin.sqlProviderAware('shared', undefined, 'SELECT * FROM posts WHERE status = ?', ['published']);
+   */
+  sqlProviderAware(
+    namespace: string,
+    id: string | undefined,
+    query: string,
+    params?: unknown[],
+  ): Promise<unknown[]>;
+  /**
+   * @deprecated Use `sqlProviderAware()` instead.
    */
   sqlWithDirectD1Access(
     namespace: string,
@@ -136,9 +146,7 @@ export interface FunctionPushProxy {
     payload: Record<string, unknown>,
   ): Promise<{ sent: number; failed: number; removed: number }>;
   /** Get registered device tokens for a user — token values NOT exposed. */
-  getTokens(
-    userId: string,
-  ): Promise<
+  getTokens(userId: string): Promise<
     Array<{
       deviceId: string;
       platform: string;
@@ -178,12 +186,30 @@ export interface FunctionPushProxy {
 
 /** Storage proxy for App Functions — wraps R2Bucket with convenience methods. */
 export interface FunctionStorageProxy {
-  put(key: string, value: ReadableStream | ArrayBuffer | string, options?: { contentType?: string; customMetadata?: Record<string, string> }): Promise<void>;
-  get(key: string): Promise<{ body: ReadableStream; contentType: string; size: number; customMetadata: Record<string, string> } | null>;
+  put(
+    key: string,
+    value: ReadableStream | ArrayBuffer | string,
+    options?: { contentType?: string; customMetadata?: Record<string, string> },
+  ): Promise<void>;
+  get(key: string): Promise<{
+    body: ReadableStream;
+    contentType: string;
+    size: number;
+    customMetadata: Record<string, string>;
+  } | null>;
   delete(key: string): Promise<void>;
   getSignedUrl(key: string, options?: { expiresIn?: number }): Promise<string>;
-  list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<{ keys: Array<{ key: string; size: number; contentType: string }>; cursor?: string; truncated: boolean }>;
-  head(key: string): Promise<{ key: string; size: number; contentType: string; customMetadata: Record<string, string> } | null>;
+  list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<{
+    keys: Array<{ key: string; size: number; contentType: string }>;
+    cursor?: string;
+    truncated: boolean;
+  }>;
+  head(key: string): Promise<{
+    key: string;
+    size: number;
+    contentType: string;
+    customMetadata: Record<string, string>;
+  } | null>;
 }
 
 /** KV proxy for App Functions — routes through Worker HTTP. */
@@ -363,13 +389,14 @@ function getRegistryName(key: string, def: FunctionDefinition): string {
 
 export function registerFunction(name: string, def: FunctionDefinition): void {
   if (!def || typeof def !== 'object' || !def.trigger) {
-    const received = typeof def === 'function'
-      ? 'a plain function'
-      : `${typeof def} (${JSON.stringify(def)?.slice(0, 100)})`;
+    const received =
+      typeof def === 'function'
+        ? 'a plain function'
+        : `${typeof def} (${JSON.stringify(def)?.slice(0, 100)})`;
     throw new Error(
       `registerFunction('${name}'): expected a FunctionDefinition with a 'trigger' property, but received ${received}. ` +
-      `Functions must use defineFunction() from '@edge-base/shared' and be exported as named HTTP method exports ` +
-      `(e.g. export const GET = defineFunction(...)). See https://docs.edgebase.dev/functions for details.`,
+        `Functions must use defineFunction() from '@edge-base/shared' and be exported as named HTTP method exports ` +
+        `(e.g. export const GET = defineFunction(...)). See https://docs.edgebase.dev/functions for details.`,
     );
   }
   functionRegistry.set(buildRegistryKey(name, def), def);
@@ -676,7 +703,12 @@ export function wrapMethodExport(
   } else if (handler && typeof handler === 'object') {
     fn = (handler.handler ?? handler) as unknown as (ctx: unknown) => Promise<unknown>;
     captcha = handler.captcha;
-    if ('trigger' in handler && handler.trigger && typeof handler.trigger === 'object' && 'path' in handler.trigger) {
+    if (
+      'trigger' in handler &&
+      handler.trigger &&
+      typeof handler.trigger === 'object' &&
+      'path' in handler.trigger
+    ) {
       const triggerPath = handler.trigger.path;
       path = typeof triggerPath === 'string' ? triggerPath : undefined;
     }
@@ -707,10 +739,10 @@ interface BuildAdminDbProxyOptions {
   preferDirectDo?: boolean;
 }
 
-// ─── Shared SQL executor — D1 direct → DO direct → HTTP fallback ───
+// ─── Shared SQL executor — provider-aware direct paths → HTTP fallback ───
 
-export interface SqlWithDirectD1AccessOptions {
-  env?: unknown;
+export interface SqlProviderAwareOptions {
+  env?: Env;
   config: EdgeBaseConfig;
   databaseNamespace?: DurableObjectNamespace;
   workerUrl?: string;
@@ -718,80 +750,40 @@ export interface SqlWithDirectD1AccessOptions {
 }
 
 /**
- * Execute raw SQL with the fastest available path:
- * 1. D1 direct binding (no network hop)
- * 2. Durable Object direct call
- * 3. HTTP fallback via workerUrl
+ * Execute raw SQL with the fastest provider-aware path:
+ * 1. PostgreSQL / Neon direct query path
+ * 2. D1 direct binding
+ * 3. Durable Object direct call
+ * 4. HTTP fallback via workerUrl
  *
- * Shared by buildFunctionContext, auth hooks, and storage hooks.
+ * Shared by buildFunctionContext, auth hooks, storage hooks, and plugin migrations.
  */
-export async function executeSqlWithDirectD1Access(
-  opts: SqlWithDirectD1AccessOptions,
+export async function executeSqlProviderAware(
+  opts: SqlProviderAwareOptions,
   namespace: string,
   id: string | undefined,
   query: string,
   params?: unknown[],
 ): Promise<unknown[]> {
-  if (opts.env) {
-    const dbBlock = opts.config.databases?.[namespace];
-    const isDynamicNamespace = !!(dbBlock?.instance || dbBlock?.access?.canCreate || dbBlock?.access?.access);
-    if (isDynamicNamespace && !id) {
-      throw new Error(`admin.sqlWithDirectD1Access() requires an id for dynamic namespace '${namespace}'.`);
-    }
-
-    if (!id && shouldRouteToD1(namespace, opts.config)) {
-      const bindingName = getD1BindingName(namespace);
-      const d1 = (opts.env as Record<string, unknown>)[bindingName] as D1Database | undefined;
-      if (!d1) {
-        throw new Error(`D1 binding '${bindingName}' not found.`);
-      }
-      try {
-        const stmt = d1.prepare(query);
-        const bound = params && params.length > 0 ? stmt.bind(...params) : stmt;
-        const result = await bound.all();
-        return (result.results ?? []) as unknown[];
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'SQL execution failed';
-        throw new Error(message);
-      }
-    }
-
-    if (opts.databaseNamespace) {
-      return executeDoSql({
-        databaseNamespace: opts.databaseNamespace,
-        namespace,
-        id,
-        query,
-        params: params ?? [],
-        internal: true,
-      });
-    }
-  }
-
-  if (opts.workerUrl && opts.serviceKey) {
-    const res = await fetch(`${opts.workerUrl}/api/sql`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-EdgeBase-Service-Key': opts.serviceKey,
-      },
-      body: JSON.stringify({ namespace, id, sql: query, params: params ?? [] }),
-    });
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({ message: 'SQL execution failed' }))) as { message: string };
-      throw new Error(err.message);
-    }
-    const data = (await res.json()) as { rows?: unknown[]; items?: unknown[]; results?: unknown[] };
-    if (Array.isArray(data.rows)) return data.rows;
-    if (Array.isArray(data.items)) return data.items;
-    if (Array.isArray(data.results)) return data.results;
-    return [];
-  }
-
-  throw new Error(
-    'admin.sqlWithDirectD1Access() requires env or workerUrl.',
+  const result = await executeProviderAwareSql(
+    {
+      env: opts.env,
+      config: opts.config,
+      databaseNamespace: opts.databaseNamespace,
+      workerUrl: opts.workerUrl,
+      serviceKey: opts.serviceKey,
+    },
+    namespace,
+    id,
+    query,
+    params ?? [],
   );
+  return result.rows;
 }
+
+// Backwards-compatible aliases for existing internal callers and public surfaces.
+export const executeSqlWithDirectBindingAccess = executeSqlProviderAware;
+export const executeSqlWithDirectD1Access = executeSqlProviderAware;
 
 /**
  * Build the admin DB proxy that returns real DbRef/TableRef instances
@@ -799,8 +791,8 @@ export async function executeSqlWithDirectD1Access(
  * direct D1/PG/DO access (no HTTP round-trip).
  */
 export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAdminContext['db'] {
-  // Create HttpClient for sql() tagged template support on TableRef.
-  // Only available when workerUrl is set (routes through /api/sql endpoint).
+  // Create HttpClient fallback for sql() tagged template support on TableRef.
+  // Trusted server contexts also receive a direct SQL executor below.
   let httpClient: HttpClient | undefined;
   if (options.workerUrl) {
     httpClient = new HttpClient({
@@ -809,6 +801,25 @@ export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAd
       contextManager: new ContextManager(),
     });
   }
+  const sqlExecutor = (
+    namespace: string,
+    id: string | undefined,
+    query: string,
+    params?: unknown[],
+  ) =>
+    executeSqlProviderAware(
+      {
+        env: options.env,
+        config: options.config,
+        databaseNamespace: options.databaseNamespace,
+        workerUrl: options.workerUrl,
+        serviceKey: options.serviceKey,
+      },
+      namespace,
+      id,
+      query,
+      params,
+    );
 
   return (namespace: string, id?: string): DbRef => {
     // Create a per-DbRef transport with explicit dbContext so that
@@ -828,9 +839,10 @@ export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAd
       dbApi,
       namespace,
       id,
-      undefined,   // databaseLiveClient — not available server-side
-      undefined,   // filterMatchFn
-      httpClient,  // enables table().sql`...` tagged template
+      undefined, // databaseLiveClient — not available server-side
+      undefined, // filterMatchFn
+      httpClient, // enables table().sql`...` tagged template
+      sqlExecutor,
     );
   };
 }
@@ -919,8 +931,10 @@ export function buildAdminAuthContext(options: AdminAuthOptions): AdminAuthConte
       // Direct D1 path — works without service key (same as updateUser/deleteUser)
       if (d1Database) {
         // Input validation (mirrors routes/admin-auth.ts guards)
-        if (!data.email || typeof data.email !== 'string') throw new Error('Email and password are required.');
-        if (!data.password || typeof data.password !== 'string') throw new Error('Email and password are required.');
+        if (!data.email || typeof data.email !== 'string')
+          throw new Error('Email and password are required.');
+        if (!data.password || typeof data.password !== 'string')
+          throw new Error('Email and password are required.');
         const email = data.email.trim().toLowerCase();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
           throw new Error('Invalid email format.');
@@ -1081,6 +1095,25 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
     executionCtx: options.executionCtx,
     preferDirectDo: options.preferDirectDoDb,
   });
+  const sqlProviderAware = (
+    namespace: string,
+    id: string | undefined,
+    query: string,
+    params?: unknown[],
+  ) =>
+    executeSqlProviderAware(
+      {
+        env: options.env,
+        config: options.config,
+        databaseNamespace: options.databaseNamespace,
+        workerUrl: options.workerUrl,
+        serviceKey: options.serviceKey,
+      },
+      namespace,
+      id,
+      query,
+      params,
+    );
 
   // ─── context.admin — AdminEdgeBase-shaped internal proxy ───
   const admin: FunctionAdminContext = {
@@ -1089,18 +1122,9 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
     // ─── context.admin.db(namespace, id) — DB-first tenant access (§5) ───
     db: adminDb,
     auth: adminAuthContext,
-    // ─── Direct D1/DO SQL — delegates to shared executor ───
-    sqlWithDirectD1Access: (namespace: string, id: string | undefined, query: string, params?: unknown[]) =>
-      executeSqlWithDirectD1Access(
-        {
-          env: options.env,
-          config: options.config,
-          databaseNamespace: options.databaseNamespace,
-          workerUrl: options.workerUrl,
-          serviceKey: options.serviceKey,
-        },
-        namespace, id, query, params,
-      ),
+    // ─── Direct provider-aware SQL — delegates to shared executor ───
+    sqlProviderAware,
+    sqlWithDirectD1Access: sqlProviderAware,
     async broadcast(
       channel: string,
       event: string,
@@ -1109,11 +1133,13 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
       if (options.env?.DATABASE_LIVE) {
         const hubId = options.env.DATABASE_LIVE.idFromName('database-live:hub');
         const stub = options.env.DATABASE_LIVE.get(hubId);
-        const response = await stub.fetch(new Request('http://do/internal/broadcast', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ channel, event, payload: payload ?? {} }),
-        }));
+        const response = await stub.fetch(
+          new Request('http://do/internal/broadcast', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel, event, payload: payload ?? {} }),
+          }),
+        );
         if (!response.ok) {
           throw new Error(`client.broadcast() failed: ${response.status}`);
         }
@@ -1161,9 +1187,7 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                ...(options.serviceKey
-                  ? { 'X-EdgeBase-Service-Key': options.serviceKey }
-                  : {}),
+                ...(options.serviceKey ? { 'X-EdgeBase-Service-Key': options.serviceKey } : {}),
                 'X-EdgeBase-Call-Depth': String(currentDepth + 1),
               },
               body: JSON.stringify(data ?? {}),
@@ -1221,13 +1245,31 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
 
     // KV / D1 / Vectorize proxies
     kv(namespace: string): FunctionKvProxy {
-      return buildFunctionKvProxy(namespace, options.config, options.env, options.workerUrl, options.serviceKey);
+      return buildFunctionKvProxy(
+        namespace,
+        options.config,
+        options.env,
+        options.workerUrl,
+        options.serviceKey,
+      );
     },
     d1(database: string): FunctionD1Proxy {
-      return buildFunctionD1Proxy(database, options.config, options.env, options.workerUrl, options.serviceKey);
+      return buildFunctionD1Proxy(
+        database,
+        options.config,
+        options.env,
+        options.workerUrl,
+        options.serviceKey,
+      );
     },
     vector(index: string): FunctionVectorizeProxy {
-      return buildFunctionVectorizeProxy(index, options.config, options.env, options.workerUrl, options.serviceKey);
+      return buildFunctionVectorizeProxy(
+        index,
+        options.config,
+        options.env,
+        options.workerUrl,
+        options.serviceKey,
+      );
     },
 
     // Push notification management
@@ -1466,11 +1508,14 @@ export function buildFunctionD1Proxy(
   return {
     async exec<T = Record<string, unknown>>(query: string, params?: unknown[]): Promise<T[]> {
       if (config && env) {
-        const bindingName = config.d1?.[database]?.binding
-          ?? (database === 'auth' ? 'AUTH_DB' : undefined)
-          ?? (database === 'control' ? 'CONTROL_DB' : undefined)
-          ?? getD1BindingName(database);
-        const binding = (env as unknown as Record<string, unknown>)[bindingName] as D1Database | undefined;
+        const bindingName =
+          config.d1?.[database]?.binding ??
+          (database === 'auth' ? 'AUTH_DB' : undefined) ??
+          (database === 'control' ? 'CONTROL_DB' : undefined) ??
+          getD1BindingName(database);
+        const binding = (env as unknown as Record<string, unknown>)[bindingName] as
+          | D1Database
+          | undefined;
         if (!binding) {
           throw new Error(`D1 binding '${bindingName}' not found.`);
         }
@@ -1522,7 +1567,7 @@ export function buildFunctionVectorizeProxy(
     if (values instanceof Float32Array || values instanceof Float64Array) {
       return Array.from(values);
     }
-    return Array.isArray(values) ? values as number[] : undefined;
+    return Array.isArray(values) ? (values as number[]) : undefined;
   };
 
   const mapMatches = (
@@ -1533,15 +1578,19 @@ export function buildFunctionVectorizeProxy(
       metadata?: Record<string, unknown>;
       namespace?: string;
     }>,
-  ) => matches.map((match) => ({
-    id: match.id,
-    score: match.score,
-    ...(match.values !== undefined ? { values: normalizeValues(match.values) } : {}),
-    ...(match.metadata !== undefined ? { metadata: match.metadata } : {}),
-    ...(match.namespace ? { namespace: match.namespace } : {}),
-  }));
+  ) =>
+    matches.map((match) => ({
+      id: match.id,
+      score: match.score,
+      ...(match.values !== undefined ? { values: normalizeValues(match.values) } : {}),
+      ...(match.metadata !== undefined ? { metadata: match.metadata } : {}),
+      ...(match.namespace ? { namespace: match.namespace } : {}),
+    }));
 
-  const withNamespace = <T extends { namespace?: string }>(vectors: T[], namespace?: string): T[] => {
+  const withNamespace = <T extends { namespace?: string }>(
+    vectors: T[],
+    namespace?: string,
+  ): T[] => {
     if (!namespace) return vectors;
     return vectors.map((vector) => (vector.namespace ? vector : { ...vector, namespace }));
   };
@@ -1559,7 +1608,10 @@ export function buildFunctionVectorizeProxy(
     if (directBinding) {
       switch (body.action) {
         case 'upsert': {
-          const vectors = withNamespace(body.vectors as VectorizeVector[], body.namespace as string | undefined);
+          const vectors = withNamespace(
+            body.vectors as VectorizeVector[],
+            body.namespace as string | undefined,
+          );
           let count = 0;
           let mutationId: string | undefined;
           for (const chunk of chunkArray(vectors, VECTOR_BATCH_LIMIT)) {
@@ -1572,7 +1624,10 @@ export function buildFunctionVectorizeProxy(
           return { count, ...(mutationId ? { mutationId } : {}) };
         }
         case 'insert': {
-          const vectors = withNamespace(body.vectors as VectorizeVector[], body.namespace as string | undefined);
+          const vectors = withNamespace(
+            body.vectors as VectorizeVector[],
+            body.namespace as string | undefined,
+          );
           let count = 0;
           let mutationId: string | undefined;
           for (const chunk of chunkArray(vectors, VECTOR_BATCH_LIMIT)) {
@@ -1595,9 +1650,11 @@ export function buildFunctionVectorizeProxy(
           return { matches: mapMatches(result.matches), count: result.count };
         }
         case 'queryById': {
-          const queryById = (directBinding as unknown as {
-            queryById?: (id: string, opts?: VectorizeQueryOptions) => Promise<VectorizeMatches>;
-          }).queryById;
+          const queryById = (
+            directBinding as unknown as {
+              queryById?: (id: string, opts?: VectorizeQueryOptions) => Promise<VectorizeMatches>;
+            }
+          ).queryById;
           if (typeof queryById !== 'function') {
             throw new Error('queryById is not available on this Vectorize binding');
           }
@@ -1612,7 +1669,11 @@ export function buildFunctionVectorizeProxy(
         }
         case 'getByIds': {
           const vectors = (
-            await Promise.all(chunkArray(body.ids as string[], VECTOR_BATCH_LIMIT).map((chunk) => directBinding.getByIds(chunk)))
+            await Promise.all(
+              chunkArray(body.ids as string[], VECTOR_BATCH_LIMIT).map((chunk) =>
+                directBinding.getByIds(chunk),
+              ),
+            )
           ).flat();
           return {
             vectors: vectors.map((vector) => ({
@@ -1640,12 +1701,22 @@ export function buildFunctionVectorizeProxy(
           const details = info as unknown as Record<string, unknown>;
           return {
             vectorCount: details.vectorCount ?? details.vectorsCount ?? 0,
-            dimensions: details.dimensions ?? (details.config as Record<string, unknown> | undefined)?.dimensions ?? 0,
-            metric: details.metric ?? (details.config as Record<string, unknown> | undefined)?.metric ?? 'cosine',
+            dimensions:
+              details.dimensions ??
+              (details.config as Record<string, unknown> | undefined)?.dimensions ??
+              0,
+            metric:
+              details.metric ??
+              (details.config as Record<string, unknown> | undefined)?.metric ??
+              'cosine',
             ...('id' in details ? { id: details.id } : {}),
             ...('name' in details ? { name: details.name } : {}),
-            ...('processedUpToDatetime' in details ? { processedUpToDatetime: details.processedUpToDatetime } : {}),
-            ...('processedUpToMutation' in details ? { processedUpToMutation: details.processedUpToMutation } : {}),
+            ...('processedUpToDatetime' in details
+              ? { processedUpToDatetime: details.processedUpToDatetime }
+              : {}),
+            ...('processedUpToMutation' in details
+              ? { processedUpToMutation: details.processedUpToMutation }
+              : {}),
           };
         }
       }

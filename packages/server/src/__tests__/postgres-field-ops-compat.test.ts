@@ -5,6 +5,7 @@ import type { Env } from '../types.js';
 
 describe('postgres field operator compatibility', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.resetModules();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
@@ -218,5 +219,114 @@ describe('postgres field operator compatibility', () => {
     expect(updateParams[1]).toBe(2);
     expect(typeof updateParams[2]).toBe('string');
     expect(waitUntil).toHaveBeenCalledTimes(1);
+  });
+
+  it('catches rejected db-live promises for batch-by-filter updates before scheduling background work', async () => {
+    const executePostgresQuery = vi.fn()
+      .mockResolvedValueOnce({
+        rows: [{ id: 'post-1' }],
+        rowCount: 1,
+      })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'post-1',
+          viewCount: 3,
+        }],
+        rowCount: 1,
+      });
+    const emitDbLiveEvent = vi.fn().mockRejectedValue(new Error('database-live unavailable'));
+
+    vi.doMock('../lib/postgres-executor.js', () => ({
+      executePostgresQuery,
+      ensureLocalDevPostgresSchema: vi.fn().mockResolvedValue(undefined),
+      withPostgresConnection: vi.fn(async (_connectionString, fn) =>
+        fn((sql: string, params: unknown[] = []) => executePostgresQuery(_connectionString, sql, params))),
+      getLocalDevPostgresExecOptions: vi.fn(() => undefined),
+      getProviderBindingName: () => 'DB_SHARED',
+    }));
+    vi.doMock('../lib/postgres-schema-init.js', () => ({
+      ensurePgSchema: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('../lib/database-live-emitter.js', () => ({
+      emitDbLiveEvent,
+      emitDbLiveBatchEvent: vi.fn().mockResolvedValue(undefined),
+    }));
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { handlePgRequest } = await import('../lib/postgres-handler.js');
+
+    const env = {
+      EDGEBASE_CONFIG: defineConfig({
+        release: true,
+        databases: {
+          shared: {
+            provider: 'postgres',
+            connectionString: 'DB_POSTGRES_SHARED_URL',
+            tables: {
+              posts: {
+                schema: {
+                  viewCount: { type: 'number' },
+                },
+                access: {
+                  update: () => true,
+                },
+              },
+            },
+          },
+        },
+      }),
+      DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
+    } as unknown as Env;
+
+    const request = new Request(
+      'http://internal/api/db/shared/tables/posts/batch-by-filter',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Is-Service-Key': 'true',
+        },
+      },
+    );
+
+    const pending: Promise<unknown>[] = [];
+    const executionCtx = {
+      waitUntil(promise: Promise<unknown>) {
+        pending.push(promise);
+      },
+    } as unknown as ExecutionContext;
+    const ctx = buildInternalHandlerContext({
+      env,
+      request,
+      executionCtx,
+      body: {
+        action: 'update',
+        filter: [['id', '==', 'post-1']],
+        update: {
+          viewCount: { $op: 'increment', value: 2 },
+        },
+      },
+    });
+
+    const response = await handlePgRequest(ctx, 'shared', 'posts', '/tables/posts/batch-by-filter');
+    const json = await response.json() as {
+      processed: number;
+      succeeded: number;
+      updated: number;
+    };
+
+    expect(response.status).toBe(200);
+    expect(json).toMatchObject({
+      processed: 1,
+      succeeded: 1,
+      updated: 1,
+    });
+    expect(emitDbLiveEvent).toHaveBeenCalledTimes(1);
+    expect(pending).toHaveLength(1);
+    await expect(pending[0]).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      '[db-live] emit bulk shared.posts (update) failed',
+      expect.any(Error),
+    );
   });
 });

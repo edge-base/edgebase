@@ -100,8 +100,18 @@ export interface PluginAdminContext {
   /** Admin user management. */
   auth: PluginAdminAuthContext;
   /**
-   * Execute raw SQL with direct D1/DO access (no HTTP round-trip).
-   * Preferred over `table().sql\`...\`` in server/plugin contexts for performance.
+   * Execute raw SQL through the fastest provider-aware path available.
+   * Uses direct PostgreSQL / Neon, D1, or DO execution when possible,
+   * then falls back to the internal worker SQL route when needed.
+   */
+  sqlProviderAware(
+    namespace: string,
+    id: string | undefined,
+    query: string,
+    params?: unknown[],
+  ): Promise<unknown[]>;
+  /**
+   * @deprecated Use `sqlProviderAware()` instead.
    */
   sqlWithDirectD1Access(
     namespace: string,
@@ -692,6 +702,9 @@ export function createMockContext<TConfig = Record<string, unknown>>(options?: {
       return { table: createTableProxy };
     },
     auth: mockAuth,
+    async sqlProviderAware() {
+      return [];
+    },
     async sqlWithDirectD1Access() {
       return [];
     },

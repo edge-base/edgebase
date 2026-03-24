@@ -56,6 +56,17 @@ These apply when you deploy on Cloudflare Edge.
 | Multi-statement DB block transactions | **Not supported** | Use batch APIs; DB block CRUD is not an exposed raw `BEGIN`/`COMMIT` surface |
 | Destructive schema changes | Migration required | `ALTER TABLE DROP COLUMN`, type changes, etc. require explicit migrations |
 
+## Real-time Subscriptions (`onSnapshot`)
+
+| Limit | Value | Notes |
+|-------|-------|-------|
+| Concurrent WebSocket connections | **~32,000** per deployment | All `onSnapshot` subscribers share a single hub Durable Object. Each client uses one WebSocket connection regardless of how many tables it subscribes to. |
+| Channels per connection | **No hard limit** | A single WebSocket can subscribe to multiple table channels simultaneously |
+
+:::tip Scaling beyond 32k concurrent subscribers
+If your app requires more than ~32,000 simultaneous `onSnapshot` connections, consider splitting high-traffic tables into separate [multi-tenant database blocks](/docs/database/create-database) (`instance` config). Each instance routes to its own Durable Object, distributing the subscription load across multiple hubs.
+:::
+
 ## Rate Limiting
 
 | Group | Default | Key | Configurable |

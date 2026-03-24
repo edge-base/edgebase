@@ -214,6 +214,60 @@ describe('TableRef', () => {
     expect(result.items[0]?.id).toBe('post-1');
     expect(result.total).toBe(1);
   });
+
+  it('sql tagged template prefers the direct SQL executor when provided', async () => {
+    const sqlExecutor = vi.fn().mockResolvedValue([{ total: 3 }]);
+    const httpClient = { post: vi.fn() } as any;
+    const table = new TableRef(
+      {} as any,
+      'posts',
+      undefined,
+      undefined,
+      'shared',
+      undefined,
+      httpClient,
+      sqlExecutor,
+    );
+
+    const rows = await table.sql`SELECT COUNT(*) AS total FROM posts WHERE status = ${'published'}`;
+
+    expect(rows).toEqual([{ total: 3 }]);
+    expect(sqlExecutor).toHaveBeenCalledWith(
+      'shared',
+      undefined,
+      `SELECT COUNT(*) AS total FROM posts WHERE status = ${TABLE_SQL_PARAM_MARKER_PREFIX}1${TABLE_SQL_PARAM_MARKER_SUFFIX}`,
+      ['published'],
+    );
+    expect(httpClient.post).not.toHaveBeenCalled();
+  });
+
+  it('sql tagged template falls back to HttpClient when no direct SQL executor is provided', async () => {
+    const httpClient = {
+      post: vi.fn().mockResolvedValue([{ total: 1 }]),
+    } as any;
+    const table = new TableRef(
+      {} as any,
+      'posts',
+      undefined,
+      undefined,
+      'shared',
+      undefined,
+      httpClient,
+    );
+
+    const rows = await table.sql`SELECT COUNT(*) AS total FROM posts WHERE id = ${'post-1'}`;
+
+    expect(rows).toEqual([{ total: 1 }]);
+    expect(httpClient.post).toHaveBeenCalledWith(
+      expect.any(String),
+      {
+        namespace: 'shared',
+        id: undefined,
+        sql: 'SELECT COUNT(*) AS total FROM posts WHERE id = ?',
+        params: ['post-1'],
+      },
+    );
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -226,6 +280,8 @@ import {
   DocRef,
   DbRef,
   OrBuilder,
+  TABLE_SQL_PARAM_MARKER_PREFIX,
+  TABLE_SQL_PARAM_MARKER_SUFFIX,
   type ListResult,
   type BatchByFilterResult,
 } from '../../src/table.js';
