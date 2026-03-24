@@ -154,6 +154,13 @@ describe('hookRejectedError', () => {
     expect(hookRejectedError(original)).toBe(original);
   });
 
+  it('uses the fallback message and hook prefix for unauthorized non-Error rejections', () => {
+    const err = hookRejectedError('plain failure', 'Authentication required', 'beforeSave');
+    expect(err.code).toBe(401);
+    expect(err.message).toBe("Hook 'beforeSave' rejected: Authentication required");
+    expect(err.slug).toBe('hook-rejected');
+  });
+
   it('maps ownership denial messages to 403', () => {
     const err = hookRejectedError(new Error('Only owners can update this record.'));
     expect(err.code).toBe(403);
@@ -171,6 +178,18 @@ describe('hookRejectedError', () => {
     expect(err.code).toBe(409);
   });
 
+  it('maps not-found style messages to 404', () => {
+    const err = hookRejectedError(new Error('Unknown project id.'));
+    expect(err.code).toBe(404);
+    expect(err.message).toBe('Unknown project id.');
+  });
+
+  it('maps rate-limit style messages to 429', () => {
+    const err = hookRejectedError(new Error('Too many uploads, throttled.'));
+    expect(err.code).toBe(429);
+    expect(err.slug).toBe('hook-rejected');
+  });
+
   it('falls back to validation errors for unknown hook failures', () => {
     const err = hookRejectedError(new Error('Custom hook failure.'));
     expect(err.code).toBe(400);
@@ -179,12 +198,24 @@ describe('hookRejectedError', () => {
 });
 
 describe('normalizeDatabaseError', () => {
+  it('passes EdgeBaseError instances through untouched', () => {
+    const original = validationError('Already normalized');
+    expect(normalizeDatabaseError(original)).toBe(original);
+  });
+
   it('maps foreign key failures to validation errors', () => {
     const err = normalizeDatabaseError(new Error('D1_ERROR: FOREIGN KEY constraint failed: SQLITE_CONSTRAINT'));
     expect(err).toBeInstanceOf(EdgeBaseError);
     expect(err?.code).toBe(400);
     expect(err?.message).toContain('Referenced record does not exist');
     expect(err?.slug).toBe('foreign-key-failed');
+  });
+
+  it('maps foreign key failures without a detected column to the generic message', () => {
+    const err = normalizeDatabaseError('FOREIGN KEY constraint failed');
+    expect(err).toBeInstanceOf(EdgeBaseError);
+    expect(err?.code).toBe(400);
+    expect(err?.message).toContain('Check that all foreign key references');
   });
 
   it('maps foreign key failures from cross-realm error-like objects', () => {
@@ -202,6 +233,38 @@ describe('normalizeDatabaseError', () => {
     expect(err?.message).toContain('Record already exists');
     expect(err?.message).toContain("'name'");
     expect(err?.slug).toBe('record-already-exists');
+  });
+
+  it('maps unique constraint failures without a parsed column to a generic conflict message', () => {
+    const err = normalizeDatabaseError('UNIQUE constraint failed');
+    expect(err).toBeInstanceOf(EdgeBaseError);
+    expect(err?.code).toBe(409);
+    expect(err?.message).toBe('Record already exists. A unique constraint was violated.');
+  });
+
+  it('maps not-null constraint failures to validation errors', () => {
+    const err = normalizeDatabaseError(new Error('NOT NULL constraint failed: users.email'));
+    expect(err).toBeInstanceOf(EdgeBaseError);
+    expect(err?.code).toBe(400);
+    expect(err?.message).toContain("'email'");
+    expect(err?.slug).toBe('constraint-failed');
+  });
+
+  it('maps cause-only check constraint failures to a generic validation error', () => {
+    const err = normalizeDatabaseError({
+      message: 'outer wrapper',
+      cause: {
+        message: 'check constraint failed',
+      },
+    });
+    expect(err).toBeInstanceOf(EdgeBaseError);
+    expect(err?.code).toBe(400);
+    expect(err?.message).toBe('Request violates a database constraint. Ensure all required fields are provided.');
+    expect(err?.slug).toBe('constraint-failed');
+  });
+
+  it('returns null for blank string inputs', () => {
+    expect(normalizeDatabaseError('   ')).toBeNull();
   });
 
   it('returns null for unrelated runtime errors', () => {
