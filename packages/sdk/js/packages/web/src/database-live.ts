@@ -492,6 +492,15 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
         // Ignore close failures.
       }
     }
+
+    // Attempt reconnection with fresh token if subscriptions are active
+    if (this.connectedChannels.size > 0 && this.hasAuthContext()) {
+      this.waitingForAuth = false;
+      const firstChannel = this.connectedChannels.values().next().value;
+      if (firstChannel) {
+        this.scheduleReconnect(firstChannel);
+      }
+    }
   }
 
   private resyncFilters(): void {

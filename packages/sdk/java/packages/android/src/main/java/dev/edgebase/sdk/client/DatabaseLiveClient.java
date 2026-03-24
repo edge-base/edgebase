@@ -577,5 +577,14 @@ class DatabaseLiveClient implements dev.edgebase.sdk.core.DatabaseLiveClient {
             webSocket.close(4001, error.getMessage());
             webSocket = null;
         }
+
+        // Attempt reconnection with fresh token if subscriptions are active
+        boolean hasSession = tokenManager.getRefreshToken() != null || tokenManager.currentUser() != null;
+        if (!subscribedChannels.isEmpty() && hasSession) {
+            waitingForAuth = false;
+            long delay = Math.min((long) (1000 * Math.pow(2, reconnectAttempts)), 30000);
+            reconnectAttempts++;
+            scheduler.schedule(() -> connect(null), delay, TimeUnit.MILLISECONDS);
+        }
     }
 }

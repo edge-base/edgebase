@@ -566,6 +566,13 @@ internal sealed class DatabaseLiveClient : IDisposable
         _ws?.Abort();
         _ws?.Dispose();
         _ws = null;
+
+        // Attempt reconnection with fresh token if subscriptions are active
+        if (_subscribedChannels.Count > 0)
+        {
+            _waitingForAuth = false;
+            _ = TryReconnectAsync();
+        }
     }
 }
 }

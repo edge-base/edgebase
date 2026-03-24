@@ -430,6 +430,13 @@ internal class DatabaseLiveClient(
                 session?.close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, error.message ?: "Auth failed"))
             } catch (_: Exception) { /* already closed */ }
             session = null
+
+            // Attempt reconnection with fresh token if subscriptions are active
+            if (subscribedChannels.isNotEmpty() && tokenManager.getRefreshToken() != null) {
+                waitingForAuth = false
+                delay(1000)
+                connect()
+            }
         }
     }
 

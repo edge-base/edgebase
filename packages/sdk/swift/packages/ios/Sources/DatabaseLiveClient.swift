@@ -640,6 +640,19 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
         stopHeartbeat()
         webSocketTask?.cancel(with: .policyViolation, reason: error.localizedDescription.data(using: .utf8))
         webSocketTask = nil
+
+        // Attempt reconnection with fresh token if subscriptions are active
+        let hasSubscriptions = queue.sync { !subscriptions.isEmpty }
+        if hasSubscriptions {
+            waitingForAuth = false
+            let baseDelay = min(reconnectBaseDelay * pow(2.0, Double(reconnectAttempts)), 30.0)
+            let jitter = Double.random(in: 0...(baseDelay * 0.25))
+            reconnectAttempts += 1
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64((baseDelay + jitter) * 1_000_000_000))
+                try? await self?.connect()
+            }
+        }
     }
 
     // MARK: - Heartbeat
