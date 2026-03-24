@@ -298,6 +298,18 @@ function buildHookCtx(
   };
 }
 
+function scheduleDbLive(
+  executionCtx: ExecutionContext,
+  promise: Promise<void>,
+  context: string,
+): void {
+  executionCtx.waitUntil(
+    promise.catch((error) => {
+      console.warn(`[db-live] ${context} failed`, error);
+    }),
+  );
+}
+
 function toFieldErrorData(
   errors: Record<string, string>,
 ): Record<string, { code: string; message: string }> {
@@ -605,7 +617,8 @@ async function handleInsert(
   }
 
   // Emit database-live event (fire-and-forget)
-  c.executionCtx.waitUntil(
+  scheduleDbLive(
+    c.executionCtx,
     emitDbLiveEvent(
       c.env,
       resolved.namespace,
@@ -614,6 +627,7 @@ async function handleInsert(
       String(inserted.id ?? ''),
       inserted,
     ),
+    `emit ${isUpsert && isUpdate ? 'modified' : 'added'} ${resolved.namespace}.${tableName}`,
   );
   c.executionCtx.waitUntil(
     executeDbTriggers(
@@ -733,8 +747,10 @@ async function handleUpdate(
   }
 
   // Emit database-live event (fire-and-forget)
-  c.executionCtx.waitUntil(
+  scheduleDbLive(
+    c.executionCtx,
     emitDbLiveEvent(c.env, resolved.namespace, tableName, 'modified', id, updated),
+    `emit modified ${resolved.namespace}.${tableName}:${id}`,
   );
   c.executionCtx.waitUntil(
     executeDbTriggers(
@@ -817,8 +833,10 @@ async function handleDelete(
   }
 
   // Emit database-live event (fire-and-forget)
-  c.executionCtx.waitUntil(
+  scheduleDbLive(
+    c.executionCtx,
     emitDbLiveEvent(c.env, resolved.namespace, tableName, 'removed', id, stripInternalPgFields(existingRow)),
+    `emit removed ${resolved.namespace}.${tableName}:${id}`,
   );
   c.executionCtx.waitUntil(
     executeDbTriggers(
@@ -944,15 +962,21 @@ async function handleBatch(
       data: r as Record<string, unknown>,
     }));
     if (changes.length >= 10) {
-      c.executionCtx.waitUntil(
+      scheduleDbLive(
+        c.executionCtx,
         emitDbLiveBatchEvent(c.env, resolved.namespace, tableName, changes),
+        `emit batch ${resolved.namespace}.${tableName} (${changes.length} changes)`,
       );
     } else {
-      for (const ch of changes) {
-        c.executionCtx.waitUntil(
-          emitDbLiveEvent(c.env, resolved.namespace, tableName, ch.type, ch.docId, ch.data),
-        );
-      }
+      scheduleDbLive(
+        c.executionCtx,
+        Promise.all(
+          changes.map((ch) =>
+            emitDbLiveEvent(c.env, resolved.namespace, tableName, ch.type, ch.docId, ch.data),
+          ),
+        ).then(() => undefined),
+        `emit fan-out ${resolved.namespace}.${tableName} (${changes.length} changes)`,
+      );
     }
   }
 
@@ -1031,8 +1055,10 @@ async function handleBatchByFilter(
     succeeded = result.rowCount;
 
     if (succeeded > 0) {
-      c.executionCtx.waitUntil(
+      scheduleDbLive(
+        c.executionCtx,
         emitDbLiveEvent(c.env, resolved.namespace, tableName, 'removed', '_bulk', { action: 'delete', count: succeeded }),
+        `emit bulk ${resolved.namespace}.${tableName} (delete)`,
       );
     }
 
@@ -1074,8 +1100,10 @@ async function handleBatchByFilter(
   succeeded = result.rowCount;
 
   if (succeeded > 0) {
-    c.executionCtx.waitUntil(
+    scheduleDbLive(
+      c.executionCtx,
       emitDbLiveEvent(c.env, resolved.namespace, tableName, 'modified', '_bulk', { action: 'update', count: succeeded }),
+      `emit bulk ${resolved.namespace}.${tableName} (update)`,
     );
   }
 
