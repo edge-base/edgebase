@@ -10,6 +10,16 @@ import type { Env } from '../types.js';
 
 export const DATABASE_LIVE_HUB_DO_NAME = 'database-live:hub';
 
+function withDeliveryId(event: Record<string, unknown>): Record<string, unknown> {
+  if (typeof event.deliveryId === 'string' && event.deliveryId.length > 0) {
+    return event;
+  }
+  return {
+    ...event,
+    deliveryId: crypto.randomUUID(),
+  };
+}
+
 export function buildDbLiveChannel(
   namespace: string,
   table: string,
@@ -122,11 +132,12 @@ export async function sendToDatabaseLiveDO(
   event: Record<string, unknown>,
   path = '/internal/event',
 ): Promise<void> {
+  const eventWithDeliveryId = withDeliveryId(event);
   let lastError: unknown;
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      await postToDatabaseLiveDO(env, event, path);
+      await postToDatabaseLiveDO(env, eventWithDeliveryId, path);
       return;
     } catch (error) {
       lastError = error;

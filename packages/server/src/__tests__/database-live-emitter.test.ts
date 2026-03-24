@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildDbLiveChannel, emitDbLiveBatchEvent, emitDbLiveEvent } from '../lib/database-live-emitter.js';
+import { buildDbLiveChannel, emitDbLiveBatchEvent, emitDbLiveEvent, sendToDatabaseLiveDO } from '../lib/database-live-emitter.js';
 
 describe('buildDbLiveChannel', () => {
   it('builds shared table channels with namespace', () => {
@@ -68,5 +68,25 @@ describe('database-live emitter', () => {
     ).rejects.toThrow(/DatabaseLiveDO .* failed with 500/);
 
     expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it('reuses the same deliveryId across retries for a single handoff', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 500 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const env = {
+      DATABASE_LIVE: {
+        idFromName: vi.fn((name: string) => name),
+        get: vi.fn().mockReturnValue({ fetch }),
+      },
+    } as any;
+
+    await sendToDatabaseLiveDO(env, { channel: 'dblive:shared:posts', event: 'refresh' }, '/internal/broadcast');
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const firstBody = JSON.parse(fetch.mock.calls[0]![1].body as string);
+    const secondBody = JSON.parse(fetch.mock.calls[1]![1].body as string);
+    expect(firstBody.deliveryId).toBeTruthy();
+    expect(firstBody.deliveryId).toBe(secondBody.deliveryId);
   });
 });

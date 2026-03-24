@@ -19,6 +19,7 @@ interface DatabaseLiveEvent {
   docId: string;
   data: Record<string, unknown> | null;
   timestamp: string;
+  deliveryId?: string;
 }
 
 export type DatabaseLiveFilterCondition = [
@@ -42,6 +43,8 @@ interface WSMeta {
 }
 
 const MAX_FILTER_CONDITIONS = 5;
+const RECENT_DELIVERY_TTL_MS = 60_000;
+const MAX_RECENT_DELIVERIES = 2048;
 const VALID_FILTER_OPERATORS = new Set<FilterOperator>([
   '==',
   '!=',
@@ -138,6 +141,7 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
   private filterRecoveryNeeded = true;
   private pendingAuth = new Map<string, ReturnType<typeof setTimeout>>();
   private metaCache = new Map<WebSocket, WSMeta>();
+  private recentDeliveryIds = new Map<string, number>();
 
   constructor(ctx: DurableObjectState, env: DOEnv) {
     super(ctx, env);
@@ -520,6 +524,10 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
       return Response.json({ error: 'Invalid event body' }, { status: 400 });
     }
 
+    if (this.isDuplicateDelivery(event.deliveryId)) {
+      return Response.json({ ok: true, duplicate: true });
+    }
+
     await this.broadcastWithFilters({
       type: 'db_change',
       channel: event.channel,
@@ -540,11 +548,16 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
       table: string;
       changes: Array<{ type: string; docId: string; data: Record<string, unknown> | null; timestamp: string }>;
       total: number;
+      deliveryId?: string;
     };
     try {
       batch = await request.json() as typeof batch;
     } catch {
       return Response.json({ error: 'Invalid batch event body' }, { status: 400 });
+    }
+
+    if (this.isDuplicateDelivery(batch.deliveryId)) {
+      return Response.json({ ok: true, duplicate: true });
     }
 
     const sockets = this.ctx.getWebSockets();
@@ -646,11 +659,15 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
    * Sends a custom broadcast_event to all clients subscribed to matching DB channels.
    */
   private async handleInternalBroadcast(request: Request): Promise<Response> {
-    let body: { channel?: string; event?: string; payload?: Record<string, unknown> };
+    let body: { channel?: string; event?: string; payload?: Record<string, unknown>; deliveryId?: string };
     try {
       body = await request.json() as typeof body;
     } catch {
       return Response.json({ error: 'Invalid broadcast body' }, { status: 400 });
+    }
+
+    if (this.isDuplicateDelivery(body.deliveryId)) {
+      return Response.json({ ok: true, duplicate: true });
     }
 
     const { channel, event, payload } = body;
@@ -789,6 +806,34 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
 
   private setWSMeta(ws: WebSocket, meta: WSMeta): void {
     this.metaCache.set(ws, meta);
+  }
+
+  private isDuplicateDelivery(deliveryId?: string): boolean {
+    if (!deliveryId) return false;
+
+    const now = Date.now();
+    this.pruneRecentDeliveries(now);
+    if (this.recentDeliveryIds.has(deliveryId)) {
+      return true;
+    }
+
+    this.recentDeliveryIds.set(deliveryId, now);
+    while (this.recentDeliveryIds.size > MAX_RECENT_DELIVERIES) {
+      const oldest = this.recentDeliveryIds.keys().next().value;
+      if (!oldest) break;
+      this.recentDeliveryIds.delete(oldest);
+    }
+
+    return false;
+  }
+
+  private pruneRecentDeliveries(now: number): void {
+    for (const [deliveryId, seenAt] of this.recentDeliveryIds) {
+      if (now - seenAt <= RECENT_DELIVERY_TTL_MS) {
+        break;
+      }
+      this.recentDeliveryIds.delete(deliveryId);
+    }
   }
 
   private getTableReadRule(tableName: string):
