@@ -2359,7 +2359,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     if (!meta.authenticated) {
-      this.safeSend(ws, { type: 'error', code: 'NOT_AUTHENTICATED', message: 'Authenticate first' });
+      this.handleUnauthenticatedSocket(ws, meta);
       return null;
     }
 
