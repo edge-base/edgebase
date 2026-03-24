@@ -35,6 +35,7 @@ import { createAdminAssetRequest } from './lib/admin-assets.js';
 import { resolveAdminFaviconTarget, resolveAdminRedirectTarget } from './lib/admin-routing.js';
 import { zodDefaultHook } from './lib/schemas.js';
 import { executePluginMigrations } from './lib/plugin-migrations.js';
+import { shouldRunPluginMigrationsForRequestPath } from './lib/plugin-migration-routing.js';
 import { getFunctionsByTrigger, buildFunctionContext, getWorkerUrl } from './lib/functions.js';
 import { parseCron, matchesCron } from './lib/cron.js';
 import { parseDuration } from './lib/jwt.js';
@@ -104,15 +105,12 @@ app.use('*', corsMiddleware);
 // middleware below rejects any request with this header unless it comes via internal
 // stub.fetch (which is allowed by the x-internal whitelist). No stripping needed.
 
-// Plugin migration middleware — lazy, runs once per cold-start
+// Plugin migration middleware — lazily reconciles plugin control state before
+// routes that can execute plugin code or touch plugin-managed tables.
 app.use('*', async (c, next) => {
   const config = parseConfig(c.env);
   const requestPath = new URL(c.req.url).pathname;
-  const shouldSkipPluginMigrations =
-    requestPath.startsWith('/admin/api/backup/') ||
-    requestPath.startsWith('/admin/api/data/backup/') ||
-    requestPath.startsWith('/internal/backup/');
-  if (!shouldSkipPluginMigrations && config?.plugins?.length) {
+  if (config?.plugins?.length && shouldRunPluginMigrationsForRequestPath(requestPath)) {
     await executePluginMigrations(config.plugins, c.env, config, getWorkerUrl(c.req.url, c.env));
   }
   return next();
@@ -306,6 +304,14 @@ export default {
    */
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     const config = parseConfig(env);
+    if (config.plugins?.length) {
+      await executePluginMigrations(
+        config.plugins,
+        env,
+        config,
+        getWorkerUrl('http://internal/scheduled', env),
+      );
+    }
     const scheduleFns = getFunctionsByTrigger('schedule');
 
     const now = new Date(event.scheduledTime);

@@ -22,7 +22,7 @@
  */
 import { OpenAPIHono, createRoute, z, type HonoEnv } from '../lib/hono.js';
 import type { Context } from 'hono';
-import { getDbDoName, parseConfig, shouldRouteToD1 } from '../lib/do-router.js';
+import { getDbDoName, isDynamicDbBlock, parseConfig, shouldRouteToD1 } from '../lib/do-router.js';
 import { fetchDOWithRetry } from '../lib/do-retry.js';
 import {
   queryParamsSchema, listResponseSchema, recordResponseSchema,
@@ -562,7 +562,8 @@ tablesRoute.openapi(dbDeleteRecord, async (c) => {
  * - provider='do' (default): forwards to DatabaseDO instance
  * - provider='neon'|'postgres': handles in Worker via postgres-handler
  *
- * Handles §36 canCreate 2-RTT flow for dynamic DOs.
+ * Handles §36 canCreate 2-RTT flow for dynamic DOs and auto-retries bootstrap
+ * for single-instance provider='do' namespaces.
  */
 async function routeToDO(
   c: Context<HonoEnv>,
@@ -580,6 +581,29 @@ async function routeToDO(
     return c.json({ code: 404, message: `Database '${namespace}' not found in config.` }, 404);
   }
 
+  const dynamicDbBlock = isDynamicDbBlock(dbBlock);
+  if (!instanceId) {
+    if (dynamicDbBlock) {
+      return c.json({
+        code: 400,
+        message: `instanceId is required for dynamic namespace '${namespace}'`,
+      }, 400);
+    }
+  } else {
+    if (instanceId.includes(':')) {
+      return c.json({
+        code: 400,
+        message: 'instanceId must not contain \':\'',
+      }, 400);
+    }
+    if (!dynamicDbBlock) {
+      return c.json({
+        code: 400,
+        message: `instanceId is not allowed for single-instance namespace '${namespace}'`,
+      }, 400);
+    }
+  }
+
   // D1 route: single-instance namespaces without dynamic instanceId
   if (!instanceId && shouldRouteToD1(namespace, config)) {
     return handleD1Request(c as unknown as Context<HonoEnv>, namespace, tableName, doPath);
@@ -590,6 +614,7 @@ async function routeToDO(
   if (provider === 'neon' || provider === 'postgres') {
     return handlePgRequest(c as unknown as Context<HonoEnv>, namespace, tableName, doPath);
   }
+  const requiresCreateAuthorization = dynamicDbBlock;
 
   // Build DO name: 'shared' | 'workspace:ws-456' (§2)
   const doName = getDbDoName(namespace, instanceId);
@@ -648,26 +673,31 @@ async function routeToDO(
     body: bodyText,
   }, { safeToRetry });
 
-  // §36: Handle needsCreate 2-RTT flow for dynamic DOs (not 'shared' or static)
-  if (res.status === 201 && instanceId) {
+  // §36: Handle needsCreate 2-RTT flow for dynamic DOs and bootstrap retry for
+  // single-instance provider='do' namespaces.
+  if (res.status === 201) {
     const body = await res.clone().json().catch(() => null) as
       | { needsCreate?: boolean; namespace?: string; id?: string }
       | null;
     if (body?.needsCreate) {
-      // Evaluate DbLevelRules.canCreate(auth, id) in Worker (#133 §36)
-      const config = parseConfig(c.env);
-      const dbBlock = config.databases?.[namespace];
-      const canCreateFn = dbBlock?.access?.canCreate;
+      let allowed = !requiresCreateAuthorization;
 
-      // Internal/admin DB proxy calls already bypass row-level rules.
-      // Dynamic DB bootstrap must honor that bypass too, otherwise
-      // context.admin.db(namespace, id).table(...).insert() fails on first write.
-      let allowed = isServiceKey;
-      if (!allowed && canCreateFn) {
-        try {
-          allowed = await Promise.resolve(canCreateFn(auth ?? null, body.id ?? instanceId));
-        } catch {
-          allowed = false; // fail-closed
+      if (!allowed) {
+        // Evaluate DbLevelRules.canCreate(auth, id) in Worker (#133 §36)
+        const config = parseConfig(c.env);
+        const currentDbBlock = config.databases?.[namespace];
+        const canCreateFn = currentDbBlock?.access?.canCreate;
+
+        // Internal/admin DB proxy calls already bypass row-level rules.
+        // Dynamic DB bootstrap must honor that bypass too, otherwise
+        // context.admin.db(namespace, id).table(...).insert() fails on first write.
+        allowed = isServiceKey;
+        if (!allowed && canCreateFn) {
+          try {
+            allowed = await Promise.resolve(canCreateFn(auth ?? null, body.id ?? instanceId ?? namespace));
+          } catch {
+            allowed = false; // fail-closed
+          }
         }
       }
 
@@ -681,11 +711,6 @@ async function routeToDO(
       // Authorized — retry with X-DO-Create-Authorized header
       const retryHeaders = new Headers(headers);
       retryHeaders.set('X-DO-Create-Authorized', '1');
-      const retryInit: RequestInit = { method: c.req.raw.method, headers: retryHeaders };
-      // BUG-008 fix: use pre-read body text (stream already consumed above)
-      if (c.req.raw.method !== 'GET' && c.req.raw.method !== 'HEAD') {
-        retryInit.body = bodyText ?? null;
-      }
       // needsCreate 2-RTT: DO is empty at this point, safe to retry
       return fetchDOWithRetry(stub, doUrl, {
         method: c.req.raw.method,

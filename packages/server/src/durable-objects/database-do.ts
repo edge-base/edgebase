@@ -54,15 +54,12 @@ import {
   getRegisteredFunctions,
   buildFunctionContext,
 } from '../lib/functions.js';
-import { parseDbDoName, parseConfig as getGlobalConfig } from '../lib/do-router.js';
+import { parseDbDoName, parseConfig as getGlobalConfig, isDynamicDbBlock } from '../lib/do-router.js';
 import { parseDuration } from '../lib/jwt.js';
-import { createPushProvider } from '../lib/push-provider.js';
-import { getDevicesForUser } from '../lib/push-token.js';
-import { ensureAuthSchema } from '../lib/auth-d1.js';
-import { resolveAuthDb, type AuthDb } from '../lib/auth-db-adapter.js';
 import { buildDbLiveChannel, DATABASE_LIVE_HUB_DO_NAME } from '../lib/database-live-emitter.js';
 import { resolveRootServiceKey } from '../lib/service-key.js';
 import { resolveDbLiveBatchThreshold } from '../lib/database-live-config.js';
+import { buildTableHookRuntimeServices } from '../lib/table-hook-runtime.js';
 import type { Env } from '../types.js';
 
 // ─── Types ───
@@ -104,8 +101,36 @@ export class DatabaseDO extends DurableObject<DOEnv> {
     if (!this.initialized) {
       // §36: Newly created DO must be authorized before initialization.
       // If X-DO-Create-Authorized header is absent, signal Worker to evaluate canCreate.
-      // Shared/static DOs (doName === 'shared' or system) skip this gate.
-      const isStaticDO = !this.doName || this.doName === 'shared' || this.doName.startsWith('_');
+      // Single-instance DB blocks and internal/system DOs skip this gate.
+      const parsedDoName = this.doName ? parseDbDoName(this.doName) : null;
+      const dbBlock = parsedDoName ? this.config.databases?.[parsedDoName.namespace] : undefined;
+      const dynamicDbBlock = isDynamicDbBlock(dbBlock);
+      if (parsedDoName && dbBlock) {
+        if (dynamicDbBlock && !parsedDoName.id) {
+          return Response.json(
+            {
+              code: 400,
+              message: `instanceId is required for dynamic namespace '${parsedDoName.namespace}'`,
+              error: 'INVALID_DB_INSTANCE_ID',
+            },
+            { status: 400 },
+          );
+        }
+        if (!dynamicDbBlock && parsedDoName.id) {
+          return Response.json(
+            {
+              code: 400,
+              message: `instanceId is not allowed for single-instance namespace '${parsedDoName.namespace}'`,
+              error: 'INVALID_DB_INSTANCE_ID',
+            },
+            { status: 400 },
+          );
+        }
+      }
+      const isStaticDO =
+        !this.doName
+        || this.doName.startsWith('_')
+        || (!!dbBlock && !dynamicDbBlock && !parsedDoName?.id);
       if (!isStaticDO && !request.headers.get('X-DO-Create-Authorized')) {
         // Check if _meta table already exists (i.e., DO was previously initialized)
         let alreadyExists = false;
@@ -118,9 +143,8 @@ export class DatabaseDO extends DurableObject<DOEnv> {
 
         if (!alreadyExists) {
           // Signal Worker: this DO needs canCreate evaluation before init
-          const parsed = this.doName ? parseDbDoName(this.doName) : null;
           return Response.json(
-            { needsCreate: true, namespace: parsed?.namespace ?? 'shared', id: parsed?.id },
+            { needsCreate: true, namespace: parsedDoName?.namespace ?? 'shared', id: parsedDoName?.id },
             { status: 201 },
           );
         }
@@ -173,6 +197,8 @@ export class DatabaseDO extends DurableObject<DOEnv> {
    * db.get/list/exists use local SQL; databaseLive.broadcast uses emitDbLiveEvent.
    */
   private buildHookCtx(_table: string): HookCtx {
+    const runtimeServices = buildTableHookRuntimeServices(this.config, this.env as unknown as Env);
+
     return {
       db: {
         get: (tbl: string, id: string) => {
@@ -201,42 +227,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
           return Promise.resolve(rows.length > 0);
         },
       },
-      databaseLive: {
-        broadcast: (channel: string, event: string, data: unknown) => {
-          return this.sendBroadcastToDatabaseLiveDO(
-            channel,
-            { channel, event, payload: data ?? {} },
-          );
-        },
-      },
-      push: {
-        // Push from hooks — direct FCM via push-provider + KV device tokens
-        send: async (userId: string, payload: { title?: string; body: string }) => {
-          // Fire-and-forget — hooks are non-critical side effects
-          try {
-            if (!this.env.KV) return;
-            const provider = createPushProvider(this.config.push, this.env as unknown as Env);
-            if (!provider) return;
-            let tokenStore: KVNamespace | { kv: KVNamespace; authDb?: AuthDb | null } = this.env.KV;
-            try {
-              const authDb = resolveAuthDb(this.env as unknown as Record<string, unknown>);
-              await ensureAuthSchema(authDb);
-              tokenStore = { kv: this.env.KV, authDb };
-            } catch {
-              tokenStore = this.env.KV;
-            }
-            const devices = await getDevicesForUser(tokenStore, userId);
-            if (devices.length === 0) return;
-            await Promise.allSettled(
-              devices.map((device) =>
-                provider.send({ token: device.token, platform: device.platform, payload }),
-              ),
-            );
-          } catch {
-            /* best-effort */
-          }
-        },
-      },
+      ...runtimeServices,
       waitUntil: (p: Promise<unknown>) => this.ctx.waitUntil(p),
     };
   }
