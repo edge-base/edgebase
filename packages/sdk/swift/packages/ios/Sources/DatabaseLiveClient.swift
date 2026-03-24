@@ -634,7 +634,8 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
 
     private func handleAuthenticationFailure(_ error: Error) {
         let statusCode = (error as? EdgeBaseError)?.statusCode
-        waitingForAuth = statusCode == 401 && queue.sync { !subscriptions.isEmpty }
+        let hasSubscriptions = queue.sync { !subscriptions.isEmpty }
+        waitingForAuth = statusCode == 401 && hasSubscriptions
         isConnected = false
         isAuthenticated = false
         stopHeartbeat()
@@ -642,16 +643,29 @@ final class DatabaseLiveClient: DatabaseLiveSubscribable, @unchecked Sendable {
         webSocketTask = nil
 
         // Attempt reconnection with fresh token if subscriptions are active
-        let hasSubscriptions = queue.sync { !subscriptions.isEmpty }
-        if hasSubscriptions {
-            waitingForAuth = false
-            let baseDelay = min(reconnectBaseDelay * pow(2.0, Double(reconnectAttempts)), 30.0)
-            let jitter = Double.random(in: 0...(baseDelay * 0.25))
-            reconnectAttempts += 1
-            Task { [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64((baseDelay + jitter) * 1_000_000_000))
-                try? await self?.connect()
+        guard hasSubscriptions else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            let hasSession = await self.tokenManager.getRefreshToken() != nil
+            guard hasSession, self.shouldReconnect, self.reconnectAttempts < self.maxReconnectAttempts else {
+                return
             }
+
+            self.waitingForAuth = false
+            let baseDelay = min(self.reconnectBaseDelay * pow(2.0, Double(self.reconnectAttempts)), 30.0)
+            let jitter = Double.random(in: 0...(baseDelay * 0.25))
+            self.reconnectAttempts += 1
+
+            try? await Task.sleep(nanoseconds: UInt64((baseDelay + jitter) * 1_000_000_000))
+
+            let stillHasSubscriptions = self.queue.sync { !self.subscriptions.isEmpty }
+            guard stillHasSubscriptions, !self.waitingForAuth, !self.isConnected else {
+                return
+            }
+
+            try? await self.connect()
         }
     }
 

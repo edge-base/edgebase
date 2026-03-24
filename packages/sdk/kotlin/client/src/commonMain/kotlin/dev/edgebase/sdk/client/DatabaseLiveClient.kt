@@ -419,25 +419,19 @@ internal class DatabaseLiveClient(
         }
     }
 
-    private fun handleAuthenticationFailure(error: Exception) {
+    private suspend fun handleAuthenticationFailure(error: Exception) {
+        val hasSession = tokenManager.getRefreshToken() != null
+            || (tokenManager as? ClientTokenManager)?.currentUser() != null
         waitingForAuth = error is EdgeBaseError
             && error.statusCode == 401
             && subscribedChannels.isNotEmpty()
+            && !hasSession
         isConnected = false
         isAuthenticated = false
-        scope.launch {
-            try {
-                session?.close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, error.message ?: "Auth failed"))
-            } catch (_: Exception) { /* already closed */ }
-            session = null
-
-            // Attempt reconnection with fresh token if subscriptions are active
-            if (subscribedChannels.isNotEmpty() && tokenManager.getRefreshToken() != null) {
-                waitingForAuth = false
-                delay(1000)
-                connect()
-            }
-        }
+        try {
+            session?.close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, error.message ?: "Auth failed"))
+        } catch (_: Exception) { /* already closed */ }
+        session = null
     }
 
     /**

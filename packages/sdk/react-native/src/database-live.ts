@@ -401,7 +401,9 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
         ? error
         : new EdgeBaseError(500, 'Database live authentication failed.');
 
-    this.waitingForAuth = authError.code === 401 && this.connectedChannels.size > 0;
+    this.waitingForAuth = authError.code === 401
+      && this.connectedChannels.size > 0
+      && !this.hasAuthContext();
     this.stopHeartbeat();
     this.connected = false;
     this.authenticated = false;
@@ -413,15 +415,6 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
         socket.close(4001, authError.message);
       } catch {
         // Ignore close failures.
-      }
-    }
-
-    // Attempt reconnection with fresh token if subscriptions are active
-    if (this.connectedChannels.size > 0 && this.hasAuthContext()) {
-      this.waitingForAuth = false;
-      const firstChannel = this.connectedChannels.values().next().value;
-      if (firstChannel) {
-        this.scheduleReconnect(firstChannel);
       }
     }
   }

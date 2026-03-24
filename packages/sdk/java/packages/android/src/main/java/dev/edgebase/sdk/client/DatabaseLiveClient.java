@@ -229,8 +229,7 @@ class DatabaseLiveClient implements dev.edgebase.sdk.core.DatabaseLiveClient {
     private void sendAuthMessage() {
         String token = tokenManager.getAccessToken();
         if (token == null) {
-            boolean hasSession = tokenManager.getRefreshToken() != null || tokenManager.currentUser() != null;
-            handleAuthenticationFailure(new EdgeBaseError(401, hasSession
+            handleAuthenticationFailure(new EdgeBaseError(401, hasSession()
                     ? "DatabaseLive is waiting for an active access token."
                     : "No access token available. Sign in first."));
             return;
@@ -570,21 +569,16 @@ class DatabaseLiveClient implements dev.edgebase.sdk.core.DatabaseLiveClient {
     }
 
     private void handleAuthenticationFailure(EdgeBaseError error) {
-        waitingForAuth = error.getStatusCode() == 401 && !subscribedChannels.isEmpty();
+        waitingForAuth = error.getStatusCode() == 401 && !subscribedChannels.isEmpty() && !hasSession();
         isConnected = false;
         authenticated = false;
         if (webSocket != null) {
             webSocket.close(4001, error.getMessage());
             webSocket = null;
         }
+    }
 
-        // Attempt reconnection with fresh token if subscriptions are active
-        boolean hasSession = tokenManager.getRefreshToken() != null || tokenManager.currentUser() != null;
-        if (!subscribedChannels.isEmpty() && hasSession) {
-            waitingForAuth = false;
-            long delay = Math.min((long) (1000 * Math.pow(2, reconnectAttempts)), 30000);
-            reconnectAttempts++;
-            scheduler.schedule(() -> connect(null), delay, TimeUnit.MILLISECONDS);
-        }
+    private boolean hasSession() {
+        return tokenManager.getRefreshToken() != null || tokenManager.currentUser() != null;
     }
 }
