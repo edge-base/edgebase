@@ -247,10 +247,28 @@ function hasTaggedTemplateSqlMarkers(query: string): boolean {
   return query.includes(TABLE_SQL_PARAM_MARKER_PREFIX);
 }
 
+function isIdentifierContinuationChar(char: string | undefined): boolean {
+  return !!char && /[A-Za-z0-9_$]/.test(char);
+}
+
+function isEscapedPostgresStringStart(query: string, quoteIndex: number): boolean {
+  const prefix = query[quoteIndex - 1];
+  if (prefix !== 'e' && prefix !== 'E') {
+    return false;
+  }
+  return !isIdentifierContinuationChar(query[quoteIndex - 2]);
+}
+
 function unescapeEscapedPostgresQuestionOperators(query: string): string {
   let normalized = '';
-  let state: 'code' | 'single' | 'double' | 'line-comment' | 'block-comment' | 'dollar-quote' =
-    'code';
+  let state:
+    | 'code'
+    | 'single'
+    | 'escaped-single'
+    | 'double'
+    | 'line-comment'
+    | 'block-comment'
+    | 'dollar-quote' = 'code';
   let dollarQuoteToken = '';
 
   for (let i = 0; i < query.length; i++) {
@@ -259,6 +277,22 @@ function unescapeEscapedPostgresQuestionOperators(query: string): string {
 
     if (state === 'single') {
       normalized += char;
+      if (char === "'" && next === "'") {
+        normalized += next;
+        i++;
+        continue;
+      }
+      if (char === "'") state = 'code';
+      continue;
+    }
+
+    if (state === 'escaped-single') {
+      normalized += char;
+      if (char === '\\' && next) {
+        normalized += next;
+        i++;
+        continue;
+      }
       if (char === "'" && next === "'") {
         normalized += next;
         i++;
@@ -308,7 +342,7 @@ function unescapeEscapedPostgresQuestionOperators(query: string): string {
 
     if (char === "'") {
       normalized += char;
-      state = 'single';
+      state = isEscapedPostgresStringStart(query, i) ? 'escaped-single' : 'single';
       continue;
     }
     if (char === '\\' && next === '?') {
