@@ -581,6 +581,29 @@ async function routeToDO(
     return c.json({ code: 404, message: `Database '${namespace}' not found in config.` }, 404);
   }
 
+  const dynamicDbBlock = isDynamicDbBlock(dbBlock);
+  if (!instanceId) {
+    if (dynamicDbBlock) {
+      return c.json({
+        code: 400,
+        message: `instanceId is required for dynamic namespace '${namespace}'`,
+      }, 400);
+    }
+  } else {
+    if (instanceId.includes(':')) {
+      return c.json({
+        code: 400,
+        message: 'instanceId must not contain \':\'',
+      }, 400);
+    }
+    if (!dynamicDbBlock) {
+      return c.json({
+        code: 400,
+        message: `instanceId is not allowed for single-instance namespace '${namespace}'`,
+      }, 400);
+    }
+  }
+
   // D1 route: single-instance namespaces without dynamic instanceId
   if (!instanceId && shouldRouteToD1(namespace, config)) {
     return handleD1Request(c as unknown as Context<HonoEnv>, namespace, tableName, doPath);
@@ -591,7 +614,7 @@ async function routeToDO(
   if (provider === 'neon' || provider === 'postgres') {
     return handlePgRequest(c as unknown as Context<HonoEnv>, namespace, tableName, doPath);
   }
-  const requiresCreateAuthorization = isDynamicDbBlock(dbBlock);
+  const requiresCreateAuthorization = dynamicDbBlock;
 
   // Build DO name: 'shared' | 'workspace:ws-456' (§2)
   const doName = getDbDoName(namespace, instanceId);

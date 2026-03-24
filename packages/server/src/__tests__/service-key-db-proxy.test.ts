@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defineConfig } from '@edge-base/shared';
 import { EdgeBaseError } from '@edge-base/shared';
 import { setConfig } from '../lib/do-router.js';
@@ -117,6 +117,7 @@ describe('DB proxy service key forwarding', () => {
       databases: {
         workspace: {
           provider: 'do',
+          instance: true,
           tables: {
             users: {},
           },
@@ -203,6 +204,7 @@ describe('DB proxy service key forwarding', () => {
       databases: {
         workspace: {
           provider: 'do',
+          instance: true,
           tables: {
             users: {},
           },
@@ -417,6 +419,81 @@ describe('DB proxy service key forwarding', () => {
     expect(forwardedHeaders).toHaveLength(2);
     expect(forwardedHeaders[0].get('X-DO-Create-Authorized')).toBeNull();
     expect(forwardedHeaders[1].get('X-DO-Create-Authorized')).toBe('1');
+  });
+
+  it('rejects instanceId route segments for single-instance namespaces before touching the DO', async () => {
+    setConfig(defineConfig({
+      release: true,
+      databases: {
+        app: {
+          provider: 'do',
+          tables: {
+            posts: {
+              access: {
+                read: () => true,
+              },
+            },
+          },
+        },
+      },
+    }));
+
+    const onFetch = vi.fn();
+    const app = createApp();
+    const response = await app.request('/api/db/app/attacker/tables/posts', {
+      method: 'GET',
+    }, createEnv(onFetch));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 400,
+      message: "instanceId is not allowed for single-instance namespace 'app'",
+    });
+    expect(onFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing instanceId for dynamic namespaces even for service key requests', async () => {
+    setConfig(defineConfig({
+      release: true,
+      databases: {
+        workspace: {
+          provider: 'do',
+          instance: true,
+          tables: {
+            users: {},
+          },
+        },
+      },
+      serviceKeys: {
+        keys: [
+          {
+            kid: 'root',
+            tier: 'root',
+            scopes: ['*'],
+            secretSource: 'inline',
+            inlineSecret: 'sk-root',
+          },
+        ],
+      },
+    }));
+
+    const onFetch = vi.fn();
+    const app = createApp();
+    const response = await app.request('/api/db/workspace/tables/users', {
+      method: 'POST',
+      headers: {
+        'X-EdgeBase-Service-Key': 'sk-root',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ id: 'user-1' }),
+    }, createEnv(onFetch));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 400,
+      message: "instanceId is required for dynamic namespace 'workspace'",
+    });
+    expect(onFetch).not.toHaveBeenCalled();
   });
 
   it('does not trust raw X-EdgeBase-Internal on public DB requests', async () => {

@@ -104,10 +104,33 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       // Single-instance DB blocks and internal/system DOs skip this gate.
       const parsedDoName = this.doName ? parseDbDoName(this.doName) : null;
       const dbBlock = parsedDoName ? this.config.databases?.[parsedDoName.namespace] : undefined;
+      const dynamicDbBlock = isDynamicDbBlock(dbBlock);
+      if (parsedDoName && dbBlock) {
+        if (dynamicDbBlock && !parsedDoName.id) {
+          return Response.json(
+            {
+              code: 400,
+              message: `instanceId is required for dynamic namespace '${parsedDoName.namespace}'`,
+              error: 'INVALID_DB_INSTANCE_ID',
+            },
+            { status: 400 },
+          );
+        }
+        if (!dynamicDbBlock && parsedDoName.id) {
+          return Response.json(
+            {
+              code: 400,
+              message: `instanceId is not allowed for single-instance namespace '${parsedDoName.namespace}'`,
+              error: 'INVALID_DB_INSTANCE_ID',
+            },
+            { status: 400 },
+          );
+        }
+      }
       const isStaticDO =
         !this.doName
         || this.doName.startsWith('_')
-        || (!!dbBlock && !isDynamicDbBlock(dbBlock));
+        || (!!dbBlock && !dynamicDbBlock && !parsedDoName?.id);
       if (!isStaticDO && !request.headers.get('X-DO-Create-Authorized')) {
         // Check if _meta table already exists (i.e., DO was previously initialized)
         let alreadyExists = false;
