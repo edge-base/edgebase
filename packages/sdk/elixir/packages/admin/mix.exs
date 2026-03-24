@@ -4,7 +4,7 @@ defmodule EdgeBaseAdmin.MixProject do
   def project do
     [
       app: :edgebase_admin,
-      version: "0.2.2",
+      version: "0.2.3",
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -23,7 +23,7 @@ defmodule EdgeBaseAdmin.MixProject do
 
   defp deps do
     [
-      {:edgebase_core, "~> 0.2.2", path: "../core"},
+      {:edgebase_core, "~> 0.2.3", path: "../core"},
       {:jason, "~> 1.4"}
     ]
   end

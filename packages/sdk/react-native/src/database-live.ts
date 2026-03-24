@@ -223,7 +223,7 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
       refreshAccessToken(this.baseUrl, refreshToken),
     );
     if (!token) throw new EdgeBaseError(401, 'No access token available. Sign in first.');
-    this.sendRaw({ type: 'auth', token, sdkVersion: '0.2.2' });
+    this.sendRaw({ type: 'auth', token, sdkVersion: '0.2.3' });
 
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new EdgeBaseError(401, 'Auth timeout')), 10000);
@@ -355,7 +355,7 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
   private refreshAuth(): void {
     const token = this.tokenManager.currentAccessToken;
     if (!token || !this.ws || !this.connected) return;
-    this.sendRaw({ type: 'auth', token, sdkVersion: '0.2.2' });
+    this.sendRaw({ type: 'auth', token, sdkVersion: '0.2.3' });
   }
 
   private handleAuthStateChange(user: TokenUser | null): void {

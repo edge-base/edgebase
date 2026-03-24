@@ -1,6 +1,6 @@
 [package]
 name = "edgebase-core"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 description = "EdgeBase Core — shared types and HTTP client"
 license = "MIT"

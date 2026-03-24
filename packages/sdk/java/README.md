@@ -9,9 +9,9 @@
 Official Java SDK for EdgeBase, published for Gradle and Maven consumers through
 JitPack as three installable artifacts:
 
-- `com.github.edge-base.edgebase:edgebase-core-java:v0.2.2`
-- `com.github.edge-base.edgebase:edgebase-android-java:v0.2.2`
-- `com.github.edge-base.edgebase:edgebase-admin-java:v0.2.2`
+- `com.github.edge-base.edgebase:edgebase-core-java:v0.2.3`
+- `com.github.edge-base.edgebase:edgebase-android-java:v0.2.3`
+- `com.github.edge-base.edgebase:edgebase-admin-java:v0.2.3`
 
 The monorepo root `edgebase-sdk-java` artifact is intentionally not part of the
 public JitPack install path. Depend on the split artifacts below.
@@ -30,9 +30,9 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.edge-base.edgebase:edgebase-core-java:v0.2.2'
-    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.2.2'
-    implementation 'com.github.edge-base.edgebase:edgebase-admin-java:v0.2.2'
+    implementation 'com.github.edge-base.edgebase:edgebase-core-java:v0.2.3'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.2.3'
+    implementation 'com.github.edge-base.edgebase:edgebase-admin-java:v0.2.3'
 }
 ```
 
@@ -49,17 +49,17 @@ dependencies {
 <dependency>
     <groupId>com.github.edge-base.edgebase</groupId>
     <artifactId>edgebase-core-java</artifactId>
-    <version>v0.2.2</version>
+    <version>v0.2.3</version>
 </dependency>
 <dependency>
     <groupId>com.github.edge-base.edgebase</groupId>
     <artifactId>edgebase-android-java</artifactId>
-    <version>v0.2.2</version>
+    <version>v0.2.3</version>
 </dependency>
 <dependency>
     <groupId>com.github.edge-base.edgebase</groupId>
     <artifactId>edgebase-admin-java</artifactId>
-    <version>v0.2.2</version>
+    <version>v0.2.3</version>
 </dependency>
 ```
 
