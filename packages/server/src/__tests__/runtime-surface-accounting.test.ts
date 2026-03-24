@@ -35,10 +35,6 @@ const KNOWN_INDIRECT_RUNTIME_COVERAGE = new Map<string, string>([
     'durable-objects/logs-do.ts',
     'Covered indirectly via analytics/logging flows; keep explicit until a direct file reference lands in tests.',
   ],
-  [
-    'durable-objects/room-runtime-base.ts',
-    'Covered through RoomsDO and room protocol/state tests, but the shared runtime base is not referenced by filename.',
-  ],
 ]);
 
 function collectFiles(dir: string, predicate: (path: string) => boolean): string[] {
