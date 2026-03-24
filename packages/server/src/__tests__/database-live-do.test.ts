@@ -21,7 +21,7 @@ describe('DatabaseLiveDO delivery idempotency', () => {
       getWebSockets: vi.fn(() => []),
       getTags: vi.fn(() => []),
     } as any;
-    const live = new DatabaseLiveDO(ctx, { EDGEBASE_CONFIG: {} }) as any;
+    const live = new DatabaseLiveDO(ctx, {} as any) as any;
     live.broadcastWithFilters = vi.fn().mockResolvedValue(undefined);
 
     const payload = {
