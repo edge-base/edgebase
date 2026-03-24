@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/cli",
-    "version": "0.2.3",
+    "version": "0.2.4",
     "description": "CLI for EdgeBase — create, develop, and deploy EdgeBase projects",
     "license": "MIT",
     "repository": {

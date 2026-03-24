@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>10.0</LangVersion>
     <PackageId>dev.edgebase.unity</PackageId>
-    <Version>0.2.3</Version>
+    <Version>0.2.4</Version>
     <Description>EdgeBase Unity client SDK for .NET Standard 2.1 - auth, database, realtime, rooms, storage, functions, analytics, and push</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://edgebase.fun/docs/database/client-sdk</PackageProjectUrl>

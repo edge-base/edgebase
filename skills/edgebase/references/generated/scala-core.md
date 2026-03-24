@@ -21,7 +21,7 @@ Java core SDK instead.
 
 ## Public Artifact
 
-- `com.github.edge-base.edgebase:edgebase-core-scala:v0.2.3`
+- `com.github.edge-base.edgebase:edgebase-core-scala:v0.2.4`
 
 ## Canonical Examples
 

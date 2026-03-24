@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>10.0</LangVersion>
     <PackageId>dev.edgebase.admin</PackageId>
-    <Version>0.2.3</Version>
+    <Version>0.2.4</Version>
     <Description>EdgeBase Admin SDK for .NET - server-side auth, SQL, storage, push, analytics, KV, D1, and Vectorize</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://edgebase.fun/docs/database/admin-sdk</PackageProjectUrl>
