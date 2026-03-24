@@ -18,22 +18,28 @@ describe('sql route', () => {
   });
 
   it('rejects unconfigured shared namespace instead of treating it as implicit', async () => {
-    setConfig(defineConfig({
-      databases: {
-        app: {
-          tables: {
-            posts: { schema: { title: { type: 'string' } } },
+    setConfig(
+      defineConfig({
+        databases: {
+          app: {
+            tables: {
+              posts: { schema: { title: { type: 'string' } } },
+            },
           },
         },
-      },
-    }));
+      }),
+    );
 
     const app = createApp();
-    const response = await app.request('/api/sql', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ namespace: 'shared', sql: 'SELECT 1' }),
-    }, {} as Env);
+    const response = await app.request(
+      '/api/sql',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ namespace: 'shared', sql: 'SELECT 1' }),
+      },
+      {} as Env,
+    );
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toMatchObject({
@@ -43,30 +49,33 @@ describe('sql route', () => {
   });
 
   it('retries dynamic DO SQL after create handshake and forwards the DO name', async () => {
-    setConfig(defineConfig({
-      databases: {
-        workspace: {
-          instance: true,
-          tables: {
-            members: { schema: { userId: { type: 'string' } } },
+    setConfig(
+      defineConfig({
+        databases: {
+          workspace: {
+            instance: true,
+            tables: {
+              members: { schema: { userId: { type: 'string' } } },
+            },
           },
         },
-      },
-      serviceKeys: {
-        keys: [
-          {
-            kid: 'root',
-            tier: 'root',
-            scopes: ['*'],
-            secretSource: 'inline',
-            inlineSecret: 'sk-root',
-          },
-        ],
-      },
-    }));
+        serviceKeys: {
+          keys: [
+            {
+              kid: 'root',
+              tier: 'root',
+              scopes: ['*'],
+              secretSource: 'inline',
+              inlineSecret: 'sk-root',
+            },
+          ],
+        },
+      }),
+    );
 
     const stub = {
-      fetch: vi.fn()
+      fetch: vi
+        .fn()
         .mockResolvedValueOnce(
           new Response(JSON.stringify({ needsCreate: true, namespace: 'workspace', id: 'ws-1' }), {
             status: 201,
@@ -88,19 +97,23 @@ describe('sql route', () => {
     } as unknown as Env;
 
     const app = createApp();
-    const response = await app.request('/api/sql', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-EdgeBase-Service-Key': 'sk-root',
+    const response = await app.request(
+      '/api/sql',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-EdgeBase-Service-Key': 'sk-root',
+        },
+        body: JSON.stringify({
+          namespace: 'workspace',
+          id: 'ws-1',
+          sql: 'SELECT COUNT(*) AS total FROM members',
+          params: [],
+        }),
       },
-      body: JSON.stringify({
-        namespace: 'workspace',
-        id: 'ws-1',
-        sql: 'SELECT COUNT(*) AS total FROM members',
-        params: [],
-      }),
-    }, env);
+      env,
+    );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -122,26 +135,28 @@ describe('sql route', () => {
   });
 
   it('uses D1 run() for non-SELECT SQL so schema mutations actually execute', async () => {
-    setConfig(defineConfig({
-      databases: {
-        shared: {
-          tables: {
-            posts: { schema: { title: { type: 'string' } } },
+    setConfig(
+      defineConfig({
+        databases: {
+          shared: {
+            tables: {
+              posts: { schema: { title: { type: 'string' } } },
+            },
           },
         },
-      },
-      serviceKeys: {
-        keys: [
-          {
-            kid: 'root',
-            tier: 'root',
-            scopes: ['*'],
-            secretSource: 'inline',
-            inlineSecret: 'sk-root',
-          },
-        ],
-      },
-    }));
+        serviceKeys: {
+          keys: [
+            {
+              kid: 'root',
+              tier: 'root',
+              scopes: ['*'],
+              secretSource: 'inline',
+              inlineSecret: 'sk-root',
+            },
+          ],
+        },
+      }),
+    );
 
     const stmt: {
       bind: ReturnType<typeof vi.fn>;
@@ -159,33 +174,129 @@ describe('sql route', () => {
     } as unknown as Env;
 
     const app = createApp();
-    const response = await app.request('/api/sql', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-EdgeBase-Service-Key': 'sk-root',
+    const response = await app.request(
+      '/api/sql',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-EdgeBase-Service-Key': 'sk-root',
+        },
+        body: JSON.stringify({
+          namespace: 'shared',
+          sql: 'ALTER TABLE "posts" RENAME TO "articles"',
+        }),
       },
-      body: JSON.stringify({
-        namespace: 'shared',
-        sql: 'ALTER TABLE "posts" RENAME TO "articles"',
-      }),
-    }, env);
+      env,
+    );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       rows: [],
       rowCount: 0,
     });
-    expect((env as unknown as { DB_D1_SHARED: { prepare: ReturnType<typeof vi.fn> } }).DB_D1_SHARED.prepare).toHaveBeenCalledWith(
-      'ALTER TABLE "posts" RENAME TO "articles"',
-    );
+    expect(
+      (env as unknown as { DB_D1_SHARED: { prepare: ReturnType<typeof vi.fn> } }).DB_D1_SHARED
+        .prepare,
+    ).toHaveBeenCalledWith('ALTER TABLE "posts" RENAME TO "articles"');
     expect(stmt.run).toHaveBeenCalledTimes(1);
     expect(stmt.all).not.toHaveBeenCalled();
   });
 
+  it.each(['postgres', 'neon'] as const)(
+    'routes %s raw SQL through the provider-aware executor and normalizes ? placeholders',
+    async (provider) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(null, { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              columns: ['literal', 'total'],
+              rows: [{ literal: '?', total: 3 }],
+              rowCount: 1,
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      setConfig(
+        defineConfig({
+          databases: {
+            shared: {
+              provider,
+              tables: {
+                posts: { schema: { title: { type: 'string' } } },
+              },
+            },
+          },
+          serviceKeys: {
+            keys: [
+              {
+                kid: 'root',
+                tier: 'root',
+                scopes: ['*'],
+                secretSource: 'inline',
+                inlineSecret: 'sk-root',
+              },
+            ],
+          },
+        }),
+      );
+
+      const env = {
+        DATABASE: {
+          idFromName: vi.fn().mockReturnValue('do-id'),
+          get: vi.fn(),
+        },
+        EDGEBASE_DEV_SIDECAR_PORT: '8788',
+        JWT_ADMIN_SECRET: 'jwt-secret',
+        DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
+      } as unknown as Env;
+
+      const app = createApp();
+      const response = await app.request(
+        '/api/sql',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-EdgeBase-Service-Key': 'sk-root',
+          },
+          body: JSON.stringify({
+            namespace: 'shared',
+            sql: "SELECT '?' AS literal, COUNT(*) AS total FROM posts WHERE title = ?",
+            params: ['owner'],
+          }),
+        },
+        env,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        rows: [{ literal: '?', total: 3 }],
+        rowCount: 1,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? '{}'))).toEqual({
+        namespace: 'shared',
+        sql: "SELECT '?' AS literal, COUNT(*) AS total FROM posts WHERE title = $1",
+        params: ['owner'],
+      });
+      expect(
+        (env as unknown as { DATABASE: { get: ReturnType<typeof vi.fn> } }).DATABASE.get,
+      ).not.toHaveBeenCalled();
+    },
+  );
+
   it('executeDoSql retries the create handshake before returning rows', async () => {
     const stub = {
-      fetch: vi.fn()
+      fetch: vi
+        .fn()
         .mockResolvedValueOnce(
           new Response(JSON.stringify({ needsCreate: true, namespace: 'workspace', id: 'ws-2' }), {
             status: 201,

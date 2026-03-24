@@ -33,7 +33,7 @@ import {
   buildFunctionPushProxy,
   buildAdminAuthContext,
 } from './functions.js';
-import { executeDoSql } from './do-sql.js';
+import { executeProviderAwareSql } from './provider-aware-sql.js';
 import { resolveRootServiceKey } from './service-key.js';
 
 /**
@@ -118,9 +118,9 @@ function arePluginMigrationsCurrentInMemory(plugins: PluginInstance[]): boolean 
     return false;
   }
 
-  return versionedPlugins.every((plugin) => (
-    currentVersionedPlugins.get(plugin.name) === plugin.version
-  ));
+  return versionedPlugins.every(
+    (plugin) => currentVersionedPlugins.get(plugin.name) === plugin.version,
+  );
 }
 
 function markPluginsCurrent(plugins: PluginInstance[]): void {
@@ -217,7 +217,8 @@ async function runMigrationsWithTimeout(
 }
 
 function resolvePluginMigrationTimeoutMs(): number {
-  const raw = typeof process !== 'undefined' ? process.env.EDGEBASE_PLUGIN_MIGRATIONS_TIMEOUT_MS : undefined;
+  const raw =
+    typeof process !== 'undefined' ? process.env.EDGEBASE_PLUGIN_MIGRATIONS_TIMEOUT_MS : undefined;
   const parsed = Number(raw);
   if (Number.isFinite(parsed) && parsed > 0) {
     return parsed;
@@ -250,9 +251,9 @@ async function arePluginMigrationsCurrent(
   );
   const versions = new Map(rows.map((row) => [row.key, row.value]));
 
-  return versionedPlugins.every((plugin) => (
-    versions.get(`plugin_version:${plugin.name}`) === plugin.version
-  ));
+  return versionedPlugins.every(
+    (plugin) => versions.get(`plugin_version:${plugin.name}`) === plugin.version,
+  );
 }
 
 // ─── Helpers ───
@@ -334,6 +335,28 @@ function buildMigrationAdminContext(
     return directUrl ?? null;
   }
 
+  const sqlProviderAware = async (
+    namespace: string,
+    id: string | undefined,
+    query: string,
+    params?: unknown[],
+  ): Promise<unknown[]> => {
+    const result = await executeProviderAwareSql(
+      {
+        env,
+        config,
+        databaseNamespace: dbNamespace,
+        workerUrl,
+        serviceKey,
+      },
+      namespace,
+      id,
+      query,
+      params ?? [],
+    );
+    return result.rows as unknown[];
+  };
+
   return {
     db(namespace: string, id?: string) {
       const pgConnStr = resolvePgConnString(namespace);
@@ -350,40 +373,14 @@ function buildMigrationAdminContext(
       return doAdminDb(namespace, id);
     },
 
+    sqlProviderAware,
     async sqlWithDirectD1Access(
       namespace: string,
       id: string | undefined,
       query: string,
       params?: unknown[],
     ): Promise<unknown[]> {
-      const dbBlock = config.databases?.[namespace];
-      const isDynamicNamespace = !!(dbBlock?.instance || dbBlock?.access?.canCreate || dbBlock?.access?.access);
-      if (isDynamicNamespace && !id) {
-        throw new Error(`admin.sqlWithDirectD1Access() requires an id for dynamic namespace '${namespace}'.`);
-      }
-
-      const pgConnStr = resolvePgConnString(namespace);
-
-      // ─── PostgreSQL path ───
-      if (pgConnStr) {
-        // Ensure schema is initialized before raw SQL
-        const dbBlock = config.databases?.[namespace];
-        if (dbBlock?.tables) {
-          await ensurePgSchema(pgConnStr, namespace, dbBlock.tables);
-        }
-        const result = await executePostgresQuery(pgConnStr, query, params ?? []);
-        return result.rows as unknown[];
-      }
-
-      // ─── DO path (existing) ───
-      return executeDoSql({
-        databaseNamespace: dbNamespace,
-        namespace,
-        id,
-        query,
-        params: params ?? [],
-        internal: true,
-      });
+      return sqlProviderAware(namespace, id, query, params);
     },
 
     // ─── Convenience shortcut: table(name) → db('shared').table(name) ───
@@ -523,7 +520,8 @@ function buildPgTableOps(
       const setClauses = (updatableCols.length > 0 ? updatableCols : [conflictTarget]).map(
         (col) => `${escapePgIdentifier(col)} = EXCLUDED.${escapePgIdentifier(col)}`,
       );
-      const sql = `INSERT INTO ${escapePgIdentifier(tableName)} (${cols.map(escapePgIdentifier).join(', ')}) VALUES (${placeholders.join(', ')})` +
+      const sql =
+        `INSERT INTO ${escapePgIdentifier(tableName)} (${cols.map(escapePgIdentifier).join(', ')}) VALUES (${placeholders.join(', ')})` +
         ` ON CONFLICT (${escapePgIdentifier(conflictTarget)}) DO UPDATE SET ${setClauses.join(', ')} RETURNING *`;
       const result = await executePostgresQuery(connectionString, sql, vals);
       return result.rows[0]
@@ -596,7 +594,9 @@ function buildPgTableOps(
       }
 
       const result = await executePostgresQuery(connectionString, sql, params);
-      return { items: result.rows.map((row) => stripInternalPgFields(row as Record<string, unknown>)) };
+      return {
+        items: result.rows.map((row) => stripInternalPgFields(row as Record<string, unknown>)),
+      };
     },
   };
 }

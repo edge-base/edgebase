@@ -44,7 +44,7 @@ import {
   buildFunctionPushProxy,
   buildAdminAuthContext,
   buildAdminDbProxy,
-  executeSqlWithDirectD1Access,
+  executeSqlProviderAware,
   getWorkerUrl,
 } from '../lib/functions.js';
 
@@ -166,8 +166,13 @@ function buildStorageHookAdminContext(
     db: adminDb,
     table: (name: string) => adminDb('shared').table(name),
     auth: buildAdminAuthContext({ d1Database: env.AUTH_DB, serviceKey, workerUrl }),
+    sqlProviderAware: (namespace: string, id: string | undefined, query: string, params?: unknown[]) =>
+      executeSqlProviderAware(
+        { env, config, databaseNamespace: env.DATABASE, workerUrl, serviceKey },
+        namespace, id, query, params,
+      ),
     sqlWithDirectD1Access: (namespace: string, id: string | undefined, query: string, params?: unknown[]) =>
-      executeSqlWithDirectD1Access(
+      executeSqlProviderAware(
         { env, config, databaseNamespace: env.DATABASE, workerUrl, serviceKey },
         namespace, id, query, params,
       ),

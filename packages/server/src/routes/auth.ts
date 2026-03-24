@@ -54,7 +54,7 @@ import {
   buildFunctionPushProxy,
   buildAdminAuthContext,
   buildAdminDbProxy,
-  executeSqlWithDirectD1Access,
+  executeSqlProviderAware,
   getWorkerUrl,
 } from '../lib/functions.js';
 import * as authService from '../lib/auth-d1-service.js';
@@ -660,8 +660,13 @@ export async function executeAuthHook(
           db: adminDb,
           table: (name: string) => adminDb('shared').table(name),
           auth: authAdmin,
+          sqlProviderAware: (namespace: string, id: string | undefined, query: string, params?: unknown[]) =>
+            executeSqlProviderAware(
+              { env, config, databaseNamespace: env.DATABASE, workerUrl: options.workerUrl, serviceKey },
+              namespace, id, query, params,
+            ),
           sqlWithDirectD1Access: (namespace: string, id: string | undefined, query: string, params?: unknown[]) =>
-            executeSqlWithDirectD1Access(
+            executeSqlProviderAware(
               { env, config, databaseNamespace: env.DATABASE, workerUrl: options.workerUrl, serviceKey },
               namespace, id, query, params,
             ),

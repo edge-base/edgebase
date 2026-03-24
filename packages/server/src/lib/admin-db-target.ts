@@ -4,16 +4,7 @@ import type {
   AdminInstanceDiscoveryOption,
   EdgeBaseConfig,
 } from '@edge-base/shared';
-import { executeD1Sql } from './d1-sql.js';
-import { executeDoSql } from './do-sql.js';
-import { getD1BindingName, shouldRouteToD1 } from './do-router.js';
-import {
-  ensureLocalDevPostgresSchema,
-  getLocalDevPostgresExecOptions,
-  getProviderBindingName,
-  withPostgresConnection,
-} from './postgres-executor.js';
-import { ensurePgSchema } from './postgres-schema-init.js';
+import { executeProviderAwareSql } from './provider-aware-sql.js';
 import type { Env } from '../types.js';
 
 export interface AdminDbQueryResult {
@@ -47,13 +38,15 @@ interface ResolveAdminInstanceOptions {
 }
 
 function isDynamicDbBlock(
-  dbBlock: {
-    instance?: boolean;
-    access?: {
-      canCreate?: unknown;
-      access?: unknown;
-    };
-  } | undefined,
+  dbBlock:
+    | {
+        instance?: boolean;
+        access?: {
+          canCreate?: unknown;
+          access?: unknown;
+        };
+      }
+    | undefined,
 ): boolean {
   if (!dbBlock) return false;
   return !!(dbBlock.instance || dbBlock.access?.canCreate || dbBlock.access?.access);
@@ -108,7 +101,9 @@ function uniqueStrings(values: Array<string | undefined>): string[] {
   return result;
 }
 
-function normalizeDiscoveryItems(items: AdminInstanceDiscoveryOption[]): AdminInstanceDiscoveryOption[] {
+function normalizeDiscoveryItems(
+  items: AdminInstanceDiscoveryOption[],
+): AdminInstanceDiscoveryOption[] {
   const seen = new Set<string>();
   const normalized: AdminInstanceDiscoveryOption[] = [];
   for (const item of items) {
@@ -132,60 +127,17 @@ export async function executeAdminDbQuery({
   sql,
   params = [],
 }: ExecuteAdminDbQueryOptions): Promise<AdminDbQueryResult> {
-  const dbBlock = config.databases?.[namespace];
-  if (!dbBlock) {
-    throw new Error(`Namespace not found: ${namespace}`);
-  }
-
-  if (!id && (dbBlock.provider === 'neon' || dbBlock.provider === 'postgres')) {
-    const bindingName = getProviderBindingName(namespace);
-    const envRecord = env as unknown as Record<string, unknown>;
-    const hyperdrive = envRecord[bindingName] as { connectionString?: string } | undefined;
-    const envKey = dbBlock.connectionString ?? `${bindingName}_URL`;
-    const connectionString = hyperdrive?.connectionString ?? (envRecord[envKey] as string | undefined);
-    if (!connectionString) {
-      throw new Error(`PostgreSQL connection '${envKey}' not found.`);
-    }
-
-    const localDevOptions = getLocalDevPostgresExecOptions(env as unknown as Record<string, unknown>, namespace);
-    if (localDevOptions) {
-      await ensureLocalDevPostgresSchema(localDevOptions);
-    }
-    return withPostgresConnection(connectionString, async (query) => {
-      if (!localDevOptions) {
-        await ensurePgSchema(connectionString, namespace, dbBlock.tables ?? {}, query);
-      }
-      return query(sql, params);
-    }, localDevOptions);
-  }
-
-  if (!id && shouldRouteToD1(namespace, config)) {
-    const bindingName = getD1BindingName(namespace);
-    const d1 = (env as unknown as Record<string, unknown>)[bindingName] as D1Database | undefined;
-    if (!d1) {
-      throw new Error(`D1 binding '${bindingName}' not found.`);
-    }
-    const result = await executeD1Sql(d1, sql, params);
-    const rows = result.rows;
-    return {
-      columns: rows.length > 0 ? Object.keys(rows[0]) : [],
-      rows,
-      rowCount: result.rowCount,
-    };
-  }
-
-  const rows = await executeDoSql({
-    databaseNamespace: env.DATABASE,
+  return executeProviderAwareSql(
+    {
+      env,
+      config,
+      databaseNamespace: env.DATABASE,
+    },
     namespace,
     id,
-    query: sql,
+    sql,
     params,
-  });
-  return {
-    columns: rows.length > 0 ? Object.keys(rows[0]) : [],
-    rows,
-    rowCount: rows.length,
-  };
+  );
 }
 
 export async function resolveAdminInstanceOptions({
@@ -245,7 +197,11 @@ export async function resolveAdminInstanceOptions({
   const sourceLimit = clampLimit(discovery.limit, 12);
   const effectiveLimit = Math.min(requestedLimit, sourceLimit);
   const sourceDbBlock = config.databases?.[sourceNamespace];
-  const usesPostgres = Boolean(sourceDbBlock && !isDynamicDbBlock(sourceDbBlock) && (sourceDbBlock.provider === 'neon' || sourceDbBlock.provider === 'postgres'));
+  const usesPostgres = Boolean(
+    sourceDbBlock &&
+    !isDynamicDbBlock(sourceDbBlock) &&
+    (sourceDbBlock.provider === 'neon' || sourceDbBlock.provider === 'postgres'),
+  );
   const idField = discovery.idField ?? 'id';
   const labelField = discovery.labelField;
   const descriptionField = discovery.descriptionField;
@@ -254,14 +210,14 @@ export async function resolveAdminInstanceOptions({
   const aliasId = '__edgebase_id';
   const aliasLabel = '__edgebase_label';
   const aliasDescription = '__edgebase_description';
-  const selectParts = [
-    `${quoteIdentifier(idField)} AS ${quoteIdentifier(aliasId)}`,
-  ];
+  const selectParts = [`${quoteIdentifier(idField)} AS ${quoteIdentifier(aliasId)}`];
   if (labelField) {
     selectParts.push(`${quoteIdentifier(labelField)} AS ${quoteIdentifier(aliasLabel)}`);
   }
   if (descriptionField) {
-    selectParts.push(`${quoteIdentifier(descriptionField)} AS ${quoteIdentifier(aliasDescription)}`);
+    selectParts.push(
+      `${quoteIdentifier(descriptionField)} AS ${quoteIdentifier(aliasDescription)}`,
+    );
   }
 
   const params: unknown[] = [];
