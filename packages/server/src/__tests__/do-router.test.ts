@@ -671,12 +671,12 @@ describe('isDynamicDbBlock', () => {
 });
 
 describe('normalizeDbInstanceId', () => {
-  it('trims non-empty ids', () => {
-    expect(normalizeDbInstanceId('  ws-1  ')).toBe('ws-1');
+  it('preserves non-empty ids verbatim', () => {
+    expect(normalizeDbInstanceId('  ws-1  ')).toBe('  ws-1  ');
   });
 
-  it('treats blank ids as undefined', () => {
-    expect(normalizeDbInstanceId('   ')).toBeUndefined();
+  it('keeps blank string inputs distinguishable from missing ids', () => {
+    expect(normalizeDbInstanceId('   ')).toBe('   ');
     expect(normalizeDbInstanceId(undefined)).toBeUndefined();
     expect(normalizeDbInstanceId(null)).toBeUndefined();
   });
@@ -717,6 +717,21 @@ describe('resolveDbTarget', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.issue).toBe('instance_id_required');
+  });
+
+  it('rejects empty instance ids without rewriting non-empty ones', () => {
+    const empty = resolveDbTarget(config, 'workspace', '   ');
+    expect(empty.ok).toBe(false);
+    if (empty.ok) return;
+    expect(empty.issue).toBe('instance_id_empty');
+    expect(formatDbTargetValidationIssue(empty.issue, 'workspace')).toBe(
+      'instanceId must not be empty',
+    );
+
+    const preserved = resolveDbTarget(config, 'workspace', ' ws-1 ');
+    expect(preserved.ok).toBe(true);
+    if (!preserved.ok) return;
+    expect(preserved.value.instanceId).toBe(' ws-1 ');
   });
 
   it('rejects ids containing colons', () => {

@@ -52,6 +52,48 @@ describe('buildFunctionContext admin.db', () => {
     );
   });
 
+  it('preserves significant whitespace in dynamic admin.db instance ids', async () => {
+    const databaseFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ items: [{ id: 'm1' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const databaseNamespace = {
+      idFromName: vi.fn(() => 'workspace-id'),
+      get: vi.fn(() => ({ fetch: databaseFetch })),
+    } as unknown as DurableObjectNamespace;
+
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/feed-summary'),
+      auth: null,
+      databaseNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      d1Database: {} as D1Database,
+      config: {
+        databases: {
+          workspace: {
+            instance: true,
+            tables: {
+              members: { schema: { role: { type: 'string' } } },
+            },
+          },
+        },
+      },
+    });
+
+    await ctx.admin.db('workspace', ' ws-1 ').table('members').getList();
+
+    expect(databaseNamespace.idFromName).toHaveBeenCalledWith('workspace: ws-1 ');
+    expect(databaseFetch.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'X-DO-Name': 'workspace: ws-1 ',
+        }),
+      }),
+    );
+  });
+
   it('routes upsert calls through the worker with upsert query params', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: 'p1', title: 'Upserted', action: 'inserted' }), {
