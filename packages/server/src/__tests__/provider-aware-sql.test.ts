@@ -1,7 +1,14 @@
-import { describe, expect, it } from 'vitest';
-import { normalizePostgresSqlPlaceholders } from '../lib/provider-aware-sql.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  executeProviderAwareSql,
+  normalizePostgresSqlPlaceholders,
+} from '../lib/provider-aware-sql.js';
 
 describe('provider-aware raw SQL helpers', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('normalizes question-mark placeholders while preserving quoted and commented question marks', () => {
     const query = `
       SELECT '?' AS literal, "weird?" AS "column?"
@@ -86,6 +93,50 @@ describe('provider-aware raw SQL helpers', () => {
   it('treats SELECT-list question marks as bind placeholders, not operators', () => {
     expect(normalizePostgresSqlPlaceholders('SELECT ?, ? FROM posts', 2)).toBe(
       'SELECT $1, $2 FROM posts',
+    );
+  });
+
+  it('falls back to the worker /api/sql route when direct execution bindings are unavailable', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ items: [{ id: 'p1' }], rowCount: 1 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await executeProviderAwareSql(
+      {
+        config: {},
+        workerUrl: 'http://localhost:8787',
+        serviceKey: 'service-key',
+      },
+      'workspace',
+      undefined,
+      'SELECT ? AS id',
+      ['p1'],
+    );
+
+    expect(result).toEqual({
+      columns: ['id'],
+      rows: [{ id: 'p1' }],
+      rowCount: 1,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8787/api/sql',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'X-EdgeBase-Service-Key': 'service-key',
+        }),
+        body: JSON.stringify({
+          namespace: 'workspace',
+          id: undefined,
+          sql: 'SELECT ? AS id',
+          params: ['p1'],
+        }),
+      }),
     );
   });
 });
