@@ -86,6 +86,15 @@ describe('provider-aware raw SQL helpers', () => {
     ).toBe("SELECT * FROM posts WHERE metadata @? '$.featured' AND id = $1");
   });
 
+  it('unescapes escaped PostgreSQL question-mark operators when only positional placeholders are present', () => {
+    expect(
+      normalizePostgresSqlPlaceholders(
+        "SELECT * FROM posts WHERE metadata @\\? '$.featured' AND id = $1",
+        1,
+      ),
+    ).toBe("SELECT * FROM posts WHERE metadata @? '$.featured' AND id = $1");
+  });
+
   it('still treats question marks after prefix operators as bind placeholders when an expression is expected', () => {
     expect(normalizePostgresSqlPlaceholders('SELECT @?::int', 1)).toBe('SELECT @$1::int');
   });
