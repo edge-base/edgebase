@@ -68,8 +68,12 @@ Do not read every reference file by default. First inspect the repo, runtime, an
 - Do not assume auth persistence is automatically isolated between colocated apps, localhost ports, or embedded previews. If multiple EdgeBase clients share one origin, verify storage keys, BroadcastChannel names, and SSR cookies will not collide.
 - Do not treat `EBADENGINE` as proof that the runtime is either broken or supported. Separate metadata warnings from actual runtime verification, and report both honestly.
 - Do not assume `edgebase dev --port X` means the live process is still serving `X`. For fixed-port workflows, re-check the real bound port and a health path after restarts.
+- Do not trust an occupied port or a dev-process PID as proof that the app is healthy. Verify a real page response and at least one expected asset or manifest path before reusing the process for QA.
 - Do not escalate an SDK/server bug before ruling out app-layer optimistic merge bugs, snapshot reconciliation bugs, stale cache/search/list logic, or redundant full-table reloads layered on top of realtime payloads.
 - Do not treat a visible button, toast, or optimistic state flip as proof that a server-backed action works. Prove the write, read-after-write, and cross-client effect from another client when the feature claims shared state.
+- Do not leave repeated verification trapped in one-off temp scripts or chat history. If the check will matter again, promote it into repo-local scripts or tests so the next agent can rerun the same workflow.
+- Do not leave visible controls in an example app as implied no-ops. Either wire them, disable them, or label them honestly as not implemented before calling the UX complete.
+- Do not treat scary local-runtime warnings as proof of a platform regression when the app still works. Separate noisy diagnostics from reproducible behavior before filing an SDK/server bug.
 - When a task spans app code and a nested `edgebase/` project, check both package manifests and lockfiles before saying versions are aligned.
 - For example apps, do not stop at `build` or `tsc`. Verify the actual user flow with concurrent clients, especially cross-client sync, auth, host controls, and any button that claims to perform a server-backed action.
 
@@ -89,6 +93,8 @@ Do not read every reference file by default. First inspect the repo, runtime, an
   separate in-room state from out-of-room discovery. Test lobby occupancy, first-join behavior, and post-leave cleanup from a client that is not already inside the room.
 - For optimistic realtime UI:
   test that pending rows survive snapshot reconciliation and are replaced cleanly when the server write arrives; do not assume local insert and live-subscription ordering will line up.
+- For optimistic server-backed actions:
+  verify four things separately: immediate local feedback, eventual server acknowledgement, state after refresh, and replication or visibility from another client.
 - For anonymous or multi-client directory flows:
   verify read-after-write discoverability from a second client, not just from the writer that created the row.
 - For optional media features:
@@ -98,7 +104,9 @@ Do not read every reference file by default. First inspect the repo, runtime, an
 - For schema or config changes:
   run `edgebase typegen` when the repo uses generated types, and verify any generated files that the app imports.
 - For example-app QA:
-  prefer fixed ports, concurrent clients, and real end-to-end interaction over mocked verification. Re-check the actual bound ports after restarts, use three clients when host/presence flows depend on it, and check optimistic UI, server reconciliation, honest placeholders for unimplemented features, graceful degradation, and auth isolation across simultaneous clients.
+  prefer fixed ports, concurrent clients, and real end-to-end interaction over mocked verification. Re-check the actual bound ports after restarts, verify the health path with real HTML plus an expected asset/manifest response, use three clients when host/presence flows depend on it, and check optimistic UI, server reconciliation, honest placeholders for unimplemented features, graceful degradation, and auth isolation across simultaneous clients.
+- For reusable QA coverage:
+  if you had to create an ad-hoc script to prove a fix, move the durable part into repo-local regression coverage before you leave the task.
 - For multi-app or nested-project work:
   verify the top-level app, the nested `edgebase/` project, and their dev ports/scripts agree before declaring the setup reproducible.
 - For runtime or toolchain validation:
