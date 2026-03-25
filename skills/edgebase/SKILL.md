@@ -53,6 +53,25 @@ Do not read every reference file by default. First inspect the repo, runtime, an
 - When the runtime or trust boundary is ambiguous, prefer the lower-privilege client/core reference and state the assumption.
 - If multiple references are relevant, read the narrowest package reference first and only add a second reference if the task crosses boundaries.
 
+## Common Footguns
+
+- Do not assume old auth response shapes from memory or stale examples. Before destructuring auth results, verify the selected package reference and the current repo types.
+- Do not assume a public option is functional just because it exists in a constructor type. If the reference does not describe behavior, treat the option as inert until repo code proves otherwise.
+- Do not infer type-safe table models from `edgebase typegen` unless the selected package reference shows the exact integration pattern. Prefer explicit table generics or generated types already used by the repo.
+- When a task spans app code and a nested `edgebase/` project, check both package manifests and lockfiles before saying versions are aligned.
+- For example apps, do not stop at `build` or `tsc`. Verify the actual user flow, especially cross-client sync, auth, and any button that claims to perform a server-backed action.
+
+## Validation
+
+- For SDK, CLI, or version-upgrade work:
+  verify the latest published version first, align every relevant package and lockfile, then run the smallest meaningful compile/build/test loop before declaring success.
+- For auth changes:
+  test the real sign-in path used by the app and confirm the returned shape matches the selected reference before wiring cookies, tokens, or redirects.
+- For schema or config changes:
+  run `edgebase typegen` when the repo uses generated types, and verify any generated files that the app imports.
+- For example-app QA:
+  prefer fixed ports, concurrent clients, and real end-to-end interaction over mocked verification. Check optimistic UI, server reconciliation, and honest placeholders for unimplemented features.
+
 ## Safety
 
 - Never use admin/server references for browser, mobile, game-client, desktop-client, or other shipped client code.
