@@ -56,7 +56,7 @@ Do not read every reference file by default. First inspect the repo, runtime, an
 ## Common Footguns
 
 - Do not assume old auth response shapes from memory or stale examples. Before destructuring auth results, verify the selected package reference and the current repo types.
-- Do not treat a recent `npm view` result or your own memory as definitive during a fresh release window. If version reports conflict, verify npm registry dist-tags and the installed package versions before changing manifests or filing regressions.
+- Do not treat a recent `npm view` result or your own memory as definitive during a fresh release window. If version reports conflict, compare npm registry dist-tags, installed dependency trees, and every manifest/lockfile that can affect the running app, including nested `edgebase/` projects, before changing versions or filing regressions.
 - Do not assume a public option is functional just because it exists in a constructor type. If the reference does not describe behavior, treat the option as inert until repo code proves otherwise.
 - Do not infer type-safe table models from `edgebase typegen` unless the selected package reference shows the exact integration pattern. Prefer explicit table generics or generated types already used by the repo.
 - Do not read `table.where(...).onSnapshot(...)` as a server-filtered live query by default. Verify whether the selected SDK surface still needs `{ serverFilter: true }` before claiming the subscription is narrow or cheap.
@@ -66,20 +66,21 @@ Do not read every reference file by default. First inspect the repo, runtime, an
 - Do not assume Room member state automatically solves lobby/list occupancy. If a UI needs room data outside a joined room, verify the current SDK surface for a queryable occupancy primitive before inventing or implying one.
 - Do not treat media transport as guaranteed. Before calling `transport.connect()` or promising camera/mic UX, verify the selected reference, current environment, and fallback path for unsupported or unconfigured runtimes.
 - Do not assume auth persistence is automatically isolated between colocated apps, localhost ports, or embedded previews. If multiple EdgeBase clients share one origin, verify storage keys, BroadcastChannel names, and SSR cookies will not collide.
-- Do not treat an `EBADENGINE` warning as proof the current Node version is supported. Check the declared `engines` range and prefer the supported runtime before trusting install, dev, or CLI results.
-- Do not assume `edgebase dev --port X` means the live process tree still serves `X` after restarts. When fixed-port QA matters, verify the bound port and the health endpoint after every restart.
+- Do not treat `EBADENGINE` as proof that the runtime is either broken or supported. Separate metadata warnings from actual runtime verification, and report both honestly.
+- Do not assume `edgebase dev --port X` means the live process is still serving `X`. For fixed-port workflows, re-check the real bound port and a health path after restarts.
+- Do not escalate an SDK/server bug before ruling out app-layer optimistic merge bugs, snapshot reconciliation bugs, stale cache/search/list logic, or redundant full-table reloads layered on top of realtime payloads.
+- Do not treat a visible button, toast, or optimistic state flip as proof that a server-backed action works. Prove the write, read-after-write, and cross-client effect from another client when the feature claims shared state.
 - When a task spans app code and a nested `edgebase/` project, check both package manifests and lockfiles before saying versions are aligned.
-- For example apps, do not stop at `build` or `tsc`. Verify the actual user flow, especially cross-client sync, auth, and any button that claims to perform a server-backed action.
-- Do not treat a visible button or optimistic state flip as proof that a feature works. Verify the intended server write, realtime fan-out, and reconciliation path before calling the UX complete.
+- For example apps, do not stop at `build` or `tsc`. Verify the actual user flow with concurrent clients, especially cross-client sync, auth, host controls, and any button that claims to perform a server-backed action.
 
 ## Validation
 
 - For SDK, CLI, or version-upgrade work:
-  verify the latest published version first, align every relevant package and lockfile, then run the smallest meaningful compile/build/test loop before declaring success.
+  verify the latest published version first, align every relevant package and lockfile including nested `edgebase/` projects, then run the smallest meaningful compile/build/test loop before declaring success.
 - For fresh package releases or conflicting version reports:
   verify npm registry dist-tags, installed `node_modules` package versions, and both top-level and nested manifests before saying the repo is current.
 - For auth changes:
-  test the real sign-in path used by the app and confirm the returned shape matches the selected reference before wiring cookies, tokens, or redirects.
+  test the real sign-in path used by the app, confirm the returned shape matches the selected reference, and verify persistence/isolation when multiple clients or colocated apps are in play before wiring cookies, tokens, or redirects.
 - For realtime changes:
   verify both the callback shape and the server-vs-client filtering behavior from the selected reference before optimizing or claiming scale characteristics.
 - For suspected SDK/server bugs:
@@ -92,10 +93,12 @@ Do not read every reference file by default. First inspect the repo, runtime, an
   verify read-after-write discoverability from a second client, not just from the writer that created the row.
 - For optional media features:
   verify the app still works when media transport is unavailable, unsupported, denied, or intentionally disabled. Keep chat/presence flows usable unless the feature truly requires media.
+- For app-vs-platform bug triage:
+  reproduce the failure from a second client, reduce it to the smallest credible repro, and only then escalate it as an SDK/server problem.
 - For schema or config changes:
   run `edgebase typegen` when the repo uses generated types, and verify any generated files that the app imports.
 - For example-app QA:
-  prefer fixed ports, concurrent clients, and real end-to-end interaction over mocked verification. Check optimistic UI, server reconciliation, honest placeholders for unimplemented features, and auth isolation across simultaneous clients.
+  prefer fixed ports, concurrent clients, and real end-to-end interaction over mocked verification. Re-check the actual bound ports after restarts, use three clients when host/presence flows depend on it, and check optimistic UI, server reconciliation, honest placeholders for unimplemented features, graceful degradation, and auth isolation across simultaneous clients.
 - For multi-app or nested-project work:
   verify the top-level app, the nested `edgebase/` project, and their dev ports/scripts agree before declaring the setup reproducible.
 - For runtime or toolchain validation:
