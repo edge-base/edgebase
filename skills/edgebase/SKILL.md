@@ -57,15 +57,20 @@ Do not read every reference file by default. First inspect the repo, runtime, an
 
 - Do not assume old auth response shapes from memory or stale examples. Before destructuring auth results, verify the selected package reference and the current repo types.
 - Do not treat a recent `npm view` result or your own memory as definitive during a fresh release window. If version reports conflict, compare npm registry dist-tags, installed dependency trees, and every manifest/lockfile that can affect the running app, including nested `edgebase/` projects, before changing versions or filing regressions.
+- Do not stop at declared CLI versions when functions are involved. Verify the installed CLI-transitive runtime packages too, plus the actual `npx edgebase --version`, before saying the function runtime is aligned.
 - Do not assume a public option is functional just because it exists in a constructor type. If the reference does not describe behavior, treat the option as inert until repo code proves otherwise.
 - Do not infer type-safe table models from `edgebase typegen` unless the selected package reference shows the exact integration pattern. Prefer explicit table generics or generated types already used by the repo.
+- Do not infer an SDK or runtime bug from a README snippet alone. When examples, types, and observed behavior disagree, check the published typings and implementation before escalating.
 - Do not read `table.where(...).onSnapshot(...)` as a server-filtered live query by default. Verify whether the selected SDK surface still needs `{ serverFilter: true }` before claiming the subscription is narrow or cheap.
 - Do not mix callback contracts between `table.onSnapshot(...)` and `table.doc(id).onSnapshot(...)`. Verify whether the current surface emits a table snapshot or a `(data, change)` pair before wiring handlers.
+- Do not assume the function-runtime DB surface differs from the client query-builder surface because of stale memory or old examples. Verify the current `ctx.db(...)` and `ctx.admin.db(...)` contract before rewriting working code or filing an API-parity bug.
 - Do not assume a flaky multi-client flow is an SDK/server bug before ruling out app-layer caching, polling, optimistic reconciliation, or search/discoverability code. Separate platform behavior from app behavior before escalating.
 - Do not bolt full-table reloads on top of snapshot payloads unless the reference or repo proves it is necessary. The extra round trips can create fake performance regressions and hide the original ordering problem.
 - Do not assume Room member state automatically solves lobby/list occupancy. If a UI needs room data outside a joined room, verify the current SDK surface for a queryable occupancy primitive before inventing or implying one.
 - Do not treat media transport as guaranteed. Before calling `transport.connect()` or promising camera/mic UX, verify the selected reference, current environment, and fallback path for unsupported or unconfigured runtimes.
 - Do not assume auth persistence is automatically isolated between colocated apps, localhost ports, or embedded previews. If multiple EdgeBase clients share one origin, verify storage keys, BroadcastChannel names, and SSR cookies will not collide.
+- Do not assume a raw `fetch()` to EdgeBase auth or function routes carries the same auth context as SDK helpers. Verify which token, cookie, or header actually authenticates the request in the current origin and port setup before blaming the backend.
+- Do not hardcode localhost origins for server self-calls, cleanup hooks, or seed flows when the runtime can move across ports or environments. Derive the worker origin from the request or environment and verify both request-driven and scheduled paths.
 - Do not treat `EBADENGINE` as proof that the runtime is either broken or supported. Separate metadata warnings from actual runtime verification, and report both honestly.
 - Do not assume `edgebase dev --port X` means the live process is still serving `X`. For fixed-port workflows, re-check the real bound port and a health path after restarts.
 - Do not trust an occupied port or a dev-process PID as proof that the app is healthy. Verify a real page response and at least one expected asset or manifest path before reusing the process for QA.
@@ -84,13 +89,15 @@ Do not read every reference file by default. First inspect the repo, runtime, an
 - For SDK, CLI, or version-upgrade work:
   verify the latest published version first, align every relevant package and lockfile including nested `edgebase/` projects, then run the smallest meaningful compile/build/test loop before declaring success.
 - For fresh package releases or conflicting version reports:
-  verify npm registry dist-tags, installed `node_modules` package versions, and both top-level and nested manifests before saying the repo is current.
+  verify npm registry dist-tags, installed `node_modules` package versions, top-level and nested manifests, and any CLI-transitive runtime packages before saying the repo is current.
 - For auth changes:
   test the real sign-in path used by the app, confirm the returned shape matches the selected reference, and verify persistence/isolation when multiple clients or colocated apps are in play before wiring cookies, tokens, or redirects.
+- For raw auth or function `fetch()` calls:
+  prove the authenticated user context on the server with an auth-dependent read or write, not just an HTTP 200 or a local optimistic state change.
 - For realtime changes:
   verify both the callback shape and the server-vs-client filtering behavior from the selected reference before optimizing or claiming scale characteristics.
 - For suspected SDK/server bugs:
-  build the smallest repro you can and write down which app-layer causes you already ruled out. Do not escalate a platform bug on confidence alone.
+  build the smallest repro you can, write down which app-layer causes you already ruled out, and confirm the current published surface before calling the mismatch an upstream bug. Do not escalate a platform bug on confidence alone.
 - For Room-based features:
   separate in-room state from out-of-room discovery. Test lobby occupancy, first-join behavior, and post-leave cleanup from a client that is not already inside the room.
 - For optimistic realtime UI:
@@ -111,6 +118,8 @@ Do not read every reference file by default. First inspect the repo, runtime, an
   if you had to create an ad-hoc script to prove a fix, move the durable part into repo-local regression coverage before you leave the task.
 - For multi-app or nested-project work:
   verify the top-level app, the nested `edgebase/` project, and their dev ports/scripts agree before declaring the setup reproducible.
+- For function-triggered internal workflows:
+  verify both direct request paths and scheduler or self-call paths, and make sure origin derivation, auth headers, and fallback behavior do not depend on a stale localhost assumption.
 - For runtime or toolchain validation:
   when the package declares a Node range, run at least one meaningful check on that supported runtime or clearly state that your validation was done under an unsupported version.
 
