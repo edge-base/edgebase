@@ -58,6 +58,9 @@ Do not read every reference file by default. First inspect the repo, runtime, an
 - Do not assume old auth response shapes from memory or stale examples. Before destructuring auth results, verify the selected package reference and the current repo types.
 - Do not assume a public option is functional just because it exists in a constructor type. If the reference does not describe behavior, treat the option as inert until repo code proves otherwise.
 - Do not infer type-safe table models from `edgebase typegen` unless the selected package reference shows the exact integration pattern. Prefer explicit table generics or generated types already used by the repo.
+- Do not read `table.where(...).onSnapshot(...)` as a server-filtered live query by default. Verify whether the selected SDK surface still needs `{ serverFilter: true }` before claiming the subscription is narrow or cheap.
+- Do not mix callback contracts between `table.onSnapshot(...)` and `table.doc(id).onSnapshot(...)`. Verify whether the current surface emits a table snapshot or a `(data, change)` pair before wiring handlers.
+- Do not assume auth persistence is automatically isolated between colocated apps, localhost ports, or embedded previews. If multiple EdgeBase clients share one origin, verify storage keys, BroadcastChannel names, and SSR cookies will not collide.
 - When a task spans app code and a nested `edgebase/` project, check both package manifests and lockfiles before saying versions are aligned.
 - For example apps, do not stop at `build` or `tsc`. Verify the actual user flow, especially cross-client sync, auth, and any button that claims to perform a server-backed action.
 
@@ -67,10 +70,14 @@ Do not read every reference file by default. First inspect the repo, runtime, an
   verify the latest published version first, align every relevant package and lockfile, then run the smallest meaningful compile/build/test loop before declaring success.
 - For auth changes:
   test the real sign-in path used by the app and confirm the returned shape matches the selected reference before wiring cookies, tokens, or redirects.
+- For realtime changes:
+  verify both the callback shape and the server-vs-client filtering behavior from the selected reference before optimizing or claiming scale characteristics.
+- For optimistic realtime UI:
+  test that pending rows survive snapshot reconciliation and are replaced cleanly when the server write arrives; do not assume local insert and live-subscription ordering will line up.
 - For schema or config changes:
   run `edgebase typegen` when the repo uses generated types, and verify any generated files that the app imports.
 - For example-app QA:
-  prefer fixed ports, concurrent clients, and real end-to-end interaction over mocked verification. Check optimistic UI, server reconciliation, and honest placeholders for unimplemented features.
+  prefer fixed ports, concurrent clients, and real end-to-end interaction over mocked verification. Check optimistic UI, server reconciliation, honest placeholders for unimplemented features, and auth isolation across simultaneous clients.
 
 ## Safety
 
