@@ -7,13 +7,13 @@ sidebar_position: 0
 
 # Why EdgeBase?
 
-EdgeBase is the **first Backend-as-a-Service built entirely on serverless edge infrastructure**. Every other BaaS — Firebase, Supabase, Appwrite, PocketBase — runs on traditional server architecture: a central database, a container, or a single process. EdgeBase runs Auth, Database, Storage, and Functions natively on Cloudflare Workers and Durable Objects.
+EdgeBase is an **open-source edge-native BaaS built on Workers, Durable Objects, D1, and R2**. Instead of centering everything on a single app server and single database, EdgeBase composes distributed serverless primitives for auth, database, realtime, storage, and functions. Shared blocks can also switch to PostgreSQL when you need conventional Postgres semantics.
 
-This single architectural decision is why everything else is different.
+That architecture is why EdgeBase can pair no egress or bandwidth fees, ~0ms cold starts, and scale-out by design.
 
 ---
 
-## Zero Scaling Effort
+## Scale-Out by Design
 
 Traditional BaaS platforms funnel all traffic through a single database. When your app grows, you deal with connection pooling, read replicas, database sharding, and capacity planning. EdgeBase has none of this.
 
@@ -42,7 +42,7 @@ No shared locks. No connection pool limits. No contention.
 
 ---
 
-## No Cost Explosion
+## Costs Track Compute, Not Users
 
 The real fear for startups: start free, app goes viral, next month's bill is catastrophic. EdgeBase eliminates this structurally.
 
@@ -54,11 +54,11 @@ The real fear for startups: start free, app goes viral, next month's bill is cat
 | Idle instances                            | Server runs 24/7 | Server runs 24/7 | **$0**                        |
 | **Total (1M MAU social app, core stack)** | **$22,048/mo**   | **$14,297/mo**   | **~$149/mo**                  |
 
-**Why?** Because serverless edge architecture eliminates the cost structures that other platforms are built on:
+**Why?** Because the architecture changes which line items exist in the first place:
 
 - **Auth $0** — JWT verified locally (pure crypto), no session server. D1 included allowance (25B reads/month) handles all auth data. Outgrow D1? Switch to Neon PostgreSQL with one config change.
-- **Egress $0** — Cloudflare charges zero egress across the entire stack: R2 (Storage), D1 (Auth DB), Workers (compute), Durable Objects (database & database subscriptions), and WebSocket traffic. This is by design, not a promotional offer.
-- **Database Subscriptions ~300x cheaper** — WebSocket broadcast inside a DO. No per-recipient billing.
+- **No egress or bandwidth fees** — R2 serves files with $0 egress, and Workers/D1 do not add separate transfer or throughput billing. Realtime stays inside DO compute instead of creating a separate per-recipient bill.
+- **Database subscriptions stay inside compute** — WebSocket broadcast happens inside a DO, so the billing model is compute + ops rather than a separate per-recipient realtime product.
 - **Idle $0** — Durable Objects hibernate. No traffic = no cost.
 - **Cold start ~0ms** — V8 isolates boot in under a millisecond. No container spin-up, no runtime initialization. Your API responds instantly even after hours of inactivity.
 
@@ -68,21 +68,21 @@ That **~$149/mo** figure is the core social-app stack (auth + DB + storage + dat
 
 ---
 
-## One Command to Start, One Command to Deploy
+## Same App, Three Deploy Modes
 
 `workerd`, Cloudflare's edge runtime, is open source. The same code runs in development and production with zero changes.
 
 ```bash
 npx edgebase dev          # Start locally (like PocketBase)
-npx edgebase deploy       # Deploy to 330+ edge locations globally
+npx edgebase deploy       # Deploy to 300+ edge locations globally
 npx edgebase docker run   # Self-host in a single container
 ```
 
 |                 | PocketBase             | Supabase                        | **EdgeBase**             |
 | --------------- | ---------------------- | ------------------------------- | ------------------------ |
 | **Start**       | Single binary          | docker-compose (10+ containers) | **`npx edgebase dev`**   |
-| **Scale**       | Single process ceiling | Manual (replicas, pooling)      | **Automatic (infinite)** |
-| **Edge deploy** | No                     | No                              | **Yes (330+ cities)**    |
+| **Scale**       | Single process ceiling | Manual (replicas, pooling)      | **Scale-out by design**  |
+| **Edge deploy** | No                     | No                              | **Yes (300+ cities)**    |
 | **Cold start**  | ~0ms                   | ~500ms                          | **~0ms**                 |
 
 ---
@@ -175,7 +175,7 @@ Server route definition (Hono + Zod)
 |                        |     Firebase      |      Supabase       |      PocketBase      |       **EdgeBase**       |
 | ---------------------- | :---------------: | :-----------------: | :------------------: | :----------------------: |
 | **Architecture**       |    Central DB     |     Central DB      |    Single process    |   **Serverless edge**    |
-| **Scaling**            |      Manual       |  Manual (replicas)  | Single process limit | **Automatic (infinite)** |
+| **Scaling**            |      Manual       |  Manual (replicas)  | Single process limit | **Scale-out by design**  |
 | **Deploy**             |   Managed only    | Managed / Self-host |      Self-host       | **Edge / Docker / Node** |
 | **Database**           | Firestore (NoSQL) |     PostgreSQL      |        SQLite        | **SQLite + PostgreSQL**  |
 | **Auth cost** (1M MAU) |      $4,415       |       $2,925        |         Free         |         **Free**         |

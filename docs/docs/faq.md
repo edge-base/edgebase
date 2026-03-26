@@ -68,14 +68,19 @@ See the [Self-Hosting Guide](/docs/getting-started/self-hosting) for setup instr
 | Self-hosting simplicity                | `docker run` vs 10+ container docker-compose.                            |
 | Multiplayer / real-time games          | Built-in Room with server-authoritative state — no separate game server. |
 
+**PostgreSQL-specific notes:**
+
+| Scenario                      | EdgeBase approach                                      | Notes                                                                                                         |
+| ----------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Geospatial queries (PostGIS)  | Switch the block to `provider: 'postgres'`             | EdgeBase's PostgreSQL provider gives you Postgres, but PostGIS setup still requires manual configuration.    |
+| Existing PostgreSQL ecosystem | Use PostgreSQL-backed blocks for shared/static data    | Covers most general Postgres use cases; some extension-heavy workflows may still require direct setup.       |
+| Multi-statement transactions  | Plan around EdgeBase's `transactionSync()` model       | The app-facing DB API does not expose raw `BEGIN`/`COMMIT`, even when the backing provider is PostgreSQL.   |
+
 **Other platforms may be a better fit for:**
 
-| Scenario                       | Better Choice                 | Why                                                                                                                   |
-| ------------------------------ | ----------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Geospatial queries (PostGIS)   | Supabase                      | SQLite lacks PostGIS extensions. EdgeBase's PostgreSQL provider gives you Postgres, but PostGIS setup still requires manual configuration. |
-| Existing PostgreSQL ecosystem  | Supabase                      | pg_vector, foreign data wrappers, etc. — though EdgeBase's PostgreSQL provider covers most general Postgres use cases.            |
-| Zero-config prototype in 1 day | Firebase                      | Unmatched onboarding speed and documentation ecosystem.                                                               |
-| Multi-statement transactions   | Supabase                      | EdgeBase supports `transactionSync()` only — no `BEGIN`/`COMMIT`.                                                     |
+| Scenario                       | Better Choice | Why                                                     |
+| ------------------------------ | ------------- | ------------------------------------------------------- |
+| Zero-config prototype in 1 day | Firebase      | Unmatched onboarding speed and documentation ecosystem. |
 
 :::tip PostgreSQL Provider
 For shared/static DB blocks that need cross-tenant analytics, unlimited storage, or full PostgreSQL capabilities, switch to `provider: 'postgres'` and add a connection-string env key such as `DB_POSTGRES_ANALYTICS_URL`. No SDK or application code changes are required. The optional Neon helper can provision or reconnect that env value for you.
