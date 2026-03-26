@@ -244,6 +244,7 @@ For use cases like real-time cursor tracking or typing indicators:
 - Prefer `sendMessage()` / `sendMessageTo()` over state mutations -- messages are sent once and not persisted.
 - If using state, keep the update payload minimal.
 - Consider increasing `rateLimit.actions` if your use case requires more than 10 actions/sec per player.
+- For negotiation-heavy room media flows, tune `rateLimit.signals` and `rateLimit.media` separately so signaling bursts do not consume the same bucket as gameplay or app actions.
 
 ### Docker / Self-Hosted
 

@@ -1,10 +1,10 @@
 /**
  * Meta-test: route registration completeness.
  *
- * Ensures every route file imported in index.ts is also registered via app.route().
- * The expected route exports are derived from the current route files.
+ * Ensures every route module imported in index.ts is also registered via app.route().
+ * The expected route exports are derived from the route modules the entrypoint actually loads.
  */
-import { readFileSync, readdirSync } from 'fs';
+import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { describe, it, expect } from 'vitest';
@@ -15,9 +15,11 @@ describe('index.ts route registration completeness', () => {
     'utf-8',
   );
   const routesDir = resolve(fileURLToPath(new URL('../routes', import.meta.url)));
-  const EXPECTED_ROUTES = readdirSync(routesDir)
-    .filter((fileName) => fileName.endsWith('.ts'))
-    .sort()
+  const ROUTE_IMPORTS = [...source.matchAll(/import\('\.\/routes\/([^']+\.js)'\)/g)]
+    .map((match) => match[1])
+    .sort();
+  const ROUTE_FILES = ROUTE_IMPORTS.map((fileName) => fileName.replace(/\.js$/, '.ts'));
+  const EXPECTED_ROUTES = ROUTE_FILES
     .flatMap((fileName) => {
       const routeSource = readFileSync(resolve(routesDir, fileName), 'utf-8');
       const directExports = [...routeSource.matchAll(/export const (\w+)\s*=\s*new OpenAPIHono/g)].map(
@@ -29,20 +31,23 @@ describe('index.ts route registration completeness', () => {
       return [...directExports, ...aliasExports];
     });
 
-  const EXPECTED_COUNT = EXPECTED_ROUTES.length;
-
-  it(`total route imports = ${EXPECTED_COUNT}`, () => {
-    const importMatches = source.match(/import \{ \w+ \} from '\.\/routes\//g) || [];
-    expect(importMatches.length).toBe(EXPECTED_COUNT);
+  it(`total route module imports = ${ROUTE_FILES.length}`, () => {
+    expect(ROUTE_IMPORTS.length).toBe(ROUTE_FILES.length);
   });
 
-  for (const routeVar of EXPECTED_ROUTES) {
-    it(`${routeVar} is imported`, () => {
-      expect(source).toMatch(new RegExp(`import\\s*\\{[^}]*\\b${routeVar}\\b[^}]*\\}\\s*from '\\./routes/`));
-    });
+  for (const routeFile of ROUTE_FILES) {
+    const routePath = routeFile.replace(/\.ts$/, '.js');
 
+    it(`${routeFile} is dynamically imported`, () => {
+      expect(source).toContain(`import('./routes/${routePath}')`);
+    });
+  }
+
+  for (const routeVar of EXPECTED_ROUTES) {
     it(`${routeVar} is registered via app.route()`, () => {
-      expect(source).toMatch(new RegExp(`app\\.route\\([^)]+,\\s*${routeVar}\\)`));
+      const directRegistration = new RegExp(`app\\.route\\([^)]+,\\s*${routeVar}\\)`);
+      const moduleRegistration = new RegExp(`app\\.route\\([^)]+,\\s*\\w+\\.${routeVar}\\)`);
+      expect(directRegistration.test(source) || moduleRegistration.test(source)).toBe(true);
     });
   }
 });

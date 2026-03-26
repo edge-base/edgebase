@@ -5,6 +5,128 @@ vi.mock('cloudflare:workers', () => ({
 }));
 
 describe('room auth-state loss recovery', () => {
+  it('treats ephemeral timer persistence failures as non-fatal', async () => {
+    const { RoomRuntimeBaseDO } = await import('../durable-objects/room-runtime-base.js');
+
+    const room: any = Object.create(RoomRuntimeBaseDO.prototype);
+    const pending: Promise<unknown>[] = [];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    room.pendingAuth = new Map([['conn-1', Date.now() + 5_000]]);
+    room.disconnectTimers = new Map();
+    room.namespace = 'game';
+    room.roomId = 'room-1';
+    room.ctx = {
+      storage: {
+        put: vi.fn().mockRejectedValue(new Error('Exceeded allowed rows written in Durable Objects free tier.')),
+        delete: vi.fn(),
+      },
+      waitUntil: vi.fn((promise: Promise<unknown>) => {
+        pending.push(promise);
+      }),
+    };
+
+    expect(() => room.syncEphemeralTimersToStorage()).not.toThrow();
+    await Promise.allSettled(pending);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[Room] Ephemeral timer persistence skipped',
+      expect.objectContaining({
+        room: 'game::room-1',
+        pendingAuthCount: 1,
+        disconnectCount: 0,
+        message: 'Exceeded allowed rows written in Durable Objects free tier.',
+      }),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('persists alarm-backed room deadlines alongside auth and disconnect timers', async () => {
+    const { RoomRuntimeBaseDO } = await import('../durable-objects/room-runtime-base.js');
+
+    const pending: Promise<unknown>[] = [];
+    const putSpy = vi.fn().mockResolvedValue(undefined);
+    const room: any = Object.create(RoomRuntimeBaseDO.prototype);
+    room.pendingAuth = new Map([['conn-1', 11_111]]);
+    room.disconnectTimers = new Map([['user-1', { fireAt: 22_222, connectionId: 'conn-1' }]]);
+    room._stateSaveAt = 33_333;
+    room._emptyRoomCleanupAt = 44_444;
+    room._stateTTLAlarmAt = 55_555;
+    room.ctx = {
+      storage: {
+        put: putSpy,
+        delete: vi.fn(),
+      },
+      waitUntil: vi.fn((promise: Promise<unknown>) => {
+        pending.push(promise);
+      }),
+    };
+
+    room.syncEphemeralTimersToStorage();
+    await Promise.allSettled(pending);
+
+    expect(putSpy).toHaveBeenCalledWith('roomEphemeralTimers', {
+      pendingAuth: { 'conn-1': 11_111 },
+      disconnects: { 'user-1': { fireAt: 22_222, connectionId: 'conn-1' } },
+      stateSaveAt: 33_333,
+      emptyRoomCleanupAt: 44_444,
+      stateTTLAlarmAt: 55_555,
+    });
+  });
+
+  it('does not rewrite ephemeral timer storage when state is already dirty', async () => {
+    const { RoomRuntimeBaseDO } = await import('../durable-objects/room-runtime-base.js');
+
+    const room: any = Object.create(RoomRuntimeBaseDO.prototype);
+    room.dirty = false;
+    room._stateSaveAt = 33_333;
+    room.namespaceConfig = {};
+    room.syncEphemeralTimersToStorage = vi.fn();
+    room._scheduleNextAlarm = vi.fn();
+
+    room.markDirty();
+
+    expect(room.dirty).toBe(true);
+    expect(room._stateSaveAt).toBe(33_333);
+    expect(room.syncEphemeralTimersToStorage).not.toHaveBeenCalled();
+    expect(room._scheduleNextAlarm).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers persisted timers before alarm processing after a cold wake without sockets', async () => {
+    const { RoomRuntimeBaseDO } = await import('../durable-objects/room-runtime-base.js');
+
+    const room: any = Object.create(RoomRuntimeBaseDO.prototype);
+    room.stateRecoveryNeeded = false;
+    room.roomCreated = false;
+    room.sharedState = {};
+    room.playerStates = new Map();
+    room.serverState = {};
+    room.players = new Map();
+    room.userToConnections = new Map();
+    room.pendingAuth = new Map();
+    room.disconnectTimers = new Map();
+    room._timers = new Map();
+    room._stateSaveAt = null;
+    room._emptyRoomCleanupAt = null;
+    room._stateTTLAlarmAt = null;
+    room._metadata = {};
+    room.config = {};
+    room.ctx = {
+      getWebSockets: vi.fn(() => []),
+    };
+    room.ensureRuntimeReady = vi.fn(async () => {});
+    room.recoverFromStorage = vi.fn(async () => {});
+    room.findWebSocketByConnectionId = vi.fn(() => null);
+    room.finalizePlayerLeave = vi.fn(async () => {});
+    room.syncEphemeralTimersToStorage = vi.fn();
+    room._scheduleNextAlarm = vi.fn();
+
+    await room.alarm();
+
+    expect(room.recoverFromStorage).toHaveBeenCalledTimes(1);
+  });
+
   it('marks websocket metadata rebuilt from hibernation tags as auth-state-lost', async () => {
     const { RoomRuntimeBaseDO } = await import('../durable-objects/room-runtime-base.js');
 

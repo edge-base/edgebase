@@ -243,6 +243,7 @@ export interface RoomMediaRemoteTrackEvent {
 
 export interface RoomMediaTransport {
   connect(payload?: RoomMediaTransportConnectPayload): Promise<string>;
+  batchLocalUpdates?<T>(callback: () => Promise<T>): Promise<T>;
   enableAudio(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
   enableVideo(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
   startScreenShare(constraints?: unknown): Promise<MediaStreamTrack>;
@@ -542,6 +543,10 @@ export class RoomClient {
         screenInputId?: string;
       }): Promise<void> => this.switchMediaDevices(payload),
     },
+    realtime: {
+      iceServers: (payload?: RoomRealtimeIceServersRequest): Promise<RoomRealtimeIceServersResponse> =>
+        this.requestRealtimeMedia('turn', 'POST', payload),
+    },
     cloudflareRealtimeKit: {
       createSession: (payload?: RoomCloudflareRealtimeKitCreateSessionRequest): Promise<RoomCloudflareRealtimeKitCreateSessionResponse> =>
         this.requestCloudflareRealtimeKitMedia('session', 'POST', payload),
@@ -648,6 +653,14 @@ export class RoomClient {
     payload?: unknown,
   ): Promise<T> {
     return this.requestRoomMedia<T>('cloudflare_realtimekit', path, method, payload);
+  }
+
+  private async requestRealtimeMedia<T>(
+    path: string,
+    method: 'GET' | 'POST' | 'PUT',
+    payload?: unknown,
+  ): Promise<T> {
+    return this.requestRoomMedia<T>('realtime', path, method, payload);
   }
 
   private async requestRoomMedia<T>(
@@ -1606,6 +1619,10 @@ export class RoomClient {
     for (const handler of this.mediaTrackHandlers) {
       handler(trackSnapshot, memberSnapshot);
     }
+    const stateSnapshot = cloneValue(mediaMember.state);
+    for (const handler of this.mediaStateHandlers) {
+      handler(memberSnapshot, stateSnapshot);
+    }
   }
 
   private handleMediaTrackRemovedFrame(msg: Record<string, unknown>): void {
@@ -1628,6 +1645,10 @@ export class RoomClient {
     const trackSnapshot = cloneValue(track);
     for (const handler of this.mediaTrackRemovedHandlers) {
       handler(trackSnapshot, memberSnapshot);
+    }
+    const stateSnapshot = cloneValue(mediaMember.state);
+    for (const handler of this.mediaStateHandlers) {
+      handler(memberSnapshot, stateSnapshot);
     }
   }
 
@@ -1662,6 +1683,10 @@ export class RoomClient {
     const change = { kind, deviceId } satisfies RoomMediaDeviceChange;
     for (const handler of this.mediaDeviceHandlers) {
       handler(memberSnapshot, change);
+    }
+    const stateSnapshot = cloneValue(mediaMember.state);
+    for (const handler of this.mediaStateHandlers) {
+      handler(memberSnapshot, stateSnapshot);
     }
   }
 

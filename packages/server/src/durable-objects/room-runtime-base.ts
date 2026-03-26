@@ -14,9 +14,6 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import {
-  getRoomActionHandlers,
-  getRoomLifecycleHandlers,
-  getRoomTimerHandlers,
   type AuthContext as SharedAuthContext,
   type EdgeBaseConfig,
   type RoomNamespaceConfig,
@@ -24,15 +21,12 @@ import {
   type RoomSender,
   type RoomHandlerContext,
 } from '@edge-base/shared';
-import { parseConfig as getGlobalConfig } from '../lib/do-router.js';
-import { resolveAuthContextFromToken } from '../middleware/auth.js';
-import { buildFunctionContext } from '../lib/functions.js';
-import { resolveDbLiveAuthTimeoutMs } from '../lib/database-live-config.js';
 import {
   persistRoomMonitoringSnapshot,
   type RoomMonitoringSnapshot,
 } from '../lib/room-monitoring.js';
-import { resolveRootServiceKey } from '../lib/service-key.js';
+import { parseConfig as getGlobalConfig } from '../lib/do-router.js';
+import { ensureServerStartup } from '../lib/runtime-startup.js';
 
 // ─── Types ───
 
@@ -67,7 +61,6 @@ interface PlayerInfo {
 
 const DEFAULT_MAX_PLAYERS = 100;
 const DEFAULT_MAX_STATE_SIZE = 1048576; // 1MB
-const DEFAULT_DELTA_BATCH_MS = 50;
 const DEFAULT_RATE_LIMIT_ACTIONS = 10;
 const DEFAULT_RECONNECT_TIMEOUT_MS = 30000;
 const ROOM_CLIENT_LEAVE_CLOSE_CODE = 4005;
@@ -76,9 +69,25 @@ const ROOM_AUTH_STATE_LOST_CLOSE_REASON = 'Room authentication state lost';
 const EMPTY_ROOM_CLEANUP_DELAY_MS = 100;
 const DEFAULT_IDLE_TIMEOUT_SEC = 300;
 const ACTION_TIMEOUT_MS = 5000;
+const DEFAULT_ROOM_AUTH_TIMEOUT_MS = 5000;
 const DEFAULT_STATE_SAVE_INTERVAL_MS = 60000; // 1 minute
 const DEFAULT_STATE_TTL_MS = 86400000; // 24 hours
+const ROOM_EPHEMERAL_TIMERS_STORAGE_KEY = 'roomEphemeralTimers';
 const roomFallbackWarnings = new Set<string>();
+type RoomRateLimitScope = 'actions' | 'signals' | 'media' | 'admin';
+
+interface PendingDisconnectDeadline {
+  fireAt: number;
+  connectionId: string;
+}
+
+interface PersistedRoomEphemeralTimers {
+  pendingAuth?: Record<string, number>;
+  disconnects?: Record<string, PendingDisconnectDeadline>;
+  stateSaveAt?: number | null;
+  emptyRoomCleanupAt?: number | null;
+  stateTTLAlarmAt?: number | null;
+}
 
 function isRoomOperationPublic(
   namespaceConfig: RoomNamespaceConfig | null,
@@ -87,6 +96,31 @@ function isRoomOperationPublic(
   if (!namespaceConfig?.public) return false;
   if (namespaceConfig.public === true) return true;
   return !!namespaceConfig.public[operation];
+}
+
+function getRoomHooks(namespaceConfig?: RoomNamespaceConfig | null) {
+  return namespaceConfig?.hooks;
+}
+
+function getRoomLifecycleHandlers(namespaceConfig?: RoomNamespaceConfig | null) {
+  return getRoomHooks(namespaceConfig)?.lifecycle ?? namespaceConfig?.handlers?.lifecycle;
+}
+
+function getRoomActionHandlers(namespaceConfig?: RoomNamespaceConfig | null) {
+  return namespaceConfig?.state?.actions ?? namespaceConfig?.handlers?.actions;
+}
+
+function getRoomTimerHandlers(namespaceConfig?: RoomNamespaceConfig | null) {
+  return namespaceConfig?.state?.timers ?? namespaceConfig?.handlers?.timers;
+}
+
+function resolveRoomAuthTimeoutMs(config?: EdgeBaseConfig): number {
+  const value = config?.databaseLive?.authTimeoutMs;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_ROOM_AUTH_TIMEOUT_MS;
+  }
+  const normalized = Math.floor(value);
+  return normalized > 0 ? normalized : DEFAULT_ROOM_AUTH_TIMEOUT_MS;
 }
 
 // ─── Compute delta between two states ───
@@ -123,7 +157,7 @@ function cloneState(obj: Record<string, unknown>): Record<string, unknown> {
 // ─── Shared Room Runtime Base ───
 
 export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
-  protected readonly config: EdgeBaseConfig;
+  protected config: EdgeBaseConfig;
 
   // ─── Room identification ───
   protected namespace: string | null = null;
@@ -143,27 +177,28 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   // ─── Lifecycle ───
   private roomCreated = false;
+  private runtimeReadyPromise: Promise<void> | null = null;
 
-  // ─── State persistence (replaces RESYNC) ───
+  // ─── State persistence (alarm-based, hibernation-friendly) ───
   private dirty = false;
-  private saveTimer: ReturnType<typeof setInterval> | null = null;
+  private _stateSaveAt: number | null = null;
   private stateRecoveryNeeded = false;
 
   // ─── WebSocket metadata cache ───
   private _metaCache = new Map<WebSocket, RoomWSMeta>();
 
   // ─── Auth timeout tracking ───
-  private pendingAuth = new Map<string, ReturnType<typeof setTimeout>>();
+  private pendingAuth = new Map<string, number>();
 
   // ─── Delta batching (shared state) ───
   private pendingSharedDelta: Record<string, unknown> | null = null;
-  private sharedDeltaBatchTimer: ReturnType<typeof setTimeout> | null = null;
+  private sharedDeltaFlushQueued = false;
 
   // ─── Rate limiting (per connection, token bucket) ───
   private rateBuckets = new Map<string, { tokens: number; lastRefill: number }>();
 
   // ─── Reconnect timers ───
-  private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>(); // userId → timer
+  private disconnectTimers = new Map<string, PendingDisconnectDeadline>(); // userId → deadline
 
   // ─── Named Timers (alarm multiplexer) ───
   private _timers = new Map<string, { fireAt: number; data?: unknown }>();
@@ -186,6 +221,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   // ─── HTTP Fetch Handler ───
 
   async fetch(request: Request): Promise<Response> {
+    await this.ensureRuntimeReady();
     const url = new URL(request.url);
     if (url.pathname === '/websocket') {
       return this.handleWebSocketUpgrade(request);
@@ -353,25 +389,11 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     this._metaCache.set(server, meta);
     this.syncRoomMonitoringSnapshot();
 
-    // Set auth timeout
-    const authTimeoutMs = resolveDbLiveAuthTimeoutMs(this.config);
-    const timer = setTimeout(() => {
-      const currentMeta = this.getWSMeta(server);
-      if (currentMeta && !currentMeta.authenticated) {
-        try {
-          this.safeSend(server, {
-            type: 'error',
-            code: 'AUTH_TIMEOUT',
-            message: `Authentication required within ${authTimeoutMs}ms`,
-          });
-          server.close(4001, 'Authentication timeout');
-        } catch {
-          // WebSocket already closed by client
-        }
-      }
-      this.pendingAuth.delete(connectionId);
-    }, authTimeoutMs);
-    this.pendingAuth.set(connectionId, timer);
+    // Set auth timeout without pinning the DO with a JS timer.
+    const authTimeoutMs = resolveRoomAuthTimeoutMs(this.config);
+    this.pendingAuth.set(connectionId, Date.now() + authTimeoutMs);
+    this.syncEphemeralTimersToStorage();
+    this._scheduleNextAlarm();
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -379,6 +401,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   // ─── Hibernation API Callbacks ───
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    await this.ensureRuntimeReady();
     if (typeof message !== 'string') return;
 
     let msg: Record<string, unknown>;
@@ -447,10 +470,9 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       const explicitLeave = code === ROOM_CLIENT_LEAVE_CLOSE_CODE;
       this.handleDisconnect(meta, kicked, explicitLeave);
       this._metaCache.delete(ws);
-      const timer = this.pendingAuth.get(meta.connectionId);
-      if (timer) {
-        clearTimeout(timer);
-        this.pendingAuth.delete(meta.connectionId);
+      if (this.pendingAuth.delete(meta.connectionId)) {
+        this.syncEphemeralTimersToStorage();
+        this._scheduleNextAlarm();
       }
     }
     this.syncRoomMonitoringSnapshot(ws);
@@ -461,12 +483,16 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     if (meta) {
       this.handleDisconnect(meta);
       this._metaCache.delete(ws);
+      if (this.pendingAuth.delete(meta.connectionId)) {
+        this.syncEphemeralTimersToStorage();
+        this._scheduleNextAlarm();
+      }
     }
     this.syncRoomMonitoringSnapshot(ws);
   }
 
   // ─── Alarm Multiplexer ───
-  // Single DO alarm is shared among: named timers, empty room cleanup, state TTL.
+  // Single DO alarm is shared among: named timers, state save, empty room cleanup, state TTL.
 
   /**
    * Recalculate and set the single DO alarm to the earliest pending event.
@@ -477,8 +503,17 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     for (const timer of this._timers.values()) {
       if (timer.fireAt < earliest) earliest = timer.fireAt;
     }
+    for (const fireAt of this.pendingAuth.values()) {
+      if (fireAt < earliest) earliest = fireAt;
+    }
+    for (const timer of this.disconnectTimers.values()) {
+      if (timer.fireAt < earliest) earliest = timer.fireAt;
+    }
     if (this._emptyRoomCleanupAt !== null && this._emptyRoomCleanupAt < earliest) {
       earliest = this._emptyRoomCleanupAt;
+    }
+    if (this._stateSaveAt !== null && this._stateSaveAt < earliest) {
+      earliest = this._stateSaveAt;
     }
     if (this._stateTTLAlarmAt !== null && this._stateTTLAlarmAt < earliest) {
       earliest = this._stateTTLAlarmAt;
@@ -490,9 +525,44 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   }
 
   async alarm(): Promise<void> {
+    await this.ensureRuntimeReady();
+
+    if (this.shouldRecoverBeforeAlarm()) {
+      await this.recoverFromStorage();
+      this.stateRecoveryNeeded = false;
+    }
+
     const now = Date.now();
 
-    // 1. Fire expired named timers
+    // 1. Close unauthenticated sockets whose auth deadline expired.
+    const expiredAuthConnectionIds: string[] = [];
+    for (const [connectionId, fireAt] of this.pendingAuth) {
+      if (fireAt <= now) {
+        expiredAuthConnectionIds.push(connectionId);
+        this.pendingAuth.delete(connectionId);
+      }
+    }
+    for (const connectionId of expiredAuthConnectionIds) {
+      const ws = this.findWebSocketByConnectionId(connectionId);
+      const currentMeta = ws ? this.getWSMeta(ws) : null;
+      if (ws && currentMeta && !currentMeta.authenticated) {
+        try {
+          this.safeSend(ws, {
+            type: 'error',
+            code: 'AUTH_TIMEOUT',
+            message: `Authentication required within ${resolveRoomAuthTimeoutMs(this.config)}ms`,
+          });
+          ws.close(4001, 'Authentication timeout');
+        } catch {
+          // WebSocket already closed by client.
+        }
+      }
+    }
+    if (expiredAuthConnectionIds.length > 0) {
+      this.syncEphemeralTimersToStorage();
+    }
+
+    // 2. Fire expired named timers
     const expiredTimers: Array<{ name: string; data?: unknown }> = [];
     for (const [name, timer] of this._timers) {
       if (timer.fireAt <= now) {
@@ -506,7 +576,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       if (handler) {
         try {
           const roomApi = this.buildRoomServerAPI();
-          const ctx = this.buildHandlerContext();
+          const ctx = await this.buildHandlerContext();
           await handler(roomApi, ctx, data);
         } catch (err) {
           console.error(`[Room] onTimer['${name}'] error: ${err instanceof Error ? err.message : String(err)}`);
@@ -515,10 +585,25 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     }
 
     if (expiredTimers.length > 0) {
-      this.dirty = true;
+      this.markDirty();
     }
 
-    // 2. Empty room cleanup
+    // 3. Finalize disconnect grace periods without pinning the DO.
+    const expiredDisconnects: Array<{ userId: string; connectionId: string }> = [];
+    for (const [userId, timer] of this.disconnectTimers) {
+      if (timer.fireAt <= now) {
+        expiredDisconnects.push({ userId, connectionId: timer.connectionId });
+        this.disconnectTimers.delete(userId);
+      }
+    }
+    for (const { userId, connectionId } of expiredDisconnects) {
+      await this.finalizePlayerLeave(userId, connectionId, 'disconnect');
+    }
+    if (expiredDisconnects.length > 0) {
+      this.syncEphemeralTimersToStorage();
+    }
+
+    // 4. Empty room cleanup
     if (this._emptyRoomCleanupAt !== null && this._emptyRoomCleanupAt <= now) {
       this._emptyRoomCleanupAt = null;
       if (this.players.size === 0) {
@@ -532,39 +617,55 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
           this.roomCreated = false;
           this._timers.clear();
           this._metadata = {};
+          this.pendingAuth.clear();
+          this.disconnectTimers.clear();
           this.pendingSharedDelta = null;
-          if (this.sharedDeltaBatchTimer) {
-            clearTimeout(this.sharedDeltaBatchTimer);
-            this.sharedDeltaBatchTimer = null;
-          }
-          this.stopSaveTimer();
+          this.sharedDeltaFlushQueued = false;
+          this.dirty = false;
+          this._stateSaveAt = null;
           // Clean up persisted state
           await this.ctx.storage.delete('roomState');
           await this.ctx.storage.delete('roomTimers');
           await this.ctx.storage.delete('roomMetadata');
+          await this.ctx.storage.delete(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY);
           // Phase 2: Schedule idleTimeout alarm
           this._stateTTLAlarmAt = Date.now() + DEFAULT_IDLE_TIMEOUT_SEC * 1000;
+          this.syncEphemeralTimersToStorage();
         } else {
           // TTL safety net alarm: room is empty and state already cleared
+          this.dirty = false;
+          this._stateSaveAt = null;
           await this.ctx.storage.delete('roomState');
           await this.ctx.storage.delete('roomTimers');
           await this.ctx.storage.delete('roomMetadata');
+          await this.ctx.storage.delete(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY);
           this._stateTTLAlarmAt = null;
         }
       }
+      this.syncEphemeralTimersToStorage();
     }
 
-    // 3. State TTL safety net
+    // 5. Persist dirty state without keeping the DO awake via setInterval.
+    if (this._stateSaveAt !== null && this._stateSaveAt <= now) {
+      this._stateSaveAt = null;
+      if (this.dirty) {
+        await this.persistState();
+      }
+    }
+
+    // 6. State TTL safety net
     if (this._stateTTLAlarmAt !== null && this._stateTTLAlarmAt <= now) {
       this._stateTTLAlarmAt = null;
       if (this.players.size === 0) {
         await this.ctx.storage.delete('roomState');
         await this.ctx.storage.delete('roomTimers');
         await this.ctx.storage.delete('roomMetadata');
+        await this.ctx.storage.delete(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY);
       }
+      this.syncEphemeralTimersToStorage();
     }
 
-    // 4. Reschedule for next pending event
+    // 7. Reschedule for next pending event
     this._scheduleNextAlarm();
   }
 
@@ -591,6 +692,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       if (meta.ip) headers.set('CF-Connecting-IP', meta.ip);
       if (meta.userAgent) headers.set('User-Agent', meta.userAgent);
       headers.set('Authorization', `Bearer ${token}`);
+      const { resolveAuthContextFromToken } = await import('../middleware/auth.js');
       const auth = await resolveAuthContextFromToken(
         this.env,
         token,
@@ -611,19 +713,17 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       this.setWSMeta(ws, meta);
 
       // Clear auth timeout
-      const timer = this.pendingAuth.get(meta.connectionId);
-      if (timer) {
-        clearTimeout(timer);
-        this.pendingAuth.delete(meta.connectionId);
+      if (this.pendingAuth.delete(meta.connectionId)) {
+        this.syncEphemeralTimersToStorage();
+        this._scheduleNextAlarm();
       }
 
       // Register player (only on first auth)
       if (!isReAuth && meta.userId) {
         // Cancel disconnect timer if this user is reconnecting
-        const existingTimer = this.disconnectTimers.get(meta.userId);
-        if (existingTimer) {
-          clearTimeout(existingTimer);
-          this.disconnectTimers.delete(meta.userId);
+        if (this.disconnectTimers.delete(meta.userId)) {
+          this.syncEphemeralTimersToStorage();
+          this._scheduleNextAlarm();
         }
 
         this.addPlayer(meta.connectionId, meta.userId);
@@ -643,11 +743,28 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         this.stateRecoveryNeeded = false;
       }
       // Note: full sync is sent during handleJoin(), not here
-    } catch {
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error('[Room] handleAuth failed', {
+        room: this.namespace && this.roomId ? `${this.namespace}::${this.roomId}` : null,
+        connectionId: meta.connectionId,
+        isReAuth,
+        userId: meta.userId ?? null,
+        message: detail,
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       if (isReAuth) {
-        this.safeSend(ws, { type: 'error', code: 'AUTH_REFRESH_FAILED', message: 'Token refresh failed' });
+        this.safeSend(ws, {
+          type: 'error',
+          code: 'AUTH_REFRESH_FAILED',
+          message: this.config.release ? 'Token refresh failed' : detail,
+        });
       } else {
-        this.safeSend(ws, { type: 'error', code: 'AUTH_FAILED', message: 'Invalid or expired token' });
+        this.safeSend(ws, {
+          type: 'error',
+          code: 'AUTH_FAILED',
+          message: this.config.release ? 'Invalid or expired token' : detail,
+        });
         ws.close(4002, 'Authentication failed');
       }
     }
@@ -714,14 +831,12 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       if (onCreate) {
         try {
           const roomApi = this.buildRoomServerAPI();
-          const ctx = this.buildHandlerContext();
+          const ctx = await this.buildHandlerContext();
           await onCreate(roomApi, ctx);
         } catch (err) {
           console.error(`[Room] onCreate error: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      // Start periodic state persistence
-      this.startSaveTimer();
     }
 
     // Lifecycle: onJoin (throw to reject)
@@ -730,7 +845,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       try {
         const sender = this.buildSender(meta);
         const roomApi = this.buildRoomServerAPI();
-        const ctx = this.buildHandlerContext();
+        const ctx = await this.buildHandlerContext();
         await onJoin(sender, roomApi, ctx);
       } catch (err) {
         this.safeSend(ws, {
@@ -881,7 +996,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
     const sender = this.buildSender(meta);
     const roomApi = this.buildRoomServerAPI();
-    const ctx = this.buildHandlerContext();
+    const ctx = await this.buildHandlerContext();
 
     try {
       const result = await Promise.race([
@@ -933,10 +1048,9 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       }
     }
 
-    const existing = this.disconnectTimers.get(player.userId);
-    if (existing) {
-      clearTimeout(existing);
-      this.disconnectTimers.delete(player.userId);
+    if (this.disconnectTimers.delete(player.userId)) {
+      this.syncEphemeralTimersToStorage();
+      this._scheduleNextAlarm();
     }
 
     const remainingConns = this.userToConnections.get(player.userId);
@@ -966,16 +1080,21 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       setSharedState: (updater: (s: Record<string, unknown>) => Record<string, unknown>): void => {
         const oldState = cloneState(this.sharedState);
         const prevVersion = this.sharedVersion;
+        const prevDirty = this.dirty;
+        const prevStateSaveAt = this._stateSaveAt;
         this.sharedState = updater(cloneState(this.sharedState));
         this.sharedVersion++;
-        this.dirty = true;
+        this.markDirty();
         try {
           this.checkStateSizeLimit();
         } catch (err) {
           // Revert mutation
           this.sharedState = oldState;
           this.sharedVersion = prevVersion;
-          this.dirty = false;
+          this.dirty = prevDirty;
+          this._stateSaveAt = prevStateSaveAt;
+          this.syncEphemeralTimersToStorage();
+          this._scheduleNextAlarm();
           throw err;
         }
         const delta = computeDelta(oldState, this.sharedState);
@@ -1002,7 +1121,9 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         const prevVer = this.playerVersions.get(userId) ?? 0;
         const ver = prevVer + 1;
         this.playerVersions.set(userId, ver);
-        this.dirty = true;
+        const prevDirty = this.dirty;
+        const prevStateSaveAt = this._stateSaveAt;
+        this.markDirty();
         try {
           this.checkStateSizeLimit();
         } catch (err) {
@@ -1013,7 +1134,10 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
             this.playerStates.delete(userId);
           }
           this.playerVersions.set(userId, prevVer);
-          this.dirty = false;
+          this.dirty = prevDirty;
+          this._stateSaveAt = prevStateSaveAt;
+          this.syncEphemeralTimersToStorage();
+          this._scheduleNextAlarm();
           throw err;
         }
         const delta = computeDelta(oldState, newState);
@@ -1028,14 +1152,19 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
       setServerState: (updater: (s: Record<string, unknown>) => Record<string, unknown>): void => {
         const oldState = this.serverState;
+        const prevDirty = this.dirty;
+        const prevStateSaveAt = this._stateSaveAt;
         this.serverState = updater(cloneState(this.serverState));
-        this.dirty = true;
+        this.markDirty();
         try {
           this.checkStateSizeLimit();
         } catch (err) {
           // Revert mutation
           this.serverState = oldState;
-          this.dirty = false;
+          this.dirty = prevDirty;
+          this._stateSaveAt = prevStateSaveAt;
+          this.syncEphemeralTimersToStorage();
+          this._scheduleNextAlarm();
           throw err;
         }
         // No broadcast — server-only state
@@ -1075,7 +1204,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
           throw new Error(`No onTimer handler for '${name}'`);
         }
         this._timers.set(name, { fireAt: Date.now() + ms, data });
-        this.dirty = true;
+        this.markDirty();
         this._scheduleNextAlarm();
       },
 
@@ -1097,7 +1226,11 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   // ─── Handler Context Builder ───
 
-  protected buildHandlerContext(): RoomHandlerContext {
+  protected async buildHandlerContext(): Promise<RoomHandlerContext> {
+    const [{ buildFunctionContext }, { resolveRootServiceKey }] = await Promise.all([
+      import('../lib/functions.js'),
+      import('../lib/service-key.js'),
+    ]);
     const ctx = buildFunctionContext({
       request: new Request('http://internal/room/action'),
       auth: null,
@@ -1138,21 +1271,18 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   // ─── State Persistence (DO Storage) ───
 
-  private startSaveTimer(): void {
-    if (this.saveTimer) return;
-    const interval = this.namespaceConfig?.stateSaveInterval ?? DEFAULT_STATE_SAVE_INTERVAL_MS;
-    this.saveTimer = setInterval(async () => {
-      if (this.dirty) {
-        await this.persistState();
-      }
-    }, interval);
-  }
-
-  private stopSaveTimer(): void {
-    if (this.saveTimer) {
-      clearInterval(this.saveTimer);
-      this.saveTimer = null;
+  private markDirty(): void {
+    this.dirty = true;
+    let scheduledNewStateSave = false;
+    if (this._stateSaveAt === null) {
+      const interval = this.namespaceConfig?.stateSaveInterval ?? DEFAULT_STATE_SAVE_INTERVAL_MS;
+      this._stateSaveAt = Date.now() + interval;
+      scheduledNewStateSave = true;
     }
+    if (scheduledNewStateSave) {
+      this.syncEphemeralTimersToStorage();
+    }
+    this._scheduleNextAlarm();
   }
 
   private async persistState(): Promise<void> {
@@ -1171,9 +1301,11 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       await this.ctx.storage.delete('roomTimers');
     }
     this.dirty = false;
+    this._stateSaveAt = null;
     // Set TTL alarm as safety net for orphaned storage cleanup
     const ttl = this.namespaceConfig?.stateTTL ?? DEFAULT_STATE_TTL_MS;
     this._stateTTLAlarmAt = Date.now() + ttl;
+    this.syncEphemeralTimersToStorage();
     this._scheduleNextAlarm();
   }
 
@@ -1202,7 +1334,6 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     const savedTimers = await this.ctx.storage.get('roomTimers') as Record<string, { fireAt: number; data?: unknown }> | undefined;
     if (savedTimers) {
       this._timers = new Map(Object.entries(savedTimers));
-      this._scheduleNextAlarm();
     }
 
     // Recover metadata
@@ -1211,33 +1342,56 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       this._metadata = savedMeta;
     }
 
-    this.startSaveTimer();
+    const savedEphemeral = await this.ctx.storage.get(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY) as PersistedRoomEphemeralTimers | undefined;
+    if (savedEphemeral?.pendingAuth) {
+      this.pendingAuth = new Map(
+        Object.entries(savedEphemeral.pendingAuth)
+          .map(([connectionId, fireAt]) => [connectionId, Number(fireAt)]),
+      );
+    } else {
+      this.pendingAuth.clear();
+    }
+    if (savedEphemeral?.disconnects) {
+      this.disconnectTimers = new Map(
+        Object.entries(savedEphemeral.disconnects)
+          .map(([userId, timer]) => [userId, { fireAt: Number(timer.fireAt), connectionId: timer.connectionId }]),
+      );
+    } else {
+      this.disconnectTimers.clear();
+    }
+    this._stateSaveAt = typeof savedEphemeral?.stateSaveAt === 'number'
+      ? savedEphemeral.stateSaveAt
+      : null;
+    this._emptyRoomCleanupAt = typeof savedEphemeral?.emptyRoomCleanupAt === 'number'
+      ? savedEphemeral.emptyRoomCleanupAt
+      : null;
+    this._stateTTLAlarmAt = typeof savedEphemeral?.stateTTLAlarmAt === 'number'
+      ? savedEphemeral.stateTTLAlarmAt
+      : null;
+
+    this._scheduleNextAlarm();
   }
 
   // ─── Delta Broadcasting ───
 
-  /** Queue shared state delta (batched, broadcast to all) */
+  /** Queue shared state delta and flush it at the end of the current turn. */
   private queueSharedDelta(delta: Record<string, unknown>): void {
     if (!this.pendingSharedDelta) {
       this.pendingSharedDelta = {};
     }
     Object.assign(this.pendingSharedDelta, delta);
 
-    if (!this.sharedDeltaBatchTimer) {
-      const batchMs = DEFAULT_DELTA_BATCH_MS;
-      this.sharedDeltaBatchTimer = setTimeout(() => {
+    if (!this.sharedDeltaFlushQueued) {
+      this.sharedDeltaFlushQueued = true;
+      queueMicrotask(() => {
+        this.sharedDeltaFlushQueued = false;
         this.flushSharedDelta();
-      }, batchMs);
+      });
     }
   }
 
   private flushSharedDelta(): void {
     if (!this.pendingSharedDelta) return;
-
-    // Cancel batch timer if still pending
-    if (this.sharedDeltaBatchTimer) {
-      clearTimeout(this.sharedDeltaBatchTimer);
-    }
 
     this.broadcastToAuthenticated({
       type: 'shared_delta',
@@ -1246,7 +1400,6 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     });
 
     this.pendingSharedDelta = null;
-    this.sharedDeltaBatchTimer = null;
   }
 
   /** Send player state delta directly (unicast, no batching) */
@@ -1305,10 +1458,9 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       }
     }
     // Cancel any existing reconnect timer
-    const existingTimer = this.disconnectTimers.get(userId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      this.disconnectTimers.delete(userId);
+    if (this.disconnectTimers.delete(userId)) {
+      this.syncEphemeralTimersToStorage();
+      this._scheduleNextAlarm();
     }
 
     // Fire onLeave with 'kicked' reason
@@ -1366,17 +1518,15 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       if (kicked) {
         // Kicked — immediate leave, no reconnect timer
         // Cancel any existing reconnect timer for this user
-        const existing = this.disconnectTimers.get(player.userId);
-        if (existing) {
-          clearTimeout(existing);
-          this.disconnectTimers.delete(player.userId);
+        if (this.disconnectTimers.delete(player.userId)) {
+          this.syncEphemeralTimersToStorage();
+          this._scheduleNextAlarm();
         }
         await this.finalizePlayerLeave(player.userId, meta.connectionId, 'kicked');
       } else if (explicitLeave) {
-        const existing = this.disconnectTimers.get(player.userId);
-        if (existing) {
-          clearTimeout(existing);
-          this.disconnectTimers.delete(player.userId);
+        if (this.disconnectTimers.delete(player.userId)) {
+          this.syncEphemeralTimersToStorage();
+          this._scheduleNextAlarm();
         }
         await this.finalizePlayerLeave(player.userId, meta.connectionId, 'leave');
       } else {
@@ -1384,11 +1534,12 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         const reconnectTimeout = this.namespaceConfig?.reconnectTimeout ?? DEFAULT_RECONNECT_TIMEOUT_MS;
 
         if (reconnectTimeout > 0) {
-          const timer = setTimeout(async () => {
-            this.disconnectTimers.delete(player.userId);
-            await this.finalizePlayerLeave(player.userId, meta.connectionId, 'disconnect');
-          }, reconnectTimeout);
-          this.disconnectTimers.set(player.userId, timer);
+          this.disconnectTimers.set(player.userId, {
+            fireAt: Date.now() + reconnectTimeout,
+            connectionId: meta.connectionId,
+          });
+          this.syncEphemeralTimersToStorage();
+          this._scheduleNextAlarm();
         } else {
           // Immediate leave
           await this.finalizePlayerLeave(player.userId, meta.connectionId, 'disconnect');
@@ -1410,7 +1561,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       try {
         const sender: RoomSender = { userId, connectionId };
         const roomApi = this.buildRoomServerAPI();
-        const ctx = this.buildHandlerContext();
+        const ctx = await this.buildHandlerContext();
         await onLeave(sender, roomApi, ctx, reason);
       } catch (err) {
         console.error(`[Room] onLeave error: ${err instanceof Error ? err.message : String(err)}`);
@@ -1434,7 +1585,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     if (onDestroy) {
       try {
         const roomApi = this.buildRoomServerAPI();
-        const ctx = this.buildHandlerContext();
+        const ctx = await this.buildHandlerContext();
         await onDestroy(roomApi, ctx);
       } catch (err) {
         console.error(`[Room] onDestroy error: ${err instanceof Error ? err.message : String(err)}`);
@@ -1442,14 +1593,65 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     }
 
     // Clean up state persistence
-    this.stopSaveTimer();
+    this.dirty = false;
+    this._stateSaveAt = null;
     this._timers.clear();
+    this.pendingAuth.clear();
+    this.disconnectTimers.clear();
     this._metadata = {};
     await this.ctx.storage.delete('roomState');
     await this.ctx.storage.delete('roomTimers');
     await this.ctx.storage.delete('roomMetadata');
+    await this.ctx.storage.delete(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY);
 
     this.scheduleEmptyRoomCleanup();
+  }
+
+  private syncEphemeralTimersToStorage(): void {
+    const pendingAuth = Object.fromEntries(this.pendingAuth);
+    const disconnects = Object.fromEntries(this.disconnectTimers);
+    const stateSaveAt = this._stateSaveAt;
+    const emptyRoomCleanupAt = this._emptyRoomCleanupAt;
+    const stateTTLAlarmAt = this._stateTTLAlarmAt;
+    this.ctx.waitUntil((async () => {
+      try {
+        if (
+          Object.keys(pendingAuth).length === 0
+          && Object.keys(disconnects).length === 0
+          && stateSaveAt === null
+          && emptyRoomCleanupAt === null
+          && stateTTLAlarmAt === null
+        ) {
+          await this.ctx.storage.delete(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY);
+          return;
+        }
+
+        await this.ctx.storage.put(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY, {
+          pendingAuth,
+          disconnects,
+          stateSaveAt,
+          emptyRoomCleanupAt,
+          stateTTLAlarmAt,
+        } satisfies PersistedRoomEphemeralTimers);
+      } catch (error) {
+        console.warn('[Room] Ephemeral timer persistence skipped', {
+          room: this.namespace && this.roomId ? `${this.namespace}::${this.roomId}` : null,
+          pendingAuthCount: this.pendingAuth.size,
+          disconnectCount: this.disconnectTimers.size,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })());
+  }
+
+  private findWebSocketByConnectionId(connectionId: string): WebSocket | null {
+    for (const ws of this.ctx.getWebSockets()) {
+      const meta = this.getWSMeta(ws);
+      if (meta?.connectionId === connectionId) {
+        return ws;
+      }
+    }
+    return null;
   }
 
   private getPlayersArray(): Array<{ userId: string; connectionId: string }> {
@@ -1522,14 +1724,29 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   // ─── Rate Limiting (Token Bucket) ───
 
-  protected checkRateLimit(connectionId: string): boolean {
+  protected checkRateLimit(
+    connectionId: string,
+    scope: RoomRateLimitScope = 'actions',
+  ): boolean {
     const now = Date.now();
-    const maxActions = this.namespaceConfig?.rateLimit?.actions ?? DEFAULT_RATE_LIMIT_ACTIONS;
-    let bucket = this.rateBuckets.get(connectionId);
+    const rateLimit = this.namespaceConfig?.rateLimit as
+      | { actions: number; signals?: number; media?: number; admin?: number }
+      | undefined;
+    const maxActions = (
+      scope === 'signals'
+        ? rateLimit?.signals
+        : scope === 'media'
+          ? rateLimit?.media
+          : scope === 'admin'
+            ? rateLimit?.admin
+            : undefined
+    ) ?? rateLimit?.actions ?? DEFAULT_RATE_LIMIT_ACTIONS;
+    const bucketKey = `${connectionId}:${scope}`;
+    let bucket = this.rateBuckets.get(bucketKey);
 
     if (!bucket) {
       bucket = { tokens: maxActions, lastRefill: now };
-      this.rateBuckets.set(connectionId, bucket);
+      this.rateBuckets.set(bucketKey, bucket);
     }
 
     // Refill tokens (1 token per 1000/maxActions ms)
@@ -1549,6 +1766,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   private scheduleEmptyRoomCleanup(): void {
     this._emptyRoomCleanupAt = Date.now() + EMPTY_ROOM_CLEANUP_DELAY_MS;
+    this.syncEphemeralTimersToStorage();
     this._scheduleNextAlarm();
   }
 
@@ -1624,5 +1842,45 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   private parseConfig(env: RoomDOEnv): EdgeBaseConfig {
     return getGlobalConfig(env);
+  }
+
+  private async ensureRuntimeReady(): Promise<void> {
+    if (!this.runtimeReadyPromise) {
+      this.runtimeReadyPromise = (async () => {
+        await ensureServerStartup();
+        this.config = this.parseConfig(this.env);
+        if (this.namespace) {
+          this.namespaceConfig = this.config.rooms?.[this.namespace] ?? null;
+        }
+      })();
+    }
+
+    await this.runtimeReadyPromise;
+  }
+
+  private shouldRecoverBeforeAlarm(): boolean {
+    if (this.stateRecoveryNeeded) {
+      return true;
+    }
+
+    if (this.ctx.getWebSockets().length > 0) {
+      return false;
+    }
+
+    return (
+      !this.roomCreated
+      && Object.keys(this.sharedState).length === 0
+      && this.playerStates.size === 0
+      && Object.keys(this.serverState).length === 0
+      && this.players.size === 0
+      && this.userToConnections.size === 0
+      && this.pendingAuth.size === 0
+      && this.disconnectTimers.size === 0
+      && this._timers.size === 0
+      && this._stateSaveAt === null
+      && this._emptyRoomCleanupAt === null
+      && this._stateTTLAlarmAt === null
+      && Object.keys(this._metadata).length === 0
+    );
   }
 }

@@ -1,12 +1,11 @@
 import {
-  getRoomHooks,
   type AuthContext as SharedAuthContext,
   type RoomMemberInfo,
+  type RoomNamespaceConfig,
   type RoomSender,
   type RoomServerAPI,
 } from '@edge-base/shared';
 import {
-  createCloudflareRealtimeClient,
   type CloudflareRealtimeCloseTracksRequest,
   type CloudflareRealtimeNewSessionRequest,
   type CloudflareRealtimeNewSessionResponse,
@@ -14,7 +13,6 @@ import {
   type CloudflareRealtimeTracksRequest,
   type CloudflareRealtimeTracksResponse,
 } from '../lib/cloudflare-realtime.js';
-import { resolveAuthContextFromToken } from '../middleware/auth.js';
 import type { Env } from '../types.js';
 import { RoomRuntimeBaseDO, type RoomWSMeta } from './room-runtime-base.js';
 
@@ -116,6 +114,10 @@ const SIGNAL_DENIED = Symbol('rooms.signal.denied');
 const MEDIA_DENIED = Symbol('rooms.media.denied');
 const WEBSOCKET_OPEN = 1;
 const CLOUDFLARE_REALTIME_KIT_MEETING_STORAGE_KEY = 'cloudflareRealtimeKitMeetingId';
+
+function getRoomHooks(namespaceConfig?: RoomNamespaceConfig | null) {
+  return namespaceConfig?.hooks;
+}
 
 function computeStateDelta(
   previous: Record<string, unknown>,
@@ -250,7 +252,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
         });
       }
 
-      const client = this.buildRealtimeClient();
+      const client = await this.buildRealtimeClient();
       const response = await client.createSession(
         {
           sessionDescription: body.sessionDescription,
@@ -311,7 +313,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     try {
       const body = await this.readJsonBody<{ ttl?: number }>(request);
       await this.authenticateRealtimeRequest(request, url);
-      const client = this.buildRealtimeClient();
+      const client = await this.buildRealtimeClient();
       const ttl = typeof body.ttl === 'number' && Number.isFinite(body.ttl) && body.ttl > 0
         ? Math.floor(body.ttl)
         : 3600;
@@ -354,7 +356,8 @@ export class RoomsDO extends RoomRuntimeBaseDO {
         throw new Error('tracks is required');
       }
 
-      const response = await this.buildRealtimeClient().addTracks(sessionId, {
+      const client = await this.buildRealtimeClient();
+      const response = await client.addTracks(sessionId, {
         sessionDescription: body.sessionDescription,
         tracks: body.tracks,
         autoDiscover: body.autoDiscover === true,
@@ -410,7 +413,8 @@ export class RoomsDO extends RoomRuntimeBaseDO {
         throw new Error('sessionDescription is required');
       }
 
-      const response = await this.buildRealtimeClient().renegotiate(sessionId, {
+      const client = await this.buildRealtimeClient();
+      const response = await client.renegotiate(sessionId, {
         sessionDescription: body.sessionDescription,
       });
       this.assertRealtimeTracksResponseSuccess(response);
@@ -447,7 +451,8 @@ export class RoomsDO extends RoomRuntimeBaseDO {
         throw new Error('tracks is required');
       }
 
-      const response = await this.buildRealtimeClient().closeTracks(sessionId, {
+      const client = await this.buildRealtimeClient();
+      const response = await client.closeTracks(sessionId, {
         sessionDescription: body.sessionDescription,
         tracks: body.tracks,
         force: body.force === true,
@@ -472,7 +477,8 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
   }
 
-  private buildRealtimeClient() {
+  private async buildRealtimeClient() {
+    const { createCloudflareRealtimeClient } = await import('../lib/cloudflare-realtime.js');
     return createCloudflareRealtimeClient(this.env as unknown as Env);
   }
 
@@ -636,6 +642,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       throw new Error('Authentication required');
     }
 
+    const { resolveAuthContextFromToken } = await import('../middleware/auth.js');
     const auth = await resolveAuthContextFromToken(this.env, token, request);
     const memberId = auth.id;
     const member = this.members.get(memberId);
@@ -758,7 +765,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
       const event = typeof msg.event === 'string' ? msg.event : '';
       const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
-      if (!this.checkRateLimit(meta.connectionId)) {
+      if (!this.checkRateLimit(meta.connectionId, 'signals')) {
         this.safeSend(ws, {
           type: 'signal_error',
           event,
@@ -806,7 +813,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
       const operation = typeof msg.operation === 'string' ? msg.operation : '';
       const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
-      if (!this.checkRateLimit(meta.connectionId)) {
+      if (!this.checkRateLimit(meta.connectionId, 'admin')) {
         this.safeSend(ws, {
           type: 'admin_error',
           operation,
@@ -833,7 +840,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       const operation = this.normalizeMediaOperation(msg.operation);
       const kind = this.normalizeMediaKind(msg.kind);
       const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
-      if (!this.checkRateLimit(meta.connectionId)) {
+      if (!this.checkRateLimit(meta.connectionId, 'media')) {
         this.safeSend(ws, {
           type: 'media_error',
           operation: operation ?? '',
@@ -1450,7 +1457,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     const beforeSend = getRoomHooks(this.namespaceConfig ?? undefined)?.signals?.beforeSend;
     if (!beforeSend) return signal.payload;
 
-    const ctx = this.buildHandlerContext();
+    const ctx = await this.buildHandlerContext();
     const result = await Promise.resolve(
       beforeSend(signal.event, signal.payload, signal.sender, signal.roomApi, ctx),
     );
@@ -1468,7 +1475,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     if (!onSend) return;
 
     try {
-      const ctx = this.buildHandlerContext();
+      const ctx = await this.buildHandlerContext();
       await Promise.resolve(onSend(event, payload, sender, roomApi, ctx));
     } catch (err) {
       console.error(`[Rooms] signal.onSend error: ${err instanceof Error ? err.message : String(err)}`);
@@ -1481,7 +1488,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
     try {
       const roomApi = this.buildRoomServerAPI();
-      const ctx = this.buildHandlerContext();
+      const ctx = await this.buildHandlerContext();
       await Promise.resolve(onJoin(member, roomApi, ctx));
     } catch (err) {
       console.error(`[Rooms] members.onJoin error: ${err instanceof Error ? err.message : String(err)}`);
@@ -1497,7 +1504,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
     try {
       const roomApi = this.buildRoomServerAPI();
-      const ctx = this.buildHandlerContext();
+      const ctx = await this.buildHandlerContext();
       await Promise.resolve(onLeave(member, roomApi, ctx, reason));
     } catch (err) {
       console.error(`[Rooms] members.onLeave error: ${err instanceof Error ? err.message : String(err)}`);
@@ -1513,7 +1520,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
     try {
       const roomApi = this.buildRoomServerAPI();
-      const ctx = this.buildHandlerContext();
+      const ctx = await this.buildHandlerContext();
       await Promise.resolve(onStateChange(member, state, roomApi, ctx));
     } catch (err) {
       console.error(`[Rooms] members.onStateChange error: ${err instanceof Error ? err.message : String(err)}`);
@@ -1528,7 +1535,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     if (!onStateChange) return;
 
     try {
-      const ctx = this.buildHandlerContext();
+      const ctx = await this.buildHandlerContext();
       await Promise.resolve(onStateChange(delta, roomApi, ctx));
     } catch (err) {
       console.error(`[Rooms] state.onStateChange error: ${err instanceof Error ? err.message : String(err)}`);
@@ -1541,7 +1548,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
     try {
       const roomApi = this.buildRoomServerAPI();
-      const ctx = this.buildHandlerContext();
+      const ctx = await this.buildHandlerContext();
       await Promise.resolve(onReconnect(sender, roomApi, ctx));
     } catch (err) {
       console.error(`[Rooms] session.onReconnect error: ${err instanceof Error ? err.message : String(err)}`);
@@ -1554,7 +1561,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
     try {
       const roomApi = this.buildRoomServerAPI();
-      const ctx = this.buildHandlerContext();
+      const ctx = await this.buildHandlerContext();
       await Promise.resolve(onDisconnectTimeout(sender, roomApi, ctx));
     } catch (err) {
       console.error(`[Rooms] session.onDisconnectTimeout error: ${err instanceof Error ? err.message : String(err)}`);
@@ -1919,7 +1926,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       return undefined;
     }
 
-    const ctx = this.buildHandlerContext();
+    const ctx = await this.buildHandlerContext();
     const result = await Promise.resolve(beforePublish(kind, sender, roomApi, ctx));
     if (result === false) {
       return MEDIA_DENIED;
@@ -1936,7 +1943,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     if (!onPublished) return;
 
     try {
-      const ctx = this.buildHandlerContext();
+      const ctx = await this.buildHandlerContext();
       await Promise.resolve(onPublished(kind, sender, roomApi, ctx));
     } catch (err) {
       console.error(`[Rooms] media.onPublished error: ${err instanceof Error ? err.message : String(err)}`);
@@ -1952,7 +1959,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     if (!onUnpublished) return;
 
     try {
-      const ctx = this.buildHandlerContext();
+      const ctx = await this.buildHandlerContext();
       await Promise.resolve(onUnpublished(kind, sender, roomApi, ctx));
     } catch (err) {
       console.error(`[Rooms] media.onUnpublished error: ${err instanceof Error ? err.message : String(err)}`);
@@ -1969,7 +1976,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     if (!onMuteChange) return;
 
     try {
-      const ctx = this.buildHandlerContext();
+      const ctx = await this.buildHandlerContext();
       await Promise.resolve(onMuteChange(kind, sender, muted, roomApi, ctx));
     } catch (err) {
       console.error(`[Rooms] media.onMuteChange error: ${err instanceof Error ? err.message : String(err)}`);

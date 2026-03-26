@@ -20,6 +20,8 @@ provider를 중심으로 지원 매트릭스를 정리하고 있습니다.
 `room.media.transport({ provider: 'p2p' })`는 Cloudflare control-plane 설정 없이 바로 사용할 수 있습니다. 다만 STUN-only best-effort mesh라서 네트워크 환경에 따라 연결이 실패할 수 있습니다.
 :::
 
+Web SDK의 `p2p` transport는 연결 시점에 `room.media.realtime.iceServers()`를 먼저 시도하고, 사용 가능한 ICE / relay 자격 증명이 없을 때만 기본 STUN 설정으로 fallback합니다.
+
 ---
 
 ## 1. Cloudflare Realtime 활성화
