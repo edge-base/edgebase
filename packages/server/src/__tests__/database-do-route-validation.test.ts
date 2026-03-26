@@ -25,11 +25,12 @@ function createCtx() {
   } as unknown as DurableObjectState;
 }
 
-function createEnv() {
+function createEnv(config?: unknown) {
   return {
     DATABASE_LIVE: {} as DurableObjectNamespace,
     DATABASE: {} as DurableObjectNamespace,
     AUTH: {} as DurableObjectNamespace,
+    EDGEBASE_CONFIG: config,
   };
 }
 
@@ -39,7 +40,7 @@ describe('DatabaseDO route validation', () => {
   });
 
   it('rejects id-suffixed doNames for single-instance namespaces', async () => {
-    setConfig(defineConfig({
+    const config = defineConfig({
       release: true,
       databases: {
         app: {
@@ -49,11 +50,12 @@ describe('DatabaseDO route validation', () => {
           },
         },
       },
-    }));
+    });
+    setConfig(config);
 
     const { DatabaseDO } = await import('../durable-objects/database-do.js');
     const ctx = createCtx();
-    const databaseDo = new DatabaseDO(ctx, createEnv() as never);
+    const databaseDo = new DatabaseDO(ctx, createEnv(config) as never);
 
     const response = await databaseDo.fetch(new Request('http://do/tables/posts', {
       headers: {
@@ -71,7 +73,7 @@ describe('DatabaseDO route validation', () => {
   });
 
   it('rejects missing instance ids for dynamic namespaces', async () => {
-    setConfig(defineConfig({
+    const config = defineConfig({
       release: true,
       databases: {
         workspace: {
@@ -82,11 +84,12 @@ describe('DatabaseDO route validation', () => {
           },
         },
       },
-    }));
+    });
+    setConfig(config);
 
     const { DatabaseDO } = await import('../durable-objects/database-do.js');
     const ctx = createCtx();
-    const databaseDo = new DatabaseDO(ctx, createEnv() as never);
+    const databaseDo = new DatabaseDO(ctx, createEnv(config) as never);
 
     const response = await databaseDo.fetch(new Request('http://do/tables/users', {
       headers: {

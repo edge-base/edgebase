@@ -343,6 +343,29 @@ describe('RoomP2PMediaTransport', () => {
     );
   });
 
+  it('clears the media health-check interval when destroyed', async () => {
+    vi.useFakeTimers();
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+    const { transport } = createTransport({
+      currentMember: {
+        memberId: 'member-1',
+        userId: 'member-1',
+        state: {},
+      },
+      members: [
+        { memberId: 'member-1', userId: 'member-1', state: {} },
+        { memberId: 'member-2', userId: 'member-2', state: {} },
+      ],
+    });
+
+    await transport.connect();
+    transport.destroy();
+
+    expect(clearIntervalSpy).toHaveBeenCalled();
+    clearIntervalSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
   it('coalesces initial audio/video publish into a single negotiation batch', async () => {
     vi.stubGlobal('MediaStream', FakeMediaStream as unknown as typeof MediaStream);
 

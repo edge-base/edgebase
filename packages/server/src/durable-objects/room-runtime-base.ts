@@ -25,6 +25,8 @@ import {
   persistRoomMonitoringSnapshot,
   type RoomMonitoringSnapshot,
 } from '../lib/room-monitoring.js';
+import { parseConfig as getGlobalConfig } from '../lib/do-router.js';
+import { ensureServerStartup } from '../lib/runtime-startup.js';
 
 // ─── Types ───
 
@@ -82,6 +84,9 @@ interface PendingDisconnectDeadline {
 interface PersistedRoomEphemeralTimers {
   pendingAuth?: Record<string, number>;
   disconnects?: Record<string, PendingDisconnectDeadline>;
+  stateSaveAt?: number | null;
+  emptyRoomCleanupAt?: number | null;
+  stateTTLAlarmAt?: number | null;
 }
 
 function isRoomOperationPublic(
@@ -152,7 +157,7 @@ function cloneState(obj: Record<string, unknown>): Record<string, unknown> {
 // ─── Shared Room Runtime Base ───
 
 export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
-  protected readonly config: EdgeBaseConfig;
+  protected config: EdgeBaseConfig;
 
   // ─── Room identification ───
   protected namespace: string | null = null;
@@ -172,6 +177,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   // ─── Lifecycle ───
   private roomCreated = false;
+  private runtimeReadyPromise: Promise<void> | null = null;
 
   // ─── State persistence (alarm-based, hibernation-friendly) ───
   private dirty = false;
@@ -215,6 +221,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   // ─── HTTP Fetch Handler ───
 
   async fetch(request: Request): Promise<Response> {
+    await this.ensureRuntimeReady();
     const url = new URL(request.url);
     if (url.pathname === '/websocket') {
       return this.handleWebSocketUpgrade(request);
@@ -394,6 +401,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   // ─── Hibernation API Callbacks ───
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    await this.ensureRuntimeReady();
     if (typeof message !== 'string') return;
 
     let msg: Record<string, unknown>;
@@ -517,7 +525,9 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   }
 
   async alarm(): Promise<void> {
-    if (this.stateRecoveryNeeded) {
+    await this.ensureRuntimeReady();
+
+    if (this.shouldRecoverBeforeAlarm()) {
       await this.recoverFromStorage();
       this.stateRecoveryNeeded = false;
     }
@@ -620,6 +630,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
           await this.ctx.storage.delete(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY);
           // Phase 2: Schedule idleTimeout alarm
           this._stateTTLAlarmAt = Date.now() + DEFAULT_IDLE_TIMEOUT_SEC * 1000;
+          this.syncEphemeralTimersToStorage();
         } else {
           // TTL safety net alarm: room is empty and state already cleared
           this.dirty = false;
@@ -631,6 +642,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
           this._stateTTLAlarmAt = null;
         }
       }
+      this.syncEphemeralTimersToStorage();
     }
 
     // 5. Persist dirty state without keeping the DO awake via setInterval.
@@ -650,6 +662,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         await this.ctx.storage.delete('roomMetadata');
         await this.ctx.storage.delete(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY);
       }
+      this.syncEphemeralTimersToStorage();
     }
 
     // 7. Reschedule for next pending event
@@ -1080,6 +1093,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
           this.sharedVersion = prevVersion;
           this.dirty = prevDirty;
           this._stateSaveAt = prevStateSaveAt;
+          this.syncEphemeralTimersToStorage();
           this._scheduleNextAlarm();
           throw err;
         }
@@ -1122,6 +1136,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
           this.playerVersions.set(userId, prevVer);
           this.dirty = prevDirty;
           this._stateSaveAt = prevStateSaveAt;
+          this.syncEphemeralTimersToStorage();
           this._scheduleNextAlarm();
           throw err;
         }
@@ -1148,6 +1163,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
           this.serverState = oldState;
           this.dirty = prevDirty;
           this._stateSaveAt = prevStateSaveAt;
+          this.syncEphemeralTimersToStorage();
           this._scheduleNextAlarm();
           throw err;
         }
@@ -1261,6 +1277,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       const interval = this.namespaceConfig?.stateSaveInterval ?? DEFAULT_STATE_SAVE_INTERVAL_MS;
       this._stateSaveAt = Date.now() + interval;
     }
+    this.syncEphemeralTimersToStorage();
     this._scheduleNextAlarm();
   }
 
@@ -1284,6 +1301,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     // Set TTL alarm as safety net for orphaned storage cleanup
     const ttl = this.namespaceConfig?.stateTTL ?? DEFAULT_STATE_TTL_MS;
     this._stateTTLAlarmAt = Date.now() + ttl;
+    this.syncEphemeralTimersToStorage();
     this._scheduleNextAlarm();
   }
 
@@ -1337,6 +1355,15 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     } else {
       this.disconnectTimers.clear();
     }
+    this._stateSaveAt = typeof savedEphemeral?.stateSaveAt === 'number'
+      ? savedEphemeral.stateSaveAt
+      : null;
+    this._emptyRoomCleanupAt = typeof savedEphemeral?.emptyRoomCleanupAt === 'number'
+      ? savedEphemeral.emptyRoomCleanupAt
+      : null;
+    this._stateTTLAlarmAt = typeof savedEphemeral?.stateTTLAlarmAt === 'number'
+      ? savedEphemeral.stateTTLAlarmAt
+      : null;
 
     this._scheduleNextAlarm();
   }
@@ -1579,9 +1606,18 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   private syncEphemeralTimersToStorage(): void {
     const pendingAuth = Object.fromEntries(this.pendingAuth);
     const disconnects = Object.fromEntries(this.disconnectTimers);
+    const stateSaveAt = this._stateSaveAt;
+    const emptyRoomCleanupAt = this._emptyRoomCleanupAt;
+    const stateTTLAlarmAt = this._stateTTLAlarmAt;
     this.ctx.waitUntil((async () => {
       try {
-        if (Object.keys(pendingAuth).length === 0 && Object.keys(disconnects).length === 0) {
+        if (
+          Object.keys(pendingAuth).length === 0
+          && Object.keys(disconnects).length === 0
+          && stateSaveAt === null
+          && emptyRoomCleanupAt === null
+          && stateTTLAlarmAt === null
+        ) {
           await this.ctx.storage.delete(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY);
           return;
         }
@@ -1589,6 +1625,9 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         await this.ctx.storage.put(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY, {
           pendingAuth,
           disconnects,
+          stateSaveAt,
+          emptyRoomCleanupAt,
+          stateTTLAlarmAt,
         } satisfies PersistedRoomEphemeralTimers);
       } catch (error) {
         console.warn('[Room] Ephemeral timer persistence skipped', {
@@ -1723,6 +1762,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   private scheduleEmptyRoomCleanup(): void {
     this._emptyRoomCleanupAt = Date.now() + EMPTY_ROOM_CLEANUP_DELAY_MS;
+    this.syncEphemeralTimersToStorage();
     this._scheduleNextAlarm();
   }
 
@@ -1797,29 +1837,46 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   // ─── Config ───
 
   private parseConfig(env: RoomDOEnv): EdgeBaseConfig {
-    const rawConfig = (env as unknown as Record<string, unknown>).EDGEBASE_CONFIG;
-    if (rawConfig && typeof rawConfig === 'object' && !Array.isArray(rawConfig)) {
-      return rawConfig as EdgeBaseConfig;
-    }
+    return getGlobalConfig(env);
+  }
 
-    if (typeof rawConfig === 'string' && rawConfig.trim().length > 0) {
-      try {
-        const parsed = JSON.parse(rawConfig) as EdgeBaseConfig;
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          return parsed;
+  private async ensureRuntimeReady(): Promise<void> {
+    if (!this.runtimeReadyPromise) {
+      this.runtimeReadyPromise = (async () => {
+        await ensureServerStartup();
+        this.config = this.parseConfig(this.env);
+        if (this.namespace) {
+          this.namespaceConfig = this.config.rooms?.[this.namespace] ?? null;
         }
-      } catch {
-        // Ignore invalid request-scoped config and fall back to the startup singleton.
-      }
+      })();
     }
 
-    if (typeof globalThis === 'object' && globalThis !== null) {
-      const globalConfig = (globalThis as Record<string, unknown>).__EDGEBASE_RUNTIME_CONFIG__;
-      if (globalConfig && typeof globalConfig === 'object' && !Array.isArray(globalConfig)) {
-        return globalConfig as EdgeBaseConfig;
-      }
+    await this.runtimeReadyPromise;
+  }
+
+  private shouldRecoverBeforeAlarm(): boolean {
+    if (this.stateRecoveryNeeded) {
+      return true;
     }
 
-    return {};
+    if (this.ctx.getWebSockets().length > 0) {
+      return false;
+    }
+
+    return (
+      !this.roomCreated
+      && Object.keys(this.sharedState).length === 0
+      && this.playerStates.size === 0
+      && Object.keys(this.serverState).length === 0
+      && this.players.size === 0
+      && this.userToConnections.size === 0
+      && this.pendingAuth.size === 0
+      && this.disconnectTimers.size === 0
+      && this._timers.size === 0
+      && this._stateSaveAt === null
+      && this._emptyRoomCleanupAt === null
+      && this._stateTTLAlarmAt === null
+      && Object.keys(this._metadata).length === 0
+    );
   }
 }

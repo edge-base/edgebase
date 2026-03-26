@@ -530,6 +530,10 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
   destroy(): void {
     this.connected = false;
     this.localMemberId = null;
+    if (this.healthCheckTimer != null) {
+      globalThis.clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+    }
     for (const subscription of this.subscriptions.splice(0)) {
       subscription.unsubscribe();
     }

@@ -7,6 +7,7 @@ import { verifyAccessToken } from '../lib/jwt.js';
 import { parseConfig as getGlobalConfig } from '../lib/do-router.js';
 import { isDbLiveChannel } from '../lib/database-live-emitter.js';
 import { resolveDbLiveAuthTimeoutMs } from '../lib/database-live-config.js';
+import { ensureServerStartup } from '../lib/runtime-startup.js';
 
 interface DOEnv {
   JWT_USER_SECRET?: string;
@@ -142,6 +143,7 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
   private pendingAuth = new Map<string, ReturnType<typeof setTimeout>>();
   private metaCache = new Map<WebSocket, WSMeta>();
   private recentDeliveryIds = new Map<string, number>();
+  private runtimeReadyPromise: Promise<void> | null = null;
 
   constructor(ctx: DurableObjectState, env: DOEnv) {
     super(ctx, env);
@@ -149,6 +151,7 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
   }
 
   async fetch(request: Request): Promise<Response> {
+    await this.ensureRuntimeReady();
     const url = new URL(request.url);
 
     if (url.pathname === '/internal/event') {
@@ -218,6 +221,7 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    await this.ensureRuntimeReady();
     if (typeof message !== 'string') return;
 
     let msg: Record<string, unknown>;
@@ -921,6 +925,17 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
     }
     if (parts.length >= 5) return parts[3];
     return null;
+  }
+
+  private async ensureRuntimeReady(): Promise<void> {
+    if (!this.runtimeReadyPromise) {
+      this.runtimeReadyPromise = (async () => {
+        await ensureServerStartup();
+        this.config = getGlobalConfig(this.env);
+      })();
+    }
+
+    await this.runtimeReadyPromise;
   }
 }
 

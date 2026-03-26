@@ -60,6 +60,7 @@ import { buildDbLiveChannel, DATABASE_LIVE_HUB_DO_NAME } from '../lib/database-l
 import { resolveRootServiceKey } from '../lib/service-key.js';
 import { resolveDbLiveBatchThreshold } from '../lib/database-live-config.js';
 import { buildTableHookRuntimeServices } from '../lib/table-hook-runtime.js';
+import { ensureServerStartup } from '../lib/runtime-startup.js';
 import type { Env } from '../types.js';
 
 // ─── Types ───
@@ -80,6 +81,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
   private config: EdgeBaseConfig;
   private initialized = false;
   private doName = '';
+  private runtimeReadyPromise: Promise<void> | null = null;
 
   constructor(ctx: DurableObjectState, env: DOEnv) {
     super(ctx, env);
@@ -92,6 +94,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
   }
 
   async fetch(request: Request): Promise<Response> {
+    await this.ensureRuntimeReady();
     // Determine DO name from header or URL
     const doNameHeader = request.headers.get('X-DO-Name');
 
@@ -1989,6 +1992,17 @@ export class DatabaseDO extends DurableObject<DOEnv> {
   /** Parse config from env — delegates to global singleton (§13). */
   private parseConfig(env: DOEnv): EdgeBaseConfig {
     return getGlobalConfig(env);
+  }
+
+  private async ensureRuntimeReady(): Promise<void> {
+    if (!this.runtimeReadyPromise) {
+      this.runtimeReadyPromise = (async () => {
+        await ensureServerStartup();
+        this.config = this.parseConfig(this.env);
+      })();
+    }
+
+    await this.runtimeReadyPromise;
   }
 
   // ─── Database Live Event Emission ───
