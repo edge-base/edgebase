@@ -40,28 +40,6 @@ Same codebase, familiar workflow — choose your runtime, switch when you need t
 
 Guides: [Quickstart](https://edgebase.fun/docs/getting-started/quickstart) · [Configuration](https://edgebase.fun/docs/getting-started/configuration) · [Deployment](https://edgebase.fun/docs/getting-started/deployment) · [Self-Hosting](https://edgebase.fun/docs/getting-started/self-hosting) · [Admin Dashboard](https://edgebase.fun/docs/admin-dashboard)
 
-## Use EdgeBase With AI
-
-EdgeBase is designed to work well with AI coding agents.
-
-For the best accuracy:
-
-- start from `npm create edgebase@latest`
-- keep the scaffolded `AGENTS.md` and `.github/copilot-instructions.md` files
-- route by runtime and trust boundary, not by language alone
-
-The canonical guide is [Use EdgeBase With AI](https://edgebase.fun/docs/getting-started/ai).
-
-Short version:
-
-- browser or other untrusted JS/TS: `@edge-base/web`
-- trusted backend with Service Keys: the matching admin SDK
-- server-side JS acting as the current cookie-authenticated user: `@edge-base/ssr`
-- React Native: `@edge-base/react-native`
-- Flutter: `edgebase_flutter`
-
-If an agent is unsure, it should choose the lower-privilege client/core SDK first instead of guessing an admin surface.
-
 ## Why EdgeBase?
 
 ### Why I Built EdgeBase
