@@ -45,8 +45,6 @@ const homeStats = [
     sub: siteMetadata.deployModes.join(' · '),
   },
 ];
-const heroCapabilities = ['Auth', 'Database', 'Realtime', 'Storage', 'Functions', 'Admin UI'];
-
 function HeroSection() {
   return (
     <section className="hero-section">
@@ -63,21 +61,21 @@ function HeroSection() {
           Run the same app locally, self-host with Docker, or deploy to Cloudflare&apos;s global
           edge.
         </p>
-        <div className="hero-capabilities">
-          {heroCapabilities.map((capability) => (
-            <span key={capability}>{capability}</span>
-          ))}
-        </div>
-        <div className="hero-code">
-          <code>npm create edgebase@latest my-app</code>
-        </div>
-        <div className="hero-buttons">
-          <Link className="hero-btn hero-btn-primary" to="/docs/getting-started/quickstart">
-            Get Started →
-          </Link>
-          <Link className="hero-btn hero-btn-secondary" to="/docs/why-edgebase">
-            Why EdgeBase
-          </Link>
+        <p className="hero-capabilities">
+          Auth · Database · Realtime · Storage · Functions · Admin UI
+        </p>
+        <div className="hero-actions">
+          <div className="hero-code">
+            <code>npm create edgebase@latest my-app</code>
+          </div>
+          <div className="hero-buttons">
+            <Link className="hero-btn hero-btn-primary" to="/docs/getting-started/quickstart">
+              Get Started →
+            </Link>
+            <Link className="hero-btn hero-btn-secondary" to="/docs/why-edgebase">
+              Why EdgeBase
+            </Link>
+          </div>
         </div>
       </div>
     </section>
