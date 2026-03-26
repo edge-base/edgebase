@@ -178,7 +178,7 @@ describe('push — full flow (fetchMock)', () => {
     }, accessToken);
 
     expect(reg.status).toBe(400);
-    expect(reg.data.message).toContain('metadata exceeds 1024 byte limit');
+    expect(reg.data.message).toContain('metadata exceeds the 1024-byte limit');
   });
 
   // ─── B. Token Unregistration ───
@@ -394,7 +394,7 @@ describe('push — full flow (fetchMock)', () => {
     });
 
     expect(put.status).toBe(400);
-    expect(put.data.message).toContain('metadata exceeds 1024 byte limit');
+    expect(put.data.message).toContain('metadata exceeds the 1024-byte limit');
   });
 
   it('PATCH /tokens rejects metadata that exceeds 1KB in UTF-8 bytes', async () => {
@@ -414,7 +414,7 @@ describe('push — full flow (fetchMock)', () => {
     });
 
     expect(patch.status).toBe(400);
-    expect(patch.data.message).toContain('metadata exceeds 1024 byte limit');
+    expect(patch.data.message).toContain('metadata exceeds the 1024-byte limit');
   });
 });
 

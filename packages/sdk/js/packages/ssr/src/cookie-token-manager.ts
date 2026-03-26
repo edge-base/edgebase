@@ -19,6 +19,8 @@ export interface CookieTokenManagerOptions {
   authNamespace?: string;
 }
 
+type CookieTokenManagerInput = CookieTokenManagerOptions | Partial<CookieOptions>;
+
 /** Default cookie options — secure, httpOnly, SameSite=Lax */
 const DEFAULT_COOKIE_OPTIONS: CookieOptions = {
   httpOnly: true,
@@ -47,6 +49,20 @@ function buildCookieTokenNames(authNamespace?: string): CookieTokenNames {
     accessToken: `eb_${sanitizedNamespace}_access_token`,
     refreshToken: `eb_${sanitizedNamespace}_refresh_token`,
   };
+}
+
+function isCookieTokenManagerOptions(input: CookieTokenManagerInput): input is CookieTokenManagerOptions {
+  return 'cookieOptions' in input || 'authNamespace' in input;
+}
+
+function normalizeCookieTokenManagerOptions(input: CookieTokenManagerInput = {}): CookieTokenManagerOptions {
+  if (!isCookieTokenManagerOptions(input)) {
+    return {
+      cookieOptions: input,
+    };
+  }
+
+  return input;
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -81,9 +97,18 @@ export class CookieTokenManager implements ITokenManager {
   private cookieNames: CookieTokenNames;
 
   constructor(
+    cookies: CookieStore,
+    cookieOptions?: Partial<CookieOptions>,
+  );
+  constructor(
+    cookies: CookieStore,
+    options?: CookieTokenManagerOptions,
+  );
+  constructor(
     private cookies: CookieStore,
-    options: CookieTokenManagerOptions = {},
+    input: CookieTokenManagerInput = {},
   ) {
+    const options = normalizeCookieTokenManagerOptions(input);
     this.cookieOptions = { ...DEFAULT_COOKIE_OPTIONS, ...options.cookieOptions };
     this.cookieNames = buildCookieTokenNames(options.authNamespace);
   }

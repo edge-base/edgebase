@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createClient } from '../../src/client.js';
 import { TokenManager } from '../../src/token-manager.js';
+import { CookieTokenManager } from '../../../ssr/src/cookie-token-manager.js';
 
 function encodeBase64UrlJson(value: unknown): string {
   const bytes = new TextEncoder().encode(JSON.stringify(value));
@@ -73,6 +74,24 @@ afterEach(() => {
   MockBroadcastChannel.reset();
 });
 
+class MockCookieStore {
+  values = new Map<string, string>();
+  writes: Array<{ name: string; value: string; options?: Record<string, unknown> }> = [];
+
+  get(name: string): string | null {
+    return this.values.get(name) ?? null;
+  }
+
+  set(name: string, value: string, options?: Record<string, unknown>): void {
+    this.values.set(name, value);
+    this.writes.push({ name, value, options });
+  }
+
+  delete(name: string): void {
+    this.values.delete(name);
+  }
+}
+
 describe('authNamespace options', () => {
   it('namespaces TokenManager storage keys and broadcast channel names', () => {
     const store = installBrowserMocks();
@@ -98,5 +117,19 @@ describe('authNamespace options', () => {
     expect(store.get('edgebase:app-b:refresh-token')).toBe(token);
 
     client.destroy();
+  });
+
+  it('accepts legacy CookieTokenManager cookie options input', () => {
+    const cookies = new MockCookieStore();
+    const token = makeValidJwt('ssr-user');
+    const manager = new CookieTokenManager(cookies, { secure: false, sameSite: 'strict' });
+
+    manager.setTokens({ accessToken: token, refreshToken: token });
+
+    expect(cookies.writes).toHaveLength(2);
+    expect(cookies.writes[0]?.options).toMatchObject({
+      secure: false,
+      sameSite: 'strict',
+    });
   });
 });

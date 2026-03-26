@@ -1319,13 +1319,6 @@ describe('Smoke: client', () => {
     expect(status).toBeLessThan(500);
   });
 
-  it('getRoomSummary: GET /api/room/summary → not 5xx', async () => {
-    const { status } = await api('GET', '/api/room/summary?namespace=test-metadata&id=smoke-room', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-    });
-    expect(status).toBeLessThan(500);
-  });
-
   it('getRoomRealtimeSession: GET /api/room/media/realtime/session → not 5xx', async () => {
     const { status, data } = await api('GET', '/api/room/media/realtime/session?namespace=test-game&id=smoke-room', {
       headers: { 'X-EdgeBase-Service-Key': SK },

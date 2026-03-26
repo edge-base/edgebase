@@ -19,6 +19,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:edgebase_core/src/generated/api_core.dart';
+import 'package:edgebase_core/src/errors.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
 import 'package:realtimekit_core_platform_interface/realtimekit_core_platform_interface.dart';

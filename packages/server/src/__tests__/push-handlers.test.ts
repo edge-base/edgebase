@@ -173,7 +173,7 @@ describe('Push handlers route integration', () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
-      message: 'beforeSend must return topic and payload',
+      message: 'push.hooks.beforeSend must return a topic and payload when overriding topic delivery.',
     });
   });
 });

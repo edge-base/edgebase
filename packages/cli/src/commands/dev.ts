@@ -84,11 +84,12 @@ function resolveDevRateLimitBindings(): ReturnType<typeof resolveRateLimitBindin
 
 const activePortReservations = new Set<string>();
 let portReservationCleanupRegistered = false;
+const ANSI_ESCAPE_PATTERN = new RegExp(String.raw`\u001B\[[0-?]*[ -/]*[@-~]`, 'g');
 
 type DevIsolationOption = string | boolean | undefined;
 
 function stripAnsi(value: string): string {
-  return value.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '');
+  return value.replace(ANSI_ESCAPE_PATTERN, '');
 }
 
 function appendRecentOutputChunk(
