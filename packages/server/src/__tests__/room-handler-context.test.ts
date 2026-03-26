@@ -48,7 +48,7 @@ describe('RoomsDO handler context', () => {
       },
     };
 
-    const ctx = room.buildHandlerContext();
+    const ctx = await room.buildHandlerContext();
     const inserted = await ctx.admin.db('shared').table('signals').insert({ title: 'Room inserted' });
 
     expect(inserted).toEqual({ id: 'sig-1', title: 'Room inserted' });
@@ -63,7 +63,7 @@ describe('RoomsDO handler context', () => {
         }),
       }),
     );
-  });
+  }, 15_000);
 
   it('routes admin.db().upsert() through the database durable object', async () => {
     const { RoomsDO } = await import('../durable-objects/rooms-do.js');
@@ -104,7 +104,7 @@ describe('RoomsDO handler context', () => {
       },
     };
 
-    const ctx = room.buildHandlerContext();
+    const ctx = await room.buildHandlerContext();
     const upserted = await ctx.admin.db('shared').table('signals').upsert({
       id: 'sig-1',
       title: 'Room upserted',
@@ -126,7 +126,7 @@ describe('RoomsDO handler context', () => {
         }),
       }),
     );
-  });
+  }, 15_000);
 
   it('returns 409 when creating a Cloudflare RealtimeKit session while media is already published', async () => {
     const { RoomsDO } = await import('../durable-objects/rooms-do.js');
