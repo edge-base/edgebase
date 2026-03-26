@@ -45,31 +45,31 @@ const homeStats = [
     sub: siteMetadata.deployModes.join(' · '),
   },
 ];
+
 function HeroSection() {
   return (
     <section className="hero-section">
-      <div className="hero-shell">
-        <p className="hero-badge">Open Source · MIT License</p>
-        <h1 className="hero-title">
-          <span>No egress or bandwidth fees.</span>
-          <span>~0ms cold starts. Scale-out by design.</span>
-        </h1>
-        <p className="hero-tagline">
-          Open-source edge-native BaaS on Workers, Durable Objects, D1, and R2.
-        </p>
-        <div className="hero-actions">
-          <div className="hero-code">
-            <code>npm create edgebase@latest my-app</code>
-          </div>
-          <div className="hero-buttons">
-            <Link className="hero-btn hero-btn-primary" to="/docs/getting-started/quickstart">
-              Get Started →
-            </Link>
-            <Link className="hero-btn hero-btn-secondary" to="/docs/why-edgebase">
-              Why EdgeBase
-            </Link>
-          </div>
-        </div>
+      <p className="hero-badge">Open Source · MIT License</p>
+      <h1 className="hero-title">
+        Open-source edge-native BaaS.
+        <br />
+        Low cost. Low latency. Scale-out by design.
+      </h1>
+      <p className="hero-tagline">
+        Open-source edge-native BaaS for Database, Auth, Storage, Functions, Room, and Admin UI.
+        <br />
+        Same app, same behavior — local, self-hosted, or global edge.
+      </p>
+      <div className="hero-code">
+        <code>npm create edgebase@latest my-app</code>
+      </div>
+      <div className="hero-buttons">
+        <Link className="hero-btn hero-btn-primary" to="/docs/getting-started/quickstart">
+          Get Started →
+        </Link>
+        <Link className="hero-btn hero-btn-secondary" to="/docs/why-edgebase">
+          Why EdgeBase
+        </Link>
       </div>
     </section>
   );
