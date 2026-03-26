@@ -54,9 +54,13 @@ class FakeRTCPeerConnection {
   remoteDescription: RTCSessionDescriptionInit | null = null;
   signalingState: RTCSignalingState = 'stable';
   connectionState: RTCPeerConnectionState = 'new';
+  iceConnectionState: RTCIceConnectionState = 'new';
   onicecandidate: ((event: { candidate: RTCIceCandidate | null }) => void) | null = null;
   onnegotiationneeded: (() => void) | null = null;
   ontrack: ((event: RTCTrackEvent) => void) | null = null;
+  onsignalingstatechange: (() => void) | null = null;
+  oniceconnectionstatechange: (() => void) | null = null;
+  onconnectionstatechange: (() => void) | null = null;
   private readonly senders: FakeSender[] = [];
 
   addTrack(track: MediaStreamTrack, _stream: MediaStream): RTCRtpSender {
@@ -80,7 +84,15 @@ class FakeRTCPeerConnection {
 
   async setLocalDescription(description?: RTCSessionDescriptionInit): Promise<void> {
     if (description) {
+      if (description.type === 'rollback') {
+        this.localDescription = null;
+        this.signalingState = 'stable';
+        this.onsignalingstatechange?.();
+        return;
+      }
       this.localDescription = description;
+      this.signalingState = description.type === 'offer' ? 'have-local-offer' : 'stable';
+      this.onsignalingstatechange?.();
       return;
     }
 
@@ -90,6 +102,7 @@ class FakeRTCPeerConnection {
         sdp: `answer-${++descriptionCounter}`,
       };
       this.signalingState = 'stable';
+      this.onsignalingstatechange?.();
       return;
     }
 
@@ -98,17 +111,26 @@ class FakeRTCPeerConnection {
       sdp: `offer-${++descriptionCounter}`,
     };
     this.signalingState = 'have-local-offer';
+    this.onsignalingstatechange?.();
   }
 
   async setRemoteDescription(description: RTCSessionDescriptionInit): Promise<void> {
     this.remoteDescription = description;
     this.signalingState = description.type === 'offer' ? 'have-remote-offer' : 'stable';
+    this.onsignalingstatechange?.();
   }
 
   async addIceCandidate(_candidate: RTCIceCandidateInit): Promise<void> {}
 
+  restartIce(): void {
+    queueMicrotask(() => {
+      this.onnegotiationneeded?.();
+    });
+  }
+
   close(): void {
     this.connectionState = 'closed';
+    this.onconnectionstatechange?.();
   }
 
   emitRemoteTrack(track: MediaStreamTrack): void {
@@ -116,6 +138,16 @@ class FakeRTCPeerConnection {
       track,
       streams: [new FakeMediaStream([track]) as unknown as MediaStream],
     } as RTCTrackEvent);
+  }
+
+  setIceConnectionState(state: RTCIceConnectionState): void {
+    this.iceConnectionState = state;
+    this.oniceconnectionstatechange?.();
+  }
+
+  setConnectionState(state: RTCPeerConnectionState): void {
+    this.connectionState = state;
+    this.onconnectionstatechange?.();
   }
 }
 
@@ -156,6 +188,7 @@ function createTransport(options?: {
   const memberLeave = createSubscriptions<(member: RoomMember, reason: RoomMemberLeaveReason) => void>();
   const mediaTrack = createSubscriptions<(track: any, member: RoomMember) => void>();
   const mediaTrackRemoved = createSubscriptions<(track: any, member: RoomMember) => void>();
+  const mediaStateChange = createSubscriptions<(member: RoomMember, state: any) => void>();
   const signalHandlers = new Map<string, createSubscriptions<(payload: unknown, meta: RoomSignalMeta) => void>>();
   const peerConnections: FakeRTCPeerConnection[] = [];
   const getSignal = (event: string) => {
@@ -189,6 +222,7 @@ function createTransport(options?: {
       },
       onTrack: (handler: (track: any, member: RoomMember) => void) => mediaTrack.subscribe(handler),
       onTrackRemoved: (handler: (track: any, member: RoomMember) => void) => mediaTrackRemoved.subscribe(handler),
+      onStateChange: (handler: (member: RoomMember, state: any) => void) => mediaStateChange.subscribe(handler),
     },
     members: {
       list: vi.fn(() => options?.members ?? []),
@@ -247,6 +281,11 @@ function createTransport(options?: {
         handler(track, member);
       }
     },
+    emitMediaStateChange: (member: RoomMember, state: any) => {
+      for (const handler of mediaStateChange.handlers) {
+        handler(member, state);
+      }
+    },
   };
 }
 
@@ -302,6 +341,43 @@ describe('RoomP2PMediaTransport', () => {
         description: expect.objectContaining({ type: 'offer' }),
       }),
     );
+  });
+
+  it('coalesces initial audio/video publish into a single negotiation batch', async () => {
+    vi.stubGlobal('MediaStream', FakeMediaStream as unknown as typeof MediaStream);
+
+    const localAudioTrack = new FakeTrack('local-audio', 'audio', { deviceId: 'mic-1' }) as unknown as MediaStreamTrack;
+    const localVideoTrack = new FakeTrack('local-video', 'video', { deviceId: 'cam-1' }) as unknown as MediaStreamTrack;
+    const { transport, room } = createTransport({
+      currentMember: {
+        memberId: 'member-1',
+        userId: 'member-1',
+        state: {},
+      },
+      members: [
+        { memberId: 'member-1', userId: 'member-1', state: {} },
+        { memberId: 'member-2', userId: 'member-2', state: {} },
+      ],
+      mediaDevices: {
+        getUserMedia: vi.fn(async (constraints?: MediaStreamConstraints) => ({
+          getAudioTracks: () => (constraints?.audio ? [localAudioTrack] : []),
+          getVideoTracks: () => (constraints?.video ? [localVideoTrack] : []),
+        })),
+      },
+    });
+
+    await transport.connect();
+    await transport.batchLocalUpdates!(async () => {
+      await transport.enableAudio({ deviceId: 'mic-1' });
+      await transport.enableVideo({ deviceId: 'cam-1' });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const offerCalls = (room.signals.sendTo as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([memberId, event]) => memberId === 'member-2' && event === 'edgebase.media.p2p.offer',
+    );
+
+    expect(offerCalls).toHaveLength(1);
   });
 
   it('creates a peer when remote members arrive through members sync after connect', async () => {
@@ -457,5 +533,135 @@ describe('RoomP2PMediaTransport', () => {
       'video:webrtc-video-track',
       'screen:webrtc-screen-track',
     ]);
+  });
+
+  it('retries negotiation after a peer reports disconnected with published media but no remote track', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('MediaStream', FakeMediaStream as unknown as typeof MediaStream);
+
+    const remoteMember = { memberId: 'member-2', userId: 'member-2', state: {} };
+    const mediaMembers: RoomMediaMember[] = [
+      {
+        member: remoteMember,
+        state: {
+          video: {
+            published: true,
+            muted: false,
+          },
+        },
+        tracks: [],
+      },
+    ];
+    const { transport, room, peerConnections, emitMediaStateChange } = createTransport({
+      currentMember: {
+        memberId: 'member-1',
+        userId: 'member-1',
+        state: {},
+      },
+      members: [
+        { memberId: 'member-1', userId: 'member-1', state: {} },
+        remoteMember,
+      ],
+      mediaMembers,
+    });
+
+    await transport.connect();
+    expect(peerConnections).toHaveLength(1);
+
+    emitMediaStateChange(remoteMember, mediaMembers[0]?.state);
+    peerConnections[0]?.setIceConnectionState('disconnected');
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.runAllTicks();
+
+    expect(room.signals.sendTo).toHaveBeenCalledWith(
+      'member-2',
+      'edgebase.media.p2p.offer',
+      expect.objectContaining({
+        description: expect.objectContaining({ type: 'offer' }),
+      }),
+    );
+
+    vi.useRealTimers();
+  });
+
+  it('batches ICE candidates per peer before sending room signals', async () => {
+    vi.useFakeTimers();
+    const { transport, room, peerConnections } = createTransport({
+      currentMember: {
+        memberId: 'member-1',
+        userId: 'member-1',
+        state: {},
+      },
+      members: [
+        { memberId: 'member-1', userId: 'member-1', state: {} },
+        { memberId: 'member-2', userId: 'member-2', state: {} },
+      ],
+    });
+
+    await transport.connect();
+    expect(peerConnections).toHaveLength(1);
+
+    peerConnections[0]?.onicecandidate?.({
+      candidate: { candidate: 'candidate-1' } as RTCIceCandidate,
+    });
+    peerConnections[0]?.onicecandidate?.({
+      candidate: { candidate: 'candidate-2' } as RTCIceCandidate,
+    });
+
+    await vi.advanceTimersByTimeAsync(50);
+
+    const iceCalls = (room.signals.sendTo as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([memberId, event]) => memberId === 'member-2' && event === 'edgebase.media.p2p.ice',
+    );
+
+    expect(iceCalls).toHaveLength(1);
+    expect(iceCalls[0]?.[2]).toEqual({
+      candidates: [
+        { candidate: 'candidate-1' },
+        { candidate: 'candidate-2' },
+      ],
+    });
+
+    vi.useRealTimers();
+  });
+
+  it('rolls back polite peers before applying a colliding remote offer', async () => {
+    const remoteMember = { memberId: 'member-1', userId: 'member-1', state: {} };
+    const { transport, room, emitSignal, peerConnections } = createTransport({
+      currentMember: {
+        memberId: 'member-2',
+        userId: 'member-2',
+        state: {},
+      },
+      members: [
+        remoteMember,
+        { memberId: 'member-2', userId: 'member-2', state: {} },
+      ],
+    });
+
+    await transport.connect();
+    expect(peerConnections).toHaveLength(1);
+
+    await peerConnections[0]?.setLocalDescription();
+    expect(peerConnections[0]?.signalingState).toBe('have-local-offer');
+
+    emitSignal(
+      'edgebase.media.p2p.offer',
+      { description: { type: 'offer', sdp: 'remote-offer' } },
+      { memberId: 'member-1' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(peerConnections[0]?.remoteDescription).toEqual({
+      type: 'offer',
+      sdp: 'remote-offer',
+    });
+    expect(room.signals.sendTo).toHaveBeenCalledWith(
+      'member-1',
+      'edgebase.media.p2p.answer',
+      expect.objectContaining({
+        description: expect.objectContaining({ type: 'answer' }),
+      }),
+    );
   });
 });
