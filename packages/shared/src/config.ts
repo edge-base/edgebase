@@ -1040,8 +1040,13 @@ export interface RoomServerAPI {
 export interface RoomNamespaceConfig {
   /** Reconnect grace period in ms. 0 = immediate onLeave on disconnect. Default: 30000 */
   reconnectTimeout?: number;
-  /** Rate limit for send() calls. Default: { actions: 10 } (per second, token bucket) */
-  rateLimit?: { actions: number };
+  /** Rate limits per second for room WebSocket traffic. Omitted scopes fall back to `actions`. */
+  rateLimit?: {
+    actions: number;
+    signals?: number;
+    media?: number;
+    admin?: number;
+  };
   /** Maximum concurrent players. Default: 100 */
   maxPlayers?: number;
   /** Maximum state size in bytes (shared + all player states combined). Default: 1MB */

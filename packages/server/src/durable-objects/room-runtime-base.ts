@@ -72,6 +72,7 @@ const DEFAULT_STATE_SAVE_INTERVAL_MS = 60000; // 1 minute
 const DEFAULT_STATE_TTL_MS = 86400000; // 24 hours
 const ROOM_EPHEMERAL_TIMERS_STORAGE_KEY = 'roomEphemeralTimers';
 const roomFallbackWarnings = new Set<string>();
+type RoomRateLimitScope = 'actions' | 'signals' | 'media' | 'admin';
 
 interface PendingDisconnectDeadline {
   fireAt: number;
@@ -729,11 +730,28 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         this.stateRecoveryNeeded = false;
       }
       // Note: full sync is sent during handleJoin(), not here
-    } catch {
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error('[Room] handleAuth failed', {
+        room: this.namespace && this.roomId ? `${this.namespace}::${this.roomId}` : null,
+        connectionId: meta.connectionId,
+        isReAuth,
+        userId: meta.userId ?? null,
+        message: detail,
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       if (isReAuth) {
-        this.safeSend(ws, { type: 'error', code: 'AUTH_REFRESH_FAILED', message: 'Token refresh failed' });
+        this.safeSend(ws, {
+          type: 'error',
+          code: 'AUTH_REFRESH_FAILED',
+          message: this.config.release ? 'Token refresh failed' : detail,
+        });
       } else {
-        this.safeSend(ws, { type: 'error', code: 'AUTH_FAILED', message: 'Invalid or expired token' });
+        this.safeSend(ws, {
+          type: 'error',
+          code: 'AUTH_FAILED',
+          message: this.config.release ? 'Invalid or expired token' : detail,
+        });
         ws.close(4002, 'Authentication failed');
       }
     }
@@ -1561,15 +1579,26 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   private syncEphemeralTimersToStorage(): void {
     const pendingAuth = Object.fromEntries(this.pendingAuth);
     const disconnects = Object.fromEntries(this.disconnectTimers);
-    if (Object.keys(pendingAuth).length === 0 && Object.keys(disconnects).length === 0) {
-      this.ctx.waitUntil(this.ctx.storage.delete(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY));
-      return;
-    }
+    this.ctx.waitUntil((async () => {
+      try {
+        if (Object.keys(pendingAuth).length === 0 && Object.keys(disconnects).length === 0) {
+          await this.ctx.storage.delete(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY);
+          return;
+        }
 
-    this.ctx.waitUntil(this.ctx.storage.put(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY, {
-      pendingAuth,
-      disconnects,
-    } satisfies PersistedRoomEphemeralTimers));
+        await this.ctx.storage.put(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY, {
+          pendingAuth,
+          disconnects,
+        } satisfies PersistedRoomEphemeralTimers);
+      } catch (error) {
+        console.warn('[Room] Ephemeral timer persistence skipped', {
+          room: this.namespace && this.roomId ? `${this.namespace}::${this.roomId}` : null,
+          pendingAuthCount: this.pendingAuth.size,
+          disconnectCount: this.disconnectTimers.size,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })());
   }
 
   private findWebSocketByConnectionId(connectionId: string): WebSocket | null {
@@ -1652,14 +1681,29 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   // ─── Rate Limiting (Token Bucket) ───
 
-  protected checkRateLimit(connectionId: string): boolean {
+  protected checkRateLimit(
+    connectionId: string,
+    scope: RoomRateLimitScope = 'actions',
+  ): boolean {
     const now = Date.now();
-    const maxActions = this.namespaceConfig?.rateLimit?.actions ?? DEFAULT_RATE_LIMIT_ACTIONS;
-    let bucket = this.rateBuckets.get(connectionId);
+    const rateLimit = this.namespaceConfig?.rateLimit as
+      | { actions: number; signals?: number; media?: number; admin?: number }
+      | undefined;
+    const maxActions = (
+      scope === 'signals'
+        ? rateLimit?.signals
+        : scope === 'media'
+          ? rateLimit?.media
+          : scope === 'admin'
+            ? rateLimit?.admin
+            : undefined
+    ) ?? rateLimit?.actions ?? DEFAULT_RATE_LIMIT_ACTIONS;
+    const bucketKey = `${connectionId}:${scope}`;
+    let bucket = this.rateBuckets.get(bucketKey);
 
     if (!bucket) {
       bucket = { tokens: maxActions, lastRefill: now };
-      this.rateBuckets.set(connectionId, bucket);
+      this.rateBuckets.set(bucketKey, bucket);
     }
 
     // Refill tokens (1 token per 1000/maxActions ms)

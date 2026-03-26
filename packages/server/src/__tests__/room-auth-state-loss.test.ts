@@ -5,6 +5,43 @@ vi.mock('cloudflare:workers', () => ({
 }));
 
 describe('room auth-state loss recovery', () => {
+  it('treats ephemeral timer persistence failures as non-fatal', async () => {
+    const { RoomRuntimeBaseDO } = await import('../durable-objects/room-runtime-base.js');
+
+    const room: any = Object.create(RoomRuntimeBaseDO.prototype);
+    const pending: Promise<unknown>[] = [];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    room.pendingAuth = new Map([['conn-1', Date.now() + 5_000]]);
+    room.disconnectTimers = new Map();
+    room.namespace = 'game';
+    room.roomId = 'room-1';
+    room.ctx = {
+      storage: {
+        put: vi.fn().mockRejectedValue(new Error('Exceeded allowed rows written in Durable Objects free tier.')),
+        delete: vi.fn(),
+      },
+      waitUntil: vi.fn((promise: Promise<unknown>) => {
+        pending.push(promise);
+      }),
+    };
+
+    expect(() => room.syncEphemeralTimersToStorage()).not.toThrow();
+    await Promise.allSettled(pending);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[Room] Ephemeral timer persistence skipped',
+      expect.objectContaining({
+        room: 'game::room-1',
+        pendingAuthCount: 1,
+        disconnectCount: 0,
+        message: 'Exceeded allowed rows written in Durable Objects free tier.',
+      }),
+    );
+
+    warnSpy.mockRestore();
+  });
+
   it('marks websocket metadata rebuilt from hibernation tags as auth-state-lost', async () => {
     const { RoomRuntimeBaseDO } = await import('../durable-objects/room-runtime-base.js');
 

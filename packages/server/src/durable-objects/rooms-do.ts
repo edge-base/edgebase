@@ -765,7 +765,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
       const event = typeof msg.event === 'string' ? msg.event : '';
       const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
-      if (!this.checkRateLimit(meta.connectionId)) {
+      if (!this.checkRateLimit(meta.connectionId, 'signals')) {
         this.safeSend(ws, {
           type: 'signal_error',
           event,
@@ -813,7 +813,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
       const operation = typeof msg.operation === 'string' ? msg.operation : '';
       const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
-      if (!this.checkRateLimit(meta.connectionId)) {
+      if (!this.checkRateLimit(meta.connectionId, 'admin')) {
         this.safeSend(ws, {
           type: 'admin_error',
           operation,
@@ -840,7 +840,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       const operation = this.normalizeMediaOperation(msg.operation);
       const kind = this.normalizeMediaKind(msg.kind);
       const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
-      if (!this.checkRateLimit(meta.connectionId)) {
+      if (!this.checkRateLimit(meta.connectionId, 'media')) {
         this.safeSend(ws, {
           type: 'media_error',
           operation: operation ?? '',
