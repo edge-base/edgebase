@@ -996,7 +996,7 @@ impl RoomClient {
         let (mut write, mut read) = ws_stream.split();
 
         // Auth
-        let auth = json!({"type": "auth", "token": (self.token_fn)(), "sdkVersion": "0.2.5"});
+        let auth = json!({"type": "auth", "token": (self.token_fn)(), "sdkVersion": "0.2.6"});
         write.send(Message::Text(auth.to_string().into())).await?;
 
         // Wait for auth_success

@@ -23,7 +23,7 @@ Do not ship this package to browser bundles or untrusted clients. It is intended
 
 ## Public Artifact
 
-- `com.github.edge-base.edgebase:edgebase-admin-scala:v0.2.5`
+- `com.github.edge-base.edgebase:edgebase-admin-scala:v0.2.6`
 
 ## Canonical Examples
 
