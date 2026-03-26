@@ -234,8 +234,8 @@ async function buildApp() {
     return c.json({ code: 404, message: 'Admin dashboard not deployed.' }, 404);
   });
 
-  app.get('/harness', () => {
-    return Response.redirect('/harness/', 302);
+  app.get('/harness', (c) => {
+    return c.redirect('/harness/', 302);
   });
 
   app.get('/harness/', async (c) => {
@@ -254,8 +254,8 @@ async function buildApp() {
     return c.json({ code: 404, message: 'Harness assets not deployed.' }, 404);
   });
 
-  app.get('/harness/*', () => {
-    return Response.redirect('/harness/', 302);
+  app.get('/harness/*', (c) => {
+    return c.redirect('/harness/', 302);
   });
 
   app.get('/openapi.json', (c) => {

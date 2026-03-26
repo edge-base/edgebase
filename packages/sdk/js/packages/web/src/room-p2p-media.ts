@@ -343,9 +343,9 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       return;
     }
 
-    this.iceServersResolved = true;
     const loadIceServers = this.room.media.realtime?.iceServers;
     if (typeof loadIceServers !== 'function') {
+      this.iceServersResolved = true;
       return;
     }
 
@@ -369,6 +369,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
         ...this.options.rtcConfiguration,
         iceServers: mergedIceServers,
       };
+      this.iceServersResolved = true;
     } catch (error) {
       console.warn(
         '[RoomP2PMediaTransport] Failed to load TURN / ICE credentials. Falling back to default STUN.',

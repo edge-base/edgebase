@@ -182,6 +182,7 @@ function createTransport(options?: {
       getVideoTracks(): MediaStreamTrack[];
     }>;
   };
+  realtimeIceServers?: () => Promise<{ iceServers?: Array<{ urls: string | string[]; username?: string; credential?: string }> }>;
 }) {
   const memberSync = createSubscriptions<(members: RoomMember[]) => void>();
   const memberJoin = createSubscriptions<(member: RoomMember) => void>();
@@ -223,6 +224,11 @@ function createTransport(options?: {
       onTrack: (handler: (track: any, member: RoomMember) => void) => mediaTrack.subscribe(handler),
       onTrackRemoved: (handler: (track: any, member: RoomMember) => void) => mediaTrackRemoved.subscribe(handler),
       onStateChange: (handler: (member: RoomMember, state: any) => void) => mediaStateChange.subscribe(handler),
+      realtime: options?.realtimeIceServers
+        ? {
+            iceServers: vi.fn(async () => options.realtimeIceServers?.()),
+          }
+        : undefined,
     },
     members: {
       list: vi.fn(() => options?.members ?? []),
@@ -364,6 +370,33 @@ describe('RoomP2PMediaTransport', () => {
     expect(clearIntervalSpy).toHaveBeenCalled();
     clearIntervalSpy.mockRestore();
     vi.useRealTimers();
+  });
+
+  it('retries loading TURN / ICE credentials after a transient failure on reconnect', async () => {
+    const realtimeIceServers = vi
+      .fn<() => Promise<{ iceServers?: Array<{ urls: string | string[]; username?: string; credential?: string }> }>>()
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce({
+        iceServers: [{ urls: 'turn:relay.example.com', username: 'user', credential: 'pass' }],
+      });
+
+    const { transport } = createTransport({
+      currentMember: {
+        memberId: 'member-1',
+        userId: 'member-1',
+        state: {},
+      },
+      members: [
+        { memberId: 'member-1', userId: 'member-1', state: {} },
+      ],
+      realtimeIceServers,
+    });
+
+    await transport.connect();
+    transport.destroy();
+    await transport.connect();
+
+    expect(realtimeIceServers).toHaveBeenCalledTimes(2);
   });
 
   it('coalesces initial audio/video publish into a single negotiation batch', async () => {

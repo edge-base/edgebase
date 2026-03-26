@@ -75,6 +75,24 @@ describe('room auth-state loss recovery', () => {
     });
   });
 
+  it('does not rewrite ephemeral timer storage when state is already dirty', async () => {
+    const { RoomRuntimeBaseDO } = await import('../durable-objects/room-runtime-base.js');
+
+    const room: any = Object.create(RoomRuntimeBaseDO.prototype);
+    room.dirty = false;
+    room._stateSaveAt = 33_333;
+    room.namespaceConfig = {};
+    room.syncEphemeralTimersToStorage = vi.fn();
+    room._scheduleNextAlarm = vi.fn();
+
+    room.markDirty();
+
+    expect(room.dirty).toBe(true);
+    expect(room._stateSaveAt).toBe(33_333);
+    expect(room.syncEphemeralTimersToStorage).not.toHaveBeenCalled();
+    expect(room._scheduleNextAlarm).toHaveBeenCalledTimes(1);
+  });
+
   it('recovers persisted timers before alarm processing after a cold wake without sockets', async () => {
     const { RoomRuntimeBaseDO } = await import('../durable-objects/room-runtime-base.js');
 

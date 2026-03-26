@@ -1273,11 +1273,15 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   private markDirty(): void {
     this.dirty = true;
+    let scheduledNewStateSave = false;
     if (this._stateSaveAt === null) {
       const interval = this.namespaceConfig?.stateSaveInterval ?? DEFAULT_STATE_SAVE_INTERVAL_MS;
       this._stateSaveAt = Date.now() + interval;
+      scheduledNewStateSave = true;
     }
-    this.syncEphemeralTimersToStorage();
+    if (scheduledNewStateSave) {
+      this.syncEphemeralTimersToStorage();
+    }
     this._scheduleNextAlarm();
   }
 
