@@ -5,7 +5,7 @@ slug: /getting-started
 
 # Introduction
 
-**EdgeBase** is the first Backend-as-a-Service built entirely on serverless edge infrastructure. Auth, Database, Room, Storage, Functions — the entire stack runs natively on [workerd](https://github.com/cloudflare/workerd), Cloudflare's open-source runtime. This means automatic horizontal scaling with zero configuration, near-zero cost at any scale, and physical data isolation by default. It runs everywhere — on the cloud edge, in a Docker container, or directly on any Node.js server. No vendor lock-in, MIT licensed.
+**EdgeBase** is an open-source edge-native BaaS built on Workers, Durable Objects, D1, and R2. Auth, Database, Realtime, Storage, and Functions share one serverless edge architecture, while shared blocks can switch to PostgreSQL when you need it. Run the same app locally on Node.js, self-host with Docker, or deploy globally on Cloudflare's edge. No vendor lock-in, MIT licensed.
 
 ## Why EdgeBase?
 
@@ -20,7 +20,7 @@ slug: /getting-started
 | **Edge Deploy** | No | No | No | **Yes** |
 | **Open Source** | No | Yes (AGPL) | Yes (MIT) | **Yes (MIT)** |
 
-### Scales Automatically
+### Scale-Out by Design
 
 Every other BaaS funnels traffic through a single database. When your app grows, you need replicas, connection pooling, and sharding. EdgeBase gives each user/tenant its own Durable Object with embedded SQLite — more users means more instances, not more load on a bottleneck. **10 users and 10 million users run the same code and config.**
 
@@ -36,13 +36,13 @@ Deploy your backend in whichever way suits your project:
 
 Same code, same behavior across all three modes. No vendor lock-in.
 
-### No Cost Explosion
+### Costs Scale with Compute, Not Users
 
-Start free, scale without fear. No per-user auth charges (Firebase charges $4,415/mo at 1M MAU). No egress fees (R2 = $0). Idle instances cost $0 (DO Hibernation). Deploy core services to Cloudflare's edge on the Free plan, then scale up with the $5/month paid plan (account-level — covers unlimited projects). Optional products like R2 still need a one-time billing setup before first use. Or self-host for free.
+Start free, scale without fear. No per-user auth charges. No egress or bandwidth fees on the Cloudflare edge stack EdgeBase builds on. Idle instances cost $0 through DO hibernation. Deploy core services to Cloudflare's edge on the Free plan, then scale up with the $5/month paid plan (account-level — covers unlimited projects). Optional products like R2 still need a one-time billing setup before first use. Or self-host for free.
 
-### 0ms Cold Start
+### ~0ms Cold Starts
 
-Built on workerd -- your API responds instantly with no containers to spin up.
+Built on [workerd](https://github.com/cloudflare/workerd), so requests hit V8 isolates instead of waiting for containers to boot.
 
 ### Fully Open Source
 

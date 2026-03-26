@@ -176,14 +176,14 @@ EdgeBase achieves deployment flexibility because Cloudflare's `workerd` runtime 
 
 ## Trade-offs
 
-EdgeBase's architecture is not universally better. There are scenarios where other platforms excel:
+EdgeBase's architecture is not universally better. A few scenarios need more deliberate setup:
 
-| Scenario                      | Better Choice | Why                                                                                                                                        |
-| ----------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| PostGIS / geospatial queries  | Supabase      | SQLite lacks PostGIS extensions. EdgeBase's PostgreSQL provider gives you Postgres, but PostGIS setup still requires manual configuration. |
-| Zero-config prototype (1 day) | Firebase      | Unmatched onboarding speed and documentation                                                                                               |
-| Existing PostgreSQL ecosystem | Supabase      | pg_vector, PostGIS, foreign data wrappers, etc. — though EdgeBase's PostgreSQL provider covers most general Postgres use cases.            |
-| Multi-statement transactions  | Supabase      | EdgeBase supports `transactionSync()` only — no `BEGIN`/`COMMIT`                                                                           |
+| Scenario                      | EdgeBase note                                                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| PostGIS / geospatial queries  | Switch the block to `provider: 'postgres'`. EdgeBase gives you Postgres, but PostGIS setup is still manual.     |
+| Existing PostgreSQL ecosystem | PostgreSQL-backed blocks cover most general Postgres use cases, though some extension-heavy workflows need more direct setup. |
+| Multi-statement transactions  | The app-facing DB API exposes `transactionSync()` rather than raw `BEGIN`/`COMMIT`, even on PostgreSQL-backed blocks. |
+| Zero-config prototype (1 day) | Firebase still has the edge on onboarding speed and documentation.                                               |
 
 :::tip PostgreSQL Provider
 Cross-tenant analytics, complex SQL JOINs, and datasets exceeding 10 GB are all handled within EdgeBase by switching static DB blocks to `provider: 'postgres'` and supplying a connection-string env key. Dynamic multi-tenant blocks (workspace/user) each have a 10 GB limit per instance, which is rarely reached in practice. If you use Neon, the CLI and dev dashboard can provision that env key for you.

@@ -8,7 +8,7 @@ EdgeBase supports three deployment modes. The same code runs identically in all 
 
 ## Cloud Edge
 
-Global serverless deployment on 330+ edge locations.
+Global serverless deployment on 300+ edge locations.
 
 ```bash
 npx edgebase deploy

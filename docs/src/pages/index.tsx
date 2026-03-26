@@ -26,9 +26,9 @@ const homeSdkItems = [
   { key: 'Elixir', label: 'Elixir' },
 ];
 const homeStats = [
-  { value: '148×', label: 'Cheaper', sub: 'vs Firebase at 1M MAU' },
-  { value: '~0ms', label: 'Cold Start', sub: '300+ edge locations' },
-  { value: '$0', label: 'Auth & Egress', sub: 'No MAU charges, ever' },
+  { value: '148×', label: 'Cheaper', sub: 'vs Firebase at 1M MAU scenario' },
+  { value: '~0ms', label: 'Cold Starts', sub: 'V8 isolates across 300+ cities' },
+  { value: '$0', label: 'Egress', sub: 'No egress or bandwidth fees' },
   {
     value: String(sdkLanguageCount),
     label: 'SDK Languages',
@@ -51,14 +51,14 @@ function HeroSection() {
     <section className="hero-section">
       <p className="hero-badge">Open Source · MIT License</p>
       <h1 className="hero-title">
-        100× cheaper than Firebase.
+        Open-source edge-native BaaS
         <br />
-        ~0ms cold starts at the edge.
+        built on Workers, Durable Objects, D1, and R2.
       </h1>
       <p className="hero-tagline">
-        Open-source edge-native BaaS for Database, Auth, Storage, Functions, Room, and Admin UI.
+        No egress or bandwidth fees. ~0ms cold starts. Scale-out by design.
         <br />
-        Same app, same behavior — local, self-hosted, or global edge.
+        Run the same app locally, self-host with Docker, or deploy to Cloudflare&apos;s global edge.
       </p>
       <div className="hero-code">
         <code>npm create edgebase@latest my-app</code>
@@ -119,10 +119,11 @@ function EntryPointsSection() {
 function CostSection() {
   return (
     <section className="comparison-section">
-      <h2>Why 100× Cheaper?</h2>
+      <h2>Why Lower Cost at Scale?</h2>
       <p className="section-subtitle">
-        Auth MAU billing and egress are the two biggest cost drivers at scale. EdgeBase removes
-        both, and database subscriptions stay inside DO compute instead of turning into a separate
+        Auth MAU billing and transfer charges are two of the biggest cost drivers at scale.
+        EdgeBase removes the first, avoids separate egress and bandwidth fees on the Cloudflare
+        edge stack it builds on, and keeps realtime inside DO compute instead of turning it into a
         per-recipient bill.
       </p>
       <div className="comparison-table-wrap">
@@ -210,9 +211,9 @@ function CostSection() {
 function SpeedSection() {
   return (
     <section className="comparison-section">
-      <h2>Why 100× Faster?</h2>
+      <h2>Why ~0ms Cold Starts?</h2>
       <p className="section-subtitle">
-        V8 isolates pre-warmed at 300+ edge locations worldwide. No container boot, no runtime init.
+        V8 isolates at 300+ edge cities worldwide. No container boot, no runtime warm-up.
       </p>
       <div className="comparison-table-wrap">
         <table>
@@ -258,10 +259,10 @@ function SpeedSection() {
 function ScalingSection() {
   return (
     <section className="features-section">
-      <h2>Why Infinite Scaling?</h2>
+      <h2>Why Scale-Out by Design?</h2>
       <p className="section-subtitle">
-        Scale to millions of independent databases — per user, per workspace, per tenant, however
-        you design it — without changing your code or schema.
+        Split data across independent DB blocks — per user, per workspace, per tenant, however you
+        design it — without redesigning around a central app-server bottleneck.
       </p>
       <div className="features-grid">
         <div className="feature-card">
@@ -299,7 +300,7 @@ const features = [
     icon: '🗄️',
     title: 'Database',
     description:
-      'SQLite across D1 and Durable Objects — full SQL, JOINs, transactions, FTS5 full-text search (CJK included), automatic schema migrations, and UUID v7 cursor pagination.',
+      'SQLite across D1 and Durable Objects — full SQL, JOINs, transactions, FTS5 full-text search (CJK included), automatic schema migrations, UUID v7 cursor pagination, plus PostgreSQL-backed static blocks when you need them.',
   },
   {
     icon: '🔐',
@@ -368,7 +369,7 @@ function DeploySection() {
           <code className="deploy-cmd">npx edgebase deploy</code>
           <ul className="deploy-features">
             <li>~0ms cold start</li>
-            <li>300+ global locations</li>
+            <li>300+ global cities</li>
             <li>Auto-scaling</li>
             <li>From $5/month (all projects)</li>
           </ul>

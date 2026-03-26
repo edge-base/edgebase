@@ -5,8 +5,8 @@
 <h1 align="center">EdgeBase</h1>
 
 <p align="center">
-  <b>100x cheaper than Firebase. ~0ms cold starts. Near-unlimited scale.</b><br>
-  Open-source edge-native BaaS that runs on Edge, Docker, and Node.js
+  Open-source edge-native BaaS built on Workers, Durable Objects, D1, and R2.<br>
+  <b>No egress or bandwidth fees. ~0ms cold starts. Scale-out by design.</b>
 </p>
 
 <p align="center">
@@ -17,8 +17,8 @@
 </p>
 
 <p align="center">
-  Auth · Database · Realtime · Storage · Functions · Admin UI<br>
-  Same app across local, self-hosted, and global edge
+  Run the same app locally, self-host with Docker, or deploy to Cloudflare's global edge.<br>
+  Auth · Database · Realtime · Storage · Functions · Admin UI
 </p>
 
 ---
