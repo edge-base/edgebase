@@ -51,14 +51,14 @@ function HeroSection() {
     <section className="hero-section">
       <p className="hero-badge">Open Source · MIT License</p>
       <h1 className="hero-title">
-        Open-source edge-native BaaS
+        Open-source edge-native BaaS.
         <br />
-        built on Workers, Durable Objects, D1, and R2.
+        Low cost. Low latency. Scale-out by design.
       </h1>
       <p className="hero-tagline">
-        No egress or bandwidth fees. ~0ms cold starts. Scale-out by design.
+        Open-source edge-native BaaS for Database, Auth, Storage, Functions, Room, and Admin UI.
         <br />
-        Run the same app locally, self-host with Docker, or deploy to Cloudflare&apos;s global edge.
+        Same app, same behavior — local, self-hosted, or global edge.
       </p>
       <div className="hero-code">
         <code>npm create edgebase@latest my-app</code>
