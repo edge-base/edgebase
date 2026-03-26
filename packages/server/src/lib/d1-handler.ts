@@ -126,6 +126,21 @@ export async function handleD1Request(
   return c.json({ code: 405, message: 'Method not allowed' }, 405);
 }
 
+function invalidD1BodyMessage(context: string): string {
+  return `Invalid JSON body for ${context}. Send application/json with the expected fields.`;
+}
+
+function d1RuleRejectedMessage(
+  tableName: string,
+  action: 'read' | 'insert' | 'delete' | 'list' | 'count' | 'search',
+  id?: string,
+): string {
+  if (id) {
+    return `Access denied. The '${action}' access rule for table '${tableName}' rejected record '${id}'.`;
+  }
+  return `Access denied. The '${action}' access rule for table '${tableName}' rejected this request.`;
+}
+
 // ─── D1 Binding Resolution ───
 
 function resolveD1Binding(env: Env, namespace: string): D1ResolvedDb {
@@ -395,7 +410,7 @@ async function handleList(
 ): Promise<Response> {
   const tableAccess = getTableAccess(tableConfig);
   if (!isServiceKey && tableAccess?.read === false) {
-    const error = forbiddenError('Access denied.');
+    const error = forbiddenError(d1RuleRejectedMessage(tableName, 'list'));
     return c.json(error.toJSON(), error.status as 403);
   }
 
@@ -478,7 +493,7 @@ async function handleCount(
 ): Promise<Response> {
   const tableAccess = getTableAccess(tableConfig);
   if (!isServiceKey && tableAccess?.read === false) {
-    const error = forbiddenError('Access denied.');
+    const error = forbiddenError(d1RuleRejectedMessage(tableName, 'count'));
     return c.json(error.toJSON(), error.status as 403);
   }
 
@@ -501,7 +516,7 @@ async function handleSearch(
 ): Promise<Response> {
   const tableAccess = getTableAccess(tableConfig);
   if (!isServiceKey && tableAccess?.read === false) {
-    const error = forbiddenError('Access denied.');
+    const error = forbiddenError(d1RuleRejectedMessage(tableName, 'search'));
     return c.json(error.toJSON(), error.status as 403);
   }
 
@@ -595,7 +610,7 @@ async function handleGet(
   const tableHooks = getTableHooks(tableConfig);
   if (!isServiceKey && tableAccess?.read !== undefined) {
     if (!(await evalRowRule(tableAccess.read, auth, row))) {
-      return c.json({ code: 403, message: 'Access denied.' }, 403);
+      return c.json({ code: 403, message: d1RuleRejectedMessage(tableName, 'read', id) }, 403);
     }
   }
 
@@ -627,7 +642,7 @@ async function handleInsert(
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidD1BodyMessage(`inserting into table '${tableName}'`) }, 400);
   }
   body = applySchemaFieldAliases(body, tableConfig.schema);
 
@@ -636,7 +651,7 @@ async function handleInsert(
   const tableHooks = getTableHooks(tableConfig);
   if (!isServiceKey && tableAccess?.insert !== undefined) {
     if (!(await evalInsertRule(tableAccess.insert, auth))) {
-      return c.json({ code: 403, message: 'Insert not allowed.' }, 403);
+      return c.json({ code: 403, message: d1RuleRejectedMessage(tableName, 'insert') }, 403);
     }
   }
 
@@ -798,14 +813,14 @@ async function handleUpdate(
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidD1BodyMessage(`updating table '${tableName}'`) }, 400);
   }
   body = applySchemaFieldAliases(body, tableConfig.schema);
 
   // Validate against schema
   const validation = validateUpdate(body, tableConfig.schema);
   if (!validation.valid) {
-    return c.json({ code: 400, message: 'Request body failed validation. See data for field-level errors.', data: Object.fromEntries(Object.entries(validation.errors).map(([k, v]) => [k, { code: 'invalid', message: v }])) }, 400);
+    return c.json({ code: 400, message: `Update payload for table '${tableName}' failed validation. See data for field-level errors.`, data: Object.fromEntries(Object.entries(validation.errors).map(([k, v]) => [k, { code: 'invalid', message: v }])) }, 400);
   }
 
   // Fetch existing record to check rules
@@ -946,7 +961,7 @@ async function handleDelete(
   const tableHooks = getTableHooks(tableConfig);
   if (!isServiceKey && tableAccess?.delete !== undefined) {
     if (!(await evalRowRule(tableAccess.delete, auth, existingRow))) {
-      return c.json({ code: 403, message: 'Delete not allowed.' }, 403);
+      return c.json({ code: 403, message: d1RuleRejectedMessage(tableName, 'delete', id) }, 403);
     }
   }
 
@@ -1016,7 +1031,7 @@ async function handleBatch(
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidD1BodyMessage(`batch operations on table '${tableName}'`) }, 400);
   }
 
   // Batch size limit: 500 total ops
@@ -1030,7 +1045,7 @@ async function handleBatch(
   const tableAccess = getTableAccess(tableConfig);
   if (!isServiceKey && body.inserts?.length && tableAccess?.insert !== undefined) {
     if (!(await evalInsertRule(tableAccess.insert, auth))) {
-      return c.json({ code: 403, message: 'Insert not allowed.' }, 403);
+      return c.json({ code: 403, message: d1RuleRejectedMessage(tableName, 'insert') }, 403);
     }
   }
 
@@ -1059,7 +1074,7 @@ async function handleBatch(
     for (const item of body.inserts) {
       const validation = validateInsert(item, tableConfig.schema);
       if (!validation.valid) {
-        return c.json({ code: 400, message: 'Batch insert request failed validation. See data for field-level errors.', data: Object.fromEntries(Object.entries(validation.errors).map(([k, v]) => [k, { code: 'invalid', message: v }])) }, 400);
+        return c.json({ code: 400, message: `Batch insert payload for table '${tableName}' failed validation. See data for field-level errors.`, data: Object.fromEntries(Object.entries(validation.errors).map(([k, v]) => [k, { code: 'invalid', message: v }])) }, 400);
       }
     }
   }
@@ -1072,14 +1087,14 @@ async function handleBatch(
     }));
     for (const entry of body.updates) {
       if (!entry.id) {
-        return c.json({ code: 400, message: 'Each batch update entry must include an id.' }, 400);
+        return c.json({ code: 400, message: `Each batch update entry for table '${tableName}' must include an id.` }, 400);
       }
       if (!entry.data || typeof entry.data !== 'object') {
-        return c.json({ code: 400, message: 'Each batch update entry must include a data object.' }, 400);
+        return c.json({ code: 400, message: `Each batch update entry for table '${tableName}' must include a data object.` }, 400);
       }
       const validation = validateUpdate(entry.data, tableConfig.schema);
       if (!validation.valid) {
-        return c.json({ code: 400, message: 'Batch update request failed validation. See data for field-level errors.', data: Object.fromEntries(Object.entries(validation.errors).map(([k, v]) => [k, { code: 'invalid', message: v }])) }, 400);
+        return c.json({ code: 400, message: `Batch update payload for table '${tableName}' failed validation. See data for field-level errors.`, data: Object.fromEntries(Object.entries(validation.errors).map(([k, v]) => [k, { code: 'invalid', message: v }])) }, 400);
       }
     }
   }
@@ -1087,7 +1102,7 @@ async function handleBatch(
   // Check delete rules (table-level)
   if (!isServiceKey && body.deletes?.length && tableAccess?.delete !== undefined) {
     if (!(await evalRowRule(tableAccess.delete, auth, {}))) {
-      return c.json({ code: 403, message: 'Delete not allowed.' }, 403);
+      return c.json({ code: 403, message: d1RuleRejectedMessage(tableName, 'delete') }, 403);
     }
   }
 
@@ -1249,7 +1264,7 @@ async function handleBatchByFilter(
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidD1BodyMessage(`batch-by-filter on table '${tableName}'`) }, 400);
   }
 
   if (!body.action || !['delete', 'update'].includes(body.action)) {

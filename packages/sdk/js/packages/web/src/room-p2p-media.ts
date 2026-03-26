@@ -1,9 +1,13 @@
+import { EdgeBaseError } from '@edge-base/core';
 import { createSubscription } from './room.js';
 import type {
+  RoomConnectDiagnostic,
   RoomMediaKind,
   RoomMediaMember,
   RoomMediaRemoteTrackEvent,
   RoomMediaTrack,
+  RoomMediaTransportCapabilities,
+  RoomMediaTransportCapabilityIssue,
   RoomMemberMediaState,
   RoomRealtimeIceServer,
   RoomRealtimeIceServersRequest,
@@ -54,6 +58,7 @@ interface RoomP2PMediaAdapter {
     onJoin(handler: (member: RoomMember) => void): Subscription;
     onLeave(handler: (member: RoomMember, reason: RoomMemberLeaveReason) => void): Subscription;
   };
+  checkConnection?(): Promise<RoomConnectDiagnostic>;
   signals: {
     sendTo(memberId: string, event: string, payload?: unknown): Promise<void>;
     on(event: string, handler: (payload: unknown, meta: RoomSignalMeta) => void): Subscription;
@@ -206,6 +211,13 @@ function sameIceServer(candidate: RTCIceServer, urls: string[]): boolean {
   return candidateUrls.length === urls.length && candidateUrls.every((url, index) => url === urls[index]);
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && typeof error.message === 'string' && error.message.length > 0) {
+    return error.message;
+  }
+  return 'Unknown room media error.';
+}
+
 export interface RoomP2PMediaTransportOptions {
   rtcConfiguration?: RTCConfiguration;
   peerConnectionFactory?: (configuration: RTCConfiguration) => RTCPeerConnection;
@@ -298,6 +310,23 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       );
     }
 
+    const capabilities = await this.collectCapabilities({ includeProviderChecks: false });
+    const fatalIssue = capabilities.issues.find((issue) => issue.fatal);
+    if (fatalIssue) {
+      const error = new EdgeBaseError(
+        400,
+        fatalIssue.message,
+        { preflight: { code: fatalIssue.code, message: fatalIssue.message } },
+        'room-media-preflight-failed',
+      );
+      Object.assign(error, {
+        provider: capabilities.provider,
+        issue: fatalIssue,
+        capabilities,
+      });
+      throw error;
+    }
+
     const currentMember = await this.waitForCurrentMember();
     if (!currentMember) {
       throw new Error('Join the room before connecting a P2P media transport.');
@@ -322,6 +351,134 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     }
 
     return this.localMemberId;
+  }
+
+  async getCapabilities(): Promise<RoomMediaTransportCapabilities> {
+    return this.collectCapabilities({ includeProviderChecks: true });
+  }
+
+  private async collectCapabilities(
+    options: { includeProviderChecks: boolean },
+  ): Promise<RoomMediaTransportCapabilities> {
+    const issues: RoomMediaTransportCapabilityIssue[] = [];
+    const currentMember = this.room.members.current();
+    const roomIssueFatal = !currentMember;
+    let room: RoomConnectDiagnostic = {
+      ok: true,
+      type: 'room_connect_ready',
+      category: 'ready',
+      message: 'Room WebSocket preflight passed',
+    };
+
+    if (typeof this.room.checkConnection === 'function') {
+      try {
+        room = await this.room.checkConnection();
+      } catch (error) {
+        issues.push({
+          code: 'room_connect_check_failed',
+          category: 'room',
+          message: `Room connect-check failed: ${getErrorMessage(error)}`,
+          fatal: roomIssueFatal,
+        });
+      }
+    }
+
+    if (!room.ok) {
+      issues.push({
+        code: room.type,
+        category: 'room',
+        message: room.message,
+        fatal: roomIssueFatal,
+      });
+    }
+
+    if (!currentMember) {
+      issues.push({
+        code: 'room_member_not_joined',
+        category: 'room',
+        message: 'Join the room before connecting a P2P media transport.',
+        fatal: true,
+      });
+    }
+
+    const browser = {
+      mediaDevices: !!this.options.mediaDevices,
+      getUserMedia: typeof this.options.mediaDevices?.getUserMedia === 'function',
+      getDisplayMedia: typeof this.options.mediaDevices?.getDisplayMedia === 'function',
+      enumerateDevices: typeof (this.options.mediaDevices as MediaDevices | undefined)?.enumerateDevices === 'function',
+      rtcPeerConnection:
+        typeof this.options.peerConnectionFactory === 'function'
+        || typeof RTCPeerConnection !== 'undefined',
+    };
+
+    if (!browser.rtcPeerConnection) {
+      issues.push({
+        code: 'webrtc_unavailable',
+        category: 'browser',
+        message: 'RTCPeerConnection is not available in this environment.',
+        fatal: true,
+      });
+    }
+    if (!browser.getUserMedia) {
+      issues.push({
+        code: 'media_devices_get_user_media_unavailable',
+        category: 'browser',
+        message: 'getUserMedia() is not available; local audio/video capture will be unavailable.',
+        fatal: false,
+      });
+    }
+    if (!browser.getDisplayMedia) {
+      issues.push({
+        code: 'media_devices_get_display_media_unavailable',
+        category: 'browser',
+        message: 'getDisplayMedia() is not available; screen sharing will be unavailable.',
+        fatal: false,
+      });
+    }
+
+    let turn: RoomMediaTransportCapabilities['turn'] | undefined;
+    const loadIceServers = this.room.media.realtime?.iceServers;
+    if (options.includeProviderChecks && typeof loadIceServers === 'function') {
+      turn = {
+        requested: true,
+        available: false,
+        iceServerCount: 0,
+      };
+      try {
+        const response = await loadIceServers({ ttl: this.options.turnCredentialTtlSeconds });
+        const servers = normalizeIceServers(response?.iceServers);
+        turn.available = servers.length > 0;
+        turn.iceServerCount = servers.length;
+        if (!turn.available) {
+          issues.push({
+            code: 'turn_credentials_unavailable',
+            category: 'provider',
+            message: 'No TURN credentials were returned; the transport will fall back to its configured ICE servers.',
+            fatal: false,
+          });
+        }
+      } catch (error) {
+        turn.error = getErrorMessage(error);
+        issues.push({
+          code: 'turn_credentials_failed',
+          category: 'provider',
+          message: `Failed to resolve TURN credentials: ${turn.error}`,
+          fatal: false,
+        });
+      }
+    }
+
+    return {
+      provider: 'p2p',
+      canConnect: !issues.some((issue) => issue.fatal),
+      issues,
+      room,
+      joined: !!currentMember,
+      currentMemberId: currentMember?.memberId ?? null,
+      sessionId: this.getSessionId(),
+      browser,
+      turn,
+    };
   }
 
   private async waitForCurrentMember(timeoutMs = DEFAULT_MEMBER_READY_TIMEOUT_MS): Promise<RoomMember | null> {

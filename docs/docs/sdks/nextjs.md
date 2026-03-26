@@ -292,19 +292,8 @@ export function LivePosts() {
   const [posts, setPosts] = useState<Post[]>([]);
 
   useEffect(() => {
-    const unsub = client.db('app').table('posts').onSnapshot((change) => {
-      setPosts(prev => {
-        switch (change.type) {
-          case 'added':
-            return [...prev, change.data! as Post];
-          case 'modified':
-            return prev.map(p => p.id === change.docId ? change.data! as Post : p);
-          case 'removed':
-            return prev.filter(p => p.id !== change.docId);
-          default:
-            return prev;
-        }
-      });
+    const unsub = client.db('app').table<Post>('posts').onSnapshot((snapshot) => {
+      setPosts(snapshot.items);
     });
 
     return unsub; // Cleanup on unmount

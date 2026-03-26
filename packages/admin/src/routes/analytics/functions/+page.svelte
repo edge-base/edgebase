@@ -5,6 +5,7 @@
    */
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
+  import { describeActionError } from '$lib/error-messages';
   import { toastError } from '$lib/stores/toast.svelte';
   import PageShell from '$lib/components/layout/PageShell.svelte';
   import { adminDashboardAnalyticsDocs } from '$lib/docs-links';
@@ -46,7 +47,7 @@
       const res = await api.fetch<AnalyticsData>(`data/analytics?range=${range}&category=function&metric=overview&groupBy=${groupBy()}`);
       data = res;
     } catch (err) {
-      toastError(err instanceof Error ? err.message : 'Failed to load functions analytics');
+      toastError(describeActionError(err, 'Failed to load functions analytics.'));
     } finally {
       loading = false;
     }

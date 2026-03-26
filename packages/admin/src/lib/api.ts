@@ -16,6 +16,7 @@ import { authStore } from '$lib/stores/auth';
 import { devInfoStore, loadDevInfo } from '$lib/stores/devInfo';
 import { addToast } from '$lib/stores/toast.svelte';
 import { getAdminApiUrl } from '$lib/runtime-config';
+import { describeActionError } from '$lib/error-messages';
 
 // ── Error type ──────────────────────────────────────────
 
@@ -48,11 +49,14 @@ async function parseErrorBody(res: Response): Promise<{ code: string; message: s
 		const json = await res.json();
 		return {
 			code: json.code ?? 'UNKNOWN',
-			message: json.message ?? res.statusText,
+			message: json.message ?? (res.statusText || `Request failed with HTTP ${res.status}`),
 			data: json.data
 		};
 	} catch {
-		return { code: 'UNKNOWN', message: res.statusText };
+		return {
+			code: 'UNKNOWN',
+			message: res.statusText || `Request failed with HTTP ${res.status}`,
+		};
 	}
 }
 
@@ -81,7 +85,7 @@ async function rawFetch<T>(url: string, opts: RequestOpts = {}): Promise<T> {
 			return rawFetch<T>(url, { ...opts, _skipRefresh: true });
 		}
 		authStore.logout();
-		throw new ApiError(401, 'UNAUTHORIZED', 'Session expired');
+		throw new ApiError(401, 'UNAUTHORIZED', 'Session expired. Sign in again to continue.');
 	}
 
 	if (!res.ok) {
@@ -151,13 +155,10 @@ async function safeFetch<T = unknown>(
 	try {
 		return await fetcher();
 	} catch (err) {
-		const msg =
-			err instanceof ApiError
-				? err.message
-				: err instanceof Error
-					? err.message
-					: 'Unknown error';
-		addToast({ type: 'error', message: errorLabel ? `${errorLabel}: ${msg}` : msg });
+		addToast({
+			type: 'error',
+			message: describeActionError(err, errorLabel ?? 'Request failed.'),
+		});
 		return null;
 	}
 }

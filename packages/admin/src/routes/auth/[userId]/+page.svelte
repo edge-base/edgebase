@@ -4,6 +4,7 @@
 	import { base } from '$app/paths';
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
 	import { authDocs } from '$lib/docs-links';
@@ -100,7 +101,7 @@
 			}
 			toastSuccess('User updated successfully');
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to update user');
+			toastError(describeActionError(err, 'Failed to update the user.'));
 		} finally {
 			saving = false;
 		}
@@ -115,7 +116,7 @@
 			});
 			toastSuccess('All sessions revoked');
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to revoke sessions');
+			toastError(describeActionError(err, 'Failed to revoke the user sessions.'));
 		} finally {
 			revoking = false;
 		}
@@ -151,7 +152,7 @@
 			toastSuccess('User deleted');
 			goto(`${base}/auth`);
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to delete user');
+			toastError(describeActionError(err, 'Failed to delete the user.'));
 		} finally {
 			deletingUser = false;
 		}
@@ -163,7 +164,7 @@
 			await api.fetch(`data/users/${userId}/send-password-reset`, { method: 'POST' });
 			toastSuccess('Password reset email sent');
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to send password reset email');
+			toastError(describeActionError(err, 'Failed to send the password reset email.'));
 		} finally {
 			sendingReset = false;
 		}
@@ -176,7 +177,7 @@
 			await api.fetch(`data/users/${userId}/mfa`, { method: 'DELETE' });
 			toastSuccess('MFA disabled');
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to disable MFA');
+			toastError(describeActionError(err, 'Failed to disable MFA.'));
 		} finally {
 			disablingMfa = false;
 		}

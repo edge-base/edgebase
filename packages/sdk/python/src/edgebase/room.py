@@ -70,6 +70,22 @@ def _deep_set(obj: dict, path: str, value: Any) -> None:
         current[last] = value
 
 
+def _extract_server_message(raw_body: str) -> Optional[str]:
+    if not raw_body:
+        return None
+    try:
+        decoded = json.loads(raw_body)
+    except ValueError:
+        return None
+    if not isinstance(decoded, dict):
+        return None
+    for key in ("message", "error", "detail"):
+        value = decoded.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 # ---- RoomClient v2 --------------------------------------------------------
 
 
@@ -170,10 +186,22 @@ class RoomClient:
             f"&id={urllib.parse.quote(room_id, safe='')}"
         )
         async with httpx.AsyncClient() as client:
-            resp = await client.get(url)
-            if resp.status_code != 200:
+            try:
+                resp = await client.get(url)
+            except httpx.HTTPError as exc:
                 raise RuntimeError(
-                    f"Failed to get room metadata: {resp.status_code}"
+                    f"Room metadata request could not reach {url}. "
+                    "Make sure the EdgeBase server is running and reachable. "
+                    f"Cause: {exc}"
+                ) from exc
+            if resp.status_code != 200:
+                message = _extract_server_message(resp.text)
+                raise RuntimeError(
+                    message
+                    or (
+                        f"Failed to load room metadata for '{room_id}' in "
+                        f"namespace '{namespace}' (HTTP {resp.status_code})."
+                    )
                 )
             return resp.json()  # type: ignore[no-any-return]
 
@@ -238,7 +266,7 @@ class RoomClient:
             result = await room.send('SET_SCORE', {'score': 42})
         """
         if not self._ws or not self._connected or not self._authenticated:
-            raise RuntimeError("Not connected to room")
+            raise RuntimeError("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.")
 
         request_id = str(uuid.uuid4())
         loop = asyncio.get_running_loop()

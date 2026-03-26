@@ -98,6 +98,29 @@ describe('room route runtime routing', () => {
     await expect(response.json()).resolves.toEqual({ runtime: 'rooms' });
   });
 
+  it('routes summary requests to the rooms runtime', async () => {
+    setConfig(defineConfig({
+      rooms: {
+        game: {
+          runtime: {
+            target: 'rooms',
+          },
+          public: {
+            metadata: true,
+          },
+        },
+      },
+    }));
+
+    const app = createRoomApp();
+    const response = await app.request('/api/room/summary?namespace=game&id=room-1', {
+      method: 'GET',
+    }, createRoomRuntimeEnv());
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toEqual({ runtime: 'rooms' });
+  });
+
   it('routes websocket upgrades to the rooms runtime', async () => {
     setConfig(defineConfig({
       rooms: {

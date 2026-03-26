@@ -278,8 +278,9 @@ Read more: [Database Client SDK](https://edgebase.fun/docs/database/client-sdk)
 const unsubscribe = client
   .db('app')
   .table('posts')
-  .onSnapshot((change) => {
-    console.log(change.changeType, change.data);
+  .onSnapshot((snapshot) => {
+    console.log(snapshot.items);
+    console.log(snapshot.changes.added);
   });
 
 // later
@@ -321,6 +322,15 @@ Read more: [Functions Client SDK](https://edgebase.fun/docs/functions/client-sdk
 ```ts
 const room = client.room('game', 'lobby-1');
 
+const summary = await client.getRoomSummary('game', 'lobby-1');
+console.log(summary.occupancy.activeMembers);
+
+const summaries = await client.getRoomSummaries('game', ['lobby-1', 'lobby-2']);
+console.log(summaries.items.map((item) => item.roomId));
+
+const readiness = await client.checkRoomConnection('game', 'lobby-1');
+console.log(readiness.ok);
+
 await room.join();
 
 room.leave();
@@ -342,6 +352,11 @@ Use rooms when you need:
 const transport = room.media.transport({
   provider: 'cloudflare_realtimekit',
 });
+
+const capabilities = await room.media.checkReadiness({
+  provider: 'cloudflare_realtimekit',
+});
+console.log(capabilities.issues);
 
 await transport.connect();
 await transport.enableAudio();

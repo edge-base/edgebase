@@ -323,6 +323,6 @@ describe('auth settings page', () => {
 		await waitFor(() => {
 			expect(mocks.toastError).toHaveBeenCalledWith('settings down');
 		});
-		expect(await screen.findByText('Failed to load authentication settings.')).toBeInTheDocument();
+		expect(await screen.findByText('settings down')).toBeInTheDocument();
 	});
 });

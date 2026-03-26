@@ -7,6 +7,7 @@
 	import { schemaStore, namespaceNames } from '$lib/stores/schema';
 	import { devInfoStore } from '$lib/stores/devInfo';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
 	import { LIMITS, type SchemaField } from '$lib/constants';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -100,7 +101,7 @@
 			await schemaStore.waitForTableReady(nextTableName, { namespace: nextDbKey });
 			goto(`${base}/database/tables/${encodeURIComponent(nextTableName)}`);
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to create table.';
+			error = describeActionError(err, 'Failed to create the table.');
 			toastError(error);
 		} finally {
 			saving = false;

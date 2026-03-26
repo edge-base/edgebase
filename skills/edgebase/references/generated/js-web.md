@@ -105,8 +105,9 @@ const docs = await client
 const unsubscribe = client
   .db('app')
   .table('posts')
-  .onSnapshot((change) => {
-    console.log(change.changeType, change.data);
+  .onSnapshot((snapshot) => {
+    console.log(snapshot.items);
+    console.log(snapshot.changes.added);
   });
 ```
 
@@ -218,7 +219,7 @@ await posts.update(id, { views: increment(1), temp: deleteField() })
 
 ```
 import { createClient } from '@edge-base/web'
-const client = createClient(url, options?: { schema?, databaseLive?: { autoReconnect?, maxReconnectAttempts?, reconnectBaseDelay? } })
+const client = createClient(url, options?: { schema?, authNamespace?, databaseLive?: { autoReconnect?, maxReconnectAttempts?, reconnectBaseDelay? } })
 ```
 
 ### Client Lifecycle
@@ -462,6 +463,11 @@ room.admin.stopScreenShare(memberId)        → Promise<void>
 
 ```
 room.meta.get()                             → Promise<Record<string, unknown>>
+room.meta.summary()                         → Promise<{namespace, roomId, metadata, occupancy, updatedAt}>
+room.getSummary()                           → Promise<{namespace, roomId, metadata, occupancy, updatedAt}>
+room.checkConnection()                      → Promise<{ok, type, category, message, namespace?, roomId?, runtime?}>
+client.getRoomSummary(namespace, roomId)    → Promise<{namespace, roomId, metadata, occupancy, updatedAt}>
+client.checkRoomConnection(namespace, roomId) → Promise<{ok, type, category, message, namespace?, roomId?, runtime?}>
 ```
 
 #### Room Media Transport (Recommended)
@@ -481,6 +487,7 @@ transport.onRemoteTrack(event => { ... });
 
 - `cloudflare_realtimekit` is the default managed provider
 - `p2p` is a STUN-only best-effort mesh provider
+- `room.media.checkReadiness({provider?})` returns transport/browser/provider preflight diagnostics before `connect()`
 
 #### Realtime (WebRTC) — Legacy Low-Level Wrappers
 

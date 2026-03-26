@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastError } from '$lib/stores/toast.svelte';
 	import { schemaStore } from '$lib/stores/schema';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -96,7 +97,7 @@
 			results = res.results ?? [];
 			tested = true;
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Test failed');
+			toastError(describeActionError(err, 'Rule test failed.'));
 		} finally {
 			loading = false;
 		}

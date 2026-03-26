@@ -185,6 +185,13 @@ function createTransport(options?: {
   createSession?: (payload?: RoomCloudflareRealtimeKitCreateSessionRequest) => Promise<RoomCloudflareRealtimeKitCreateSessionResponse>;
   meeting?: FakeMeeting;
   clientFactory?: RoomCloudflareKitClientFactory;
+  currentMember?: { memberId: string; userId: string } | null;
+  checkConnection?: () => Promise<{
+    ok: boolean;
+    type: string;
+    category: string;
+    message: string;
+  }>;
   mediaDevices?: {
     getUserMedia?: (constraints?: MediaStreamConstraints) => Promise<{
       getAudioTracks(): MediaStreamTrack[];
@@ -227,6 +234,15 @@ function createTransport(options?: {
         createSession,
       },
     },
+    members: {
+      current: vi.fn(() => options?.currentMember ?? { memberId: 'member-1', userId: 'member-1' }),
+    },
+    checkConnection: options?.checkConnection ?? vi.fn(async () => ({
+      ok: true,
+      type: 'room_connect_ready',
+      category: 'ready',
+      message: 'Room WebSocket preflight passed',
+    })),
     onTrack: () => noopSubscription,
     onTrackRemoved: () => noopSubscription,
   };
@@ -244,6 +260,70 @@ function createTransport(options?: {
 }
 
 describe('RoomCloudflareMediaTransport', () => {
+  it('reports readiness with room preflight and RealtimeKit client availability', async () => {
+    const { transport } = createTransport();
+
+    await expect(transport.getCapabilities()).resolves.toMatchObject({
+      provider: 'cloudflare_realtimekit',
+      canConnect: true,
+      joined: true,
+      currentMemberId: 'member-1',
+      room: {
+        ok: true,
+        type: 'room_connect_ready',
+      },
+    });
+  });
+
+  it('treats room connect-check statuses as advisory once the member has already joined', async () => {
+    const { transport, createSession } = createTransport({
+      checkConnection: vi.fn(async () => ({
+        ok: false,
+        type: 'room_connect_rate_limited',
+        category: 'rate_limit',
+        message: 'Too many pending Room connections',
+      })),
+    });
+
+    await expect(transport.getCapabilities()).resolves.toMatchObject({
+      canConnect: true,
+      room: {
+        ok: false,
+        type: 'room_connect_rate_limited',
+      },
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'room_connect_rate_limited',
+          fatal: false,
+        }),
+      ]),
+    });
+
+    await expect(transport.connect()).resolves.toBe('sess-1');
+    expect(createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats room connect-check fetch errors as advisory once the member has already joined', async () => {
+    const { transport, createSession } = createTransport({
+      checkConnection: vi.fn(async () => {
+        throw new Error('service unavailable');
+      }),
+    });
+
+    await expect(transport.getCapabilities()).resolves.toMatchObject({
+      canConnect: true,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'room_connect_check_failed',
+          fatal: false,
+        }),
+      ]),
+    });
+
+    await expect(transport.connect()).resolves.toBe('sess-1');
+    expect(createSession).toHaveBeenCalledTimes(1);
+  });
+
   it('creates a RealtimeKit session and joins the meeting', async () => {
     const { transport, createSession, factory, meeting } = createTransport();
 

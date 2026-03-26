@@ -26,6 +26,8 @@ export {
   type UpsertResult,
   type BatchByFilterResult,
   type TableSqlExecutor,
+  type EdgeBaseTableRecord,
+  type EdgeBaseTableMap,
 } from './table.js';
 
 // Storage
@@ -55,4 +57,4 @@ export {
 export { HttpClientAdapter, PublicHttpClientAdapter } from './transport-adapter.js';
 
 // Errors
-export { EdgeBaseError } from './errors.js';
+export { EdgeBaseError, parseErrorResponse, networkError } from './errors.js';

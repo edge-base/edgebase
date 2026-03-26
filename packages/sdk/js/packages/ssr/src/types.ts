@@ -2,6 +2,8 @@
  * @edge-base/ssr — Type definitions for cookie-based SSR authentication.
  */
 
+import type { EdgeBaseTableMap } from '@edge-base/core';
+
 /** Options for cookie serialization. */
 export interface CookieOptions {
   httpOnly?: boolean;
@@ -30,12 +32,21 @@ export interface CookieStore {
   delete(name: string): void;
 }
 
+export interface ServerAuthCookieNames {
+  accessToken: string;
+  refreshToken: string;
+}
+
 /** Options for creating a server-side EdgeBase client. */
-export interface ServerClientOptions {
+export interface ServerClientOptions<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> {
   /** Cookie store for token persistence across requests. */
   cookies: CookieStore;
   /** Override default cookie options (httpOnly, secure, sameSite, path). */
   cookieOptions?: Partial<CookieOptions>;
+  /** Schema map from typegen (for example `EdgeBaseTables`) used for table inference. */
+  schema?: Schema;
+  /** Prefix auth cookie names to avoid same-origin collisions across apps. */
+  authNamespace?: string;
   /**
    * Service key for admin-level access.
    * When provided, requests use the service key instead of user tokens.

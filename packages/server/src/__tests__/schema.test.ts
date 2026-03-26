@@ -825,10 +825,10 @@ describe('zodDefaultHook', () => {
     const c = mockContext();
     const result = zodDefaultHook({
       success: false,
-      error: { issues: [{ message: 'field required' }, { message: 'invalid type' }] },
+      error: { issues: [{ message: 'field required', path: ['body', 'email'] }, { message: 'invalid type' }] },
     }, c);
     expect(result).toBeDefined();
-    expect(c.lastJson).toEqual({ code: 400, message: 'field required, invalid type' });
+    expect(c.lastJson).toEqual({ code: 400, message: 'body.email: field required, invalid type' });
     expect(c.lastStatus).toBe(400);
   });
 
@@ -841,13 +841,13 @@ describe('zodDefaultHook', () => {
     expect(c.lastJson).toEqual({ code: 400, message: 'too short' });
   });
 
-  it('handles empty issues → empty message', () => {
+  it('handles empty issues → default message', () => {
     const c = mockContext();
     zodDefaultHook({
       success: false,
       error: { issues: [] },
     }, c);
-    expect(c.lastJson).toEqual({ code: 400, message: '' });
+    expect(c.lastJson).toEqual({ code: 400, message: 'Request validation failed.' });
   });
 
   it('handles missing error.issues and error.errors', () => {
@@ -856,7 +856,7 @@ describe('zodDefaultHook', () => {
       success: false,
       error: {},
     }, c);
-    expect(c.lastJson).toEqual({ code: 400, message: '' });
+    expect(c.lastJson).toEqual({ code: 400, message: 'Request validation failed.' });
   });
 
   it('handles undefined error', () => {
@@ -864,7 +864,16 @@ describe('zodDefaultHook', () => {
     zodDefaultHook({
       success: false,
     }, c);
-    expect(c.lastJson).toEqual({ code: 400, message: '' });
+    expect(c.lastJson).toEqual({ code: 400, message: 'Request validation failed.' });
+  });
+
+  it('formats array indexes in issue paths', () => {
+    const c = mockContext();
+    zodDefaultHook({
+      success: false,
+      error: { issues: [{ message: 'Expected string', path: ['body', 'members', 0, 'email'] }] },
+    }, c);
+    expect(c.lastJson).toEqual({ code: 400, message: 'body.members[0].email: Expected string' });
   });
 });
 

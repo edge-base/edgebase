@@ -170,7 +170,132 @@ describe('Room API Contract — metadata', () => {
   });
 });
 
-// ─── 5. Response Headers ───
+// ─── 5. Summary HTTP Endpoint ───
+
+describe('Room API Contract — summary', () => {
+  it('returns a summary shape for non-existent rooms', async () => {
+    const res = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/room/summary?namespace=test-metadata&id=summary-${uid()}`,
+    );
+    expect(res.status).toBe(200);
+    const summary = await res.json() as any;
+    expect(summary.namespace).toBe('test-metadata');
+    expect(summary.metadata).toEqual({});
+    expect(summary.occupancy.activeMembers).toBeTypeOf('number');
+    expect(summary.occupancy.activeConnections).toBeTypeOf('number');
+  });
+
+  it('returns live occupancy and metadata after room creation', async () => {
+    const roomId = `contract-summary-${uid()}`;
+    const token = await getToken();
+
+    const wsRes = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/room?namespace=test-metadata&id=${roomId}`,
+      { headers: { Upgrade: 'websocket', 'X-Forwarded-For': `10.11.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}` } },
+    );
+    const ws = (wsRes as any).webSocket;
+    ws.accept();
+
+    ws.send(JSON.stringify({ type: 'auth', token }));
+    await new Promise<void>((resolve) => {
+      const handler = (event: MessageEvent) => {
+        const msg = JSON.parse(event.data as string);
+        if (msg.type === 'auth_success') {
+          ws.removeEventListener('message', handler);
+          resolve();
+        }
+      };
+      ws.addEventListener('message', handler);
+    });
+
+    ws.send(JSON.stringify({ type: 'join' }));
+    await new Promise<void>((resolve) => {
+      const handler = (event: MessageEvent) => {
+        const msg = JSON.parse(event.data as string);
+        if (msg.type === 'sync') {
+          ws.removeEventListener('message', handler);
+          resolve();
+        }
+      };
+      ws.addEventListener('message', handler);
+    });
+
+    const res = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/room/summary?namespace=test-metadata&id=${roomId}`,
+    );
+    expect(res.status).toBe(200);
+    const summary = await res.json() as any;
+    expect(summary.metadata.mode).toBe('classic');
+    expect(summary.occupancy.activeMembers).toBeGreaterThanOrEqual(1);
+    expect(summary.occupancy.activeConnections).toBeGreaterThanOrEqual(1);
+
+    ws.close();
+  });
+
+  it('returns 400 without required params', async () => {
+    const res = await (globalThis as any).SELF.fetch(`${BASE}/api/room/summary`);
+    expect(res.status).toBe(400);
+  });
+
+  it('returns summaries for multiple rooms in one request', async () => {
+    const roomA = `contract-batch-a-${uid()}`;
+    const roomB = `contract-batch-b-${uid()}`;
+    const token = await getToken();
+
+    for (const roomId of [roomA, roomB]) {
+      const wsRes = await (globalThis as any).SELF.fetch(
+        `${BASE}/api/room?namespace=test-metadata&id=${roomId}`,
+        { headers: { Upgrade: 'websocket', 'X-Forwarded-For': `10.12.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}` } },
+      );
+      const ws = (wsRes as any).webSocket;
+      ws.accept();
+
+      ws.send(JSON.stringify({ type: 'auth', token }));
+      await new Promise<void>((resolve) => {
+        const handler = (event: MessageEvent) => {
+          const msg = JSON.parse(event.data as string);
+          if (msg.type === 'auth_success') {
+            ws.removeEventListener('message', handler);
+            resolve();
+          }
+        };
+        ws.addEventListener('message', handler);
+      });
+
+      ws.send(JSON.stringify({ type: 'join' }));
+      await new Promise<void>((resolve) => {
+        const handler = (event: MessageEvent) => {
+          const msg = JSON.parse(event.data as string);
+          if (msg.type === 'sync') {
+            ws.removeEventListener('message', handler);
+            resolve();
+          }
+        };
+        ws.addEventListener('message', handler);
+      });
+
+      ws.close();
+    }
+
+    const res = await (globalThis as any).SELF.fetch(`${BASE}/api/room/summaries`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        namespace: 'test-metadata',
+        ids: [roomA, roomB],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const summaryCollection = await res.json() as any;
+    expect(summaryCollection.namespace).toBe('test-metadata');
+    expect(summaryCollection.items).toHaveLength(2);
+    expect(summaryCollection.deniedIds).toEqual([]);
+    expect(summaryCollection.items.map((item: any) => item.roomId).sort()).toEqual([roomA, roomB].sort());
+  });
+});
+
+// ─── 6. Response Headers ───
 
 describe('Room API Contract — response headers', () => {
   it('metadata endpoint returns Content-Type: application/json', async () => {
@@ -183,6 +308,25 @@ describe('Room API Contract — response headers', () => {
   it('connect-check returns Content-Type: application/json', async () => {
     const res = await (globalThis as any).SELF.fetch(
       `${BASE}/api/room/connect-check?namespace=test-game&id=headers-${uid()}`,
+    );
+    expect(res.headers.get('Content-Type')).toContain('application/json');
+  });
+
+  it('summary returns Content-Type: application/json', async () => {
+    const res = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/room/summary?namespace=test-metadata&id=headers-${uid()}`,
+    );
+    expect(res.headers.get('Content-Type')).toContain('application/json');
+  });
+
+  it('batch summary returns Content-Type: application/json', async () => {
+    const res = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/room/summaries`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ namespace: 'test-metadata', ids: [`headers-${uid()}`] }),
+      },
     );
     expect(res.headers.get('Content-Type')).toContain('application/json');
   });

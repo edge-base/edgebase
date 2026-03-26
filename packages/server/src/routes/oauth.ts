@@ -86,7 +86,7 @@ oauthRoute.onError((err, c) => {
     return c.json(err.toJSON(), err.code as 400);
   }
   console.error('OAuth unhandled error:', err);
-  return c.json({ code: 500, message: 'OAuth error.' }, 500);
+  return c.json({ code: 500, message: 'OAuth flow failed unexpectedly. Check the worker logs for the original exception.' }, 500);
 });
 
 // ─── Helpers ───

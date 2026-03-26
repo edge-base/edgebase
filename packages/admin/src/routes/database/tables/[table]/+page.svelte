@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { base } from '$app/paths';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import RecordsTab from '$lib/components/database/RecordsTab.svelte';
@@ -132,7 +133,7 @@
 			} catch (err) {
 				if (cancelled) return;
 				discoveredInstances = [];
-				instanceSuggestionsError = err instanceof Error ? err.message : 'Failed to load instance suggestions';
+				instanceSuggestionsError = describeActionError(err, 'Failed to load instance suggestions.');
 			} finally {
 				if (!cancelled) instanceSuggestionsLoading = false;
 			}
@@ -267,7 +268,7 @@
 			selectedNeonProjectId = neonProjects[0]?.projectId ?? '';
 			neonProjectsLoaded = true;
 		} catch (err) {
-			neonProjectsError = err instanceof Error ? err.message : 'Failed to load Neon projects.';
+			neonProjectsError = describeActionError(err, 'Failed to load Neon projects.');
 		} finally {
 			neonProjectsLoading = false;
 		}
@@ -415,7 +416,7 @@
 			upgradeModalOpen = false;
 			toastSuccess(`"${namespace}" upgraded from D1 to Postgres`);
 		} catch (err) {
-			const message = err instanceof Error ? err.message : 'Failed to upgrade database block.';
+			const message = describeActionError(err, 'Failed to upgrade the database block.');
 			toastError(message);
 		} finally {
 			upgradeAction = null;
@@ -792,7 +793,7 @@
 				{:catch err}
 					<div class="target-empty">
 						<h3>Query tools unavailable</h3>
-						<p>{err instanceof Error ? err.message : 'Failed to load query tools.'}</p>
+						<p>{describeActionError(err, 'Failed to load the query tools.')}</p>
 					</div>
 				{/await}
 			{/if}

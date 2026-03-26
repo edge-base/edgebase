@@ -7,6 +7,7 @@
 
 import { writable, derived, get } from 'svelte/store';
 import { api } from '$lib/api';
+import { describeActionError } from '$lib/error-messages';
 import type { SchemaField, IndexConfig } from '$lib/constants';
 import { buildAdminRecordsPath } from '$lib/database-target';
 
@@ -92,7 +93,7 @@ async function loadSchema(options: { silent?: boolean } = {}): Promise<Schema | 
     });
     return data.schema;
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to load schema';
+    const message = describeActionError(err, 'Failed to load schema.');
     store.update((s) => ({ ...s, loading: false, error: message }));
     return null;
   }

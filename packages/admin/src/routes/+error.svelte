@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { base } from '$app/paths';
+	import { describeActionError } from '$lib/error-messages';
 
 	const statusMessages: Record<number, string> = {
 		400: 'Bad Request',
@@ -9,13 +10,17 @@
 		404: 'Page not found',
 		408: 'Request timed out',
 		429: 'Too many requests — please try again later',
-		500: 'Internal server error',
+		500: 'Dashboard request failed',
 		502: 'Bad gateway — the server may be restarting',
 		503: 'Service temporarily unavailable',
 	};
 
 	const friendlyMessage = $derived(
-		$page.error?.message || statusMessages[$page.status] || 'Something went wrong. Please try reloading the page.'
+		describeActionError(
+			$page.error,
+			statusMessages[$page.status] || 'The dashboard could not load this page.',
+			{ hint: 'Try reloading first, then check that EdgeBase is running and your session is still valid.' },
+		)
 	);
 </script>
 

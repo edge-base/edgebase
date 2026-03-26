@@ -61,6 +61,18 @@ interface PgResolvedDb {
   namespace: string;
 }
 
+function postgresInvalidJsonMessage(context: string, tableName: string): string {
+  return `Invalid JSON body for ${context} on table '${tableName}'. Send application/json with the expected fields.`;
+}
+
+function postgresRuleRejectedMessage(tableName: string, action: 'insert' | 'update' | 'delete'): string {
+  return `Access denied by access rules for ${action} on table '${tableName}'.`;
+}
+
+function postgresValidationMessage(context: string, tableName: string): string {
+  return `Validation failed for ${context} on table '${tableName}'. See data for field-level errors.`;
+}
+
 // ─── Main Handler ───
 
 /**
@@ -526,7 +538,7 @@ async function handleInsert(
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: postgresInvalidJsonMessage('insert', tableName) }, 400);
   }
 
   // Check insert rule
@@ -534,7 +546,7 @@ async function handleInsert(
   const tableHooks = getTableHooks(tableConfig);
   if (!isServiceKey && tableAccess?.insert !== undefined) {
     if (!(await evalInsertRule(tableAccess.insert, auth))) {
-      return c.json({ code: 403, message: 'Insert not allowed.' }, 403);
+      return c.json({ code: 403, message: postgresRuleRejectedMessage(tableName, 'insert') }, 403);
     }
   }
 
@@ -663,7 +675,7 @@ async function handleUpdate(
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: postgresInvalidJsonMessage(`update record '${id}'`, tableName) }, 400);
   }
 
   // Validate against schema
@@ -671,7 +683,7 @@ async function handleUpdate(
   if (!validation.valid) {
     return c.json({
       code: 400,
-      message: 'Validation failed.',
+      message: postgresValidationMessage(`update record '${id}'`, tableName),
       data: toFieldErrorData(validation.errors),
       errors: validation.errors,
     }, 400);
@@ -690,7 +702,7 @@ async function handleUpdate(
   const tableHooks = getTableHooks(tableConfig);
   if (!isServiceKey && tableAccess?.update !== undefined) {
     if (!(await evalRowRule(tableAccess.update, auth, existingRow))) {
-      return c.json({ code: 403, message: 'Update not allowed.' }, 403);
+      return c.json({ code: 403, message: postgresRuleRejectedMessage(tableName, 'update') }, 403);
     }
   }
 
@@ -792,7 +804,7 @@ async function handleDelete(
   const tableHooks = getTableHooks(tableConfig);
   if (!isServiceKey && tableAccess?.delete !== undefined) {
     if (!(await evalRowRule(tableAccess.delete, auth, existingRow))) {
-      return c.json({ code: 403, message: 'Delete not allowed.' }, 403);
+      return c.json({ code: 403, message: postgresRuleRejectedMessage(tableName, 'delete') }, 403);
     }
   }
 
@@ -870,7 +882,7 @@ async function handleBatch(
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: postgresInvalidJsonMessage('batch insert', tableName) }, 400);
   }
 
   const inserts = Array.isArray(body.inserts)
@@ -901,7 +913,7 @@ async function handleBatch(
   const tableAccess = getTableAccess(tableConfig);
   if (!isServiceKey && inserts.length > 0 && tableAccess?.insert !== undefined) {
     if (!(await evalInsertRule(tableAccess.insert, auth))) {
-      return c.json({ code: 403, message: 'Insert not allowed.' }, 403);
+      return c.json({ code: 403, message: postgresRuleRejectedMessage(tableName, 'insert') }, 403);
     }
   }
 
@@ -915,7 +927,7 @@ async function handleBatch(
     if (!validation.valid) {
       return c.json({
         code: 400,
-        message: 'Validation failed.',
+        message: postgresValidationMessage('batch insert', tableName),
         data: toFieldErrorData(validation.errors),
         errors: validation.errors,
       }, 400);
@@ -1000,7 +1012,7 @@ async function handleBatchByFilter(
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: postgresInvalidJsonMessage('batch-by-filter', tableName) }, 400);
   }
 
   if (!body.action || !['delete', 'update'].includes(body.action)) {
@@ -1038,7 +1050,7 @@ async function handleBatchByFilter(
     const tableAccess = getTableAccess(tableConfig);
     if (!isServiceKey && tableAccess?.delete !== undefined) {
       if (typeof tableAccess.delete === 'boolean' && !tableAccess.delete) {
-        return c.json({ code: 403, message: 'Delete not allowed.' }, 403);
+        return c.json({ code: 403, message: postgresRuleRejectedMessage(tableName, 'delete') }, 403);
       }
     }
 
@@ -1071,7 +1083,7 @@ async function handleBatchByFilter(
   const tableAccess = getTableAccess(tableConfig);
   if (!isServiceKey && tableAccess?.update !== undefined) {
     if (typeof tableAccess.update === 'boolean' && !tableAccess.update) {
-      return c.json({ code: 403, message: 'Update not allowed.' }, 403);
+      return c.json({ code: 403, message: postgresRuleRejectedMessage(tableName, 'update') }, 403);
     }
   }
 

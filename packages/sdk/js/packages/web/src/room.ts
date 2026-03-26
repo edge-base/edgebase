@@ -9,7 +9,13 @@
  *   - namespace + roomId identification (replaces single roomId)
  */
 import type { TokenManager, TokenUser } from './token-manager.js';
-import { EdgeBaseError, createSubscription, type Subscription } from '@edge-base/core';
+import {
+  EdgeBaseError,
+  createSubscription,
+  networkError,
+  parseErrorResponse,
+  type Subscription,
+} from '@edge-base/core';
 import { refreshAccessToken } from './auth-refresh.js';
 import type { RoomRealtimeMediaTransportOptions } from './room-realtime-media.js';
 import {
@@ -220,6 +226,73 @@ export interface RoomCloudflareRealtimeKitCreateSessionResponse {
   reused?: boolean;
 }
 
+export interface RoomConnectDiagnostic {
+  ok: boolean;
+  type: string;
+  category: string;
+  message: string;
+  namespace?: string;
+  roomId?: string;
+  runtime?: string;
+  pendingCount?: number;
+  maxPending?: number;
+}
+
+export interface RoomSummary {
+  namespace: string;
+  roomId: string;
+  metadata: Record<string, unknown>;
+  occupancy: {
+    activeMembers: number;
+    activeConnections: number;
+  };
+  updatedAt: string;
+}
+
+export interface RoomSummaryCollection {
+  namespace: string;
+  items: RoomSummary[];
+  deniedIds: string[];
+  updatedAt: string;
+}
+
+export type RoomMediaTransportCapabilityCategory =
+  | 'room'
+  | 'browser'
+  | 'provider'
+  | 'auth'
+  | 'config';
+
+export interface RoomMediaTransportCapabilityIssue {
+  code: string;
+  category: RoomMediaTransportCapabilityCategory;
+  message: string;
+  fatal: boolean;
+}
+
+export interface RoomMediaTransportCapabilities {
+  provider: RoomMediaTransportProvider;
+  canConnect: boolean;
+  issues: RoomMediaTransportCapabilityIssue[];
+  room: RoomConnectDiagnostic;
+  joined: boolean;
+  currentMemberId: string | null;
+  sessionId: string | null;
+  browser: {
+    mediaDevices: boolean;
+    getUserMedia: boolean;
+    getDisplayMedia: boolean;
+    enumerateDevices: boolean;
+    rtcPeerConnection: boolean;
+  };
+  turn?: {
+    requested: boolean;
+    available: boolean;
+    iceServerCount: number;
+    error?: string;
+  };
+}
+
 export interface RoomMediaTransportConnectPayload {
   connectionId?: string;
   customParticipantId?: string;
@@ -243,6 +316,7 @@ export interface RoomMediaRemoteTrackEvent {
 
 export interface RoomMediaTransport {
   connect(payload?: RoomMediaTransportConnectPayload): Promise<string>;
+  getCapabilities(): Promise<RoomMediaTransportCapabilities>;
   batchLocalUpdates?<T>(callback: () => Promise<T>): Promise<T>;
   enableAudio(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
   enableVideo(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
@@ -466,6 +540,7 @@ export class RoomClient {
 
   readonly meta = {
     get: (): Promise<Record<string, unknown>> => this.getMetadata(),
+    summary: (): Promise<RoomSummary> => this.getSummary(),
   };
 
   readonly signals = {
@@ -551,6 +626,10 @@ export class RoomClient {
       createSession: (payload?: RoomCloudflareRealtimeKitCreateSessionRequest): Promise<RoomCloudflareRealtimeKitCreateSessionResponse> =>
         this.requestCloudflareRealtimeKitMedia('session', 'POST', payload),
     },
+    checkReadiness: async (options?: RoomMediaTransportOptions): Promise<RoomMediaTransportCapabilities> => {
+      const transport = this.media.transport(options);
+      return transport.getCapabilities();
+    },
     transport: (options?: RoomMediaTransportOptions): RoomMediaTransport => {
       // Infer provider from options: if cloudflareRealtimeKit config is present, use it;
       // otherwise default to p2p for zero-config local development.
@@ -630,6 +709,14 @@ export class RoomClient {
     return RoomClient.getMetadata(this.baseUrl, this.namespace, this.roomId);
   }
 
+  async getSummary(): Promise<RoomSummary> {
+    return RoomClient.getSummary(this.baseUrl, this.namespace, this.roomId);
+  }
+
+  async checkConnection(): Promise<RoomConnectDiagnostic> {
+    return RoomClient.checkConnection(this.baseUrl, this.namespace, this.roomId);
+  }
+
   /**
    * Static: Get room metadata without creating a RoomClient instance.
    * Useful for lobby screens where you need room info before joining.
@@ -639,12 +726,135 @@ export class RoomClient {
     namespace: string,
     roomId: string,
   ): Promise<Record<string, unknown>> {
-    const url = `${baseUrl.replace(/\/$/, '')}/api/room/metadata?namespace=${encodeURIComponent(namespace)}&id=${encodeURIComponent(roomId)}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new EdgeBaseError(res.status, `Failed to get room metadata: ${res.statusText}`);
+    return RoomClient.requestPublicRoomResource<Record<string, unknown>>(
+      baseUrl,
+      'metadata',
+      namespace,
+      roomId,
+      'Failed to get room metadata',
+    );
+  }
+
+  static async getSummary(
+    baseUrl: string,
+    namespace: string,
+    roomId: string,
+  ): Promise<RoomSummary> {
+    return RoomClient.requestPublicRoomResource<RoomSummary>(
+      baseUrl,
+      'summary',
+      namespace,
+      roomId,
+      'Failed to get room summary',
+    );
+  }
+
+  static async getSummaries(
+    baseUrl: string,
+    namespace: string,
+    roomIds: string[],
+  ): Promise<RoomSummaryCollection> {
+    const url = `${baseUrl.replace(/\/$/, '')}/api/room/summaries`;
+    let res: Response;
+
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ namespace, ids: roomIds }),
+      });
+    } catch (error) {
+      throw networkError(
+        `Failed to get room summaries. Could not reach ${baseUrl.replace(/\/$/, '')}. Make sure the EdgeBase server is running and reachable.`,
+        { cause: error },
+      );
     }
-    return res.json() as Promise<Record<string, unknown>>;
+
+    const data = (await res.json().catch(() => null)) as RoomSummaryCollection | null;
+    if (!res.ok) {
+      const parsed = parseErrorResponse(res.status, data);
+      parsed.message = `Failed to get room summaries: ${parsed.message}`;
+      throw parsed;
+    }
+
+    return data as RoomSummaryCollection;
+  }
+
+  static async checkConnection(
+    baseUrl: string,
+    namespace: string,
+    roomId: string,
+  ): Promise<RoomConnectDiagnostic> {
+    const url = `${baseUrl.replace(/\/$/, '')}/api/room/connect-check?namespace=${encodeURIComponent(namespace)}&id=${encodeURIComponent(roomId)}`;
+    let response: Response;
+
+    try {
+      response = await fetch(url);
+    } catch (error) {
+      throw networkError(
+        `Room connect-check could not reach ${baseUrl.replace(/\/$/, '')}. Make sure the EdgeBase server is running and reachable.`,
+        { cause: error },
+      );
+    }
+
+    const data = (await response.json().catch(() => null)) as Partial<RoomConnectDiagnostic> | null;
+    if (!response.ok) {
+      throw parseErrorResponse(response.status, data);
+    }
+
+    if (
+      typeof data?.ok !== 'boolean'
+      || typeof data?.type !== 'string'
+      || typeof data?.category !== 'string'
+      || typeof data?.message !== 'string'
+    ) {
+      throw new EdgeBaseError(
+        response.status || 500,
+        'Room connect-check returned an unexpected response. The EdgeBase server and SDK may be out of sync.',
+      );
+    }
+
+    const diagnostic = data as RoomConnectDiagnostic;
+
+    return {
+      ok: diagnostic.ok,
+      type: diagnostic.type,
+      category: diagnostic.category,
+      message: diagnostic.message,
+      namespace: typeof diagnostic.namespace === 'string' ? diagnostic.namespace : undefined,
+      roomId: typeof diagnostic.roomId === 'string' ? diagnostic.roomId : undefined,
+      runtime: typeof diagnostic.runtime === 'string' ? diagnostic.runtime : undefined,
+      pendingCount: typeof diagnostic.pendingCount === 'number' ? diagnostic.pendingCount : undefined,
+      maxPending: typeof diagnostic.maxPending === 'number' ? diagnostic.maxPending : undefined,
+    };
+  }
+
+  private static async requestPublicRoomResource<T>(
+    baseUrl: string,
+    resource: 'metadata' | 'summary',
+    namespace: string,
+    roomId: string,
+    failureMessage: string,
+  ): Promise<T> {
+    const url = `${baseUrl.replace(/\/$/, '')}/api/room/${resource}?namespace=${encodeURIComponent(namespace)}&id=${encodeURIComponent(roomId)}`;
+    let res: Response;
+
+    try {
+      res = await fetch(url);
+    } catch (error) {
+      throw networkError(
+        `${failureMessage}. Could not reach ${baseUrl.replace(/\/$/, '')}. Make sure the EdgeBase server is running and reachable.`,
+        { cause: error },
+      );
+    }
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      const parsed = parseErrorResponse(res.status, data);
+      parsed.message = `${failureMessage}: ${parsed.message}`;
+      throw parsed;
+    }
+    return res.json() as Promise<T>;
   }
 
   private async requestCloudflareRealtimeKitMedia<T>(
@@ -673,31 +883,42 @@ export class RoomClient {
       (refreshToken) => refreshAccessToken(this.baseUrl, refreshToken),
     );
     if (!token) {
-      throw new EdgeBaseError(401, 'Authentication required');
+      throw new EdgeBaseError(
+        401,
+        'Authentication required before calling room media APIs. Sign in and join the room first.',
+      );
     }
 
     const url = new URL(`${this.baseUrl.replace(/\/$/, '')}/api/room/media/${providerPath}/${path}`);
     url.searchParams.set('namespace', this.namespace);
     url.searchParams.set('id', this.roomId);
 
-    const response = await fetch(url.toString(), {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: method === 'GET' ? undefined : JSON.stringify(payload ?? {}),
-    });
+    let response: Response;
 
-    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!response.ok) {
-      throw new EdgeBaseError(
-        response.status,
-        (typeof data.message === 'string' && data.message) || `Room media request failed: ${response.statusText}`,
+    try {
+      response = await fetch(url.toString(), {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: method === 'GET' ? undefined : JSON.stringify(payload ?? {}),
+      });
+    } catch (error) {
+      throw networkError(
+        `Room media request ${providerPath}/${path} could not reach ${this.baseUrl.replace(/\/$/, '')}. Make sure the EdgeBase server is running and reachable.`,
+        { cause: error },
       );
     }
 
-    return data as T;
+    const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!response.ok) {
+      const parsed = parseErrorResponse(response.status, data);
+      parsed.message = `Room media request ${providerPath}/${path} failed: ${parsed.message}`;
+      throw parsed;
+    }
+
+    return (data ?? {}) as T;
   }
 
   // ─── Connection Lifecycle ───
@@ -745,6 +966,15 @@ export class RoomClient {
     this.setConnectionState('disconnected');
   }
 
+  private assertConnected(action: string): void {
+    if (!this.ws || !this.connected || !this.authenticated) {
+      throw new EdgeBaseError(
+        400,
+        `Room connection required before ${action}. Call room.join() and wait for the connection to finish.`,
+      );
+    }
+  }
+
   /**
    * Destroy the RoomClient and release all resources.
    * Calls leave() if still connected, unsubscribes from auth state changes,
@@ -787,9 +1017,7 @@ export class RoomClient {
    * const result = await room.send('SET_SCORE', { score: 42 });
    */
   async send(actionType: string, payload?: unknown): Promise<unknown> {
-    if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, 'Not connected to room');
-    }
+    this.assertConnected(`sending action '${actionType}'`);
 
     const requestId = generateRequestId();
 
@@ -1012,9 +1240,7 @@ export class RoomClient {
     payload?: unknown,
     options?: { includeSelf?: boolean; memberId?: string },
   ): Promise<void> {
-    if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, 'Not connected to room');
-    }
+    this.assertConnected(`sending signal '${event}'`);
 
     const requestId = generateRequestId();
     return new Promise<void>((resolve, reject) => {
@@ -1051,9 +1277,7 @@ export class RoomClient {
   private async sendMemberStateRequest(
     payload: { type: 'member_state'; state: Record<string, unknown> } | { type: 'member_state_clear' },
   ): Promise<void> {
-    if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, 'Not connected to room');
-    }
+    this.assertConnected('updating member state');
 
     const requestId = generateRequestId();
     return new Promise<void>((resolve, reject) => {
@@ -1072,9 +1296,7 @@ export class RoomClient {
     memberId: string,
     payload?: Record<string, unknown>,
   ): Promise<void> {
-    if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, 'Not connected to room');
-    }
+    this.assertConnected(`running admin operation '${operation}'`);
 
     const requestId = generateRequestId();
     return new Promise<void>((resolve, reject) => {
@@ -1099,9 +1321,7 @@ export class RoomClient {
     kind: RoomMediaKind,
     payload?: Record<string, unknown>,
   ): Promise<void> {
-    if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, 'Not connected to room');
-    }
+    this.assertConnected(`running media operation '${operation}' for '${kind}'`);
 
     const requestId = generateRequestId();
     return new Promise<void>((resolve, reject) => {
@@ -1252,12 +1472,20 @@ export class RoomClient {
       refreshAccessToken(this.baseUrl, refreshToken),
     );
     if (!token) {
-      throw new EdgeBaseError(401, 'No access token available. Sign in first.');
+      throw new EdgeBaseError(
+        401,
+        'Room authentication requires a signed-in session. Sign in before joining the room.',
+      );
     }
 
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new EdgeBaseError(401, 'Room auth timeout'));
+        reject(
+          new EdgeBaseError(
+            401,
+            'Room authentication timed out. Check the server auth response and room connectivity.',
+          ),
+        );
       }, 10000);
 
       const originalOnMessage = this.ws?.onmessage;

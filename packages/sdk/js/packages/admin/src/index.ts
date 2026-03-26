@@ -34,3 +34,4 @@ export {
   type EventTimeSeriesResult,
   type EventTopResult,
 } from './analytics.js';
+export type { EdgeBaseTableMap, EdgeBaseTableRecord } from '@edge-base/core';

@@ -162,7 +162,7 @@ void RoomClient::send(const std::string &action_type, const json &payload,
                       ResultCallback on_result, ErrorCallback on_error) {
   if (!connected_.load() || !authenticated_.load()) {
     if (on_error)
-      on_error("Not connected to room");
+      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.");
     return;
   }
 
@@ -485,7 +485,7 @@ void RoomClient::handle_message(const std::string &raw) {
       }
     }
     if (on_error) {
-      on_error(msg.value("message", "Unknown error"));
+      on_error(msg.value("message", "Unknown EdgeBase error. Check the server response or logs for details."));
     }
     return;
   }
@@ -691,7 +691,7 @@ void RoomClient::send_signal(const std::string &event, const json &payload,
                              const json &options) {
   if (!connected_.load() || !authenticated_.load()) {
     if (on_error)
-      on_error("Not connected to room");
+      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.");
     return;
   }
   std::string request_id = generate_request_id();
@@ -735,7 +735,7 @@ void RoomClient::send_member_state(const json &state, VoidCallback on_success,
                                    ErrorCallback on_error) {
   if (!connected_.load() || !authenticated_.load()) {
     if (on_error)
-      on_error("Not connected to room");
+      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.");
     return;
   }
   std::string request_id = generate_request_id();
@@ -774,7 +774,7 @@ void RoomClient::clear_member_state(VoidCallback on_success,
                                     ErrorCallback on_error) {
   if (!connected_.load() || !authenticated_.load()) {
     if (on_error)
-      on_error("Not connected to room");
+      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.");
     return;
   }
   std::string request_id = generate_request_id();
@@ -813,7 +813,7 @@ void RoomClient::send_admin(const std::string &operation,
                             ErrorCallback on_error) {
   if (!connected_.load() || !authenticated_.load()) {
     if (on_error)
-      on_error("Not connected to room");
+      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.");
     return;
   }
   std::string request_id = generate_request_id();
@@ -855,7 +855,7 @@ void RoomClient::send_media(const std::string &operation,
                             VoidCallback on_success, ErrorCallback on_error) {
   if (!connected_.load() || !authenticated_.load()) {
     if (on_error)
-      on_error("Not connected to room");
+      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.");
     return;
   }
   std::string request_id = generate_request_id();

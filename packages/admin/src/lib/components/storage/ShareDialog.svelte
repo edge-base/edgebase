@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -51,7 +52,7 @@
 			);
 			signedUrl = res.url;
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to create signed URL');
+			toastError(describeActionError(err, 'Failed to create signed URL.'));
 		} finally {
 			loading = false;
 		}

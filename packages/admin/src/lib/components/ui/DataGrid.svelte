@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { ApiError } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { validateCustomRecordId } from '$lib/record-id';
 	import { toastError, toastSuccess } from '$lib/stores/toast.svelte';
 	import CreateRowPanel from '$lib/components/ui/CreateRowPanel.svelte';
@@ -292,7 +293,7 @@
 			dirtyRows.delete(rowId);
 			dirtyRows = new Map(dirtyRows);
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Save failed');
+			toastError(describeActionError(err, 'Save failed.'));
 		} finally {
 			const next = new Set(savingRows);
 			next.delete(rowId);
@@ -323,7 +324,7 @@
 			await onDelete(ids);
 			selectedRows = new Set();
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Delete failed');
+			toastError(describeActionError(err, 'Delete failed.'));
 		}
 	}
 
@@ -393,7 +394,7 @@
 				newRowErrors = fieldErrors;
 				return;
 			}
-			toastError(err instanceof Error ? err.message : 'Create failed');
+			toastError(describeActionError(err, 'Create failed.'));
 		} finally {
 			newRowSaving = false;
 		}

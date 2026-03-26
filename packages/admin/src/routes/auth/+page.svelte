@@ -3,6 +3,7 @@
 	import { base } from '$app/paths';
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastError, toastSuccess } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
 	import { authDocs } from '$lib/docs-links';
@@ -171,7 +172,7 @@
 			if (res.total != null) totalUsers = res.total;
 		} catch (err) {
 			if (requestId !== latestFetchRequest) return;
-			toastError(err instanceof Error ? err.message : 'Failed to load users');
+			toastError(describeActionError(err, 'Failed to load users.'));
 		} finally {
 			if (requestId === latestFetchRequest) {
 				loading = false;

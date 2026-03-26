@@ -276,7 +276,7 @@ class RoomClient
     public function send(string $actionType, mixed $payload = null): mixed
     {
         if (!$this->connected || !$this->authenticated) {
-            throw new EdgeBaseException('Not connected to room', 400);
+            throw new EdgeBaseException('Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.', 400);
         }
 
         $requestId = $this->generateRequestId();
@@ -1104,7 +1104,7 @@ class RoomClient
     private function sendVoidRequest(string $bucket, string $requestId, array $message, string $timeoutMessage): void
     {
         if (!$this->connected || !$this->authenticated) {
-            throw new EdgeBaseException('Not connected to room', 400);
+            throw new EdgeBaseException('Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.', 400);
         }
 
         $this->{$bucket}[$requestId] = [

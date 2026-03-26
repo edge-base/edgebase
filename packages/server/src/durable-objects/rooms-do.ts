@@ -94,6 +94,17 @@ interface RoomMemberPresence {
   state: Record<string, unknown>;
 }
 
+interface RoomSummaryResponse {
+  namespace: string;
+  roomId: string;
+  metadata: Record<string, unknown>;
+  occupancy: {
+    activeMembers: number;
+    activeConnections: number;
+  };
+  updatedAt: string;
+}
+
 interface RoomMemberRealtimeSession {
   sessionId: string;
   connectionId?: string;
@@ -155,6 +166,10 @@ export class RoomsDO extends RoomRuntimeBaseDO {
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
+    if (url.pathname === '/summary' && request.method === 'GET') {
+      return this.handleSummaryGet(url);
+    }
+
     if (url.pathname === '/media/cloudflare_realtimekit/session' && request.method === 'POST') {
       return this.handleCloudflareRealtimeKitSessionCreate(request, url);
     }
@@ -182,6 +197,22 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     return super.fetch(request);
+  }
+
+  private async handleSummaryGet(url: URL): Promise<Response> {
+    this.hydrateRoomIdentityFromUrl(url);
+    const metadata = await this.getRoomMetadataSnapshot();
+
+    return this.jsonResponse<RoomSummaryResponse>(200, {
+      namespace: this.namespace ?? '',
+      roomId: this.roomId ?? '',
+      metadata,
+      occupancy: {
+        activeMembers: this.members.size,
+        activeConnections: this.joinedConnectionIds.size,
+      },
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   private async handleCloudflareRealtimeKitSessionCreate(request: Request, url: URL): Promise<Response> {
@@ -639,7 +670,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
     const token = this.extractBearerToken(request);
     if (!token) {
-      throw new Error('Authentication required');
+      throw new Error('Authentication required before the room connection could be established.');
     }
 
     const { resolveAuthContextFromToken } = await import('../middleware/auth.js');

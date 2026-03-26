@@ -4,14 +4,19 @@ import type {
   RTKParticipants,
   RTKSelf,
 } from '@cloudflare/realtimekit';
+import { EdgeBaseError } from '@edge-base/core';
 import { createSubscription } from './room.js';
 import type {
+  RoomConnectDiagnostic,
   RoomCloudflareRealtimeKitCreateSessionRequest,
   RoomCloudflareRealtimeKitCreateSessionResponse,
   RoomMediaKind,
   RoomMediaRemoteTrackEvent,
   RoomMediaTransport,
+  RoomMediaTransportCapabilities,
+  RoomMediaTransportCapabilityIssue,
   RoomMediaTransportConnectPayload,
+  RoomMember,
   Subscription,
 } from './room.js';
 
@@ -42,6 +47,10 @@ interface RoomCloudflareMediaAdapter {
       createSession(payload?: RoomCloudflareRealtimeKitCreateSessionRequest): Promise<RoomCloudflareRealtimeKitCreateSessionResponse>;
     };
   };
+  members?: {
+    current(): RoomMember | null;
+  };
+  checkConnection?(): Promise<RoomConnectDiagnostic>;
 }
 
 interface LocalTrackState {
@@ -95,6 +104,13 @@ interface ParticipantListenerSet {
 
 function buildRemoteTrackKey(participantId: string, kind: RoomMediaKind): string {
   return `${participantId}:${kind}`;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && typeof error.message === 'string' && error.message.length > 0) {
+    return error.message;
+  }
+  return 'Unknown room media error.';
 }
 
 export class RoomCloudflareMediaTransport implements RoomMediaTransport {
@@ -163,8 +179,26 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
       );
     }
 
+    const lifecycleVersion = this.lifecycleVersion;
+    const capabilities = await this.getCapabilities();
+    this.assertConnectStillActive(lifecycleVersion);
+    const fatalIssue = capabilities.issues.find((issue) => issue.fatal);
+    if (fatalIssue) {
+      const error = new EdgeBaseError(
+        400,
+        fatalIssue.message,
+        { preflight: { code: fatalIssue.code, message: fatalIssue.message } },
+        'room-media-preflight-failed',
+      );
+      Object.assign(error, {
+        provider: capabilities.provider,
+        issue: fatalIssue,
+        capabilities,
+      });
+      throw error;
+    }
+
     const connectPromise = (async () => {
-      const lifecycleVersion = this.lifecycleVersion;
       const session = await this.room.media.cloudflareRealtimeKit.createSession(payload);
       this.assertConnectStillActive(lifecycleVersion);
       const factory = await this.resolveClientFactory();
@@ -205,6 +239,106 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
         this.connectPromise = null;
       }
     }
+  }
+
+  async getCapabilities(): Promise<RoomMediaTransportCapabilities> {
+    const issues: RoomMediaTransportCapabilityIssue[] = [];
+    const currentMember = this.room.members?.current() ?? null;
+    const roomIssueFatal = !currentMember;
+    let room: RoomConnectDiagnostic = {
+      ok: true,
+      type: 'room_connect_ready',
+      category: 'ready',
+      message: 'Room WebSocket preflight passed',
+    };
+
+    if (typeof this.room.checkConnection === 'function') {
+      try {
+        room = await this.room.checkConnection();
+      } catch (error) {
+        issues.push({
+          code: 'room_connect_check_failed',
+          category: 'room',
+          message: `Room connect-check failed: ${getErrorMessage(error)}`,
+          fatal: roomIssueFatal,
+        });
+      }
+    }
+
+    if (!room.ok) {
+      issues.push({
+        code: room.type,
+        category: 'room',
+        message: room.message,
+        fatal: roomIssueFatal,
+      });
+    }
+
+    if (!currentMember) {
+      issues.push({
+        code: 'room_member_not_joined',
+        category: 'room',
+        message: 'Join the room before connecting a Cloudflare media transport.',
+        fatal: true,
+      });
+    }
+
+    const browser = {
+      mediaDevices: !!this.options.mediaDevices,
+      getUserMedia: typeof this.options.mediaDevices?.getUserMedia === 'function',
+      getDisplayMedia: typeof this.options.mediaDevices?.getDisplayMedia === 'function',
+      enumerateDevices: typeof this.options.mediaDevices?.enumerateDevices === 'function',
+      rtcPeerConnection:
+        typeof this.options.peerConnectionFactory === 'function'
+        || typeof RTCPeerConnection !== 'undefined',
+    };
+
+    if (!browser.rtcPeerConnection) {
+      issues.push({
+        code: 'webrtc_unavailable',
+        category: 'browser',
+        message: 'RTCPeerConnection is not available in this environment.',
+        fatal: true,
+      });
+    }
+    if (!browser.getUserMedia) {
+      issues.push({
+        code: 'media_devices_get_user_media_unavailable',
+        category: 'browser',
+        message: 'getUserMedia() is not available; local audio/video capture will be unavailable.',
+        fatal: false,
+      });
+    }
+    if (!browser.getDisplayMedia) {
+      issues.push({
+        code: 'media_devices_get_display_media_unavailable',
+        category: 'browser',
+        message: 'getDisplayMedia() is not available; screen sharing will be unavailable.',
+        fatal: false,
+      });
+    }
+
+    try {
+      await this.resolveClientFactory();
+    } catch (error) {
+      issues.push({
+        code: 'cloudflare_realtimekit_client_unavailable',
+        category: 'provider',
+        message: `Failed to load the Cloudflare RealtimeKit client: ${getErrorMessage(error)}`,
+        fatal: true,
+      });
+    }
+
+    return {
+      provider: 'cloudflare_realtimekit',
+      canConnect: !issues.some((issue) => issue.fatal),
+      issues,
+      room,
+      joined: !!currentMember,
+      currentMemberId: currentMember?.memberId ?? null,
+      sessionId: this.getSessionId(),
+      browser,
+    };
   }
 
   async enableAudio(constraints: MediaTrackConstraints | boolean = true): Promise<MediaStreamTrack> {

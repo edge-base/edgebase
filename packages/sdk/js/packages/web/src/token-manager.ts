@@ -83,12 +83,29 @@ function extractUser(token: string): TokenUser | null {
 }
 
 type StorageAdapter = ReturnType<typeof createBrowserStorage>;
-
-const REFRESH_TOKEN_KEY = 'edgebase:refresh-token';
-const REFRESH_LOCK_KEY = 'edgebase:refresh-lock';
-const REFRESH_RESULT_KEY = 'edgebase:refresh-result';
 const LOCK_TIMEOUT_MS = 10_000;
-const BC_CHANNEL_NAME = 'edgebase:auth';
+
+interface TokenManagerKeySet {
+  refreshTokenKey: string;
+  refreshLockKey: string;
+  refreshResultKey: string;
+  broadcastChannelName: string;
+}
+
+export interface TokenManagerOptions {
+  authNamespace?: string;
+}
+
+function buildTokenManagerKeys(authNamespace?: string): TokenManagerKeySet {
+  const trimmedNamespace = authNamespace?.trim();
+  const prefix = trimmedNamespace ? `edgebase:${trimmedNamespace}` : 'edgebase';
+  return {
+    refreshTokenKey: `${prefix}:refresh-token`,
+    refreshLockKey: `${prefix}:refresh-lock`,
+    refreshResultKey: `${prefix}:refresh-result`,
+    broadcastChannelName: `${prefix}:auth`,
+  };
+}
 
 export type AuthStateChangeHandler = (user: TokenUser | null) => void;
 
@@ -100,13 +117,15 @@ export class TokenManager {
   private broadcastChannel: BroadcastChannel | null = null;
   private storageListener: ((e: StorageEvent) => void) | null = null;
   private cachedUser: TokenUser | null = null;
+  private keys: TokenManagerKeySet;
 
-  constructor(private baseUrl: string) {
+  constructor(private baseUrl: string, options: TokenManagerOptions = {}) {
     this.storage = createBrowserStorage();
+    this.keys = buildTokenManagerKeys(options.authNamespace);
     this.setupCrossTabListeners();
 
     // Restore user from existing refresh token on init
-    const existingRefresh = this.storage.getItem(REFRESH_TOKEN_KEY);
+    const existingRefresh = this.storage.getItem(this.keys.refreshTokenKey);
     if (existingRefresh && !isTokenExpired(existingRefresh, 0)) {
       this.cachedUser = extractUser(existingRefresh);
     }
@@ -123,12 +142,12 @@ export class TokenManager {
 
     // Prefer BroadcastChannel
     if (typeof BroadcastChannel !== 'undefined') {
-      this.broadcastChannel = new BroadcastChannel(BC_CHANNEL_NAME);
+      this.broadcastChannel = new BroadcastChannel(this.keys.broadcastChannelName);
       this.broadcastChannel.onmessage = (event: MessageEvent) => {
         const { type, accessToken, refreshToken } = event.data;
         if (type === 'token-refreshed' && accessToken && refreshToken) {
           this.accessToken = accessToken;
-          this.storage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+          this.storage.setItem(this.keys.refreshTokenKey, refreshToken);
           this.updateUser(accessToken);
         } else if (type === 'signed-out') {
           this.clearTokensInternal(false);
@@ -139,7 +158,7 @@ export class TokenManager {
     // Also listen to storage events (fallback + additional tab sync for signout)
     if (typeof window !== 'undefined') {
       this.storageListener = (e: StorageEvent) => {
-        if (e.key === REFRESH_TOKEN_KEY) {
+        if (e.key === this.keys.refreshTokenKey) {
           if (e.newValue === null) {
             // Signed out in another tab
             this.accessToken = null;
@@ -151,11 +170,11 @@ export class TokenManager {
           }
         }
         // BroadcastChannel fallback: result delivered via storage event
-        if (e.key === REFRESH_RESULT_KEY && e.newValue) {
+        if (e.key === this.keys.refreshResultKey && e.newValue) {
           try {
             const result = JSON.parse(e.newValue) as TokenPair;
             this.accessToken = result.accessToken;
-            this.storage.setItem(REFRESH_TOKEN_KEY, result.refreshToken);
+            this.storage.setItem(this.keys.refreshTokenKey, result.refreshToken);
             this.updateUser(result.accessToken);
           } catch {
             // ignore parse errors
@@ -176,7 +195,7 @@ export class TokenManager {
     }
 
     // Try to refresh
-    const refreshToken = this.storage.getItem(REFRESH_TOKEN_KEY);
+    const refreshToken = this.storage.getItem(this.keys.refreshTokenKey);
     if (!refreshToken) return null;
 
     return this.refreshWithLeaderElection(refreshToken, doRefresh);
@@ -197,7 +216,7 @@ export class TokenManager {
     }
 
     // Check if another tab is refreshing (localStorage mutex)
-    const lockValue = this.storage.getItem(REFRESH_LOCK_KEY);
+    const lockValue = this.storage.getItem(this.keys.refreshLockKey);
     if (lockValue) {
       const lockTime = parseInt(lockValue, 10);
       if (Date.now() - lockTime < LOCK_TIMEOUT_MS) {
@@ -208,7 +227,7 @@ export class TokenManager {
     }
 
     // Acquire lock and refresh
-    this.storage.setItem(REFRESH_LOCK_KEY, Date.now().toString());
+    this.storage.setItem(this.keys.refreshLockKey, Date.now().toString());
 
     this.refreshPromise = doRefresh(refreshToken)
       .then((tokens) => {
@@ -224,7 +243,7 @@ export class TokenManager {
         throw err;
       })
       .finally(() => {
-        this.storage.removeItem(REFRESH_LOCK_KEY);
+        this.storage.removeItem(this.keys.refreshLockKey);
         this.refreshPromise = null;
       });
 
@@ -234,7 +253,7 @@ export class TokenManager {
 
   /** Wait for another tab's refresh result (max 10s) */
   private waitForRefreshResult(): Promise<string> {
-    if (!this.storage.getItem(REFRESH_TOKEN_KEY)) {
+    if (!this.storage.getItem(this.keys.refreshTokenKey)) {
       return Promise.reject(new EdgeBaseError(401, 'Not authenticated'));
     }
 
@@ -245,8 +264,8 @@ export class TokenManager {
         settled = true;
         cleanup();
         // Leader tab died, try refreshing ourselves
-        this.storage.removeItem(REFRESH_LOCK_KEY);
-        const rt = this.storage.getItem(REFRESH_TOKEN_KEY);
+        this.storage.removeItem(this.keys.refreshLockKey);
+        const rt = this.storage.getItem(this.keys.refreshTokenKey);
         if (rt) {
           reject(new EdgeBaseError(0, 'Token refresh timeout'));
         } else {
@@ -271,7 +290,7 @@ export class TokenManager {
             clearTimeout(timeout);
             cleanup();
             this.accessToken = event.data.accessToken;
-            this.storage.setItem(REFRESH_TOKEN_KEY, event.data.refreshToken);
+            this.storage.setItem(this.keys.refreshTokenKey, event.data.refreshToken);
             this.updateUser(event.data.accessToken);
             resolve(event.data.accessToken);
             return;
@@ -285,11 +304,11 @@ export class TokenManager {
       } else {
         // Fallback: poll storage for result
         const interval = setInterval(() => {
-          if (!this.storage.getItem(REFRESH_TOKEN_KEY)) {
+          if (!this.storage.getItem(this.keys.refreshTokenKey)) {
             rejectSignedOut();
             return;
           }
-          const result = this.storage.getItem(REFRESH_RESULT_KEY);
+          const result = this.storage.getItem(this.keys.refreshResultKey);
           if (result) {
             if (settled) return;
             settled = true;
@@ -298,11 +317,16 @@ export class TokenManager {
             try {
               const tokens = JSON.parse(result) as TokenPair;
               this.accessToken = tokens.accessToken;
-              this.storage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
+              this.storage.setItem(this.keys.refreshTokenKey, tokens.refreshToken);
               this.updateUser(tokens.accessToken);
               resolve(tokens.accessToken);
             } catch {
-              reject(new EdgeBaseError(0, 'Failed to parse refresh result'));
+              reject(
+                new EdgeBaseError(
+                  0,
+                  'Failed to parse the cross-tab auth refresh result. Clear local EdgeBase auth state and sign in again.',
+                ),
+              );
             }
           }
         }, 100);
@@ -321,16 +345,16 @@ export class TokenManager {
       });
     } else if (typeof window !== 'undefined') {
       // Fallback: use storage event
-      this.storage.setItem(REFRESH_RESULT_KEY, JSON.stringify(tokens));
+      this.storage.setItem(this.keys.refreshResultKey, JSON.stringify(tokens));
       // Clean up after other tabs have time to read
-      setTimeout(() => this.storage.removeItem(REFRESH_RESULT_KEY), 2000);
+      setTimeout(() => this.storage.removeItem(this.keys.refreshResultKey), 2000);
     }
   }
 
   /** Set tokens after successful auth */
   setTokens(tokens: TokenPair, userOverride?: TokenUser | null): void {
     this.accessToken = tokens.accessToken;
-    this.storage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
+    this.storage.setItem(this.keys.refreshTokenKey, tokens.refreshToken);
     this.setUserFromAccessToken(tokens.accessToken, userOverride);
   }
 
@@ -342,13 +366,13 @@ export class TokenManager {
 
   /** Get the stored refresh token (for signout) */
   getRefreshToken(): string | null {
-    return this.storage.getItem(REFRESH_TOKEN_KEY);
+    return this.storage.getItem(this.keys.refreshTokenKey);
   }
 
   /** Drop the current access token so the next request must re-authenticate or refresh. */
   invalidateAccessToken(): void {
     this.accessToken = null;
-    if (!this.storage.getItem(REFRESH_TOKEN_KEY)) {
+    if (!this.storage.getItem(this.keys.refreshTokenKey)) {
       this.cachedUser = null;
       this.emitAuthStateChange(null);
     }
@@ -367,8 +391,8 @@ export class TokenManager {
 
   private clearTokensInternal(shouldBroadcast: boolean): void {
     this.accessToken = null;
-    this.storage.removeItem(REFRESH_TOKEN_KEY);
-    this.storage.removeItem(REFRESH_LOCK_KEY);
+    this.storage.removeItem(this.keys.refreshTokenKey);
+    this.storage.removeItem(this.keys.refreshLockKey);
     this.cachedUser = null;
     this.emitAuthStateChange(null);
 

@@ -167,7 +167,14 @@ function verifyRealtimeDocs(baseDir) {
 
   const filtersContent = read(filtersPath);
   const relFilters = path.relative(workspaceRoot, filtersPath);
-  assert(filtersContent.includes('{ serverFilter: true }'), `${relFilters} must include serverFilter usage`);
+  const documentsJsDefault = filtersContent.includes('use server-side filtering by default')
+    || filtersContent.includes('uses server-side filtering automatically');
+  const documentsExplicitToggle = filtersContent.includes('{ serverFilter: true }')
+    || filtersContent.includes('{ serverFilter: false }');
+  assert(
+    documentsJsDefault && documentsExplicitToggle,
+    `${relFilters} must explain the JavaScript default and include an explicit serverFilter toggle`
+  );
 }
 
 function verifyNoLegacyTriggerSyntax(baseDir) {

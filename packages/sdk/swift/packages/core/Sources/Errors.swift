@@ -27,10 +27,12 @@ public struct EdgeBaseError: Error, LocalizedError, Sendable {
     /// Parse error from JSON response.
     public static func fromJSON(_ data: Data, statusCode: Int) -> EdgeBaseError {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return EdgeBaseError(statusCode: statusCode, message: "Unknown error")
+            return EdgeBaseError(statusCode: statusCode, message: "Request failed with HTTP \(statusCode) and a non-JSON error response.")
         }
 
-        let message = json["message"] as? String ?? json["error"] as? String ?? "Unknown error"
+        let message = json["message"] as? String
+            ?? json["error"] as? String
+            ?? "Request failed with HTTP \(statusCode) and no error message from the server."
 
         var details: [String: [String]]? = nil
         if let fieldErrors = json["details"] as? [String: Any] {

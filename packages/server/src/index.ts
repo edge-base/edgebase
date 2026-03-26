@@ -12,6 +12,14 @@ export { LogsDO } from './durable-objects/logs-do.js';
 
 let appPromise: Promise<Awaited<ReturnType<typeof buildApp>>> | null = null;
 
+function assetUnavailableMessage(
+  assetName: 'admin dashboard' | 'harness assets',
+): string {
+  const label = `${assetName[0].toUpperCase()}${assetName.slice(1)}`;
+  const verb = assetName === 'admin dashboard' ? 'is' : 'are';
+  return `${label} ${verb} not deployed for this worker. Deploy the assets bundle or configure ADMIN_ORIGIN if they are hosted elsewhere.`;
+}
+
 async function buildApp() {
   await ensureServerStartup();
 
@@ -179,7 +187,7 @@ async function buildApp() {
     }
 
     if (!env.ASSETS) {
-      return c.json({ code: 404, message: 'Admin dashboard not deployed.' }, 404);
+      return c.json({ code: 404, message: assetUnavailableMessage('admin dashboard') }, 404);
     }
 
     const url = new URL(c.req.url);
@@ -198,7 +206,7 @@ async function buildApp() {
       return env.ASSETS.fetch(c.req.raw);
     }
 
-    return c.json({ code: 404, message: 'Admin dashboard not deployed.' }, 404);
+    return c.json({ code: 404, message: assetUnavailableMessage('admin dashboard') }, 404);
   });
 
   app.get('/_app/*', async (c) => {
@@ -207,7 +215,7 @@ async function buildApp() {
       return env.ASSETS.fetch(c.req.raw);
     }
 
-    return c.json({ code: 404, message: 'Admin dashboard not deployed.' }, 404);
+    return c.json({ code: 404, message: assetUnavailableMessage('admin dashboard') }, 404);
   });
 
   app.get('/admin/*', async (c) => {
@@ -219,7 +227,7 @@ async function buildApp() {
     if (env.ASSETS) {
       return env.ASSETS.fetch(createAdminAssetRequest(c.req.raw));
     }
-    return c.json({ code: 404, message: 'Admin dashboard not deployed.' }, 404);
+    return c.json({ code: 404, message: assetUnavailableMessage('admin dashboard') }, 404);
   });
 
   app.get('/admin', async (c) => {
@@ -231,7 +239,7 @@ async function buildApp() {
     if (env.ASSETS) {
       return env.ASSETS.fetch(createAdminAssetRequest(c.req.raw));
     }
-    return c.json({ code: 404, message: 'Admin dashboard not deployed.' }, 404);
+    return c.json({ code: 404, message: assetUnavailableMessage('admin dashboard') }, 404);
   });
 
   app.get('/harness', (c) => {
@@ -243,7 +251,7 @@ async function buildApp() {
     if (env.ASSETS) {
       return env.ASSETS.fetch(c.req.raw);
     }
-    return c.json({ code: 404, message: 'Harness assets not deployed.' }, 404);
+    return c.json({ code: 404, message: assetUnavailableMessage('harness assets') }, 404);
   });
 
   app.get('/harness/assets/*', async (c) => {
@@ -251,7 +259,7 @@ async function buildApp() {
     if (env.ASSETS) {
       return env.ASSETS.fetch(c.req.raw);
     }
-    return c.json({ code: 404, message: 'Harness assets not deployed.' }, 404);
+    return c.json({ code: 404, message: assetUnavailableMessage('harness assets') }, 404);
   });
 
   app.get('/harness/*', (c) => {
@@ -268,7 +276,10 @@ async function buildApp() {
   });
 
   app.notFound((c) => {
-    return c.json({ code: 404, message: 'Not found.' }, 404);
+    return c.json({
+      code: 404,
+      message: `Path '${new URL(c.req.url).pathname}' was not found on this EdgeBase server.`,
+    }, 404);
   });
 
   app.onError((err, c) => {
@@ -302,7 +313,10 @@ async function buildApp() {
       return c.json(body, e.code as number as 400);
     }
     console.error('Unhandled error:', err);
-    return c.json({ code: 500, message: 'Internal server error.' }, 500);
+    return c.json({
+      code: 500,
+      message: `Internal server error while handling '${new URL(c.req.url).pathname}'. Check the worker logs for the original exception.`,
+    }, 500);
   });
 
   return app;

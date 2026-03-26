@@ -226,7 +226,7 @@ module EdgebaseCore
         rescue EdgeBaseError
           raise
         rescue StandardError
-          raise EdgeBaseError.new(code, response.body || "Unknown error")
+          raise EdgeBaseError.new(code, response.body || "Request failed with HTTP #{code} and a non-JSON error response.")
         end
       end
 

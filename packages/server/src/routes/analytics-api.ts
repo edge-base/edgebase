@@ -29,10 +29,10 @@ function requireServiceKey(c: { env: Env; req: { header: (name: string) => strin
   const constraintCtx = buildConstraintCtx(c.env as never, c.req);
   const { result } = validateKey(provided, 'analytics:*:*:*', config, c.env as never, undefined, constraintCtx);
   if (result === 'missing') {
-    throw new EdgeBaseError(403, 'Service Key required for analytics queries.');
+    throw new EdgeBaseError(403, 'X-EdgeBase-Service-Key is required for analytics queries.');
   }
   if (result === 'invalid') {
-    throw new EdgeBaseError(401, 'Invalid Service Key.');
+    throw new EdgeBaseError(401, 'Invalid X-EdgeBase-Service-Key for analytics queries.');
   }
 }
 
@@ -107,7 +107,7 @@ analyticsApi.openapi(trackEvents, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    throw new EdgeBaseError(400, 'Invalid JSON body.');
+    throw new EdgeBaseError(400, 'Invalid JSON body for analytics tracking. Send application/json with { events: [...] }.');
   }
 
   const events = body.events;

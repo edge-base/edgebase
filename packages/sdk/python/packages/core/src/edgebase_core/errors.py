@@ -27,7 +27,9 @@ class EdgeBaseError(Exception):
         """Create from API JSON response."""
         return cls(
             status_code=status_code,
-            message=data.get("message", "Unknown error"),
+            message=data.get("message")
+            or data.get("error")
+            or f"Request failed with HTTP {status_code} and no error message from the server.",
             details=data.get("details"),
         )
 

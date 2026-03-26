@@ -117,6 +117,38 @@ function metadataExceedsByteLimit(metadata: Record<string, unknown> | undefined)
   return utf8Encoder.encode(JSON.stringify(metadata)).length > MAX_METADATA_BYTES;
 }
 
+function invalidPushJsonMessage(context: string): string {
+  return `Invalid JSON body for ${context}. Send application/json with the expected fields.`;
+}
+
+function pushAuthRequiredMessage(context: string): string {
+  return `Authentication required. Sign in before trying to ${context}.`;
+}
+
+function pushServiceKeyRequiredMessage(context: string): string {
+  return `X-EdgeBase-Service-Key is required to ${context}.`;
+}
+
+function pushInvalidServiceKeyMessage(context: string): string {
+  return `Invalid X-EdgeBase-Service-Key for ${context}.`;
+}
+
+function pushNotConfiguredMessage(action: string): string {
+  return `Push notifications are not configured. Add push.fcm config with FCM credentials before trying to ${action}.`;
+}
+
+function pushRequiredFieldMessage(field: string, context: string): string {
+  return `Missing required field '${field}' for ${context}.`;
+}
+
+function pushMetadataTooLargeMessage(context: string): string {
+  return `metadata exceeds the ${MAX_METADATA_BYTES}-byte limit for ${context}.`;
+}
+
+function pushRuleRejectedMessage(context: string): string {
+  return `Push send denied by push access rules for ${context}.`;
+}
+
 function getSharedMirrorDb(env: Env): D1Database | null {
   const config = parseConfig(env);
   if (!shouldRouteToD1('shared', config)) return null;
@@ -316,7 +348,7 @@ const pushRegister = createRoute({
 pushRoute.openapi(pushRegister, async (c) => {
   const auth = c.get('auth' as never) as { id: string } | null | undefined;
   if (!auth?.id) {
-    return c.json({ code: 401, message: 'Authentication required to register push token' }, 401);
+    return c.json({ code: 401, message: pushAuthRequiredMessage('register a push token') }, 401);
   }
 
   let body: {
@@ -329,23 +361,23 @@ pushRoute.openapi(pushRegister, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidPushJsonMessage('push token registration') }, 400);
   }
 
   const { deviceId, token, platform } = body;
   if (!deviceId || typeof deviceId !== 'string') {
-    return c.json({ code: 400, message: 'deviceId is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('deviceId', 'push token registration') }, 400);
   }
   if (!token || typeof token !== 'string') {
-    return c.json({ code: 400, message: 'token is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('token', 'push token registration') }, 400);
   }
   if (!platform || typeof platform !== 'string') {
-    return c.json({ code: 400, message: 'platform is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('platform', 'push token registration') }, 400);
   }
 
   // Validate metadata size (≤1KB)
   if (metadataExceedsByteLimit(body.metadata)) {
-    return c.json({ code: 400, message: `metadata exceeds ${MAX_METADATA_BYTES} byte limit` }, 400);
+    return c.json({ code: 400, message: pushMetadataTooLargeMessage('push token registration') }, 400);
   }
 
   // All tokens are FCM Registration Tokens — store directly
@@ -394,18 +426,18 @@ const pushUnregister = createRoute({
 pushRoute.openapi(pushUnregister, async (c) => {
   const auth = c.get('auth' as never) as { id: string } | null | undefined;
   if (!auth?.id) {
-    return c.json({ code: 401, message: 'Authentication required' }, 401);
+    return c.json({ code: 401, message: pushAuthRequiredMessage('unregister a push token') }, 401);
   }
 
   let body: { deviceId?: string };
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidPushJsonMessage('push token unregistration') }, 400);
   }
 
   if (!body.deviceId || typeof body.deviceId !== 'string') {
-    return c.json({ code: 400, message: 'deviceId is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('deviceId', 'push token unregistration') }, 400);
   }
 
   // Get the FCM token from user's device array BEFORE removing
@@ -461,30 +493,30 @@ pushRoute.openapi(pushSend, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required for push send' }, 403);
+    return c.json({ code: 403, message: pushServiceKeyRequiredMessage('send a push notification') }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: pushInvalidServiceKeyMessage('push notification send') }, 401);
   }
 
   const provider = createPushProvider(config.push, c.env);
   if (!provider) {
-    return c.json({ code: 503, message: 'Push notifications are not configured. Add push.fcm config with FCM credentials.' }, 503);
+    return c.json({ code: 503, message: pushNotConfiguredMessage('send a push notification') }, 503);
   }
 
   let body: { userId?: string; payload?: PushPayload };
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidPushJsonMessage('push send') }, 400);
   }
 
   let { userId, payload } = body;
   if (!userId || typeof userId !== 'string') {
-    return c.json({ code: 400, message: 'userId is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('userId', 'push send') }, 400);
   }
   if (!payload || typeof payload !== 'object') {
-    return c.json({ code: 400, message: 'payload is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('payload', 'push send') }, 400);
   }
 
   ({ userId, payload } = await runBeforeSendHook(c, auth, {
@@ -495,12 +527,12 @@ pushRoute.openapi(pushSend, async (c) => {
   userId = asNonEmptyString(userId);
   payload = asPushPayload(payload);
   if (!userId || !payload) {
-    return c.json({ code: 400, message: 'beforeSend must return a valid userId and payload' }, 400);
+    return c.json({ code: 400, message: 'push.hooks.beforeSend must return a valid userId and payload when overriding send-by-user delivery.' }, 400);
   }
 
   const payloadStr = JSON.stringify(payload);
   if (payloadStr.length > 4096) {
-    return c.json({ code: 400, message: 'Payload exceeds 4KB limit' }, 400);
+    return c.json({ code: 400, message: 'Push payload exceeds the 4KB FCM limit for send-by-user delivery.' }, 400);
   }
 
   // Evaluate push send rule (if defined)
@@ -508,10 +540,10 @@ pushRoute.openapi(pushSend, async (c) => {
   if (sendRule) {
     try {
       if (!sendRule(auth, { userId })) {
-        return c.json({ code: 403, message: 'Denied by push send rule' }, 403);
+        return c.json({ code: 403, message: pushRuleRejectedMessage(`user '${userId}'`) }, 403);
       }
     } catch {
-      return c.json({ code: 403, message: 'Denied by push send rule' }, 403);
+      return c.json({ code: 403, message: pushRuleRejectedMessage(`user '${userId}'`) }, 403);
     }
   }
 
@@ -556,33 +588,33 @@ pushRoute.openapi(pushSendMany, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required for push send' }, 403);
+    return c.json({ code: 403, message: pushServiceKeyRequiredMessage('send push notifications to multiple users') }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: pushInvalidServiceKeyMessage('multi-user push send') }, 401);
   }
 
   const provider = createPushProvider(config.push, c.env);
   if (!provider) {
-    return c.json({ code: 503, message: 'Push notifications are not configured. Add push.fcm config with FCM credentials.' }, 503);
+    return c.json({ code: 503, message: pushNotConfiguredMessage('send push notifications to multiple users') }, 503);
   }
 
   let body: { userIds?: string[]; payload?: PushPayload };
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidPushJsonMessage('multi-user push send') }, 400);
   }
 
   let { userIds, payload } = body;
   if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
-    return c.json({ code: 400, message: 'userIds array is required and must not be empty' }, 400);
+    return c.json({ code: 400, message: "Missing required field 'userIds' for multi-user push send, or the array was empty." }, 400);
   }
   if (userIds.length > 10000) {
-    return c.json({ code: 400, message: 'userIds array must not exceed 10,000 items' }, 400);
+    return c.json({ code: 400, message: 'userIds for multi-user push send must not exceed 10,000 entries.' }, 400);
   }
   if (!payload || typeof payload !== 'object') {
-    return c.json({ code: 400, message: 'payload is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('payload', 'multi-user push send') }, 400);
   }
 
   ({ userIds, payload } = await runBeforeSendHook(c, auth, {
@@ -593,12 +625,12 @@ pushRoute.openapi(pushSendMany, async (c) => {
   userIds = asStringArray(userIds);
   payload = asPushPayload(payload);
   if (!userIds || userIds.length === 0 || !payload) {
-    return c.json({ code: 400, message: 'beforeSend must return userIds[] and payload' }, 400);
+    return c.json({ code: 400, message: 'push.hooks.beforeSend must return a non-empty userIds array and payload when overriding multi-user delivery.' }, 400);
   }
 
   const payloadStr = JSON.stringify(payload);
   if (payloadStr.length > 4096) {
-    return c.json({ code: 400, message: 'Payload exceeds 4KB limit' }, 400);
+    return c.json({ code: 400, message: 'Push payload exceeds the 4KB FCM limit for multi-user delivery.' }, 400);
   }
 
   // Evaluate push send rule per userId (if defined)
@@ -613,7 +645,7 @@ pushRoute.openapi(pushSendMany, async (c) => {
       }
     });
     if (allowedUserIds.length === 0) {
-      return c.json({ code: 403, message: 'Denied by push send rule' }, 403);
+      return c.json({ code: 403, message: pushRuleRejectedMessage('the requested user set') }, 403);
     }
   }
 
@@ -727,29 +759,29 @@ pushRoute.openapi(pushSendToToken, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required for push send' }, 403);
+    return c.json({ code: 403, message: pushServiceKeyRequiredMessage('send a push notification to a token') }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: pushInvalidServiceKeyMessage('direct token push send') }, 401);
   }
 
   const provider = createPushProvider(config.push, c.env);
   if (!provider) {
-    return c.json({ code: 503, message: 'Push notifications are not configured. Add push.fcm config with FCM credentials.' }, 503);
+    return c.json({ code: 503, message: pushNotConfiguredMessage('send a push notification to a token') }, 503);
   }
 
   let body: { token?: string; platform?: string; payload?: PushPayload };
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidPushJsonMessage('direct token push send') }, 400);
   }
 
   if (!body.token || typeof body.token !== 'string') {
-    return c.json({ code: 400, message: 'token is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('token', 'direct token push send') }, 400);
   }
   if (!body.payload || typeof body.payload !== 'object') {
-    return c.json({ code: 400, message: 'payload is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('payload', 'direct token push send') }, 400);
   }
 
   const hookInput = await runBeforeSendHook(c, auth, {
@@ -762,12 +794,12 @@ pushRoute.openapi(pushSendToToken, async (c) => {
   const platform = asNonEmptyString(hookInput.platform) ?? 'web';
   const payload = asPushPayload(hookInput.payload);
   if (!token || !payload) {
-    return c.json({ code: 400, message: 'beforeSend must return token and payload' }, 400);
+    return c.json({ code: 400, message: 'push.hooks.beforeSend must return a token and payload when overriding direct token delivery.' }, 400);
   }
 
   const payloadStr = JSON.stringify(payload);
   if (payloadStr.length > 4096) {
-    return c.json({ code: 400, message: 'Payload exceeds 4KB limit' }, 400);
+    return c.json({ code: 400, message: 'Push payload exceeds the 4KB FCM limit for direct token delivery.' }, 400);
   }
 
   const result = await provider.send({
@@ -852,29 +884,29 @@ pushRoute.openapi(pushSendToTopic, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required for push send' }, 403);
+    return c.json({ code: 403, message: pushServiceKeyRequiredMessage('send a push notification to a topic') }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: pushInvalidServiceKeyMessage('topic push send') }, 401);
   }
 
   const provider = createPushProvider(config.push, c.env);
   if (!provider) {
-    return c.json({ code: 503, message: 'Push notifications are not configured. Add push.fcm config with FCM credentials.' }, 503);
+    return c.json({ code: 503, message: pushNotConfiguredMessage('send a push notification to a topic') }, 503);
   }
 
   let body: { topic?: string; payload?: PushPayload };
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidPushJsonMessage('topic push send') }, 400);
   }
 
   if (!body.topic || typeof body.topic !== 'string') {
-    return c.json({ code: 400, message: 'topic is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('topic', 'topic push send') }, 400);
   }
   if (!body.payload || typeof body.payload !== 'object') {
-    return c.json({ code: 400, message: 'payload is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('payload', 'topic push send') }, 400);
   }
 
   const hookInput = await runBeforeSendHook(c, auth, {
@@ -885,7 +917,7 @@ pushRoute.openapi(pushSendToTopic, async (c) => {
   const topic = asNonEmptyString(hookInput.topic);
   const payload = asPushPayload(hookInput.payload);
   if (!topic || !payload) {
-    return c.json({ code: 400, message: 'beforeSend must return topic and payload' }, 400);
+    return c.json({ code: 400, message: 'push.hooks.beforeSend must return a topic and payload when overriding topic delivery.' }, 400);
   }
   const topicInput: PushSendInput = { kind: 'topic', topic, payload: payload as Record<string, unknown> };
   const result = await provider.sendToTopic(topic, payload);
@@ -943,26 +975,26 @@ pushRoute.openapi(pushBroadcast, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required for push send' }, 403);
+    return c.json({ code: 403, message: pushServiceKeyRequiredMessage('broadcast a push notification') }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: pushInvalidServiceKeyMessage('push broadcast') }, 401);
   }
 
   const provider = createPushProvider(config.push, c.env);
   if (!provider) {
-    return c.json({ code: 503, message: 'Push notifications are not configured. Add push.fcm config with FCM credentials.' }, 503);
+    return c.json({ code: 503, message: pushNotConfiguredMessage('broadcast a push notification') }, 503);
   }
 
   let body: { payload?: PushPayload };
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidPushJsonMessage('push broadcast') }, 400);
   }
 
   if (!body.payload || typeof body.payload !== 'object') {
-    return c.json({ code: 400, message: 'payload is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('payload', 'push broadcast') }, 400);
   }
 
   const hookInput = await runBeforeSendHook(c, auth, {
@@ -971,7 +1003,7 @@ pushRoute.openapi(pushBroadcast, async (c) => {
   });
   const payload = asPushPayload(hookInput.payload);
   if (!payload) {
-    return c.json({ code: 400, message: 'beforeSend must return payload' }, 400);
+    return c.json({ code: 400, message: 'push.hooks.beforeSend must return a payload object when overriding broadcast delivery.' }, 400);
   }
   const broadcastInput: PushSendInput = { kind: 'broadcast', payload: payload as Record<string, unknown> };
   const result = await provider.broadcast(payload);
@@ -1018,24 +1050,24 @@ const pushTopicSubscribe = createRoute({
 pushRoute.openapi(pushTopicSubscribe, async (c) => {
   const auth = c.get('auth' as never) as { id: string } | null | undefined;
   if (!auth?.id) {
-    return c.json({ code: 401, message: 'Authentication required' }, 401);
+    return c.json({ code: 401, message: pushAuthRequiredMessage('subscribe push tokens to a topic') }, 401);
   }
 
   const config = parseConfig(c.env);
   const provider = createPushProvider(config.push, c.env);
   if (!provider) {
-    return c.json({ code: 503, message: 'Push notifications are not configured.' }, 503);
+    return c.json({ code: 503, message: pushNotConfiguredMessage('subscribe push tokens to a topic') }, 503);
   }
 
   let body: { topic?: string };
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidPushJsonMessage('push topic subscription') }, 400);
   }
 
   if (!body.topic || typeof body.topic !== 'string') {
-    return c.json({ code: 400, message: 'topic is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('topic', 'push topic subscription') }, 400);
   }
 
   // Get user's devices and subscribe all tokens to the topic
@@ -1080,24 +1112,24 @@ const pushTopicUnsubscribe = createRoute({
 pushRoute.openapi(pushTopicUnsubscribe, async (c) => {
   const auth = c.get('auth' as never) as { id: string } | null | undefined;
   if (!auth?.id) {
-    return c.json({ code: 401, message: 'Authentication required' }, 401);
+    return c.json({ code: 401, message: pushAuthRequiredMessage('unsubscribe push tokens from a topic') }, 401);
   }
 
   const config = parseConfig(c.env);
   const provider = createPushProvider(config.push, c.env);
   if (!provider) {
-    return c.json({ code: 503, message: 'Push notifications are not configured.' }, 503);
+    return c.json({ code: 503, message: pushNotConfiguredMessage('unsubscribe push tokens from a topic') }, 503);
   }
 
   let body: { topic?: string };
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidPushJsonMessage('push topic unsubscription') }, 400);
   }
 
   if (!body.topic || typeof body.topic !== 'string') {
-    return c.json({ code: 400, message: 'topic is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('topic', 'push topic unsubscription') }, 400);
   }
 
   const devices = await getDevicesForUser(await getPushTokenStore(c), auth.id);
@@ -1150,15 +1182,15 @@ pushRoute.openapi(pushLogsRoute, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required for push logs' }, 403);
+    return c.json({ code: 403, message: pushServiceKeyRequiredMessage('read push notification logs') }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: pushInvalidServiceKeyMessage('push log reads') }, 401);
   }
 
   const userId = c.req.query('userId');
   if (!userId) {
-    return c.json({ code: 400, message: 'userId query parameter is required' }, 400);
+    return c.json({ code: 400, message: "Missing required query parameter 'userId' for push log reads." }, 400);
   }
 
   const limitStr = c.req.query('limit');
@@ -1201,15 +1233,15 @@ pushRoute.openapi(pushTokensRoute, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required for push tokens' }, 403);
+    return c.json({ code: 403, message: pushServiceKeyRequiredMessage('read registered push tokens') }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: pushInvalidServiceKeyMessage('push token reads') }, 401);
   }
 
   const userId = c.req.query('userId');
   if (!userId) {
-    return c.json({ code: 400, message: 'userId query parameter is required' }, 400);
+    return c.json({ code: 400, message: "Missing required query parameter 'userId' for push token reads." }, 400);
   }
 
   const devices = await getDevicesForUser(await getPushTokenStore(c), userId);
@@ -1259,26 +1291,31 @@ pushRoute.openapi(putPushTokens, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required' }, 403);
+    return c.json({ code: 403, message: pushServiceKeyRequiredMessage('upsert a push token') }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: pushInvalidServiceKeyMessage('push token upsert') }, 401);
   }
 
-  const body = await c.req.json<{
+  let body: {
     userId?: string;
     deviceId?: string;
     token?: string;
     platform?: string;
     deviceInfo?: { name?: string; osVersion?: string; appVersion?: string; locale?: string };
     metadata?: Record<string, unknown>;
-  }>();
+  };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ code: 400, message: invalidPushJsonMessage('push token upsert') }, 400);
+  }
   if (!body.userId || !body.deviceId || !body.token || !body.platform) {
-    return c.json({ code: 400, message: 'userId, deviceId, token, and platform are required' }, 400);
+    return c.json({ code: 400, message: "Missing required fields for push token upsert. Expected 'userId', 'deviceId', 'token', and 'platform'." }, 400);
   }
 
   if (metadataExceedsByteLimit(body.metadata)) {
-    return c.json({ code: 400, message: `metadata exceeds ${MAX_METADATA_BYTES} byte limit` }, 400);
+    return c.json({ code: 400, message: pushMetadataTooLargeMessage('push token upsert') }, 400);
   }
 
   await registerToken(
@@ -1344,29 +1381,34 @@ pushRoute.openapi(patchPushTokens, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required' }, 403);
+    return c.json({ code: 403, message: pushServiceKeyRequiredMessage('update push token metadata') }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: pushInvalidServiceKeyMessage('push token metadata updates') }, 401);
   }
 
-  const body = await c.req.json<{ userId?: string; deviceId?: string; metadata?: Record<string, unknown> }>();
+  let body: { userId?: string; deviceId?: string; metadata?: Record<string, unknown> };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ code: 400, message: invalidPushJsonMessage('push token metadata update') }, 400);
+  }
   if (!body.userId || !body.deviceId) {
-    return c.json({ code: 400, message: 'userId and deviceId are required' }, 400);
+    return c.json({ code: 400, message: "Missing required fields for push token metadata update. Expected 'userId' and 'deviceId'." }, 400);
   }
   if (!body.metadata) {
-    return c.json({ code: 400, message: 'metadata is required' }, 400);
+    return c.json({ code: 400, message: pushRequiredFieldMessage('metadata', 'push token metadata update') }, 400);
   }
 
   if (metadataExceedsByteLimit(body.metadata)) {
-    return c.json({ code: 400, message: `metadata exceeds ${MAX_METADATA_BYTES} byte limit` }, 400);
+    return c.json({ code: 400, message: pushMetadataTooLargeMessage('push token metadata update') }, 400);
   }
 
   const pushStore = await getPushTokenStore(c);
   const devices = await getDevicesForUser(pushStore, body.userId);
   const device = devices.find(d => d.deviceId === body.deviceId);
   if (!device) {
-    return c.json({ code: 404, message: 'Device not found' }, 404);
+    return c.json({ code: 404, message: `Push device '${body.deviceId}' for user '${body.userId}' was not found.` }, 404);
   }
 
   device.metadata = body.metadata;

@@ -39,6 +39,10 @@ import { executeProviderAwareSql } from '../lib/provider-aware-sql.js';
 
 export const sqlRoute = new OpenAPIHono<HonoEnv>({ defaultHook: zodDefaultHook });
 
+function invalidSqlJsonMessage(): string {
+  return 'Invalid JSON body for SQL execution. Send application/json with { namespace, sql, params? }.';
+}
+
 /**
  * POST /api/sql
  * Body: { namespace: string, id?: string, sql: string, params?: unknown[] }
@@ -81,19 +85,19 @@ sqlRoute.openapi(executeSql, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidSqlJsonMessage() }, 400);
   }
 
   const { namespace, id, sql, params } = body;
 
   if (!namespace || typeof namespace !== 'string') {
-    return c.json({ code: 400, message: 'namespace is required' }, 400);
+    return c.json({ code: 400, message: "Missing required field 'namespace' for SQL execution." }, 400);
   }
   if (id !== undefined && id !== null && typeof id !== 'string') {
-    return c.json({ code: 400, message: 'id must be a string' }, 400);
+    return c.json({ code: 400, message: "Field 'id' must be a string when provided for SQL execution." }, 400);
   }
   if (!sql || typeof sql !== 'string') {
-    return c.json({ code: 400, message: 'sql is required' }, 400);
+    return c.json({ code: 400, message: "Missing required field 'sql' for SQL execution." }, 400);
   }
 
   // Validate namespace is declared in databases config (§1)
@@ -124,10 +128,10 @@ sqlRoute.openapi(executeSql, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required to execute SQL' }, 403);
+    return c.json({ code: 403, message: `X-EdgeBase-Service-Key is required to execute SQL for database namespace '${namespace}'.` }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: `Invalid X-EdgeBase-Service-Key for SQL execution in database namespace '${namespace}'.` }, 401);
   }
 
   try {

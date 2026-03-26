@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastError, toastSuccess } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
 	import { functionsDocs } from '$lib/docs-links';
@@ -44,7 +45,7 @@
 			const res = await api.fetch<{ functions: FunctionEntry[] }>('data/functions');
 			functions = res.functions ?? [];
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to load functions');
+			toastError(describeActionError(err, 'Failed to load functions.'));
 			functions = [];
 		} finally {
 			loading = false;
@@ -135,7 +136,11 @@
 			response = {
 				status: 0,
 				statusText: 'Network Error',
-				body: err instanceof Error ? err.message : 'Request failed',
+				body: describeActionError(
+					err,
+					`Failed to execute /${selectedFn.path}.`,
+					{ hint: 'Make sure the EdgeBase server is running and the function route exists.' },
+				),
 				time: elapsed,
 				headers: {},
 			};

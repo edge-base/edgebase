@@ -173,6 +173,12 @@ function createTransport(options?: {
   currentMember?: RoomMember | null;
   members?: RoomMember[];
   mediaMembers?: RoomMediaMember[];
+  checkConnection?: () => Promise<{
+    ok: boolean;
+    type: string;
+    category: string;
+    message: string;
+  }>;
   mediaDevices?: {
     getUserMedia?: (constraints?: MediaStreamConstraints) => Promise<{
       getAudioTracks(): MediaStreamTrack[];
@@ -237,6 +243,12 @@ function createTransport(options?: {
       onJoin: (handler: (member: RoomMember) => void) => memberJoin.subscribe(handler),
       onLeave: (handler: (member: RoomMember, reason: RoomMemberLeaveReason) => void) => memberLeave.subscribe(handler),
     },
+    checkConnection: options?.checkConnection ?? vi.fn(async () => ({
+      ok: true,
+      type: 'room_connect_ready',
+      category: 'ready',
+      message: 'Room WebSocket preflight passed',
+    })),
     signals: {
       sendTo: vi.fn(async () => {}),
       on: (event: string, handler: (payload: unknown, meta: RoomSignalMeta) => void) =>
@@ -296,6 +308,98 @@ function createTransport(options?: {
 }
 
 describe('RoomP2PMediaTransport', () => {
+  it('reports readiness with room preflight and TURN diagnostics', async () => {
+    const { transport } = createTransport({
+      currentMember: {
+        memberId: 'member-1',
+        userId: 'member-1',
+        state: {},
+      },
+      checkConnection: vi.fn(async () => ({
+        ok: true,
+        type: 'room_connect_ready',
+        category: 'ready',
+        message: 'Room WebSocket preflight passed',
+      })),
+      realtimeIceServers: vi.fn(async () => ({
+        iceServers: [{ urls: 'turn:turn.example.com:3478', username: 'u', credential: 'p' }],
+      })),
+    });
+
+    await expect(transport.getCapabilities()).resolves.toMatchObject({
+      provider: 'p2p',
+      canConnect: true,
+      joined: true,
+      currentMemberId: 'member-1',
+      room: {
+        ok: true,
+        type: 'room_connect_ready',
+      },
+      turn: {
+        requested: true,
+        available: true,
+        iceServerCount: 1,
+      },
+    });
+  });
+
+  it('treats room connect-check statuses as advisory once the member has already joined', async () => {
+    const { transport } = createTransport({
+      currentMember: {
+        memberId: 'member-1',
+        userId: 'member-1',
+        state: {},
+      },
+      checkConnection: vi.fn(async () => ({
+        ok: false,
+        type: 'room_connect_rate_limited',
+        category: 'rate_limit',
+        message: 'Too many pending Room connections',
+      })),
+    });
+
+    await expect(transport.getCapabilities()).resolves.toMatchObject({
+      canConnect: true,
+      room: {
+        ok: false,
+        type: 'room_connect_rate_limited',
+      },
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'room_connect_rate_limited',
+          fatal: false,
+        }),
+      ]),
+    });
+
+    await expect(transport.connect()).resolves.toBe('member-1');
+  });
+
+  it('treats room connect-check fetch errors as advisory once the member has already joined', async () => {
+    const { transport } = createTransport({
+      currentMember: {
+        memberId: 'member-1',
+        userId: 'member-1',
+        state: {},
+      },
+      checkConnection: vi.fn(async () => {
+        throw new Error('service unavailable');
+      }),
+    });
+
+    await expect(transport.getCapabilities()).resolves.toMatchObject({
+      canConnect: true,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'room_connect_check_failed',
+          fatal: false,
+        }),
+      ]),
+    });
+
+    await expect(transport.connect()).resolves.toBe('member-1');
+  });
+
   it('requires the room to be joined before connecting', async () => {
     vi.useFakeTimers();
     const { transport } = createTransport();

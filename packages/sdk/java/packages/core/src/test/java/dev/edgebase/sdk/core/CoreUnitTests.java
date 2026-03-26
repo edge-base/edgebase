@@ -224,7 +224,7 @@ class EdgeBaseErrorTest {
     void test_fromJson_missing_message_defaults() {
         Map<String, Object> json = new HashMap<>();
         EdgeBaseError err = EdgeBaseError.fromJson(json, 500);
-        assertEquals("Unknown error", err.getMessage());
+        assertEquals("Request failed with HTTP 500 and no error message from the server.", err.getMessage());
     }
 
     @Test

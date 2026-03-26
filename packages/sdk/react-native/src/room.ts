@@ -9,7 +9,7 @@
  *   - namespace + roomId identification (replaces single roomId)
  */
 import type { TokenManager, TokenUser } from './token-manager.js';
-import { EdgeBaseError, createSubscription, type Subscription } from '@edge-base/core';
+import { EdgeBaseError, createSubscription, networkError, parseErrorResponse, type Subscription } from '@edge-base/core';
 import { refreshAccessToken } from './auth-refresh.js';
 import {
   RoomCloudflareMediaTransport,
@@ -516,7 +516,7 @@ export class RoomClient {
       (refreshToken) => refreshAccessToken(this.baseUrl, refreshToken),
     );
     if (!token) {
-      throw new EdgeBaseError(401, 'Authentication required');
+      throw new EdgeBaseError(401, 'Authentication required before calling room media APIs. Sign in and join the room first.');
     }
 
     const url = new URL(`${this.baseUrl.replace(/\/$/, '')}/api/room/media/${providerPath}/${path}`);
@@ -553,11 +553,29 @@ export class RoomClient {
     roomId: string,
   ): Promise<Record<string, unknown>> {
     const url = `${baseUrl.replace(/\/$/, '')}/api/room/metadata?namespace=${encodeURIComponent(namespace)}&id=${encodeURIComponent(roomId)}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new EdgeBaseError(res.status, `Failed to get room metadata: ${res.statusText}`);
+    let res: Response;
+
+    try {
+      res = await fetch(url);
+    } catch (error) {
+      throw networkError(
+        `Room metadata request could not reach ${url}. Make sure the EdgeBase server is running and reachable.`,
+        { cause: error },
+      );
     }
-    return res.json() as Promise<Record<string, unknown>>;
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const parsed = parseErrorResponse(res.status, data);
+      if (data && typeof data === 'object' && typeof (data as { message?: unknown }).message === 'string') {
+        throw parsed;
+      }
+      throw new EdgeBaseError(
+        res.status,
+        `Failed to load room metadata for '${roomId}' in namespace '${namespace}'. ${parsed.message}`,
+      );
+    }
+    return (data ?? {}) as Record<string, unknown>;
   }
 
   // ─── Connection Lifecycle ───
@@ -649,7 +667,7 @@ export class RoomClient {
    */
   async send(actionType: string, payload?: unknown): Promise<unknown> {
     if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, 'Not connected to room');
+      throw new EdgeBaseError(400, "Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.");
     }
 
     const requestId = generateRequestId();
@@ -874,7 +892,7 @@ export class RoomClient {
     options?: { includeSelf?: boolean; memberId?: string },
   ): Promise<void> {
     if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, 'Not connected to room');
+      throw new EdgeBaseError(400, "Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.");
     }
 
     const requestId = generateRequestId();
@@ -913,7 +931,7 @@ export class RoomClient {
     payload: { type: 'member_state'; state: Record<string, unknown> } | { type: 'member_state_clear' },
   ): Promise<void> {
     if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, 'Not connected to room');
+      throw new EdgeBaseError(400, "Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.");
     }
 
     const requestId = generateRequestId();
@@ -934,7 +952,7 @@ export class RoomClient {
     payload?: Record<string, unknown>,
   ): Promise<void> {
     if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, 'Not connected to room');
+      throw new EdgeBaseError(400, "Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.");
     }
 
     const requestId = generateRequestId();
@@ -961,7 +979,7 @@ export class RoomClient {
     payload?: Record<string, unknown>,
   ): Promise<void> {
     if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, 'Not connected to room');
+      throw new EdgeBaseError(400, "Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.");
     }
 
     const requestId = generateRequestId();

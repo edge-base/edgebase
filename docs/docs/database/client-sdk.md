@@ -1440,28 +1440,22 @@ const unsubscribe = client.db('app').table('posts')
   .where('status', '==', 'published')
   .orderBy('createdAt', 'desc')
   .limit(20)
-  .onSnapshot((event) => {
-    if (event.type === 'added') {
-      console.log('New:', event.data);
-    } else if (event.type === 'modified') {
-      console.log('Updated:', event.data);
-    } else if (event.type === 'removed') {
-      console.log('Deleted:', event.docId);
-    }
+  .onSnapshot((snapshot) => {
+    console.log('Current rows:', snapshot.items);
+    console.log('Just added:', snapshot.changes.added);
   });
 
 unsubscribe(); // Stop listening
 ```
 
-### Event Structure
+### Table Snapshot Structure
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `type` | `'added' \| 'modified' \| 'removed'` | Change type |
-| `table` | `string` | Table name |
-| `docId` | `string` | Record ID |
-| `data` | `T \| null` | Record data (`null` for removed) |
-| `timestamp` | `string` | ISO 8601 timestamp |
+| `items` | `T[]` | Current rows visible to the subscription |
+| `changes.added` | `T[]` | Rows newly added to the current result |
+| `changes.modified` | `T[]` | Rows updated but still visible |
+| `changes.removed` | `T[]` | Rows removed or no longer matching |
 
 ### Error Handling
 

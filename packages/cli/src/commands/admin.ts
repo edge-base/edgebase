@@ -366,9 +366,10 @@ adminCommand
         const data = await resp.json() as { ok?: boolean; message?: string; code?: number };
 
         if (!resp.ok || !data.ok) {
+          const failureMessage = data.message || 'Unknown admin API error. Check the worker response or logs.';
           raiseCliError({
             code: 'admin_password_reset_failed',
-            message: `Failed: ${data.message || 'Unknown error'} (${data.code || resp.status})`,
+            message: `Failed: ${failureMessage} (${data.code || resp.status})`,
             hint: 'Check that the Worker is reachable and the service key has admin privileges.',
           });
         }

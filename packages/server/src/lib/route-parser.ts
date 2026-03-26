@@ -360,6 +360,9 @@ export function parseRoute(method: string, path: string): ParsedRoute {
       if (segments[2] === 'metadata') {
         result.subcategory = 'metadata';
         result.operation = 'getMetadata';
+      } else if (segments[2] === 'summary') {
+        result.subcategory = 'summary';
+        result.operation = 'getSummary';
       } else if (segments[2] === 'connect-check') {
         result.subcategory = 'connect-check';
         result.operation = 'connectCheck';

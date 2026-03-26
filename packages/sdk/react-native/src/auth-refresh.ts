@@ -1,4 +1,4 @@
-import { EdgeBaseError } from '@edge-base/core';
+import { EdgeBaseError, networkError, parseErrorResponse } from '@edge-base/core';
 
 interface RefreshResponse {
   accessToken?: string;
@@ -10,27 +10,25 @@ export async function refreshAccessToken(baseUrl: string, refreshToken: string):
   accessToken: string;
   refreshToken: string;
 }> {
+  const refreshUrl = `${baseUrl.replace(/\/$/, '')}/api/auth/refresh`;
   let response: Response;
 
   try {
-    response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/auth/refresh`, {
+    response = await fetch(refreshUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
     });
   } catch (error) {
-    throw new EdgeBaseError(
-      0,
-      `Network error: ${error instanceof Error ? error.message : 'Failed to refresh access token.'}`,
+    throw networkError(
+      `Auth session refresh could not reach ${refreshUrl}. Make sure the EdgeBase server is running and reachable.`,
+      { cause: error },
     );
   }
 
   const body = await response.json().catch(() => null) as RefreshResponse | null;
   if (!response.ok) {
-    throw new EdgeBaseError(
-      response.status,
-      typeof body?.message === 'string' ? body.message : 'Failed to refresh access token.',
-    );
+    throw parseErrorResponse(response.status, body);
   }
 
   if (!body?.accessToken || !body?.refreshToken) {

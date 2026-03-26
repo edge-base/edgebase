@@ -226,14 +226,57 @@ namespace EdgeBase
         {
             var url = $"{baseUrl.TrimEnd('/')}/api/room/metadata?namespace={Uri.EscapeDataString(namespaceName)}&id={Uri.EscapeDataString(roomId)}";
             using var client = new HttpClient();
-            var response = await client.GetAsync(url);
+            HttpResponseMessage response;
+            try
+            {
+                response = await client.GetAsync(url);
+            }
+            catch (Exception ex)
+            {
+                throw new EdgeBaseException(
+                    0,
+                    $"Room metadata request could not reach {url}. Make sure the EdgeBase server is running and reachable. Cause: {ex.Message}",
+                    ex
+                );
+            }
+            var body = await response.Content.ReadAsStringAsync();
             if (!response.IsSuccessStatusCode)
             {
-                throw new EdgeBaseException((int)response.StatusCode, $"Failed to get room metadata: {response.StatusCode}");
+                var message = ExtractServerMessage(body)
+                    ?? $"Failed to load room metadata for '{roomId}' in namespace '{namespaceName}' (HTTP {(int)response.StatusCode}).";
+                throw new EdgeBaseException((int)response.StatusCode, message);
+            }
+            return JsonSerializer.Deserialize<Dictionary<string, object?>>(body) ?? new Dictionary<string, object?>();
+        }
+
+        private static string? ExtractServerMessage(string body)
+        {
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                return null;
             }
 
-            var body = await response.Content.ReadAsStringAsync();
-            return JsonSerializer.Deserialize<Dictionary<string, object?>>(body) ?? new Dictionary<string, object?>();
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                foreach (var key in new[] { "message", "error", "detail" })
+                {
+                    if (doc.RootElement.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String)
+                    {
+                        var text = value.GetString();
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            return text.Trim();
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore malformed response bodies and fall back to a synthesized message.
+            }
+
+            return null;
         }
 
         /// <summary>Connect to the room, authenticate, and join.</summary>

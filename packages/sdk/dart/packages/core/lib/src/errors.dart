@@ -24,7 +24,9 @@ class EdgeBaseError implements Exception {
         ?.map((e) => FieldError.fromJson(e as Map<String, dynamic>))
         .toList();
     return EdgeBaseError(
-      (json['error'] as String?) ?? (json['message'] as String?) ?? 'Unknown error',
+      (json['error'] as String?)
+          ?? (json['message'] as String?)
+          ?? 'Request failed with HTTP $statusCode and no error message from the server.',
       statusCode: statusCode,
       code: json['code']?.toString(),
       fieldErrors: fieldErrors,

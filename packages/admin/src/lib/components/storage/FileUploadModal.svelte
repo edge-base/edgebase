@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { authStore } from '$lib/stores/auth';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
@@ -82,7 +83,9 @@
 				successCount++;
 			} catch (err) {
 				failCount++;
-				toastError(`Failed to upload ${file.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+				toastError(describeActionError(err, `Failed to upload ${file.name}.`, {
+					prefixKnownMessage: `Failed to upload ${file.name}`,
+				}));
 			}
 		}
 

@@ -387,7 +387,7 @@ class TestEdgeBaseError < Minitest::Test
 
   def test_from_json_missing_message
     err = EdgebaseCore::EdgeBaseError.from_json({}, 500)
-    assert_equal "Unknown error", err.message
+    assert_equal "Request failed with HTTP 500 and no error message from the server.", err.message
   end
 end
 

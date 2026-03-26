@@ -10,13 +10,13 @@
 
 import { HttpClient, EdgeBaseError } from '@edge-base/core';
 import { ContextManager } from '@edge-base/core';
-import type { ContextValue } from '@edge-base/core';
+import type { ContextValue, EdgeBaseTableMap } from '@edge-base/core';
 import { DbRef } from '@edge-base/core';
 import { StorageClient } from '@edge-base/core';
 import { FunctionsClient } from '@edge-base/core';
 import { DefaultDbApi, HttpClientAdapter, PublicHttpClientAdapter } from '@edge-base/core';
 import { DatabaseLiveClient, type DatabaseLiveOptions } from './database-live.js';
-import type { RoomOptions } from './room.js';
+import type { RoomConnectDiagnostic, RoomOptions, RoomSummary, RoomSummaryCollection } from './room.js';
 import { RoomClient } from './room.js';
 import { matchesFilter } from './match-filter.js';
 import { TokenManager } from './token-manager.js';
@@ -27,11 +27,13 @@ import { createBrowserStorage } from './browser-storage.js';
 // ─── Option types ───
 
 /** Options for createClient() */
-export interface JuneClientOptions {
-  /** Schema from typegen (build-time metadata) */
-  schema?: Record<string, unknown>;
+export interface JuneClientOptions<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> {
+  /** Schema map from typegen (for example `EdgeBaseTables`) used for table inference. */
+  schema?: Schema;
   /** Database live subscription options (auto-reconnect, delays, etc.) */
   databaseLive?: DatabaseLiveOptions;
+  /** Prefix auth storage keys and cross-tab channels to avoid same-origin collisions. */
+  authNamespace?: string;
 }
 
 // ─── Client SDK (browser / mobile) ───
@@ -45,7 +47,7 @@ export interface JuneClientOptions {
  * const client = createClient('https://my-app.edgebase.fun');
  * const posts = await client.db('shared').table('posts').where('status', '==', 'published').getList();
  */
-export class ClientEdgeBase {
+export class ClientEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> {
   readonly auth: AuthClient;
   readonly storage: StorageClient;
   readonly functions: FunctionsClient;
@@ -90,12 +92,14 @@ export class ClientEdgeBase {
   private core: DefaultDbApi;
   private swMessageHandler: ((event: MessageEvent) => void) | null = null;
 
-  constructor(url: string, options?: JuneClientOptions) {
+  constructor(url: string, options?: JuneClientOptions<Schema>) {
     if (!url || typeof url !== 'string') {
       throw new EdgeBaseError(0, `[EdgeBase] Invalid URL: expected a non-empty string, got ${url === undefined ? 'undefined' : url === null ? 'null' : JSON.stringify(url)}. Set NEXT_PUBLIC_EDGEBASE_URL or pass a URL to createClient().`, undefined, 'invalid-url');
     }
     const baseUrl = url.replace(/\/$/, '');
-    this.tokenManager = new TokenManager(baseUrl);
+    this.tokenManager = new TokenManager(baseUrl, {
+      authNamespace: options?.authNamespace,
+    });
     this.contextManager = new ContextManager();
     this.httpClient = new HttpClient({
       baseUrl,
@@ -291,8 +295,8 @@ export class ClientEdgeBase {
    * // Per-user DB
    * const notes = await client.db('user', userId).table('notes').getList();
    */
-  db(namespace: string, id?: string): DbRef {
-    return new DbRef(this.core, namespace, id, this.databaseLive, matchesFilter);
+  db(namespace: string, id?: string): DbRef<Schema> {
+    return new DbRef<Schema>(this.core, namespace, id, this.databaseLive, matchesFilter);
   }
 
   /**
@@ -321,6 +325,29 @@ export class ClientEdgeBase {
    */
   async getRoomMetadata(namespace: string, roomId: string): Promise<Record<string, unknown>> {
     return RoomClient.getMetadata(this.baseUrl, namespace, roomId);
+  }
+
+  /**
+   * Get room summary without joining (HTTP GET). Includes metadata plus current occupancy.
+   * Useful for lobby cards and room-list UIs.
+   */
+  async getRoomSummary(namespace: string, roomId: string): Promise<RoomSummary> {
+    return RoomClient.getSummary(this.baseUrl, namespace, roomId);
+  }
+
+  /**
+   * Get summaries for multiple rooms without joining. Useful for room-list and lobby-grid UIs.
+   */
+  async getRoomSummaries(namespace: string, roomIds: string[]): Promise<RoomSummaryCollection> {
+    return RoomClient.getSummaries(this.baseUrl, namespace, roomIds);
+  }
+
+  /**
+   * Run the room connect-check preflight without opening a WebSocket connection.
+   * Useful for showing setup/readiness hints before calling room.join() or media transport connect().
+   */
+  async checkRoomConnection(namespace: string, roomId: string): Promise<RoomConnectDiagnostic> {
+    return RoomClient.checkConnection(this.baseUrl, namespace, roomId);
   }
 
   /**
@@ -369,6 +396,9 @@ export class ClientEdgeBase {
 // ─── Factory ───
 
 /** Create a client-side EdgeBase SDK instance. */
-export function createClient(url: string, options?: JuneClientOptions): ClientEdgeBase {
+export function createClient<Schema extends EdgeBaseTableMap = EdgeBaseTableMap>(
+  url: string,
+  options?: JuneClientOptions<Schema>,
+): ClientEdgeBase<Schema> {
   return new ClientEdgeBase(url, options);
 }

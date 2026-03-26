@@ -20,14 +20,11 @@ Listen to real-time database changes with `onSnapshot`. Use `client.db(namespace
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-const unsubscribe = client.db('app').table('posts').onSnapshot((event) => {
-  if (event.type === 'added') {
-    console.log('New post:', event.data);
-  } else if (event.type === 'modified') {
-    console.log('Updated:', event.data);
-  } else if (event.type === 'removed') {
-    console.log('Deleted:', event.docId);
-  }
+const unsubscribe = client.db('app').table('posts').onSnapshot((snapshot) => {
+  console.log('Current posts:', snapshot.items);
+  console.log('Added:', snapshot.changes.added);
+  console.log('Modified:', snapshot.changes.modified);
+  console.log('Removed:', snapshot.changes.removed);
 });
 
 // Stop listening
@@ -127,8 +124,8 @@ Subscribe to changes on a single document:
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-const unsubscribe = client.db('app').table('posts').doc('post-id').onSnapshot((event) => {
-  console.log('Document changed:', event.data);
+const unsubscribe = client.db('app').table('posts').doc('post-id').onSnapshot((post, change) => {
+  console.log(change.changeType, post);
 });
 ```
 
@@ -193,31 +190,35 @@ When a change occurs, both the table-level subscription and the document-level s
 
 ## Filtered Subscriptions
 
-Filter events using `where()`. EdgeBase supports two filtering modes:
+Filter events using `where()`.
 
-### Client-Side Filtering (Default)
+### JavaScript / TypeScript Default
 
-The SDK receives all events and filters locally. No additional configuration needed:
+On the JavaScript/TypeScript SDK, filtered table subscriptions now use server-side filtering by default, so the server only sends matching events:
 
 ```typescript
 const unsubscribe = client.db('app').table('posts')
   .where('status', '==', 'published')
-  .onSnapshot((event) => {
-    // Only receives events for published posts
+  .onSnapshot((snapshot) => {
+    console.log(snapshot.items);
   });
 ```
 
-### Server-Side Filtering
+This reduces bandwidth and client-side processing without any extra option.
 
-For high-traffic tables, enable server-side filtering so the server only sends matching events. This reduces bandwidth and client-side processing:
+If you intentionally want the old client-side behavior in JavaScript, opt out explicitly:
 
 ```typescript
 const unsubscribe = client.db('app').table('posts')
   .where('status', '==', 'published')
-  .onSnapshot((event) => {
-    // Server only sends events where status == 'published'
-  }, { serverFilter: true });
+  .onSnapshot((snapshot) => {
+    console.log(snapshot.items);
+  }, { serverFilter: false });
 ```
+
+### Other Client SDKs
+
+Other client SDKs still opt in with their language-specific `serverFilter` option when you want server-side filtering.
 
 Server-side filters support AND conditions, OR conditions, 8 comparison operators, and runtime updates. See [Server-Side Filters](./server-side-filters) for the full guide.
 
@@ -225,15 +226,18 @@ Server-side filters support AND conditions, OR conditions, 8 comparison operator
 Database subscriptions are only available in **client SDKs** (JavaScript, Dart, Swift, Kotlin, C#, C++). Server-only Admin SDKs do not support `onSnapshot`. Use [server-side broadcast](#server-side-broadcast) instead.
 :::
 
-## Event Types
+## JavaScript Callback Shapes
 
-Every `onSnapshot` callback receives an event with one of three types:
+JavaScript table subscriptions receive a `TableSnapshot<T>` object:
 
-| Type | Description | `event.data` |
-|------|-------------|--------------|
-| `added` | New document created | Full document |
-| `modified` | Existing document updated | Full document (after update) |
-| `removed` | Document deleted | `null` |
+| Property | Type | Description |
+|----------|------|-------------|
+| `items` | `T[]` | Current rows visible to the subscription |
+| `changes.added` | `T[]` | Rows newly added to the current result |
+| `changes.modified` | `T[]` | Rows updated but still visible |
+| `changes.removed` | `T[]` | Rows removed or no longer matching |
+
+JavaScript document subscriptions receive `(data, change)`, where `change.changeType` is one of `added`, `modified`, or `removed`.
 
 ## Authentication
 
@@ -277,17 +281,21 @@ When a client's auth token is refreshed on a long-lived WebSocket connection, th
 
 When many changes occur simultaneously (e.g., bulk operations), the server batches them into a single `batch_changes` message instead of individual events. The batch threshold is **10 changes** by default.
 
-Your `onSnapshot` callback receives each change individually — the SDK unpacks batch events automatically.
+JavaScript table subscriptions coalesce live changes into a single snapshot callback, so high-frequency UIs should batch their renders too.
 
 ### High-Frequency Update Pattern
 
 For scenarios with very frequent updates (e.g., real-time analytics), consider debouncing your UI updates:
 
 ```typescript
-let pending: SnapshotEvent[] = [];
+let pending: Array<Record<string, unknown>> = [];
 
-client.db('app').table('metrics').onSnapshot((event) => {
-  pending.push(event);
+client.db('app').table('metrics').onSnapshot((snapshot) => {
+  pending.push(
+    ...snapshot.changes.added,
+    ...snapshot.changes.modified,
+    ...snapshot.changes.removed,
+  );
   requestAnimationFrame(() => {
     if (pending.length > 0) {
       renderUpdates(pending);
@@ -299,14 +307,14 @@ client.db('app').table('metrics').onSnapshot((event) => {
 
 ## Type-Safe Subscriptions
 
-Use the generic parameter on `onSnapshot<T>()` with types generated by `npx edgebase typegen`:
+Use your generated types when you create the table ref:
 
 ```typescript
 import type { Post } from './edgebase.d.ts';
 
-// Typed subscription — change.data is Post | null
-const unsub = client.db('app').table('posts').onSnapshot<Post>((change) => {
-  console.log(change.data?.title); // TypeScript autocomplete
+// Typed subscription — snapshot.items is Post[]
+const unsub = client.db('app').table<Post>('posts').onSnapshot((snapshot) => {
+  console.log(snapshot.items[0]?.title); // TypeScript autocomplete
 });
 ```
 

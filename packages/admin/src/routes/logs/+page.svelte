@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastError, toastSuccess } from '$lib/stores/toast.svelte';
 	import { downloadBlob } from '$lib/download';
 	import { generateCSV } from '$lib/csv';
@@ -108,7 +109,7 @@
 				return l === 'error' || l === 'fatal' || l === 'critical';
 			}).length;
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to load logs');
+			toastError(describeActionError(err, 'Failed to load logs.'));
 		} finally {
 			loading = false;
 			loadingMore = false;

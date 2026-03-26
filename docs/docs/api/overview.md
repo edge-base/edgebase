@@ -24,7 +24,7 @@ https://your-project.edgebase.fun/api/
 | **Database** | `/api/db/{namespace}/tables/{table}`, `/api/db/{namespace}/{instanceId}/tables/{table}` | CRUD, batch, queries, count |
 | **Storage** | `/api/storage/{bucket}/*` | Upload, download, signed URLs, multipart |
 | **Database Subscriptions** | `/api/db/subscribe`, `/api/db/connect-check`, `/api/db/broadcast` | WebSocket connection, preflight diagnostics, and server-side broadcasts |
-| **Room** | `/api/room`, `/api/room/connect-check`, `/api/room/metadata` | Room WebSocket connection plus room metadata and diagnostics |
+| **Room** | `/api/room`, `/api/room/connect-check`, `/api/room/metadata`, `/api/room/summary` | Room WebSocket connection plus room metadata, occupancy summaries, and diagnostics |
 | **Push** | `/api/push/*` | Device registration, topic management |
 | **Functions** | `/api/functions/*` | HTTP-triggered App Functions |
 | **Analytics** | `/api/analytics/*` | Request metrics and custom event tracking |

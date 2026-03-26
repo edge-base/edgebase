@@ -41,6 +41,13 @@ type HonoContext = Context<{ Bindings: Env }>;
 const WORKER_RULE_TIMEOUT_MS = 50;
 const DB_ACCESS_RULE_TIMEOUT_MS = 2000;
 
+function tableRuleRejected(tableName: string, action: string): EdgeBaseError {
+  return new EdgeBaseError(
+    403,
+    `Access denied. The '${action}' access rule for table '${tableName}' rejected this request.`,
+  );
+}
+
 /**
  * Normalize a raw rule value (function | boolean | string) into a callable.
  *
@@ -174,7 +181,7 @@ export async function rulesMiddleware(c: HonoContext, next: Next): Promise<Respo
     return next();
   }
   if (keyResult === 'invalid') {
-    throw new EdgeBaseError(401, 'Unauthorized. Invalid Service Key.');
+    throw new EdgeBaseError(401, `Invalid X-EdgeBase-Service-Key for scope '${requiredScope}'.`);
   }
   // keyResult === 'missing' → continue to normal rules evaluation
 
@@ -182,7 +189,10 @@ export async function rulesMiddleware(c: HonoContext, next: Next): Promise<Respo
   if (!config.databases) {
     // No databases config → release mode check
     if (!config.release) return next();
-    throw new EdgeBaseError(403, `Access denied. No databases config defined.`);
+    throw new EdgeBaseError(
+      403,
+      'Access denied. No databases config is defined for this server. Add config.databases or set release: false while developing locally.',
+    );
   }
 
   // namespace comes directly from the URL (/api/db/:namespace/...)
@@ -192,13 +202,19 @@ export async function rulesMiddleware(c: HonoContext, next: Next): Promise<Respo
   if (!dbBlock) {
     // Namespace not found in config → deny
     if (!config.release) return next();
-    throw new EdgeBaseError(403, `Access denied. Namespace '${tableNamespace}' is not configured.`);
+    throw new EdgeBaseError(
+      403,
+      `Access denied. Namespace '${tableNamespace}' is not configured. Check the API path or add this namespace to config.databases.`,
+    );
   }
 
   if (dbBlock.tables && !dbBlock.tables[tableName]) {
     // Table not defined in this DB block
     if (!config.release) return next();
-    throw new EdgeBaseError(403, `Access denied. Table '${tableName}' has no access rules defined.`);
+    throw new EdgeBaseError(
+      403,
+      `Access denied. Table '${tableName}' is missing access rules. Add access.* rules or disable release mode for local-only development.`,
+    );
   }
 
   // ── Step 3: DB-level access check (§4) ──
@@ -232,7 +248,10 @@ export async function rulesMiddleware(c: HonoContext, next: Next): Promise<Respo
 
   if (!tableRules) {
     if (!config.release) return next();
-    throw new EdgeBaseError(403, `Access denied. No access rules defined for '${tableName}'.`);
+    throw new EdgeBaseError(
+      403,
+      `Access denied. No access rules are defined for table '${tableName}'. Add access.* rules or disable release mode for local-only development.`,
+    );
   }
 
   // Determine action
@@ -259,7 +278,7 @@ export async function rulesMiddleware(c: HonoContext, next: Next): Promise<Respo
       : !config.release;
 
     if (!insertPass && !updatePass) {
-      throw new EdgeBaseError(403, 'Access denied by access rules.');
+      throw tableRuleRejected(tableName, 'upsert');
     }
     return next();
   }
@@ -274,9 +293,9 @@ export async function rulesMiddleware(c: HonoContext, next: Next): Promise<Respo
       }
       if (insertRuleFn) {
         const canInsert = await evalWithTimeout(() => insertRuleFn(auth), WORKER_RULE_TIMEOUT_MS);
-        if (!canInsert) throw new EdgeBaseError(403, 'Access denied by access rules.');
+        if (!canInsert) throw tableRuleRejected(tableName, 'batch insert');
       } else if (config.release) {
-        throw new EdgeBaseError(403, 'Access denied by access rules.');
+        throw tableRuleRejected(tableName, 'batch insert');
       }
     }
     return next();
@@ -292,7 +311,7 @@ export async function rulesMiddleware(c: HonoContext, next: Next): Promise<Respo
       throw new EdgeBaseError(403, `Access denied. No 'insert' rule defined for '${tableName}'.`);
     }
     const canInsert = await evalWithTimeout(() => insertRuleFn(auth), WORKER_RULE_TIMEOUT_MS);
-    if (!canInsert) throw new EdgeBaseError(403, 'Access denied by access rules.');
+    if (!canInsert) throw tableRuleRejected(tableName, 'insert');
     return next();
   }
 

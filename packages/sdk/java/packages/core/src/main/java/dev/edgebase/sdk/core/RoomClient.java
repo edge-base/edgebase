@@ -10,6 +10,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
@@ -669,17 +670,17 @@ public class RoomClient {
     }
 
     public static Map<String, Object> getMetadata(String baseUrl, String namespace, String roomId) {
+        String url = baseUrl.replaceAll("/$", "") + GeneratedDbApi.ApiPaths.GET_ROOM_METADATA
+                + "?namespace=" + encodeURIComponent(namespace)
+                + "&id=" + encodeURIComponent(roomId);
         try {
-            String url = baseUrl.replaceAll("/$", "") + GeneratedDbApi.ApiPaths.GET_ROOM_METADATA
-                    + "?namespace=" + encodeURIComponent(namespace)
-                    + "&id=" + encodeURIComponent(roomId);
             HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Accept", "application/json");
 
             int status = conn.getResponseCode();
             if (status != 200) {
-                throw new EdgeBaseError(status, "Failed to get room metadata: " + status);
+                throw new EdgeBaseError(status, describeRoomMetadataHttpError(conn, status, namespace, roomId));
             }
 
             try (var in = conn.getInputStream()) {
@@ -689,7 +690,47 @@ public class RoomClient {
         } catch (EdgeBaseError e) {
             throw e;
         } catch (Exception e) {
-            throw new EdgeBaseError(500, "Failed to get room metadata: " + e.getMessage());
+            throw new EdgeBaseError(
+                    0,
+                    "Room metadata request could not reach " + url
+                            + ". Make sure the EdgeBase server is running and reachable. Cause: "
+                            + e.getMessage()
+            );
+        }
+    }
+
+    private static String describeRoomMetadataHttpError(
+            HttpURLConnection conn,
+            int status,
+            String namespace,
+            String roomId
+    ) {
+        String responseBody = readHttpErrorBody(conn);
+        if (!responseBody.isBlank()) {
+            try {
+                JSONObject json = new JSONObject(responseBody);
+                for (String key : List.of("message", "error", "detail")) {
+                    String message = json.optString(key, "").trim();
+                    if (!message.isEmpty()) {
+                        return message;
+                    }
+                }
+            } catch (Exception ignored) {
+                // Ignore malformed response bodies and fall back to a synthesized message.
+            }
+        }
+        return "Failed to load room metadata for '" + roomId + "' in namespace '" + namespace
+                + "' (HTTP " + status + ").";
+    }
+
+    private static String readHttpErrorBody(HttpURLConnection conn) {
+        try (InputStream errorStream = conn.getErrorStream()) {
+            if (errorStream == null) {
+                return "";
+            }
+            return new String(errorStream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException ignored) {
+            return "";
         }
     }
 
@@ -707,7 +748,7 @@ public class RoomClient {
         try {
             String token = tokenSupplier.get();
             if (token == null || token.isBlank()) {
-                throw new EdgeBaseError(401, "Authentication required");
+                throw new EdgeBaseError(401, "Authentication required before calling room media APIs. Sign in and join the room first.");
             }
 
             String url = baseUrl.replaceAll("/$", "") + "/api/room/media/" + providerPath + "/" + path
@@ -802,7 +843,7 @@ public class RoomClient {
     public CompletableFuture<Object> send(String actionType, Object payload) {
         if (!connected || !authenticated) {
             CompletableFuture<Object> future = new CompletableFuture<>();
-            future.completeExceptionally(new EdgeBaseError(400, "Not connected to room"));
+            future.completeExceptionally(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media."));
             return future;
         }
 
@@ -823,7 +864,7 @@ public class RoomClient {
 
     public CompletableFuture<Void> sendSignal(String event, Object payload, Map<String, Object> options) {
         if (!connected || !authenticated) {
-            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room"));
+            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media."));
         }
         String requestId = UUID.randomUUID().toString();
         CompletableFuture<Void> future = registerPendingVoid(pendingSignalRequests, requestId, "Signal '" + event + "' timed out");
@@ -852,7 +893,7 @@ public class RoomClient {
 
     public CompletableFuture<Void> sendMemberState(Map<String, Object> state) {
         if (!connected || !authenticated) {
-            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room"));
+            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media."));
         }
         String requestId = UUID.randomUUID().toString();
         CompletableFuture<Void> future = registerPendingVoid(pendingMemberStateRequests, requestId, "Member state update timed out");
@@ -866,7 +907,7 @@ public class RoomClient {
 
     public CompletableFuture<Void> clearMemberState() {
         if (!connected || !authenticated) {
-            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room"));
+            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media."));
         }
         String requestId = UUID.randomUUID().toString();
         CompletableFuture<Void> future = registerPendingVoid(pendingMemberStateRequests, requestId, "Member state clear timed out");
@@ -879,7 +920,7 @@ public class RoomClient {
 
     public CompletableFuture<Void> sendAdmin(String operation, String memberId, Map<String, Object> payload) {
         if (!connected || !authenticated) {
-            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room"));
+            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media."));
         }
         String requestId = UUID.randomUUID().toString();
         CompletableFuture<Void> future = registerPendingVoid(pendingAdminRequests, requestId, "Admin operation '" + operation + "' timed out");
@@ -899,7 +940,7 @@ public class RoomClient {
 
     public CompletableFuture<Void> sendMedia(String operation, String kind, Map<String, Object> payload) {
         if (!connected || !authenticated) {
-            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room"));
+            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media."));
         }
         String requestId = UUID.randomUUID().toString();
         CompletableFuture<Void> future = registerPendingVoid(pendingMediaRequests, requestId, "Media operation '" + operation + "' timed out");

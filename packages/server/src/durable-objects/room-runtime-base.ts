@@ -114,6 +114,22 @@ function getRoomTimerHandlers(namespaceConfig?: RoomNamespaceConfig | null) {
   return namespaceConfig?.state?.timers ?? namespaceConfig?.handlers?.timers;
 }
 
+function warnRoomDevelopmentFallback(
+  namespace: string,
+  operation: 'join' | 'action',
+): void {
+  const warningKey = `${namespace}:${operation}`;
+  if (roomFallbackWarnings.has(warningKey)) {
+    return;
+  }
+  roomFallbackWarnings.add(warningKey);
+  console.warn(
+    `[Room] ${warningKey} is allowed because release=false and no explicit room rule was found. `
+    + `This fallback is local-dev only. Add rooms.${namespace}.access.${operation} or set `
+    + `rooms.${namespace}.public.${operation}=true to make the behavior explicit.`,
+  );
+}
+
 function resolveRoomAuthTimeoutMs(config?: EdgeBaseConfig): number {
   const value = config?.databaseLive?.authTimeoutMs;
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -307,30 +323,39 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     this.ctx.waitUntil(persistRoomMonitoringSnapshot(this.env.KV, snapshotToPersist));
   }
 
-  // ─── Metadata HTTP Handler ───
-
-  private async handleGetMetadata(url: URL): Promise<Response> {
-    // Resolve namespace if not set (DO may have been cold-started via HTTP)
+  protected hydrateRoomIdentityFromUrl(url: URL): void {
     const roomFullName = url.searchParams.get('room');
-    if (roomFullName && !this.namespace) {
-      const separatorIdx = roomFullName.indexOf('::');
-      if (separatorIdx >= 0) {
-        this.namespace = roomFullName.substring(0, separatorIdx);
-        this.roomId = roomFullName.substring(separatorIdx + 2);
-      } else {
-        this.namespace = roomFullName;
-        this.roomId = roomFullName;
-      }
-      this.namespaceConfig = this.config.rooms?.[this.namespace] ?? null;
+    if (!roomFullName || this.namespace) {
+      return;
     }
 
-    // Metadata may not be in memory if DO was evicted/hibernated
+    const separatorIdx = roomFullName.indexOf('::');
+    if (separatorIdx >= 0) {
+      this.namespace = roomFullName.substring(0, separatorIdx);
+      this.roomId = roomFullName.substring(separatorIdx + 2);
+    } else {
+      this.namespace = roomFullName;
+      this.roomId = roomFullName;
+    }
+    this.namespaceConfig = this.config.rooms?.[this.namespace] ?? null;
+  }
+
+  protected async getRoomMetadataSnapshot(): Promise<Record<string, unknown>> {
     if (Object.keys(this._metadata).length === 0) {
       const saved = await this.ctx.storage.get('roomMetadata') as Record<string, unknown> | undefined;
       if (saved) this._metadata = saved;
     }
 
-    return new Response(JSON.stringify(this._metadata), {
+    return cloneState(this._metadata);
+  }
+
+  // ─── Metadata HTTP Handler ───
+
+  private async handleGetMetadata(url: URL): Promise<Response> {
+    this.hydrateRoomIdentityFromUrl(url);
+    const metadata = await this.getRoomMetadataSnapshot();
+
+    return new Response(JSON.stringify(metadata), {
       headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -339,19 +364,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   private handleWebSocketUpgrade(request: Request): Response {
     const url = new URL(request.url);
-    const roomFullName = url.searchParams.get('room');
-
-    if (roomFullName) {
-      const separatorIdx = roomFullName.indexOf('::');
-      if (separatorIdx >= 0) {
-        this.namespace = roomFullName.substring(0, separatorIdx);
-        this.roomId = roomFullName.substring(separatorIdx + 2);
-      } else {
-        this.namespace = roomFullName;
-        this.roomId = roomFullName;
-      }
-      this.namespaceConfig = this.config.rooms?.[this.namespace] ?? null;
-    }
+    this.hydrateRoomIdentityFromUrl(url);
 
     // Check max players
     const maxPlayers = this.namespaceConfig?.maxPlayers ?? DEFAULT_MAX_PLAYERS;
@@ -378,9 +391,13 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     };
 
     // Accept with Hibernation API
+    const roomFullName =
+      this.namespace && this.roomId
+        ? `${this.namespace}::${this.roomId}`
+        : url.searchParams.get('room') ?? '';
     const tags = [
       `conn:${connectionId}`,
-      `room:${roomFullName || ''}`,
+      `room:${roomFullName}`,
     ];
     if (meta.ip) {
       tags.push(`ip:${encodeURIComponent(meta.ip)}`);
@@ -794,11 +811,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         return;
       }
       if (!this.config.release && this.namespace) {
-        const warningKey = `${this.namespace}:join`;
-        if (!roomFallbackWarnings.has(warningKey)) {
-          roomFallbackWarnings.add(warningKey);
-          console.warn(`[Room] ${warningKey} is using development-mode allow-by-default. Add rooms.${this.namespace}.access.join or public.join to make this explicit.`);
-        }
+        warnRoomDevelopmentFallback(this.namespace, 'join');
       }
     }
     if (joinAccess && this.roomId) {
@@ -947,11 +960,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         return;
       }
       if (!this.config.release && this.namespace) {
-        const warningKey = `${this.namespace}:action`;
-        if (!roomFallbackWarnings.has(warningKey)) {
-          roomFallbackWarnings.add(warningKey);
-          console.warn(`[Room] ${warningKey} is using development-mode allow-by-default. Add rooms.${this.namespace}.access.action or public.action to make this explicit.`);
-        }
+        warnRoomDevelopmentFallback(this.namespace, 'action');
       }
     }
     if (actionAccess && this.roomId) {

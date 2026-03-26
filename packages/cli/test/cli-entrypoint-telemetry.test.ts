@@ -115,4 +115,30 @@ describe('CLI entrypoint telemetry', () => {
       eventCount: 0,
     });
   });
+
+  it('fails fast with a clear error when Node.js is too old', () => {
+    const homeDir = createHomeDir();
+
+    const result = spawnSync(
+      tsxCommand.command,
+      [...tsxCommand.argsPrefix, 'src/index.ts', 'telemetry', 'status'],
+      {
+        cwd: packageDir,
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          USERPROFILE: homeDir,
+          NO_COLOR: '1',
+          EDGEBASE_NODE_VERSION_OVERRIDE: '18.20.0',
+        },
+        stdio: 'pipe',
+        ...tsxExecOptions,
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Node.js >= 20.19.0');
+    expect(result.stderr).toContain('Install Node.js 20.19.0 or newer');
+  });
 });

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastError } from '$lib/stores/toast.svelte';
 	import { schemaStore, namespaceNames, namespaceDefs } from '$lib/stores/schema';
 	import { onMount } from 'svelte';
@@ -89,7 +90,7 @@
 				time: res.time ?? 0,
 			}, ...results];
 		} catch (err) {
-			const message = err instanceof Error ? err.message : 'Query failed';
+			const message = describeActionError(err, 'Query failed.');
 			toastError(message);
 			resultCounter += 1;
 			results = [{

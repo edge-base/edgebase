@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { ADMIN_APP_BASE_PATH, getAdminApiUrl } from '$lib/runtime-config';
 	import { authStore } from '$lib/stores/auth';
 	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
@@ -154,7 +155,7 @@
 			}
 			cursor = res.cursor;
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to load objects');
+			toastError(describeActionError(err, 'Failed to load storage objects.'));
 		} finally {
 			loading = false;
 			loadingMore = false;
@@ -209,7 +210,7 @@
 			selectedFiles = new Set(selectedFiles);
 			toastSuccess(`Deleted ${deleteTarget}`);
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to delete object');
+			toastError(describeActionError(err, 'Failed to delete the storage object.'));
 		} finally {
 			deleting = false;
 			deleteTarget = null;
@@ -244,7 +245,7 @@
 			const blob = await resp.blob();
 			downloadBlob(blob, displayKey(key));
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to download file');
+			toastError(describeActionError(err, 'Failed to download the file.'));
 		}
 	}
 

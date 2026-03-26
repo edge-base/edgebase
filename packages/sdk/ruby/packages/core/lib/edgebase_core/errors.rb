@@ -26,7 +26,7 @@ module EdgebaseCore
     def self.from_json(data, status_code)
       new(
         status_code,
-        data["message"] || "Unknown error",
+        data["message"] || data["error"] || "Request failed with HTTP #{status_code} and no error message from the server.",
         details: data["details"]
       )
     end

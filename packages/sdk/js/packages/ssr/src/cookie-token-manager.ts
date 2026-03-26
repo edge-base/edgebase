@@ -9,8 +9,17 @@
 import type { ITokenManager, ITokenPair } from '@edge-base/core';
 import type { CookieStore, CookieOptions } from './types.js';
 
-const ACCESS_TOKEN_COOKIE = 'eb_access_token';
-const REFRESH_TOKEN_COOKIE = 'eb_refresh_token';
+interface CookieTokenNames {
+  accessToken: string;
+  refreshToken: string;
+}
+
+export interface CookieTokenManagerOptions {
+  cookieOptions?: Partial<CookieOptions>;
+  authNamespace?: string;
+}
+
+type CookieTokenManagerInput = CookieTokenManagerOptions | Partial<CookieOptions>;
 
 /** Default cookie options — secure, httpOnly, SameSite=Lax */
 const DEFAULT_COOKIE_OPTIONS: CookieOptions = {
@@ -19,6 +28,42 @@ const DEFAULT_COOKIE_OPTIONS: CookieOptions = {
   sameSite: 'lax',
   path: '/',
 };
+
+function sanitizeCookieNamespace(namespace: string): string {
+  return namespace
+    .trim()
+    .replace(/[^!#$%&'*+.^_`|~0-9A-Za-z-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function buildCookieTokenNames(authNamespace?: string): CookieTokenNames {
+  const sanitizedNamespace = authNamespace ? sanitizeCookieNamespace(authNamespace) : '';
+  if (!sanitizedNamespace) {
+    return {
+      accessToken: 'eb_access_token',
+      refreshToken: 'eb_refresh_token',
+    };
+  }
+  return {
+    accessToken: `eb_${sanitizedNamespace}_access_token`,
+    refreshToken: `eb_${sanitizedNamespace}_refresh_token`,
+  };
+}
+
+function isCookieTokenManagerOptions(input: CookieTokenManagerInput): input is CookieTokenManagerOptions {
+  return 'cookieOptions' in input || 'authNamespace' in input;
+}
+
+function normalizeCookieTokenManagerOptions(input: CookieTokenManagerInput = {}): CookieTokenManagerOptions {
+  if (!isCookieTokenManagerOptions(input)) {
+    return {
+      cookieOptions: input,
+    };
+  }
+
+  return input;
+}
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
@@ -49,23 +94,34 @@ function isTokenExpired(token: string): boolean {
 
 export class CookieTokenManager implements ITokenManager {
   private cookieOptions: CookieOptions;
+  private cookieNames: CookieTokenNames;
 
   constructor(
-    private cookies: CookieStore,
+    cookies: CookieStore,
     cookieOptions?: Partial<CookieOptions>,
+  );
+  constructor(
+    cookies: CookieStore,
+    options?: CookieTokenManagerOptions,
+  );
+  constructor(
+    private cookies: CookieStore,
+    input: CookieTokenManagerInput = {},
   ) {
-    this.cookieOptions = { ...DEFAULT_COOKIE_OPTIONS, ...cookieOptions };
+    const options = normalizeCookieTokenManagerOptions(input);
+    this.cookieOptions = { ...DEFAULT_COOKIE_OPTIONS, ...options.cookieOptions };
+    this.cookieNames = buildCookieTokenNames(options.authNamespace);
   }
 
   getAccessToken(
     refreshFn?: (refreshToken: string) => Promise<ITokenPair>,
   ): Promise<string | null> | string | null {
-    const accessToken = this.cookies.get(ACCESS_TOKEN_COOKIE) ?? null;
+    const accessToken = this.cookies.get(this.cookieNames.accessToken) ?? null;
 
     // If we have an access token, return it directly
     if (accessToken && !isTokenExpired(accessToken)) return accessToken;
     if (accessToken) {
-      this.cookies.delete(ACCESS_TOKEN_COOKIE);
+      this.cookies.delete(this.cookieNames.accessToken);
     }
 
     // If no access token but we have a refresh token and a refresh function,
@@ -82,29 +138,29 @@ export class CookieTokenManager implements ITokenManager {
   }
 
   getRefreshToken(): string | null {
-    return this.cookies.get(REFRESH_TOKEN_COOKIE) ?? null;
+    return this.cookies.get(this.cookieNames.refreshToken) ?? null;
   }
 
   invalidateAccessToken(): void {
-    this.cookies.delete(ACCESS_TOKEN_COOKIE);
+    this.cookies.delete(this.cookieNames.accessToken);
   }
 
   setTokens(tokens: ITokenPair): void {
     const accessMaxAge = getTokenMaxAge(tokens.accessToken) ?? 900;
     const refreshMaxAge = getTokenMaxAge(tokens.refreshToken) ?? 60 * 60 * 24 * 28;
 
-    this.cookies.set(ACCESS_TOKEN_COOKIE, tokens.accessToken, {
+    this.cookies.set(this.cookieNames.accessToken, tokens.accessToken, {
       ...this.cookieOptions,
       maxAge: accessMaxAge,
     });
-    this.cookies.set(REFRESH_TOKEN_COOKIE, tokens.refreshToken, {
+    this.cookies.set(this.cookieNames.refreshToken, tokens.refreshToken, {
       ...this.cookieOptions,
       maxAge: refreshMaxAge,
     });
   }
 
   clearTokens(): void {
-    this.cookies.delete(ACCESS_TOKEN_COOKIE);
-    this.cookies.delete(REFRESH_TOKEN_COOKIE);
+    this.cookies.delete(this.cookieNames.accessToken);
+    this.cookies.delete(this.cookieNames.refreshToken);
   }
 }

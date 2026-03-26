@@ -22,6 +22,10 @@ import { zodDefaultHook, d1BodySchema, jsonResponseSchema, errorResponseSchema }
 
 export const d1Route = new OpenAPIHono<HonoEnv>({ defaultHook: zodDefaultHook });
 
+function invalidD1JsonMessage(): string {
+  return 'Invalid JSON body. Send application/json with { query, params? }.';
+}
+
 /**
  * POST /api/d1/:database
  * Body: { query: string, params?: unknown[] }
@@ -51,12 +55,12 @@ d1Route.openapi(executeD1Query, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidD1JsonMessage() }, 400);
   }
 
   const { query, params } = body;
   if (!query || typeof query !== 'string') {
-    return c.json({ code: 400, message: 'query is required' }, 400);
+    return c.json({ code: 400, message: "Missing required field 'query'. Send the SQL string in the request body." }, 400);
   }
 
   // §2 Allowlist: validate database is declared in config
@@ -76,16 +80,19 @@ d1Route.openapi(executeD1Query, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required to access D1' }, 403);
+    return c.json({ code: 403, message: `X-EdgeBase-Service-Key is required to execute raw SQL on D1 database '${nameParam}'.` }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: `Invalid X-EdgeBase-Service-Key for D1 database '${nameParam}'.` }, 401);
   }
 
   // §1 Env type — dynamic binding access via type assertion
   const binding = (c.env as unknown as Record<string, unknown>)[d1Config.binding] as D1Database | undefined;
   if (!binding) {
-    return c.json({ code: 500, message: `D1 binding '${d1Config.binding}' not available.` }, 500);
+    return c.json({
+      code: 500,
+      message: `D1 binding '${d1Config.binding}' is unavailable. Check the binding name in edgebase.config.ts and wrangler.toml.`,
+    }, 500);
   }
 
   // Execute D1 query — all SQL allowed (DDL included), ? bind variables enforced
@@ -103,7 +110,7 @@ d1Route.openapi(executeD1Query, async (c) => {
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'D1 query execution failed';
-    throw new EdgeBaseError(400, message);
+    const message = err instanceof Error ? err.message : 'Unknown D1 query error';
+    throw new EdgeBaseError(400, `D1 query failed for '${nameParam}': ${message}`);
   }
 });

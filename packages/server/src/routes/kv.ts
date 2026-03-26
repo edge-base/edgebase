@@ -20,6 +20,14 @@ import { zodDefaultHook, kvBodySchema, jsonResponseSchema, errorResponseSchema }
 
 export const kvRoute = new OpenAPIHono<HonoEnv>({ defaultHook: zodDefaultHook });
 
+function invalidKvJsonMessage(): string {
+  return 'Invalid JSON body. Send application/json with a KV operation payload like { action, key, value }.';
+}
+
+function missingKvFieldMessage(field: string, action: string): string {
+  return `Missing required field '${field}' for KV action '${action}'.`;
+}
+
 function normalizeKvBindingError(action: string, error: unknown): EdgeBaseError {
   const message = error instanceof Error ? error.message : String(error);
   const lowered = message.toLowerCase();
@@ -75,12 +83,12 @@ kvRoute.openapi(kvOperation, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidKvJsonMessage() }, 400);
   }
 
   const { action } = body;
   if (!action || !['get', 'set', 'delete', 'list'].includes(action)) {
-    return c.json({ code: 400, message: "action must be one of: 'get', 'set', 'delete', 'list'" }, 400);
+    return c.json({ code: 400, message: "Invalid KV action. Expected one of: 'get', 'set', 'delete', 'list'." }, 400);
   }
 
   // §2 Allowlist: validate namespace is declared in config
@@ -105,28 +113,31 @@ kvRoute.openapi(kvOperation, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required to access KV' }, 403);
+    return c.json({ code: 403, message: `X-EdgeBase-Service-Key is required to access KV namespace '${nameParam}'.` }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: `Invalid X-EdgeBase-Service-Key for KV namespace '${nameParam}'.` }, 401);
   }
 
   // §1 Env type — dynamic binding access via type assertion
   const binding = (c.env as unknown as Record<string, unknown>)[kvConfig.binding] as KVNamespace | undefined;
   if (!binding) {
-    return c.json({ code: 500, message: `KV binding '${kvConfig.binding}' not available.` }, 500);
+    return c.json({
+      code: 500,
+      message: `KV binding '${kvConfig.binding}' is unavailable. Check the binding name in edgebase.config.ts and wrangler.toml.`,
+    }, 500);
   }
 
   // Execute KV operation
   switch (action) {
     case 'get': {
-      if (!body.key) return c.json({ code: 400, message: 'key is required for get' }, 400);
+      if (!body.key) return c.json({ code: 400, message: missingKvFieldMessage('key', 'get') }, 400);
       const value = await binding.get(body.key);
       return c.json({ value });
     }
     case 'set': {
-      if (!body.key) return c.json({ code: 400, message: 'key is required for set' }, 400);
-      if (body.value === undefined) return c.json({ code: 400, message: 'value is required for set' }, 400);
+      if (!body.key) return c.json({ code: 400, message: missingKvFieldMessage('key', 'set') }, 400);
+      if (body.value === undefined) return c.json({ code: 400, message: missingKvFieldMessage('value', 'set') }, 400);
       const putOptions: KVNamespacePutOptions = {};
       if (body.ttl) putOptions.expirationTtl = body.ttl;
       try {
@@ -137,7 +148,7 @@ kvRoute.openapi(kvOperation, async (c) => {
       return c.json({ ok: true });
     }
     case 'delete': {
-      if (!body.key) return c.json({ code: 400, message: 'key is required for delete' }, 400);
+      if (!body.key) return c.json({ code: 400, message: missingKvFieldMessage('key', 'delete') }, 400);
       try {
         await binding.delete(body.key);
       } catch (error) {
@@ -162,6 +173,6 @@ kvRoute.openapi(kvOperation, async (c) => {
       });
     }
     default:
-      return c.json({ code: 400, message: 'Unknown action' }, 400);
+      return c.json({ code: 400, message: `Unsupported KV action '${action}'.` }, 400);
   }
 });

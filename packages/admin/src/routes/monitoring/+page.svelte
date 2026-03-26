@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastError } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
 	import { adminDashboardAnalyticsDocs } from '$lib/docs-links';
@@ -30,7 +31,7 @@
 			data = res;
 			lastUpdated = new Date().toLocaleTimeString();
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to load monitoring data');
+			toastError(describeActionError(err, 'Failed to load monitoring data.'));
 		} finally {
 			loading = false;
 		}

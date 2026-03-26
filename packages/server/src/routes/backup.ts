@@ -86,7 +86,7 @@ backupRoute.onError((err, c) => {
     return c.json(err.toJSON(), err.code as 400);
   }
   console.error('Backup API error:', err);
-  return c.json({ code: 500, message: 'Internal server error.' }, 500);
+  return c.json({ code: 500, message: 'Backup operation failed unexpectedly. Check the worker logs for the original exception.' }, 500);
 });
 
 // ─── DO Name Helpers ───

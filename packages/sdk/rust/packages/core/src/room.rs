@@ -310,17 +310,31 @@ impl RoomClient {
         );
         let resp = reqwest::get(&url)
             .await
-            .map_err(|e| Error::Room(format!("Failed to get room metadata: {}", e)))?;
-        if !resp.status().is_success() {
-            return Err(Error::Room(format!(
-                "Failed to get room metadata: {}",
-                resp.status()
-            )));
-        }
+            .map_err(|e| Error::Room(format!(
+                "Room metadata request could not reach {}. Make sure the EdgeBase server is running and reachable. Cause: {}",
+                url, e
+            )))?;
+        let status = resp.status();
         let body = resp
             .text()
             .await
-            .map_err(|e| Error::Room(format!("Failed to read room metadata body: {}", e)))?;
+            .map_err(|e| Error::Room(format!("Failed to read room metadata body from {}: {}", url, e)))?;
+        if !status.is_success() {
+            if let Ok(json) = serde_json::from_str::<Value>(&body) {
+                for key in ["message", "error", "detail"] {
+                    if let Some(message) = json.get(key).and_then(|value| value.as_str()) {
+                        let trimmed = message.trim();
+                        if !trimmed.is_empty() {
+                            return Err(Error::Room(trimmed.to_string()));
+                        }
+                    }
+                }
+            }
+            return Err(Error::Room(format!(
+                "Failed to load room metadata for '{}' in namespace '{}' (HTTP {}).",
+                room_id, namespace, status
+            )));
+        }
         serde_json::from_str(&body)
             .map_err(|e| Error::Room(format!("Failed to parse room metadata: {}", e)))
     }
@@ -429,7 +443,7 @@ impl RoomClient {
     /// ```
     pub async fn send(&self, action_type: &str, payload: Option<Value>) -> Result<Value, Error> {
         if self.send_tx.lock().unwrap().is_none() {
-            return Err(Error::Room("Not connected to room".to_string()));
+            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.".to_string()));
         }
 
         let request_id = Uuid::new_v4().to_string();
@@ -751,7 +765,7 @@ impl RoomClient {
         options: Option<Value>,
     ) -> Result<(), Error> {
         if self.send_tx.lock().unwrap().is_none() {
-            return Err(Error::Room("Not connected to room".to_string()));
+            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.".to_string()));
         }
 
         let request_id = Uuid::new_v4().to_string();
@@ -770,7 +784,7 @@ impl RoomClient {
 
     pub async fn send_member_state(&self, state: Value) -> Result<(), Error> {
         if self.send_tx.lock().unwrap().is_none() {
-            return Err(Error::Room("Not connected to room".to_string()));
+            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.".to_string()));
         }
 
         let request_id = Uuid::new_v4().to_string();
@@ -790,7 +804,7 @@ impl RoomClient {
 
     pub async fn clear_member_state(&self) -> Result<(), Error> {
         if self.send_tx.lock().unwrap().is_none() {
-            return Err(Error::Room("Not connected to room".to_string()));
+            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.".to_string()));
         }
 
         let request_id = Uuid::new_v4().to_string();
@@ -814,7 +828,7 @@ impl RoomClient {
         payload: Option<Value>,
     ) -> Result<(), Error> {
         if self.send_tx.lock().unwrap().is_none() {
-            return Err(Error::Room("Not connected to room".to_string()));
+            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.".to_string()));
         }
 
         let request_id = Uuid::new_v4().to_string();
@@ -841,7 +855,7 @@ impl RoomClient {
         payload: Option<Value>,
     ) -> Result<(), Error> {
         if self.send_tx.lock().unwrap().is_none() {
-            return Err(Error::Room("Not connected to room".to_string()));
+            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.".to_string()));
         }
 
         let request_id = Uuid::new_v4().to_string();
@@ -1171,7 +1185,7 @@ impl RoomClient {
     fn handle_action_error(&self, msg: &Value) {
         let request_id = msg["requestId"].as_str().unwrap_or("");
         if let Some(tx) = self.pending_requests.lock().unwrap().remove(request_id) {
-            let message = msg["message"].as_str().unwrap_or("Unknown error");
+            let message = msg["message"].as_str().unwrap_or("Unknown EdgeBase error. Check the server response or logs for details.");
             let _ = tx.send(Err(Error::Room(message.to_string())));
         }
     }

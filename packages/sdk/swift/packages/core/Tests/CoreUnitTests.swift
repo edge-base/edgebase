@@ -222,7 +222,7 @@ final class EdgeBaseErrorUnitTests: XCTestCase {
     func testFromJSON_invalidJSON_defaultMessage() throws {
         let json = "invalid-json".data(using: .utf8)!
         let err = EdgeBaseError.fromJSON(json, statusCode: 500)
-        XCTAssertEqual(err.message, "Unknown error")
+        XCTAssertEqual(err.message, "Request failed with HTTP 500 and a non-JSON error response.")
     }
 
     func testFromJSON_withDetails() throws {

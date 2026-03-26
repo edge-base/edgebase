@@ -45,7 +45,7 @@ export const errorHandlerMiddleware: MiddlewareHandler<HonoEnv> = async (c, next
     return c.json(
       {
         code: 500,
-        message: 'Internal server error.',
+        message: `Internal server error while handling '${c.req.path}'. Check the worker logs for the original exception.`,
         slug: 'internal-error',
       },
       500,

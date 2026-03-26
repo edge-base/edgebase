@@ -65,16 +65,134 @@ const MANAGED_AUTH_ENV_KEYS = ['EDGEBASE_AUTH_ALLOWED_OAUTH_PROVIDERS'];
 const MANAGED_AUTH_ENV_PREFIXES = ['EDGEBASE_OAUTH_', 'EDGEBASE_OIDC_'];
 const PORT_SEARCH_LIMIT = 50;
 const PORT_RESERVATION_STALE_GRACE_MS = 10_000;
+const MAX_RECENT_WRANGLER_STDERR_LINES = 12;
+const WRANGLER_EXIT_GRACE_MS = 2_500;
+const WRANGLER_FORCE_KILL_GRACE_MS = 1_000;
 const PORT_RESERVATION_DIR = process.env.EDGEBASE_DEV_PORT_RESERVATION_DIR
   ? resolve(process.env.EDGEBASE_DEV_PORT_RESERVATION_DIR)
   : join(tmpdir(), 'edgebase-dev-port-reservations');
 
 export { resolveLocalDevBindings };
 
+function resolveDevRateLimitBindings(): ReturnType<typeof resolveRateLimitBindings> {
+  // Wrangler currently prints a noisy experimental "unsafe.bindings" warning for
+  // CLI-generated rate limit bindings. Local dev already enforces the in-process
+  // software counter layer, so we skip the ceiling bindings here to keep startup
+  // output focused on actionable problems.
+  return [];
+}
+
 const activePortReservations = new Set<string>();
 let portReservationCleanupRegistered = false;
+const ANSI_ESCAPE_PATTERN = new RegExp(String.raw`\u001B\[[0-?]*[ -/]*[@-~]`, 'g');
 
 type DevIsolationOption = string | boolean | undefined;
+
+function stripAnsi(value: string): string {
+  return value.replace(ANSI_ESCAPE_PATTERN, '');
+}
+
+function appendRecentOutputChunk(
+  recentLines: string[],
+  chunk: string,
+  remainder = '',
+): string {
+  const combined = `${remainder}${stripAnsi(chunk)}`;
+  const parts = combined.split(/\r?\n/);
+  const nextRemainder = parts.pop() ?? '';
+
+  for (const part of parts) {
+    const line = part.trim();
+    if (!line) continue;
+    recentLines.push(line);
+  }
+
+  if (recentLines.length > MAX_RECENT_WRANGLER_STDERR_LINES) {
+    recentLines.splice(0, recentLines.length - MAX_RECENT_WRANGLER_STDERR_LINES);
+  }
+
+  return nextRemainder;
+}
+
+function flushRecentOutputRemainder(recentLines: string[], remainder: string): void {
+  const line = stripAnsi(remainder).trim();
+  if (!line) return;
+  recentLines.push(line);
+  if (recentLines.length > MAX_RECENT_WRANGLER_STDERR_LINES) {
+    recentLines.splice(0, recentLines.length - MAX_RECENT_WRANGLER_STDERR_LINES);
+  }
+}
+
+function inferWranglerDevExitHint(diagnostics: string[]): string {
+  const haystack = diagnostics.join('\n').toLowerCase();
+
+  if (
+    haystack.includes('eaddrinuse')
+    || haystack.includes('address already in use')
+    || haystack.includes('port is already in use')
+  ) {
+    return 'Another process is already using the selected dev or inspector port. Stop the other process, choose a different port, or rerun with --auto-port.';
+  }
+
+  if (
+    haystack.includes('cannot find module')
+    || haystack.includes('could not resolve')
+    || haystack.includes('module not found')
+    || haystack.includes('no such file or directory')
+    || haystack.includes('enoent')
+  ) {
+    return 'A file or import referenced by the dev runtime could not be found. Check recent changes in edgebase.config.ts, config/, functions/, and wrangler.toml.';
+  }
+
+  if (
+    haystack.includes('syntaxerror')
+    || haystack.includes('unexpected token')
+    || haystack.includes('parse error')
+    || haystack.includes('failed to parse')
+    || haystack.includes('toml')
+  ) {
+    return 'Wrangler could not parse your runtime config or source files. Check the reported file and line in edgebase.config.ts, wrangler.toml, or the generated runtime scaffold.';
+  }
+
+  if (
+    haystack.includes('d1')
+    && (haystack.includes('binding') || haystack.includes('database'))
+  ) {
+    return 'A D1 binding referenced by the local runtime is missing or mismatched. Check your database namespaces in edgebase.config.ts and the generated wrangler dev bindings.';
+  }
+
+  return 'Check the recent Wrangler stderr lines below. Common causes are config syntax errors, missing imports, or local binding mismatches.';
+}
+
+function shouldSuppressWranglerStderrLine(line: string): boolean {
+  const normalized = stripAnsi(line).trim();
+  if (!normalized) return false;
+
+  return (
+    /processing .*wrangler.* configuration:/i.test(normalized)
+    || /"unsafe" fields are experimental and may change or break at any time\./i.test(normalized)
+  );
+}
+
+function filterWranglerStderrChunkForDisplay(
+  chunk: string,
+  remainder = '',
+): { display: string; remainder: string } {
+  const combined = `${remainder}${chunk}`;
+  const parts = combined.split(/\r?\n/);
+  const nextRemainder = parts.pop() ?? '';
+  const visibleLines = parts.filter((line) => !shouldSuppressWranglerStderrLine(line));
+
+  return {
+    display: visibleLines.length > 0 ? `${visibleLines.join('\n')}\n` : '',
+    remainder: nextRemainder,
+  };
+}
+
+function flushWranglerStderrDisplayRemainder(remainder: string): string {
+  if (!remainder || shouldSuppressWranglerStderrLine(remainder)) return '';
+  return `${remainder}\n`;
+}
 
 function isManagedAuthEnvKey(key: string): boolean {
   return MANAGED_AUTH_ENV_KEYS.includes(key)
@@ -109,12 +227,85 @@ interface GeneratedDevSecretsResult {
   primaryPath: string | null;
 }
 
+interface ReserveDevPortOptions {
+  strictPort?: boolean;
+}
+
 function parsePort(value: string, flagName: string): number {
   const port = Number.parseInt(value, 10);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error(`Invalid ${flagName}: '${value}'. Expected a port between 1 and 65535.`);
   }
   return port;
+}
+
+function wasFlagProvided(rawArgs: readonly string[], longFlag: string, shortFlag?: string): boolean {
+  return rawArgs.some((arg) => {
+    if (arg === longFlag || arg.startsWith(`${longFlag}=`)) return true;
+    if (!shortFlag) return false;
+    if (arg === shortFlag) return true;
+    return arg.startsWith(shortFlag) && arg.length > shortFlag.length;
+  });
+}
+
+async function waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null || !isProcessAlive(child.pid ?? null)) {
+    return true;
+  }
+
+  return new Promise<boolean>((resolve) => {
+    const onExit = () => {
+      clearTimeout(timeout);
+      resolve(true);
+    };
+    const timeout = setTimeout(() => {
+      child.off('exit', onExit);
+      resolve(child.exitCode !== null || child.signalCode !== null || !isProcessAlive(child.pid ?? null));
+    }, timeoutMs);
+
+    child.once('exit', onExit);
+  });
+}
+
+async function terminateChildProcessTree(
+  child: ChildProcess,
+  signal: NodeJS.Signals = 'SIGTERM',
+) : Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null || !isProcessAlive(child.pid ?? null)) {
+    return;
+  }
+
+  if (process.platform !== 'win32' && typeof child.pid === 'number' && child.pid > 0) {
+    try {
+      process.kill(-child.pid, signal);
+    } catch {
+      // Fall back to the direct child when the group is already gone.
+    }
+  }
+
+  child.kill(signal);
+  const exited = await waitForChildExit(child, WRANGLER_EXIT_GRACE_MS);
+  if (exited || signal === 'SIGKILL') return;
+
+  if (process.platform !== 'win32' && typeof child.pid === 'number' && child.pid > 0) {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {
+      // Fall back to the direct child when the group is already gone.
+    }
+  }
+
+  child.kill('SIGKILL');
+  await waitForChildExit(child, WRANGLER_FORCE_KILL_GRACE_MS);
+}
+
+async function closeHttpServer(
+  server: ReturnType<typeof import('node:http').createServer> | null,
+): Promise<void> {
+  if (!server) return;
+  await new Promise<void>((resolve) => {
+    server.close(() => resolve());
+  });
 }
 
 async function probePortHost(
@@ -408,11 +599,14 @@ export async function resolveDevPorts(preferredPort: number): Promise<ResolvedDe
 export async function reserveDevPorts(
   preferredPort: number,
   preferredInspectorPort?: number,
+  options: ReserveDevPortOptions = {},
 ): Promise<ReservedDevPorts> {
   const reservations: PortReservation[] = [];
 
   try {
-    const portReservation = await findAndReservePort(preferredPort);
+    const portReservation = options.strictPort
+      ? await reservePort(preferredPort)
+      : await findAndReservePort(preferredPort);
     reservations.push(portReservation);
 
     const sidecarReservation = await findAndReservePort(
@@ -532,12 +726,14 @@ export const devCommand = new Command('dev')
   .alias('dv')
   .description('Start local development server')
   .option('-p, --port <port>', 'Preferred port number', String(DEFAULT_DEV_PORT))
+  .option('--auto-port', 'When the preferred --port is busy, use the next available port')
   .option('--host <host>', 'Bind wrangler dev to a specific host or IP address')
   .option('--inspector-port <port>', 'Bind wrangler dev inspector to a specific port')
   .option('--isolated [name]', 'Use an isolated local state directory (defaults to the selected port)')
   .option('--open', 'Open admin dashboard in browser')
   .action(async (options: {
     port: string;
+    autoPort?: boolean;
     host?: string;
     inspectorPort?: string;
     open: boolean;
@@ -559,7 +755,22 @@ export const devCommand = new Command('dev')
     const preferredInspectorPort = options.inspectorPort
       ? parsePort(options.inspectorPort, '--inspector-port')
       : undefined;
-    const resolvedPorts = await reserveDevPorts(preferredPort, preferredInspectorPort);
+    const explicitPortRequested = wasFlagProvided(process.argv.slice(2), '--port', '-p');
+    const strictPort = explicitPortRequested && !options.autoPort;
+    let resolvedPorts: ReservedDevPorts;
+    try {
+      resolvedPorts = await reserveDevPorts(preferredPort, preferredInspectorPort, {
+        strictPort,
+      });
+    } catch (error) {
+      raiseCliError({
+        code: 'dev_port_unavailable',
+        message: (error as Error).message,
+        hint: strictPort
+          ? 'Choose a different --port or rerun with --auto-port to allow fallback.'
+          : 'Choose a different port, free the port, or retry once the other dev server stops.',
+      });
+    }
     const persistence = resolveDevPersistence(projectDir, resolvedPorts.port, options.isolated);
     const localApiUrl = `http://localhost:${resolvedPorts.port}`;
     const localAdminUrl = `${localApiUrl}/admin`;
@@ -611,11 +822,24 @@ export const devCommand = new Command('dev')
       syncDevEnvToProcess(projectDir);
       const config = loadConfigSafe(configPath, projectDir, FULL_CONFIG_EVAL);
       if (config.release) {
-        console.log(chalk.yellow('🔒'), 'Release mode (release: true) — deny-by-default enforced');
+        console.log(
+          chalk.yellow('🔒'),
+          'Release mode (release: true) — local dev enforces explicit access rules.',
+        );
+        console.log(
+          chalk.dim(
+            '  Add public.* and access.* rules to match production behavior and avoid unexpected access-denied errors.',
+          ),
+        );
       } else {
         console.log(
           chalk.green('🔓'),
-          'Development mode (release: false) — all resources accessible without rules',
+          'Development mode (release: false) — missing access rules fall back to allow-by-default locally.',
+        );
+        console.log(
+          chalk.dim(
+            '  This is dev-only behavior. Add explicit public.* and access.* rules to preview production behavior and silence fallback warnings.',
+          ),
         );
       }
 
@@ -694,6 +918,11 @@ export const devCommand = new Command('dev')
     }
 
     async function releaseSessionResources(): Promise<void> {
+      const activeWrangler = wranglerProcess;
+      wranglerProcess = null;
+      if (activeWrangler) {
+        await terminateChildProcessTree(activeWrangler, keepRunning ? 'SIGTERM' : 'SIGKILL');
+      }
       cleanupTempWrangler();
       for (const handle of cleanupHandles.splice(0)) {
         try {
@@ -702,7 +931,9 @@ export const devCommand = new Command('dev')
           /* ignore watcher close errors */
         }
       }
-      sidecarServer?.close();
+      const activeSidecar = sidecarServer;
+      sidecarServer = null;
+      await closeHttpServer(activeSidecar);
       await resolvedPorts.release();
     }
 
@@ -750,7 +981,7 @@ export const devCommand = new Command('dev')
           if (!handled && wranglerProcess) {
             console.log(chalk.yellow('♻️'), 'Restarting wrangler dev...');
             restartRequested = true;
-            wranglerProcess.kill('SIGTERM');
+            void terminateChildProcessTree(wranglerProcess, 'SIGTERM');
           }
         });
       }, 500);
@@ -852,12 +1083,15 @@ export const devCommand = new Command('dev')
       } else {
         console.log(
           chalk.dim(
-            '  📐 Schema Editor sidecar skipped (no JWT_ADMIN_SECRET in .env.development or .dev.vars)',
+            '  📐 Schema Editor sidecar skipped — API server will continue to run. Add JWT_ADMIN_SECRET to .env.development or .dev.vars to enable the local schema editor.',
           ),
         );
       }
     } catch (err) {
-      console.log(chalk.dim('  📐 Schema Editor sidecar skipped:'), (err as Error).message);
+      console.log(
+        chalk.dim('  📐 Schema Editor sidecar skipped — API server will continue to run:'),
+        (err as Error).message,
+      );
     }
 
     // ─── Start wrangler dev (with auto-restart) ───
@@ -885,13 +1119,16 @@ export const devCommand = new Command('dev')
         {
           bindings: resolveLocalDevBindings(config),
           triggerMode: 'preserve',
-          rateLimitBindings: resolveRateLimitBindings(config),
+          rateLimitBindings: resolveDevRateLimitBindings(),
         },
       );
     }
 
     function startWrangler() {
       syncEnvDevelopmentToDevVars(projectDir, false);
+      const recentWranglerStderr: string[] = [];
+      let wranglerStderrDisplayRemainder = '';
+      let wranglerStderrCaptureRemainder = '';
 
       try {
         refreshTempWrangler();
@@ -928,7 +1165,23 @@ export const devCommand = new Command('dev')
 
       wranglerProcess = spawn(wranglerTool.command, wranglerArgs, {
         cwd: projectDir,
-        stdio: 'inherit',
+        stdio: ['inherit', 'inherit', 'pipe'],
+        detached: process.platform !== 'win32',
+      });
+
+      wranglerProcess.stderr?.setEncoding('utf8');
+      wranglerProcess.stderr?.on('data', (chunk) => {
+        const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        const filtered = filterWranglerStderrChunkForDisplay(text, wranglerStderrDisplayRemainder);
+        wranglerStderrDisplayRemainder = filtered.remainder;
+        if (!filtered.display) return;
+
+        process.stderr.write(filtered.display);
+        wranglerStderrCaptureRemainder = appendRecentOutputChunk(
+          recentWranglerStderr,
+          filtered.display,
+          wranglerStderrCaptureRemainder,
+        );
       });
 
       // Wrap wrangler process errors with EdgeBase-specific guidance so users
@@ -942,6 +1195,18 @@ export const devCommand = new Command('dev')
       wranglerProcess.on('exit', (code) => {
         const shouldRespawn = restartRequested;
         restartRequested = false;
+        const finalDisplay = flushWranglerStderrDisplayRemainder(wranglerStderrDisplayRemainder);
+        wranglerStderrDisplayRemainder = '';
+        if (finalDisplay) {
+          process.stderr.write(finalDisplay);
+          wranglerStderrCaptureRemainder = appendRecentOutputChunk(
+            recentWranglerStderr,
+            finalDisplay,
+            wranglerStderrCaptureRemainder,
+          );
+        }
+        flushRecentOutputRemainder(recentWranglerStderr, wranglerStderrCaptureRemainder);
+        wranglerStderrCaptureRemainder = '';
         cleanupTempWrangler();
         if (shouldRespawn) {
           // Config change triggered restart → respawn wrangler
@@ -952,6 +1217,7 @@ export const devCommand = new Command('dev')
               void settleSession(Object.assign(new Error(`Wrangler exited with code ${code}.`), {
                 edgebaseCode: 'wrangler_dev_exit',
                 exitCode: code,
+                diagnostics: [...recentWranglerStderr],
               }));
               return;
             }
@@ -1053,7 +1319,7 @@ export const devCommand = new Command('dev')
       interruptionSignal = 'SIGINT';
       restartRequested = false;
       if (wranglerProcess) {
-        wranglerProcess.kill('SIGINT');
+        void terminateChildProcessTree(wranglerProcess, 'SIGINT');
       } else {
         void settleSession(new CommanderError(130, 'SIGINT', ''));
       }
@@ -1063,7 +1329,7 @@ export const devCommand = new Command('dev')
       interruptionSignal = 'SIGTERM';
       restartRequested = false;
       if (wranglerProcess) {
-        wranglerProcess.kill('SIGTERM');
+        void terminateChildProcessTree(wranglerProcess, 'SIGTERM');
       } else {
         void settleSession(new CommanderError(130, 'SIGTERM', ''));
       }
@@ -1078,7 +1344,7 @@ export const devCommand = new Command('dev')
       process.off('SIGTERM', handleSigterm);
       if (error instanceof CommanderError || isCliStructuredError(error)) throw error;
 
-      const devError = error as Error & { edgebaseCode?: string; exitCode?: number };
+      const devError = error as Error & { edgebaseCode?: string; exitCode?: number; diagnostics?: string[] };
       if (devError.edgebaseCode === 'dev_runtime_config_failed') {
         raiseCliError({
           code: 'dev_runtime_config_failed',
@@ -1099,7 +1365,8 @@ export const devCommand = new Command('dev')
         raiseCliError({
           code: 'wrangler_dev_exit',
           message: devError.message,
-          hint: 'Common causes are syntax errors in edgebase.config.ts or wrangler.toml, missing D1 bindings, or port conflicts.',
+          hint: inferWranglerDevExitHint(devError.diagnostics ?? []),
+          details: devError.diagnostics?.length ? devError.diagnostics : undefined,
         }, devError.exitCode ?? 1);
       }
       throw error;
@@ -1186,6 +1453,11 @@ export const _devInternals = {
   resolveWorkerVarBindings,
   sanitizeIsolationName,
   ensureDevJwtSecrets,
+  resolveDevRateLimitBindings,
+  appendRecentOutputChunk,
+  inferWranglerDevExitHint,
+  shouldSuppressWranglerStderrLine,
+  filterWranglerStderrChunkForDisplay,
 };
 
 // ─── Helper: Config Sync ───
@@ -1203,7 +1475,7 @@ async function rebundleConfig(projectDir: string, configPath: string): Promise<v
     console.error(
       chalk.red('✗'),
       'Config sync failed:',
-      (err as Error).message?.split('\n')[0] ?? 'Unknown error',
+      (err as Error).message?.split('\n')[0] ?? 'Unknown config sync error. Check the filesystem permissions and worker config paths.',
     );
     console.log(chalk.dim(`  → Check that ${configPath} is readable and .dev.vars is writable.`));
   }
@@ -1257,7 +1529,7 @@ async function checkSchemaChanges(
         if (wranglerProcess) {
           console.log(chalk.yellow('♻️'), 'Restarting wrangler dev...');
           requestRestart();
-          wranglerProcess.kill('SIGTERM');
+          void terminateChildProcessTree(wranglerProcess, 'SIGTERM');
         }
         return true;
       }
@@ -1337,7 +1609,7 @@ async function checkSchemaChanges(
         if (wranglerProcess) {
           console.log(chalk.yellow('♻️'), 'Restarting wrangler dev...');
           requestRestart();
-          wranglerProcess.kill('SIGTERM');
+          void terminateChildProcessTree(wranglerProcess, 'SIGTERM');
         }
         return true;
       } else {

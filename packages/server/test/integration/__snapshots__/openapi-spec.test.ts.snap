@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`OpenAPI spec stability > operation list matches snapshot 1`] = `197`;
+exports[`OpenAPI spec stability > operation list matches snapshot 1`] = `199`;
 
 exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
 [
@@ -79,6 +79,7 @@ exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
   "GET /api/room/connect-check",
   "GET /api/room/media/realtime/session",
   "GET /api/room/metadata",
+  "GET /api/room/summary",
   "GET /api/schema",
   "GET /api/storage/{bucket}",
   "GET /api/storage/{bucket}/uploads/{uploadId}/parts",
@@ -183,6 +184,7 @@ exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
   "POST /api/room/media/realtime/session",
   "POST /api/room/media/realtime/tracks/new",
   "POST /api/room/media/realtime/turn",
+  "POST /api/room/summaries",
   "POST /api/sql",
   "POST /api/storage/{bucket}/delete-batch",
   "POST /api/storage/{bucket}/multipart/abort",

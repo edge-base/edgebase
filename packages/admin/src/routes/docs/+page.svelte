@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
+	import { describeActionError } from '$lib/error-messages';
 	import { apiReferenceDocs } from '$lib/docs-links';
 	import { buildScalarHtml } from '$lib/api-docs';
 	import { ADMIN_AUTH_STORAGE_KEY } from '$lib/stores/auth';
@@ -23,7 +24,7 @@
 			loading = false;
 		} catch (err) {
 			loading = false;
-			error = err instanceof Error ? err.message : 'Failed to initialize API docs';
+			error = describeActionError(err, 'Failed to initialize API docs.');
 		}
 	});
 </script>

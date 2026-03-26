@@ -16,6 +16,7 @@
 import { HttpClient } from '@edge-base/core';
 import { ContextManager } from '@edge-base/core';
 import { DbRef } from '@edge-base/core';
+import type { EdgeBaseTableMap } from '@edge-base/core';
 import { StorageClient } from '@edge-base/core';
 import { FunctionsClient } from '@edge-base/core';
 import { DefaultDbApi, HttpClientAdapter } from '@edge-base/core';
@@ -30,14 +31,14 @@ import { AnalyticsClient } from './analytics.js';
 // ─── Option types ───
 
 /** Options for createAdminClient() */
-export interface JuneAdminClientOptions {
+export interface JuneAdminClientOptions<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> {
   /**
    * Service Key for admin operations.
    * Optional when called with no args from App Functions — falls back to EDGEBASE_SERVICE_KEY env var.
    */
   serviceKey?: string;
-  /** Schema from typegen (build-time metadata) */
-  schema?: Record<string, unknown>;
+  /** Schema map from typegen (for example `EdgeBaseTables`) used for table inference. */
+  schema?: Schema;
 }
 
 // ─── Admin SDK ───
@@ -51,7 +52,7 @@ export interface JuneAdminClientOptions {
  * const posts = await admin.db('shared').table('posts').getList();
  * const docs = await admin.db('workspace', 'ws-456').table('documents').getList();
  */
-export class AdminEdgeBase {
+export class AdminEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> {
   /** Admin user management. */
   readonly auth: AdminAuthClient;
   readonly storage: StorageClient;
@@ -65,7 +66,7 @@ export class AdminEdgeBase {
   private core: DefaultDbApi;
   private adminCore: DefaultAdminApi;
 
-  constructor(url: string, options: JuneAdminClientOptions) {
+  constructor(url: string, options: JuneAdminClientOptions<Schema>) {
     this.baseUrl = url.replace(/\/$/, '');
     this.contextManager = new ContextManager();
     this.httpClient = new HttpClient({
@@ -97,8 +98,8 @@ export class AdminEdgeBase {
    * // Per-user DB
    * const notes = await admin.db('user', 'user-123').table('notes').getList();
    */
-  db(namespace: string, id?: string): DbRef {
-    return new DbRef(this.core, namespace, id, undefined, undefined, this.httpClient);
+  db(namespace: string, id?: string): DbRef<Schema> {
+    return new DbRef<Schema>(this.core, namespace, id, undefined, undefined, this.httpClient);
   }
 
   /**
@@ -171,10 +172,14 @@ export class AdminEdgeBase {
 /**
  * Create an admin-side EdgeBase SDK instance.
  */
-export function createAdminClient(
+export function createAdminClient<Schema extends EdgeBaseTableMap = EdgeBaseTableMap>(
   url?: string,
-  options?: JuneAdminClientOptions,
-): AdminEdgeBase {
+  options?: JuneAdminClientOptions<Schema>,
+): AdminEdgeBase<Schema>;
+export function createAdminClient<Schema extends EdgeBaseTableMap = EdgeBaseTableMap>(
+  url?: string,
+  options?: JuneAdminClientOptions<Schema>,
+): AdminEdgeBase<Schema> {
   const getEnv = (key: string): string | undefined => {
     const processValue =
       typeof process !== 'undefined' && process.env
@@ -198,7 +203,7 @@ export function createAdminClient(
     );
   }
 
-  return new AdminEdgeBase(resolvedUrl, {
+  return new AdminEdgeBase<Schema>(resolvedUrl, {
     ...options,
     serviceKey: resolvedServiceKey ?? '',
   });
