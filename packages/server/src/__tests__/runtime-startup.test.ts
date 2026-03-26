@@ -25,4 +25,25 @@ describe('runtime startup bootstrap', () => {
     expect(firstConfig).toEqual(secondConfig);
     expect(secondConfig).toBeTypeOf('object');
   });
+
+  it('does not clobber an explicitly injected runtime config', async () => {
+    const { ensureServerStartup } = await import('../lib/runtime-startup.js');
+    const { parseConfig, setConfig } = await import('../lib/do-router.js');
+
+    setConfig({
+      release: false,
+      auth: {
+        allowedRedirectUrls: ['http://localhost:4173'],
+      },
+    });
+
+    await expect(ensureServerStartup()).resolves.toBeUndefined();
+
+    expect(parseConfig()).toMatchObject({
+      release: false,
+      auth: {
+        allowedRedirectUrls: ['http://localhost:4173'],
+      },
+    });
+  });
 });

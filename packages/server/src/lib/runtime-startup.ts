@@ -29,6 +29,7 @@ export async function ensureServerStartup(): Promise<void> {
       const processEnv = typeof process !== 'undefined' ? process.env : undefined;
       const isTestBuild = typeof EDGEBASE_TEST_BUILD !== 'undefined';
       const preferTestConfig = await detectWorkersTestRuntime() || isTestBuild;
+      const existingConfig = doRouterModule.parseConfig();
       const resolvedConfig = await resolveStartupConfig(
         generatedConfigModule.default,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -37,7 +38,7 @@ export async function ensureServerStartup(): Promise<void> {
         { preferTestConfig },
       );
 
-      if (resolvedConfig) {
+      if (resolvedConfig && Object.keys(existingConfig).length === 0) {
         doRouterModule.setConfig(resolvedConfig);
       }
     } catch (err) {
