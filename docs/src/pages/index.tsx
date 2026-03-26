@@ -45,31 +45,40 @@ const homeStats = [
     sub: siteMetadata.deployModes.join(' · '),
   },
 ];
+const heroCapabilities = ['Auth', 'Database', 'Realtime', 'Storage', 'Functions', 'Admin UI'];
 
 function HeroSection() {
   return (
     <section className="hero-section">
-      <p className="hero-badge">Open Source · MIT License</p>
-      <h1 className="hero-title">
-        Open-source edge-native BaaS
-        <br />
-        built on Workers, Durable Objects, D1, and R2.
-      </h1>
-      <p className="hero-tagline">
-        No egress or bandwidth fees. ~0ms cold starts. Scale-out by design.
-        <br />
-        Run the same app locally, self-host with Docker, or deploy to Cloudflare&apos;s global edge.
-      </p>
-      <div className="hero-code">
-        <code>npm create edgebase@latest my-app</code>
-      </div>
-      <div className="hero-buttons">
-        <Link className="hero-btn hero-btn-primary" to="/docs/getting-started/quickstart">
-          Get Started →
-        </Link>
-        <Link className="hero-btn hero-btn-secondary" to="/docs/why-edgebase">
-          Why EdgeBase
-        </Link>
+      <div className="hero-shell">
+        <p className="hero-badge">Open Source · MIT License</p>
+        <h1 className="hero-title">
+          Open-source edge-native BaaS
+          <span className="hero-stack">Workers · Durable Objects · D1 · R2</span>
+        </h1>
+        <p className="hero-proof">
+          No egress or bandwidth fees. ~0ms cold starts. Scale-out by design.
+        </p>
+        <p className="hero-tagline">
+          Run the same app locally, self-host with Docker, or deploy to Cloudflare&apos;s global
+          edge.
+        </p>
+        <div className="hero-capabilities">
+          {heroCapabilities.map((capability) => (
+            <span key={capability}>{capability}</span>
+          ))}
+        </div>
+        <div className="hero-code">
+          <code>npm create edgebase@latest my-app</code>
+        </div>
+        <div className="hero-buttons">
+          <Link className="hero-btn hero-btn-primary" to="/docs/getting-started/quickstart">
+            Get Started →
+          </Link>
+          <Link className="hero-btn hero-btn-secondary" to="/docs/why-edgebase">
+            Why EdgeBase
+          </Link>
+        </div>
       </div>
     </section>
   );
