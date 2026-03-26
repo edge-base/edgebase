@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/plugin-core",
-    "version": "0.2.5",
+    "version": "0.2.6",
     "description": "EdgeBase plugin authoring helpers and public plugin contracts",
     "license": "MIT",
     "repository": {

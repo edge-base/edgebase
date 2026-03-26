@@ -21,7 +21,7 @@ Kotlin admin module instead.
 
 ## Public Artifact
 
-- `com.github.edge-base.edgebase:edgebase-client:v0.2.5`
+- `com.github.edge-base.edgebase:edgebase-client:v0.2.6`
 - this is the current JitPack JVM publication for the shared `:client` module
 
 ## Canonical Examples
