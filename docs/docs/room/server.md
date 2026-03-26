@@ -54,7 +54,7 @@ export default defineConfig({
 | `maxPlayers` | `number` | `100` | Maximum concurrent connections per room instance (1 -- 32768) |
 | `maxStateSize` | `number` (bytes) | `1048576` (1 MB) | Maximum combined size of sharedState + all playerStates. Min 1 KB. |
 | `reconnectTimeout` | `number` (ms) | `30000` | Grace period before `handlers.lifecycle.onLeave` fires after disconnect. `0` = immediate. |
-| `rateLimit` | `{ actions: number }` | `{ actions: 10 }` | Token-bucket rate limit for `send()` calls per second per connection |
+| `rateLimit` | `{ actions: number; signals?: number; media?: number; admin?: number }` | `{ actions: 10 }` | Token-bucket room WebSocket rate limits per second per connection. Omitted scopes fall back to `actions`. |
 | `stateSaveInterval` | `number` (ms) | `60000` | How often state is saved to DO Storage. Lower = less data loss, more writes. |
 | `stateTTL` | `number` (ms) | `86400000` | How long saved state remains valid. After expiry, state is auto-deleted. |
 
@@ -569,7 +569,12 @@ export default defineConfig({
       maxPlayers: 10,
       maxStateSize: 512 * 1024,       // 512 KB
       reconnectTimeout: 15000,        // 15 seconds
-      rateLimit: { actions: 20 },     // 20 actions/sec per player
+      rateLimit: {
+        actions: 20,
+        signals: 80,
+        media: 40,
+        admin: 10,
+      },
       stateSaveInterval: 30000,       // Save every 30 seconds
       stateTTL: 7200000,              // 2 hours
       handlers: {

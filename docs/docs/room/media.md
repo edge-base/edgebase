@@ -101,6 +101,7 @@ The main client APIs are:
 - `room.media.onTrackRemoved(...)`
 - `room.media.onStateChange(...)`
 - `room.media.onDeviceChange(...)`
+- `room.media.realtime.iceServers()` *(web helper for fetching relay / ICE credentials before P2P transport connect)*
 
 :::note Transport provider availability
 `room.media.transport(...)` is currently available across multiple client SDKs, but the provider mix is not identical everywhere yet.
