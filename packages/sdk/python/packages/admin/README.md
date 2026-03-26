@@ -123,5 +123,5 @@ print(len(users.get("users", [])), len(posts.items), rows, signed.url)
 ## Requirements
 
 - Python `3.10+`
-- `edgebase-core>=0.2.4,<0.3.0`
+- `edgebase-core>=0.2.5,<0.3.0`
 - A valid EdgeBase Service Key

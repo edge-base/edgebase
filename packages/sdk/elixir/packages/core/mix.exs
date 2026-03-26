@@ -4,7 +4,7 @@ defmodule EdgeBaseCore.MixProject do
   def project do
     [
       app: :edgebase_core,
-      version: "0.2.4",
+      version: "0.2.5",
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),

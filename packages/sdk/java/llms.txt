@@ -26,10 +26,10 @@ batch jobs, and operational tooling that hold a Service Key.
 ## Public Artifacts
 
 - JitPack group: `com.github.edge-base.edgebase`
-- tags are versioned with the leading `v`, for example `v0.2.4`
-- `com.github.edge-base.edgebase:edgebase-core-java:v0.2.4`
-- `com.github.edge-base.edgebase:edgebase-android-java:v0.2.4`
-- `com.github.edge-base.edgebase:edgebase-admin-java:v0.2.4`
+- tags are versioned with the leading `v`, for example `v0.2.5`
+- `com.github.edge-base.edgebase:edgebase-core-java:v0.2.5`
+- `com.github.edge-base.edgebase:edgebase-android-java:v0.2.5`
+- `com.github.edge-base.edgebase:edgebase-admin-java:v0.2.5`
 - do not recommend the root `edgebase-sdk-java` artifact for public installs
 
 ## Canonical Examples
