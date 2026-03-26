@@ -102,6 +102,32 @@ The main client APIs are:
 - `room.media.onStateChange(...)`
 - `room.media.onDeviceChange(...)`
 - `room.media.realtime.iceServers()` *(web helper for fetching relay / ICE credentials before P2P transport connect)*
+- `room.media.checkReadiness(...)` *(web helper for transport/browser/provider preflight diagnostics before connect)*
+
+## Readiness Checks
+
+On the JavaScript/TypeScript web SDK, call `room.media.checkReadiness()` before `transport.connect()` when you want a user-facing explanation of what is missing.
+
+```ts
+const readiness = await room.media.checkReadiness({
+  provider: 'cloudflare_realtimekit',
+});
+
+if (!readiness.canConnect) {
+  for (const issue of readiness.issues) {
+    console.warn(issue.code, issue.message);
+  }
+}
+```
+
+The readiness payload includes:
+
+- room connect-check diagnostics
+- whether the current member has already joined
+- browser capability flags like `getUserMedia` and `RTCPeerConnection`
+- provider-specific checks such as TURN availability for `p2p`
+
+`transport.connect()` also performs the same fatal preflight checks automatically and throws a structured error when the room or browser is not ready.
 
 :::note Transport provider availability
 `room.media.transport(...)` is currently available across multiple client SDKs, but the provider mix is not identical everywhere yet.

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { describeActionError } from '$lib/error-messages';
 	import { toastError } from '$lib/stores/toast.svelte';
 	import type { GridColumn } from '$lib/components/ui/DataGrid.svelte';
 
@@ -176,7 +177,7 @@
 			baselineRow = { ...baselineRow, ...changes };
 			draftValues = buildDraftValues(baselineRow);
 		} catch (error) {
-			toastError(error instanceof Error ? error.message : 'Save failed');
+			toastError(describeActionError(error, 'Save failed.'));
 		} finally {
 			saving = false;
 		}

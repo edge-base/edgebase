@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { ApiError, api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { addToast, toastError } from '$lib/stores/toast.svelte';
 	import { devInfoStore, loadDevInfo } from '$lib/stores/devInfo';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
@@ -127,6 +128,7 @@
 	let saving = $state(false);
 	let editable = $state(false);
 	let staleSidecar = $state(false);
+	let loadError = $state('');
 	let selectedTarget = $state<AuthEnvTarget>('development');
 	let sharedForm = $state<SharedAuthSettingsForm | null>(null);
 	let savedSharedForm = $state<SharedAuthSettingsForm | null>(null);
@@ -368,7 +370,7 @@
 					: 'Development auth settings saved to edgebase.config.ts and local env files.'
 			});
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to save auth settings');
+			toastError(describeActionError(err, 'Failed to save auth settings.'));
 		} finally {
 			saving = false;
 		}
@@ -402,7 +404,8 @@
 				applySettings(runtimeSettings);
 			}
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to load auth settings');
+			loadError = describeActionError(err, 'Failed to load auth settings.');
+			toastError(loadError);
 		} finally {
 			loading = false;
 		}
@@ -430,7 +433,7 @@
 			Loading settings...
 		</div>
 	{:else if !sharedForm || !oauthForms}
-		<div class="error-state">Failed to load authentication settings.</div>
+		<div class="error-state">{loadError || 'Failed to load authentication settings. Check that the EdgeBase admin API is running and retry.'}</div>
 	{:else}
 		<div class="settings-grid">
 			<div class="card">

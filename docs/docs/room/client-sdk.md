@@ -296,6 +296,36 @@ room->leave();
 
 ---
 
+## Pre-Join Helpers
+
+The JavaScript/TypeScript web SDK exposes HTTP helpers for lobby UIs and connection diagnostics before you call `room.join()`.
+
+```typescript
+const summary = await client.getRoomSummary('game', 'lobby-1');
+console.log(summary.metadata, summary.occupancy.activeMembers);
+
+const summaries = await client.getRoomSummaries('game', ['lobby-1', 'lobby-2']);
+console.log(summaries.items.map((item) => item.roomId));
+
+const readiness = await client.checkRoomConnection('game', 'lobby-1');
+if (!readiness.ok) {
+  console.warn(readiness.message);
+}
+
+const room = client.room('game', 'lobby-1');
+const roomSummary = await room.meta.summary();
+const roomReadiness = await room.checkConnection();
+```
+
+Use these helpers when you want to:
+
+- render room cards before join
+- show occupancy in a lobby list
+- validate room runtime configuration before opening a WebSocket
+- explain why media transport connect would fail before touching browser capture APIs
+
+---
+
 ## Unified Surface
 
 The unified Room surface groups the product around the same live-session model used in the newer SDK implementations.
@@ -350,6 +380,7 @@ Verification is still deepest on the web live-media path. Mobile SDKs now have b
 | `room.state.onMineChange(...)` | `room.onPlayerState(...)` |
 | `room.state.send(...)` | `room.send(...)` |
 | `room.meta.get()` | `room.getMetadata()` |
+| `room.meta.summary()` | `room.getSummary()` |
 | `room.signals.on(...)` / `room.signals.onAny(...)` | `room.onMessage(...)` / `room.onAnyMessage(...)` |
 | `room.session.onError(...)` / `room.session.onKicked(...)` | `room.onError(...)` / `room.onKicked(...)` |
 

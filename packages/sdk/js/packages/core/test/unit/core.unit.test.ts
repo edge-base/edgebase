@@ -15,7 +15,7 @@ import {
   isFieldOp,
   serializeFieldOps,
 } from '../../src/field-ops.js';
-import { EdgeBaseError, parseErrorResponse } from '../../src/errors.js';
+import { EdgeBaseError, networkError, parseErrorResponse } from '../../src/errors.js';
 import { ContextManager } from '../../src/context.js';
 
 // ─── A. increment / deleteField 생성 ─────────────────────────────────────────
@@ -165,11 +165,22 @@ describe('parseErrorResponse', () => {
   it('body string → 기본 메시지 사용', () => {
     const err = parseErrorResponse(403, 'forbidden text');
     expect(err.status).toBe(403);
+    expect(err.message).toBe('forbidden text');
   });
 
   it('body.data → err.data에 보존', () => {
     const err = parseErrorResponse(422, { message: 'Val', data: { field: 'x' } });
     expect(err.data).toEqual({ field: 'x' });
+  });
+
+  it('body.detail 을 message fallback으로 사용', () => {
+    const err = parseErrorResponse(422, { detail: 'Missing email' });
+    expect(err.message).toBe('Missing email');
+  });
+
+  it('status fallback 메시지는 상태별 힌트를 포함한다', () => {
+    const err = parseErrorResponse(403, null);
+    expect(err.message).toBe('Forbidden. The request was blocked by access rules or missing permissions.');
   });
 });
 
@@ -455,6 +466,73 @@ describe('HttpClient — 401 retry', () => {
     expect(refreshHeaders.Authorization).toBeUndefined();
     expect(retryHeaders.Authorization).toBe('Bearer fresh-access-token');
   });
+
+  it('includes refresh failure details when retrying a 401 response cannot refresh the session', async () => {
+    const cm = new ContextManager();
+    let accessToken = 'stale-access-token';
+    let refreshToken = 'refresh-token';
+
+    const tokenManager: ITokenManager = {
+      getAccessToken: vi.fn(async () => accessToken || null),
+      getRefreshToken: vi.fn(() => refreshToken),
+      invalidateAccessToken: vi.fn(() => {
+        accessToken = '';
+      }),
+      setTokens: vi.fn((tokens: ITokenPair) => {
+        accessToken = tokens.accessToken;
+        refreshToken = tokens.refreshToken;
+      }),
+      clearTokens: vi.fn(() => {
+        accessToken = '';
+        refreshToken = '';
+      }),
+    };
+
+    const client = new HttpClient({
+      baseUrl: 'http://localhost:8688',
+      contextManager: cm,
+      tokenManager,
+    });
+
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: 'Unauthorized.' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: 'Refresh token expired.' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: 'Missing auth token.' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    await expect(client.get('/api/protected')).rejects.toMatchObject({
+      status: 401,
+      message: expect.stringContaining('Token refresh also failed: Refresh token expired.'),
+    });
+    expect(tokenManager.invalidateAccessToken).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('HttpClient — network failures', () => {
+  it('surfaces actionable request context when fetch cannot reach the server', async () => {
+    const cm = new ContextManager();
+    const client = new HttpClient({ baseUrl: 'http://localhost:8688', contextManager: cm });
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:8688'));
+
+    await expect(client.get('/api/posts')).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining('GET /api/posts could not reach http://localhost:8688'),
+    });
+  });
 });
 
 // ─── H. TableRef — immutable chaining ───────────────────────────────────────
@@ -565,6 +643,22 @@ describe('TableRef.onSnapshot', () => {
     };
   }
 
+  it('uses server-side filtering by default for filtered subscriptions', () => {
+    const live = createDatabaseLiveHarness();
+
+    new TableRef<Record<string, unknown>>({} as never, 'posts', live.subscriber as never, undefined, 'shared')
+      .where('status', '==', 'published')
+      .onSnapshot(() => {});
+
+    expect(live.subscriber.onSnapshot).toHaveBeenCalledWith(
+      'dblive:shared:posts',
+      expect.any(Function),
+      undefined,
+      [['status', '==', 'published']],
+      [],
+    );
+  });
+
   it('applies client-side operators and OR filters by default', async () => {
     vi.useFakeTimers();
     const live = createDatabaseLiveHarness();
@@ -650,6 +744,25 @@ describe('TableRef.onSnapshot', () => {
         },
       },
     ]);
+  });
+
+  it('warns once in development when filtered table subscriptions force client-side filtering', () => {
+    const live = createDatabaseLiveHarness();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    new TableRef<Record<string, unknown>>({} as never, 'warnings', live.subscriber as never, undefined, 'shared')
+      .where('status', '==', 'published')
+      .onSnapshot(() => {}, { serverFilter: false });
+
+    new TableRef<Record<string, unknown>>({} as never, 'warnings', live.subscriber as never, undefined, 'shared')
+      .where('status', '==', 'published')
+      .onSnapshot(() => {}, { serverFilter: false });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[EdgeBase] shared:single:warnings onSnapshot() is using client-side filtering. ' +
+      'Remove { serverFilter: false } to use server-side filtering by default.',
+    );
   });
 });
 
@@ -940,10 +1053,18 @@ describe('DbRef — table reference creation', () => {
 // ─── Q. networkError ────────────────────────────────────────────────────────
 
 describe('networkError', () => {
-  it('creates EdgeBaseError with status 0', async () => {
-    const { networkError } = await import('../../src/errors.js');
+  it('creates EdgeBaseError with status 0', () => {
     const err = networkError('connection refused');
     expect(err.status).toBe(0);
     expect(err.message).toContain('connection refused');
+  });
+
+  it('appends the original cause when it is not already present', () => {
+    const err = networkError(
+      'Could not reach server.',
+      { cause: new Error('connect ETIMEDOUT') },
+    );
+    expect(err.message).toContain('Could not reach server.');
+    expect(err.message).toContain('Cause: connect ETIMEDOUT');
   });
 });

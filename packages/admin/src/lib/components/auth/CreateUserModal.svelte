@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
@@ -51,7 +52,7 @@
 			reset();
 			onCreated();
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to create user';
+			error = describeActionError(err, 'Failed to create user.');
 			toastError(error);
 		} finally {
 			saving = false;

@@ -6,6 +6,7 @@
    */
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
+  import { describeActionError } from '$lib/error-messages';
   import { getAnalyticsTimeFormatter, type AnalyticsRange } from '$lib/analytics-range';
   import { toastError } from '$lib/stores/toast.svelte';
   import PageShell from '$lib/components/layout/PageShell.svelte';
@@ -74,7 +75,7 @@
       data = res;
       lastUpdated = new Date().toLocaleTimeString();
     } catch (err) {
-      toastError(err instanceof Error ? err.message : 'Failed to load analytics data');
+      toastError(describeActionError(err, 'Failed to load analytics data.'));
     } finally {
       loading = false;
     }

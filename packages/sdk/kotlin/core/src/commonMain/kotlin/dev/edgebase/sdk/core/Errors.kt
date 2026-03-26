@@ -28,7 +28,9 @@ class EdgeBaseError(
          */
         @Suppress("UNCHECKED_CAST")
         fun fromJson(json: Map<String, Any?>, statusCode: Int): EdgeBaseError {
-            val message = json["message"] as? String ?: "Unknown error"
+            val message = (json["message"] as? String)
+                ?: (json["error"] as? String)
+                ?: "Request failed with HTTP $statusCode and no error message from the server."
             val rawDetails = json["details"] as? Map<String, Any?>
             val details = rawDetails?.mapValues { (_, v) ->
                 when (v) {

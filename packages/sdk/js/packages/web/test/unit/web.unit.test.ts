@@ -369,6 +369,7 @@ import { AuthClient } from '../../src/auth.js';
 import { RoomClient, type RoomOptions } from '../../src/room.js';
 import { matchesFilter } from '../../src/match-filter.js';
 import { ClientAnalytics } from '../../src/analytics.js';
+import { refreshAccessToken } from '../../src/auth-refresh.js';
 import { ApiPaths, HttpClient, ContextManager, EdgeBaseError } from '@edge-base/core';
 
 // ─── E. TokenManager — expired token handling ────────────────────────────────
@@ -1249,6 +1250,8 @@ describe('RoomClient — method signatures', () => {
     const tm = new TokenManager('http://localhost:8688');
     const room = new RoomClient('http://localhost:8688', 'default', 'r1', tm);
     expect(typeof room.getMetadata).toBe('function');
+    expect(typeof room.getSummary).toBe('function');
+    expect(typeof room.checkConnection).toBe('function');
     tm.destroy();
   });
 });
@@ -1259,6 +1262,13 @@ describe('RoomClient — rooms adapter APIs', () => {
     const room = new RoomClient('http://localhost:8688', 'default', 'adapter-room', tm);
     const sendSpy = vi.spyOn(room, 'send').mockResolvedValue({ ok: true });
     const metadataSpy = vi.spyOn(room, 'getMetadata').mockResolvedValue({ stage: 'lobby' });
+    const summarySpy = vi.spyOn(room, 'getSummary').mockResolvedValue({
+      namespace: 'default',
+      roomId: 'adapter-room',
+      metadata: { stage: 'lobby' },
+      occupancy: { activeMembers: 2, activeConnections: 3 },
+      updatedAt: '2026-03-27T00:00:00.000Z',
+    });
 
     (room as any)._sharedState = { score: 1 };
     (room as any)._playerState = { ready: true };
@@ -1267,9 +1277,222 @@ describe('RoomClient — rooms adapter APIs', () => {
     expect(room.state.getMine()).toEqual({ ready: true });
     await expect(room.state.send('SET_READY', { ready: true })).resolves.toEqual({ ok: true });
     await expect(room.meta.get()).resolves.toEqual({ stage: 'lobby' });
+    await expect(room.meta.summary()).resolves.toEqual({
+      namespace: 'default',
+      roomId: 'adapter-room',
+      metadata: { stage: 'lobby' },
+      occupancy: { activeMembers: 2, activeConnections: 3 },
+      updatedAt: '2026-03-27T00:00:00.000Z',
+    });
 
     expect(sendSpy).toHaveBeenCalledWith('SET_READY', { ready: true });
     expect(metadataSpy).toHaveBeenCalledTimes(1);
+    expect(summarySpy).toHaveBeenCalledTimes(1);
+    tm.destroy();
+  });
+
+  it('room summary and connect-check helpers call the expected public endpoints', async () => {
+    const tm = new TokenManager('http://localhost:8688');
+    const room = new RoomClient('http://localhost:8688', 'default', 'adapter-room', tm);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          namespace: 'default',
+          roomId: 'adapter-room',
+          metadata: { stage: 'lobby' },
+          occupancy: { activeMembers: 2, activeConnections: 3 },
+          updatedAt: '2026-03-27T00:00:00.000Z',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          ok: true,
+          type: 'room_connect_ready',
+          category: 'ready',
+          message: 'Room WebSocket preflight passed',
+          namespace: 'default',
+          roomId: 'adapter-room',
+          runtime: 'rooms',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    await expect(room.getSummary()).resolves.toEqual({
+      namespace: 'default',
+      roomId: 'adapter-room',
+      metadata: { stage: 'lobby' },
+      occupancy: { activeMembers: 2, activeConnections: 3 },
+      updatedAt: '2026-03-27T00:00:00.000Z',
+    });
+    await expect(room.checkConnection()).resolves.toEqual({
+      ok: true,
+      type: 'room_connect_ready',
+      category: 'ready',
+      message: 'Room WebSocket preflight passed',
+      namespace: 'default',
+      roomId: 'adapter-room',
+      runtime: 'rooms',
+    });
+
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:8688/api/room/summary?namespace=default&id=adapter-room',
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost:8688/api/room/connect-check?namespace=default&id=adapter-room',
+    );
+    tm.destroy();
+  });
+
+  it('room summary network failures explain which server was unreachable', async () => {
+    const tm = new TokenManager('http://localhost:8688');
+    const room = new RoomClient('http://localhost:8688', 'default', 'adapter-room', tm);
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:8688'));
+
+    await expect(room.getSummary()).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining('Failed to get room summary. Could not reach http://localhost:8688.'),
+    });
+    tm.destroy();
+  });
+
+  it('batch room summary helpers call the expected public endpoint', async () => {
+    const { createClient } = await import('../../src/client.js');
+    const client = createClient('http://localhost:8688');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({
+        namespace: 'default',
+        items: [
+          {
+            namespace: 'default',
+            roomId: 'room-1',
+            metadata: { stage: 'lobby' },
+            occupancy: { activeMembers: 2, activeConnections: 3 },
+            updatedAt: '2026-03-27T00:00:00.000Z',
+          },
+        ],
+        deniedIds: ['room-2'],
+        updatedAt: '2026-03-27T00:00:00.000Z',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(client.getRoomSummaries('default', ['room-1', 'room-2'])).resolves.toEqual({
+      namespace: 'default',
+      items: [
+        {
+          namespace: 'default',
+          roomId: 'room-1',
+          metadata: { stage: 'lobby' },
+          occupancy: { activeMembers: 2, activeConnections: 3 },
+          updatedAt: '2026-03-27T00:00:00.000Z',
+        },
+      ],
+      deniedIds: ['room-2'],
+      updatedAt: '2026-03-27T00:00:00.000Z',
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'http://localhost:8688/api/room/summaries',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ namespace: 'default', ids: ['room-1', 'room-2'] }),
+      },
+    );
+    client.destroy();
+  });
+
+  it('connect-check reports incompatible payloads clearly', async () => {
+    const tm = new TokenManager('http://localhost:8688');
+    const room = new RoomClient('http://localhost:8688', 'default', 'adapter-room', tm);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(room.checkConnection()).rejects.toMatchObject({
+      status: 200,
+      message: expect.stringContaining('may be out of sync'),
+    });
+    tm.destroy();
+  });
+
+  it('room media requests without a signed-in session explain how to recover', async () => {
+    const tm = new TokenManager('http://localhost:8688');
+    const room = new RoomClient('http://localhost:8688', 'default', 'adapter-room', tm);
+
+    await expect(room.media.realtime.iceServers()).rejects.toMatchObject({
+      status: 401,
+      message: 'Authentication required before calling room media APIs. Sign in and join the room first.',
+    });
+    tm.destroy();
+  });
+
+  it('media.checkReadiness delegates to the selected transport capabilities', async () => {
+    const tm = new TokenManager('http://localhost:8688');
+    const room = new RoomClient('http://localhost:8688', 'default', 'adapter-room', tm);
+    const getCapabilities = vi.fn(async () => ({
+      provider: 'p2p',
+      canConnect: true,
+      issues: [],
+      room: {
+        ok: true,
+        type: 'room_connect_ready',
+        category: 'ready',
+        message: 'Room WebSocket preflight passed',
+      },
+      joined: true,
+      currentMemberId: 'member-1',
+      sessionId: null,
+      browser: {
+        mediaDevices: true,
+        getUserMedia: true,
+        getDisplayMedia: true,
+        enumerateDevices: false,
+        rtcPeerConnection: true,
+      },
+      turn: {
+        requested: true,
+        available: true,
+        iceServerCount: 2,
+      },
+    }));
+    const transportSpy = vi.spyOn(room.media, 'transport').mockReturnValue({
+      connect: vi.fn(),
+      getCapabilities,
+      enableAudio: vi.fn(),
+      enableVideo: vi.fn(),
+      startScreenShare: vi.fn(),
+      disableAudio: vi.fn(),
+      disableVideo: vi.fn(),
+      stopScreenShare: vi.fn(),
+      setMuted: vi.fn(),
+      switchDevices: vi.fn(),
+      onRemoteTrack: vi.fn(),
+      getSessionId: vi.fn(() => null),
+      getPeerConnection: vi.fn(() => null),
+      destroy: vi.fn(),
+    } as any);
+
+    await expect(room.media.checkReadiness({ provider: 'p2p' })).resolves.toMatchObject({
+      provider: 'p2p',
+      canConnect: true,
+      currentMemberId: 'member-1',
+    });
+
+    expect(transportSpy).toHaveBeenCalledWith({ provider: 'p2p' });
+    expect(getCapabilities).toHaveBeenCalledTimes(1);
     tm.destroy();
   });
 
@@ -1779,6 +2002,31 @@ describe('RoomClient — rooms adapter APIs', () => {
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
     tm.destroy();
+  });
+});
+
+describe('refreshAccessToken', () => {
+  it('includes the refresh URL when the auth server is unreachable', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:8688'));
+
+    await expect(refreshAccessToken('http://localhost:8688', 'refresh-token')).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining('Auth session refresh could not reach http://localhost:8688/api/auth/refresh'),
+    });
+  });
+
+  it('explains when the refresh response is missing tokens', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ accessToken: 'only-access-token' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(refreshAccessToken('http://localhost:8688', 'refresh-token')).rejects.toMatchObject({
+      status: 500,
+      message: 'Auth refresh succeeded but did not return both accessToken and refreshToken. Check the server auth configuration.',
+    });
   });
 });
 

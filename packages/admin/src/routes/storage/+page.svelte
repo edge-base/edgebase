@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { devInfoStore } from '$lib/stores/devInfo';
 	import { toastError, toastSuccess } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
@@ -86,7 +87,9 @@
 		try {
 			await loadBuckets();
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to load storage buckets. Check your connection and configuration.');
+			toastError(describeActionError(err, 'Failed to load storage buckets.', {
+				hint: 'Check your connection, then confirm the EdgeBase worker is running and the admin session is valid.',
+			}));
 		} finally {
 			loading = false;
 		}
@@ -120,7 +123,7 @@
 			createName = '';
 			toastSuccess(`Bucket "${name}" created`);
 		} catch (err) {
-			createError = err instanceof Error ? err.message : 'Failed to create bucket.';
+			createError = describeActionError(err, 'Failed to create bucket.');
 			toastError(createError);
 		} finally {
 			creating = false;

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
 	import { pushDocs } from '$lib/docs-links';
@@ -32,7 +33,7 @@
 			const res = await api.fetch<{ items: Array<Record<string, unknown>> }>(`data/push/tokens?userId=${encodeURIComponent(tokenUserId.trim())}`);
 			tokens = res.items;
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to load tokens');
+			toastError(describeActionError(err, 'Failed to load push tokens.'));
 			tokens = [];
 		} finally {
 			tokensLoading = false;
@@ -74,7 +75,7 @@
 			sendResult = res;
 			toastSuccess(`Sent to ${res.sent ?? 0} device(s)`);
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to send');
+			toastError(describeActionError(err, 'Failed to send the test push notification.'));
 		} finally {
 			sending = false;
 		}
@@ -93,7 +94,7 @@
 			const res = await api.fetch<{ items: Array<Record<string, unknown>> }>(path);
 			logs = res.items;
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to load logs');
+			toastError(describeActionError(err, 'Failed to load push logs.'));
 			logs = [];
 		} finally {
 			logsLoading = false;

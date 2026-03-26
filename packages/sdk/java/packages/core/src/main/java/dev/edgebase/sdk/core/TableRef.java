@@ -384,7 +384,7 @@ public class TableRef {
                     break;
             } catch (Exception e) {
                 errors.add(Map.of("chunkIndex", chunkIndex, "chunkSize", 500,
-                        "error", e.getMessage() != null ? e.getMessage() : "Unknown error"));
+                        "error", e.getMessage() != null ? e.getMessage() : "Batch operation failed without an error message."));
                 break;
             }
         }

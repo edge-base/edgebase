@@ -493,7 +493,7 @@ class TableRef(
                 // Only 'delete' benefits from looping since deleted rows disappear.
                 if (action == "update") break
             } catch (e: Exception) {
-                errors.add(mapOf("chunkIndex" to chunkIndex, "chunkSize" to 500, "error" to (e.message ?: "Unknown error")))
+                errors.add(mapOf("chunkIndex" to chunkIndex, "chunkSize" to 500, "error" to (e.message ?: "Batch operation failed without an error message.")))
                 break // Stop on error (partial failure)
             }
         }

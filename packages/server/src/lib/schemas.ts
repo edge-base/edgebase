@@ -139,13 +139,23 @@ export const trackEventsBodySchema = z.object({
  * Returns Zod validation errors in the standard { code, message } format.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export function zodDefaultHook(result: { success: boolean; error?: { issues?: Array<{ message: string }>; errors?: Array<{ message: string }> } }, c: any) {
+function formatZodIssue(issue: { message?: string; path?: Array<string | number> }): string {
+  const message = typeof issue.message === 'string' ? issue.message : 'Invalid value';
+  const path = Array.isArray(issue.path) && issue.path.length > 0
+    ? issue.path.map((segment) => typeof segment === 'number' ? `[${segment}]` : String(segment)).join('.').replace(/\.\[/g, '[')
+    : '';
+  return path ? `${path}: ${message}` : message;
+}
+
+export function zodDefaultHook(result: { success: boolean; error?: { issues?: Array<{ message: string; path?: Array<string | number> }>; errors?: Array<{ message: string; path?: Array<string | number> }> } }, c: any) {
   if (!result.success) {
     // Zod v4 uses `issues`, Zod v3 uses `errors`
     const items = (result.error as any)?.issues ?? (result.error as any)?.errors ?? [];
     return c.json({
       code: 400,
-      message: items.map((e: any) => e.message).join(', '),
+      message: items.length > 0
+        ? items.map((e: any) => formatZodIssue(e)).join(', ')
+        : 'Request validation failed.',
     }, 400);
   }
 }

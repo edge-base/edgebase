@@ -18,6 +18,7 @@ interface CaptchaConfig {
 }
 
 type HonoContext = Context<{ Bindings: Env }>;
+const captchaWarnings = new Set<string>();
 
 interface SiteverifyResponse {
   success: boolean;
@@ -139,7 +140,14 @@ export function captchaMiddleware(expectedAction: string) {
       try {
         const config = parseConfig(c.env);
         if (config?.captcha === true) {
-          console.warn('⚠️ Captcha skipped: no Turnstile keys provisioned.');
+          if (!captchaWarnings.has('missing-turnstile-keys')) {
+            captchaWarnings.add('missing-turnstile-keys');
+            console.warn(
+              '[Auth] CAPTCHA is enabled, but Turnstile keys are missing. '
+              + 'Requests will continue without CAPTCHA in local dev. '
+              + 'Add captchaSiteKey and TURNSTILE_SECRET, or set captcha: false to silence this warning.',
+            );
+          }
         }
       } catch { /* ignore */ }
       await next();
@@ -170,7 +178,13 @@ export function captchaMiddleware(expectedAction: string) {
     // Handle siteverify API failure (timeout, network error)
     if (result['error-codes']?.includes('timeout-or-network-error')) {
       if (failMode === 'open') {
-        console.warn('⚠️ Turnstile siteverify failed (timeout/network). Allowing request (failMode=open).');
+        if (!captchaWarnings.has('siteverify-fail-open')) {
+          captchaWarnings.add('siteverify-fail-open');
+          console.warn(
+            '[Auth] Turnstile siteverify failed because of a timeout or network error. '
+            + 'The request is being allowed because captcha.failMode is set to "open".',
+          );
+        }
         await next();
         return;
       }
@@ -214,4 +228,3 @@ export const _test = {
   hasServiceKey,
   siteverify,
 };
-

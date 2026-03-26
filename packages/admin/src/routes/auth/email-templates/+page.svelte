@@ -2,6 +2,7 @@
 	import { base } from '$app/paths';
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastError, addToast } from '$lib/stores/toast.svelte';
 	import { devInfoStore } from '$lib/stores/devInfo';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
@@ -34,6 +35,7 @@
 	let loading = $state(true);
 	let saving = $state(false);
 	let config = $state<EmailTemplateConfig | null>(null);
+	let loadError = $state('');
 
 	// Language selector
 	let selectedLocale = $state('en');
@@ -94,7 +96,8 @@
 				initEditState(type.id, 'en');
 			}
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to load email templates');
+			loadError = describeActionError(err, 'Failed to load email templates.');
+			toastError(loadError);
 		} finally {
 			loading = false;
 		}
@@ -205,7 +208,7 @@
 				message: `Email template for "${EMAIL_TYPES.find((t) => t.id === currentType)?.label}" (${localeName}) saved.`,
 			});
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to save email template');
+			toastError(describeActionError(err, 'Failed to save the email template.'));
 		} finally {
 			saving = false;
 		}
@@ -231,7 +234,7 @@
 			Loading email templates...
 		</div>
 	{:else if !config}
-		<div class="error-state">Failed to load email template configuration.</div>
+		<div class="error-state">{loadError || 'Failed to load email template configuration. Check that the EdgeBase admin API is running and retry.'}</div>
 	{:else}
 		<!-- Language Selector -->
 		<div class="locale-selector">

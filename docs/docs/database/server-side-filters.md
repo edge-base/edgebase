@@ -16,15 +16,15 @@ Reduce bandwidth and client-side processing by letting the server evaluate filte
 
 ## Overview
 
-EdgeBase supports two filtering modes for database subscriptions:
+EdgeBase supports two filtering modes for database subscriptions. On the JavaScript/TypeScript SDK, filtered table subscriptions use server-side filtering by default. Other client SDKs can opt in with `serverFilter: true` or the equivalent language-specific option.
 
-| | Client-Side (Default) | Server-Side |
+| | Client-Side | Server-Side |
 |---|---|---|
 | **How** | Server sends all events; SDK filters locally | Server evaluates filters; only matching events sent |
 | **Bandwidth** | Higher — all events transmitted | Lower — only matching events |
 | **CPU** | Client evaluates | Server evaluates |
 | **Flexibility** | Any filter logic | 8 operators, max 5 conditions per type |
-| **Best for** | Development, low-traffic tables | Production, high-traffic tables |
+| **Best for** | Opt-out compatibility or local debugging | Production, high-traffic tables |
 
 ## Quick Start
 
@@ -34,9 +34,9 @@ EdgeBase supports two filtering modes for database subscriptions:
 ```typescript
 const unsubscribe = client.db('app').table('posts')
   .where('status', '==', 'published')
-  .onSnapshot((event) => {
-    console.log('Published post changed:', event.data);
-  }, { serverFilter: true });
+  .onSnapshot((snapshot) => {
+    console.log('Published posts:', snapshot.items);
+  });
 ```
 
 </TabItem>
@@ -98,6 +98,18 @@ int subId = client.db().onSnapshot("posts",
 </TabItem>
 </Tabs>
 
+## JavaScript Default
+
+On JavaScript/TypeScript, any filtered table subscription created with `.where()` or `.whereOr()` now uses server-side filtering automatically.
+
+If you intentionally want the old client-side behavior, opt out explicitly:
+
+```typescript
+const unsubscribe = client.db('app').table('posts')
+  .where('status', '==', 'published')
+  .onSnapshot(handler, { serverFilter: false });
+```
+
 ## AND Filters
 
 AND filters require **all** conditions to match. Chain multiple `.where()` calls:
@@ -107,7 +119,7 @@ AND filters require **all** conditions to match. Chain multiple `.where()` calls
 const unsubscribe = client.db('app').table('posts')
   .where('status', '==', 'published')
   .where('authorId', '==', 'user-123')
-  .onSnapshot(handler, { serverFilter: true });
+  .onSnapshot(handler);
 ```
 
 ## OR Filters
@@ -120,7 +132,7 @@ const unsubscribe = client.db('app').table('posts')
   .where('authorId', '==', 'user-123')
   .whereOr('status', '==', 'published')
   .whereOr('status', '==', 'featured')
-  .onSnapshot(handler, { serverFilter: true });
+  .onSnapshot(handler);
 ```
 
 This is equivalent to: `WHERE authorId = 'user-123' AND (status = 'published' OR status = 'featured')`
@@ -146,7 +158,7 @@ Change your filter conditions without re-subscribing using `updateFilters`:
 // Initially subscribe to published posts
 const sub = client.db('app').table('posts')
   .where('status', '==', 'published')
-  .onSnapshot(handler, { serverFilter: true });
+  .onSnapshot(handler);
 
 // Later, switch to draft posts without reconnecting
 sub.updateFilters([

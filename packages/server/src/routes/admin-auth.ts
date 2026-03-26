@@ -51,7 +51,7 @@ adminAuthRoute.onError((err, c) => {
     return c.json(err.toJSON(), err.code as 400);
   }
   console.error('Admin Auth unhandled error:', err);
-  return c.json({ code: 500, message: 'Internal server error.' }, 500);
+  return c.json({ code: 500, message: 'Admin auth request failed unexpectedly. Check the worker logs for the original exception.' }, 500);
 });
 
 // Service Key middleware — scoped validation
@@ -65,10 +65,10 @@ adminAuthRoute.use('*', async (c, next) => {
   const provided = explicitServiceKey ?? resolveServiceKeyCandidate(c.req, extractBearerToken(c.req));
   const { result } = validateKey(provided, 'auth:admin:*:*', config, c.env, undefined, buildConstraintCtx(c.env, c.req));
   if (result === 'missing') {
-    throw new EdgeBaseError(403, 'Service Key required for admin auth operations.');
+    throw new EdgeBaseError(403, 'X-EdgeBase-Service-Key is required for admin auth operations.');
   }
   if (result === 'invalid') {
-    throw new EdgeBaseError(401, 'Unauthorized. Service Key required.');
+    throw new EdgeBaseError(401, 'Invalid X-EdgeBase-Service-Key for admin auth operations.');
   }
   await ensureAuthSchema(getAuthDb(c));
   await next();

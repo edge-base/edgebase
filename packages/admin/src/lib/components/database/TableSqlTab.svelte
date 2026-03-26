@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastError } from '$lib/stores/toast.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import DataGrid from '$lib/components/ui/DataGrid.svelte';
@@ -106,7 +107,7 @@
 			];
 			activeTab = results.length - 1;
 		} catch (err) {
-			const message = err instanceof Error ? err.message : 'Query failed';
+			const message = describeActionError(err, 'Query failed.');
 			toastError(message);
 			resultCounter += 1;
 			results = [

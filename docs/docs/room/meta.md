@@ -31,6 +31,8 @@ Do not put secrets, tokens, email addresses, or private user data in metadata.
 
 `room.meta.get()` can be used before or after join.
 
+On the JavaScript/TypeScript web SDK, `room.meta.summary()` adds live occupancy counts on top of the metadata payload, `client.getRoomSummary(namespace, roomId)` provides the same HTTP helper without creating a room instance first, and `client.getRoomSummaries(namespace, roomIds)` batches multiple room cards into one request.
+
 Assume `room` is an authenticated room client created with `client.room(...)`.
 
 <Tabs groupId="sdk-language">
@@ -39,6 +41,9 @@ Assume `room` is an authenticated room client created with `client.room(...)`.
 ```ts
 const meta = await room.meta.get();
 console.log(meta.mode, meta.playerCount);
+
+const summary = await room.meta.summary();
+console.log(summary.occupancy.activeMembers);
 ```
 
 </TabItem>
@@ -98,6 +103,18 @@ The underlying HTTP API is:
 GET /api/room/metadata?namespace={ns}&id={roomId}
 ```
 
+For lobby cards and room lists, the occupancy-aware companion endpoint is:
+
+```text
+GET /api/room/summary?namespace={ns}&id={roomId}
+```
+
+For list UIs that need multiple room cards at once, use:
+
+```text
+POST /api/room/summaries
+```
+
 ## Server Surface
 
 ```ts
@@ -141,6 +158,7 @@ See [Access Rules](/docs/room/access-rules).
 
 - Use [State](/docs/room/state) for authoritative gameplay or collaborative state.
 - Use `meta` for pre-join or publicly readable room summary data.
+- Use `summary` when you also need a live count of active members or connections without joining.
 
 ## Related Docs
 

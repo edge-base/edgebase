@@ -218,7 +218,12 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
       };
 
       ws.onerror = () => {
-        reject(new EdgeBaseError(500, 'Database live WebSocket connection error'));
+        reject(
+          new EdgeBaseError(
+            500,
+            'Database live WebSocket connection failed. Check that the EdgeBase server is running and that database-live is enabled for this URL.',
+          ),
+        );
       };
     });
   }
@@ -228,7 +233,10 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
       refreshAccessToken(this.baseUrl, refreshToken),
     );
     if (!token) {
-      throw new EdgeBaseError(401, 'No access token available. Sign in first.');
+      throw new EdgeBaseError(
+        401,
+        'Database live subscriptions require a signed-in session. Sign in before opening live subscriptions.',
+      );
     }
 
     this.sendRaw({ type: 'auth', token, sdkVersion: '0.2.5' });
@@ -236,7 +244,12 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         if (this.ws) this.ws.onmessage = originalOnMessage ?? null;
-        reject(new EdgeBaseError(401, 'Auth timeout'));
+        reject(
+          new EdgeBaseError(
+            401,
+            'Database live authentication timed out. Check the server auth response and WebSocket connectivity.',
+          ),
+        );
       }, 10000);
 
       const originalOnMessage = this.ws?.onmessage;

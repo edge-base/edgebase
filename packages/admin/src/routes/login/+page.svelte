@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { base } from '$app/paths';
 	import { authStore } from '$lib/stores/auth';
+	import { describeActionError } from '$lib/error-messages';
 	import { getPostLoginPath } from '$lib/login-redirect';
 	import { fetchSetupStatus } from '$lib/setup-status';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -55,8 +56,12 @@
 			needsSetup = data.needsSetup;
 			publicSetupAllowed = data.publicSetupAllowed ?? false;
 			setupMessage = data.message ?? '';
-		} catch {
-			setupStatusError = 'Could not reach the admin server. Make sure the fresh dev server is still running, then retry.';
+		} catch (err) {
+			setupStatusError = describeActionError(
+				err,
+				'Could not reach the admin server.',
+				{ hint: 'Make sure the fresh dev server is still running, then retry.' },
+			);
 		}
 	}
 
@@ -89,7 +94,7 @@
 				await authStore.login(email, password);
 			}
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Authentication failed.';
+			error = describeActionError(err, needsSetup ? 'Failed to create the admin account.' : 'Authentication failed.');
 		} finally {
 			loading = false;
 		}

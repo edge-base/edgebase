@@ -43,6 +43,73 @@ Successful response:
 }
 ```
 
+### `GET /api/room/summary`
+
+Use the room summary endpoint when you want lobby-card data before join, including public metadata and live occupancy:
+
+```bash
+curl "https://your-project.edgebase.fun/api/room/summary?namespace=game&id=lobby-1"
+```
+
+Successful response:
+
+```json
+{
+  "namespace": "game",
+  "roomId": "lobby-1",
+  "metadata": {
+    "mode": "classic",
+    "title": "Beginner Lobby"
+  },
+  "occupancy": {
+    "activeMembers": 3,
+    "activeConnections": 4
+  },
+  "updatedAt": "2026-03-27T00:00:00.000Z"
+}
+```
+
+`/api/room/summary` follows the same public metadata access gate as `/api/room/metadata`. If metadata is not public for the room namespace, the summary endpoint also requires auth/authorization.
+
+### `POST /api/room/summaries`
+
+Use the batch summary endpoint when you want lobby-card data for multiple rooms in one request:
+
+```bash
+curl "https://your-project.edgebase.fun/api/room/summaries" \
+  -H "Content-Type: application/json" \
+  -d '{"namespace":"game","ids":["lobby-1","lobby-2"]}'
+```
+
+Successful response:
+
+```json
+{
+  "namespace": "game",
+  "items": [
+    {
+      "namespace": "game",
+      "roomId": "lobby-1",
+      "metadata": {
+        "mode": "classic",
+        "title": "Beginner Lobby"
+      },
+      "occupancy": {
+        "activeMembers": 3,
+        "activeConnections": 4
+      },
+      "updatedAt": "2026-03-27T00:00:00.000Z"
+    }
+  ],
+  "deniedIds": [
+    "lobby-2"
+  ],
+  "updatedAt": "2026-03-27T00:00:00.000Z"
+}
+```
+
+`deniedIds` contains room IDs that failed the same metadata access gate used by `/api/room/summary`.
+
 ---
 
 ## Authentication

@@ -225,7 +225,7 @@ class RoomClient(
         method: String = "POST",
         payload: Map<String, Any?> = emptyMap(),
     ): Map<String, Any?> {
-        val token = tokenManager.getAccessToken() ?: throw EdgeBaseError(401, "Authentication required")
+        val token = tokenManager.getAccessToken() ?: throw EdgeBaseError(401, "Authentication required before calling room media APIs. Sign in and join the room first.")
         val client = createPlatformHttpClient()
         val url = "${baseUrl.trimEnd('/')}/api/room/media/$providerPath/$path?namespace=${platformUrlEncode(namespace)}&id=${platformUrlEncode(roomId)}"
         val requestBody = Json.encodeToString(
@@ -331,7 +331,7 @@ class RoomClient(
 
     suspend fun send(actionType: String, payload: Any? = null): Any? {
         if (!isConnected || !isAuthenticated) {
-            throw EdgeBaseError(400, "Not connected to room")
+            throw EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.")
         }
 
         val requestId = platformUuid()
@@ -1131,7 +1131,7 @@ class RoomClient(
         buildMessage: (String) -> Map<String, Any?>,
     ) {
         if (!isConnected || !isAuthenticated) {
-            throw EdgeBaseError(400, "Not connected to room")
+            throw EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.")
         }
 
         val requestId = platformUuid()

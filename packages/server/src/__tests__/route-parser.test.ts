@@ -360,6 +360,12 @@ describe('parseRoute — room', () => {
     expect(r.subcategory).toBe('metadata');
     expect(r.operation).toBe('getMetadata');
   });
+
+  it('GET /api/room/summary', () => {
+    const r = parseRoute('GET', '/api/room/summary');
+    expect(r.subcategory).toBe('summary');
+    expect(r.operation).toBe('getSummary');
+  });
 });
 
 // ─── K. Other feature routes ────────────────────────────────────────────────

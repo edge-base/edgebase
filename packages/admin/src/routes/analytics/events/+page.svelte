@@ -5,6 +5,7 @@
 	 */
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastError } from '$lib/stores/toast.svelte';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
 	import { adminDashboardAnalyticsDocs } from '$lib/docs-links';
@@ -67,7 +68,7 @@
 			const res = await api.fetch<{ events?: TimelineEvent[]; data?: TimelineEvent[] }>(url);
 			events = res.events ?? res.data ?? [];
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to load events');
+			toastError(describeActionError(err, 'Failed to load analytics events.'));
 			events = [];
 		} finally {
 			loading = false;

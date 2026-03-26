@@ -394,7 +394,7 @@ class TestEdgeBaseError:
 
     def test_from_json_missing_message(self):
         err = EdgeBaseError.from_json({}, 500)
-        assert err.message == "Unknown error"
+        assert err.message == "Request failed with HTTP 500 and no error message from the server."
 
 
 # ─── G. EdgeBaseAuthError ─────────────────────────────────────────────────────

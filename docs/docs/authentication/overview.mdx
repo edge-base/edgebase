@@ -64,15 +64,21 @@ Assume `client` is already initialized with your platform SDK.
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
+import { isAuthResult } from '@edge-base/web';
+
 const signUpResult = await client.auth.signUp({
   email: 'user@example.com',
   password: 'securePassword123',
 });
 
-const session = await client.auth.signIn({
+const signIn = await client.auth.signIn({
   email: 'user@example.com',
   password: 'securePassword123',
 });
+
+if (isAuthResult(signIn)) {
+  console.log(signIn.user.email);
+}
 
 const currentUser = client.auth.currentUser;
 

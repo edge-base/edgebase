@@ -20,6 +20,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { signRefreshToken } from '../../src/lib/jwt.js';
 
 const BASE = 'http://localhost';
+const SK = 'test-service-key-for-admin';
 
 async function api(
   method: string,
@@ -157,6 +158,24 @@ describe('1-11 auth-session — signin/anonymous', () => {
       expect(data.user?.isAnonymous).toBeTruthy();
       expect(typeof data.accessToken).toBe('string');
     }
+  });
+
+  it('익명 로그인 직후 public profile projection 조회 가능', async () => {
+    const { status, data } = await api('POST', '/signin/anonymous');
+    if (status === 404) {
+      expect(data.message).toContain('not enabled');
+      return;
+    }
+
+    expect(status).toBe(201);
+    const profileRes = await (globalThis as any).SELF.fetch(
+      `${BASE}/admin/api/data/users/${data.user.id}/profile`,
+      { headers: { 'X-EdgeBase-Service-Key': SK } },
+    );
+    expect(profileRes.status).toBe(200);
+    const profile = await profileRes.json() as any;
+    expect(profile.id).toBe(data.user.id);
+    expect(profile.isAnonymous).toBeTruthy();
   });
 });
 

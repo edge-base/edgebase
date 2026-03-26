@@ -257,6 +257,62 @@ describe('Wrangler dev arguments', () => {
     expect(args).toContain('3000');
   });
 
+  it('skips CLI-generated unsafe rate limit bindings in local dev', () => {
+    expect(_devInternals.resolveDevRateLimitBindings()).toEqual([]);
+  });
+
+  it('captures recent wrangler stderr lines without ANSI noise', () => {
+    const lines: string[] = [];
+    let remainder = _devInternals.appendRecentOutputChunk(lines, '\u001B[31mFirst error\u001B[0m\nSecond');
+    expect(lines).toEqual(['First error']);
+    expect(remainder).toBe('Second');
+
+    remainder = _devInternals.appendRecentOutputChunk(lines, ' line\nThird line\n', remainder);
+    expect(lines).toEqual(['First error', 'Second line', 'Third line']);
+    expect(remainder).toBe('');
+  });
+
+  it('suppresses known wrangler local-dev warning noise from stderr output', () => {
+    expect(
+      _devInternals.shouldSuppressWranglerStderrLine(
+        '▲ [WARNING] Processing wrangler.toml configuration:',
+      ),
+    ).toBe(true);
+    expect(
+      _devInternals.shouldSuppressWranglerStderrLine(
+        '    - "unsafe" fields are experimental and may change or break at any time.',
+      ),
+    ).toBe(true);
+    expect(_devInternals.shouldSuppressWranglerStderrLine('Error: listen EADDRINUSE')).toBe(false);
+  });
+
+  it('filters suppressed wrangler warning lines while keeping actionable stderr output', () => {
+    const result = _devInternals.filterWranglerStderrChunkForDisplay(
+      '▲ [WARNING] Processing wrangler.toml configuration:\n'
+      + '    - "unsafe" fields are experimental and may change or break at any time.\n'
+      + 'Error: listen EADDRINUSE\n',
+    );
+
+    expect(result.display).toBe('Error: listen EADDRINUSE\n');
+    expect(result.remainder).toBe('');
+  });
+
+  it('infers a port-conflict hint from recent wrangler stderr output', () => {
+    expect(
+      _devInternals.inferWranglerDevExitHint([
+        'Error: listen EADDRINUSE: address already in use 127.0.0.1:8787',
+      ]),
+    ).toContain('--auto-port');
+  });
+
+  it('infers a missing-module hint from recent wrangler stderr output', () => {
+    expect(
+      _devInternals.inferWranglerDevExitHint([
+        'Error: Cannot find module "./generated-config.js"',
+      ]),
+    ).toContain('functions/');
+  });
+
   it('always includes --port flag', () => {
     const port = '8787';
     const args = ['wrangler', 'dev', '--port', port];
@@ -354,6 +410,27 @@ describe('Wrangler dev arguments', () => {
       expect(resolved.portChanged).toBe(true);
       expect(resolved.sidecarPort).toBeGreaterThan(resolved.port);
       expect(resolved.sidecarPort).not.toBe(resolved.port);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve())),
+      );
+    }
+  });
+
+  it('fails when a strict preferred dev port is already occupied', async () => {
+    const server = createNetServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => resolve());
+    });
+
+    const address = server.address();
+    const occupiedPort = typeof address === 'object' && address ? address.port : 0;
+
+    try {
+      await expect(
+        _devInternals.reserveDevPorts(occupiedPort, undefined, { strictPort: true }),
+      ).rejects.toThrow(`Port ${occupiedPort} is already in use or reserved`);
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((err) => (err ? reject(err) : resolve())),

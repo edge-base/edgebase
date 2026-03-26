@@ -26,6 +26,10 @@ import {
 
 export const databaseLiveRoute = new OpenAPIHono<HonoEnv>({ defaultHook: zodDefaultHook });
 
+function invalidDatabaseLiveJsonMessage(): string {
+  return 'Invalid JSON body for database-live broadcast. Send application/json with { channel, event, payload? }.';
+}
+
 const MAX_PENDING_PER_IP = 5;
 const PENDING_TTL_SECONDS = 60;
 const dbLiveQuerySchema = z.object({
@@ -269,15 +273,15 @@ databaseLiveRoute.openapi(databaseLiveBroadcast, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidDatabaseLiveJsonMessage() }, 400);
   }
 
   const { channel, event, payload } = body;
   if (!channel || typeof channel !== 'string') {
-    return c.json({ code: 400, message: 'channel is required' }, 400);
+    return c.json({ code: 400, message: "Missing required field 'channel' for database-live broadcast." }, 400);
   }
   if (!event || typeof event !== 'string') {
-    return c.json({ code: 400, message: 'event is required' }, 400);
+    return c.json({ code: 400, message: "Missing required field 'event' for database-live broadcast." }, 400);
   }
 
   // Service Key required AND validated
@@ -291,10 +295,10 @@ databaseLiveRoute.openapi(databaseLiveBroadcast, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required for server broadcast' }, 403);
+    return c.json({ code: 403, message: `X-EdgeBase-Service-Key is required to broadcast to database-live channel '${channel}'.` }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: `Invalid X-EdgeBase-Service-Key for database-live channel '${channel}'.` }, 401);
   }
 
   // Route broadcast through the DatabaseLiveDO hub
@@ -308,7 +312,10 @@ databaseLiveRoute.openapi(databaseLiveBroadcast, async (c) => {
   }));
 
   if (!doResponse.ok) {
-    return c.json({ code: doResponse.status, message: 'Broadcast failed' }, doResponse.status as 400 | 500);
+    return c.json({
+      code: doResponse.status,
+      message: `Broadcast to database-live channel '${channel}' failed for event '${event}'.`,
+    }, doResponse.status as 400 | 500);
   }
 
   return c.json({ ok: true });

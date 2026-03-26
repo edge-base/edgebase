@@ -25,6 +25,7 @@ import {
   HttpClientAdapter,
 } from '@edge-base/core';
 import type { ITokenPair } from '@edge-base/core';
+import type { EdgeBaseTableMap } from '@edge-base/core';
 import { CookieTokenManager } from './cookie-token-manager.js';
 import type { ServerClientOptions } from './types.js';
 
@@ -46,16 +47,19 @@ export interface ServerUser {
  * Exposes: db(), storage, functions, getUser(), getSession().
  * Does NOT expose: auth signIn/signUp (client-side only), database-live, room, push.
  */
-export class ServerEdgeBase {
+export class ServerEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> {
   readonly storage: StorageClient;
   readonly functions: FunctionsClient;
   private httpClient: HttpClient;
   private tokenManager: CookieTokenManager;
   private baseUrl: string;
   private core: DefaultDbApi;
-  constructor(url: string, options: ServerClientOptions) {
+  constructor(url: string, options: ServerClientOptions<Schema>) {
     this.baseUrl = url.replace(/\/$/, '');
-    this.tokenManager = new CookieTokenManager(options.cookies, options.cookieOptions);
+    this.tokenManager = new CookieTokenManager(options.cookies, {
+      cookieOptions: options.cookieOptions,
+      authNamespace: options.authNamespace,
+    });
 
     this.httpClient = new HttpClient({
       baseUrl: this.baseUrl,
@@ -76,8 +80,8 @@ export class ServerEdgeBase {
    * const posts = await client.db('shared').table('posts').getList();
    * const docs = await client.db('workspace', 'ws-456').table('documents').getList();
    */
-  db(namespace: string, id?: string): DbRef {
-    return new DbRef(this.core, namespace, id, undefined, undefined);
+  db(namespace: string, id?: string): DbRef<Schema> {
+    return new DbRef<Schema>(this.core, namespace, id, undefined, undefined);
   }
 
   /**

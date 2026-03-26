@@ -1238,7 +1238,7 @@ authRoute.openapi(signinAnonymous, async (c) => {
 
     const user = await authService.getUserById(db, userId);
     if (user) {
-      syncUserPublic(c.env, c.executionCtx, userId, authService.buildPublicUserData(user));
+      await syncUserPublic(c.env, c.executionCtx, userId, authService.buildPublicUserData(user), true);
 
       return c.json({
         user: authService.sanitizeUser(user),

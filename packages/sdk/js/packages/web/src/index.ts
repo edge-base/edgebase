@@ -14,7 +14,7 @@ export { ClientEdgeBase, createClient, type JuneClientOptions } from './client.j
 
 // Auth
 export { AuthClient, isAuthResult, isMfaRequired, type AuthResult, type SignInResult, type MfaRequiredResult, type MfaFactor, type SignUpOptions, type SignInOptions, type Session } from './auth.js';
-export { TokenManager, type TokenPair, type TokenUser, type AuthStateChangeHandler } from './token-manager.js';
+export { TokenManager, type TokenPair, type TokenUser, type AuthStateChangeHandler, type TokenManagerOptions } from './token-manager.js';
 
 // Database Live
 export { DatabaseLiveClient, type DatabaseLiveOptions } from './database-live.js';
@@ -43,6 +43,11 @@ export {
   type RoomRealtimeTrackObject,
   type RoomRealtimeCreateSessionRequest,
   type RoomRealtimeCreateSessionResponse,
+  type RoomConnectDiagnostic,
+  type RoomSummary,
+  type RoomMediaTransportCapabilityCategory,
+  type RoomMediaTransportCapabilityIssue,
+  type RoomMediaTransportCapabilities,
   type RoomRealtimeIceServer,
   type RoomRealtimeIceServersRequest,
   type RoomRealtimeIceServersResponse,
@@ -62,3 +67,4 @@ export { ClientAnalytics } from './analytics.js';
 
 // Errors (re-exported for convenience)
 export { EdgeBaseError, ResumableUploadError } from '@edge-base/core';
+export type { EdgeBaseTableMap, EdgeBaseTableRecord } from '@edge-base/core';

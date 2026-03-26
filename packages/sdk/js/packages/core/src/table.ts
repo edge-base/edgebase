@@ -69,6 +69,11 @@ export type TableSqlExecutor = (
   params?: unknown[],
 ) => Promise<unknown[]>;
 
+export type EdgeBaseTableRecord = Record<string, unknown>;
+export type EdgeBaseTableMap = Record<string, EdgeBaseTableRecord>;
+
+const warnedClientSideSnapshotFilters = new Set<string>();
+
 export const TABLE_SQL_PARAM_MARKER_PREFIX = '__EDGEBASE_SQL_PARAM_';
 export const TABLE_SQL_PARAM_MARKER_SUFFIX = '__';
 
@@ -171,6 +176,11 @@ function matchesSnapshotFilters(
     return true;
   }
   return matchesAnyFilter(data, orFilters, filterMatchFn);
+}
+
+function shouldWarnForClientSideSnapshotFilters(): boolean {
+  if (typeof process === 'undefined' || !process.env) return false;
+  return process.env.NODE_ENV !== 'production' && process.env.VITEST !== 'false';
 }
 
 // ─── Core dispatch helpers ───
@@ -340,7 +350,10 @@ export class DocRef<T = Record<string, unknown>> {
    */
   onSnapshot(callback: (data: T | null, change: IDbChange<T>) => void): Subscription {
     if (!this.databaseLiveClient) {
-      throw new EdgeBaseError(500, 'IDatabaseLiveSubscriber not available');
+      throw new EdgeBaseError(
+        500,
+        'Database live subscriptions are unavailable on this client. Use @edge-base/web or pass a configured database-live subscriber.',
+      );
     }
 
     const channel = buildDatabaseLiveChannel(
@@ -512,7 +525,7 @@ export class TableRef<T = Record<string, unknown>> {
     if (hasCursor && hasOffset) {
       throw new EdgeBaseError(
         400,
-        'Cannot use page()/offset() with after()/before() — choose offset or cursor pagination',
+        'Cannot use page()/offset() with after()/before(). Choose either offset pagination or cursor pagination for this query.',
       );
     }
 
@@ -813,12 +826,12 @@ export class TableRef<T = Record<string, unknown>> {
 
   /**
    * Subscribe to table changes via database-live.
-   * By default, client-side filtering is applied for where() conditions.
-   * With `{ serverFilter: true }`, filters are evaluated server-side for bandwidth savings.
+   * By default, filtered subscriptions use server-side filtering for where()/or() conditions.
+   * Pass `{ serverFilter: false }` to force client-side filtering instead.
    * Returns an unsubscribe function.
    *
    * @example
-   * // Client-side filtering (default)
+   * // Server-side filtering (default for filtered subscriptions)
    * const unsub = client.db('shared').table('posts')
    *   .where('status', '==', 'published')
    *   .onSnapshot((snapshot) => {
@@ -830,14 +843,30 @@ export class TableRef<T = Record<string, unknown>> {
     options?: { serverFilter?: boolean },
   ): Subscription {
     if (!this.databaseLiveClient) {
-      throw new EdgeBaseError(500, 'IDatabaseLiveSubscriber not available');
+      throw new EdgeBaseError(
+        500,
+        'Database live subscriptions are unavailable on this client. Use @edge-base/web or pass a configured database-live subscriber.',
+      );
     }
 
     const channel = buildDatabaseLiveChannel(this.namespace, this.instanceId, this.name);
     const currentFilters = [...this.filters];
     const currentOrFilters = [...this.orFilters];
-    const useServerFilter =
-      options?.serverFilter === true && (currentFilters.length > 0 || currentOrFilters.length > 0);
+    const hasFilterConstraints = currentFilters.length > 0 || currentOrFilters.length > 0;
+    const useServerFilter = hasFilterConstraints
+      ? options?.serverFilter !== false
+      : false;
+
+    if (hasFilterConstraints && options?.serverFilter === false && shouldWarnForClientSideSnapshotFilters()) {
+      const warningKey = `${this.namespace}:${this.instanceId ?? 'single'}:${this.name}`;
+      if (!warnedClientSideSnapshotFilters.has(warningKey)) {
+        warnedClientSideSnapshotFilters.add(warningKey);
+        console.warn(
+          `[EdgeBase] ${warningKey} onSnapshot() is using client-side filtering. ` +
+          'Remove { serverFilter: false } to use server-side filtering by default.',
+        );
+      }
+    }
 
     // Accumulate state locally
     const items = new Map<string, T>();
@@ -876,7 +905,6 @@ export class TableRef<T = Record<string, unknown>> {
       (change) => {
         const data = change.data as Record<string, unknown> | null;
         const docId = change.docId;
-        const hasFilterConstraints = currentFilters.length > 0 || currentOrFilters.length > 0;
         const hadItem = items.has(docId);
 
         // Client-side filtering — always applied as safety net, even when server filter is active
@@ -958,7 +986,7 @@ export class TableRef<T = Record<string, unknown>> {
     if (!this._httpClient) {
       throw new EdgeBaseError(
         500,
-        'sql() requires HttpClient or direct SQL executor (admin-only method).',
+        'sql() requires an admin-capable HttpClient or a direct SQL executor. Use createAdminClient() or provide a SQL executor.',
       );
     }
     // §11: body uses { namespace, id, sql, params }
@@ -985,7 +1013,7 @@ export class TableRef<T = Record<string, unknown>> {
  * // Dynamic workspace DB
  * const docsRef = client.db('workspace', 'ws-456').table('documents');
  */
-export class DbRef {
+export class DbRef<Tables extends EdgeBaseTableMap = EdgeBaseTableMap> {
   constructor(
     private core: GeneratedDbApi,
     /** DB namespace: 'shared' | 'workspace' | 'user' | ... */
@@ -1009,7 +1037,9 @@ export class DbRef {
    *
    * @param name — Table name (as defined in config.databases[namespace].tables)
    */
-  table<T = Record<string, unknown>>(name: string): TableRef<T> {
+  table<Name extends Extract<keyof Tables, string>>(name: Name): TableRef<Tables[Name]>;
+  table<T = EdgeBaseTableRecord>(name: string): TableRef<T>;
+  table<T = EdgeBaseTableRecord>(name: string): TableRef<T> {
     return new TableRef<T>(
       this.core,
       name,

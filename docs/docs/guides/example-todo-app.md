@@ -288,7 +288,7 @@ Create `frontend/index.html`:
         .then(renderTodos);
 
       // Real-time updates via DB Live Query
-      unsubscribe = todos.onSnapshot((event) => {
+      unsubscribe = todos.onSnapshot((snapshot) => {
         // Re-fetch the full list on any change for simplicity
         todos
           .where('userId', '==', client.auth.currentUser.id)
@@ -378,9 +378,9 @@ Even though the client sends `where('userId', '==', currentUser.id)`, the server
 ### Real-Time Updates
 
 ```javascript
-const unsubscribe = todos.onSnapshot((event) => {
-  // event.type is 'added', 'modified', or 'removed'
-  // event.data contains the full document (or null for 'removed')
+const unsubscribe = todos.onSnapshot((snapshot) => {
+  // snapshot.items is the current list
+  // snapshot.changes has added / modified / removed arrays
   refreshUI();
 });
 

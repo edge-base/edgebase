@@ -1936,7 +1936,13 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         return c.json(normalizedDbError.toJSON(), normalizedDbError.code as 400);
       }
       console.error('DatabaseDO Error:', err);
-      return c.json({ code: 500, message: 'Internal server error.' }, 500);
+      return c.json(
+        {
+          code: 500,
+          message: `Database request failed while handling '${c.req.path}'. Check the worker logs for the original exception.`,
+        },
+        500,
+      );
     });
 
     return app;

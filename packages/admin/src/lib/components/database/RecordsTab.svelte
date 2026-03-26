@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { base } from '$app/paths';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { schemaStore } from '$lib/stores/schema';
 	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
 	import { downloadBlob } from '$lib/download';
@@ -162,7 +163,7 @@
 				void loadTotalCount();
 			}
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to load records');
+			toastError(describeActionError(err, 'Failed to load records.'));
 			records = [];
 		} finally {
 			loading = false;
@@ -282,7 +283,7 @@
 			downloadBlob(blob, `${tableName}.csv`);
 			toastSuccess('CSV exported');
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Export failed');
+			toastError(describeActionError(err, 'CSV export failed.'));
 		}
 	}
 
@@ -305,7 +306,7 @@
 			downloadBlob(blob, `${tableName}.json`);
 			toastSuccess('JSON exported');
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'JSON export failed');
+			toastError(describeActionError(err, 'JSON export failed.'));
 		}
 	}
 
@@ -405,7 +406,7 @@
 			csvModalOpen = false;
 			await loadRecords();
 		} catch (err) {
-			csvError = err instanceof Error ? err.message : 'Import failed';
+			csvError = describeActionError(err, 'Import failed.');
 		} finally {
 			csvImporting = false;
 		}

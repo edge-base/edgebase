@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
 	import { adminDashboardSchemaDocs } from '$lib/docs-links';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -103,7 +104,7 @@
 			selectedNeonProjectId = neonProjects[0]?.projectId ?? '';
 			neonProjectsLoaded = true;
 		} catch (err) {
-			neonProjectsError = err instanceof Error ? err.message : 'Failed to load Neon projects.';
+			neonProjectsError = describeActionError(err, 'Failed to load Neon projects.');
 		} finally {
 			neonProjectsLoading = false;
 		}
@@ -164,7 +165,7 @@
 			toastSuccess(`Database block "${name.trim()}" created`);
 			goto(`${base}/database/tables/new?dbKey=${encodeURIComponent(name.trim())}`);
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to create database block.';
+			error = describeActionError(err, 'Failed to create the database block.');
 			toastError(error);
 		} finally {
 			saving = false;
@@ -213,7 +214,7 @@
 			toastSuccess(`Database block "${name.trim()}" connected to Neon`);
 			goto(`${base}/database/tables/new?dbKey=${encodeURIComponent(name.trim())}`);
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to connect with Neon.';
+			error = describeActionError(err, 'Failed to connect with Neon.');
 			toastError(error);
 		} finally {
 			neonAction = null;

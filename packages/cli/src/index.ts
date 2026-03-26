@@ -29,7 +29,8 @@ import { telemetryCommand } from './commands/telemetry.js';
 import { realtimeCommand } from './commands/realtime.js';
 import { describeCommand } from './commands/describe.js';
 import { setContext } from './lib/cli-context.js';
-import { isCliStructuredError, renderStructuredIssue } from './lib/agent-contract.js';
+import { isCliStructuredError, raiseCliError, renderStructuredIssue } from './lib/agent-contract.js';
+import { assertSupportedNodeVersion } from './lib/node-version.js';
 import { checkForUpdates } from './lib/update-check.js';
 import { recordEvent, showTelemetryNoticeOnce } from './lib/telemetry.js';
 
@@ -125,6 +126,15 @@ program.hook('preAction', (thisCommand, actionCommand) => {
     json: !!opts.json,
     nonInteractive: !!opts.nonInteractive,
   });
+  try {
+    assertSupportedNodeVersion();
+  } catch (error) {
+    raiseCliError({
+      code: 'unsupported_node_version',
+      message: (error as Error).message,
+      hint: 'Install Node.js 20.19.0 or newer, then rerun the command.',
+    });
+  }
   _startTime = Date.now();
   _telemetryCommandPath = resolveCommandPath(actionCommand);
 });

@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { authStore } from '$lib/stores/auth';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastError } from '$lib/stores/toast.svelte';
 	import { getAnalyticsTimeFormatter, type PresetAnalyticsRange } from '$lib/analytics-range';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
@@ -51,7 +52,9 @@
 			const res = await api.fetch<OverviewData>('data/overview');
 			data = res;
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to load dashboard overview. Check your server connection and try reloading.');
+			toastError(describeActionError(err, 'Failed to load the dashboard overview.', {
+				hint: 'Check your server connection and try reloading.',
+			}));
 		} finally {
 			loading = false;
 		}

@@ -139,6 +139,7 @@ export class HttpClient {
     options: { skipAuth?: boolean; query?: Record<string, string> } = {},
   ): Promise<T> {
     const url = new URL(path, this.baseUrl);
+    const requestLabel = `${method.toUpperCase()} ${url.pathname}`;
     if (options.query) {
       for (const [key, value] of Object.entries(options.query)) {
         if (value !== undefined && value !== null) {
@@ -150,6 +151,7 @@ export class HttpClient {
     const maxRetries = 3;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      let refreshFailure: Error | null = null;
       const headers = await this.buildHeaders(options.skipAuth);
       if (body === undefined) {
         delete headers['Content-Type'];
@@ -169,7 +171,8 @@ export class HttpClient {
           continue;
         }
         throw networkError(
-          `Network error: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          `${requestLabel} could not reach ${this.baseUrl}. Make sure the EdgeBase server is running and the URL is correct.`,
+          { cause: err },
         );
       }
 
@@ -184,7 +187,25 @@ export class HttpClient {
       if (response.status === 401 && !options.skipAuth && !this.serviceKey) {
         try {
           this.tokenManager?.invalidateAccessToken();
-          const newHeaders = await this.buildHeaders(false);
+          const nextRefreshToken = this.tokenManager?.getRefreshToken();
+          if (!nextRefreshToken) {
+            refreshFailure = new Error('No refresh token was available.');
+          } else {
+            const refreshedTokens = await this.refreshToken(nextRefreshToken);
+            this.tokenManager?.setTokens(refreshedTokens);
+          }
+        } catch (error) {
+          refreshFailure = error instanceof Error
+            ? error
+            : new Error(String(error));
+        }
+
+        try {
+          const newHeaders = await this.buildHeaders(true);
+          const nextAccessToken = await this.tokenManager?.getAccessToken();
+          if (nextAccessToken) {
+            newHeaders['Authorization'] = `Bearer ${nextAccessToken}`;
+          }
           if (body === undefined) {
             delete newHeaders['Content-Type'];
           }
@@ -198,14 +219,21 @@ export class HttpClient {
             return (await retryResponse.json()) as T;
           }
           response = retryResponse;
-        } catch {
-          // retry failed, use original response
+        } catch (error) {
+          throw networkError(
+            `${requestLabel} could not reach ${this.baseUrl} while retrying after a 401 response. Make sure the EdgeBase server is running and the URL is correct.`,
+            { cause: error },
+          );
         }
       }
 
       if (!response.ok) {
         const errorBody = await response.json().catch(() => null);
-        throw parseErrorResponse(response.status, errorBody);
+        const parsed = parseErrorResponse(response.status, errorBody);
+        if (response.status === 401 && refreshFailure) {
+          parsed.message = `${parsed.message} Token refresh also failed: ${refreshFailure.message}`;
+        }
+        throw parsed;
       }
 
       if (response.status === 204) return undefined as T;
@@ -213,7 +241,9 @@ export class HttpClient {
     }
 
     // Should not reach here
-    throw networkError('Request failed after retries');
+    throw networkError(
+      `${requestLabel} failed after ${maxRetries + 1} attempts. The server may be unavailable or repeatedly rate-limiting requests.`,
+    );
   }
 
   /** GET request */

@@ -92,8 +92,17 @@ export function renderStructuredIssue(issue: CliStructuredIssue): void {
     console.error(chalk.dim(`  Hint: ${issue.hint}`));
   }
 
-  if (issue.details && !Array.isArray(issue.details) && Object.keys(issue.details).length > 0) {
-    console.error(chalk.dim(`  Details: ${JSON.stringify(issue.details)}`));
+  if (Array.isArray(issue.details) && issue.details.length > 0) {
+    console.error(chalk.dim('  Details:'));
+    for (const detail of issue.details) {
+      const rendered = typeof detail === 'string' ? detail : JSON.stringify(detail);
+      console.error(chalk.dim(`    • ${rendered}`));
+    }
+  } else if (issue.details && !Array.isArray(issue.details) && Object.keys(issue.details).length > 0) {
+    console.error(chalk.dim('  Details:'));
+    for (const [key, value] of Object.entries(issue.details)) {
+      console.error(chalk.dim(`    ${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`));
+    }
   }
 
   if (issue.choices && issue.choices.length > 0) {

@@ -99,10 +99,19 @@ auto result = client.auth().signUp("user@example.com", "securePassword123", "Jan
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-const { user, accessToken, refreshToken } = await client.auth.signIn({
+import { isAuthResult, isMfaRequired } from '@edge-base/web';
+
+const signInResult = await client.auth.signIn({
   email: 'user@example.com',
   password: 'securePassword123',
 });
+
+if (isMfaRequired(signInResult)) {
+  console.log('Complete MFA with one of:', signInResult.factors);
+} else if (isAuthResult(signInResult)) {
+  const { user, accessToken, refreshToken } = signInResult;
+  console.log(user.email, accessToken, refreshToken);
+}
 ```
 
 </TabItem>

@@ -7,6 +7,7 @@
 
 import { writable, get } from 'svelte/store';
 import { getAdminApiUrl } from '$lib/runtime-config';
+import { describeActionError } from '$lib/error-messages';
 
 // ── Types ───────────────────────────────────────────────
 
@@ -25,6 +26,19 @@ interface AuthTokenResponse {
 	accessToken: string;
 	refreshToken: string;
 	admin: { id: string; email: string };
+}
+
+async function buildAuthError(res: Response, fallback: string): Promise<Error> {
+	const body = await res.json().catch(() => null) as { message?: unknown } | null;
+	return new Error(
+		describeActionError(
+			{
+				status: res.status,
+				message: typeof body?.message === 'string' ? body.message : undefined,
+			},
+			fallback,
+		),
+	);
 }
 
 // ── LocalStorage ────────────────────────────────────────
@@ -94,8 +108,7 @@ async function login(email: string, password: string): Promise<void> {
 	});
 
 	if (!res.ok) {
-		const body = await res.json().catch(() => ({}));
-		throw new Error(body.message ?? 'Login failed. Please check your email and password.');
+		throw await buildAuthError(res, 'Login failed. Please check your email and password.');
 	}
 
 	const data: AuthTokenResponse = await res.json();
@@ -119,8 +132,7 @@ async function setup(email: string, password: string): Promise<void> {
 	});
 
 	if (!res.ok) {
-		const body = await res.json().catch(() => ({}));
-		throw new Error(body.message ?? 'Failed to create admin account. Please check your details and try again.');
+		throw await buildAuthError(res, 'Failed to create admin account. Please check your details and try again.');
 	}
 
 	const data: AuthTokenResponse = await res.json();

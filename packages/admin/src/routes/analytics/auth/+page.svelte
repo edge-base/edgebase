@@ -5,6 +5,7 @@
    */
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
+  import { describeActionError } from '$lib/error-messages';
   import { getAnalyticsTimeFormatter, type PresetAnalyticsRange } from '$lib/analytics-range';
   import { toastError } from '$lib/stores/toast.svelte';
   import PageShell from '$lib/components/layout/PageShell.svelte';
@@ -38,7 +39,7 @@
       const res = await api.fetch<AnalyticsData>(`data/analytics?range=${range}&category=auth&metric=overview`);
       data = res;
     } catch (err) {
-      toastError(err instanceof Error ? err.message : 'Failed to load auth analytics');
+      toastError(describeActionError(err, 'Failed to load auth analytics.'));
     } finally {
       loading = false;
     }

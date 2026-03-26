@@ -298,9 +298,25 @@ public final class RoomClient: @unchecked Sendable {
             throw EdgeBaseError(statusCode: 0, message: "Invalid room metadata URL")
         }
 
-        let (data, response) = try await session.data(from: url)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(from: url)
+        } catch {
+            throw EdgeBaseError(
+                statusCode: 0,
+                message: "Room metadata request could not reach \(urlString). Make sure the EdgeBase server is running and reachable. Cause: \(error.localizedDescription)"
+            )
+        }
         if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-            throw EdgeBaseError(statusCode: httpResponse.statusCode, message: "Failed to get room metadata: \(httpResponse.statusCode)")
+            let parsed = EdgeBaseError.fromJSON(data, statusCode: httpResponse.statusCode)
+            let message = parsed.message.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw message.isEmpty
+                ? EdgeBaseError(
+                    statusCode: httpResponse.statusCode,
+                    message: "Failed to load room metadata for '\(roomId)' in namespace '\(namespace)' (HTTP \(httpResponse.statusCode))."
+                )
+                : parsed
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -329,7 +345,7 @@ public final class RoomClient: @unchecked Sendable {
         payload: [String: Any] = [:]
     ) async throws -> [String: Any] {
         guard let token = try await tokenManager.getAccessToken() else {
-            throw EdgeBaseError(statusCode: 401, message: "Authentication required")
+            throw EdgeBaseError(statusCode: 401, message: "Authentication required before calling room media APIs. Sign in and join the room first.")
         }
 
         let trimmedUrl = baseUrl.hasSuffix("/") ? String(baseUrl.dropLast()) : baseUrl
@@ -435,7 +451,7 @@ public final class RoomClient: @unchecked Sendable {
     @discardableResult
     public func send(_ actionType: String, payload: Any? = nil) async throws -> Any? {
         guard webSocketTask != nil, isConnected, isAuthenticated else {
-            throw EdgeBaseError(statusCode: 400, message: "Not connected to room")
+            throw EdgeBaseError(statusCode: 400, message: "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.")
         }
 
         let requestId = UUID().uuidString
@@ -1166,7 +1182,7 @@ public final class RoomClient: @unchecked Sendable {
         timeoutMessage: String
     ) async throws {
         guard webSocketTask != nil, isConnected, isAuthenticated else {
-            throw EdgeBaseError(statusCode: 400, message: "Not connected to room")
+            throw EdgeBaseError(statusCode: 400, message: "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.")
         }
 
         let requestId = UUID().uuidString

@@ -31,6 +31,24 @@ part 'room_p2p_media.dart';
 
 const _roomExplicitLeaveCloseDelay = Duration(milliseconds: 40);
 
+String? _extractRoomServerMessage(String rawBody) {
+  if (rawBody.isEmpty) return null;
+  try {
+    final decoded = jsonDecode(rawBody);
+    if (decoded is Map<String, dynamic>) {
+      for (final key in ['message', 'error', 'detail']) {
+        final value = decoded[key];
+        if (value is String && value.trim().isNotEmpty) {
+          return value.trim();
+        }
+      }
+    }
+  } catch (_) {
+    // Ignore malformed response bodies and fall back to synthesized messages.
+  }
+  return null;
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 /// Options for RoomClient.
@@ -343,14 +361,25 @@ class RoomClient {
     String namespace,
     String roomId,
   ) async {
-    final url = '${baseUrl.replaceAll(RegExp(r'/$'), '')}'
+    final trimmedBaseUrl = baseUrl.replaceAll(RegExp(r'/$'), '');
+    final url = '$trimmedBaseUrl'
         '${ApiPaths.GET_ROOM_METADATA}'
         '?namespace=${Uri.encodeComponent(namespace)}'
         '&id=${Uri.encodeComponent(roomId)}';
-    final response = await http.get(Uri.parse(url));
+    late http.Response response;
+    try {
+      response = await http.get(Uri.parse(url));
+    } catch (error) {
+      throw EdgeBaseError(
+        'Room metadata request could not reach $url. Make sure the EdgeBase server is running and reachable. Cause: $error',
+        statusCode: 0,
+      );
+    }
     if (response.statusCode != 200) {
       throw Exception(
-          'Failed to get room metadata: ${response.statusCode} ${response.reasonPhrase}');
+        _extractRoomServerMessage(response.body) ??
+            "Failed to load room metadata for '$roomId' in namespace '$namespace' (HTTP ${response.statusCode}${response.reasonPhrase == null || response.reasonPhrase!.isEmpty ? '' : ' ${response.reasonPhrase}'}).",
+      );
     }
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
@@ -373,7 +402,9 @@ class RoomClient {
       (refreshToken) => refreshAccessToken(_baseUrl, refreshToken),
     );
     if (token == null) {
-      throw Exception('Authentication required');
+      throw Exception(
+        'Authentication required before calling room media APIs. Sign in and join the room first.',
+      );
     }
 
     final uri = Uri.parse(
@@ -482,7 +513,9 @@ class RoomClient {
   /// ```
   Future<dynamic> send(String actionType, [dynamic payload]) {
     if (!_connected || !_authenticated) {
-      return Future.error(Exception('Not connected to room'));
+      return Future.error(Exception(
+        'Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.',
+      ));
     }
 
     final requestId = _generateRequestId();
@@ -664,7 +697,9 @@ class RoomClient {
     Map<String, dynamic>? options,
   ]) {
     if (!_connected || !_authenticated) {
-      return Future.error(Exception('Not connected to room'));
+      return Future.error(Exception(
+        'Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.',
+      ));
     }
 
     final requestId = _generateRequestId();
@@ -691,7 +726,9 @@ class RoomClient {
 
   Future<void> sendMemberState(Map<String, dynamic> state) {
     if (!_connected || !_authenticated) {
-      return Future.error(Exception('Not connected to room'));
+      return Future.error(Exception(
+        'Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.',
+      ));
     }
 
     final requestId = _generateRequestId();
@@ -715,7 +752,9 @@ class RoomClient {
 
   Future<void> clearMemberState() {
     if (!_connected || !_authenticated) {
-      return Future.error(Exception('Not connected to room'));
+      return Future.error(Exception(
+        'Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.',
+      ));
     }
 
     final requestId = _generateRequestId();
@@ -742,7 +781,9 @@ class RoomClient {
     Map<String, dynamic>? payload,
   ]) {
     if (!_connected || !_authenticated) {
-      return Future.error(Exception('Not connected to room'));
+      return Future.error(Exception(
+        'Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.',
+      ));
     }
 
     final requestId = _generateRequestId();
@@ -772,7 +813,9 @@ class RoomClient {
     Map<String, dynamic>? payload,
   ]) {
     if (!_connected || !_authenticated) {
-      return Future.error(Exception('Not connected to room'));
+      return Future.error(Exception(
+        'Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.',
+      ));
     }
 
     final requestId = _generateRequestId();

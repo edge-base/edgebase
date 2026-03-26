@@ -297,7 +297,7 @@ function checkServiceKey(env: Env, header: string | undefined, scope: string, re
   const { result } = validateKey(header, scope, config, env, undefined, constraintCtx);
   if (result === 'valid') return true;
   if (result === 'invalid') {
-    throw new EdgeBaseError(401, 'Unauthorized. Invalid Service Key.', undefined, 'unauthenticated');
+    throw new EdgeBaseError(401, `Invalid X-EdgeBase-Service-Key for storage scope '${scope}'.`, undefined, 'unauthenticated');
   }
   return false; // 'missing' → continue to normal rules
 }
@@ -1236,7 +1236,9 @@ storage.openapi(deleteBatch, async (c) => {
       // afterDelete — plugin-registered storage hooks (per-file, non-blocking)
       executeStorageHooks('afterDelete', { ...fileMeta, bucket: bucketName }, auth, c.executionCtx, c.env, getWorkerUrl(c.req.url, c.env));
     } catch (e) {
-      const msg = e instanceof EdgeBaseError ? e.message : 'Unknown error.';
+      const msg = e instanceof EdgeBaseError
+        ? e.message
+        : 'Delete failed with an unexpected storage error. Check worker logs for details.';
       failed.push({ key, error: msg });
     }
   }

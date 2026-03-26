@@ -4,6 +4,7 @@
 	import { schemaStore, type TableDef } from '$lib/stores/schema';
 	import { devInfoStore } from '$lib/stores/devInfo';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
@@ -132,7 +133,7 @@
 				return Boolean(nextTable && sameField(nextTable.fields[name], field));
 			});
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to save column');
+			toastError(describeActionError(err, 'Failed to save column.'));
 		}
 	}
 
@@ -149,7 +150,7 @@
 				return Boolean(nextTable && !(pendingDeleteColumn in nextTable.fields));
 			});
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to delete column');
+			toastError(describeActionError(err, 'Failed to delete column.'));
 		}
 	}
 
@@ -167,7 +168,7 @@
 				return Boolean(nextTable && sameIndexList(nextTable.indexes ?? [], expectedIndexes));
 			});
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to add index');
+			toastError(describeActionError(err, 'Failed to add index.'));
 		}
 	}
 
@@ -184,7 +185,7 @@
 				return Boolean(nextTable && sameIndexList(nextTable.indexes ?? [], expectedIndexes));
 			});
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to remove index');
+			toastError(describeActionError(err, 'Failed to remove index.'));
 		}
 	}
 
@@ -201,7 +202,7 @@
 				return Boolean(nextTable && sameFieldSet(nextTable.fts ?? [], newFields));
 			});
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to update FTS');
+			toastError(describeActionError(err, 'Failed to update FTS.'));
 		}
 	}
 
@@ -217,7 +218,7 @@
 			await schemaStore.waitForSchema((schema) => !(tableName in schema));
 			goto(`${base}/database/tables`);
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to delete table');
+			toastError(describeActionError(err, 'Failed to delete table.'));
 		}
 	}
 
@@ -237,7 +238,7 @@
 			await schemaStore.waitForTableReady(nextTableName, { namespace: dbKey });
 			goto(`${base}/database/tables/${encodeURIComponent(nextTableName)}`);
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to rename table');
+			toastError(describeActionError(err, 'Failed to rename table.'));
 		} finally {
 			renaming = false;
 		}

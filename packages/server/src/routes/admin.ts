@@ -362,7 +362,7 @@ adminRoute.onError((err, c) => {
     return c.json(err.toJSON(), err.code as 400);
   }
   console.error('Admin Dashboard unhandled error:', err);
-  return c.json({ code: 500, message: 'Internal server error.' }, 500);
+  return c.json({ code: 500, message: 'Admin dashboard request failed unexpectedly. Check the worker logs for the original exception.' }, 500);
 });
 
 // ─────────────────────────────────────────────
@@ -2133,7 +2133,12 @@ api.openapi(adminImportTable, async (c) => {
       }
     } catch (err) {
       for (let j = 0; j < chunk.length; j++) {
-        errors.push({ row: i + j, message: err instanceof Error ? err.message : 'Unknown error' });
+        errors.push({
+          row: i + j,
+          message: err instanceof Error
+            ? err.message
+            : 'Import failed with an unexpected admin API error. Check worker logs for details.',
+        });
       }
     }
   }
@@ -3436,7 +3441,7 @@ api.openapi(adminDestroyApp, async (c) => {
       const label = `D1 ${r.name}`;
       const result = await cfApi(accountId, apiToken, 'DELETE', `/d1/database/${r.id}`);
       if (result.ok) deleted.push(label);
-      else failed.push({ resource: label, error: result.error ?? 'Unknown error' });
+      else failed.push({ resource: label, error: result.error ?? 'Unknown Cloudflare API error while deleting this resource.' });
     }
   }
 
@@ -3446,7 +3451,7 @@ api.openapi(adminDestroyApp, async (c) => {
       const label = `Vectorize ${indexName}`;
       const result = await cfApi(accountId, apiToken, 'DELETE', `/vectorize/v2/indexes/${indexName}`);
       if (result.ok) deleted.push(label);
-      else failed.push({ resource: label, error: result.error ?? 'Unknown error' });
+      else failed.push({ resource: label, error: result.error ?? 'Unknown Cloudflare API error while deleting this resource.' });
     }
   }
 
@@ -3455,7 +3460,7 @@ api.openapi(adminDestroyApp, async (c) => {
       const label = `Hyperdrive ${r.name}`;
       const result = await cfApi(accountId, apiToken, 'DELETE', `/hyperdrive/configs/${r.id}`);
       if (result.ok) deleted.push(label);
-      else failed.push({ resource: label, error: result.error ?? 'Unknown error' });
+      else failed.push({ resource: label, error: result.error ?? 'Unknown Cloudflare API error while deleting this resource.' });
     }
   }
 
@@ -3492,7 +3497,7 @@ api.openapi(adminDestroyApp, async (c) => {
       // Turnstile uses zone-level API, not account
       const result = await cfApi(accountId, apiToken, 'DELETE', `/challenges/widgets/${r.id}`);
       if (result.ok) deleted.push(label);
-      else failed.push({ resource: label, error: result.error ?? 'Unknown error' });
+      else failed.push({ resource: label, error: result.error ?? 'Unknown Cloudflare API error while deleting this resource.' });
     }
   }
 
@@ -3503,7 +3508,7 @@ api.openapi(adminDestroyApp, async (c) => {
     if (result.ok) {
       deleted.push(label);
     } else {
-      failed.push({ resource: label, error: result.error ?? 'Unknown error' });
+      failed.push({ resource: label, error: result.error ?? 'Unknown Cloudflare API error while deleting this resource.' });
     }
   }
 
@@ -3513,7 +3518,7 @@ api.openapi(adminDestroyApp, async (c) => {
       const label = `KV ${r.name}`;
       const result = await cfApi(accountId, apiToken, 'DELETE', `/storage/kv/namespaces/${r.id}`);
       if (result.ok) deleted.push(label);
-      else failed.push({ resource: label, error: result.error ?? 'Unknown error' });
+      else failed.push({ resource: label, error: result.error ?? 'Unknown Cloudflare API error while deleting this resource.' });
     }
   }
 

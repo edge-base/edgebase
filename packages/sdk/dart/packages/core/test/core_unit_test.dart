@@ -498,7 +498,10 @@ void main() {
 
     test('fromJson unknown error fallback', () {
       final e = EdgeBaseError.fromJson({}, 500);
-      expect(e.message, equals('Unknown error'));
+      expect(
+        e.message,
+        equals('Request failed with HTTP 500 and no error message from the server.'),
+      );
     });
 
     test('code field', () {
@@ -523,7 +526,7 @@ void main() {
     });
 
     test('fromJson parses error field with priority over message', () {
-      // fromJson uses error ?? message ?? 'Unknown error'
+      // fromJson uses error ?? message ?? a fallback message that includes the HTTP status code
       final e = EdgeBaseError.fromJson(
           {'error': 'ErrMsg', 'message': 'MsgField'}, 400);
       expect(e.message, equals('ErrMsg'));

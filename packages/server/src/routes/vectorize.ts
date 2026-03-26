@@ -35,8 +35,13 @@ const READ_ACTIONS: Action[] = ['search', 'getByIds', 'queryById', 'describe'];
 
 const STUB_WARNING = 'Vectorize not available in this environment';
 const VECTOR_BATCH_LIMIT = 20;
+const vectorizeStubWarnings = new Set<string>();
 
 export const vectorizeRoute = new OpenAPIHono<HonoEnv>({ defaultHook: zodDefaultHook });
+
+function invalidVectorizeJsonMessage(): string {
+  return 'Invalid JSON body for Vectorize. Send application/json with { action, ...payload }.';
+}
 
 /**
  * POST /api/vectorize/:index
@@ -78,7 +83,7 @@ vectorizeRoute.openapi(vectorizeOperation, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: 'Invalid JSON body' }, 400);
+    return c.json({ code: 400, message: invalidVectorizeJsonMessage() }, 400);
   }
 
   const { action } = body;
@@ -108,10 +113,10 @@ vectorizeRoute.openapi(vectorizeOperation, async (c) => {
     buildConstraintCtx(c.env, c.req),
   );
   if (skResult === 'missing') {
-    return c.json({ code: 403, message: 'Service Key required to access Vectorize' }, 403);
+    return c.json({ code: 403, message: `X-EdgeBase-Service-Key is required to access Vectorize index '${nameParam}'.` }, 403);
   }
   if (skResult === 'invalid') {
-    return c.json({ code: 401, message: 'Unauthorized. Invalid Service Key.' }, 401);
+    return c.json({ code: 401, message: `Invalid X-EdgeBase-Service-Key for Vectorize index '${nameParam}'.` }, 401);
   }
 
   // ─── Input validation ─────────────────────────────────────────────────
@@ -165,7 +170,14 @@ vectorizeRoute.openapi(vectorizeOperation, async (c) => {
   const bindingName = vectorConfig.binding ?? `VECTORIZE_${nameParam.toUpperCase()}`;
   const binding = (c.env as unknown as Record<string, unknown>)[bindingName] as VectorizeIndex | undefined;
   if (!binding) {
-    console.warn(`⚠️ Vectorize binding '${bindingName}' for '${nameParam}' not available. Running locally or binding not configured.`);
+    const warningKey = `${nameParam}:${bindingName}`;
+    if (!vectorizeStubWarnings.has(warningKey)) {
+      vectorizeStubWarnings.add(warningKey);
+      console.warn(
+        `[Vectorize] '${nameParam}' is running with a local stub because binding '${bindingName}' is unavailable. `
+        + 'Search and mutation calls will return no-op stub data until the binding is configured in Cloudflare.',
+      );
+    }
     // Return stub responses for local development
     // Include both v1 (count) and v2 (mutationId) fields so code for either version works.
     switch (action) {

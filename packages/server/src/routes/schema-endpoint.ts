@@ -45,14 +45,14 @@ schemaRoute.openapi(getSchema, async (c) => {
       buildConstraintCtx(c.env, c.req),
     );
     if (skResult === 'invalid') {
-      throw new EdgeBaseError(401, 'Unauthorized. Invalid Service Key.');
+      throw new EdgeBaseError(401, 'Invalid X-EdgeBase-Service-Key for schema reads.');
     }
     const serviceKeyBypass = skResult === 'valid';
 
     if (!serviceKeyBypass) {
       const auth = c.get('auth');
       if (!auth) {
-        throw new EdgeBaseError(401, 'Authentication required.');
+        throw new EdgeBaseError(401, 'Authentication required to read the schema endpoint.');
       }
     }
   }

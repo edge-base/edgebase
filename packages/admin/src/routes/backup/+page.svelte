@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastSuccess, toastError, toastInfo } from '$lib/stores/toast.svelte';
 	import { downloadBlob } from '$lib/download';
 	import PageShell from '$lib/components/layout/PageShell.svelte';
@@ -31,7 +32,7 @@
 			const res = await api.fetch<{ dos: DOInfo[] }>('data/backup/list-dos', { method: 'POST' });
 			dos = res.dos;
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to load DO list');
+			toastError(describeActionError(err, 'Failed to load the backup Durable Object list.'));
 		} finally {
 			loading = false;
 		}
@@ -70,7 +71,7 @@
 
 			toastSuccess('Backup downloaded');
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Backup failed');
+			toastError(describeActionError(err, 'Backup failed.'));
 		} finally {
 			dumpingAll = false;
 		}
@@ -84,7 +85,7 @@
 			downloadBlob(blob, `edgebase-d1-backup-${new Date().toISOString().slice(0, 10)}.json`);
 			toastSuccess('D1 backup downloaded');
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'D1 backup failed');
+			toastError(describeActionError(err, 'D1 backup failed.'));
 		} finally {
 			dumpingD1 = false;
 		}
@@ -143,7 +144,7 @@
 			restoreFile = null;
 			restoreData = null;
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Restore failed');
+			toastError(describeActionError(err, 'Restore failed.'));
 		} finally {
 			restoring = false;
 		}

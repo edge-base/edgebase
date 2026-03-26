@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
+	import { describeActionError } from '$lib/error-messages';
 	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
 	import { downloadBlob } from '$lib/download';
 	import { devInfoStore } from '$lib/stores/devInfo';
@@ -15,6 +16,7 @@
 
 	// ── State ────────────────────────────────────────
 	let loading = $state(true);
+	let loadError = $state('');
 	let config = $state<{
 		devMode: boolean;
 		release: boolean;
@@ -97,7 +99,8 @@
 	onMount(async () => {
 		try {
 			config = await api.fetch('data/config-info');
-		} catch {
+		} catch (err) {
+			loadError = describeActionError(err, 'Failed to load configuration.');
 			config = null;
 		} finally {
 			loading = false;
@@ -149,7 +152,7 @@
 			newAdminPassword = '';
 			await fetchAdmins();
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to create admin');
+			toastError(describeActionError(err, 'Failed to create the admin account.'));
 		} finally {
 			addingAdmin = false;
 		}
@@ -164,7 +167,7 @@
 			toastSuccess('Admin account deleted');
 			await fetchAdmins();
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to delete admin');
+			toastError(describeActionError(err, 'Failed to delete the admin account.'));
 		}
 	}
 
@@ -180,7 +183,7 @@
 			passwordTarget = null;
 			newPassword = '';
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to change password');
+			toastError(describeActionError(err, 'Failed to change the admin password.'));
 		} finally {
 			changingPassword = false;
 		}
@@ -193,7 +196,7 @@
 			downloadBlob(blob, `edgebase-config-snapshot-${new Date().toISOString().slice(0, 10)}.json`);
 			toastSuccess('Config snapshot downloaded');
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to download config');
+			toastError(describeActionError(err, 'Failed to download the config snapshot.'));
 		}
 	}
 
@@ -245,7 +248,7 @@
 				toastError(`Partial destruction: ${result.failed.length} resource(s) failed to delete.`);
 			}
 		} catch (err) {
-			toastError(err instanceof Error ? err.message : 'Failed to destroy app');
+			toastError(describeActionError(err, 'Failed to destroy the app resources.'));
 		} finally {
 			destroying = false;
 			deleteConfirmText = '';
@@ -274,7 +277,7 @@
 			{/each}
 		</div>
 	{:else if !config}
-		<div class="settings-error">Failed to load configuration.</div>
+		<div class="settings-error">{loadError || 'Failed to load configuration. Check that the EdgeBase admin API is running and retry.'}</div>
 	{:else}
 		<div class="settings-grid">
 			<!-- Environment -->

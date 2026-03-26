@@ -57,7 +57,11 @@ public class EdgeBaseError extends RuntimeException {
 
     @SuppressWarnings("unchecked")
     public static EdgeBaseError fromJson(Map<String, Object> json, int statusCode) {
-        String message = json.containsKey("message") ? String.valueOf(json.get("message")) : "Unknown error";
+        String message = json.containsKey("message")
+                ? String.valueOf(json.get("message"))
+                : json.containsKey("error")
+                        ? String.valueOf(json.get("error"))
+                        : "Request failed with HTTP " + statusCode + " and no error message from the server.";
         Map<String, Object> rawDetails = (Map<String, Object>) json.get("details");
         Map<String, List<String>> details = null;
         if (rawDetails != null) {
