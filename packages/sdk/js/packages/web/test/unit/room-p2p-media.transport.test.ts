@@ -343,7 +343,7 @@ describe('RoomP2PMediaTransport', () => {
     });
   });
 
-  it('fails fast with a structured preflight error when room connect-check fails', async () => {
+  it('treats room connect-check statuses as advisory once the member has already joined', async () => {
     const { transport } = createTransport({
       currentMember: {
         memberId: 'member-1',
@@ -358,10 +358,46 @@ describe('RoomP2PMediaTransport', () => {
       })),
     });
 
-    await expect(transport.connect()).rejects.toMatchObject({
-      message: 'Too many pending Room connections',
-      slug: 'room-media-preflight-failed',
+    await expect(transport.getCapabilities()).resolves.toMatchObject({
+      canConnect: true,
+      room: {
+        ok: false,
+        type: 'room_connect_rate_limited',
+      },
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'room_connect_rate_limited',
+          fatal: false,
+        }),
+      ]),
     });
+
+    await expect(transport.connect()).resolves.toBe('member-1');
+  });
+
+  it('treats room connect-check fetch errors as advisory once the member has already joined', async () => {
+    const { transport } = createTransport({
+      currentMember: {
+        memberId: 'member-1',
+        userId: 'member-1',
+        state: {},
+      },
+      checkConnection: vi.fn(async () => {
+        throw new Error('service unavailable');
+      }),
+    });
+
+    await expect(transport.getCapabilities()).resolves.toMatchObject({
+      canConnect: true,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'room_connect_check_failed',
+          fatal: false,
+        }),
+      ]),
+    });
+
+    await expect(transport.connect()).resolves.toBe('member-1');
   });
 
   it('requires the room to be joined before connecting', async () => {

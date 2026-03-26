@@ -243,6 +243,8 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
 
   async getCapabilities(): Promise<RoomMediaTransportCapabilities> {
     const issues: RoomMediaTransportCapabilityIssue[] = [];
+    const currentMember = this.room.members?.current() ?? null;
+    const roomIssueFatal = !currentMember;
     let room: RoomConnectDiagnostic = {
       ok: true,
       type: 'room_connect_ready',
@@ -258,7 +260,7 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
           code: 'room_connect_check_failed',
           category: 'room',
           message: `Room connect-check failed: ${getErrorMessage(error)}`,
-          fatal: true,
+          fatal: roomIssueFatal,
         });
       }
     }
@@ -268,11 +270,10 @@ export class RoomCloudflareMediaTransport implements RoomMediaTransport {
         code: room.type,
         category: 'room',
         message: room.message,
-        fatal: true,
+        fatal: roomIssueFatal,
       });
     }
 
-    const currentMember = this.room.members?.current() ?? null;
     if (!currentMember) {
       issues.push({
         code: 'room_member_not_joined',

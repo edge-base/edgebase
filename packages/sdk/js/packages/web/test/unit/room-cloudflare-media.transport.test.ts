@@ -275,8 +275,8 @@ describe('RoomCloudflareMediaTransport', () => {
     });
   });
 
-  it('fails fast with a structured preflight error when the room is not ready', async () => {
-    const { transport } = createTransport({
+  it('treats room connect-check statuses as advisory once the member has already joined', async () => {
+    const { transport, createSession } = createTransport({
       checkConnection: vi.fn(async () => ({
         ok: false,
         type: 'room_connect_rate_limited',
@@ -285,10 +285,43 @@ describe('RoomCloudflareMediaTransport', () => {
       })),
     });
 
-    await expect(transport.connect()).rejects.toMatchObject({
-      message: 'Too many pending Room connections',
-      slug: 'room-media-preflight-failed',
+    await expect(transport.getCapabilities()).resolves.toMatchObject({
+      canConnect: true,
+      room: {
+        ok: false,
+        type: 'room_connect_rate_limited',
+      },
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'room_connect_rate_limited',
+          fatal: false,
+        }),
+      ]),
     });
+
+    await expect(transport.connect()).resolves.toBe('sess-1');
+    expect(createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats room connect-check fetch errors as advisory once the member has already joined', async () => {
+    const { transport, createSession } = createTransport({
+      checkConnection: vi.fn(async () => {
+        throw new Error('service unavailable');
+      }),
+    });
+
+    await expect(transport.getCapabilities()).resolves.toMatchObject({
+      canConnect: true,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'room_connect_check_failed',
+          fatal: false,
+        }),
+      ]),
+    });
+
+    await expect(transport.connect()).resolves.toBe('sess-1');
+    expect(createSession).toHaveBeenCalledTimes(1);
   });
 
   it('creates a RealtimeKit session and joins the meeting', async () => {
