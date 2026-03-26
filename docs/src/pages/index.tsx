@@ -51,18 +51,11 @@ function HeroSection() {
       <div className="hero-shell">
         <p className="hero-badge">Open Source · MIT License</p>
         <h1 className="hero-title">
-          Open-source edge-native BaaS
-          <span className="hero-stack">Workers · Durable Objects · D1 · R2</span>
+          <span>No egress or bandwidth fees.</span>
+          <span>~0ms cold starts. Scale-out by design.</span>
         </h1>
-        <p className="hero-proof">
-          No egress or bandwidth fees. ~0ms cold starts. Scale-out by design.
-        </p>
         <p className="hero-tagline">
-          Run the same app locally, self-host with Docker, or deploy to Cloudflare&apos;s global
-          edge.
-        </p>
-        <p className="hero-capabilities">
-          Auth · Database · Realtime · Storage · Functions · Admin UI
+          Open-source edge-native BaaS on Workers, Durable Objects, D1, and R2.
         </p>
         <div className="hero-actions">
           <div className="hero-code">

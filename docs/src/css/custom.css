@@ -466,7 +466,7 @@ td {
 /* ─── Hero Section (Landing) ───────────────────────────── */
 
 .hero-section {
-  padding: 7.5rem 2rem 6.5rem;
+  padding: 7.5rem 2rem 5.25rem;
   text-align: center;
   position: relative;
   overflow: hidden;
@@ -475,7 +475,7 @@ td {
 .hero-shell {
   position: relative;
   z-index: 1;
-  max-width: 980px;
+  max-width: 900px;
   margin: 0 auto;
 }
 
@@ -524,12 +524,12 @@ td {
 }
 
 .hero-title {
-  font-size: clamp(3rem, 6.2vw, 5.4rem);
+  font-size: clamp(2.65rem, 6vw, 5rem);
   font-weight: 800;
   letter-spacing: -0.03em;
-  line-height: 0.94;
-  margin: 0 auto 1.15rem;
-  max-width: 13ch;
+  line-height: 0.97;
+  margin: 0 auto 1.25rem;
+  max-width: 13.5ch;
   text-wrap: balance;
   background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #f472b6 100%);
   -webkit-background-clip: text;
@@ -537,54 +537,26 @@ td {
   background-clip: text;
 }
 
-.hero-stack {
+.hero-title span {
   display: block;
-  margin-top: 0.85rem;
-  font-size: clamp(0.92rem, 1.7vw, 1.18rem);
-  font-weight: 700;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: rgba(191, 219, 254, 0.78);
-  -webkit-text-fill-color: rgba(191, 219, 254, 0.78);
-}
-
-.hero-proof {
-  font-size: clamp(1rem, 1.8vw, 1.2rem);
-  font-weight: 600;
-  color: var(--ifm-font-color-base);
-  opacity: 0.9;
-  max-width: 700px;
-  margin: 0 auto 1rem;
-  line-height: 1.6;
   text-wrap: balance;
 }
 
 .hero-tagline {
-  font-size: clamp(0.98rem, 1.7vw, 1.12rem);
+  font-size: clamp(1rem, 1.8vw, 1.16rem);
   color: var(--ifm-color-emphasis-600);
-  max-width: 580px;
-  margin: 0 auto 1.1rem;
-  line-height: 1.8;
+  max-width: 680px;
+  margin: 0 auto;
+  line-height: 1.7;
   text-wrap: balance;
 }
 
-.hero-capabilities {
-  max-width: 720px;
-  margin: 0 auto;
-  color: var(--ifm-color-emphasis-500);
-  font-size: 0.84rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  line-height: 1.7;
-}
-
 .hero-actions {
-  margin-top: 2.15rem;
+  margin-top: 2.4rem;
 }
 
 .hero-code {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.35rem;
 }
 
 .hero-code code {
@@ -660,7 +632,7 @@ td {
 /* ─── Stats Section ────────────────────────────────────── */
 
 .stats-section {
-  padding: 0.5rem 2rem 4.5rem;
+  padding: 2rem 2rem 4.5rem;
   max-width: 980px;
   margin: 0 auto;
 }
@@ -1270,15 +1242,6 @@ td {
   background-clip: text;
 }
 
-[data-theme='light'] .hero-stack {
-  color: #5b21b6;
-  -webkit-text-fill-color: #5b21b6;
-}
-
-[data-theme='light'] .hero-capabilities {
-  color: #64748b;
-}
-
 [data-theme='light'] .hero-code code {
   background: rgba(59, 130, 246, 0.06);
   border-color: rgba(59, 130, 246, 0.2);
@@ -1415,25 +1378,11 @@ td {
   }
 
   .hero-title {
-    max-width: 9.5ch;
-  }
-
-  .hero-stack {
-    letter-spacing: 0.1em;
-    margin-top: 0.65rem;
-  }
-
-  .hero-proof {
-    font-size: 1rem;
+    max-width: 11ch;
   }
 
   .hero-tagline {
     font-size: 0.98rem;
-  }
-
-  .hero-capabilities {
-    font-size: 0.76rem;
-    line-height: 1.8;
   }
 
   .hero-actions {
