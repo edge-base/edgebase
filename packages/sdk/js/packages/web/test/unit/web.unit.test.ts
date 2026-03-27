@@ -1176,8 +1176,6 @@ describe('RoomClient — method signatures', () => {
     room.leave();
 
     expect(send).toHaveBeenCalledWith(JSON.stringify({ type: 'leave' }));
-    expect(close).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(40);
     expect(close).toHaveBeenCalledWith(4005, 'Client left room');
     tm.destroy();
     vi.useRealTimers();

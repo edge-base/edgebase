@@ -76,6 +76,7 @@ interface P2PPeerState {
   memberId: string;
   pc: RTCPeerConnection;
   polite: boolean;
+  bootstrapPassive: boolean;
   makingOffer: boolean;
   ignoreOffer: boolean;
   isSettingRemoteAnswerPending: boolean;
@@ -85,6 +86,8 @@ interface P2PPeerState {
   recoveryAttempts: number;
   recoveryTimer: ReturnType<typeof globalThis.setTimeout> | null;
   healthCheckInFlight: boolean;
+  createdAt: number;
+  hasRemoteDescription: boolean;
   remoteVideoFlows: Map<string, {
     track: MediaStreamTrack;
     receivedAt: number;
@@ -113,6 +116,7 @@ const DEFAULT_RATE_LIMIT_RETRY_DELAYS_MS = [160, 320, 640] as const;
 const DEFAULT_MEDIA_HEALTH_CHECK_INTERVAL_MS = 4_000;
 const DEFAULT_VIDEO_FLOW_GRACE_MS = 8_000;
 const DEFAULT_VIDEO_FLOW_STALL_GRACE_MS = 12_000;
+const DEFAULT_INITIAL_NEGOTIATION_GRACE_MS = 5_000;
 
 function buildTrackKey(memberId: string, trackId: string): string {
   return `${memberId}:${trackId}`;
@@ -230,6 +234,7 @@ export interface RoomP2PMediaTransportOptions {
   mediaHealthCheckIntervalMs?: number;
   videoFlowGraceMs?: number;
   videoFlowStallGraceMs?: number;
+  initialNegotiationGraceMs?: number;
 }
 
 export class RoomP2PMediaTransport implements RoomMediaTransport {
@@ -285,6 +290,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       mediaHealthCheckIntervalMs: options?.mediaHealthCheckIntervalMs ?? DEFAULT_MEDIA_HEALTH_CHECK_INTERVAL_MS,
       videoFlowGraceMs: options?.videoFlowGraceMs ?? DEFAULT_VIDEO_FLOW_GRACE_MS,
       videoFlowStallGraceMs: options?.videoFlowStallGraceMs ?? DEFAULT_VIDEO_FLOW_STALL_GRACE_MS,
+      initialNegotiationGraceMs: options?.initialNegotiationGraceMs ?? DEFAULT_INITIAL_NEGOTIATION_GRACE_MS,
     };
   }
 
@@ -721,8 +727,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     this.subscriptions.push(
       this.room.members.onJoin((member) => {
         if (member.memberId !== this.localMemberId) {
-          this.ensurePeer(member.memberId);
-          this.schedulePeerRecoveryCheck(member.memberId, 'member-join');
+          this.ensurePeer(member.memberId, { passive: true });
         }
       }),
       this.room.members.onSync((members) => {
@@ -730,8 +735,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
         for (const member of members) {
           if (member.memberId !== this.localMemberId) {
             activeMemberIds.add(member.memberId);
-            this.ensurePeer(member.memberId);
-            this.schedulePeerRecoveryCheck(member.memberId, 'member-sync');
+            this.ensurePeer(member.memberId, { passive: true });
           }
         }
         for (const memberId of Array.from(this.peers.keys())) {
@@ -754,7 +758,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       }),
       this.room.media.onTrack((track, member) => {
         if (member.memberId !== this.localMemberId) {
-          this.ensurePeer(member.memberId);
+          this.ensurePeer(member.memberId, { passive: true });
           this.schedulePeerRecoveryCheck(member.memberId, 'media-track');
         }
         this.rememberRemoteTrackKind(track, member);
@@ -775,6 +779,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
           if (member.memberId === this.localMemberId) {
             return;
           }
+          this.ensurePeer(member.memberId, { passive: true });
           this.rememberRemoteTrackKindsFromState(member, state);
           this.schedulePeerRecoveryCheck(member.memberId, 'media-state');
         }),
@@ -843,10 +848,14 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     this.flushPendingRemoteTracks(member.memberId, track.kind);
   }
 
-  private ensurePeer(memberId: string): P2PPeerState {
+  private ensurePeer(memberId: string, options?: { passive?: boolean }): P2PPeerState {
+    const passive = options?.passive === true;
     const existing = this.peers.get(memberId);
     if (existing) {
-      this.syncPeerSenders(existing);
+      if (!passive) {
+        existing.bootstrapPassive = false;
+        this.syncPeerSenders(existing);
+      }
       return existing;
     }
 
@@ -855,6 +864,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       memberId,
       pc,
       polite: !!this.localMemberId && this.localMemberId.localeCompare(memberId) > 0,
+      bootstrapPassive: passive,
       makingOffer: false,
       ignoreOffer: false,
       isSettingRemoteAnswerPending: false,
@@ -864,6 +874,8 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       recoveryAttempts: 0,
       recoveryTimer: null,
       healthCheckInFlight: false,
+      createdAt: Date.now(),
+      hasRemoteDescription: false,
       remoteVideoFlows: new Map(),
     };
 
@@ -876,6 +888,9 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     };
 
     pc.onnegotiationneeded = () => {
+      if (peer.bootstrapPassive && !peer.hasRemoteDescription && peer.pc.signalingState === 'stable') {
+        return;
+      }
       void this.negotiatePeer(peer);
     };
 
@@ -910,8 +925,10 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     };
 
     this.peers.set(memberId, peer);
-    this.syncPeerSenders(peer);
-    this.schedulePeerRecoveryCheck(memberId, 'peer-created');
+    if (!peer.bootstrapPassive) {
+      this.syncPeerSenders(peer);
+      this.schedulePeerRecoveryCheck(memberId, 'peer-created');
+    }
     return peer;
   }
 
@@ -997,6 +1014,8 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
 
       peer.isSettingRemoteAnswerPending = description.type === 'answer';
       await peer.pc.setRemoteDescription(description);
+      peer.hasRemoteDescription = true;
+      peer.bootstrapPassive = false;
       peer.isSettingRemoteAnswerPending = false;
       await this.flushPendingCandidates(peer);
 
@@ -1747,6 +1766,13 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       return;
     }
 
+    const peerAgeMs = Date.now() - peer.createdAt;
+    const inInitialBootstrapWindow =
+      !peer.hasRemoteDescription
+      && peer.pc.connectionState === 'new'
+      && peer.pc.iceConnectionState === 'new'
+      && peerAgeMs < this.options.initialNegotiationGraceMs;
+
     const healthSensitiveReason =
       reason.includes('health')
       || reason.includes('stalled')
@@ -1760,6 +1786,15 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     ) {
       this.resetPeerRecovery(peer);
       return;
+    }
+
+    if (
+      inInitialBootstrapWindow
+      && !healthSensitiveReason
+      && !reason.includes('failed')
+      && !reason.includes('disconnected')
+    ) {
+      delayMs = Math.max(delayMs, this.options.initialNegotiationGraceMs - peerAgeMs);
     }
 
     this.clearPeerRecoveryTimer(peer);

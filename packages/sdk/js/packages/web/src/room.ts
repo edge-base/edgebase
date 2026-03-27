@@ -121,6 +121,16 @@ export interface RoomMediaDeviceChange {
   deviceId: string;
 }
 
+interface RoomLocalMediaReplayState {
+  published: boolean;
+  muted: boolean;
+  trackId?: string;
+  deviceId?: string;
+  publishedAt?: number;
+  adminDisabled?: boolean;
+  providerSessionId?: string;
+}
+
 export interface RoomRealtimeSessionDescription {
   sdp: string;
   type: 'offer' | 'answer';
@@ -399,20 +409,18 @@ const WS_OPEN = 1;
 const ROOM_EXPLICIT_LEAVE_CLOSE_CODE = 4005;
 const ROOM_AUTH_STATE_LOST_CLOSE_CODE = 4006;
 const ROOM_EXPLICIT_LEAVE_REASON = 'Client left room';
-const ROOM_EXPLICIT_LEAVE_CLOSE_DELAY_MS = 40;
+const ROOM_HEARTBEAT_INTERVAL_MS = 8000;
 
 function isSocketOpenOrConnecting(socket: Pick<WebSocket, 'readyState'> | null | undefined): boolean {
   return !!socket && (socket.readyState === WS_OPEN || socket.readyState === WS_CONNECTING);
 }
 
 function closeSocketAfterLeave(socket: Pick<WebSocket, 'close'>, reason: string): void {
-  globalThis.setTimeout(() => {
-    try {
-      socket.close(ROOM_EXPLICIT_LEAVE_CLOSE_CODE, reason);
-    } catch {
-      // Socket already closed.
-    }
-  }, ROOM_EXPLICIT_LEAVE_CLOSE_DELAY_MS);
+  try {
+    socket.close(ROOM_EXPLICIT_LEAVE_CLOSE_CODE, reason);
+  } catch {
+    // Socket already closed.
+  }
 }
 
 // ─── RoomClient v2 ───
@@ -434,6 +442,8 @@ export class RoomClient {
   private _playerVersion = 0;
   private _members: RoomMember[] = [];
   private _mediaMembers: RoomMediaMember[] = [];
+  private lastLocalMemberState: Record<string, unknown> | null = null;
+  private lastLocalMediaState = new Map<RoomMediaKind, RoomLocalMediaReplayState>();
   // ─── Connection ───
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
@@ -960,6 +970,8 @@ export class RoomClient {
     this._playerVersion = 0;
     this._members = [];
     this._mediaMembers = [];
+    this.lastLocalMemberState = null;
+    this.lastLocalMediaState.clear();
     this.currentUserId = null;
     this.currentConnectionId = null;
     this.reconnectInfo = null;
@@ -1262,6 +1274,10 @@ export class RoomClient {
   }
 
   private async sendMemberState(state: Record<string, unknown>): Promise<void> {
+    this.lastLocalMemberState = {
+      ...(this.lastLocalMemberState ?? {}),
+      ...cloneRecord(state),
+    };
     return this.sendMemberStateRequest({
       type: 'member_state',
       state,
@@ -1269,6 +1285,7 @@ export class RoomClient {
   }
 
   private async clearMemberState(): Promise<void> {
+    this.lastLocalMemberState = {};
     return this.sendMemberStateRequest({
       type: 'member_state_clear',
     });
@@ -1322,6 +1339,7 @@ export class RoomClient {
     payload?: Record<string, unknown>,
   ): Promise<void> {
     this.assertConnected(`running media operation '${operation}' for '${kind}'`);
+    this.updateLocalMediaReplayState(operation, kind, payload ?? {});
 
     const requestId = generateRequestId();
     return new Promise<void>((resolve, reject) => {
@@ -1500,15 +1518,17 @@ export class RoomClient {
             if (this.ws) this.ws.onmessage = originalOnMessage ?? null;
 
             // Send join message with last known state for eviction recovery
-            this.sendRaw({
-              type: 'join',
-              lastSharedState: this._sharedState,
-              lastSharedVersion: this._sharedVersion,
-              lastPlayerState: this._playerState,
-              lastPlayerVersion: this._playerVersion,
-            });
-            this.joined = true;
-            resolve();
+                        this.sendRaw({
+                            type: 'join',
+                            lastSharedState: this._sharedState,
+                            lastSharedVersion: this._sharedVersion,
+                            lastPlayerState: this._playerState,
+                            lastPlayerVersion: this._playerVersion,
+                            lastMemberState: this.getReconnectMemberState(),
+                            lastMediaState: this.getReconnectMediaState(),
+                        });
+                        this.joined = true;
+                        resolve();
           } else if (msg.type === 'error') {
             clearTimeout(timeout);
             reject(new EdgeBaseError(401, msg.message as string));
@@ -2465,7 +2485,7 @@ export class RoomClient {
       if (this.ws && this.connected) {
         this.ws.send(JSON.stringify({ type: 'ping' }));
       }
-    }, 30000);
+    }, ROOM_HEARTBEAT_INTERVAL_MS);
   }
 
   private stopHeartbeat(): void {
@@ -2473,5 +2493,74 @@ export class RoomClient {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
+  }
+
+  private updateLocalMediaReplayState(
+    operation: 'publish' | 'unpublish' | 'mute' | 'device',
+    kind: RoomMediaKind,
+    payload: Record<string, unknown>,
+  ): void {
+    const current = this.lastLocalMediaState.get(kind) ?? {
+      published: false,
+      muted: false,
+    } satisfies RoomLocalMediaReplayState;
+    const next: RoomLocalMediaReplayState = { ...current };
+
+    if (operation === 'publish') {
+      next.published = true;
+      next.muted = payload.muted === true ? true : next.muted;
+      next.trackId =
+        typeof payload.trackId === 'string' && payload.trackId.trim()
+          ? payload.trackId.trim()
+          : next.trackId;
+      next.deviceId =
+        typeof payload.deviceId === 'string' && payload.deviceId.trim()
+          ? payload.deviceId.trim()
+          : next.deviceId;
+      next.providerSessionId =
+        typeof payload.providerSessionId === 'string' && payload.providerSessionId.trim()
+          ? payload.providerSessionId.trim()
+          : next.providerSessionId;
+      next.publishedAt = Date.now();
+      next.adminDisabled = false;
+    } else if (operation === 'unpublish') {
+      next.published = false;
+      next.trackId = undefined;
+      next.publishedAt = undefined;
+      next.adminDisabled = false;
+      next.providerSessionId = undefined;
+    } else if (operation === 'mute') {
+      next.muted = payload.muted === true;
+    } else if (operation === 'device') {
+      next.deviceId =
+        typeof payload.deviceId === 'string' && payload.deviceId.trim()
+          ? payload.deviceId.trim()
+          : next.deviceId;
+    }
+
+    this.lastLocalMediaState.set(kind, next);
+  }
+
+  private getReconnectMemberState(): Record<string, unknown> | undefined {
+    if (!this.lastLocalMemberState) {
+      return undefined;
+    }
+
+    return cloneRecord(this.lastLocalMemberState);
+  }
+
+  private getReconnectMediaState(): RoomMemberMediaState | undefined {
+    if (this.lastLocalMediaState.size === 0) {
+      return undefined;
+    }
+
+    const next: RoomMemberMediaState = {};
+    for (const kind of ['audio', 'video', 'screen'] as const) {
+      const current = this.lastLocalMediaState.get(kind);
+      if (!current) continue;
+      next[kind] = cloneValue(current);
+    }
+
+    return Object.keys(next).length > 0 ? next : undefined;
   }
 }

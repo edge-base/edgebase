@@ -112,6 +112,15 @@ interface RoomMemberRealtimeSession {
   updatedAt: number;
 }
 
+interface RoomsWSAttachmentExtra {
+  joined?: boolean;
+  joinedAt?: number;
+  role?: string;
+  state?: Record<string, unknown>;
+  mediaState?: RoomMemberMediaState;
+  realtimeSession?: RoomMemberRealtimeSession;
+}
+
 type RoomMemberSnapshot = RoomMemberInfo & { state: Record<string, unknown> };
 type RoomMemberLeaveReason = 'leave' | 'timeout' | 'kicked';
 
@@ -153,6 +162,10 @@ function computeStateDelta(
   return hasChanges ? delta : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export class RoomsDO extends RoomRuntimeBaseDO {
   private readonly joinedConnectionIds = new Set<string>();
   private readonly members = new Map<string, RoomMemberPresence>();
@@ -162,6 +175,87 @@ export class RoomsDO extends RoomRuntimeBaseDO {
   private readonly memberRealtimeSessions = new Map<string, RoomMemberRealtimeSession>();
   private cloudflareRealtimeKitMeetingId: string | null = null;
   private cloudflareRealtimeKitMeetingIdPromise: Promise<string> | null = null;
+
+  protected override buildWSAttachmentExtra(_ws: WebSocket, meta: RoomWSMeta): unknown {
+    if (!meta.userId) {
+      return undefined;
+    }
+
+    const member = this.members.get(meta.userId);
+    const mediaState = this.buildMediaStateSnapshot(meta.userId);
+    const realtimeSession = this.memberRealtimeSessions.get(meta.userId);
+
+    return {
+      joined: this.joinedConnectionIds.has(meta.connectionId),
+      joinedAt: member?.joinedAt,
+      role: this.memberRoles.get(meta.userId) ?? meta.role,
+      state: member ? { ...member.state } : undefined,
+      mediaState: Object.keys(mediaState).length > 0 ? mediaState : undefined,
+      realtimeSession: realtimeSession ? { ...realtimeSession } : undefined,
+    } satisfies RoomsWSAttachmentExtra;
+  }
+
+  protected override async recoverRuntimeStateFromSockets(): Promise<void> {
+    await super.recoverRuntimeStateFromSockets();
+
+    this.joinedConnectionIds.clear();
+    this.members.clear();
+    this.blockedMembers.clear();
+    this.memberRoles.clear();
+    this.memberMediaStates.clear();
+    this.memberRealtimeSessions.clear();
+
+    for (const ws of this.ctx.getWebSockets()) {
+      const meta = this.getWSMeta(ws);
+      if (!meta?.authenticated || !meta.userId) {
+        continue;
+      }
+
+      const extra = this.getWSAttachmentExtra<RoomsWSAttachmentExtra>(ws);
+      if (!extra?.joined) {
+        continue;
+      }
+
+      this.joinedConnectionIds.add(meta.connectionId);
+      const member = this.ensureMember(meta.userId);
+      member.connectionIds.add(meta.connectionId);
+      if (typeof extra.joinedAt === 'number' && Number.isFinite(extra.joinedAt)) {
+        member.joinedAt = Math.min(member.joinedAt, extra.joinedAt);
+      }
+      if (isRecord(extra.state)) {
+        member.state = {
+          ...member.state,
+          ...extra.state,
+        };
+      }
+
+      const role = typeof extra.role === 'string' && extra.role.trim()
+        ? extra.role.trim()
+        : meta.role;
+      if (role) {
+        this.memberRoles.set(meta.userId, role);
+      }
+
+      if (isRecord(extra.mediaState)) {
+        this.restoreRecoveredMemberMediaState(meta.userId, extra.mediaState);
+      }
+
+      if (isRecord(extra.realtimeSession) && typeof extra.realtimeSession.sessionId === 'string') {
+        this.memberRealtimeSessions.set(meta.userId, {
+          sessionId: extra.realtimeSession.sessionId,
+          connectionId: typeof extra.realtimeSession.connectionId === 'string'
+            ? extra.realtimeSession.connectionId
+            : meta.connectionId,
+          createdAt: typeof extra.realtimeSession.createdAt === 'number'
+            ? extra.realtimeSession.createdAt
+            : Date.now(),
+          updatedAt: typeof extra.realtimeSession.updatedAt === 'number'
+            ? extra.realtimeSession.updatedAt
+            : Date.now(),
+        });
+      }
+    }
+  }
 
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -202,14 +296,20 @@ export class RoomsDO extends RoomRuntimeBaseDO {
   private async handleSummaryGet(url: URL): Promise<Response> {
     this.hydrateRoomIdentityFromUrl(url);
     const metadata = await this.getRoomMetadataSnapshot();
+    const activeMembers = Array.from(this.members.values()).filter(
+      (member) => this.getVisibleMemberConnectionIds(member).length > 0
+    ).length;
 
     return this.jsonResponse<RoomSummaryResponse>(200, {
       namespace: this.namespace ?? '',
       roomId: this.roomId ?? '',
       metadata,
       occupancy: {
-        activeMembers: this.members.size,
-        activeConnections: this.joinedConnectionIds.size,
+        activeMembers,
+        activeConnections: Array.from(this.members.values()).reduce(
+          (count, member) => count + this.getVisibleMemberConnectionIds(member).length,
+          0,
+        ),
       },
       updatedAt: new Date().toISOString(),
     });
@@ -922,6 +1022,17 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     const member = this.ensureMember(userId);
+    const restoredMemberState = this.normalizeRecoveredMemberState(msg.lastMemberState);
+    if (restoredMemberState) {
+      member.state = {
+        ...member.state,
+        ...restoredMemberState,
+      };
+    }
+    const restoredMediaKinds = this.restoreRecoveredMemberMediaState(
+      userId,
+      msg.lastMediaState,
+    );
     this.joinedConnectionIds.add(meta.connectionId);
     member.connectionIds.add(meta.connectionId);
 
@@ -932,11 +1043,21 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     this.broadcastMembersSync();
+    if (restoredMediaKinds.length > 0) {
+      for (const kind of restoredMediaKinds) {
+        if (this.buildMediaTrackFrame(userId, kind)) {
+          await this.broadcastMediaTrack(userId, kind);
+        }
+      }
+      await this.broadcastMediaState(userId);
+    }
     await this.sendMediaSyncToConnection(ws, meta);
 
     if (wasReconnecting) {
       await this.runSessionReconnectHook(this.buildSender(meta));
     }
+
+    this.refreshMemberSocketAttachments(userId);
   }
 
   protected override async handleExplicitLeave(ws: WebSocket, meta: RoomWSMeta): Promise<void> {
@@ -954,6 +1075,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       if (member.connectionIds.size === 0) {
         await this.clearPublishedMedia(userId);
       }
+      this.refreshMemberSocketAttachments(userId);
       this.broadcastMembersSync();
     }
   }
@@ -978,6 +1100,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     if (member.connectionIds.size > 0) {
+      this.refreshMemberSocketAttachments(userId);
       this.broadcastMembersSync();
       return;
     }
@@ -1404,6 +1527,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
     const snapshot = this.buildMemberSnapshot(member);
     const state = { ...member.state };
+    this.refreshMemberSocketAttachments(meta.userId);
     this.broadcastToJoined({
       type: 'member_state',
       member: snapshot,
@@ -1850,6 +1974,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       await this.broadcastMediaTrackRemoved(meta.userId, kind, previousTrack);
     }
 
+    this.refreshMemberSocketAttachments(meta.userId);
     await this.broadcastMediaTrack(meta.userId, kind);
     await this.broadcastMediaState(meta.userId);
     await this.runMediaPublishedHook(kind, sender, roomApi);
@@ -1880,6 +2005,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     this.pruneMediaKindState(memberId, kind);
 
     if (previousTrack) {
+      this.refreshMemberSocketAttachments(memberId);
       await this.broadcastMediaTrackRemoved(memberId, kind, previousTrack);
       await this.broadcastMediaState(memberId);
       await this.runMediaUnpublishedHook(kind, this.buildMemberSender(memberId), this.buildRoomServerAPI());
@@ -1902,6 +2028,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
     kindState.muted = muted;
     this.pruneMediaKindState(memberId, kind);
+    this.refreshMemberSocketAttachments(memberId);
     await this.broadcastMediaState(memberId);
     await this.runMediaMuteChangeHook(
       kind,
@@ -1931,6 +2058,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     kindState.deviceId = deviceId;
+    this.refreshMemberSocketAttachments(memberId);
     await this.broadcastMediaState(memberId);
     await this.broadcastMediaDevice(memberId, kind, deviceId);
   }
@@ -2299,6 +2427,68 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     return member;
   }
 
+  private normalizeRecoveredMemberState(value: unknown): Record<string, unknown> | null {
+    if (!isRecord(value)) {
+      return null;
+    }
+
+    return { ...value };
+  }
+
+  private restoreRecoveredMemberMediaState(memberId: string, value: unknown): MediaKind[] {
+    if (!isRecord(value)) {
+      return [];
+    }
+
+    const mediaState = this.ensureMemberMediaState(memberId);
+    const changedKinds: MediaKind[] = [];
+
+    for (const kind of ['audio', 'video', 'screen'] as const) {
+      const nextKind = value[kind];
+      if (!isRecord(nextKind)) {
+        continue;
+      }
+
+      const previous = mediaState[kind] ? { ...mediaState[kind]! } : null;
+      const normalized: RoomMemberMediaKindState = {
+        published: nextKind.published === true,
+        muted: nextKind.muted === true,
+      };
+
+      if (typeof nextKind.trackId === 'string' && nextKind.trackId.trim()) {
+        normalized.trackId = nextKind.trackId.trim();
+      }
+      if (typeof nextKind.deviceId === 'string' && nextKind.deviceId.trim()) {
+        normalized.deviceId = nextKind.deviceId.trim();
+      }
+      if (typeof nextKind.publishedAt === 'number' && Number.isFinite(nextKind.publishedAt)) {
+        normalized.publishedAt = nextKind.publishedAt;
+      } else if (normalized.published) {
+        normalized.publishedAt = Date.now();
+      }
+      if (nextKind.adminDisabled === true) {
+        normalized.adminDisabled = true;
+      }
+      if (
+        typeof nextKind.providerSessionId === 'string'
+        && nextKind.providerSessionId.trim()
+      ) {
+        normalized.providerSessionId = nextKind.providerSessionId.trim();
+      }
+
+      mediaState[kind] = {
+        ...(mediaState[kind] ?? { published: false, muted: false }),
+        ...normalized,
+      };
+
+      if (JSON.stringify(previous) !== JSON.stringify(mediaState[kind])) {
+        changedKinds.push(kind);
+      }
+    }
+
+    return changedKinds;
+  }
+
   private removeMemberConnection(userId: string, connectionId: string): RoomMemberPresence | null {
     this.joinedConnectionIds.delete(connectionId);
     const member = this.members.get(userId);
@@ -2322,8 +2512,40 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     this.members.delete(userId);
   }
 
+  private getEffectiveSocketStaleTimeoutMs(): number {
+    const configured = (this.namespaceConfig as { socketStaleTimeout?: unknown } | null)?.socketStaleTimeout;
+    if (typeof configured !== 'number' || !Number.isFinite(configured)) {
+      return 20000;
+    }
+    const normalized = Math.floor(configured);
+    return normalized >= 3000 ? normalized : 20000;
+  }
+
+  private getVisibleMemberConnectionIds(member: RoomMemberPresence): string[] {
+    if (member.connectionIds.size === 0) {
+      return [];
+    }
+
+    const staleBefore = Date.now() - this.getEffectiveSocketStaleTimeoutMs();
+    const visibleConnectionIds: string[] = [];
+
+    for (const connectionId of member.connectionIds) {
+      const meta = this.findConnectionMeta(connectionId);
+      if (!meta?.authenticated) {
+        continue;
+      }
+      if ((meta.lastSeenAt ?? 0) <= staleBefore) {
+        continue;
+      }
+      visibleConnectionIds.push(connectionId);
+    }
+
+    return visibleConnectionIds;
+  }
+
   private listMembers(): RoomMemberSnapshot[] {
     return Array.from(this.members.values())
+      .filter((member) => this.getVisibleMemberConnectionIds(member).length > 0)
       .sort((left, right) => left.joinedAt - right.joinedAt || left.memberId.localeCompare(right.memberId))
       .map((member) => this.buildMemberSnapshot(member));
   }
@@ -2342,7 +2564,9 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     member: RoomMemberPresence,
     fallbackConnectionId?: string,
   ): RoomMemberInfo {
-    const activeConnectionId = member.connectionIds.values().next().value as string | undefined;
+    const visibleConnectionIds = this.getVisibleMemberConnectionIds(member);
+    const activeConnectionId = visibleConnectionIds[0]
+      ?? member.connectionIds.values().next().value as string | undefined;
     const connectionId = activeConnectionId ?? fallbackConnectionId;
     const meta = connectionId ? this.findConnectionMeta(connectionId) : null;
     const role = this.memberRoles.get(member.memberId) ?? meta?.role;
@@ -2351,7 +2575,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       memberId: member.memberId,
       userId: member.userId,
       connectionId,
-      connectionCount: member.connectionIds.size,
+      connectionCount: visibleConnectionIds.length,
       role,
     };
   }
@@ -2424,6 +2648,16 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       meta.role = role;
       if (meta.auth) {
         meta.auth = { ...meta.auth, role };
+      }
+      this.setWSMeta(ws, meta);
+    }
+  }
+
+  private refreshMemberSocketAttachments(memberId: string): void {
+    for (const ws of this.ctx.getWebSockets()) {
+      const meta = this.getWSMeta(ws);
+      if (!meta || meta.userId !== memberId) {
+        continue;
       }
       this.setWSMeta(ws, meta);
     }
