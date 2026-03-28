@@ -87,7 +87,9 @@ interface P2PPeerState {
   recoveryTimer: ReturnType<typeof globalThis.setTimeout> | null;
   healthCheckInFlight: boolean;
   createdAt: number;
+  signalingStateChangedAt: number;
   hasRemoteDescription: boolean;
+  answeringOffer?: boolean;
   remoteVideoFlows: Map<string, {
     track: MediaStreamTrack;
     receivedAt: number;
@@ -117,9 +119,24 @@ const DEFAULT_MEDIA_HEALTH_CHECK_INTERVAL_MS = 4_000;
 const DEFAULT_VIDEO_FLOW_GRACE_MS = 8_000;
 const DEFAULT_VIDEO_FLOW_STALL_GRACE_MS = 12_000;
 const DEFAULT_INITIAL_NEGOTIATION_GRACE_MS = 5_000;
+const DEFAULT_STUCK_SIGNALING_GRACE_MS = 2_500;
+const DEFAULT_NEGOTIATION_QUEUE_SPACING_MS = 180;
+const DEFAULT_SYNC_REMOVAL_GRACE_MS = 9_000;
+const DEFAULT_TRACK_REMOVAL_GRACE_MS = 2_600;
+const DEFAULT_PENDING_VIDEO_PROMOTION_GRACE_MS = 900;
 
 function buildTrackKey(memberId: string, trackId: string): string {
   return `${memberId}:${trackId}`;
+}
+
+function isMediaStreamTrackLike(value: unknown): value is MediaStreamTrack {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && 'id' in value
+    && 'kind' in value
+    && 'readyState' in value,
+  );
 }
 
 function buildExactDeviceConstraint(deviceId: string): MediaTrackConstraints {
@@ -235,6 +252,11 @@ export interface RoomP2PMediaTransportOptions {
   videoFlowGraceMs?: number;
   videoFlowStallGraceMs?: number;
   initialNegotiationGraceMs?: number;
+  stuckSignalingGraceMs?: number;
+  negotiationQueueSpacingMs?: number;
+  syncRemovalGraceMs?: number;
+  trackRemovalGraceMs?: number;
+  pendingVideoPromotionGraceMs?: number;
 }
 
 export class RoomP2PMediaTransport implements RoomMediaTransport {
@@ -252,6 +274,9 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     track: MediaStreamTrack;
     stream: MediaStream;
   }>();
+  private readonly pendingTrackRemovalTimers = new Map<string, ReturnType<typeof globalThis.setTimeout>>();
+  private readonly pendingSyncRemovalTimers = new Map<string, ReturnType<typeof globalThis.setTimeout>>();
+  private readonly pendingVideoPromotionTimers = new Map<string, ReturnType<typeof globalThis.setTimeout>>();
   private readonly pendingIceCandidates = new Map<string, {
     candidates: RTCIceCandidateInit[];
     timer: ReturnType<typeof globalThis.setTimeout> | null;
@@ -265,6 +290,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
   private syncAllPeerSendersScheduled = false;
   private syncAllPeerSendersPending = false;
   private healthCheckTimer: ReturnType<typeof globalThis.setInterval> | null = null;
+  private negotiationTail: Promise<void> = Promise.resolve();
 
   constructor(room: RoomP2PMediaAdapter, options?: RoomP2PMediaTransportOptions) {
     this.room = room;
@@ -291,6 +317,12 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       videoFlowGraceMs: options?.videoFlowGraceMs ?? DEFAULT_VIDEO_FLOW_GRACE_MS,
       videoFlowStallGraceMs: options?.videoFlowStallGraceMs ?? DEFAULT_VIDEO_FLOW_STALL_GRACE_MS,
       initialNegotiationGraceMs: options?.initialNegotiationGraceMs ?? DEFAULT_INITIAL_NEGOTIATION_GRACE_MS,
+      stuckSignalingGraceMs: options?.stuckSignalingGraceMs ?? DEFAULT_STUCK_SIGNALING_GRACE_MS,
+      negotiationQueueSpacingMs: options?.negotiationQueueSpacingMs ?? DEFAULT_NEGOTIATION_QUEUE_SPACING_MS,
+      syncRemovalGraceMs: options?.syncRemovalGraceMs ?? DEFAULT_SYNC_REMOVAL_GRACE_MS,
+      trackRemovalGraceMs: options?.trackRemovalGraceMs ?? DEFAULT_TRACK_REMOVAL_GRACE_MS,
+      pendingVideoPromotionGraceMs:
+        options?.pendingVideoPromotionGraceMs ?? DEFAULT_PENDING_VIDEO_PROMOTION_GRACE_MS,
     };
   }
 
@@ -713,6 +745,18 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
         clearTimeout(pending.timer);
       }
     }
+    for (const timer of this.pendingTrackRemovalTimers.values()) {
+      globalThis.clearTimeout(timer);
+    }
+    for (const timer of this.pendingSyncRemovalTimers.values()) {
+      globalThis.clearTimeout(timer);
+    }
+    for (const timer of this.pendingVideoPromotionTimers.values()) {
+      globalThis.clearTimeout(timer);
+    }
+    this.pendingTrackRemovalTimers.clear();
+    this.pendingSyncRemovalTimers.clear();
+    this.pendingVideoPromotionTimers.clear();
     this.pendingIceCandidates.clear();
     this.remoteTrackKinds.clear();
     this.emittedRemoteTracks.clear();
@@ -727,6 +771,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     this.subscriptions.push(
       this.room.members.onJoin((member) => {
         if (member.memberId !== this.localMemberId) {
+          this.cancelPendingSyncRemoval(member.memberId);
           this.ensurePeer(member.memberId, { passive: true });
         }
       }),
@@ -735,16 +780,18 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
         for (const member of members) {
           if (member.memberId !== this.localMemberId) {
             activeMemberIds.add(member.memberId);
+            this.cancelPendingSyncRemoval(member.memberId);
             this.ensurePeer(member.memberId, { passive: true });
           }
         }
         for (const memberId of Array.from(this.peers.keys())) {
           if (!activeMemberIds.has(memberId)) {
-            this.removeRemoteMember(memberId);
+            this.scheduleSyncRemoval(memberId);
           }
         }
       }),
       this.room.members.onLeave((member) => {
+        this.cancelPendingSyncRemoval(member.memberId);
         this.removeRemoteMember(member.memberId);
       }),
       this.room.signals.on(this.offerEvent, (payload, meta) => {
@@ -765,11 +812,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       }),
       this.room.media.onTrackRemoved((track, member) => {
         if (!track.trackId) return;
-        const key = buildTrackKey(member.memberId, track.trackId);
-        this.remoteTrackKinds.delete(key);
-        this.emittedRemoteTracks.delete(key);
-        this.pendingRemoteTracks.delete(key);
-        this.schedulePeerRecoveryCheck(member.memberId, 'media-track-removed');
+        this.scheduleTrackRemoval(track, member);
       }),
     );
 
@@ -842,6 +885,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     const pending = this.pendingRemoteTracks.get(key);
     if (pending) {
       this.pendingRemoteTracks.delete(key);
+      this.clearPendingVideoPromotionTimer(key);
       this.emitRemoteTrack(member.memberId, pending.track, pending.stream, track.kind);
       return;
     }
@@ -875,6 +919,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       recoveryTimer: null,
       healthCheckInFlight: false,
       createdAt: Date.now(),
+      signalingStateChangedAt: Date.now(),
       hasRemoteDescription: false,
       remoteVideoFlows: new Map(),
     };
@@ -895,6 +940,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     };
 
     pc.onsignalingstatechange = () => {
+      peer.signalingStateChangedAt = Date.now();
       this.maybeRetryPendingNegotiation(peer);
     };
 
@@ -916,9 +962,11 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
 
       if (!kind || (!exactKind && !fallbackKind && kind === 'video' && event.track.kind === 'video')) {
         this.pendingRemoteTracks.set(key, { memberId, track: event.track, stream });
+        this.schedulePendingVideoPromotion(memberId, event.track, stream);
         return;
       }
 
+      this.clearPendingVideoPromotionTimer(key);
       this.emitRemoteTrack(memberId, event.track, stream, kind);
       this.registerPeerRemoteTrack(peer, event.track, kind);
       this.resetPeerRecovery(peer);
@@ -933,41 +981,83 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
   }
 
   private async negotiatePeer(peer: P2PPeerState): Promise<void> {
-    if (
-      !this.connected
-      || peer.pc.connectionState === 'closed'
-    ) {
+    if (peer.answeringOffer) {
+      peer.pendingNegotiation = false;
       return;
     }
 
-    if (
-      peer.makingOffer
-      || peer.isSettingRemoteAnswerPending
-      || peer.pc.signalingState !== 'stable'
-    ) {
+    const runNegotiation = async (): Promise<void> => {
+      if (!this.connected || peer.pc.connectionState === 'closed') {
+        return;
+      }
+
+      if (
+        peer.makingOffer
+        || peer.isSettingRemoteAnswerPending
+        || peer.pc.signalingState !== 'stable'
+      ) {
+        peer.pendingNegotiation = true;
+        return;
+      }
+
+      try {
+        peer.pendingNegotiation = false;
+        peer.makingOffer = true;
+        await peer.pc.setLocalDescription();
+        const localDescription = peer.pc.localDescription;
+        const signalingState = peer.pc.signalingState as RTCSignalingState;
+        if (!localDescription) {
+          return;
+        }
+        if (
+          localDescription.type !== 'offer'
+          || signalingState !== 'have-local-offer'
+        ) {
+          return;
+        }
+        await this.sendSignalWithRetry(peer.memberId, this.offerEvent, {
+          description: serializeDescription(localDescription),
+        });
+      } catch (error) {
+        console.warn('[RoomP2PMediaTransport] Failed to negotiate peer offer.', {
+          memberId: peer.memberId,
+          signalingState: peer.pc.signalingState,
+          error,
+        });
+      } finally {
+        peer.makingOffer = false;
+        this.maybeRetryPendingNegotiation(peer);
+      }
+    };
+
+    const shouldSerializeBootstrap =
+      !peer.hasRemoteDescription
+      && (peer.pc.connectionState === 'new' || peer.pc.connectionState === 'connecting');
+
+    if (!shouldSerializeBootstrap) {
+      await runNegotiation();
+      return;
+    }
+
+    const bootstrapQueue = peer as P2PPeerState & { bootstrapNegotiationQueued?: boolean };
+    if (bootstrapQueue.bootstrapNegotiationQueued) {
       peer.pendingNegotiation = true;
       return;
     }
 
-    try {
-      peer.pendingNegotiation = false;
-      peer.makingOffer = true;
-      await peer.pc.setLocalDescription();
-      if (!peer.pc.localDescription) {
-        return;
-      }
-      await this.sendSignalWithRetry(peer.memberId, this.offerEvent, {
-        description: serializeDescription(peer.pc.localDescription),
+    bootstrapQueue.bootstrapNegotiationQueued = true;
+    const queuedRun = this.negotiationTail
+      .catch(() => {})
+      .then(async () => {
+        await runNegotiation();
+        await new Promise((resolve) => globalThis.setTimeout(resolve, this.options.negotiationQueueSpacingMs));
+      })
+      .finally(() => {
+        bootstrapQueue.bootstrapNegotiationQueued = false;
       });
-    } catch (error) {
-      console.warn('[RoomP2PMediaTransport] Failed to negotiate peer offer.', {
-        memberId: peer.memberId,
-        signalingState: peer.pc.signalingState,
-        error,
-      });
-    } finally {
-      peer.makingOffer = false;
-    }
+
+    this.negotiationTail = queuedRun;
+    await queuedRun;
   }
 
   private async handleDescriptionSignal(
@@ -1020,14 +1110,24 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       await this.flushPendingCandidates(peer);
 
       if (description.type === 'offer') {
-        this.syncPeerSenders(peer);
-        await peer.pc.setLocalDescription();
-        if (!peer.pc.localDescription) {
-          return;
+        peer.answeringOffer = true;
+        try {
+          this.syncPeerSenders(peer);
+          await peer.pc.setLocalDescription();
+          const localDescription = peer.pc.localDescription;
+          if (!localDescription) {
+            return;
+          }
+          if (localDescription.type !== 'answer') {
+            return;
+          }
+          await this.sendSignalWithRetry(senderId, this.answerEvent, {
+            description: serializeDescription(localDescription),
+          });
+        } finally {
+          peer.answeringOffer = false;
+          peer.pendingNegotiation = false;
         }
-        await this.sendSignalWithRetry(senderId, this.answerEvent, {
-          description: serializeDescription(peer.pc.localDescription),
-        });
       }
     } catch (error) {
       if (description.type === 'answer' && peer.pc.signalingState === 'stable' && isStableAnswerError(error)) {
@@ -1275,9 +1375,86 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
         continue;
       }
       this.pendingRemoteTracks.delete(key);
+      this.clearPendingVideoPromotionTimer(key);
       this.emitRemoteTrack(memberId, pending.track, pending.stream, roomKind);
       return;
     }
+  }
+
+  private hasReplacementTrack(memberId: string, removedTrackId: string): boolean {
+    const peer = this.peers.get(memberId);
+    const hasLiveTrackedReplacement = Array.from(peer?.remoteVideoFlows?.values() ?? []).some((flow) => {
+      const track = flow?.track;
+      return isMediaStreamTrackLike(track) && track.id !== removedTrackId && track.readyState === 'live';
+    });
+    if (hasLiveTrackedReplacement) {
+      return true;
+    }
+
+    return Array.from(this.pendingRemoteTracks.values()).some((pending) =>
+      pending.memberId === memberId
+      && pending.track.kind === 'video'
+      && pending.track.id !== removedTrackId
+      && pending.track.readyState === 'live');
+  }
+
+  private isRoomTrackStillPublished(
+    memberId: string,
+    removedTrack: Pick<RoomMediaTrack, 'kind' | 'trackId'>,
+  ): boolean {
+    const mediaMember = this.room.media.list().find((entry) => entry.member.memberId === memberId);
+    if (!mediaMember) {
+      return false;
+    }
+
+    const kind = removedTrack.kind;
+    if (kind === 'audio' || kind === 'video' || kind === 'screen') {
+      const kindState = mediaMember.state?.[kind];
+      if (kindState?.published) {
+        if (!removedTrack.trackId || kindState.trackId !== removedTrack.trackId) {
+          return true;
+        }
+      }
+    }
+
+    return mediaMember.tracks.some((track) =>
+      track.kind === removedTrack.kind
+      && Boolean(track.trackId)
+      && (!removedTrack.trackId || track.trackId !== removedTrack.trackId));
+  }
+
+  private scheduleTrackRemoval(track: RoomMediaTrack, member: RoomMember): void {
+    if (!track.trackId || !member.memberId) {
+      return;
+    }
+
+    const key = buildTrackKey(member.memberId, track.trackId);
+    const existingTimer = this.pendingTrackRemovalTimers.get(key);
+    if (existingTimer) {
+      globalThis.clearTimeout(existingTimer);
+    }
+
+    this.pendingTrackRemovalTimers.set(
+      key,
+      globalThis.setTimeout(() => {
+        this.pendingTrackRemovalTimers.delete(key);
+
+        const replacementTrack =
+          (track.kind === 'video' || track.kind === 'screen')
+          && this.hasReplacementTrack(member.memberId, track.trackId!);
+        const stillPublished = this.isRoomTrackStillPublished(member.memberId, track);
+
+        if (replacementTrack || stillPublished) {
+          return;
+        }
+
+        this.remoteTrackKinds.delete(key);
+        this.emittedRemoteTracks.delete(key);
+        this.pendingRemoteTracks.delete(key);
+        this.clearPendingVideoPromotionTimer(key);
+        this.schedulePeerRecoveryCheck(member.memberId, 'media-track-removed');
+      }, this.options.trackRemovalGraceMs),
+    );
   }
 
   private getPublishedVideoLikeKinds(memberId: string): Array<Extract<RoomMediaKind, 'video' | 'screen'>> {
@@ -1322,6 +1499,92 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     return publishedKinds.find((kind) => !assignedKinds.has(kind)) ?? null;
   }
 
+  private resolveDeferredVideoKind(memberId: string): Extract<RoomMediaKind, 'video' | 'screen'> | null {
+    const publishedKinds = this.getPublishedVideoLikeKinds(memberId);
+    const assignedKinds = new Set<Extract<RoomMediaKind, 'video' | 'screen'>>();
+    for (const key of this.emittedRemoteTracks) {
+      if (!key.startsWith(`${memberId}:`)) {
+        continue;
+      }
+      const kind = this.remoteTrackKinds.get(key);
+      if (kind === 'video' || kind === 'screen') {
+        assignedKinds.add(kind);
+      }
+    }
+
+    if (publishedKinds.length === 1) {
+      return publishedKinds[0];
+    }
+
+    if (publishedKinds.length > 1) {
+      if (assignedKinds.size === 1) {
+        const [kind] = Array.from(assignedKinds.values());
+        if (publishedKinds.includes(kind)) {
+          return kind;
+        }
+      }
+      return null;
+    }
+
+    if (assignedKinds.size === 1) {
+      return Array.from(assignedKinds.values())[0];
+    }
+
+    if (assignedKinds.size === 0) {
+      return 'video';
+    }
+
+    return null;
+  }
+
+  private schedulePendingVideoPromotion(
+    memberId: string,
+    track: MediaStreamTrack,
+    stream: MediaStream,
+  ): void {
+    const key = buildTrackKey(memberId, track.id);
+    if (this.pendingVideoPromotionTimers.has(key)) {
+      return;
+    }
+
+    this.pendingVideoPromotionTimers.set(
+      key,
+      globalThis.setTimeout(() => {
+        this.pendingVideoPromotionTimers.delete(key);
+        const pending = this.pendingRemoteTracks.get(key);
+        if (!pending) {
+          return;
+        }
+        if (!isMediaStreamTrackLike(pending.track) || pending.track.readyState !== 'live') {
+          this.pendingRemoteTracks.delete(key);
+          return;
+        }
+
+        const promotedKind = this.resolveDeferredVideoKind(memberId);
+        if (!promotedKind) {
+          return;
+        }
+
+        const peer = this.peers.get(memberId);
+        this.pendingRemoteTracks.delete(key);
+        this.emitRemoteTrack(memberId, pending.track, pending.stream, promotedKind);
+        if (peer) {
+          this.registerPeerRemoteTrack(peer, pending.track, promotedKind);
+          this.resetPeerRecovery(peer);
+        }
+      }, this.options.pendingVideoPromotionGraceMs),
+    );
+  }
+
+  private clearPendingVideoPromotionTimer(key: string): void {
+    const timer = this.pendingVideoPromotionTimers.get(key);
+    if (!timer) {
+      return;
+    }
+    globalThis.clearTimeout(timer);
+    this.pendingVideoPromotionTimers.delete(key);
+  }
+
   private closePeer(memberId: string): void {
     const peer = this.peers.get(memberId);
     if (!peer) return;
@@ -1330,9 +1593,15 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
   }
 
   private removeRemoteMember(memberId: string): void {
+    this.cancelPendingSyncRemoval(memberId);
     this.remoteTrackKinds.forEach((_kind, key) => {
       if (key.startsWith(`${memberId}:`)) {
         this.remoteTrackKinds.delete(key);
+        const timer = this.pendingTrackRemovalTimers.get(key);
+        if (timer) {
+          globalThis.clearTimeout(timer);
+          this.pendingTrackRemovalTimers.delete(key);
+        }
       }
     });
     this.emittedRemoteTracks.forEach((key) => {
@@ -1343,9 +1612,40 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     this.pendingRemoteTracks.forEach((_pending, key) => {
       if (key.startsWith(`${memberId}:`)) {
         this.pendingRemoteTracks.delete(key);
+        this.clearPendingVideoPromotionTimer(key);
       }
     });
     this.closePeer(memberId);
+  }
+
+  private scheduleSyncRemoval(memberId: string): void {
+    if (!memberId || memberId === this.localMemberId || this.pendingSyncRemovalTimers.has(memberId)) {
+      return;
+    }
+
+    this.pendingSyncRemovalTimers.set(
+      memberId,
+      globalThis.setTimeout(() => {
+        this.pendingSyncRemovalTimers.delete(memberId);
+
+        const stillActive = this.room.members.list().some((member) => member.memberId === memberId);
+        const hasMedia = this.room.media.list().some((entry) => entry.member.memberId === memberId);
+        if (stillActive || hasMedia) {
+          return;
+        }
+
+        this.removeRemoteMember(memberId);
+      }, this.options.syncRemovalGraceMs),
+    );
+  }
+
+  private cancelPendingSyncRemoval(memberId: string): void {
+    const timer = this.pendingSyncRemovalTimers.get(memberId);
+    if (!timer) {
+      return;
+    }
+    globalThis.clearTimeout(timer);
+    this.pendingSyncRemovalTimers.delete(memberId);
   }
 
   private findMember(memberId: string): RoomMember | undefined {
@@ -1371,6 +1671,18 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
         clearTimeout(pending.timer);
       }
     }
+    for (const timer of this.pendingTrackRemovalTimers.values()) {
+      globalThis.clearTimeout(timer);
+    }
+    for (const timer of this.pendingSyncRemovalTimers.values()) {
+      globalThis.clearTimeout(timer);
+    }
+    for (const timer of this.pendingVideoPromotionTimers.values()) {
+      globalThis.clearTimeout(timer);
+    }
+    this.pendingTrackRemovalTimers.clear();
+    this.pendingSyncRemovalTimers.clear();
+    this.pendingVideoPromotionTimers.clear();
     this.pendingIceCandidates.clear();
     this.remoteTrackKinds.clear();
     this.emittedRemoteTracks.clear();
@@ -1577,6 +1889,18 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       return 'health-video-flow-timeout';
     }
 
+    const signalingState = peer.pc.signalingState;
+    if (signalingState !== 'stable' && signalingState !== 'closed') {
+      const connectionLooksHealthy =
+        peer.pc.connectionState === 'connected'
+        || peer.pc.iceConnectionState === 'connected'
+        || peer.pc.iceConnectionState === 'completed';
+      const signalingAgeMs = Date.now() - (peer.signalingStateChangedAt || peer.createdAt || Date.now());
+      if (connectionLooksHealthy && signalingAgeMs > this.options.stuckSignalingGraceMs) {
+        return `health-stuck-${signalingState}`;
+      }
+    }
+
     return null;
   }
 
@@ -1732,12 +2056,27 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
 
     const connectionState = peer.pc.connectionState;
     const iceConnectionState = peer.pc.iceConnectionState;
-
-    if (
+    const connectedish =
       connectionState === 'connected'
       || iceConnectionState === 'connected'
-      || iceConnectionState === 'completed'
-    ) {
+      || iceConnectionState === 'completed';
+
+    if (connectedish) {
+      const unstableSignaling = peer.pc.signalingState !== 'stable';
+      const missingPublishedMedia = this.hasMissingPublishedMedia(peer.memberId);
+      const allRemoteVideoFlowsUnhealthy =
+        peer.remoteVideoFlows.size > 0
+        && Array.from(peer.remoteVideoFlows.values()).every((flow) => (flow.lastHealthyAt ?? 0) <= 0);
+
+      if (unstableSignaling || missingPublishedMedia || allRemoteVideoFlowsUnhealthy) {
+        this.schedulePeerRecoveryCheck(
+          peer.memberId,
+          `${source}-connected-but-incomplete`,
+          Math.max(1_200, this.options.missingMediaGraceMs),
+        );
+        return;
+      }
+
       this.resetPeerRecovery(peer);
       return;
     }
@@ -1822,6 +2161,43 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
 
     if (!stillMissingPublishedMedia && !connectivityIssue && !healthIssue) {
       this.resetPeerRecovery(peer);
+      return;
+    }
+
+    if (
+      healthIssue === 'health-stuck-have-local-offer'
+      && (
+        peer.pc.connectionState === 'connected'
+        || peer.pc.iceConnectionState === 'connected'
+        || peer.pc.iceConnectionState === 'completed'
+      )
+    ) {
+      try {
+        await peer.pc.setLocalDescription({ type: 'rollback' });
+        peer.pendingNegotiation = true;
+        peer.ignoreOffer = false;
+        this.maybeRetryPendingNegotiation(peer);
+        this.schedulePeerRecoveryCheck(peer.memberId, `${reason}:post-rollback`, 1_200);
+        return;
+      } catch (error) {
+        console.warn('[RoomP2PMediaTransport] Failed to roll back stale local offer.', {
+          memberId: peer.memberId,
+          reason,
+          error,
+        });
+      }
+    }
+
+    if (
+      healthIssue
+      && healthIssue.startsWith('health-stuck-')
+      && (
+        peer.pc.connectionState === 'connected'
+        || peer.pc.iceConnectionState === 'connected'
+        || peer.pc.iceConnectionState === 'completed'
+      )
+    ) {
+      this.resetPeer(peer.memberId, `${reason}:${healthIssue}`);
       return;
     }
 

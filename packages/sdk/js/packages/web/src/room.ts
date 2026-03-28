@@ -40,6 +40,8 @@ export interface RoomOptions {
   sendTimeout?: number;
   /** Timeout for WebSocket connection establishment in ms (default: 15000) */
   connectionTimeout?: number;
+  /** Heartbeat ping interval in ms (default: 8000) */
+  heartbeatIntervalMs?: number;
 }
 
 // Re-export Subscription + helper from core for backwards compatibility
@@ -689,6 +691,7 @@ export class RoomClient {
       reconnectBaseDelay: options?.reconnectBaseDelay ?? 1000,
       sendTimeout: options?.sendTimeout ?? 10000,
       connectionTimeout: options?.connectionTimeout ?? 15000,
+      heartbeatIntervalMs: options?.heartbeatIntervalMs ?? ROOM_HEARTBEAT_INTERVAL_MS,
     };
 
     this.unsubAuthState = this.tokenManager.onAuthStateChange((user) => {
@@ -2485,7 +2488,7 @@ export class RoomClient {
       if (this.ws && this.connected) {
         this.ws.send(JSON.stringify({ type: 'ping' }));
       }
-    }, ROOM_HEARTBEAT_INTERVAL_MS);
+    }, this.options.heartbeatIntervalMs);
   }
 
   private stopHeartbeat(): void {
