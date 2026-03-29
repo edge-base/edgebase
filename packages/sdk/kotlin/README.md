@@ -81,9 +81,10 @@ client.destroy()
 
 ## Room Media Transport
 
-The Kotlin client surface includes `room.media.transport(...)` everywhere. Built-in
-`cloudflare_realtimekit` and `p2p` ship on Android, iOS, and JS (browser). JVM/macOS
-use the same transport API through explicit adapter injection.
+The Kotlin client surface keeps the low-level `room.media.transport(...)` API, but the
+preferred app-facing flow is the higher-level `room.media.connect(...)` style surface as
+the SDKs converge. Built-in `cloudflare_realtimekit` and `p2p` ship on Android, iOS,
+and JS (browser). JVM/macOS use the same transport API through explicit adapter injection.
 
 Important runtime note:
 

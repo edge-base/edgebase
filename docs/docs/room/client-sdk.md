@@ -359,7 +359,9 @@ await room.signals.send('chat.message', { text: 'hello' });
 The rest of this page keeps the flat compatibility methods documented because they are still useful as cross-SDK fallbacks and map cleanly to the unified namespaces.
 
 :::note Room Media transport status
-`room.media.transport(...)` is active on the Web, React Native, Flutter, Swift iOS, Java Android, Kotlin Android, Kotlin iOS, Kotlin JS, Kotlin JVM/macOS, and the Java core artifact.
+`room.media.connect(...)` is the preferred unified entry point for room media. `room.media.transport(...)` is still available when you need lower-level transport control.
+
+The underlying transport surface is active on the Web, React Native, Flutter, Swift iOS, Java Android, Kotlin Android, Kotlin iOS, Kotlin JS, Kotlin JVM/macOS, and the Java core artifact.
 
 The provider mix is still rolling out:
 

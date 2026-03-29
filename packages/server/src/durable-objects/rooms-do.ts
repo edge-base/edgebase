@@ -91,6 +91,7 @@ interface RoomMemberPresence {
   userId: string;
   joinedAt: number;
   connectionIds: Set<string>;
+  reconnectUntil?: number;
   state: Record<string, unknown>;
 }
 
@@ -1035,6 +1036,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     );
     this.joinedConnectionIds.add(meta.connectionId);
     member.connectionIds.add(meta.connectionId);
+    member.reconnectUntil = undefined;
 
     if (!hadMember) {
       const snapshot = this.buildMemberSnapshot(member);
@@ -1043,6 +1045,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     this.broadcastMembersSync();
+    this.sendMembersSyncToConnection(ws);
     if (restoredMediaKinds.length > 0) {
       for (const kind of restoredMediaKinds) {
         if (this.buildMediaTrackFrame(userId, kind)) {
@@ -1100,17 +1103,21 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     if (member.connectionIds.size > 0) {
+      member.reconnectUntil = undefined;
+      this.refreshMemberSocketAttachments(userId);
+      this.broadcastMembersSync();
+      return;
+    }
+
+    const reconnectTimeout = this.namespaceConfig?.reconnectTimeout ?? DEFAULT_MEMBER_RECONNECT_TIMEOUT_MS;
+    if (!kicked && reconnectTimeout > 0) {
+      member.reconnectUntil = Date.now() + reconnectTimeout;
       this.refreshMemberSocketAttachments(userId);
       this.broadcastMembersSync();
       return;
     }
 
     await this.clearPublishedMedia(userId);
-
-    const reconnectTimeout = this.namespaceConfig?.reconnectTimeout ?? DEFAULT_MEMBER_RECONNECT_TIMEOUT_MS;
-    if (!kicked && reconnectTimeout > 0) {
-      this.broadcastMembersSync();
-    }
   }
 
   protected override async finalizePlayerLeave(
@@ -2152,7 +2159,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     await this.broadcastMediaFrame(
       {
         type: 'media_track',
-        member: this.buildMemberInfo(member),
+        member: this.buildMemberSnapshot(member),
         track,
       },
       {
@@ -2184,7 +2191,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     await this.broadcastMediaFrame(
       {
         type: 'media_track_removed',
-        member: this.buildMemberInfo(member),
+        member: this.buildMemberSnapshot(member),
         track: track ?? { kind },
       },
       {
@@ -2206,7 +2213,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     await this.broadcastMediaFrame(
       {
         type: 'media_state',
-        member: this.buildMemberInfo(member),
+        member: this.buildMemberSnapshot(member),
         state,
       },
       {
@@ -2230,7 +2237,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     await this.broadcastMediaFrame(
       {
         type: 'media_device',
-        member: this.buildMemberInfo(member),
+        member: this.buildMemberSnapshot(member),
         kind,
         deviceId,
       },
@@ -2265,6 +2272,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       return;
     }
 
+    const occupancy = this.buildAuthoritativeOccupancy();
     const members: Array<{
       member: RoomMemberInfo;
       state: RoomMemberMediaState;
@@ -2297,7 +2305,20 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
     this.safeSend(ws, {
       type: 'media_sync',
+      occupancy,
       members,
+    });
+  }
+
+  private sendMembersSyncToConnection(ws: WebSocket): void {
+    if (!this.isSocketOpen(ws)) {
+      return;
+    }
+
+    this.safeSend(ws, {
+      type: 'members_sync',
+      occupancy: this.buildAuthoritativeOccupancy(),
+      members: this.listMembers(),
     });
   }
 
@@ -2382,6 +2403,7 @@ export class RoomsDO extends RoomRuntimeBaseDO {
   private broadcastMembersSync(): void {
     this.broadcastToJoined({
       type: 'members_sync',
+      occupancy: this.buildAuthoritativeOccupancy(),
       members: this.listMembers(),
     });
   }
@@ -2544,10 +2566,36 @@ export class RoomsDO extends RoomRuntimeBaseDO {
   }
 
   private listMembers(): RoomMemberSnapshot[] {
+    const now = Date.now();
     return Array.from(this.members.values())
-      .filter((member) => this.getVisibleMemberConnectionIds(member).length > 0)
+      .filter((member) => {
+        const visibleConnectionIds = this.getVisibleMemberConnectionIds(member);
+        if (visibleConnectionIds.length > 0) {
+          return true;
+        }
+        return typeof member.reconnectUntil === 'number' && member.reconnectUntil > now;
+      })
       .sort((left, right) => left.joinedAt - right.joinedAt || left.memberId.localeCompare(right.memberId))
       .map((member) => this.buildMemberSnapshot(member));
+  }
+
+  private buildAuthoritativeOccupancy(): { activeMembers: number; activeConnections: number } {
+    let activeMembers = 0;
+    let activeConnections = 0;
+
+    for (const member of this.members.values()) {
+      const connectionCount = this.getVisibleMemberConnectionIds(member).length;
+      if (connectionCount <= 0) {
+        continue;
+      }
+      activeMembers += 1;
+      activeConnections += connectionCount;
+    }
+
+    return {
+      activeMembers,
+      activeConnections,
+    };
   }
 
   private buildMemberSnapshot(
