@@ -49,7 +49,19 @@ export interface RoomWSMeta {
   ip?: string;
   userAgent?: string;
   connectionId: string;
+  lastSeenAt?: number;
 }
+
+interface PersistedRoomWSAttachment {
+  version: 1;
+  meta: RoomWSMeta;
+  extra?: unknown;
+}
+
+type HibernatingWebSocket = WebSocket & {
+  serializeAttachment?: (value: unknown) => void;
+  deserializeAttachment?: () => unknown;
+};
 
 interface PlayerInfo {
   userId: string;
@@ -72,6 +84,8 @@ const ACTION_TIMEOUT_MS = 5000;
 const DEFAULT_ROOM_AUTH_TIMEOUT_MS = 5000;
 const DEFAULT_STATE_SAVE_INTERVAL_MS = 60000; // 1 minute
 const DEFAULT_STATE_TTL_MS = 86400000; // 24 hours
+const DEFAULT_SOCKET_STALE_TIMEOUT_MS = 45000;
+const SOCKET_HEARTBEAT_CHECK_INTERVAL_MS = 5000;
 const ROOM_EPHEMERAL_TIMERS_STORAGE_KEY = 'roomEphemeralTimers';
 const roomFallbackWarnings = new Set<string>();
 type RoomRateLimitScope = 'actions' | 'signals' | 'media' | 'admin';
@@ -87,6 +101,7 @@ interface PersistedRoomEphemeralTimers {
   stateSaveAt?: number | null;
   emptyRoomCleanupAt?: number | null;
   stateTTLAlarmAt?: number | null;
+  socketHeartbeatCheckAt?: number | null;
 }
 
 function isRoomOperationPublic(
@@ -170,6 +185,34 @@ function cloneState(obj: Record<string, unknown>): Record<string, unknown> {
   return JSON.parse(JSON.stringify(obj));
 }
 
+function cloneRoomWSMeta(meta: RoomWSMeta): RoomWSMeta {
+  return {
+    authenticated: meta.authenticated,
+    authStateLost: meta.authStateLost === true,
+    userId: meta.userId,
+    role: meta.role,
+    auth: meta.auth
+      ? {
+          ...meta.auth,
+          custom: meta.auth.custom ? cloneState(meta.auth.custom as Record<string, unknown>) : undefined,
+          meta: meta.auth.meta ? cloneState(meta.auth.meta as Record<string, unknown>) : undefined,
+        }
+      : undefined,
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+    connectionId: meta.connectionId,
+    lastSeenAt: meta.lastSeenAt,
+  };
+}
+
+function isPersistedRoomWSAttachment(value: unknown): value is PersistedRoomWSAttachment {
+  return typeof value === 'object'
+    && value !== null
+    && (value as PersistedRoomWSAttachment).version === 1
+    && typeof (value as PersistedRoomWSAttachment).meta === 'object'
+    && (value as PersistedRoomWSAttachment).meta !== null;
+}
+
 // ─── Shared Room Runtime Base ───
 
 export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
@@ -202,6 +245,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   // ─── WebSocket metadata cache ───
   private _metaCache = new Map<WebSocket, RoomWSMeta>();
+  private _attachmentExtraCache = new Map<WebSocket, unknown>();
 
   // ─── Auth timeout tracking ───
   private pendingAuth = new Map<string, number>();
@@ -220,6 +264,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   private _timers = new Map<string, { fireAt: number; data?: unknown }>();
   private _emptyRoomCleanupAt: number | null = null;
   private _stateTTLAlarmAt: number | null = null;
+  private _socketHeartbeatCheckAt: number | null = null;
 
   // ─── Room Metadata (queryable via HTTP without joining) ───
   private _metadata: Record<string, unknown> = {};
@@ -384,6 +429,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       authenticated: false,
       authStateLost: false,
       connectionId,
+      lastSeenAt: Date.now(),
       ip: request.headers.get('CF-Connecting-IP')
         || request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim()
         || undefined,
@@ -403,8 +449,9 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       tags.push(`ip:${encodeURIComponent(meta.ip)}`);
     }
     this.ctx.acceptWebSocket(server, tags);
-    this._metaCache.set(server, meta);
+    this.setWSMeta(server, meta);
     this.syncRoomMonitoringSnapshot();
+    this.ensureSocketHeartbeatCheckScheduled();
 
     // Set auth timeout without pinning the DO with a JS timer.
     const authTimeoutMs = resolveRoomAuthTimeoutMs(this.config);
@@ -419,6 +466,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     await this.ensureRuntimeReady();
+    await this.recoverStateIfNeeded();
     if (typeof message !== 'string') return;
 
     let msg: Record<string, unknown>;
@@ -434,6 +482,8 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       ws.close(4000, 'No metadata');
       return;
     }
+    meta.lastSeenAt = Date.now();
+    this.setWSMeta(ws, meta);
 
     const type = msg.type as string;
 
@@ -487,11 +537,13 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       const explicitLeave = code === ROOM_CLIENT_LEAVE_CLOSE_CODE;
       this.handleDisconnect(meta, kicked, explicitLeave);
       this._metaCache.delete(ws);
+      this._attachmentExtraCache.delete(ws);
       if (this.pendingAuth.delete(meta.connectionId)) {
         this.syncEphemeralTimersToStorage();
         this._scheduleNextAlarm();
       }
     }
+    this.ensureSocketHeartbeatCheckScheduled();
     this.syncRoomMonitoringSnapshot(ws);
   }
 
@@ -500,11 +552,13 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     if (meta) {
       this.handleDisconnect(meta);
       this._metaCache.delete(ws);
+      this._attachmentExtraCache.delete(ws);
       if (this.pendingAuth.delete(meta.connectionId)) {
         this.syncEphemeralTimersToStorage();
         this._scheduleNextAlarm();
       }
     }
+    this.ensureSocketHeartbeatCheckScheduled();
     this.syncRoomMonitoringSnapshot(ws);
   }
 
@@ -535,6 +589,9 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     if (this._stateTTLAlarmAt !== null && this._stateTTLAlarmAt < earliest) {
       earliest = this._stateTTLAlarmAt;
     }
+    if (this._socketHeartbeatCheckAt !== null && this._socketHeartbeatCheckAt < earliest) {
+      earliest = this._socketHeartbeatCheckAt;
+    }
 
     if (earliest < Infinity) {
       this.ctx.storage.setAlarm(earliest);
@@ -543,10 +600,9 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   async alarm(): Promise<void> {
     await this.ensureRuntimeReady();
-
     if (this.shouldRecoverBeforeAlarm()) {
-      await this.recoverFromStorage();
-      this.stateRecoveryNeeded = false;
+      this.stateRecoveryNeeded = true;
+      await this.recoverStateIfNeeded();
     }
 
     const now = Date.now();
@@ -682,7 +738,28 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       this.syncEphemeralTimersToStorage();
     }
 
-    // 7. Reschedule for next pending event
+    // 7. Close stale authenticated sockets that stopped heartbeating.
+    if (this._socketHeartbeatCheckAt !== null && this._socketHeartbeatCheckAt <= now) {
+      this._socketHeartbeatCheckAt = null;
+      const staleBefore = now - this.getSocketStaleTimeoutMs();
+      for (const ws of this.ctx.getWebSockets()) {
+        const meta = this.getWSMeta(ws);
+        if (!meta?.authenticated) {
+          continue;
+        }
+        if ((meta.lastSeenAt ?? 0) > staleBefore) {
+          continue;
+        }
+        try {
+          ws.close(4007, 'Heartbeat timeout');
+        } catch {
+          // Socket may already be closing.
+        }
+      }
+      this.ensureSocketHeartbeatCheckScheduled();
+    }
+
+    // 8. Reschedule for next pending event
     this._scheduleNextAlarm();
   }
 
@@ -717,6 +794,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       );
       meta.authenticated = true;
       meta.authStateLost = false;
+      meta.lastSeenAt = Date.now();
       meta.userId = auth.id;
       meta.role = auth.role;
       meta.auth = {
@@ -755,10 +833,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       this.syncRoomMonitoringSnapshot();
 
       // Recover state from storage if needed (after hibernation wake-up)
-      if (this.stateRecoveryNeeded) {
-        await this.recoverFromStorage();
-        this.stateRecoveryNeeded = false;
-      }
+      await this.recoverStateIfNeeded();
       // Note: full sync is sent during handleJoin(), not here
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -1377,8 +1452,21 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     this._stateTTLAlarmAt = typeof savedEphemeral?.stateTTLAlarmAt === 'number'
       ? savedEphemeral.stateTTLAlarmAt
       : null;
+    this._socketHeartbeatCheckAt = typeof savedEphemeral?.socketHeartbeatCheckAt === 'number'
+      ? savedEphemeral.socketHeartbeatCheckAt
+      : null;
 
     this._scheduleNextAlarm();
+  }
+
+  protected async recoverStateIfNeeded(): Promise<void> {
+    if (!this.stateRecoveryNeeded) {
+      return;
+    }
+
+    await this.recoverFromStorage();
+    await this.recoverRuntimeStateFromSockets();
+    this.stateRecoveryNeeded = false;
   }
 
   // ─── Delta Broadcasting ───
@@ -1622,6 +1710,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     const stateSaveAt = this._stateSaveAt;
     const emptyRoomCleanupAt = this._emptyRoomCleanupAt;
     const stateTTLAlarmAt = this._stateTTLAlarmAt;
+    const socketHeartbeatCheckAt = this._socketHeartbeatCheckAt;
     this.ctx.waitUntil((async () => {
       try {
         if (
@@ -1630,6 +1719,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
           && stateSaveAt === null
           && emptyRoomCleanupAt === null
           && stateTTLAlarmAt === null
+          && socketHeartbeatCheckAt === null
         ) {
           await this.ctx.storage.delete(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY);
           return;
@@ -1641,6 +1731,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
           stateSaveAt,
           emptyRoomCleanupAt,
           stateTTLAlarmAt,
+          socketHeartbeatCheckAt,
         } satisfies PersistedRoomEphemeralTimers);
       } catch (error) {
         console.warn('[Room] Ephemeral timer persistence skipped', {
@@ -1785,8 +1876,17 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     const cached = this._metaCache.get(ws);
     if (cached) return cached;
 
-    // After hibernation wake-up: rebuild from tags
     try {
+      const attachment = this.readWSAttachment(ws);
+      if (attachment) {
+        const meta = cloneRoomWSMeta(attachment.meta);
+        this._metaCache.set(ws, meta);
+        this._attachmentExtraCache.set(ws, attachment.extra);
+        this.hydrateRoomIdentityFromWebSocketTags(ws);
+        return meta;
+      }
+
+      // After hibernation wake-up: rebuild from tags
       const tags = this.ctx.getTags(ws);
       if (tags.length === 0) return null;
 
@@ -1817,8 +1917,10 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         authStateLost: true,
         connectionId,
         ip,
+        lastSeenAt: Date.now(),
       };
       this._metaCache.set(ws, meta);
+      this._attachmentExtraCache.delete(ws);
       return meta;
     } catch {
       return null;
@@ -1826,7 +1928,77 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   }
 
   protected setWSMeta(ws: WebSocket, meta: RoomWSMeta): void {
-    this._metaCache.set(ws, meta);
+    const clonedMeta = cloneRoomWSMeta(meta);
+    const extra = this.buildWSAttachmentExtra(ws, clonedMeta);
+    this._metaCache.set(ws, clonedMeta);
+    this._attachmentExtraCache.set(ws, extra);
+    this.writeWSAttachment(ws, {
+      version: 1,
+      meta: clonedMeta,
+      extra,
+    });
+  }
+
+  protected getWSAttachmentExtra<T = unknown>(ws: WebSocket): T | undefined {
+    return this._attachmentExtraCache.get(ws) as T | undefined;
+  }
+
+  protected buildWSAttachmentExtra(_ws: WebSocket, _meta: RoomWSMeta): unknown {
+    return undefined;
+  }
+
+  private getSocketStaleTimeoutMs(): number {
+    const configured = (this.namespaceConfig as { socketStaleTimeout?: unknown } | null)?.socketStaleTimeout;
+    if (typeof configured !== 'number' || !Number.isFinite(configured)) {
+      return DEFAULT_SOCKET_STALE_TIMEOUT_MS;
+    }
+    const normalized = Math.floor(configured);
+    return normalized >= 3000 ? normalized : DEFAULT_SOCKET_STALE_TIMEOUT_MS;
+  }
+
+  private getSocketHeartbeatCheckIntervalMs(): number {
+    return Math.max(
+      2000,
+      Math.min(SOCKET_HEARTBEAT_CHECK_INTERVAL_MS, Math.floor(this.getSocketStaleTimeoutMs() / 2)),
+    );
+  }
+
+  private ensureSocketHeartbeatCheckScheduled(): void {
+    if (this.ctx.getWebSockets().length === 0) {
+      this._socketHeartbeatCheckAt = null;
+      return;
+    }
+
+    const nextCheckAt = Date.now() + this.getSocketHeartbeatCheckIntervalMs();
+    if (this._socketHeartbeatCheckAt === null || this._socketHeartbeatCheckAt > nextCheckAt) {
+      this._socketHeartbeatCheckAt = nextCheckAt;
+      this._scheduleNextAlarm();
+    }
+  }
+
+  protected async recoverRuntimeStateFromSockets(): Promise<void> {
+    this.players.clear();
+    this.userToConnections.clear();
+
+    let clearedPendingAuth = false;
+    for (const ws of this.ctx.getWebSockets()) {
+      const meta = this.getWSMeta(ws);
+      if (!meta?.authenticated || !meta.userId) {
+        continue;
+      }
+      this.addPlayer(meta.connectionId, meta.userId);
+      if (this.pendingAuth.delete(meta.connectionId)) {
+        clearedPendingAuth = true;
+      }
+    }
+
+    if (clearedPendingAuth) {
+      this.syncEphemeralTimersToStorage();
+      this._scheduleNextAlarm();
+    }
+
+    this.syncRoomMonitoringSnapshot();
+    this.ensureSocketHeartbeatCheckScheduled();
   }
 
   protected handleUnauthenticatedSocket(ws: WebSocket, meta: RoomWSMeta): void {
@@ -1853,7 +2025,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     return getGlobalConfig(env);
   }
 
-  private async ensureRuntimeReady(): Promise<void> {
+  protected async ensureRuntimeReady(): Promise<void> {
     if (!this.runtimeReadyPromise) {
       this.runtimeReadyPromise = (async () => {
         await ensureServerStartup();
@@ -1891,5 +2063,59 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       && this._stateTTLAlarmAt === null
       && Object.keys(this._metadata).length === 0
     );
+  }
+
+  private readWSAttachment(ws: WebSocket): PersistedRoomWSAttachment | null {
+    const hibernatingSocket = ws as HibernatingWebSocket;
+    if (typeof hibernatingSocket.deserializeAttachment !== 'function') {
+      return null;
+    }
+
+    try {
+      const attachment = hibernatingSocket.deserializeAttachment();
+      return isPersistedRoomWSAttachment(attachment) ? attachment : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeWSAttachment(ws: WebSocket, attachment: PersistedRoomWSAttachment): void {
+    const hibernatingSocket = ws as HibernatingWebSocket;
+    if (typeof hibernatingSocket.serializeAttachment !== 'function') {
+      return;
+    }
+
+    try {
+      hibernatingSocket.serializeAttachment(attachment);
+    } catch (error) {
+      console.warn('[Room] Failed to serialize websocket attachment', {
+        room: this.namespace && this.roomId ? `${this.namespace}::${this.roomId}` : null,
+        connectionId: attachment.meta.connectionId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private hydrateRoomIdentityFromWebSocketTags(ws: WebSocket): void {
+    if (this.namespace) {
+      return;
+    }
+
+    const tags = this.ctx.getTags(ws);
+    const roomTag = tags.find(t => t.startsWith('room:'));
+    if (!roomTag) {
+      return;
+    }
+
+    const roomFullName = roomTag.substring(5);
+    const separatorIdx = roomFullName.indexOf('::');
+    if (separatorIdx >= 0) {
+      this.namespace = roomFullName.substring(0, separatorIdx);
+      this.roomId = roomFullName.substring(separatorIdx + 2);
+    } else {
+      this.namespace = roomFullName;
+      this.roomId = roomFullName;
+    }
+    this.namespaceConfig = this.config.rooms?.[this.namespace] ?? null;
   }
 }

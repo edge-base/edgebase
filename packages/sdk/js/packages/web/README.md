@@ -346,21 +346,25 @@ Use rooms when you need:
 
 ### Room Media Transports
 
-`room.media.transport()` is the high-level browser transport entry point.
+`room.media.connect()` is the preferred browser entry point. `room.media.transport()` remains available when you need to manage the transport instance yourself.
 
 ```ts
-const transport = room.media.transport({
-  provider: 'cloudflare_realtimekit',
-});
-
 const capabilities = await room.media.checkReadiness({
   provider: 'cloudflare_realtimekit',
 });
 console.log(capabilities.issues);
 
-await transport.connect();
-await transport.enableAudio();
-await transport.enableVideo();
+const media = await room.media.connect({
+  candidates: [
+    {
+      label: 'cloudflare_realtimekit',
+      options: { provider: 'cloudflare_realtimekit' },
+    },
+  ],
+});
+
+await media.transport.enableAudio();
+await media.transport.enableVideo();
 ```
 
 Available providers:
@@ -371,8 +375,9 @@ Available providers:
   STUN-only best-effort mesh for lightweight direct calls
 
 The lower-level `room.media.realtime.*` HTTP wrappers and `RoomRealtimeMediaTransport`
-export still exist for raw WebRTC/SFU flows, but `room.media.transport()` is the
-recommended browser entry point for new room media integrations.
+export still exist for raw WebRTC/SFU flows, and `room.media.transport()` remains
+available as an advanced escape hatch. For most browser apps, `room.media.connect()`
+is the recommended entry point.
 
 Read more: [Room Client SDK](https://edgebase.fun/docs/room/client-sdk)
 

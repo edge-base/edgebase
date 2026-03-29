@@ -106,7 +106,7 @@ The main client APIs are:
 
 ## Readiness Checks
 
-On the JavaScript/TypeScript web SDK, call `room.media.checkReadiness()` before `transport.connect()` when you want a user-facing explanation of what is missing.
+On the JavaScript/TypeScript web SDK, call `room.media.checkReadiness()` before `room.media.connect()` when you want a user-facing explanation of what is missing.
 
 ```ts
 const readiness = await room.media.checkReadiness({
@@ -127,10 +127,12 @@ The readiness payload includes:
 - browser capability flags like `getUserMedia` and `RTCPeerConnection`
 - provider-specific checks such as TURN availability for `p2p`
 
-`transport.connect()` also performs the same fatal preflight checks automatically and throws a structured error when the room or browser is not ready.
+`room.media.connect()` also performs the same fatal preflight checks automatically and throws a structured error when the room or browser is not ready.
 
 :::note Transport provider availability
-`room.media.transport(...)` is currently available across multiple client SDKs, but the provider mix is not identical everywhere yet.
+`room.media.connect(...)` is the preferred app-level entry point. `room.media.transport(...)` remains available as an advanced escape hatch when you need to manage a transport instance yourself.
+
+The transport/provider mix is not identical everywhere yet.
 
 - Web, React Native, and Flutter support `cloudflare_realtimekit` and `p2p`
 - Swift iOS currently supports `cloudflare_realtimekit` and `p2p`; P2P screen share requires an app-provided `RTKRTCVideoTrack` source (for example ReplayKit-backed capture) passed to `transport.startScreenShare(...)`

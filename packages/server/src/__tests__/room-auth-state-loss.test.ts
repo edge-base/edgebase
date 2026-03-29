@@ -53,6 +53,7 @@ describe('room auth-state loss recovery', () => {
     room._stateSaveAt = 33_333;
     room._emptyRoomCleanupAt = 44_444;
     room._stateTTLAlarmAt = 55_555;
+    room._socketHeartbeatCheckAt = 66_666;
     room.ctx = {
       storage: {
         put: putSpy,
@@ -72,6 +73,7 @@ describe('room auth-state loss recovery', () => {
       stateSaveAt: 33_333,
       emptyRoomCleanupAt: 44_444,
       stateTTLAlarmAt: 55_555,
+      socketHeartbeatCheckAt: 66_666,
     });
   });
 
@@ -112,6 +114,7 @@ describe('room auth-state loss recovery', () => {
     room._stateTTLAlarmAt = null;
     room._metadata = {};
     room.config = {};
+    room.env = {};
     room.ctx = {
       getWebSockets: vi.fn(() => []),
     };
@@ -132,6 +135,7 @@ describe('room auth-state loss recovery', () => {
 
     const room: any = Object.create(RoomRuntimeBaseDO.prototype);
     room._metaCache = new Map();
+    room._attachmentExtraCache = new Map();
     room.ctx = {
       getTags: vi.fn(() => [
         'conn:conn-1',
@@ -171,6 +175,7 @@ describe('room auth-state loss recovery', () => {
       authStateLost: false,
       connectionId: 'conn-1',
     }]]);
+    room._attachmentExtraCache = new Map();
     room.safeSend = vi.fn();
 
     await room.webSocketMessage(ws, JSON.stringify({ type: 'ping' }));
@@ -193,6 +198,7 @@ describe('room auth-state loss recovery', () => {
       authStateLost: true,
       connectionId: 'conn-1',
     }]]);
+    room._attachmentExtraCache = new Map();
     room.safeSend = vi.fn();
 
     await room.webSocketMessage(ws, JSON.stringify({ type: 'ping' }));

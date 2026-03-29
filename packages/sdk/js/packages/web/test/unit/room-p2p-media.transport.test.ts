@@ -14,6 +14,8 @@ class FakeMediaStream {
 
 class FakeTrack {
   enabled = true;
+  muted = false;
+  readyState: MediaStreamTrackState = 'live';
   private endedListener: (() => void) | null = null;
 
   constructor(
@@ -32,9 +34,12 @@ class FakeTrack {
     }
   }
 
-  stop(): void {}
+  stop(): void {
+    this.readyState = 'ended';
+  }
 
   end(): void {
+    this.readyState = 'ended';
     this.endedListener?.();
   }
 }
@@ -44,6 +49,14 @@ class FakeSender {
 
   async replaceTrack(track: MediaStreamTrack | null): Promise<void> {
     this.track = track;
+  }
+}
+
+class FakeReceiver {
+  constructor(public readonly track: MediaStreamTrack) {}
+
+  async getStats(): Promise<Map<string, RTCStats>> {
+    return new Map();
   }
 }
 
@@ -62,6 +75,7 @@ class FakeRTCPeerConnection {
   oniceconnectionstatechange: (() => void) | null = null;
   onconnectionstatechange: (() => void) | null = null;
   private readonly senders: FakeSender[] = [];
+  private readonly receivers: FakeReceiver[] = [];
 
   addTrack(track: MediaStreamTrack, _stream: MediaStream): RTCRtpSender {
     const sender = new FakeSender(track);
@@ -133,7 +147,12 @@ class FakeRTCPeerConnection {
     this.onconnectionstatechange?.();
   }
 
+  getReceivers(): RTCRtpReceiver[] {
+    return this.receivers as unknown as RTCRtpReceiver[];
+  }
+
   emitRemoteTrack(track: MediaStreamTrack): void {
+    this.receivers.push(new FakeReceiver(track));
     this.ontrack?.({
       track,
       streams: [new FakeMediaStream([track]) as unknown as MediaStream],
@@ -556,6 +575,26 @@ describe('RoomP2PMediaTransport', () => {
     expect(peerConnections).toHaveLength(1);
   });
 
+  it('keeps peers alive during partial sync omissions when room membership still contains them', async () => {
+    vi.useFakeTimers();
+    const currentMember = { memberId: 'me', userId: 'me' } as RoomMember;
+    const remoteMember = { memberId: 'them', userId: 'them' } as RoomMember;
+    const members = [currentMember, remoteMember];
+    const { transport, emitMemberSync } = createTransport({
+      currentMember,
+      members,
+    });
+
+    await transport.connect();
+    expect(transport.getPeerConnection()).not.toBeNull();
+
+    emitMemberSync([currentMember]);
+    await vi.advanceTimersByTimeAsync(9_100);
+
+    expect(transport.getPeerConnection()).not.toBeNull();
+    vi.useRealTimers();
+  });
+
   it('emits remote tracks using room media state to preserve kind metadata', async () => {
     vi.stubGlobal('MediaStream', FakeMediaStream as unknown as typeof MediaStream);
 
@@ -603,6 +642,54 @@ describe('RoomP2PMediaTransport', () => {
       participantId: 'member-2',
       providerSessionId: 'member-2',
     }));
+  });
+
+  it('promotes pending remote video tracks once room media reports a published video kind', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('MediaStream', FakeMediaStream as unknown as typeof MediaStream);
+
+    const remoteTrack = new FakeTrack('webrtc-video-track', 'video') as unknown as MediaStreamTrack;
+    const remoteMember = { memberId: 'member-2', userId: 'member-2', state: {} };
+    const mediaMembers: RoomMediaMember[] = [
+      {
+        member: remoteMember,
+        state: {},
+        tracks: [],
+      },
+    ];
+    const { transport, peerConnections } = createTransport({
+      currentMember: {
+        memberId: 'member-1',
+        userId: 'member-1',
+        state: {},
+      },
+      members: [
+        { memberId: 'member-1', userId: 'member-1', state: {} },
+        remoteMember,
+      ],
+      mediaMembers,
+    });
+
+    const remoteTrackHandler = vi.fn();
+    transport.onRemoteTrack(remoteTrackHandler);
+    await transport.connect();
+
+    peerConnections[0]?.emitRemoteTrack(remoteTrack);
+    mediaMembers[0]!.state = {
+      video: {
+        published: true,
+        muted: false,
+      },
+    };
+
+    await vi.advanceTimersByTimeAsync(950);
+
+    expect(remoteTrackHandler).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'video',
+      track: remoteTrack,
+      participantId: 'member-2',
+    }));
+    vi.useRealTimers();
   });
 
   it('falls back to member media kind when remote video track ids differ from room state', async () => {
@@ -693,6 +780,65 @@ describe('RoomP2PMediaTransport', () => {
       'video:webrtc-video-track',
       'screen:webrtc-screen-track',
     ]);
+  });
+
+  it('does not tear down an old video track before a replacement pending track is promoted', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('MediaStream', FakeMediaStream as unknown as typeof MediaStream);
+
+    const remoteMember = { memberId: 'member-2', userId: 'member-2', state: {} };
+    const mediaMembers: RoomMediaMember[] = [
+      {
+        member: remoteMember,
+        state: {
+          video: {
+            published: true,
+            muted: false,
+            trackId: 'room-video-track',
+          },
+        },
+        tracks: [
+          { kind: 'video', trackId: 'room-video-track', muted: false },
+        ],
+      },
+    ];
+    const { transport, peerConnections, emitMediaTrackRemoved } = createTransport({
+      currentMember: {
+        memberId: 'member-1',
+        userId: 'member-1',
+        state: {},
+      },
+      members: [
+        { memberId: 'member-1', userId: 'member-1', state: {} },
+        remoteMember,
+      ],
+      mediaMembers,
+    });
+
+    const remoteEvents: string[] = [];
+    transport.onRemoteTrack((event) => {
+      remoteEvents.push(`${event.kind}:${event.track.id}`);
+    });
+    await transport.connect();
+
+    peerConnections[0]?.emitRemoteTrack(new FakeTrack('room-video-track', 'video') as unknown as MediaStreamTrack);
+    peerConnections[0]?.emitRemoteTrack(new FakeTrack('replacement-track', 'video') as unknown as MediaStreamTrack);
+    emitMediaTrackRemoved({ kind: 'video', trackId: 'room-video-track' }, remoteMember);
+
+    await vi.advanceTimersByTimeAsync(950);
+    mediaMembers[0]!.state = {
+      video: {
+        published: true,
+        muted: false,
+      },
+    };
+    await vi.advanceTimersByTimeAsync(2_700);
+
+    expect(remoteEvents).toEqual([
+      'video:room-video-track',
+      'video:replacement-track',
+    ]);
+    vi.useRealTimers();
   });
 
   it('retries negotiation after a peer reports disconnected with published media but no remote track', async () => {

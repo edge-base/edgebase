@@ -227,23 +227,27 @@ When you pass `appState` to `createClient()`, the SDK automatically coordinates 
 
 ## Room Media Transports
 
-React Native now exposes the same top-level room media transport entrypoint as the web SDK:
+React Native now exposes the same room media surface as the web SDK. Prefer `room.media.connect(...)` for app code and drop down to `room.media.transport(...)` only when you need manual transport control.
 
 ```ts
 const room = client.room('calls', 'demo');
 await room.join();
 
-const transport = room.media.transport({
-  provider: 'cloudflare_realtimekit',
+const media = await room.media.connect({
+  candidates: [
+    {
+      label: 'cloudflare_realtimekit',
+      options: { provider: 'cloudflare_realtimekit' },
+    },
+  ],
+  connectPayload: {
+    name: 'June',
+    customParticipantId: 'mobile-june',
+  },
 });
 
-await transport.connect({
-  name: 'June',
-  customParticipantId: 'mobile-june',
-});
-
-await transport.enableAudio();
-await transport.enableVideo();
+await media.transport.enableAudio();
+await media.transport.enableVideo();
 ```
 
 Available providers:
