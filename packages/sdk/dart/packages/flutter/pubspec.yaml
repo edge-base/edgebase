@@ -1,6 +1,6 @@
 name: edgebase_flutter
 description: EdgeBase Flutter/Dart SDK — client-side auth, database-live, and more.
-version: 0.2.6
+version: 0.2.7
 homepage: https://github.com/edge-base/edgebase/tree/main/packages/sdk/dart/packages/flutter
 repository: https://github.com/edge-base/edgebase/tree/main/packages/sdk/dart/packages/flutter
 
@@ -10,7 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  edgebase_core: ^0.2.6
+  edgebase_core: ^0.2.7
   http: ^1.2.0
   js: ^0.7.2
   shared_preferences: ^2.2.0

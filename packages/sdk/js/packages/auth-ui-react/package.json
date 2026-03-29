@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/auth-ui-react",
-    "version": "0.2.6",
+    "version": "0.2.7",
     "description": "EdgeBase Auth UI for React — pre-built authentication components",
     "license": "MIT",
     "repository": {

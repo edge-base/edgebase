@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/sdk",
-    "version": "0.2.6",
+    "version": "0.2.7",
     "private": true,
     "description": "EdgeBase SDK — unified JavaScript/TypeScript client for EdgeBase",
     "license": "MIT",

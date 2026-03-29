@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name          = "edgebase_core"
-  spec.version       = "0.2.6"
+  spec.version       = "0.2.7"
   spec.summary       = "EdgeBase Core SDK for Ruby — shared HTTP client, query builder, and storage."
   spec.description   = "Core module for EdgeBase Ruby SDK. Provides HttpClient, TableRef, DocRef, " \
                         "StorageClient, and generated API layer from OpenAPI spec."

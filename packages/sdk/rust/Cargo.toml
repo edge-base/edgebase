@@ -1,6 +1,6 @@
 [package]
 name = "edgebase-sdk"
-version = "0.2.6"
+version = "0.2.7"
 description = "Workspace release line for the EdgeBase Rust SDKs"
 edition = "2021"
 license = "MIT"
