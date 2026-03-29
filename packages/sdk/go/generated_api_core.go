@@ -465,41 +465,6 @@ func (a *GeneratedDbApi) GetRoomMetadata(ctx context.Context, query map[string]s
 	return a.client.GetWithQuery(ctx, "/api/room/metadata", query)
 }
 
-// GetRoomRealtimeSession — Get the active room realtime media session — GET /api/room/media/realtime/session
-func (a *GeneratedDbApi) GetRoomRealtimeSession(ctx context.Context, query map[string]string) (map[string]interface{}, error) {
-	return a.client.GetWithQuery(ctx, "/api/room/media/realtime/session", query)
-}
-
-// CreateRoomRealtimeSession — Create a room realtime media session — POST /api/room/media/realtime/session
-func (a *GeneratedDbApi) CreateRoomRealtimeSession(ctx context.Context, body interface{}, query map[string]string) (map[string]interface{}, error) {
-	return a.client.DoWithQuery(ctx, "POST", "/api/room/media/realtime/session", body, query)
-}
-
-// CreateRoomRealtimeIceServers — Generate TURN / ICE credentials for room realtime media — POST /api/room/media/realtime/turn
-func (a *GeneratedDbApi) CreateRoomRealtimeIceServers(ctx context.Context, body interface{}, query map[string]string) (map[string]interface{}, error) {
-	return a.client.DoWithQuery(ctx, "POST", "/api/room/media/realtime/turn", body, query)
-}
-
-// AddRoomRealtimeTracks — Add realtime media tracks to a room session — POST /api/room/media/realtime/tracks/new
-func (a *GeneratedDbApi) AddRoomRealtimeTracks(ctx context.Context, body interface{}, query map[string]string) (map[string]interface{}, error) {
-	return a.client.DoWithQuery(ctx, "POST", "/api/room/media/realtime/tracks/new", body, query)
-}
-
-// RenegotiateRoomRealtimeSession — Renegotiate a room realtime media session — PUT /api/room/media/realtime/renegotiate
-func (a *GeneratedDbApi) RenegotiateRoomRealtimeSession(ctx context.Context, body interface{}, query map[string]string) (map[string]interface{}, error) {
-	return a.client.DoWithQuery(ctx, "PUT", "/api/room/media/realtime/renegotiate", body, query)
-}
-
-// CloseRoomRealtimeTracks — Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close
-func (a *GeneratedDbApi) CloseRoomRealtimeTracks(ctx context.Context, body interface{}, query map[string]string) (map[string]interface{}, error) {
-	return a.client.DoWithQuery(ctx, "PUT", "/api/room/media/realtime/tracks/close", body, query)
-}
-
-// CreateRoomCloudflareRealtimeKitSession — Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
-func (a *GeneratedDbApi) CreateRoomCloudflareRealtimeKitSession(ctx context.Context, body interface{}, query map[string]string) (map[string]interface{}, error) {
-	return a.client.DoWithQuery(ctx, "POST", "/api/room/media/cloudflare_realtimekit/session", body, query)
-}
-
 // TrackEvents — Track custom events — POST /api/analytics/track
 func (a *GeneratedDbApi) TrackEvents(ctx context.Context, body interface{}) (map[string]interface{}, error) {
 	return a.client.do(ctx, "POST", "/api/analytics/track", body)
@@ -623,13 +588,6 @@ const (
 	PathPushUnregister = "/api/push/unregister"
 	PathConnectRoom = "/api/room"
 	PathCheckRoomConnection = "/api/room/connect-check"
-	PathCreateRoomCloudflareRealtimeKitSession = "/api/room/media/cloudflare_realtimekit/session"
-	PathRenegotiateRoomRealtimeSession = "/api/room/media/realtime/renegotiate"
-	PathGetRoomRealtimeSession = "/api/room/media/realtime/session"
-	PathCreateRoomRealtimeSession = "/api/room/media/realtime/session"
-	PathCloseRoomRealtimeTracks = "/api/room/media/realtime/tracks/close"
-	PathAddRoomRealtimeTracks = "/api/room/media/realtime/tracks/new"
-	PathCreateRoomRealtimeIceServers = "/api/room/media/realtime/turn"
 	PathGetRoomMetadata = "/api/room/metadata"
 	PathGetSchema = "/api/schema"
 	PathExecuteSql = "/api/sql"

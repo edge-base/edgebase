@@ -490,6 +490,13 @@ export default defineConfig({
                         room.kick(payload.memberId);
                         return { ok: true };
                     },
+                    SET_TOPIC: (payload, room) => {
+                        room.setSharedState((state) => ({
+                            ...state,
+                            topic: payload.topic,
+                        }));
+                        return { ok: true, topic: payload.topic };
+                    },
                 },
             },
             hooks: {
@@ -526,6 +533,14 @@ export default defineConfig({
                         });
                     },
                 },
+                state: {
+                    onStateChange: (delta, room) => {
+                        room.setMetadata({
+                            ...room.getMetadata(),
+                            lastStateDelta: delta,
+                        });
+                    },
+                },
                 session: {
                     onReconnect: (sender, room) => {
                         room.setMetadata({
@@ -546,117 +561,6 @@ export default defineConfig({
                                 connectionId: sender.connectionId,
                             },
                         });
-                    },
-                },
-            },
-        },
-
-        'test-media-admin': {
-            public: true,
-            rateLimit: { actions: 100 },
-            runtime: {
-                target: 'rooms',
-            },
-            access: {
-                admin: (auth) => auth?.email?.startsWith('admin-') === true,
-                signal: (_auth, _roomId, event) => event.startsWith('edgebase.media.p2p.'),
-                media: {
-                    subscribe: (auth) => auth?.email?.startsWith('blind-') !== true,
-                    publish: (auth, _roomId, kind) => {
-                        if (kind === 'screen') {
-                            return auth?.role === 'host' || auth?.role === 'admin';
-                        }
-                        return true;
-                    },
-                    control: () => true,
-                },
-            },
-            state: {
-                actions: {
-                    SET_TOPIC: (payload, room) => {
-                        room.setSharedState((state) => ({
-                            ...state,
-                            topic: payload.topic,
-                        }));
-                        return { ok: true, topic: payload.topic };
-                    },
-                },
-            },
-            hooks: {
-                state: {
-                    onStateChange: (delta, room) => {
-                        room.setMetadata({
-                            ...room.getMetadata(),
-                            lastStateDelta: delta,
-                        });
-                    },
-                },
-                media: {
-                    beforePublish: (kind) => {
-                        if (kind === 'video') {
-                            return { trackId: 'hook-video-track' };
-                        }
-                    },
-                    onPublished: (kind, sender, room) => {
-                        room.setMetadata({
-                            ...room.getMetadata(),
-                            lastMediaEvent: {
-                                type: 'published',
-                                kind,
-                                memberId: sender.userId,
-                                role: sender.role,
-                            },
-                        });
-                    },
-                    onUnpublished: (kind, sender, room) => {
-                        room.setMetadata({
-                            ...room.getMetadata(),
-                            lastMediaEvent: {
-                                type: 'unpublished',
-                                kind,
-                                memberId: sender.userId,
-                            },
-                        });
-                    },
-                    onMuteChange: (kind, sender, muted, room) => {
-                        room.setMetadata({
-                            ...room.getMetadata(),
-                            lastMediaEvent: {
-                                type: 'mute',
-                                kind,
-                                memberId: sender.userId,
-                                muted,
-                            },
-                        });
-                    },
-                },
-            },
-        },
-
-        'test-media-screen-share': {
-            public: true,
-            rateLimit: { actions: 100 },
-            runtime: {
-                target: 'rooms',
-            },
-            access: {
-                admin: (auth) => auth?.email?.startsWith('admin-') === true,
-                signal: (_auth, _roomId, event) => event.startsWith('edgebase.media.p2p.'),
-                media: {
-                    subscribe: () => true,
-                    publish: () => true,
-                    control: () => true,
-                },
-            },
-            hooks: {
-                media: {
-                    beforePublish: (kind) => {
-                        if (kind === 'video') {
-                            return { trackId: 'hook-video-track' };
-                        }
-                        if (kind === 'screen') {
-                            return { trackId: 'hook-screen-track' };
-                        }
                     },
                 },
             },

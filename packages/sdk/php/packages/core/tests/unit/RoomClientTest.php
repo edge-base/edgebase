@@ -59,14 +59,6 @@ final class RoomClientTest extends TestCase
                             'memberId' => $decoded['memberId'] ?? '',
                         ], JSON_THROW_ON_ERROR);
                         break;
-                    case 'media':
-                        $this->queuedResponses[] = json_encode([
-                            'type' => 'media_result',
-                            'requestId' => $requestId,
-                            'operation' => $decoded['operation'] ?? '',
-                            'kind' => $decoded['kind'] ?? '',
-                        ], JSON_THROW_ON_ERROR);
-                        break;
                 }
             }
 
@@ -101,14 +93,12 @@ final class RoomClientTest extends TestCase
         $this->assertSame(['send:leave', 'close'], $fakeSocket->events);
     }
 
-    public function test_unified_surface_parses_members_signals_media_and_session_frames(): void
+    public function test_unified_surface_parses_members_signals_and_session_frames(): void
     {
         $room = new RoomClient('http://localhost:8688', 'game', 'room-1', fn (): string => 'token');
         $memberSyncSnapshots = [];
         $memberLeaves = [];
         $signalEvents = [];
-        $mediaTracks = [];
-        $mediaDevices = [];
         $connectionStates = [];
 
         $room->members->onSync(function (array $members) use (&$memberSyncSnapshots): void {
@@ -120,12 +110,6 @@ final class RoomClientTest extends TestCase
         $room->signals->onAny(function (string $event, mixed $payload, array $meta) use (&$signalEvents): void {
             $signalEvents[] = $event . ':' . ($meta['userId'] ?? '');
         });
-        $room->media->onTrack(function (array $track, array $member) use (&$mediaTracks): void {
-            $mediaTracks[] = ($track['kind'] ?? '') . ':' . ($member['memberId'] ?? '');
-        });
-        $room->media->onDeviceChange(function (array $member, array $change) use (&$mediaDevices): void {
-            $mediaDevices[] = ($change['kind'] ?? '') . ':' . ($change['deviceId'] ?? '');
-        });
         $room->session->onConnectionStateChange(function (string $state) use (&$connectionStates): void {
             $connectionStates[] = $state;
         });
@@ -135,8 +119,6 @@ final class RoomClientTest extends TestCase
         $room->handleMessageForTesting('{"type":"members_sync","members":[{"memberId":"user-1","userId":"user-1","connectionId":"conn-1","connectionCount":1,"state":{"typing":false}}]}');
         $room->handleMessageForTesting('{"type":"member_join","member":{"memberId":"user-2","userId":"user-2","connectionCount":1,"state":{}}}');
         $room->handleMessageForTesting('{"type":"signal","event":"cursor.move","payload":{"x":10,"y":20},"meta":{"memberId":"user-2","userId":"user-2","connectionId":"conn-2","sentAt":123}}');
-        $room->handleMessageForTesting('{"type":"media_track","member":{"memberId":"user-2","userId":"user-2","state":{}},"track":{"kind":"video","trackId":"video-1","deviceId":"cam-1","muted":false}}');
-        $room->handleMessageForTesting('{"type":"media_device","member":{"memberId":"user-2","userId":"user-2","state":{}},"kind":"video","deviceId":"cam-2"}');
         $room->handleMessageForTesting('{"type":"member_leave","member":{"memberId":"user-2","userId":"user-2","state":{}},"reason":"timeout"}');
 
         $this->assertSame(['topic' => 'focus'], $room->state->getShared());
@@ -148,15 +130,12 @@ final class RoomClientTest extends TestCase
         $this->assertCount(1, $memberSyncSnapshots);
         $this->assertSame('user-1', $memberSyncSnapshots[0][0]['memberId']);
         $this->assertSame(['cursor.move:user-2'], $signalEvents);
-        $this->assertSame(['video:user-2'], $mediaTracks);
-        $this->assertSame(['video:cam-2'], $mediaDevices);
         $this->assertSame(['user-2:timeout'], $memberLeaves);
         $this->assertCount(1, $room->members->list());
         $this->assertSame('user-1', $room->members->list()[0]['memberId']);
-        $this->assertCount(0, $room->media->list());
     }
 
-    public function test_unified_surface_sends_signal_member_admin_and_media_frames(): void
+    public function test_unified_surface_sends_signal_member_and_admin_frames(): void
     {
         $room = new RoomClient('http://localhost:8688', 'game', 'room-1', fn (): string => 'token');
         $fakeSocket = $this->createFakeSocket();
@@ -172,17 +151,11 @@ final class RoomClientTest extends TestCase
         $this->assertSame('member_state', $fakeSocket->messages[1]['type']);
         $this->assertTrue($fakeSocket->messages[1]['state']['typing']);
 
-        $room->admin->disableVideo('user-2');
+        $room->admin->block('user-2');
         $this->assertSame('admin', $fakeSocket->messages[2]['type']);
-        $this->assertSame('disableVideo', $fakeSocket->messages[2]['operation']);
+        $this->assertSame('block', $fakeSocket->messages[2]['operation']);
         $this->assertSame('user-2', $fakeSocket->messages[2]['memberId']);
 
-        $room->media->audio->setMuted(true);
-        $this->assertSame('media', $fakeSocket->messages[3]['type']);
-        $this->assertSame('mute', $fakeSocket->messages[3]['operation']);
-        $this->assertSame('audio', $fakeSocket->messages[3]['kind']);
-        $this->assertTrue($fakeSocket->messages[3]['payload']['muted']);
-
-        $this->assertSame(['send:signal', 'send:member_state', 'send:admin', 'send:media'], $fakeSocket->events);
+        $this->assertSame(['send:signal', 'send:member_state', 'send:admin'], $fakeSocket->events);
     }
 }

@@ -604,10 +604,9 @@ void main() {
       await server.close(force: true);
     });
 
-    test('parses signals, members, media, and session namespaces', () async {
+    test('parses signals, members, and session namespaces', () async {
       final memberSync = Completer<List<Map<String, dynamic>>>();
       final signalEvent = Completer<Map<String, dynamic>>();
-      final mediaTrack = Completer<Map<String, dynamic>>();
       final connectionStates = <String>[];
 
       server.listen((request) async {
@@ -651,55 +650,12 @@ void main() {
               ],
             }));
             ws.add(jsonEncode({
-              'type': 'media_sync',
-              'members': [
-                {
-                  'member': {
-                    'memberId': 'user-1',
-                    'userId': 'user-1',
-                    'connectionId': 'conn-1',
-                    'connectionCount': 1,
-                    'state': {'cursor': 'x:1'},
-                  },
-                  'state': {
-                    'audio': {
-                      'published': true,
-                      'muted': false,
-                      'trackId': 'audio-1',
-                    }
-                  },
-                  'tracks': [
-                    {
-                      'kind': 'audio',
-                      'trackId': 'audio-1',
-                      'muted': false,
-                    }
-                  ],
-                }
-              ],
-            }));
-            ws.add(jsonEncode({
               'type': 'signal',
               'event': 'wave',
               'payload': {'from': 'server'},
               'meta': {
                 'serverSent': true,
                 'sentAt': 123,
-              },
-            }));
-            ws.add(jsonEncode({
-              'type': 'media_track',
-              'member': {
-                'memberId': 'user-1',
-                'userId': 'user-1',
-                'connectionId': 'conn-1',
-                'connectionCount': 1,
-                'state': {'cursor': 'x:1'},
-              },
-              'track': {
-                'kind': 'video',
-                'trackId': 'video-1',
-                'muted': true,
               },
             }));
           }
@@ -721,15 +677,6 @@ void main() {
           });
         }
       });
-      room.media.onTrack((track, member) {
-        if (!mediaTrack.isCompleted) {
-          mediaTrack.complete({
-            'track': track,
-            'member': member,
-          });
-        }
-      });
-
       await room.join();
 
       expect(await memberSync.future.timeout(const Duration(seconds: 5)), [
@@ -745,19 +692,16 @@ void main() {
           await signalEvent.future.timeout(const Duration(seconds: 5));
       expect(signal['payload'], {'from': 'server'});
       expect((signal['meta'] as Map<String, dynamic>)['serverSent'], isTrue);
-      final track = await mediaTrack.future.timeout(const Duration(seconds: 5));
-      expect((track['track'] as Map<String, dynamic>)['trackId'], 'video-1');
       expect(room.state.getShared()['phase'], 'lobby');
       expect(room.state.getMine()['ready'], isTrue);
       expect(room.members.list().single['memberId'], 'user-1');
-      expect(room.media.list().single['tracks'], isNotEmpty);
       expect(room.session.connectionState, 'connected');
       expect(connectionStates, containsAllInOrder(['connecting', 'connected']));
 
       room.leave();
     });
 
-    test('sends unified request frames for signals, members, admin, and media',
+    test('sends unified request frames for signals, members, and admin',
         () async {
       final frames = <Map<String, dynamic>>[];
 
@@ -843,15 +787,6 @@ void main() {
                 'result': {'ok': true},
               }));
               break;
-            case 'media':
-              ws.add(jsonEncode({
-                'type': 'media_result',
-                'operation': decoded['operation'],
-                'kind': decoded['kind'],
-                'requestId': decoded['requestId'],
-                'result': {'ok': true},
-              }));
-              break;
           }
         });
       });
@@ -862,13 +797,10 @@ void main() {
       await room.signals.send('wave', {'value': 1}, {'includeSelf': true});
       await room.members.setState({'typing': true});
       await room.admin.setRole('user-2', 'moderator');
-      await room.media.audio.enable({'deviceId': 'mic-1'});
-
       expect(frames.map((entry) => entry['type']), [
         'signal',
         'member_state',
         'admin',
-        'media',
       ]);
       expect(frames[0]['event'], 'wave');
       expect(frames[0]['includeSelf'], isTrue);
@@ -876,56 +808,8 @@ void main() {
       expect(frames[2]['operation'], 'setRole');
       expect(
           (frames[2]['payload'] as Map<String, dynamic>)['role'], 'moderator');
-      expect(frames[3]['operation'], 'publish');
-      expect(frames[3]['kind'], 'audio');
 
       room.leave();
-    });
-
-    test('creates a cloudflare realtimekit session through the provider endpoint',
-        () async {
-      server.listen((request) async {
-        if (request.uri.path == '/api/room/media/cloudflare_realtimekit/session') {
-          expect(request.method, 'POST');
-          expect(
-            request.headers.value('authorization'),
-            startsWith('Bearer '),
-          );
-          expect(request.uri.queryParameters['namespace'], 'game');
-          expect(request.uri.queryParameters['id'], 'room-1');
-
-          final body = await utf8.decoder.bind(request).join();
-          final decoded = jsonDecode(body) as Map<String, dynamic>;
-          expect(decoded['name'], 'Flutter User');
-          expect(decoded['customParticipantId'], 'flutter-user-1');
-
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(jsonEncode({
-            'sessionId': 'session-1',
-            'meetingId': 'meeting-1',
-            'participantId': 'participant-1',
-            'authToken': 'auth-token-1',
-            'presetName': 'default',
-          }));
-          await request.response.close();
-          return;
-        }
-
-        request.response.statusCode = HttpStatus.notFound;
-        await request.response.close();
-      });
-
-      final room = RoomClient(baseUrl, 'game', 'room-1', tokenManager);
-      final session = await room.media.cloudflareRealtimeKit.createSession({
-        'name': 'Flutter User',
-        'customParticipantId': 'flutter-user-1',
-      });
-
-      expect(session['sessionId'], 'session-1');
-      expect(session['meetingId'], 'meeting-1');
-      expect(session['participantId'], 'participant-1');
-      expect(session['authToken'], 'auth-token-1');
-      expect(session['presetName'], 'default');
     });
   });
 }

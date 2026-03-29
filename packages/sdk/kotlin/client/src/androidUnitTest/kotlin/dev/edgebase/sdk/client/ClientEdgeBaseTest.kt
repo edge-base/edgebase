@@ -508,44 +508,6 @@ class RoomClientStructureTest {
     }
 }
 
-class RoomMediaTransportStructureTest {
-
-    private fun createRoom(): RoomClient {
-        val tokenManager = ClientTokenManager(MemoryTokenStorage())
-        return RoomClient(
-            baseUrl = "https://dummy.edgebase.fun",
-            namespace = "media",
-            roomId = "room-1",
-            tokenManager = tokenManager,
-        )
-    }
-
-    @Test
-    fun transport_returns_cloudflare_runtime_by_default() {
-        val room = createRoom()
-        val transport = room.media.transport()
-        assertEquals("RoomCloudflareMediaTransport", transport::class.simpleName)
-    }
-
-    @Test
-    fun transport_returns_p2p_runtime_when_requested() {
-        val room = createRoom()
-        val transport = room.media.transport(
-            RoomMediaTransportOptions(
-                provider = RoomMediaTransportProvider.p2p,
-                p2p = RoomP2PMediaTransportOptions(),
-            ),
-        )
-        assertEquals("RoomP2PMediaTransport", transport::class.simpleName)
-    }
-
-    @Test
-    fun android_runtime_factories_are_available_for_both_media_providers() {
-        assertNotNull(defaultCloudflareRealtimeKitClientFactory())
-        assertNotNull(defaultP2PMediaRuntimeFactory())
-    }
-}
-
 // ─── H. PushClient 구조 ─────────────────────────────────────────────────────
 
 class PushClientStructureTest {

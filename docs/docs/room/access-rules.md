@@ -78,12 +78,6 @@ rooms: {
   - decides whether a client action is allowed
 - `access.signal`
   - decides whether a signal can be sent
-- `access.media.publish`
-  - decides whether a track can be published
-- `access.media.control`
-  - decides whether mute/unmute/device/unpublish is allowed
-- `access.media.subscribe`
-  - decides whether a member can watch another member's tracks
 - `handlers.lifecycle.onJoin`
   - runs after join is accepted
 - `handlers.actions`
@@ -102,7 +96,7 @@ rooms: {
       signal: (auth, roomId, event, payload) => {
         if (!auth) return false;
         // Only allow known signal types
-        return ['offer', 'answer', 'ice-candidate', 'cursor-move'].includes(event);
+        return ['cursor-move', 'typing', 'reaction'].includes(event);
       },
     },
   },
@@ -116,38 +110,7 @@ rooms: {
 | `event` | `string` | Signal event name |
 | `payload` | `unknown` | Signal payload |
 
-## Media Access *(Beta)*
-
-Media access rules use a nested structure with three gates:
-
-```typescript
-rooms: {
-  meeting: {
-    access: {
-      media: {
-        subscribe: (auth, roomId, payload) => auth !== null,
-        publish: (auth, roomId, kind, payload) => {
-          if (!auth) return false;
-          // Only allow screen-share for moderators
-          if (kind === 'screen') return auth.role === 'moderator';
-          return true;
-        },
-        control: (auth, roomId, operation, payload) => auth !== null,
-      },
-    },
-  },
-}
-```
-
-| Gate | Parameters | Purpose |
-|------|-----------|---------|
-| `subscribe` | `(auth, roomId, payload)` | Watch other members' tracks |
-| `publish` | `(auth, roomId, kind, payload)` | Publish audio/video/screen |
-| `control` | `(auth, roomId, operation, payload)` | Mute, unmute, device change, unpublish |
-
-`kind` values: `'audio'`, `'video'`, `'screen'`. `operation` values: `'mute'`, `'unmute'`, `'device'`, `'unpublish'`.
-
-In release mode, missing signal and media access rules **deny by default**, matching the same fail-closed behavior as `metadata`, `join`, and `action`.
+In release mode, missing signal access rules **deny by default**, matching the same fail-closed behavior as `metadata`, `join`, and `action`.
 
 ## Using `auth.meta`
 

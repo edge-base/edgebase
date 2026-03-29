@@ -1,7 +1,7 @@
 ---
 sidebar_position: 14
 title: Signals (Broadcast)
-description: Fire-and-forget room events for chat, cursors, notifications, and WebRTC signaling.
+description: Fire-and-forget room events for chat, cursors, notifications, and lightweight coordination.
 sidebar_label: Signals (Broadcast)
 ---
 
@@ -25,7 +25,6 @@ Signals are not authoritative state. They are for events you want to deliver now
 - cursor movement
 - read receipts
 - transient notifications
-- WebRTC offer/answer/ICE signaling
 
 ## Client Surface
 

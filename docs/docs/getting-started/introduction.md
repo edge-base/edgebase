@@ -56,7 +56,7 @@ MIT licensed. Export your data anytime. Run it anywhere.
 
 - **Database Subscriptions** -- WebSocket-based `onSnapshot` subscriptions for live data changes with server-side filtering. Hibernation API for cost efficiency.
 
-- **Room** -- Server-authoritative state synchronization with built-in members (presence), signals (pub/sub), and media metadata. Ideal for multiplayer, collaboration, and conferencing.
+- **Room** -- Server-authoritative state synchronization with built-in members (presence) and signals (pub/sub). Ideal for multiplayer, collaboration, coordination, and real-time workflows.
 
 - **Storage** -- R2-backed file storage with $0 egress, signed URLs, multipart upload with resume, and per-bucket access rules.
 

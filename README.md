@@ -432,7 +432,7 @@ Deep dives: [Database](https://edgebase.fun/docs/database) · [Authentication](h
 - **Admin UI** — Built-in dashboard at `/admin`
 - **KV / D1 / Vectorize** — Direct access to Cloudflare native resources
 - **Portable Backup** — CLI cross-environment migration (Edge ↔ Docker ↔ Node.js)
-- **Room** — Server-authoritative multiplayer state (shared game/app state), metadata (lobby/session info), members (presence), signals (events/pub-sub), and realtime media (voice/video, WebRTC/SFU) in one live session primitive
+- **Room** — Server-authoritative multiplayer state (shared game/app state), metadata (lobby/session info), members (presence), and signals (events/pub-sub) in one live session primitive
 - **Push Notifications** — FCM with individual, topic-based, and multicast messaging
 - **Environments** — Strictly isolated `dev` and `release` modes
 - **Plugins** — Build-time plugin system for seamless integration of external logic (Stripe, Image Resizing, etc.)

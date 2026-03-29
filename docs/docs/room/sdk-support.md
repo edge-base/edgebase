@@ -49,27 +49,5 @@ If you are looking for the "server side" of Room, the correct destination is [Se
 
 ## Unified Surface Rollout
 
-- The unified Room client model groups five core live surfaces (`room.state`, `room.meta`, `room.members`, `room.signals`, `room.media` *(beta)*) plus two companion runtime namespaces (`room.admin`, `room.session`).
+- The unified Room client model groups four core live surfaces (`room.state`, `room.meta`, `room.members`, `room.signals`) plus the companion runtime namespaces (`room.admin`, `room.session`).
 - That unified namespace surface is currently implemented in the Web, React Native, Flutter, Kotlin, Java, and Swift iOS client SDKs.
-- Room Media transport provider support is currently split like this:
-  - Web: `cloudflare_realtimekit` and `p2p`
-  - React Native: `cloudflare_realtimekit` and `p2p`
-  - Flutter: `cloudflare_realtimekit` and `p2p`
-  - Swift iOS: `cloudflare_realtimekit` and `p2p`
-  - Kotlin client: Android, iOS, and JS browser ship built-in `cloudflare_realtimekit` and `p2p`; JVM/macOS use explicit `cloudflareRealtimeKit.clientFactory` and `p2p.transportFactory`
-  - Java core / Android package: Android ships built-in `cloudflare_realtimekit` and `p2p`; the core artifact uses explicit `cloudflareRealtimeKit.clientFactory` and `p2p.transportFactory`
-- Verified smoke builds in the current matrix:
-  - React Native: host-app smoke builds succeeded on both iOS simulator and Android debug
-  - Flutter: host-app smoke builds succeeded on Web, macOS, Android, and an Apple Silicon iOS simulator via direct Xcode device build
-  - Kotlin: JS, iOS simulator, iOS device, macOS, JVM, and Android targets compile successfully; Android unit tests verify provider selection for `cloudflare_realtimekit` and `p2p`, and iOS simulator tests verify built-in factory availability for both providers
-- Swift iOS: package tests and iOS simulator build succeeded; P2P now has package-level transport coverage, including injected screen-share source coverage
-- Java / Kotlin Android: package/runtime integration is verified through module builds, targeted transport tests, and Android host-app debug builds
-- Kotlin currently ships built-in Room Media runtime on Android, iOS, and JS browser, and uses explicit transport injection on JVM/macOS. Java Android now ships built-in `cloudflare_realtimekit` and `p2p`, while the Java core artifact uses the same transport surface through explicit adapter injection. Native live media E2E is still strongest on Web / React Native / Flutter. Other server-only SDKs intentionally do not expose Room Media transport providers.
-
-:::note
-The strongest fully-verified Room Media paths today are Web plus the mobile host-build/runtime smoke paths on React Native, Flutter, Swift iOS, Kotlin iOS, and Android-native Java/Kotlin. Kotlin multiplatform still compiles across every target, with built-in Room Media on Android/iOS/JS and explicit adapter injection on JVM/macOS. On Swift iOS, P2P screen share is available through an app-provided `RTKRTCVideoTrack` source rather than built-in ReplayKit capture.
-:::
-
-:::tip Android host-app requirement
-The current Java/Kotlin Android host-app smoke builds succeeded with **AGP 8.6+** and **compileSdk 35+**. If your app is still on AGP 8.2 / compileSdk 34, RealtimeKit's newer AndroidX metadata may block the media runtime before the app even compiles.
-:::

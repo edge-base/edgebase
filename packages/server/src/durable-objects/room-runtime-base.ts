@@ -88,7 +88,7 @@ const DEFAULT_SOCKET_STALE_TIMEOUT_MS = 45000;
 const SOCKET_HEARTBEAT_CHECK_INTERVAL_MS = 5000;
 const ROOM_EPHEMERAL_TIMERS_STORAGE_KEY = 'roomEphemeralTimers';
 const roomFallbackWarnings = new Set<string>();
-type RoomRateLimitScope = 'actions' | 'signals' | 'media' | 'admin';
+type RoomRateLimitScope = 'actions' | 'signals' | 'admin';
 
 interface PendingDisconnectDeadline {
   fireAt: number;
@@ -1830,14 +1830,12 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   ): boolean {
     const now = Date.now();
     const rateLimit = this.namespaceConfig?.rateLimit as
-      | { actions: number; signals?: number; media?: number; admin?: number }
+      | { actions: number; signals?: number; admin?: number }
       | undefined;
     const maxActions = (
       scope === 'signals'
         ? rateLimit?.signals
-        : scope === 'media'
-          ? rateLimit?.media
-          : scope === 'admin'
+        : scope === 'admin'
             ? rateLimit?.admin
             : undefined
     ) ?? rateLimit?.actions ?? DEFAULT_RATE_LIMIT_ACTIONS;

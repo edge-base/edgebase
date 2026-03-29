@@ -381,34 +381,6 @@ public class GeneratedDbApi
     public Task<Dictionary<string, object?>> GetRoomMetadataAsync(Dictionary<string, string>? query = null, CancellationToken ct = default)
         => _http.GetWithQueryAsync("/api/room/metadata", query, ct);
 
-    /// <summary>Get the active room realtime media session — GET /api/room/media/realtime/session</summary>
-    public Task<Dictionary<string, object?>> GetRoomRealtimeSessionAsync(Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.GetWithQueryAsync("/api/room/media/realtime/session", query, ct);
-
-    /// <summary>Create a room realtime media session — POST /api/room/media/realtime/session</summary>
-    public Task<Dictionary<string, object?>> CreateRoomRealtimeSessionAsync(object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.PostAsyncWithQuery("/api/room/media/realtime/session", body, query, ct);
-
-    /// <summary>Generate TURN / ICE credentials for room realtime media — POST /api/room/media/realtime/turn</summary>
-    public Task<Dictionary<string, object?>> CreateRoomRealtimeIceServersAsync(object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.PostAsyncWithQuery("/api/room/media/realtime/turn", body, query, ct);
-
-    /// <summary>Add realtime media tracks to a room session — POST /api/room/media/realtime/tracks/new</summary>
-    public Task<Dictionary<string, object?>> AddRoomRealtimeTracksAsync(object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.PostAsyncWithQuery("/api/room/media/realtime/tracks/new", body, query, ct);
-
-    /// <summary>Renegotiate a room realtime media session — PUT /api/room/media/realtime/renegotiate</summary>
-    public Task<Dictionary<string, object?>> RenegotiateRoomRealtimeSessionAsync(object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.PutAsyncWithQuery("/api/room/media/realtime/renegotiate", body, query, ct);
-
-    /// <summary>Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close</summary>
-    public Task<Dictionary<string, object?>> CloseRoomRealtimeTracksAsync(object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.PutAsyncWithQuery("/api/room/media/realtime/tracks/close", body, query, ct);
-
-    /// <summary>Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session</summary>
-    public Task<Dictionary<string, object?>> CreateRoomCloudflareRealtimeKitSessionAsync(object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
-        => _http.PostAsyncWithQuery("/api/room/media/cloudflare_realtimekit/session", body, query, ct);
-
     /// <summary>Track custom events — POST /api/analytics/track</summary>
     public Task<Dictionary<string, object?>> TrackEventsAsync(object? body = null, CancellationToken ct = default)
         => _http.PostAsync("/api/analytics/track", body, ct);
@@ -591,13 +563,6 @@ public static class ApiPaths
     public const string PUSH_UNREGISTER = "/api/push/unregister";
     public const string CONNECT_ROOM = "/api/room";
     public const string CHECK_ROOM_CONNECTION = "/api/room/connect-check";
-    public const string CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session";
-    public const string RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate";
-    public const string GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";
-    public const string CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";
-    public const string CLOSE_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/close";
-    public const string ADD_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/new";
-    public const string CREATE_ROOM_REALTIME_ICE_SERVERS = "/api/room/media/realtime/turn";
     public const string GET_ROOM_METADATA = "/api/room/metadata";
     public const string GET_SCHEMA = "/api/schema";
     public const string EXECUTE_SQL = "/api/sql";

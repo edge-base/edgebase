@@ -385,34 +385,6 @@ Result GeneratedDbApi::get_room_metadata(const std::map<std::string, std::string
   return http_.get("/api/room/metadata", query);
 }
 
-Result GeneratedDbApi::get_room_realtime_session(const std::map<std::string, std::string>& query) const {
-  return http_.get("/api/room/media/realtime/session", query);
-}
-
-Result GeneratedDbApi::create_room_realtime_session(const std::string& json_body, const std::map<std::string, std::string>& query) const {
-  return http_.post_with_query("/api/room/media/realtime/session", json_body, query);
-}
-
-Result GeneratedDbApi::create_room_realtime_ice_servers(const std::string& json_body, const std::map<std::string, std::string>& query) const {
-  return http_.post_with_query("/api/room/media/realtime/turn", json_body, query);
-}
-
-Result GeneratedDbApi::add_room_realtime_tracks(const std::string& json_body, const std::map<std::string, std::string>& query) const {
-  return http_.post_with_query("/api/room/media/realtime/tracks/new", json_body, query);
-}
-
-Result GeneratedDbApi::renegotiate_room_realtime_session(const std::string& json_body, const std::map<std::string, std::string>& query) const {
-  return http_.post_with_query("/api/room/media/realtime/renegotiate", json_body, query);
-}
-
-Result GeneratedDbApi::close_room_realtime_tracks(const std::string& json_body, const std::map<std::string, std::string>& query) const {
-  return http_.post_with_query("/api/room/media/realtime/tracks/close", json_body, query);
-}
-
-Result GeneratedDbApi::create_room_cloudflare_realtime_kit_session(const std::string& json_body, const std::map<std::string, std::string>& query) const {
-  return http_.post_with_query("/api/room/media/cloudflare_realtimekit/session", json_body, query);
-}
-
 Result GeneratedDbApi::track_events(const std::string& json_body) const {
   return http_.post("/api/analytics/track", json_body);
 }

@@ -67,7 +67,6 @@ Do not read every reference file by default. First inspect the repo, runtime, an
 - Do not assume a flaky multi-client flow is an SDK/server bug before ruling out app-layer caching, polling, optimistic reconciliation, or search/discoverability code. Separate platform behavior from app behavior before escalating.
 - Do not bolt full-table reloads on top of snapshot payloads unless the reference or repo proves it is necessary. The extra round trips can create fake performance regressions and hide the original ordering problem.
 - Do not assume Room member state automatically solves lobby/list occupancy. If a UI needs room data outside a joined room, verify the current SDK surface for a queryable occupancy primitive before inventing or implying one.
-- Do not treat media transport as guaranteed. Before calling `transport.connect()` or promising camera/mic UX, verify the selected reference, current environment, and fallback path for unsupported or unconfigured runtimes.
 - Do not assume auth persistence is automatically isolated between colocated apps, localhost ports, or embedded previews. If multiple EdgeBase clients share one origin, verify storage keys, BroadcastChannel names, and SSR cookies will not collide.
 - Do not assume a raw `fetch()` to EdgeBase auth or function routes carries the same auth context as SDK helpers. Verify which token, cookie, or header actually authenticates the request in the current origin and port setup before blaming the backend.
 - Do not hardcode localhost origins for server self-calls, cleanup hooks, or seed flows when the runtime can move across ports or environments. Derive the worker origin from the request or environment and verify both request-driven and scheduled paths.
@@ -106,8 +105,6 @@ Do not read every reference file by default. First inspect the repo, runtime, an
   verify four things separately: immediate local feedback, eventual server acknowledgement, state after refresh, and replication or visibility from another client. If the server write can fail, also verify the rollback or error state instead of stopping at the happy path.
 - For anonymous or multi-client directory flows:
   verify read-after-write discoverability from a second client, not just from the writer that created the row.
-- For optional media features:
-  verify the app still works when media transport is unavailable, unsupported, denied, or intentionally disabled. Keep chat/presence flows usable unless the feature truly requires media.
 - For app-vs-platform bug triage:
   reproduce the failure from a second client, reduce it to the smallest credible repro, and only then escalate it as an SDK/server problem.
 - For schema or config changes:

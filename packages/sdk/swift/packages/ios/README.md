@@ -55,31 +55,6 @@ import EdgeBase
 let client = EdgeBaseClient("https://your-project.edgebase.fun")
 ```
 
-## Room Media Transport
-
-The Swift Room surface includes `room.media.transport(...)` with
-`cloudflare_realtimekit` and `p2p` on iOS.
-
-Important runtime note:
-
-- the package currently targets iOS
-- the bundled `cloudflare_realtimekit` and `p2p` transports are wired for iOS
-- Swift P2P screen sharing on iOS requires an app-provided `RTKRTCVideoTrack`
-  (for example from ReplayKit or another screen-capture integration) passed into
-  `transport.startScreenShare(["source": ...])`
-
-Current verification note:
-
-- targeted iOS simulator package tests pass through `xcodebuild test`
-- iOS simulator builds succeeded in the current smoke matrix
-- Swift P2P currently has package-level tests, including injected screen-share
-  source coverage, but not a native live media E2E harness yet
-
-Read more:
-
-- [Room Media Overview](https://edgebase.fun/docs/room/media)
-- [Room Media Setup](https://edgebase.fun/docs/room/media-setup)
-
 ## Notes
 
 - Use `EdgeBaseClient` for end-user flows.

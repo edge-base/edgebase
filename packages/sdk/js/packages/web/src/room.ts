@@ -17,15 +17,6 @@ import {
   type Subscription,
 } from '@edge-base/core';
 import { refreshAccessToken } from './auth-refresh.js';
-import type { RoomRealtimeMediaTransportOptions } from './room-realtime-media.js';
-import {
-  RoomCloudflareMediaTransport,
-  type RoomCloudflareMediaTransportOptions,
-} from './room-cloudflare-media.js';
-import {
-  RoomP2PMediaTransport,
-  type RoomP2PMediaTransportOptions,
-} from './room-p2p-media.js';
 
 // ─── Types ───
 
@@ -95,160 +86,6 @@ export interface RoomRecoveryFailureInfo {
   timeoutMs: number;
 }
 
-export type RoomMediaKind = 'audio' | 'video' | 'screen';
-
-export interface RoomMediaTrack {
-  kind: RoomMediaKind;
-  trackId?: string;
-  deviceId?: string;
-  muted: boolean;
-  publishedAt?: number;
-  adminDisabled?: boolean;
-  providerSessionId?: string;
-}
-
-export interface RoomMemberMediaKindState {
-  published: boolean;
-  muted: boolean;
-  trackId?: string;
-  deviceId?: string;
-  publishedAt?: number;
-  adminDisabled?: boolean;
-  providerSessionId?: string;
-}
-
-export interface RoomMemberMediaState {
-  audio?: RoomMemberMediaKindState;
-  video?: RoomMemberMediaKindState;
-  screen?: RoomMemberMediaKindState;
-}
-
-export interface RoomMediaMember {
-  member: RoomMember;
-  state: RoomMemberMediaState;
-  tracks: RoomMediaTrack[];
-}
-
-export interface RoomMediaDeviceChange {
-  kind: RoomMediaKind;
-  deviceId: string;
-}
-
-interface RoomLocalMediaReplayState {
-  published: boolean;
-  muted: boolean;
-  trackId?: string;
-  deviceId?: string;
-  publishedAt?: number;
-  adminDisabled?: boolean;
-  providerSessionId?: string;
-}
-
-export interface RoomRealtimeSessionDescription {
-  sdp: string;
-  type: 'offer' | 'answer';
-}
-
-export interface RoomRealtimeTrackObject {
-  location: 'local' | 'remote';
-  mid?: string;
-  sessionId?: string;
-  trackName?: string;
-  bidirectionalMediaStream?: boolean;
-  kind?: string;
-  simulcast?: {
-    preferredRid?: string;
-    priorityOrdering?: 'none' | 'asciibetical';
-    ridNotAvailable?: 'none' | 'asciibetical';
-  };
-  errorCode?: string;
-  errorDescription?: string;
-}
-
-export interface RoomRealtimeCreateSessionRequest {
-  connectionId?: string;
-  correlationId?: string;
-  thirdparty?: boolean;
-  sessionDescription?: RoomRealtimeSessionDescription;
-}
-
-export interface RoomRealtimeCreateSessionResponse {
-  sessionId: string;
-  sessionDescription?: RoomRealtimeSessionDescription;
-  errorCode?: string;
-  errorDescription?: string;
-  connectionId?: string;
-  reused?: boolean;
-}
-
-export interface RoomRealtimeIceServer {
-  urls: string[] | string;
-  username?: string;
-  credential?: string;
-}
-
-export interface RoomRealtimeIceServersRequest {
-  ttl?: number;
-}
-
-export interface RoomRealtimeIceServersResponse {
-  iceServers: RoomRealtimeIceServer[];
-}
-
-export interface RoomRealtimeTracksRequest {
-  sessionId: string;
-  connectionId?: string;
-  sessionDescription?: RoomRealtimeSessionDescription;
-  tracks: RoomRealtimeTrackObject[];
-  autoDiscover?: boolean;
-  publish?: {
-    kind?: RoomMediaKind;
-    trackId?: string;
-    deviceId?: string;
-    muted?: boolean;
-  };
-}
-
-export interface RoomRealtimeTracksResponse {
-  errorCode?: string;
-  errorDescription?: string;
-  requiresImmediateRenegotiation?: boolean;
-  sessionDescription?: RoomRealtimeSessionDescription;
-  tracks?: RoomRealtimeTrackObject[];
-}
-
-export interface RoomRealtimeRenegotiateRequest {
-  sessionId: string;
-  connectionId?: string;
-  sessionDescription: RoomRealtimeSessionDescription;
-}
-
-export interface RoomRealtimeCloseTracksRequest {
-  sessionId: string;
-  connectionId?: string;
-  sessionDescription?: RoomRealtimeSessionDescription;
-  tracks: Array<{ mid: string }>;
-  force?: boolean;
-  unpublish?: { kind?: RoomMediaKind };
-}
-
-export interface RoomCloudflareRealtimeKitCreateSessionRequest {
-  connectionId?: string;
-  customParticipantId?: string;
-  name?: string;
-  picture?: string;
-}
-
-export interface RoomCloudflareRealtimeKitCreateSessionResponse {
-  sessionId: string;
-  meetingId: string;
-  participantId: string;
-  authToken: string;
-  presetName: string;
-  connectionId?: string;
-  reused?: boolean;
-}
-
 export interface RoomConnectDiagnostic {
   ok: boolean;
   type: string;
@@ -278,160 +115,6 @@ export interface RoomSummaryCollection {
   deniedIds: string[];
   updatedAt: string;
 }
-
-export type RoomMediaTransportCapabilityCategory =
-  | 'room'
-  | 'browser'
-  | 'provider'
-  | 'auth'
-  | 'config';
-
-export interface RoomMediaTransportCapabilityIssue {
-  code: string;
-  category: RoomMediaTransportCapabilityCategory;
-  message: string;
-  fatal: boolean;
-}
-
-export interface RoomMediaTransportCapabilities {
-  provider: RoomMediaTransportProvider;
-  canConnect: boolean;
-  issues: RoomMediaTransportCapabilityIssue[];
-  room: RoomConnectDiagnostic;
-  joined: boolean;
-  currentMemberId: string | null;
-  sessionId: string | null;
-  browser: {
-    mediaDevices: boolean;
-    getUserMedia: boolean;
-    getDisplayMedia: boolean;
-    enumerateDevices: boolean;
-    rtcPeerConnection: boolean;
-  };
-  turn?: {
-    requested: boolean;
-    available: boolean;
-    iceServerCount: number;
-    error?: string;
-  };
-}
-
-export interface RoomMediaTransportConnectPayload {
-  connectionId?: string;
-  customParticipantId?: string;
-  name?: string;
-  picture?: string;
-  correlationId?: string;
-  thirdparty?: boolean;
-  sessionDescription?: RoomRealtimeSessionDescription;
-}
-
-export interface RoomMediaRemoteTrackEvent {
-  kind: RoomMediaKind;
-  track: MediaStreamTrack;
-  stream?: MediaStream;
-  trackName?: string;
-  providerSessionId?: string;
-  memberId?: string;
-  participantId?: string;
-  customParticipantId?: string;
-  userId?: string;
-  displayName?: string;
-}
-
-export interface RoomMediaConnectCandidate {
-  label?: string;
-  options?: RoomMediaTransportOptions;
-}
-
-export interface RoomMediaUsableRemoteVideoEntry {
-  memberId: string;
-  userId?: string;
-  displayName?: string;
-  stream: MediaStream | null;
-  trackId: string | null;
-  published: boolean;
-  isCameraOff: boolean;
-}
-
-export interface RoomMediaRemoteVideoState extends RoomMediaUsableRemoteVideoEntry {
-  participantId: string;
-  updatedAt: number;
-}
-
-export interface RoomMediaConnectRequest {
-  candidates?: RoomMediaConnectCandidate[];
-  connectPayload?: RoomMediaTransportConnectPayload;
-  onTransport?(transport: RoomMediaTransport): void;
-  onRemoteTrack?(event: RoomMediaRemoteTrackEvent): void;
-  onRemoteVideoStateChange?(entries: RoomMediaRemoteVideoState[]): void;
-}
-
-export interface RoomMediaConnectResult {
-  label: string;
-  provider: RoomMediaTransportProvider;
-  transport: RoomMediaTransport;
-  cleanup(): void;
-}
-
-export interface RoomMediaBootstrapRequest {
-  transport: RoomMediaTransport;
-  muted?: boolean;
-  cameraOff?: boolean;
-  preflightStream?: MediaStream | null;
-  videoConstraints?: MediaTrackConstraints | boolean;
-}
-
-export interface RoomMediaBootstrapResult {
-  muted: boolean;
-  cameraOff: boolean;
-  audioTrack: MediaStreamTrack | null;
-  videoTrack: MediaStreamTrack | null;
-}
-
-export interface RoomMediaTransport {
-  connect(payload?: RoomMediaTransportConnectPayload): Promise<string>;
-  getCapabilities(): Promise<RoomMediaTransportCapabilities>;
-  batchLocalUpdates?<T>(callback: () => Promise<T>): Promise<T>;
-  getUsableRemoteVideoStream?(memberId: string): MediaStream | null;
-  getUsableRemoteVideoEntries?(): RoomMediaUsableRemoteVideoEntry[];
-  getRemoteVideoStates?(): RoomMediaRemoteVideoState[];
-  getActiveRemoteMemberIds?(): string[];
-  onRemoteVideoStateChange?(handler: (entries: RoomMediaRemoteVideoState[]) => void): Subscription;
-  getDebugSnapshot?(): unknown;
-  enableAudio(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
-  enableVideo(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
-  startScreenShare(constraints?: unknown): Promise<MediaStreamTrack>;
-  disableAudio(): Promise<void>;
-  disableVideo(): Promise<void>;
-  stopScreenShare(): Promise<void>;
-  setMuted(kind: Extract<RoomMediaKind, 'audio' | 'video'>, muted: boolean): Promise<void>;
-  switchDevices(payload: {
-    audioInputId?: string;
-    videoInputId?: string;
-    screenInputId?: string;
-  }): Promise<void>;
-  onRemoteTrack(handler: (event: RoomMediaRemoteTrackEvent) => void): Subscription;
-  getSessionId(): string | null;
-  getPeerConnection(): RTCPeerConnection | null;
-  destroy(): void;
-}
-
-export type RoomMediaTransportProvider = 'cloudflare_realtimekit' | 'p2p';
-
-export interface RoomCloudflareRealtimeKitTransportFactoryOptions {
-  provider?: 'cloudflare_realtimekit';
-  cloudflareRealtimeKit?: RoomCloudflareMediaTransportOptions;
-}
-
-export interface RoomP2PTransportFactoryOptions {
-  provider: 'p2p';
-  p2p?: RoomP2PMediaTransportOptions;
-}
-
-export type RoomMediaTransportOptions =
-  | RoomCloudflareRealtimeKitTransportFactoryOptions
-  | RoomP2PTransportFactoryOptions;
 
 // ─── Helpers ───
 
@@ -517,9 +200,7 @@ export class RoomClient {
   private _playerState: Record<string, unknown> = {};
   private _playerVersion = 0;
   private _members: RoomMember[] = [];
-  private _mediaMembers: RoomMediaMember[] = [];
   private lastLocalMemberState: Record<string, unknown> | null = null;
-  private lastLocalMediaState = new Map<RoomMediaKind, RoomLocalMediaReplayState>();
   // ─── Connection ───
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
@@ -593,12 +274,6 @@ export class RoomClient {
     timeout: ReturnType<typeof setTimeout>;
     onSuccess?: () => void;
   }>();
-  private pendingMediaRequests = new Map<string, {
-    resolve: () => void;
-    reject: (error: Error) => void;
-    timeout: ReturnType<typeof setTimeout>;
-    onSuccess?: () => void;
-  }>();
 
   // ─── Subscriptions ───
   private sharedStateHandlers: SharedStateHandler[] = [];
@@ -614,17 +289,9 @@ export class RoomClient {
   private memberStateHandlers: Array<(member: RoomMember, state: Record<string, unknown>) => void> = [];
   private signalHandlers = new Map<string, Array<(payload: unknown, meta: RoomSignalMeta) => void>>();
   private anySignalHandlers: Array<(event: string, payload: unknown, meta: RoomSignalMeta) => void> = [];
-  private mediaTrackHandlers: Array<(track: RoomMediaTrack, member: RoomMember) => void> = [];
-  private mediaTrackRemovedHandlers: Array<(track: RoomMediaTrack, member: RoomMember) => void> = [];
-  private mediaStateHandlers: Array<(member: RoomMember, state: RoomMemberMediaState) => void> = [];
-  private mediaDeviceHandlers: Array<(member: RoomMember, change: RoomMediaDeviceChange) => void> = [];
-  private remoteMediaTrackHandlers: Array<(event: RoomMediaRemoteTrackEvent) => void> = [];
-  private remoteMediaVideoStateHandlers: Array<(entries: RoomMediaRemoteVideoState[]) => void> = [];
   private reconnectHandlers: Array<(info: RoomReconnectInfo) => void> = [];
   private recoveryFailureHandlers: Array<(info: RoomRecoveryFailureInfo) => void> = [];
   private connectionStateHandlers: Array<(state: RoomConnectionState) => void> = [];
-  private activeMediaTransport: RoomMediaTransport | null = null;
-  private activeMediaCleanup: (() => void) | null = null;
 
   readonly state = {
     getShared: (): Record<string, unknown> => this.getSharedState(),
@@ -640,26 +307,10 @@ export class RoomClient {
   };
 
   readonly signals = {
-    send: async (event: string, payload?: unknown, options?: { includeSelf?: boolean }): Promise<void> => {
-      try {
-        return await this.sendSignal(event, payload, options);
-      } catch (error) {
-        if (this.shouldDropP2PSignalError(event, error)) {
-          return;
-        }
-        throw error;
-      }
-    },
-    sendTo: async (memberId: string, event: string, payload?: unknown): Promise<void> => {
-      try {
-        return await this.sendSignal(event, payload, { memberId });
-      } catch (error) {
-        if (this.shouldDropP2PSignalError(event, error)) {
-          return;
-        }
-        throw error;
-      }
-    },
+    send: (event: string, payload?: unknown, options?: { includeSelf?: boolean }): Promise<void> =>
+      this.sendSignal(event, payload, options),
+    sendTo: (memberId: string, event: string, payload?: unknown): Promise<void> =>
+      this.sendSignal(event, payload, { memberId }),
     on: (event: string, handler: (payload: unknown, meta: RoomSignalMeta) => void): Subscription =>
       this.onSignal(event, handler),
     onAny: (handler: (event: string, payload: unknown, meta: RoomSignalMeta) => void): Subscription =>
@@ -667,13 +318,13 @@ export class RoomClient {
   };
 
   readonly members = {
-    list: (): RoomMember[] => this._members.map((member) => this.buildEffectiveMemberSnapshot(member)),
+    list: (): RoomMember[] => this._members.map((member) => cloneValue(member)),
     current: (): RoomMember | null => {
       const connectionId = this.currentConnectionId;
       if (connectionId) {
         const byConnection = this._members.find((member) => member.connectionId === connectionId);
         if (byConnection) {
-          return this.buildEffectiveMemberSnapshot(byConnection);
+          return cloneValue(byConnection);
         }
       }
 
@@ -682,7 +333,7 @@ export class RoomClient {
         return null;
       }
       const member = this._members.find((entry) => entry.userId === userId) ?? null;
-      return member ? this.buildEffectiveMemberSnapshot(member) : null;
+      return member ? cloneValue(member) : null;
     },
     awaitCurrent: (timeoutMs = 10_000): Promise<RoomMember | null> => this.waitForCurrentMember(timeoutMs),
     onSync: (handler: (members: RoomMember[]) => void): Subscription => this.onMembersSync(handler),
@@ -698,246 +349,9 @@ export class RoomClient {
 
   readonly admin = {
     kick: (memberId: string): Promise<void> => this.sendAdmin('kick', memberId),
-    mute: (memberId: string): Promise<void> => this.sendAdmin('mute', memberId),
     block: (memberId: string): Promise<void> => this.sendAdmin('block', memberId),
     setRole: (memberId: string, role: string): Promise<void> =>
       this.sendAdmin('setRole', memberId, { role }),
-    disableVideo: (memberId: string): Promise<void> => this.sendAdmin('disableVideo', memberId),
-    stopScreenShare: (memberId: string): Promise<void> => this.sendAdmin('stopScreenShare', memberId),
-  };
-
-  readonly media = {
-    list: (): RoomMediaMember[] => cloneValue(this._mediaMembers),
-    audio: {
-      enable: (payload?: { trackId?: string; deviceId?: string; providerSessionId?: string }): Promise<void> =>
-        this.sendMedia('publish', 'audio', payload),
-      disable: (): Promise<void> => this.sendMedia('unpublish', 'audio'),
-      setMuted: (muted: boolean): Promise<void> => this.sendMedia('mute', 'audio', { muted }),
-    },
-    video: {
-      enable: (payload?: { trackId?: string; deviceId?: string; providerSessionId?: string }): Promise<void> =>
-        this.sendMedia('publish', 'video', payload),
-      disable: (): Promise<void> => this.sendMedia('unpublish', 'video'),
-      setMuted: (muted: boolean): Promise<void> => this.sendMedia('mute', 'video', { muted }),
-    },
-    screen: {
-      start: (payload?: { trackId?: string; deviceId?: string; providerSessionId?: string }): Promise<void> =>
-        this.sendMedia('publish', 'screen', payload),
-      stop: (): Promise<void> => this.sendMedia('unpublish', 'screen'),
-    },
-    devices: {
-      switch: (payload: {
-        audioInputId?: string;
-        videoInputId?: string;
-        screenInputId?: string;
-      }): Promise<void> => this.switchMediaDevices(payload),
-    },
-    local: {
-      enableAudio: (constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack> =>
-        this.activeMediaTransport?.enableAudio?.(constraints)
-        ?? Promise.reject(new Error('Active media transport unavailable')),
-      enableVideo: (constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack> =>
-        this.activeMediaTransport?.enableVideo?.(constraints)
-        ?? Promise.reject(new Error('Active media transport unavailable')),
-      disableAudio: (): Promise<void> =>
-        this.activeMediaTransport?.disableAudio?.()
-        ?? Promise.reject(new Error('Active media transport unavailable')),
-      disableVideo: (): Promise<void> =>
-        this.activeMediaTransport?.disableVideo?.()
-        ?? Promise.reject(new Error('Active media transport unavailable')),
-      setMuted: (kind: Extract<RoomMediaKind, 'audio' | 'video'>, muted: boolean): Promise<void> =>
-        this.activeMediaTransport?.setMuted?.(kind, muted)
-        ?? Promise.reject(new Error('Active media transport unavailable')),
-      startScreenShare: (constraints?: unknown): Promise<MediaStreamTrack> =>
-        this.activeMediaTransport?.startScreenShare?.(constraints)
-        ?? Promise.reject(new Error('Active media transport unavailable')),
-      stopScreenShare: (): Promise<void> =>
-        this.activeMediaTransport?.stopScreenShare?.()
-        ?? Promise.reject(new Error('Active media transport unavailable')),
-      switchDevices: (payload: {
-        audioInputId?: string;
-        videoInputId?: string;
-        screenInputId?: string;
-      }): Promise<void> =>
-        this.activeMediaTransport?.switchDevices?.(payload)
-        ?? Promise.reject(new Error('Active media transport unavailable')),
-    },
-    realtime: {
-      iceServers: (payload?: RoomRealtimeIceServersRequest): Promise<RoomRealtimeIceServersResponse> =>
-        this.requestRealtimeMedia('turn', 'POST', payload),
-    },
-    cloudflareRealtimeKit: {
-      createSession: (payload?: RoomCloudflareRealtimeKitCreateSessionRequest): Promise<RoomCloudflareRealtimeKitCreateSessionResponse> =>
-        this.requestCloudflareRealtimeKitMedia('session', 'POST', payload),
-    },
-    checkReadiness: async (options?: RoomMediaTransportOptions): Promise<RoomMediaTransportCapabilities> => {
-      const transport = this.media.transport(options);
-      return transport.getCapabilities();
-    },
-    getRemoteVideoStates: (): RoomMediaRemoteVideoState[] => this.getActiveMediaTransportRemoteVideoStates(),
-    getRemoteVideoStream: (memberId: string): MediaStream | null =>
-      this.activeMediaTransport?.getUsableRemoteVideoStream?.(memberId) ?? null,
-    getActiveRemoteMemberIds: (): string[] =>
-      this.activeMediaTransport?.getActiveRemoteMemberIds?.()
-      ?? this.getActiveMediaTransportRemoteVideoStates()
-        .filter((entry) => entry.stream instanceof MediaStream || entry.published)
-        .map((entry) => entry.memberId),
-    getTransportDebugSnapshot: (): unknown => this.activeMediaTransport?.getDebugSnapshot?.() ?? null,
-    connect: async (request?: RoomMediaConnectRequest): Promise<RoomMediaConnectResult> => {
-      const candidates = request?.candidates?.length
-        ? request.candidates
-        : [{ label: 'p2p', options: { provider: 'p2p' as const } }];
-      let lastError: unknown = null;
-
-      for (const candidate of candidates) {
-        const options = candidate?.options;
-        const hasCloudflareConfig =
-          options && 'cloudflareRealtimeKit' in options && options.cloudflareRealtimeKit != null;
-        const provider = options?.provider ?? (hasCloudflareConfig ? 'cloudflare_realtimekit' : 'p2p');
-        const label = candidate?.label ?? provider;
-        const transport = this.media.transport(options ?? { provider });
-        const cleanupFns: Array<() => void> = [];
-        const cleanup = () => {
-          while (cleanupFns.length > 0) {
-            const fn = cleanupFns.pop();
-            try {
-              fn?.();
-            } catch {
-              // Ignore cleanup failures.
-            }
-          }
-        };
-
-        try {
-          request?.onTransport?.(transport);
-        } catch {
-          // Ignore observer failures.
-        }
-
-        const trackSub = transport.onRemoteTrack((event) => {
-          this.emitRemoteMediaTrack(event);
-          request?.onRemoteTrack?.(event);
-        });
-        cleanupFns.push(() => {
-          (trackSub as unknown as { unsubscribe?: () => void } | null)?.unsubscribe?.();
-        });
-
-        if (typeof transport.onRemoteVideoStateChange === 'function') {
-          const remoteVideoSub = transport.onRemoteVideoStateChange((entries) => {
-            this.emitRemoteMediaVideoStateChange(entries);
-            request?.onRemoteVideoStateChange?.(entries);
-          });
-          cleanupFns.push(() => {
-            (remoteVideoSub as unknown as { unsubscribe?: () => void } | null)?.unsubscribe?.();
-          });
-        }
-
-        try {
-          await transport.connect(request?.connectPayload);
-          const wrappedCleanup = () => {
-            this.clearActiveMediaTransport(transport, { skipCleanup: true });
-            cleanup();
-          };
-          this.setActiveMediaTransport(transport, cleanup);
-          return {
-            label,
-            provider,
-            transport,
-            cleanup: wrappedCleanup,
-          };
-        } catch (error) {
-          lastError = error;
-          cleanup();
-          try {
-            transport.destroy?.();
-          } catch {
-            // Ignore destroy failures.
-          }
-        }
-      }
-
-      throw lastError ?? new Error('No media transport available');
-    },
-    bootstrapLocalTracks: async (request: RoomMediaBootstrapRequest): Promise<RoomMediaBootstrapResult> => {
-      const transport = request.transport;
-      if (request.preflightStream) {
-        try {
-          request.preflightStream.getTracks().forEach((track) => track.stop());
-        } catch {
-          // Ignore preflight stream cleanup failures.
-        }
-      }
-
-      let resolvedMuted = request.muted ?? true;
-      let resolvedCameraOff = true;
-      let audioTrack: MediaStreamTrack | null = null;
-      let videoTrack: MediaStreamTrack | null = null;
-
-      const applyInitialMedia = async () => {
-        if (!resolvedMuted) {
-          try {
-            audioTrack = await transport.enableAudio(true);
-          } catch {
-            resolvedMuted = true;
-          }
-        }
-
-        if (!request.cameraOff) {
-          try {
-            videoTrack = await transport.enableVideo(request.videoConstraints ?? {
-              width: { ideal: 640 },
-              height: { ideal: 480 },
-              frameRate: { ideal: 24 },
-            });
-            if (videoTrack) {
-              resolvedCameraOff = false;
-            }
-          } catch {
-            // Leave camera off on failure.
-          }
-        }
-      };
-
-      if (typeof transport.batchLocalUpdates === 'function') {
-        await transport.batchLocalUpdates(applyInitialMedia);
-      } else {
-        await applyInitialMedia();
-      }
-
-      return {
-        muted: resolvedMuted,
-        cameraOff: resolvedCameraOff,
-        audioTrack,
-        videoTrack,
-      };
-    },
-    disconnect: (): void => this.teardownTransport(),
-    transport: (options?: RoomMediaTransportOptions): RoomMediaTransport => {
-      // Infer provider from options: if cloudflareRealtimeKit config is present, use it;
-      // otherwise default to p2p for zero-config local development.
-      const hasCloudflareConfig = options && 'cloudflareRealtimeKit' in options && (options as RoomCloudflareRealtimeKitTransportFactoryOptions).cloudflareRealtimeKit != null;
-      const provider = options?.provider ?? (hasCloudflareConfig ? 'cloudflare_realtimekit' : 'p2p');
-      if (provider === 'p2p') {
-        const p2pOptions = (options as RoomP2PTransportFactoryOptions | undefined)?.p2p;
-        return new RoomP2PMediaTransport(this, p2pOptions);
-      }
-
-      const cloudflareOptions =
-        (options as RoomCloudflareRealtimeKitTransportFactoryOptions | undefined)?.cloudflareRealtimeKit;
-      return new RoomCloudflareMediaTransport(this, cloudflareOptions);
-    },
-    onTrack: (handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription =>
-      this.onMediaTrack(handler),
-    onRemoteTrack: (handler: (event: RoomMediaRemoteTrackEvent) => void): Subscription =>
-      this.onRemoteMediaTrack(handler),
-    onTrackRemoved: (handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription =>
-      this.onMediaTrackRemoved(handler),
-    onStateChange: (handler: (member: RoomMember, state: RoomMemberMediaState) => void): Subscription =>
-      this.onMediaStateChange(handler),
-    onRemoteVideoStateChange: (handler: (entries: RoomMediaRemoteVideoState[]) => void): Subscription =>
-      this.onRemoteMediaVideoStateChange(handler),
-    onDeviceChange: (handler: (member: RoomMember, change: RoomMediaDeviceChange) => void): Subscription =>
-      this.onMediaDeviceChange(handler),
   };
 
   readonly session = {
@@ -948,8 +362,6 @@ export class RoomClient {
       this.onConnectionStateChange(handler),
     onRecoveryFailure: (handler: (info: RoomRecoveryFailureInfo) => void): Subscription =>
       this.onRecoveryFailure(handler),
-    teardownTransport: (transport?: Pick<RoomMediaTransport, 'destroy'> | null): void =>
-      this.teardownTransport(transport as RoomMediaTransport | null | undefined),
     getDebugSnapshot: (): unknown => this.getDebugSnapshot(),
   };
 
@@ -1166,70 +578,6 @@ export class RoomClient {
     return res.json() as Promise<T>;
   }
 
-  private async requestCloudflareRealtimeKitMedia<T>(
-    path: string,
-    method: 'GET' | 'POST' | 'PUT',
-    payload?: unknown,
-  ): Promise<T> {
-    return this.requestRoomMedia<T>('cloudflare_realtimekit', path, method, payload);
-  }
-
-  private async requestRealtimeMedia<T>(
-    path: string,
-    method: 'GET' | 'POST' | 'PUT',
-    payload?: unknown,
-  ): Promise<T> {
-    return this.requestRoomMedia<T>('realtime', path, method, payload);
-  }
-
-  private async requestRoomMedia<T>(
-    providerPath: string,
-    path: string,
-    method: 'GET' | 'POST' | 'PUT',
-    payload?: unknown,
-  ): Promise<T> {
-    const token = await this.tokenManager.getAccessToken(
-      (refreshToken) => refreshAccessToken(this.baseUrl, refreshToken),
-    );
-    if (!token) {
-      throw new EdgeBaseError(
-        401,
-        'Authentication required before calling room media APIs. Sign in and join the room first.',
-      );
-    }
-
-    const url = new URL(`${this.baseUrl.replace(/\/$/, '')}/api/room/media/${providerPath}/${path}`);
-    url.searchParams.set('namespace', this.namespace);
-    url.searchParams.set('id', this.roomId);
-
-    let response: Response;
-
-    try {
-      response = await fetch(url.toString(), {
-        method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: method === 'GET' ? undefined : JSON.stringify(payload ?? {}),
-      });
-    } catch (error) {
-      throw networkError(
-        `Room media request ${providerPath}/${path} could not reach ${this.baseUrl.replace(/\/$/, '')}. Make sure the EdgeBase server is running and reachable.`,
-        { cause: error },
-      );
-    }
-
-    const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-    if (!response.ok) {
-      const parsed = parseErrorResponse(response.status, data);
-      parsed.message = `Room media request ${providerPath}/${path} failed: ${parsed.message}`;
-      throw parsed;
-    }
-
-    return (data ?? {}) as T;
-  }
-
   // ─── Connection Lifecycle ───
 
   /** Connect to the room, authenticate, and join */
@@ -1250,7 +598,6 @@ export class RoomClient {
     this.waitingForAuth = false;
     this.stopHeartbeat();
     this.clearDisconnectResetTimer();
-    this.teardownTransport();
 
     // Reject all pending send() requests
     this.rejectAllPendingRequests(new EdgeBaseError(499, 'Room left'));
@@ -1270,9 +617,7 @@ export class RoomClient {
     this._playerState = {};
     this._playerVersion = 0;
     this._members = [];
-    this._mediaMembers = [];
     this.lastLocalMemberState = null;
-    this.lastLocalMediaState.clear();
     this.currentUserId = null;
     this.currentConnectionId = null;
     this.reconnectInfo = null;
@@ -1312,10 +657,6 @@ export class RoomClient {
     this.memberStateHandlers.length = 0;
     this.signalHandlers.clear();
     this.anySignalHandlers.length = 0;
-    this.mediaTrackHandlers.length = 0;
-    this.mediaTrackRemovedHandlers.length = 0;
-    this.mediaStateHandlers.length = 0;
-    this.mediaDeviceHandlers.length = 0;
     this.reconnectHandlers.length = 0;
     this.connectionStateHandlers.length = 0;
   }
@@ -1528,65 +869,6 @@ export class RoomClient {
       });
   }
 
-  private onMediaTrack(handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription {
-    this.mediaTrackHandlers.push(handler);
-    return createSubscription(() => {
-        const index = this.mediaTrackHandlers.indexOf(handler);
-        if (index >= 0) this.mediaTrackHandlers.splice(index, 1);
-      });
-  }
-
-  private onMediaTrackRemoved(handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription {
-    this.mediaTrackRemovedHandlers.push(handler);
-    return createSubscription(() => {
-        const index = this.mediaTrackRemovedHandlers.indexOf(handler);
-        if (index >= 0) this.mediaTrackRemovedHandlers.splice(index, 1);
-      });
-  }
-
-  private onMediaStateChange(
-    handler: (member: RoomMember, state: RoomMemberMediaState) => void,
-  ): Subscription {
-    this.mediaStateHandlers.push(handler);
-    return createSubscription(() => {
-        const index = this.mediaStateHandlers.indexOf(handler);
-        if (index >= 0) this.mediaStateHandlers.splice(index, 1);
-      });
-  }
-
-  private onMediaDeviceChange(
-    handler: (member: RoomMember, change: RoomMediaDeviceChange) => void,
-  ): Subscription {
-    this.mediaDeviceHandlers.push(handler);
-    return createSubscription(() => {
-        const index = this.mediaDeviceHandlers.indexOf(handler);
-        if (index >= 0) this.mediaDeviceHandlers.splice(index, 1);
-      });
-  }
-
-  private onRemoteMediaTrack(handler: (event: RoomMediaRemoteTrackEvent) => void): Subscription {
-    this.remoteMediaTrackHandlers.push(handler);
-    return createSubscription(() => {
-      const index = this.remoteMediaTrackHandlers.indexOf(handler);
-      if (index >= 0) this.remoteMediaTrackHandlers.splice(index, 1);
-    });
-  }
-
-  private onRemoteMediaVideoStateChange(
-    handler: (entries: RoomMediaRemoteVideoState[]) => void,
-  ): Subscription {
-    this.remoteMediaVideoStateHandlers.push(handler);
-    try {
-      handler(this.getActiveMediaTransportRemoteVideoStates());
-    } catch {
-      // Ignore eager remote media state handler failures.
-    }
-    return createSubscription(() => {
-      const index = this.remoteMediaVideoStateHandlers.indexOf(handler);
-      if (index >= 0) this.remoteMediaVideoStateHandlers.splice(index, 1);
-    });
-  }
-
   private async sendSignal(
     event: string,
     payload?: unknown,
@@ -1676,54 +958,6 @@ export class RoomClient {
         requestId,
       });
     });
-  }
-
-  private async sendMedia(
-    operation: 'publish' | 'unpublish' | 'mute' | 'device',
-    kind: RoomMediaKind,
-    payload?: Record<string, unknown>,
-  ): Promise<void> {
-    this.assertConnected(`running media operation '${operation}' for '${kind}'`);
-
-    const requestId = generateRequestId();
-    return new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingMediaRequests.delete(requestId);
-        reject(new EdgeBaseError(408, `Media operation '${operation}' timed out`));
-      }, this.options.sendTimeout);
-
-      this.pendingMediaRequests.set(requestId, {
-        resolve,
-        reject,
-        timeout,
-        onSuccess: () => this.updateLocalMediaReplayState(operation, kind, payload ?? {}),
-      });
-      this.sendRaw({
-        type: 'media',
-        operation,
-        kind,
-        payload: payload ?? {},
-        requestId,
-      });
-    });
-  }
-
-  private async switchMediaDevices(payload: {
-    audioInputId?: string;
-    videoInputId?: string;
-    screenInputId?: string;
-  }): Promise<void> {
-    const operations: Promise<void>[] = [];
-    if (payload.audioInputId) {
-      operations.push(this.sendMedia('device', 'audio', { deviceId: payload.audioInputId }));
-    }
-    if (payload.videoInputId) {
-      operations.push(this.sendMedia('device', 'video', { deviceId: payload.videoInputId }));
-    }
-    if (payload.screenInputId) {
-      operations.push(this.sendMedia('device', 'screen', { deviceId: payload.screenInputId }));
-    }
-    await Promise.all(operations);
   }
 
   // ─── Private: Connection ───
@@ -1874,7 +1108,6 @@ export class RoomClient {
                             lastPlayerState: this._playerState,
                             lastPlayerVersion: this._playerVersion,
                             lastMemberState: this.getReconnectMemberState(),
-                            lastMediaState: this.getReconnectMediaState(),
                         });
                         this.joined = true;
                         resolve();
@@ -1936,9 +1169,6 @@ export class RoomClient {
       case 'members_sync':
         this.handleMembersSync(msg);
         break;
-      case 'media_sync':
-        this.handleMediaSync(msg);
-        break;
       case 'member_join':
         this.handleMemberJoinFrame(msg);
         break;
@@ -1950,24 +1180,6 @@ export class RoomClient {
         break;
       case 'member_state_error':
         this.handleMemberStateError(msg);
-        break;
-      case 'media_track':
-        this.handleMediaTrackFrame(msg);
-        break;
-      case 'media_track_removed':
-        this.handleMediaTrackRemovedFrame(msg);
-        break;
-      case 'media_state':
-        this.handleMediaStateFrame(msg);
-        break;
-      case 'media_device':
-        this.handleMediaDeviceFrame(msg);
-        break;
-      case 'media_result':
-        this.handleMediaResult(msg);
-        break;
-      case 'media_error':
-        this.handleMediaError(msg);
         break;
       case 'admin_result':
         this.handleAdminResult(msg);
@@ -2125,10 +1337,7 @@ export class RoomClient {
   private handleMembersSync(msg: Record<string, unknown>): void {
     const members = this.normalizeMembers(msg.members);
     this._members = members;
-    for (const member of members) {
-      this.syncMediaMemberInfo(member);
-    }
-    const snapshot = this._members.map((member) => this.buildEffectiveMemberSnapshot(member));
+    const snapshot = this._members.map((member) => cloneValue(member));
     for (const handler of this.memberSyncHandlers) {
       handler(snapshot);
     }
@@ -2137,16 +1346,11 @@ export class RoomClient {
     }
   }
 
-  private handleMediaSync(msg: Record<string, unknown>): void {
-    this._mediaMembers = this.normalizeMediaMembers(msg.members);
-  }
-
   private handleMemberJoinFrame(msg: Record<string, unknown>): void {
     const member = this.normalizeMember(msg.member);
     if (!member) return;
     this.upsertMember(member);
-    this.syncMediaMemberInfo(member);
-    const snapshot = this.buildEffectiveMemberSnapshot(member);
+    const snapshot = cloneValue(member);
     for (const handler of this.memberJoinHandlers) {
       handler(snapshot);
     }
@@ -2156,9 +1360,8 @@ export class RoomClient {
     const member = this.normalizeMember(msg.member);
     if (!member) return;
     this.removeMember(member.memberId);
-    this.removeMediaMember(member.memberId);
     const reason = this.normalizeLeaveReason(msg.reason);
-    const snapshot = this.buildEffectiveMemberSnapshot(member);
+    const snapshot = cloneValue(member);
     for (const handler of this.memberLeaveHandlers) {
       handler(snapshot, reason);
     }
@@ -2170,7 +1373,6 @@ export class RoomClient {
     if (!member) return;
     member.state = state;
     this.upsertMember(member);
-    this.syncMediaMemberInfo(member);
 
     const requestId = msg.requestId as string | undefined;
     if (requestId) {
@@ -2183,7 +1385,7 @@ export class RoomClient {
       }
     }
 
-    const memberSnapshot = this.buildEffectiveMemberSnapshot(member);
+    const memberSnapshot = cloneValue(member);
     const stateSnapshot = cloneRecord(state);
     for (const handler of this.memberStateHandlers) {
       handler(memberSnapshot, stateSnapshot);
@@ -2198,119 +1400,6 @@ export class RoomClient {
     clearTimeout(pending.timeout);
     this.pendingMemberStateRequests.delete(requestId);
     pending.reject(new EdgeBaseError(400, (msg.message as string) || 'Member state update failed'));
-  }
-
-  private handleMediaTrackFrame(msg: Record<string, unknown>): void {
-    const member = this.normalizeMember(msg.member);
-    const track = this.normalizeMediaTrack(msg.track);
-    if (!member || !track) return;
-    const mediaMember = this.ensureMediaMember(member);
-    this.upsertMediaTrack(mediaMember, track);
-    this.mergeMediaState(mediaMember, track.kind, {
-      published: true,
-      muted: track.muted,
-      trackId: track.trackId,
-      deviceId: track.deviceId,
-      publishedAt: track.publishedAt,
-      adminDisabled: track.adminDisabled,
-      providerSessionId: track.providerSessionId,
-    });
-
-    const memberSnapshot = this.buildEffectiveMemberSnapshot(mediaMember.member);
-    const trackSnapshot = cloneValue(track);
-    for (const handler of this.mediaTrackHandlers) {
-      handler(trackSnapshot, memberSnapshot);
-    }
-    const stateSnapshot = cloneValue(mediaMember.state);
-    for (const handler of this.mediaStateHandlers) {
-      handler(memberSnapshot, stateSnapshot);
-    }
-  }
-
-  private handleMediaTrackRemovedFrame(msg: Record<string, unknown>): void {
-    const member = this.normalizeMember(msg.member);
-    const track = this.normalizeMediaTrack(msg.track);
-    if (!member || !track) return;
-    const mediaMember = this.ensureMediaMember(member);
-    this.removeMediaTrack(mediaMember, track);
-    mediaMember.state = {
-      ...mediaMember.state,
-      [track.kind]: {
-        published: false,
-        muted: false,
-        adminDisabled: false,
-        providerSessionId: undefined,
-      },
-    };
-
-    const memberSnapshot = this.buildEffectiveMemberSnapshot(mediaMember.member);
-    const trackSnapshot = cloneValue(track);
-    for (const handler of this.mediaTrackRemovedHandlers) {
-      handler(trackSnapshot, memberSnapshot);
-    }
-    const stateSnapshot = cloneValue(mediaMember.state);
-    for (const handler of this.mediaStateHandlers) {
-      handler(memberSnapshot, stateSnapshot);
-    }
-  }
-
-  private handleMediaStateFrame(msg: Record<string, unknown>): void {
-    const member = this.normalizeMember(msg.member);
-    if (!member) return;
-    const mediaMember = this.ensureMediaMember(member);
-    mediaMember.state = this.normalizeMediaState(msg.state);
-
-    const memberSnapshot = this.buildEffectiveMemberSnapshot(mediaMember.member);
-    const stateSnapshot = cloneValue(mediaMember.state);
-    for (const handler of this.mediaStateHandlers) {
-      handler(memberSnapshot, stateSnapshot);
-    }
-  }
-
-  private handleMediaDeviceFrame(msg: Record<string, unknown>): void {
-    const member = this.normalizeMember(msg.member);
-    const kind = this.normalizeMediaKind(msg.kind);
-    const deviceId = typeof msg.deviceId === 'string' ? msg.deviceId : '';
-    if (!member || !kind || !deviceId) return;
-
-    const mediaMember = this.ensureMediaMember(member);
-    this.mergeMediaState(mediaMember, kind, { deviceId });
-    for (const track of mediaMember.tracks) {
-      if (track.kind === kind) {
-        track.deviceId = deviceId;
-      }
-    }
-
-    const memberSnapshot = this.buildEffectiveMemberSnapshot(mediaMember.member);
-    const change = { kind, deviceId } satisfies RoomMediaDeviceChange;
-    for (const handler of this.mediaDeviceHandlers) {
-      handler(memberSnapshot, change);
-    }
-    const stateSnapshot = cloneValue(mediaMember.state);
-    for (const handler of this.mediaStateHandlers) {
-      handler(memberSnapshot, stateSnapshot);
-    }
-  }
-
-  private handleMediaResult(msg: Record<string, unknown>): void {
-    const requestId = msg.requestId as string | undefined;
-    if (!requestId) return;
-    const pending = this.pendingMediaRequests.get(requestId);
-    if (!pending) return;
-    clearTimeout(pending.timeout);
-    this.pendingMediaRequests.delete(requestId);
-    pending.onSuccess?.();
-    pending.resolve();
-  }
-
-  private handleMediaError(msg: Record<string, unknown>): void {
-    const requestId = msg.requestId as string | undefined;
-    if (!requestId) return;
-    const pending = this.pendingMediaRequests.get(requestId);
-    if (!pending) return;
-    clearTimeout(pending.timeout);
-    this.pendingMediaRequests.delete(requestId);
-    pending.reject(new EdgeBaseError(400, (msg.message as string) || 'Media operation failed'));
   }
 
   private handleAdminResult(msg: Record<string, unknown>): void {
@@ -2395,7 +1484,6 @@ export class RoomClient {
       this.connected = false;
       this.authenticated = false;
       this.joined = false;
-      this._mediaMembers = [];
       this.currentUserId = null;
       this.currentConnectionId = null;
       try {
@@ -2409,7 +1497,6 @@ export class RoomClient {
     this.connected = false;
     this.authenticated = false;
     this.joined = false;
-    this._mediaMembers = [];
   }
 
   private handleAuthenticationFailure(error: unknown): void {
@@ -2450,8 +1537,7 @@ export class RoomClient {
     return this.pendingRequests.size > 0
       || this.pendingSignalRequests.size > 0
       || this.pendingAdminRequests.size > 0
-      || this.pendingMemberStateRequests.size > 0
-      || this.pendingMediaRequests.size > 0;
+      || this.pendingMemberStateRequests.size > 0;
   }
 
   private handleRoomAuthStateLoss(message?: string): void {
@@ -2481,15 +1567,6 @@ export class RoomClient {
       .filter((member): member is RoomMember => !!member);
   }
 
-  private normalizeMediaMembers(value: unknown): RoomMediaMember[] {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-    return value
-      .map((member) => this.normalizeMediaMember(member))
-      .filter((member): member is RoomMediaMember => !!member);
-  }
-
   private normalizeMember(value: unknown): RoomMember | null {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return null;
@@ -2514,92 +1591,6 @@ export class RoomClient {
       return {};
     }
     return cloneRecord(value as Record<string, unknown>);
-  }
-
-  private normalizeMediaMember(value: unknown): RoomMediaMember | null {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return null;
-    }
-    const entry = value as Record<string, unknown>;
-    const member = this.normalizeMember(entry.member);
-    if (!member) {
-      return null;
-    }
-    return {
-      member,
-      state: this.normalizeMediaState(entry.state),
-      tracks: this.normalizeMediaTracks(entry.tracks),
-    };
-  }
-
-  private normalizeMediaState(value: unknown): RoomMemberMediaState {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return {};
-    }
-    const state = value as Record<string, unknown>;
-    return {
-      audio: this.normalizeMediaKindState(state.audio),
-      video: this.normalizeMediaKindState(state.video),
-      screen: this.normalizeMediaKindState(state.screen),
-    };
-  }
-
-  private normalizeMediaKindState(value: unknown): RoomMemberMediaKindState | undefined {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return undefined;
-    }
-    const state = value as Record<string, unknown>;
-    return {
-      published: state.published === true,
-      muted: state.muted === true,
-      trackId: typeof state.trackId === 'string' ? state.trackId : undefined,
-      deviceId: typeof state.deviceId === 'string' ? state.deviceId : undefined,
-      publishedAt: typeof state.publishedAt === 'number' ? state.publishedAt : undefined,
-      adminDisabled: state.adminDisabled === true,
-      providerSessionId:
-        typeof state.providerSessionId === 'string' ? state.providerSessionId : undefined,
-    };
-  }
-
-  private normalizeMediaTracks(value: unknown): RoomMediaTrack[] {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-    return value
-      .map((track) => this.normalizeMediaTrack(track))
-      .filter((track): track is RoomMediaTrack => !!track);
-  }
-
-  private normalizeMediaTrack(value: unknown): RoomMediaTrack | null {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return null;
-    }
-    const track = value as Record<string, unknown>;
-    const kind = this.normalizeMediaKind(track.kind);
-    if (!kind) {
-      return null;
-    }
-    return {
-      kind,
-      trackId: typeof track.trackId === 'string' ? track.trackId : undefined,
-      deviceId: typeof track.deviceId === 'string' ? track.deviceId : undefined,
-      muted: track.muted === true,
-      publishedAt: typeof track.publishedAt === 'number' ? track.publishedAt : undefined,
-      adminDisabled: track.adminDisabled === true,
-      providerSessionId:
-        typeof track.providerSessionId === 'string' ? track.providerSessionId : undefined,
-    };
-  }
-
-  private normalizeMediaKind(value: unknown): RoomMediaKind | null {
-    switch (value) {
-      case 'audio':
-      case 'video':
-      case 'screen':
-        return value;
-      default:
-        return null;
-    }
   }
 
   private normalizeSignalMeta(value: unknown): RoomSignalMeta {
@@ -2630,155 +1621,6 @@ export class RoomClient {
     }
   }
 
-  private buildEffectiveMemberSnapshot(member: RoomMember): RoomMember {
-    const snapshot = cloneValue(member);
-    const mediaMember = this._mediaMembers.find((entry) => entry.member.memberId === member.memberId);
-    const videoPublished = mediaMember?.state?.video?.published;
-    if (typeof videoPublished === 'boolean') {
-      snapshot.state = {
-        ...(snapshot.state ?? {}),
-        isCameraOff: !videoPublished,
-      };
-    }
-    return snapshot;
-  }
-
-  private shouldDropP2PSignalError(event: string, error: unknown): boolean {
-    if (typeof event !== 'string' || !event.startsWith('edgebase.media.p2p.')) {
-      return false;
-    }
-    const message = error instanceof Error ? error.message : String(error ?? '');
-    return message.includes('Room connection required')
-      || message.includes('WebSocket connection lost')
-      || message.includes('Room left');
-  }
-
-  private setActiveMediaTransport(transport: RoomMediaTransport | null, cleanup?: (() => void) | null): void {
-    if (this.activeMediaTransport && this.activeMediaTransport !== transport) {
-      this.teardownTransport(this.activeMediaTransport);
-    }
-    this.activeMediaTransport = transport ?? null;
-    this.activeMediaCleanup = typeof cleanup === 'function' ? cleanup : null;
-  }
-
-  private clearActiveMediaTransport(
-    transport?: RoomMediaTransport | null,
-    options: { skipCleanup?: boolean } = {},
-  ): void {
-    if (transport && this.activeMediaTransport && transport !== this.activeMediaTransport) {
-      return;
-    }
-    const cleanup = this.activeMediaCleanup;
-    this.activeMediaTransport = null;
-    this.activeMediaCleanup = null;
-    if (options.skipCleanup) {
-      return;
-    }
-    try {
-      cleanup?.();
-    } catch {
-      // Ignore active media cleanup failures.
-    }
-  }
-
-  private getActiveMediaTransportRemoteVideoStates(): RoomMediaRemoteVideoState[] {
-    const transport = this.activeMediaTransport;
-    if (typeof transport?.getRemoteVideoStates === 'function') {
-      return transport.getRemoteVideoStates();
-    }
-    const now = Date.now();
-    return (transport?.getUsableRemoteVideoEntries?.() ?? []).map((entry) => ({
-      participantId: entry.memberId,
-      updatedAt: now,
-      memberId: entry.memberId,
-      userId: entry.userId,
-      displayName: entry.displayName,
-      stream: entry.stream instanceof MediaStream ? entry.stream : null,
-      trackId: entry.trackId ?? null,
-      published: Boolean(entry.published),
-      isCameraOff:
-        typeof entry.isCameraOff === 'boolean'
-          ? entry.isCameraOff
-          : !(entry.published || entry.stream instanceof MediaStream),
-    }));
-  }
-
-  private normalizeRemoteMediaTrackEvent(event: RoomMediaRemoteTrackEvent): RoomMediaRemoteTrackEvent {
-    const stream = event?.stream instanceof MediaStream
-      ? event.stream
-      : event?.track instanceof MediaStreamTrack
-        ? new MediaStream([event.track])
-        : undefined;
-    const directMemberId =
-      (typeof event?.memberId === 'string' && event.memberId.length > 0 && event.memberId)
-      || (typeof event?.customParticipantId === 'string' && event.customParticipantId.length > 0 && event.customParticipantId)
-      || (typeof event?.participantId === 'string' && event.participantId.length > 0 && event.participantId)
-      || (typeof event?.providerSessionId === 'string' && event.providerSessionId.length > 0 && event.providerSessionId)
-      || null;
-    const member = directMemberId
-      ? this._members.find((entry) => entry.memberId === directMemberId) ?? null
-      : (typeof event?.userId === 'string' && event.userId.length > 0
-        ? this._members.find((entry) => entry.userId === event.userId) ?? null
-        : null);
-    const memberSnapshot = member ? this.buildEffectiveMemberSnapshot(member) : null;
-
-    return {
-      ...event,
-      stream,
-      memberId: event?.memberId ?? memberSnapshot?.memberId ?? directMemberId ?? undefined,
-      participantId: event?.participantId ?? memberSnapshot?.memberId ?? directMemberId ?? undefined,
-      userId: event?.userId ?? memberSnapshot?.userId ?? undefined,
-      displayName:
-        event?.displayName
-        ?? (typeof memberSnapshot?.state?.displayName === 'string'
-          ? memberSnapshot.state.displayName
-          : undefined),
-    };
-  }
-
-  private emitRemoteMediaTrack(event: RoomMediaRemoteTrackEvent): void {
-    const normalizedEvent = this.normalizeRemoteMediaTrackEvent(event);
-    for (const handler of this.remoteMediaTrackHandlers) {
-      try {
-        handler(normalizedEvent);
-      } catch {
-        // Ignore remote media track handler failures.
-      }
-    }
-  }
-
-  private emitRemoteMediaVideoStateChange(entries: RoomMediaRemoteVideoState[]): void {
-    for (const handler of this.remoteMediaVideoStateHandlers) {
-      try {
-        handler(entries.map((entry) => ({ ...entry })));
-      } catch {
-        // Ignore remote media video state handler failures.
-      }
-    }
-  }
-
-  private teardownTransport(transport?: RoomMediaTransport | null): void {
-    const targetTransport = transport ?? this.activeMediaTransport;
-    if (!targetTransport) {
-      this.clearActiveMediaTransport();
-      return;
-    }
-    const cleanup = this.activeMediaTransport === targetTransport
-      ? this.activeMediaCleanup
-      : null;
-    this.clearActiveMediaTransport(targetTransport, { skipCleanup: true });
-    try {
-      targetTransport.destroy();
-    } catch {
-      // Ignore transport destroy failures.
-    }
-    try {
-      cleanup?.();
-    } catch {
-      // Ignore transport cleanup failures.
-    }
-  }
-
   private getDebugSnapshot(): unknown {
     return {
       connectionState: this.connectionState,
@@ -2788,11 +1630,9 @@ export class RoomClient {
       currentUserId: this.currentUserId,
       currentConnectionId: this.currentConnectionId,
       membersCount: this._members.length,
-      mediaMembersCount: this._mediaMembers.length,
       reconnectAttempts: this.reconnectAttempts,
       joinRequested: this.joinRequested,
       waitingForAuth: this.waitingForAuth,
-      hasActiveMediaTransport: Boolean(this.activeMediaTransport),
     };
   }
 
@@ -2809,77 +1649,6 @@ export class RoomClient {
     this._members = this._members.filter((member) => member.memberId !== memberId);
   }
 
-  private syncMediaMemberInfo(member: RoomMember): void {
-    const mediaMember = this._mediaMembers.find((entry) => entry.member.memberId === member.memberId);
-    if (!mediaMember) {
-      return;
-    }
-    mediaMember.member = cloneValue(member);
-  }
-
-  private ensureMediaMember(member: RoomMember): RoomMediaMember {
-    const existing = this._mediaMembers.find((entry) => entry.member.memberId === member.memberId);
-    if (existing) {
-      existing.member = cloneValue(member);
-      return existing;
-    }
-    const created: RoomMediaMember = {
-      member: cloneValue(member),
-      state: {},
-      tracks: [],
-    };
-    this._mediaMembers.push(created);
-    return created;
-  }
-
-  private removeMediaMember(memberId: string): void {
-    this._mediaMembers = this._mediaMembers.filter((member) => member.member.memberId !== memberId);
-  }
-
-  private upsertMediaTrack(mediaMember: RoomMediaMember, track: RoomMediaTrack): void {
-    const index = mediaMember.tracks.findIndex(
-      (entry) =>
-        entry.kind === track.kind &&
-        entry.trackId === track.trackId,
-    );
-    if (index >= 0) {
-      mediaMember.tracks[index] = cloneValue(track);
-      return;
-    }
-    mediaMember.tracks = mediaMember.tracks
-      .filter((entry) => !(entry.kind === track.kind && !track.trackId))
-      .concat(cloneValue(track));
-  }
-
-  private removeMediaTrack(mediaMember: RoomMediaMember, track: RoomMediaTrack): void {
-    mediaMember.tracks = mediaMember.tracks.filter((entry) => {
-      if (track.trackId) {
-        return !(entry.kind === track.kind && entry.trackId === track.trackId);
-      }
-      return entry.kind !== track.kind;
-    });
-  }
-
-  private mergeMediaState(
-    mediaMember: RoomMediaMember,
-    kind: RoomMediaKind,
-    partial: Partial<RoomMemberMediaKindState>,
-  ): void {
-    const next: RoomMemberMediaKindState = {
-      published: partial.published ?? mediaMember.state[kind]?.published ?? false,
-      muted: partial.muted ?? mediaMember.state[kind]?.muted ?? false,
-      trackId: partial.trackId ?? mediaMember.state[kind]?.trackId,
-      deviceId: partial.deviceId ?? mediaMember.state[kind]?.deviceId,
-      publishedAt: partial.publishedAt ?? mediaMember.state[kind]?.publishedAt,
-      adminDisabled: partial.adminDisabled ?? mediaMember.state[kind]?.adminDisabled,
-      providerSessionId: partial.providerSessionId ?? mediaMember.state[kind]?.providerSessionId,
-    };
-    mediaMember.state = {
-      ...mediaMember.state,
-      [kind]: next,
-    };
-  }
-
   /** Reject all 5 pending request maps at once. */
   private rejectAllPendingRequests(error: EdgeBaseError): void {
     for (const [, pending] of this.pendingRequests) {
@@ -2890,7 +1659,6 @@ export class RoomClient {
     this.rejectPendingVoidRequests(this.pendingSignalRequests, error);
     this.rejectPendingVoidRequests(this.pendingAdminRequests, error);
     this.rejectPendingVoidRequests(this.pendingMemberStateRequests, error);
-    this.rejectPendingVoidRequests(this.pendingMediaRequests, error);
   }
 
   private rejectPendingVoidRequests(
@@ -3074,72 +1842,11 @@ export class RoomClient {
     }
   }
 
-  private updateLocalMediaReplayState(
-    operation: 'publish' | 'unpublish' | 'mute' | 'device',
-    kind: RoomMediaKind,
-    payload: Record<string, unknown>,
-  ): void {
-    const current = this.lastLocalMediaState.get(kind) ?? {
-      published: false,
-      muted: false,
-    } satisfies RoomLocalMediaReplayState;
-    const next: RoomLocalMediaReplayState = { ...current };
-
-    if (operation === 'publish') {
-      next.published = true;
-      next.muted = payload.muted === true ? true : next.muted;
-      next.trackId =
-        typeof payload.trackId === 'string' && payload.trackId.trim()
-          ? payload.trackId.trim()
-          : next.trackId;
-      next.deviceId =
-        typeof payload.deviceId === 'string' && payload.deviceId.trim()
-          ? payload.deviceId.trim()
-          : next.deviceId;
-      next.providerSessionId =
-        typeof payload.providerSessionId === 'string' && payload.providerSessionId.trim()
-          ? payload.providerSessionId.trim()
-          : next.providerSessionId;
-      next.publishedAt = Date.now();
-      next.adminDisabled = false;
-    } else if (operation === 'unpublish') {
-      next.published = false;
-      next.trackId = undefined;
-      next.publishedAt = undefined;
-      next.adminDisabled = false;
-      next.providerSessionId = undefined;
-    } else if (operation === 'mute') {
-      next.muted = payload.muted === true;
-    } else if (operation === 'device') {
-      next.deviceId =
-        typeof payload.deviceId === 'string' && payload.deviceId.trim()
-          ? payload.deviceId.trim()
-          : next.deviceId;
-    }
-
-    this.lastLocalMediaState.set(kind, next);
-  }
-
   private getReconnectMemberState(): Record<string, unknown> | undefined {
     if (!this.lastLocalMemberState) {
       return undefined;
     }
 
     return cloneRecord(this.lastLocalMemberState);
-  }
-
-  private getReconnectMediaState(): RoomMemberMediaState | undefined {
-    if (this.lastLocalMediaState.size === 0) {
-      return undefined;
-    }
-
-    const next: RoomMemberMediaState = {};
-    for (const kind of ['audio', 'video', 'screen'] as const) {
-      const current = this.lastLocalMediaState.get(kind);
-      if (!current) continue;
-      next[kind] = cloneValue(current);
-    }
-
-    return Object.keys(next).length > 0 ? next : undefined;
   }
 }

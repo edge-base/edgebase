@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { defineConfig } from '@edge-base/shared';
 import { OpenAPIHono, type HonoEnv } from '../lib/hono.js';
 import { setConfig } from '../lib/do-router.js';
@@ -29,21 +29,6 @@ function createRoomRuntimeEnv(): Env {
 
 function createRoomApp() {
   const app = new OpenAPIHono<HonoEnv>();
-  app.route('/api/room', roomRoute);
-  return app;
-}
-
-function createAuthedRoomApp() {
-  const app = new OpenAPIHono<HonoEnv>();
-  app.use('/api/*', async (c, next) => {
-    c.set('auth', {
-      id: 'user-1',
-      role: 'user',
-      isAnonymous: false,
-      meta: {},
-    });
-    await next();
-  });
   app.route('/api/room', roomRoute);
   return app;
 }
@@ -195,99 +180,4 @@ describe('room route runtime routing', () => {
     });
   });
 
-  it('routes room media requests to the rooms runtime', async () => {
-    setConfig(defineConfig({
-      rooms: {
-        game: {
-          runtime: {
-            target: 'rooms',
-          },
-        },
-      },
-    }));
-
-    const doFetch = vi.fn(async (request: Request) => new Response(JSON.stringify({
-      runtime: 'rooms',
-      path: new URL(request.url).pathname,
-      auth: request.headers.get('Authorization'),
-      body: await request.clone().json(),
-    }), {
-      headers: { 'Content-Type': 'application/json' },
-      status: 201,
-    }));
-
-    const env = createRoomRuntimeEnv();
-    env.ROOMS = {
-      idFromName: (name: string) => name as unknown as DurableObjectId,
-      get: () => ({ fetch: doFetch }),
-    } as unknown as DurableObjectNamespace;
-
-    const app = createAuthedRoomApp();
-    const response = await app.request('/api/room/media/realtime/session?namespace=game&id=room-1', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer room-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ connectionId: 'conn-1' }),
-    }, env);
-
-    expect(response.status).toBe(201);
-    await expect(response.json()).resolves.toMatchObject({
-      runtime: 'rooms',
-      path: '/media/realtime/session',
-      auth: 'Bearer room-token',
-      body: { connectionId: 'conn-1' },
-    });
-    expect(doFetch).toHaveBeenCalledTimes(1);
-    expect(new URL((doFetch.mock.calls[0][0] as Request).url).searchParams.get('room')).toBe('game::room-1');
-  });
-
-  it('routes room cloudflare realtimekit session requests to the rooms runtime', async () => {
-    setConfig(defineConfig({
-      rooms: {
-        game: {
-          runtime: {
-            target: 'rooms',
-          },
-        },
-      },
-    }));
-
-    const doFetch = vi.fn(async (request: Request) => new Response(JSON.stringify({
-      runtime: 'rooms',
-      path: new URL(request.url).pathname,
-      auth: request.headers.get('Authorization'),
-      body: await request.clone().json(),
-    }), {
-      headers: { 'Content-Type': 'application/json' },
-      status: 201,
-    }));
-
-    const env = createRoomRuntimeEnv();
-    env.ROOMS = {
-      idFromName: (name: string) => name as unknown as DurableObjectId,
-      get: () => ({ fetch: doFetch }),
-    } as unknown as DurableObjectNamespace;
-
-    const app = createAuthedRoomApp();
-    const response = await app.request('/api/room/media/cloudflare_realtimekit/session?namespace=game&id=room-1', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer room-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ connectionId: 'conn-1' }),
-    }, env);
-
-    expect(response.status).toBe(201);
-    await expect(response.json()).resolves.toMatchObject({
-      runtime: 'rooms',
-      path: '/media/cloudflare_realtimekit/session',
-      auth: 'Bearer room-token',
-      body: { connectionId: 'conn-1' },
-    });
-    expect(doFetch).toHaveBeenCalledTimes(1);
-    expect(new URL((doFetch.mock.calls[0][0] as Request).url).searchParams.get('room')).toBe('game::room-1');
-  });
 });

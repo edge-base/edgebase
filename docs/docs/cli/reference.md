@@ -324,19 +324,6 @@ Generate shell completion scripts.
 
 Supported shells are `bash`, `zsh`, and `fish`. Unsupported shells return a structured `error` in JSON mode.
 
-### `realtime`
-
-```bash
-npx edgebase realtime provision
-npx edgebase realtime provision --app-name <name>
-npx edgebase realtime provision --turn-name <name>
-npx edgebase realtime provision --force-create-app
-npx edgebase realtime provision --force-create-turn
-npx edgebase realtime provision --skip-workers-secrets
-```
-
-Provision Cloudflare Calls (WebRTC) resources for Room Media. Creates the required Calls App and TURN service, then stores the credentials as Workers secrets.
-
 ### `telemetry`
 
 ```bash

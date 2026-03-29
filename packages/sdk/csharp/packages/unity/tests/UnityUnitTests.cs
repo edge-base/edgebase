@@ -857,21 +857,17 @@ namespace EdgeBase.Tests
         }
 
         [Fact]
-        public void Unified_surface_parses_members_signals_media_and_session_frames()
+        public void Unified_surface_parses_members_signals_and_session_frames()
         {
             var room = new RoomClient("http://localhost", "game", "room-1", () => "token");
             var memberSyncSnapshots = new List<List<Dictionary<string, object?>>>();
             var memberLeaves = new List<string>();
             var signalEvents = new List<string>();
-            var mediaTracks = new List<string>();
-            var mediaDevices = new List<string>();
             var connectionStates = new List<string>();
 
             room.Members.OnSync(members => memberSyncSnapshots.Add(members));
             room.Members.OnLeave((member, reason) => memberLeaves.Add($"{member["memberId"]}:{reason}"));
             room.Signals.OnAny((eventName, payload, meta) => signalEvents.Add($"{eventName}:{meta["userId"]}"));
-            room.Media.OnTrack((track, member) => mediaTracks.Add($"{track["kind"]}:{member["memberId"]}"));
-            room.Media.OnDeviceChange((member, change) => mediaDevices.Add($"{change["kind"]}:{change["deviceId"]}"));
             room.Session.OnConnectionStateChange(connectionStates.Add);
 
             room.HandleRawForTesting("{\"type\":\"auth_success\",\"userId\":\"user-1\",\"connectionId\":\"conn-1\"}");
@@ -879,8 +875,6 @@ namespace EdgeBase.Tests
             room.HandleRawForTesting("{\"type\":\"members_sync\",\"members\":[{\"memberId\":\"user-1\",\"userId\":\"user-1\",\"connectionId\":\"conn-1\",\"connectionCount\":1,\"state\":{\"typing\":false}}]}");
             room.HandleRawForTesting("{\"type\":\"member_join\",\"member\":{\"memberId\":\"user-2\",\"userId\":\"user-2\",\"connectionCount\":1,\"state\":{}}}");
             room.HandleRawForTesting("{\"type\":\"signal\",\"event\":\"cursor.move\",\"payload\":{\"x\":10,\"y\":20},\"meta\":{\"memberId\":\"user-2\",\"userId\":\"user-2\",\"connectionId\":\"conn-2\",\"sentAt\":123}}");
-            room.HandleRawForTesting("{\"type\":\"media_track\",\"member\":{\"memberId\":\"user-2\",\"userId\":\"user-2\",\"state\":{}},\"track\":{\"kind\":\"video\",\"trackId\":\"video-1\",\"deviceId\":\"cam-1\",\"muted\":false}}");
-            room.HandleRawForTesting("{\"type\":\"media_device\",\"member\":{\"memberId\":\"user-2\",\"userId\":\"user-2\",\"state\":{}},\"kind\":\"video\",\"deviceId\":\"cam-2\"}");
             room.HandleRawForTesting("{\"type\":\"member_leave\",\"member\":{\"memberId\":\"user-2\",\"userId\":\"user-2\",\"state\":{}},\"reason\":\"timeout\"}");
 
             Assert.Equal("focus", room.State.GetShared()["topic"]);
@@ -892,18 +886,15 @@ namespace EdgeBase.Tests
             Assert.Single(memberSyncSnapshots);
             Assert.Equal("user-1", memberSyncSnapshots[0][0]["memberId"]);
             Assert.Equal(new[] { "cursor.move:user-2" }, signalEvents);
-            Assert.Equal(new[] { "video:user-2" }, mediaTracks);
-            Assert.Equal(new[] { "video:cam-2" }, mediaDevices);
             Assert.Equal(new[] { "user-2:timeout" }, memberLeaves);
             Assert.Single(room.Members.List());
             Assert.Equal("user-1", room.Members.List()[0]["memberId"]);
-            Assert.Empty(room.Media.List());
 
             room.Dispose();
         }
 
         [Fact]
-        public async Task Unified_surface_sends_signal_member_admin_and_media_frames()
+        public async Task Unified_surface_sends_signal_member_and_admin_frames()
         {
             var room = new RoomClient("http://localhost", "game", "room-1", () => "token");
             var fakeSocket = new FakeRoomWebSocket();
@@ -931,26 +922,16 @@ namespace EdgeBase.Tests
             room.HandleRawForTesting($"{{\"type\":\"member_state\",\"requestId\":\"{memberStateRequestId}\",\"member\":{{\"memberId\":\"user-1\",\"userId\":\"user-1\",\"state\":{{\"typing\":true}}}},\"state\":{{\"typing\":true}}}}");
             await memberStateTask;
 
-            var adminTask = room.Admin.DisableVideo("user-2");
+            var adminTask = room.Admin.Block("user-2");
             var adminMessage = fakeSocket.Messages[2];
             Assert.Equal("admin", adminMessage.GetProperty("type").GetString());
-            Assert.Equal("disableVideo", adminMessage.GetProperty("operation").GetString());
+            Assert.Equal("block", adminMessage.GetProperty("operation").GetString());
             Assert.Equal("user-2", adminMessage.GetProperty("memberId").GetString());
             var adminRequestId = adminMessage.GetProperty("requestId").GetString();
-            room.HandleRawForTesting($"{{\"type\":\"admin_result\",\"requestId\":\"{adminRequestId}\",\"operation\":\"disableVideo\",\"memberId\":\"user-2\"}}");
+            room.HandleRawForTesting($"{{\"type\":\"admin_result\",\"requestId\":\"{adminRequestId}\",\"operation\":\"block\",\"memberId\":\"user-2\"}}");
             await adminTask;
 
-            var mediaTask = room.Media.Audio.SetMuted(true);
-            var mediaMessage = fakeSocket.Messages[3];
-            Assert.Equal("media", mediaMessage.GetProperty("type").GetString());
-            Assert.Equal("mute", mediaMessage.GetProperty("operation").GetString());
-            Assert.Equal("audio", mediaMessage.GetProperty("kind").GetString());
-            Assert.True(mediaMessage.GetProperty("payload").GetProperty("muted").GetBoolean());
-            var mediaRequestId = mediaMessage.GetProperty("requestId").GetString();
-            room.HandleRawForTesting($"{{\"type\":\"media_result\",\"requestId\":\"{mediaRequestId}\",\"operation\":\"mute\",\"kind\":\"audio\"}}");
-            await mediaTask;
-
-            Assert.Equal(new[] { "send:signal", "send:member_state", "send:admin", "send:media" }, fakeSocket.Events);
+            Assert.Equal(new[] { "send:signal", "send:member_state", "send:admin" }, fakeSocket.Events);
 
             room.Dispose();
         }

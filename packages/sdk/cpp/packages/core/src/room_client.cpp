@@ -143,7 +143,6 @@ void RoomClient::leave() {
   player_state_ = json::object();
   player_version_ = 0;
   room_members_ = json::array();
-  media_members_ = json::array();
   current_user_id_.clear();
   current_connection_id_.clear();
   reconnect_info_ = json::object();
@@ -162,7 +161,7 @@ void RoomClient::send(const std::string &action_type, const json &payload,
                       ResultCallback on_result, ErrorCallback on_error) {
   if (!connected_.load() || !authenticated_.load()) {
     if (on_error)
-      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.");
+      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions or signals.");
     return;
   }
 
@@ -303,34 +302,6 @@ Subscription RoomClient::on_member_state_change(
   int id = next_handler_id_.fetch_add(1);
   member_state_handlers_[id] = std::move(handler);
   auto *map = &member_state_handlers_;
-  return Subscription{[map, id]() { map->erase(id); }};
-}
-
-Subscription RoomClient::on_media_track(MediaTrackHandler handler) {
-  int id = next_handler_id_.fetch_add(1);
-  media_track_handlers_[id] = std::move(handler);
-  auto *map = &media_track_handlers_;
-  return Subscription{[map, id]() { map->erase(id); }};
-}
-
-Subscription RoomClient::on_media_track_removed(MediaTrackHandler handler) {
-  int id = next_handler_id_.fetch_add(1);
-  media_track_removed_handlers_[id] = std::move(handler);
-  auto *map = &media_track_removed_handlers_;
-  return Subscription{[map, id]() { map->erase(id); }};
-}
-
-Subscription RoomClient::on_media_state_change(MediaStateHandler handler) {
-  int id = next_handler_id_.fetch_add(1);
-  media_state_handlers_[id] = std::move(handler);
-  auto *map = &media_state_handlers_;
-  return Subscription{[map, id]() { map->erase(id); }};
-}
-
-Subscription RoomClient::on_media_device_change(MediaDeviceHandler handler) {
-  int id = next_handler_id_.fetch_add(1);
-  media_device_handlers_[id] = std::move(handler);
-  auto *map = &media_device_handlers_;
   return Subscription{[map, id]() { map->erase(id); }};
 }
 
@@ -532,7 +503,6 @@ void RoomClient::handle_message(const std::string &raw) {
 
   if (type == "members_sync") {
     room_members_ = msg.value("members", json::array());
-    sync_media_members_with_room_members();
     for (auto &[id, h] : members_sync_handlers_)
       h(room_members_);
     return;
@@ -556,12 +526,6 @@ void RoomClient::handle_message(const std::string &raw) {
                                            return entry.value("memberId", entry.value("userId", std::string())) == member_id;
                                          }),
                           room_members_.end());
-      media_members_.erase(std::remove_if(media_members_.begin(), media_members_.end(),
-                                          [&](const json &entry) {
-                                            return entry.value("member", json::object())
-                                                       .value("memberId", std::string()) == member_id;
-                                          }),
-                           media_members_.end());
     }
     std::string reason = msg.value("reason", "");
     for (auto &[id, h] : member_leave_handlers_)
@@ -585,62 +549,6 @@ void RoomClient::handle_message(const std::string &raw) {
     reject_pending_void(pending_member_state_requests_,
                         msg.value("requestId", ""),
                         msg.value("message", "Member state error"));
-    return;
-  }
-
-  if (type == "media_sync") {
-    media_members_ = msg.value("members", json::array());
-    sync_media_members_with_room_members();
-    return;
-  }
-
-  if (type == "media_track") {
-    json member = msg.value("member", json::object());
-    json track = msg.value("track", json::object());
-    upsert_media_track(member, track);
-    for (auto &[id, h] : media_track_handlers_)
-      h(track, member);
-    return;
-  }
-
-  if (type == "media_track_removed") {
-    json member = msg.value("member", json::object());
-    json track = msg.value("track", json::object());
-    remove_media_track(member, track);
-    for (auto &[id, h] : media_track_removed_handlers_)
-      h(track, member);
-    return;
-  }
-
-  if (type == "media_state") {
-    json member = msg.value("member", json::object());
-    json state = msg.value("state", json::object());
-    if (auto *media_member = ensure_media_member(member)) {
-      (*media_member)["state"] = state;
-    }
-    for (auto &[id, h] : media_state_handlers_)
-      h(member, state);
-    return;
-  }
-
-  if (type == "media_device") {
-    json member = msg.value("member", json::object());
-    ensure_media_member(member);
-    json change{{"kind", msg.value("kind", "")},
-                {"deviceId", msg.value("deviceId", "")}};
-    for (auto &[id, h] : media_device_handlers_)
-      h(member, change);
-    return;
-  }
-
-  if (type == "media_result") {
-    resolve_pending_void(pending_media_requests_, msg.value("requestId", ""));
-    return;
-  }
-
-  if (type == "media_error") {
-    reject_pending_void(pending_media_requests_, msg.value("requestId", ""),
-                        msg.value("message", "Media error"));
     return;
   }
 
@@ -691,7 +599,7 @@ void RoomClient::send_signal(const std::string &event, const json &payload,
                              const json &options) {
   if (!connected_.load() || !authenticated_.load()) {
     if (on_error)
-      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.");
+      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions or signals.");
     return;
   }
   std::string request_id = generate_request_id();
@@ -735,7 +643,7 @@ void RoomClient::send_member_state(const json &state, VoidCallback on_success,
                                    ErrorCallback on_error) {
   if (!connected_.load() || !authenticated_.load()) {
     if (on_error)
-      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.");
+      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions or signals.");
     return;
   }
   std::string request_id = generate_request_id();
@@ -774,7 +682,7 @@ void RoomClient::clear_member_state(VoidCallback on_success,
                                     ErrorCallback on_error) {
   if (!connected_.load() || !authenticated_.load()) {
     if (on_error)
-      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.");
+      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions or signals.");
     return;
   }
   std::string request_id = generate_request_id();
@@ -813,7 +721,7 @@ void RoomClient::send_admin(const std::string &operation,
                             ErrorCallback on_error) {
   if (!connected_.load() || !authenticated_.load()) {
     if (on_error)
-      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.");
+      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions or signals.");
     return;
   }
   std::string request_id = generate_request_id();
@@ -848,72 +756,6 @@ void RoomClient::send_admin(const std::string &operation,
       on_error("Admin action timed out");
     }
   }).detach();
-}
-
-void RoomClient::send_media(const std::string &operation,
-                            const std::string &kind, const json &payload,
-                            VoidCallback on_success, ErrorCallback on_error) {
-  if (!connected_.load() || !authenticated_.load()) {
-    if (on_error)
-      on_error("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.");
-    return;
-  }
-  std::string request_id = generate_request_id();
-  {
-    std::lock_guard<std::mutex> lock(pending_requests_mx_);
-    pending_media_requests_[request_id] =
-        PendingVoidRequest{std::move(on_success), std::move(on_error)};
-  }
-  send_raw({{"type", "media"},
-            {"operation", operation},
-            {"kind", kind},
-            {"payload", payload},
-            {"requestId", request_id}});
-
-  // Timeout for pending media request
-  auto weak = weak_from_this();
-  int timeout_ms = opts_.send_timeout_ms;
-  std::thread([weak, request_id, timeout_ms]() {
-    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
-    auto self = weak.lock();
-    if (!self) return;
-    ErrorCallback on_error;
-    {
-      std::lock_guard<std::mutex> lock(self->pending_requests_mx_);
-      auto it = self->pending_media_requests_.find(request_id);
-      if (it != self->pending_media_requests_.end()) {
-        on_error = std::move(it->second.on_error);
-        self->pending_media_requests_.erase(it);
-      }
-    }
-    if (on_error) {
-      on_error("Media action timed out");
-    }
-  }).detach();
-}
-
-void RoomClient::switch_media_devices(const json &payload,
-                                      VoidCallback on_success,
-                                      ErrorCallback on_error) {
-  auto shared_success = std::make_shared<std::atomic<int>>(0);
-  auto expected = std::make_shared<int>(0);
-  auto maybe_send = [&](const char *kind, const char *key) {
-    if (payload.contains(key) && payload[key].is_string() &&
-        !payload[key].get<std::string>().empty()) {
-      (*expected)++;
-      send_media("device", kind, json{{"deviceId", payload[key]}},
-                 [shared_success, expected, on_success]() {
-                   if (shared_success->fetch_add(1) + 1 == *expected && on_success)
-                     on_success();
-                 },
-                 on_error);
-    }
-  };
-  maybe_send("audio", "audioInputId");
-  maybe_send("video", "videoInputId");
-  maybe_send("screen", "screenInputId");
-  if (*expected == 0 && on_success)
-    on_success();
 }
 
 void RoomClient::send_leave_and_close() {
@@ -973,8 +815,7 @@ void RoomClient::reject_all_pending(const std::string &reason) {
     std::lock_guard<std::mutex> lock(pending_requests_mx_);
     callbacks.reserve(pending_requests_.size() + pending_signal_requests_.size() +
                       pending_admin_requests_.size() +
-                      pending_member_state_requests_.size() +
-                      pending_media_requests_.size());
+                      pending_member_state_requests_.size());
     for (auto &[id, pending] : pending_requests_) {
       if (pending.on_error)
         callbacks.push_back(std::move(pending.on_error));
@@ -995,11 +836,6 @@ void RoomClient::reject_all_pending(const std::string &reason) {
         callbacks.push_back(std::move(request.on_error));
     }
     pending_member_state_requests_.clear();
-    for (auto &[id, request] : pending_media_requests_) {
-      if (request.on_error)
-        callbacks.push_back(std::move(request.on_error));
-    }
-    pending_media_requests_.clear();
   }
   for (auto &callback : callbacks) {
     callback(reason);
@@ -1061,85 +897,6 @@ void RoomClient::upsert_room_member(const json &member) {
     }
   }
   room_members_.push_back(member);
-}
-
-json *RoomClient::ensure_media_member(const json &member) {
-  const auto member_id =
-      member.value("memberId", member.value("userId", std::string()));
-  if (member_id.empty())
-    return nullptr;
-  for (auto &entry : media_members_) {
-    if (entry.value("member", json::object())
-            .value("memberId", std::string()) == member_id) {
-      entry["member"] = member;
-      if (!entry.contains("state"))
-        entry["state"] = json::object();
-      if (!entry.contains("tracks"))
-        entry["tracks"] = json::array();
-      return &entry;
-    }
-  }
-  media_members_.push_back(
-      json{{"member", member}, {"state", json::object()}, {"tracks", json::array()}});
-  return &media_members_.back();
-}
-
-void RoomClient::sync_media_members_with_room_members() {
-  media_members_.erase(std::remove_if(media_members_.begin(), media_members_.end(),
-                                      [&](const json &entry) {
-                                        const auto member_id =
-                                            entry.value("member", json::object())
-                                                .value("memberId",
-                                                       std::string());
-                                        if (member_id.empty())
-                                          return false;
-                                        return std::none_of(
-                                            room_members_.begin(),
-                                            room_members_.end(),
-                                            [&](const json &member) {
-                                              return member.value(
-                                                         "memberId",
-                                                         member.value(
-                                                             "userId",
-                                                             std::string())) ==
-                                                     member_id;
-                                            });
-                                      }),
-                       media_members_.end());
-}
-
-void RoomClient::upsert_media_track(const json &member, const json &track) {
-  auto *media_member = ensure_media_member(member);
-  if (!media_member)
-    return;
-  auto &tracks = (*media_member)["tracks"];
-  const auto track_id = track.value("trackId", std::string());
-  const auto kind = track.value("kind", std::string());
-  for (auto &entry : tracks) {
-    if ((!track_id.empty() && entry.value("trackId", std::string()) == track_id) ||
-        (track_id.empty() && !kind.empty() &&
-         entry.value("kind", std::string()) == kind)) {
-      entry = track;
-      return;
-    }
-  }
-  tracks.push_back(track);
-}
-
-void RoomClient::remove_media_track(const json &member, const json &track) {
-  auto *media_member = ensure_media_member(member);
-  if (!media_member)
-    return;
-  auto &tracks = (*media_member)["tracks"];
-  const auto track_id = track.value("trackId", std::string());
-  const auto kind = track.value("kind", std::string());
-  tracks.erase(std::remove_if(tracks.begin(), tracks.end(), [&](const json &entry) {
-                 return (!track_id.empty() &&
-                         entry.value("trackId", std::string()) == track_id) ||
-                        (track_id.empty() && !kind.empty() &&
-                         entry.value("kind", std::string()) == kind);
-               }),
-               tracks.end());
 }
 
 // Recursive dot-path deep set.

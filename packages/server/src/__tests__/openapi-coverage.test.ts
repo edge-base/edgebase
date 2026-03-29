@@ -118,8 +118,6 @@ describe('OpenAPI route coverage', () => {
         '/api/sql': { post: {} },
         '/admin/api/setup': { get: {} },
         '/admin/api/data/users': { get: {} },
-        '/api/room/media/realtime/session': { post: {} },
-        '/api/room/media/cloudflare_realtimekit/session': { post: {} },
       },
     };
 
@@ -133,10 +131,6 @@ describe('OpenAPI route coverage', () => {
     expect(schemes).toHaveProperty('userBearerAuth');
     expect(schemes).toHaveProperty('serviceKeyAuth');
     expect((normalized.paths?.['/api/auth/me'] as Record<string, { security?: unknown }>).get.security)
-      .toEqual([{ userBearerAuth: [] }]);
-    expect((normalized.paths?.['/api/room/media/realtime/session'] as Record<string, { security?: unknown }>).post.security)
-      .toEqual([{ userBearerAuth: [] }]);
-    expect((normalized.paths?.['/api/room/media/cloudflare_realtimekit/session'] as Record<string, { security?: unknown }>).post.security)
       .toEqual([{ userBearerAuth: [] }]);
     expect((normalized.paths?.['/api/sql'] as Record<string, { security?: unknown }>).post.security)
       .toEqual([{ serviceKeyAuth: [] }]);

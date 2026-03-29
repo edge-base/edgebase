@@ -344,7 +344,7 @@ export class ClientEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> 
 
   /**
    * Run the room connect-check preflight without opening a WebSocket connection.
-   * Useful for showing setup/readiness hints before calling room.join() or media transport connect().
+   * Useful for showing setup/readiness hints before calling room.join().
    */
   async checkRoomConnection(namespace: string, roomId: string): Promise<RoomConnectDiagnostic> {
     return RoomClient.checkConnection(this.baseUrl, namespace, roomId);

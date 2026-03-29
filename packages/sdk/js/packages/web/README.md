@@ -62,7 +62,7 @@ Use this README for the fast overview, then jump into the docs when you need dep
 - [Authentication](https://edgebase.fun/docs/authentication)
   Email/password, OAuth, MFA, sessions, passkeys
 - [Room Client SDK](https://edgebase.fun/docs/room/client-sdk)
-  Presence, state, members, signals, and media
+  Presence, state, members, and signals
 - [Functions Client SDK](https://edgebase.fun/docs/functions/client-sdk)
   Calling EdgeBase functions from the browser
 - [Analytics Client SDK](https://edgebase.fun/docs/analytics/client-sdk)
@@ -99,7 +99,7 @@ Most browser SDKs stop at auth + CRUD.
 | Auth | Email/password, OAuth, sessions, auth state |
 | Database | Query, insert, update, delete |
 | Database Live | `onSnapshot()` subscriptions |
-| Rooms | Presence, room state, signals, media-ready client surface |
+| Rooms | Presence, room state, signals, and room summaries |
 | Storage | Uploads, bucket access, file URLs |
 | Functions | Call EdgeBase functions from the browser |
 | Analytics | Client-side analytics helpers |
@@ -342,43 +342,7 @@ Use rooms when you need:
 - room state
 - peer signals
 - multiplayer coordination
-- media/session-style realtime flows
-
-### Room Media Transports
-
-`room.media.connect()` is the preferred browser entry point. `room.media.transport()` remains available when you need to manage the transport instance yourself.
-
-```ts
-const capabilities = await room.media.checkReadiness({
-  provider: 'cloudflare_realtimekit',
-});
-console.log(capabilities.issues);
-
-const media = await room.media.connect({
-  candidates: [
-    {
-      label: 'cloudflare_realtimekit',
-      options: { provider: 'cloudflare_realtimekit' },
-    },
-  ],
-});
-
-await media.transport.enableAudio();
-await media.transport.enableVideo();
-```
-
-Available providers:
-
-- `cloudflare_realtimekit`
-  Default managed media path backed by the Room Media control plane
-- `p2p`
-  STUN-only best-effort mesh for lightweight direct calls
-
-The lower-level `room.media.realtime.*` HTTP wrappers and `RoomRealtimeMediaTransport`
-export still exist for raw WebRTC/SFU flows, and `room.media.transport()` remains
-available as an advanced escape hatch. For most browser apps, `room.media.connect()`
-is the recommended entry point.
-
+- session-style realtime flows
 Read more: [Room Client SDK](https://edgebase.fun/docs/room/client-sdk)
 
 ## Which EdgeBase Package Should You Use?

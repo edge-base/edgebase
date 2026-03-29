@@ -28,7 +28,6 @@ class RoomClient
     public readonly RoomSignalsNamespace $signals;
     public readonly RoomMembersNamespace $members;
     public readonly RoomAdminNamespace $admin;
-    public readonly RoomMediaNamespace $media;
     public readonly RoomSessionNamespace $session;
 
     private array $sharedState = [];
@@ -37,8 +36,6 @@ class RoomClient
     private int $playerVersion = 0;
     /** @var list<array<string, mixed>> */
     private array $roomMembers = [];
-    /** @var list<array<string, mixed>> */
-    private array $mediaMembers = [];
 
     private string $baseUrl;
     private \Closure $tokenFn;
@@ -70,8 +67,6 @@ class RoomClient
     private array $pendingAdminRequests = [];
     /** @var array<string, array{done: bool, error: ?string}> */
     private array $pendingMemberStateRequests = [];
-    /** @var array<string, array{done: bool, error: ?string}> */
-    private array $pendingMediaRequests = [];
 
     /** @var list<callable(array<string, mixed>, array<string, mixed>): void> */
     private array $sharedStateHandlers = [];
@@ -97,14 +92,6 @@ class RoomClient
     private array $signalHandlers = [];
     /** @var list<callable(string, mixed, array<string, mixed>): void> */
     private array $anySignalHandlers = [];
-    /** @var list<callable(array<string, mixed>, array<string, mixed>): void> */
-    private array $mediaTrackHandlers = [];
-    /** @var list<callable(array<string, mixed>, array<string, mixed>): void> */
-    private array $mediaTrackRemovedHandlers = [];
-    /** @var list<callable(array<string, mixed>, array<string, mixed>): void> */
-    private array $mediaStateHandlers = [];
-    /** @var list<callable(array<string, mixed>, array<string, mixed>): void> */
-    private array $mediaDeviceHandlers = [];
     /** @var list<callable(array<string, mixed>): void> */
     private array $reconnectHandlers = [];
     /** @var list<callable(string): void> */
@@ -134,7 +121,6 @@ class RoomClient
         $this->signals = new RoomSignalsNamespace($this);
         $this->members = new RoomMembersNamespace($this);
         $this->admin = new RoomAdminNamespace($this);
-        $this->media = new RoomMediaNamespace($this);
         $this->session = new RoomSessionNamespace($this);
     }
 
@@ -153,14 +139,6 @@ class RoomClient
     {
         /** @var list<array<string, mixed>> $members */
         $members = self::deepCopy($this->roomMembers);
-        return $members;
-    }
-
-    /** @return list<array<string, mixed>> */
-    public function listMediaMembers(): array
-    {
-        /** @var list<array<string, mixed>> $members */
-        $members = self::deepCopy($this->mediaMembers);
         return $members;
     }
 
@@ -254,8 +232,6 @@ class RoomClient
         $this->rejectPendingVoidRequests('pendingSignalRequests', 'Room left');
         $this->rejectPendingVoidRequests('pendingAdminRequests', 'Room left');
         $this->rejectPendingVoidRequests('pendingMemberStateRequests', 'Room left');
-        $this->rejectPendingVoidRequests('pendingMediaRequests', 'Room left');
-
         $this->sendLeaveAndClose();
         $this->connected = false;
         $this->authenticated = false;
@@ -269,14 +245,13 @@ class RoomClient
         $this->playerState = [];
         $this->playerVersion = 0;
         $this->roomMembers = [];
-        $this->mediaMembers = [];
         $this->setConnectionState('idle');
     }
 
     public function send(string $actionType, mixed $payload = null): mixed
     {
         if (!$this->connected || !$this->authenticated) {
-            throw new EdgeBaseException('Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.', 400);
+            throw new EdgeBaseException('Not connected to room. Call join() and wait for the room to connect before sending actions or signals.', 400);
         }
 
         $requestId = $this->generateRequestId();
@@ -372,36 +347,6 @@ class RoomClient
             ],
             "Admin operation '{$operation}' timed out",
         );
-    }
-
-    public function sendMedia(string $operation, string $kind, ?array $payload = null): void
-    {
-        $requestId = $this->generateRequestId();
-        $this->sendVoidRequest(
-            'pendingMediaRequests',
-            $requestId,
-            [
-                'type' => 'media',
-                'operation' => $operation,
-                'kind' => $kind,
-                'payload' => $payload ?? new \stdClass(),
-                'requestId' => $requestId,
-            ],
-            "Media operation '{$operation}' timed out",
-        );
-    }
-
-    public function switchMediaDevices(array $payload): void
-    {
-        if (is_string($payload['audioInputId'] ?? null)) {
-            $this->sendMedia('device', 'audio', ['deviceId' => $payload['audioInputId']]);
-        }
-        if (is_string($payload['videoInputId'] ?? null)) {
-            $this->sendMedia('device', 'video', ['deviceId' => $payload['videoInputId']]);
-        }
-        if (is_string($payload['screenInputId'] ?? null)) {
-            $this->sendMedia('device', 'screen', ['deviceId' => $payload['screenInputId']]);
-        }
     }
 
     public function onSharedState(callable $handler): Subscription
@@ -505,38 +450,6 @@ class RoomClient
         $this->anySignalHandlers[] = $handler;
         return new Subscription(function () use ($handler): void {
             $this->removeHandler($this->anySignalHandlers, $handler);
-        });
-    }
-
-    public function onMediaTrack(callable $handler): Subscription
-    {
-        $this->mediaTrackHandlers[] = $handler;
-        return new Subscription(function () use ($handler): void {
-            $this->removeHandler($this->mediaTrackHandlers, $handler);
-        });
-    }
-
-    public function onMediaTrackRemoved(callable $handler): Subscription
-    {
-        $this->mediaTrackRemovedHandlers[] = $handler;
-        return new Subscription(function () use ($handler): void {
-            $this->removeHandler($this->mediaTrackRemovedHandlers, $handler);
-        });
-    }
-
-    public function onMediaStateChange(callable $handler): Subscription
-    {
-        $this->mediaStateHandlers[] = $handler;
-        return new Subscription(function () use ($handler): void {
-            $this->removeHandler($this->mediaStateHandlers, $handler);
-        });
-    }
-
-    public function onMediaDeviceChange(callable $handler): Subscription
-    {
-        $this->mediaDeviceHandlers[] = $handler;
-        return new Subscription(function () use ($handler): void {
-            $this->removeHandler($this->mediaDeviceHandlers, $handler);
         });
     }
 
@@ -725,27 +638,6 @@ class RoomClient
             case 'admin_error':
                 $this->rejectPendingVoidRequest('pendingAdminRequests', (string) ($msg['requestId'] ?? ''), (string) ($msg['message'] ?? 'Admin operation failed'));
                 break;
-            case 'media_sync':
-                $this->handleMediaSync($msg);
-                break;
-            case 'media_track':
-                $this->handleMediaTrackFrame($msg);
-                break;
-            case 'media_track_removed':
-                $this->handleMediaTrackRemovedFrame($msg);
-                break;
-            case 'media_state':
-                $this->handleMediaStateFrame($msg);
-                break;
-            case 'media_device':
-                $this->handleMediaDeviceFrame($msg);
-                break;
-            case 'media_result':
-                $this->resolvePendingVoidRequest('pendingMediaRequests', (string) ($msg['requestId'] ?? ''));
-                break;
-            case 'media_error':
-                $this->rejectPendingVoidRequest('pendingMediaRequests', (string) ($msg['requestId'] ?? ''), (string) ($msg['message'] ?? 'Media operation failed'));
-                break;
             case 'kicked':
                 $this->handleKicked();
                 break;
@@ -870,23 +762,6 @@ class RoomClient
     private function handleMembersSync(array $msg): void
     {
         $this->roomMembers = $this->normalizeMembers($msg['members'] ?? []);
-        $memberIds = array_fill_keys(
-            array_values(array_filter(array_map(
-                static fn (array $member): ?string => is_string($member['memberId'] ?? null) ? $member['memberId'] : null,
-                $this->roomMembers,
-            ))),
-            true,
-        );
-
-        $this->mediaMembers = array_values(array_filter(
-            $this->mediaMembers,
-            static fn (array $entry): bool => isset($memberIds[$entry['member']['memberId'] ?? '']),
-        ));
-
-        foreach ($this->roomMembers as $member) {
-            $this->syncMediaMemberInfo($member);
-        }
-
         foreach ($this->membersSyncHandlers as $handler) {
             $handler($this->listMembers());
         }
@@ -899,7 +774,6 @@ class RoomClient
             return;
         }
         $this->upsertMember($member);
-        $this->syncMediaMemberInfo($member);
         foreach ($this->memberJoinHandlers as $handler) {
             $handler(self::deepCopy($member));
         }
@@ -913,7 +787,6 @@ class RoomClient
         }
         $memberId = (string) ($member['memberId'] ?? '');
         $this->removeMember($memberId);
-        $this->removeMediaMember($memberId);
         $reason = $this->normalizeLeaveReason($msg['reason'] ?? null);
         foreach ($this->memberLeaveHandlers as $handler) {
             $handler(self::deepCopy($member), $reason);
@@ -929,7 +802,6 @@ class RoomClient
         $state = self::safeAssoc($msg['state'] ?? []);
         $member['state'] = self::deepCopy($state);
         $this->upsertMember($member);
-        $this->syncMediaMemberInfo($member);
 
         $requestId = (string) ($msg['requestId'] ?? '');
         if ($requestId !== '' && ($member['memberId'] ?? null) === $this->currentUserId) {
@@ -938,106 +810,6 @@ class RoomClient
 
         foreach ($this->memberStateHandlers as $handler) {
             $handler(self::deepCopy($member), self::deepCopy($state));
-        }
-    }
-
-    private function handleMediaSync(array $msg): void
-    {
-        $this->mediaMembers = $this->normalizeMediaMembers($msg['members'] ?? []);
-        foreach ($this->roomMembers as $member) {
-            $this->syncMediaMemberInfo($member);
-        }
-    }
-
-    private function handleMediaTrackFrame(array $msg): void
-    {
-        $member = $this->normalizeMember($msg['member'] ?? null);
-        $track = $this->normalizeMediaTrack($msg['track'] ?? null);
-        if ($member === null || $track === null) {
-            return;
-        }
-
-        $index = $this->ensureMediaMemberIndex($member);
-        $this->upsertMediaTrack($index, $track);
-        $this->mergeMediaState($index, (string) $track['kind'], [
-            'published' => true,
-            'muted' => (bool) ($track['muted'] ?? false),
-            'trackId' => $track['trackId'] ?? null,
-            'deviceId' => $track['deviceId'] ?? null,
-            'publishedAt' => $track['publishedAt'] ?? null,
-            'adminDisabled' => $track['adminDisabled'] ?? null,
-        ]);
-
-        $memberSnapshot = self::deepCopy($this->mediaMembers[$index]['member']);
-        foreach ($this->mediaTrackHandlers as $handler) {
-            $handler(self::deepCopy($track), $memberSnapshot);
-        }
-    }
-
-    private function handleMediaTrackRemovedFrame(array $msg): void
-    {
-        $member = $this->normalizeMember($msg['member'] ?? null);
-        $track = $this->normalizeMediaTrack($msg['track'] ?? null);
-        if ($member === null || $track === null) {
-            return;
-        }
-
-        $index = $this->ensureMediaMemberIndex($member);
-        $this->removeMediaTrack($index, $track);
-        $kind = (string) $track['kind'];
-        $state = self::safeAssoc($this->mediaMembers[$index]['state'] ?? []);
-        $state[$kind] = [
-            'published' => false,
-            'muted' => false,
-            'adminDisabled' => false,
-        ];
-        $this->mediaMembers[$index]['state'] = $state;
-
-        $memberSnapshot = self::deepCopy($this->mediaMembers[$index]['member']);
-        foreach ($this->mediaTrackRemovedHandlers as $handler) {
-            $handler(self::deepCopy($track), $memberSnapshot);
-        }
-    }
-
-    private function handleMediaStateFrame(array $msg): void
-    {
-        $member = $this->normalizeMember($msg['member'] ?? null);
-        if ($member === null) {
-            return;
-        }
-
-        $index = $this->ensureMediaMemberIndex($member);
-        $this->mediaMembers[$index]['state'] = $this->normalizeMediaState($msg['state'] ?? []);
-
-        $memberSnapshot = self::deepCopy($this->mediaMembers[$index]['member']);
-        $stateSnapshot = self::deepCopy($this->mediaMembers[$index]['state']);
-        foreach ($this->mediaStateHandlers as $handler) {
-            $handler($memberSnapshot, $stateSnapshot);
-        }
-    }
-
-    private function handleMediaDeviceFrame(array $msg): void
-    {
-        $member = $this->normalizeMember($msg['member'] ?? null);
-        $kind = $this->normalizeMediaKind($msg['kind'] ?? null);
-        $deviceId = is_string($msg['deviceId'] ?? null) ? $msg['deviceId'] : null;
-        if ($member === null || $kind === null || $deviceId === null) {
-            return;
-        }
-
-        $index = $this->ensureMediaMemberIndex($member);
-        $this->mergeMediaState($index, $kind, ['deviceId' => $deviceId]);
-        foreach ($this->mediaMembers[$index]['tracks'] as &$track) {
-            if (($track['kind'] ?? null) === $kind) {
-                $track['deviceId'] = $deviceId;
-            }
-        }
-        unset($track);
-
-        $change = ['kind' => $kind, 'deviceId' => $deviceId];
-        $memberSnapshot = self::deepCopy($this->mediaMembers[$index]['member']);
-        foreach ($this->mediaDeviceHandlers as $handler) {
-            $handler($memberSnapshot, self::deepCopy($change));
         }
     }
 
@@ -1104,7 +876,7 @@ class RoomClient
     private function sendVoidRequest(string $bucket, string $requestId, array $message, string $timeoutMessage): void
     {
         if (!$this->connected || !$this->authenticated) {
-            throw new EdgeBaseException('Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.', 400);
+            throw new EdgeBaseException('Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or member state.', 400);
         }
 
         $this->{$bucket}[$requestId] = [
@@ -1279,127 +1051,6 @@ class RoomClient
         return $member;
     }
 
-    private function normalizeMediaMembers(mixed $value): array
-    {
-        if (!is_array($value)) {
-            return [];
-        }
-        $members = [];
-        foreach ($value as $member) {
-            $normalized = $this->normalizeMediaMember($member);
-            if ($normalized !== null) {
-                $members[] = $normalized;
-            }
-        }
-        return $members;
-    }
-
-    private function normalizeMediaMember(mixed $value): ?array
-    {
-        if (!is_array($value)) {
-            return null;
-        }
-        $member = $this->normalizeMember($value['member'] ?? null);
-        if ($member === null) {
-            return null;
-        }
-        return [
-            'member' => $member,
-            'state' => $this->normalizeMediaState($value['state'] ?? []),
-            'tracks' => $this->normalizeMediaTracks($value['tracks'] ?? []),
-        ];
-    }
-
-    private function normalizeMediaState(mixed $value): array
-    {
-        if (!is_array($value)) {
-            return [];
-        }
-        $state = [];
-        foreach (['audio', 'video', 'screen'] as $kind) {
-            $entry = $this->normalizeMediaKindState($value[$kind] ?? null);
-            if ($entry !== null) {
-                $state[$kind] = $entry;
-            }
-        }
-        return $state;
-    }
-
-    private function normalizeMediaKindState(mixed $value): ?array
-    {
-        if (!is_array($value)) {
-            return null;
-        }
-        $state = [
-            'published' => ($value['published'] ?? false) === true,
-            'muted' => ($value['muted'] ?? false) === true,
-        ];
-        if (is_string($value['trackId'] ?? null)) {
-            $state['trackId'] = $value['trackId'];
-        }
-        if (is_string($value['deviceId'] ?? null)) {
-            $state['deviceId'] = $value['deviceId'];
-        }
-        if (isset($value['publishedAt'])) {
-            $state['publishedAt'] = $value['publishedAt'];
-        }
-        if (array_key_exists('adminDisabled', $value)) {
-            $state['adminDisabled'] = ($value['adminDisabled'] ?? false) === true;
-        }
-        return $state;
-    }
-
-    private function normalizeMediaTracks(mixed $value): array
-    {
-        if (!is_array($value)) {
-            return [];
-        }
-        $tracks = [];
-        foreach ($value as $track) {
-            $normalized = $this->normalizeMediaTrack($track);
-            if ($normalized !== null) {
-                $tracks[] = $normalized;
-            }
-        }
-        return $tracks;
-    }
-
-    private function normalizeMediaTrack(mixed $value): ?array
-    {
-        if (!is_array($value)) {
-            return null;
-        }
-        $kind = $this->normalizeMediaKind($value['kind'] ?? null);
-        if ($kind === null) {
-            return null;
-        }
-        $track = [
-            'kind' => $kind,
-            'muted' => ($value['muted'] ?? false) === true,
-        ];
-        if (is_string($value['trackId'] ?? null)) {
-            $track['trackId'] = $value['trackId'];
-        }
-        if (is_string($value['deviceId'] ?? null)) {
-            $track['deviceId'] = $value['deviceId'];
-        }
-        if (isset($value['publishedAt'])) {
-            $track['publishedAt'] = $value['publishedAt'];
-        }
-        if (array_key_exists('adminDisabled', $value)) {
-            $track['adminDisabled'] = ($value['adminDisabled'] ?? false) === true;
-        }
-        return $track;
-    }
-
-    private function normalizeMediaKind(mixed $value): ?string
-    {
-        return match ($value) {
-            'audio', 'video', 'screen' => $value,
-            default => null,
-        };
-    }
-
     private function normalizeSignalMeta(mixed $value): array
     {
         if (!is_array($value)) {
@@ -1446,94 +1097,6 @@ class RoomClient
             $this->roomMembers,
             static fn (array $member): bool => ($member['memberId'] ?? null) !== $memberId,
         ));
-    }
-
-    private function syncMediaMemberInfo(array $member): void
-    {
-        $memberId = (string) ($member['memberId'] ?? '');
-        foreach ($this->mediaMembers as $index => $mediaMember) {
-            if (($mediaMember['member']['memberId'] ?? null) === $memberId) {
-                $this->mediaMembers[$index]['member'] = self::deepCopy($member);
-                return;
-            }
-        }
-    }
-
-    private function ensureMediaMemberIndex(array $member): int
-    {
-        $memberId = (string) ($member['memberId'] ?? '');
-        foreach ($this->mediaMembers as $index => $mediaMember) {
-            if (($mediaMember['member']['memberId'] ?? null) === $memberId) {
-                $this->mediaMembers[$index]['member'] = self::deepCopy($member);
-                return $index;
-            }
-        }
-        $this->mediaMembers[] = [
-            'member' => self::deepCopy($member),
-            'state' => [],
-            'tracks' => [],
-        ];
-        return array_key_last($this->mediaMembers);
-    }
-
-    private function removeMediaMember(string $memberId): void
-    {
-        $this->mediaMembers = array_values(array_filter(
-            $this->mediaMembers,
-            static fn (array $mediaMember): bool => ($mediaMember['member']['memberId'] ?? null) !== $memberId,
-        ));
-    }
-
-    private function upsertMediaTrack(int $index, array $track): void
-    {
-        $kind = (string) ($track['kind'] ?? '');
-        $trackId = $track['trackId'] ?? null;
-        $tracks = $this->mediaMembers[$index]['tracks'] ?? [];
-        foreach ($tracks as $trackIndex => $existing) {
-            if (($existing['kind'] ?? null) === $kind && (($existing['trackId'] ?? null) === $trackId)) {
-                $tracks[$trackIndex] = self::deepCopy($track);
-                $this->mediaMembers[$index]['tracks'] = array_values($tracks);
-                return;
-            }
-        }
-        if ($trackId === null) {
-            $tracks = array_values(array_filter(
-                $tracks,
-                static fn (array $existing): bool => !(($existing['kind'] ?? null) === $kind && !isset($existing['trackId'])),
-            ));
-        }
-        $tracks[] = self::deepCopy($track);
-        $this->mediaMembers[$index]['tracks'] = array_values($tracks);
-    }
-
-    private function removeMediaTrack(int $index, array $track): void
-    {
-        $kind = (string) ($track['kind'] ?? '');
-        $trackId = $track['trackId'] ?? null;
-        $this->mediaMembers[$index]['tracks'] = array_values(array_filter(
-            $this->mediaMembers[$index]['tracks'] ?? [],
-            static fn (array $existing): bool => $trackId !== null
-                ? !(($existing['kind'] ?? null) === $kind && (($existing['trackId'] ?? null) === $trackId))
-                : (($existing['kind'] ?? null) !== $kind),
-        ));
-    }
-
-    private function mergeMediaState(int $index, string $kind, array $partial): void
-    {
-        $state = self::safeAssoc($this->mediaMembers[$index]['state'] ?? []);
-        $current = self::safeAssoc($state[$kind] ?? []);
-        $next = [
-            'published' => array_key_exists('published', $partial) ? $partial['published'] : ($current['published'] ?? false),
-            'muted' => array_key_exists('muted', $partial) ? $partial['muted'] : ($current['muted'] ?? false),
-        ];
-        foreach (['trackId', 'deviceId', 'publishedAt', 'adminDisabled'] as $key) {
-            $value = array_key_exists($key, $partial) ? $partial[$key] : ($current[$key] ?? null);
-            if ($value !== null) {
-                $next[$key] = $value;
-            }
-        }
-        $state[$kind] = $next;
-        $this->mediaMembers[$index]['state'] = $state;
     }
 
     private function generateRequestId(): string
@@ -1707,11 +1270,6 @@ final class RoomAdminNamespace
         $this->client->sendAdmin('kick', $memberId);
     }
 
-    public function mute(string $memberId): void
-    {
-        $this->client->sendAdmin('mute', $memberId);
-    }
-
     public function block(string $memberId): void
     {
         $this->client->sendAdmin('block', $memberId);
@@ -1722,107 +1280,6 @@ final class RoomAdminNamespace
         $this->client->sendAdmin('setRole', $memberId, ['role' => $role]);
     }
 
-    public function disableVideo(string $memberId): void
-    {
-        $this->client->sendAdmin('disableVideo', $memberId);
-    }
-
-    public function stopScreenShare(string $memberId): void
-    {
-        $this->client->sendAdmin('stopScreenShare', $memberId);
-    }
-}
-
-final class RoomMediaKindNamespace
-{
-    public function __construct(private RoomClient $client, private string $kind)
-    {
-    }
-
-    public function enable(array $payload = []): void
-    {
-        $this->client->sendMedia('publish', $this->kind, $payload);
-    }
-
-    public function disable(): void
-    {
-        $this->client->sendMedia('unpublish', $this->kind);
-    }
-
-    public function setMuted(bool $muted): void
-    {
-        $this->client->sendMedia('mute', $this->kind, ['muted' => $muted]);
-    }
-}
-
-final class RoomScreenMediaNamespace
-{
-    public function __construct(private RoomClient $client)
-    {
-    }
-
-    public function start(array $payload = []): void
-    {
-        $this->client->sendMedia('publish', 'screen', $payload);
-    }
-
-    public function stop(): void
-    {
-        $this->client->sendMedia('unpublish', 'screen');
-    }
-}
-
-final class RoomMediaDevicesNamespace
-{
-    public function __construct(private RoomClient $client)
-    {
-    }
-
-    public function switchInputs(array $payload): void
-    {
-        $this->client->switchMediaDevices($payload);
-    }
-}
-
-final class RoomMediaNamespace
-{
-    public readonly RoomMediaKindNamespace $audio;
-    public readonly RoomMediaKindNamespace $video;
-    public readonly RoomScreenMediaNamespace $screen;
-    public readonly RoomMediaDevicesNamespace $devices;
-
-    public function __construct(private RoomClient $client)
-    {
-        $this->audio = new RoomMediaKindNamespace($client, 'audio');
-        $this->video = new RoomMediaKindNamespace($client, 'video');
-        $this->screen = new RoomScreenMediaNamespace($client);
-        $this->devices = new RoomMediaDevicesNamespace($client);
-    }
-
-    public function list(): array
-    {
-        return $this->client->listMediaMembers();
-    }
-
-    public function onTrack(callable $handler): Subscription
-    {
-        return $this->client->onMediaTrack($handler);
-    }
-
-    public function onTrackRemoved(callable $handler): Subscription
-    {
-        return $this->client->onMediaTrackRemoved($handler);
-    }
-
-    public function onStateChange(callable $handler): Subscription
-    {
-        return $this->client->onMediaStateChange($handler);
-    }
-
-    public function onDeviceChange(callable $handler): Subscription
-    {
-        return $this->client->onMediaDeviceChange($handler);
-    }
 }
 
 final class RoomSessionNamespace

@@ -42,7 +42,7 @@ npx edgebase <command>
 | Project lifecycle | `init`, `dev`, `deploy`, `destroy`, `logs`, `upgrade` | Bootstrap, local runtime, Cloudflare deploy/cleanup, runtime logs, package upgrades |
 | Data workflow | `migration`, `migrate`, `seed`, `backup`, `export`, `typegen`, `neon` | Schema changes, provider moves, fixture data, portable backup/restore, table exports, generated TS types, Neon setup |
 | Security and admin | `secret`, `keys`, `admin` | Workers Secrets, Service Key and JWT rotation, admin password recovery |
-| Plugins and tooling | `plugins`, `create-plugin`, `docker`, `webhook-test`, `completion`, `describe`, `telemetry`, `realtime` | Plugin inspection/cleanup, plugin scaffolding, self-hosting commands, webhook simulation, shell completion, machine-readable CLI introspection, telemetry preferences, and Cloudflare Realtime provisioning for Room Media |
+| Plugins and tooling | `plugins`, `create-plugin`, `docker`, `webhook-test`, `completion`, `describe`, `telemetry` | Plugin inspection/cleanup, plugin scaffolding, self-hosting commands, webhook simulation, shell completion, machine-readable CLI introspection, and telemetry preferences |
 
 ## Fast Start
 

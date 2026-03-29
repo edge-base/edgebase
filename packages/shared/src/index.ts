@@ -133,7 +133,6 @@ export type {
   // ─── Room v2 ───
   RoomNamespaceConfig,
   RoomAccess,
-  RoomMediaAccess,
   RoomRuntimeConfig,
   RoomRuntimeTarget,
   RoomStateConfig,
@@ -141,7 +140,6 @@ export type {
   RoomMemberHooks,
   RoomStateHooks,
   RoomSignalHooks,
-  RoomMediaHooks,
   RoomSessionHooks,
   RoomHandlers,
   RoomLifecycleHandlers,

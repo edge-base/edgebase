@@ -20,15 +20,10 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:edgebase_core/src/generated/api_core.dart';
 import 'package:edgebase_core/src/errors.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
-import 'package:realtimekit_core_platform_interface/realtimekit_core_platform_interface.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'auth_refresh.dart';
 import 'token_manager.dart';
-
-part 'room_cloudflare_media.dart';
-part 'room_p2p_media.dart';
 
 const _roomExplicitLeaveCloseDelay = Duration(milliseconds: 40);
 
@@ -127,112 +122,6 @@ typedef AnySignalHandler = void Function(
   Map<String, dynamic> meta,
 );
 
-/// Handler for media track events.
-typedef MediaTrackHandler = void Function(
-  Map<String, dynamic> track,
-  Map<String, dynamic> member,
-);
-
-/// Handler for media state updates.
-typedef MediaStateHandler = void Function(
-  Map<String, dynamic> member,
-  Map<String, dynamic> state,
-);
-
-/// Handler for media device updates.
-typedef MediaDeviceHandler = void Function(
-  Map<String, dynamic> member,
-  Map<String, dynamic> change,
-);
-typedef RoomCloudflareRealtimeKitCreateSessionRequest = Map<String, dynamic>;
-typedef RoomCloudflareRealtimeKitCreateSessionResponse = Map<String, dynamic>;
-typedef RoomMediaTransportConnectPayload = Map<String, dynamic>;
-
-class RoomMediaRemoteTrackEvent {
-  final String kind;
-  final Object? track;
-  final Object? view;
-  final String? providerSessionId;
-  final String? participantId;
-  final String? customParticipantId;
-  final String? userId;
-  final Map<String, dynamic>? participant;
-
-  const RoomMediaRemoteTrackEvent({
-    required this.kind,
-    this.track,
-    this.view,
-    this.providerSessionId,
-    this.participantId,
-    this.customParticipantId,
-    this.userId,
-    this.participant,
-  });
-}
-
-abstract class RoomMediaTransport {
-  Future<String> connect([RoomMediaTransportConnectPayload? payload]);
-  Future<Object?> enableAudio([Map<String, dynamic>? payload]);
-  Future<Object?> enableVideo([Map<String, dynamic>? payload]);
-  Future<Object?> startScreenShare([Map<String, dynamic>? payload]);
-  Future<void> disableAudio();
-  Future<void> disableVideo();
-  Future<void> stopScreenShare();
-  Future<void> setMuted(String kind, bool muted);
-  Future<void> switchDevices(Map<String, dynamic> payload);
-  RoomSubscription onRemoteTrack(
-    void Function(RoomMediaRemoteTrackEvent event) handler,
-  );
-  String? getSessionId();
-  Object? getPeerConnection();
-  void destroy();
-}
-
-class RoomCloudflareRealtimeKitTransportOptions {
-  final bool autoSubscribe;
-  final String baseDomain;
-  final RoomCloudflareRealtimeKitClientFactory? clientFactory;
-
-  const RoomCloudflareRealtimeKitTransportOptions({
-    this.autoSubscribe = true,
-    this.baseDomain = 'dyte.io',
-    this.clientFactory,
-  });
-}
-
-abstract class RoomP2PMediaDevicesAdapter {
-  Future<MediaStream> getUserMedia(Map<String, dynamic> mediaConstraints);
-  Future<MediaStream> getDisplayMedia(Map<String, dynamic> mediaConstraints);
-}
-
-class RoomP2PMediaTransportOptions {
-  final Map<String, dynamic>? rtcConfiguration;
-  final Future<RTCPeerConnection> Function(
-    Map<String, dynamic> configuration,
-  )? peerConnectionFactory;
-  final RoomP2PMediaDevicesAdapter? mediaDevices;
-  final String signalPrefix;
-
-  const RoomP2PMediaTransportOptions({
-    this.rtcConfiguration,
-    this.peerConnectionFactory,
-    this.mediaDevices,
-    this.signalPrefix = 'edgebase.media.p2p',
-  });
-}
-
-class RoomMediaTransportOptions {
-  final String provider;
-  final RoomCloudflareRealtimeKitTransportOptions? cloudflareRealtimeKit;
-  final RoomP2PMediaTransportOptions? p2p;
-
-  const RoomMediaTransportOptions({
-    this.provider = 'cloudflare_realtimekit',
-    this.cloudflareRealtimeKit,
-    this.p2p,
-  });
-}
-
 /// Handler for reconnect lifecycle.
 typedef ReconnectHandler = void Function(Map<String, dynamic> info);
 
@@ -260,7 +149,6 @@ class RoomClient {
   Map<String, dynamic> _playerState = {};
   int _playerVersion = 0;
   List<Map<String, dynamic>> _members = [];
-  List<Map<String, dynamic>> _mediaMembers = [];
   String? _currentUserId;
   String? _currentConnectionId;
   String _connectionState = 'idle';
@@ -286,7 +174,6 @@ class RoomClient {
   final Map<String, _PendingRequest> _pendingSignalRequests = {};
   final Map<String, _PendingRequest> _pendingAdminRequests = {};
   final Map<String, _PendingRequest> _pendingMemberStateRequests = {};
-  final Map<String, _PendingRequest> _pendingMediaRequests = {};
 
   // ── Subscription handlers ──
 
@@ -303,10 +190,6 @@ class RoomClient {
   final List<MemberStateHandler> _memberStateHandlers = [];
   final Map<String, List<SignalHandler>> _signalHandlers = {};
   final List<AnySignalHandler> _anySignalHandlers = [];
-  final List<MediaTrackHandler> _mediaTrackHandlers = [];
-  final List<MediaTrackHandler> _mediaTrackRemovedHandlers = [];
-  final List<MediaStateHandler> _mediaStateHandlers = [];
-  final List<MediaDeviceHandler> _mediaDeviceHandlers = [];
   final List<ReconnectHandler> _reconnectHandlers = [];
   final List<ConnectionStateHandler> _connectionStateHandlers = [];
 
@@ -315,7 +198,6 @@ class RoomClient {
   late final RoomSignalsNamespace signals;
   late final RoomMembersNamespace members;
   late final RoomAdminNamespace admin;
-  late final RoomMediaNamespace media;
   late final RoomSessionNamespace session;
 
   RoomClient(
@@ -330,7 +212,6 @@ class RoomClient {
     signals = RoomSignalsNamespace(this);
     members = RoomMembersNamespace(this);
     admin = RoomAdminNamespace(this);
-    media = RoomMediaNamespace(this);
     session = RoomSessionNamespace(this);
     _authStateSubscription = _tokenManager.onAuthStateChange.listen(
       _handleAuthStateChange,
@@ -385,66 +266,6 @@ class RoomClient {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> _requestCloudflareRealtimeKitMedia(
-    String path,
-    String method, [
-    Map<String, dynamic>? payload,
-  ]) {
-    return _requestRoomMedia('cloudflare_realtimekit', path, method, payload);
-  }
-
-  Future<Map<String, dynamic>> _requestRoomMedia(
-    String providerPath,
-    String path,
-    String method, [
-    Map<String, dynamic>? payload,
-  ]) async {
-    final token = await _tokenManager.getAccessToken(
-      (refreshToken) => refreshAccessToken(_baseUrl, refreshToken),
-    );
-    if (token == null) {
-      throw Exception(
-        'Authentication required before calling room media APIs. Sign in and join the room first.',
-      );
-    }
-
-    final uri = Uri.parse(
-      '${_baseUrl.replaceAll(RegExp(r'/$'), '')}/api/room/media/$providerPath/$path',
-    ).replace(queryParameters: {
-      'namespace': namespace,
-      'id': roomId,
-    });
-
-    final headers = {
-      'Authorization': 'Bearer $token',
-      'Content-Type': 'application/json',
-    };
-    final response = switch (method) {
-      'GET' => await http.get(uri, headers: headers),
-      'PUT' => await http.put(
-          uri,
-          headers: headers,
-          body: jsonEncode(payload ?? <String, dynamic>{}),
-        ),
-      _ => await http.post(
-          uri,
-          headers: headers,
-          body: jsonEncode(payload ?? <String, dynamic>{}),
-        ),
-    };
-    final decoded = response.body.isEmpty
-        ? <String, dynamic>{}
-        : (jsonDecode(response.body) as Map<String, dynamic>);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception(
-        decoded['message'] ??
-            'Room media request failed: ${response.statusCode}',
-      );
-    }
-
-    return decoded;
-  }
-
   // ── Connection Lifecycle ──
 
   /// Connect to the room, authenticate, and join.
@@ -473,7 +294,6 @@ class RoomClient {
     _rejectPendingVoidRequests(_pendingSignalRequests, 'Room left');
     _rejectPendingVoidRequests(_pendingAdminRequests, 'Room left');
     _rejectPendingVoidRequests(_pendingMemberStateRequests, 'Room left');
-    _rejectPendingVoidRequests(_pendingMediaRequests, 'Room left');
 
     final socket = _channel;
     if (socket != null) {
@@ -495,7 +315,6 @@ class RoomClient {
     _playerState = {};
     _playerVersion = 0;
     _members = [];
-    _mediaMembers = [];
     _currentUserId = null;
     _currentConnectionId = null;
     _reconnectInfo = null;
@@ -515,7 +334,7 @@ class RoomClient {
   Future<dynamic> send(String actionType, [dynamic payload]) {
     if (!_connected || !_authenticated) {
       return Future.error(Exception(
-        'Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.',
+        'Not connected to room. Call room.join() and wait for the room to connect before sending actions or signals.',
       ));
     }
 
@@ -645,34 +464,6 @@ class RoomClient {
     });
   }
 
-  RoomSubscription onMediaTrack(MediaTrackHandler handler) {
-    _mediaTrackHandlers.add(handler);
-    return RoomSubscription(() {
-      _mediaTrackHandlers.remove(handler);
-    });
-  }
-
-  RoomSubscription onMediaTrackRemoved(MediaTrackHandler handler) {
-    _mediaTrackRemovedHandlers.add(handler);
-    return RoomSubscription(() {
-      _mediaTrackRemovedHandlers.remove(handler);
-    });
-  }
-
-  RoomSubscription onMediaStateChange(MediaStateHandler handler) {
-    _mediaStateHandlers.add(handler);
-    return RoomSubscription(() {
-      _mediaStateHandlers.remove(handler);
-    });
-  }
-
-  RoomSubscription onMediaDeviceChange(MediaDeviceHandler handler) {
-    _mediaDeviceHandlers.add(handler);
-    return RoomSubscription(() {
-      _mediaDeviceHandlers.remove(handler);
-    });
-  }
-
   RoomSubscription onReconnect(ReconnectHandler handler) {
     _reconnectHandlers.add(handler);
     return RoomSubscription(() {
@@ -689,9 +480,6 @@ class RoomClient {
 
   List<Map<String, dynamic>> listMembers() => _cloneListOfMaps(_members);
 
-  List<Map<String, dynamic>> listMediaMembers() =>
-      _cloneListOfMaps(_mediaMembers);
-
   Future<void> sendSignal(
     String event, [
     dynamic payload,
@@ -699,7 +487,7 @@ class RoomClient {
   ]) {
     if (!_connected || !_authenticated) {
       return Future.error(Exception(
-        'Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.',
+        'Not connected to room. Call room.join() and wait for the room to connect before sending actions or signals.',
       ));
     }
 
@@ -728,7 +516,7 @@ class RoomClient {
   Future<void> sendMemberState(Map<String, dynamic> state) {
     if (!_connected || !_authenticated) {
       return Future.error(Exception(
-        'Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.',
+        'Not connected to room. Call room.join() and wait for the room to connect before sending actions or signals.',
       ));
     }
 
@@ -754,7 +542,7 @@ class RoomClient {
   Future<void> clearMemberState() {
     if (!_connected || !_authenticated) {
       return Future.error(Exception(
-        'Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.',
+        'Not connected to room. Call room.join() and wait for the room to connect before sending actions or signals.',
       ));
     }
 
@@ -783,7 +571,7 @@ class RoomClient {
   ]) {
     if (!_connected || !_authenticated) {
       return Future.error(Exception(
-        'Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.',
+        'Not connected to room. Call room.join() and wait for the room to connect before sending actions or signals.',
       ));
     }
 
@@ -806,58 +594,6 @@ class RoomClient {
     });
 
     return completer.future.then((_) => null);
-  }
-
-  Future<void> sendMedia(
-    String operation,
-    String kind, [
-    Map<String, dynamic>? payload,
-  ]) {
-    if (!_connected || !_authenticated) {
-      return Future.error(Exception(
-        'Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.',
-      ));
-    }
-
-    final requestId = _generateRequestId();
-    final completer = Completer<dynamic>();
-    final timer = Timer(Duration(milliseconds: _options.sendTimeout), () {
-      _pendingMediaRequests.remove(requestId);
-      if (!completer.isCompleted) {
-        completer.completeError(
-          Exception("Media '$operation:$kind' timed out"),
-        );
-      }
-    });
-    _pendingMediaRequests[requestId] = _PendingRequest(completer, timer);
-
-    _sendRaw({
-      'type': 'media',
-      'operation': operation,
-      'kind': kind,
-      if (payload != null) 'payload': payload,
-      'requestId': requestId,
-    });
-
-    return completer.future.then((_) => null);
-  }
-
-  Future<void> switchMediaDevices(Map<String, dynamic> payload) async {
-    if (payload['audioInputId'] is String && payload['audioInputId'] != '') {
-      await sendMedia('device', 'audio', {
-        'deviceId': payload['audioInputId'],
-      });
-    }
-    if (payload['videoInputId'] is String && payload['videoInputId'] != '') {
-      await sendMedia('device', 'video', {
-        'deviceId': payload['videoInputId'],
-      });
-    }
-    if (payload['screenInputId'] is String && payload['screenInputId'] != '') {
-      await sendMedia('device', 'screen', {
-        'deviceId': payload['screenInputId'],
-      });
-    }
   }
 
   // ── Private: Connection ──
@@ -1020,31 +756,6 @@ class RoomClient {
           msg['message'] as String? ?? 'Admin error',
         );
         break;
-      case 'media_sync':
-        _handleMediaSync(msg);
-        break;
-      case 'media_track':
-        _handleMediaTrack(msg);
-        break;
-      case 'media_track_removed':
-        _handleMediaTrackRemoved(msg);
-        break;
-      case 'media_state':
-        _handleMediaState(msg);
-        break;
-      case 'media_device':
-        _handleMediaDevice(msg);
-        break;
-      case 'media_result':
-        _resolvePendingVoidRequest(_pendingMediaRequests, msg['requestId']);
-        break;
-      case 'media_error':
-        _rejectPendingVoidRequest(
-          _pendingMediaRequests,
-          msg['requestId'],
-          msg['message'] as String? ?? 'Media error',
-        );
-        break;
       case 'kicked':
         _handleKicked();
         break;
@@ -1172,7 +883,6 @@ class RoomClient {
   void _handleMembersSync(Map<String, dynamic> msg) {
     final nextMembers = _normalizeMembers(msg['members']);
     _members = nextMembers;
-    _mergeMembersIntoMedia(nextMembers);
 
     for (final handler in _memberSyncHandlers) {
       handler(_cloneListOfMaps(_members));
@@ -1211,90 +921,6 @@ class RoomClient {
 
     for (final handler in _memberStateHandlers) {
       handler(_cloneMap(member), _cloneMap(state));
-    }
-  }
-
-  void _handleMediaSync(Map<String, dynamic> msg) {
-    _mediaMembers = _normalizeMediaMembers(msg['members']);
-    for (final mediaMember in _mediaMembers) {
-      final member = _asMap(mediaMember['member']);
-      if (member.isNotEmpty) {
-        _upsertMember(_cloneMap(member));
-      }
-    }
-  }
-
-  void _handleMediaTrack(Map<String, dynamic> msg) {
-    final member = _normalizeMember(msg['member']);
-    final track = _normalizeTrack(msg['track']);
-    if (member == null || track == null) return;
-
-    final mediaMember = _ensureMediaMember(member);
-    final tracks = _asListOfMaps(mediaMember['tracks']);
-    final existingIndex = tracks.indexWhere(
-      (entry) => entry['kind'] == track['kind'],
-    );
-    if (existingIndex >= 0) {
-      tracks[existingIndex] = track;
-    } else {
-      tracks.add(track);
-    }
-    mediaMember['tracks'] = tracks;
-    _setPublishedState(mediaMember, track, true);
-
-    for (final handler in _mediaTrackHandlers) {
-      handler(_cloneMap(track), _cloneMap(member));
-    }
-  }
-
-  void _handleMediaTrackRemoved(Map<String, dynamic> msg) {
-    final member = _normalizeMember(msg['member']);
-    final track = _normalizeTrack(msg['track']);
-    if (member == null || track == null) return;
-
-    final mediaMember = _ensureMediaMember(member);
-    final tracks = _asListOfMaps(mediaMember['tracks'])
-      ..removeWhere((entry) => entry['kind'] == track['kind']);
-    mediaMember['tracks'] = tracks;
-    _setPublishedState(mediaMember, track, false);
-
-    for (final handler in _mediaTrackRemovedHandlers) {
-      handler(_cloneMap(track), _cloneMap(member));
-    }
-  }
-
-  void _handleMediaState(Map<String, dynamic> msg) {
-    final member = _normalizeMember(msg['member']);
-    if (member == null) return;
-    final state = _cloneMap(_asMap(msg['state']));
-    final mediaMember = _ensureMediaMember(member);
-    mediaMember['state'] = state;
-
-    for (final handler in _mediaStateHandlers) {
-      handler(_cloneMap(member), _cloneMap(state));
-    }
-  }
-
-  void _handleMediaDevice(Map<String, dynamic> msg) {
-    final member = _normalizeMember(msg['member']);
-    if (member == null) return;
-    final kind = msg['kind'] as String?;
-    final deviceId = msg['deviceId'] as String?;
-    if (kind == null || deviceId == null) return;
-
-    final mediaMember = _ensureMediaMember(member);
-    final state = _asMap(mediaMember['state']);
-    final kindState = _asMap(state[kind]);
-    kindState['deviceId'] = deviceId;
-    state[kind] = kindState;
-    mediaMember['state'] = state;
-
-    final change = {
-      'kind': kind,
-      'deviceId': deviceId,
-    };
-    for (final handler in _mediaDeviceHandlers) {
-      handler(_cloneMap(member), _cloneMap(change));
     }
   }
 
@@ -1379,10 +1005,6 @@ class RoomClient {
     _memberStateHandlers.clear();
     _signalHandlers.clear();
     _anySignalHandlers.clear();
-    _mediaTrackHandlers.clear();
-    _mediaTrackRemovedHandlers.clear();
-    _mediaStateHandlers.clear();
-    _mediaDeviceHandlers.clear();
     _reconnectHandlers.clear();
     _connectionStateHandlers.clear();
   }
@@ -1404,10 +1026,6 @@ class RoomClient {
     _memberStateHandlers.clear();
     _signalHandlers.clear();
     _anySignalHandlers.clear();
-    _mediaTrackHandlers.clear();
-    _mediaTrackRemovedHandlers.clear();
-    _mediaStateHandlers.clear();
-    _mediaDeviceHandlers.clear();
     _reconnectHandlers.clear();
     _connectionStateHandlers.clear();
   }
@@ -1493,7 +1111,6 @@ class RoomClient {
     _rejectPendingVoidRequests(_pendingSignalRequests, message);
     _rejectPendingVoidRequests(_pendingAdminRequests, message);
     _rejectPendingVoidRequests(_pendingMemberStateRequests, message);
-    _rejectPendingVoidRequests(_pendingMediaRequests, message);
   }
 
   void _rejectPendingVoidRequests(
@@ -1519,77 +1136,10 @@ class RoomClient {
     } else {
       _members.add(member);
     }
-    _mergeMembersIntoMedia(_members);
   }
 
   void _removeMember(String memberId) {
     _members.removeWhere((member) => member['memberId'] == memberId);
-    _mediaMembers.removeWhere(
-      (mediaMember) => _asMap(mediaMember['member'])['memberId'] == memberId,
-    );
-  }
-
-  Map<String, dynamic> _ensureMediaMember(Map<String, dynamic> member) {
-    _upsertMember(member);
-    final memberId = member['memberId'] as String;
-    final index = _mediaMembers.indexWhere(
-      (entry) => _asMap(entry['member'])['memberId'] == memberId,
-    );
-    if (index >= 0) {
-      _mediaMembers[index]['member'] = _cloneMap(member);
-      return _mediaMembers[index];
-    }
-
-    final mediaMember = <String, dynamic>{
-      'member': _cloneMap(member),
-      'state': <String, dynamic>{},
-      'tracks': <Map<String, dynamic>>[],
-    };
-    _mediaMembers.add(mediaMember);
-    return mediaMember;
-  }
-
-  void _mergeMembersIntoMedia(List<Map<String, dynamic>> members) {
-    for (final member in members) {
-      final memberId = member['memberId'] as String?;
-      if (memberId == null) continue;
-      final index = _mediaMembers.indexWhere(
-        (entry) => _asMap(entry['member'])['memberId'] == memberId,
-      );
-      if (index >= 0) {
-        _mediaMembers[index]['member'] = _cloneMap(member);
-      }
-    }
-  }
-
-  void _setPublishedState(
-    Map<String, dynamic> mediaMember,
-    Map<String, dynamic> track,
-    bool published,
-  ) {
-    final kind = track['kind'] as String?;
-    if (kind == null || kind.isEmpty) return;
-
-    final state = _asMap(mediaMember['state']);
-    final kindState = _asMap(state[kind]);
-    kindState['published'] = published;
-    kindState['muted'] = track['muted'] == true;
-    if (published) {
-      if (track['trackId'] != null) kindState['trackId'] = track['trackId'];
-      if (track['deviceId'] != null) kindState['deviceId'] = track['deviceId'];
-      if (track['publishedAt'] != null) {
-        kindState['publishedAt'] = track['publishedAt'];
-      }
-      if (track['adminDisabled'] != null) {
-        kindState['adminDisabled'] = track['adminDisabled'];
-      }
-    } else {
-      kindState.remove('trackId');
-      kindState.remove('publishedAt');
-      kindState['adminDisabled'] = track['adminDisabled'] == true;
-    }
-    state[kind] = kindState;
-    mediaMember['state'] = state;
   }
 
   static final _random = Random();
@@ -1681,46 +1231,6 @@ List<Map<String, dynamic>> _normalizeMembers(dynamic value) {
   return members;
 }
 
-Map<String, dynamic>? _normalizeTrack(dynamic value) {
-  final track = _asMap(value);
-  final kind = track['kind'] as String?;
-  if (kind == null || kind.isEmpty) return null;
-  return {
-    'kind': kind,
-    if (track['trackId'] != null) 'trackId': track['trackId'],
-    if (track['deviceId'] != null) 'deviceId': track['deviceId'],
-    'muted': track['muted'] == true,
-    if (track['publishedAt'] != null) 'publishedAt': track['publishedAt'],
-    if (track['adminDisabled'] != null) 'adminDisabled': track['adminDisabled'],
-  };
-}
-
-List<Map<String, dynamic>> _normalizeTracks(dynamic value) {
-  if (value is! List) return <Map<String, dynamic>>[];
-  final tracks = <Map<String, dynamic>>[];
-  for (final entry in value) {
-    final track = _normalizeTrack(entry);
-    if (track != null) tracks.add(track);
-  }
-  return tracks;
-}
-
-List<Map<String, dynamic>> _normalizeMediaMembers(dynamic value) {
-  if (value is! List) return <Map<String, dynamic>>[];
-  final mediaMembers = <Map<String, dynamic>>[];
-  for (final entry in value) {
-    final raw = _asMap(entry);
-    final member = _normalizeMember(raw['member']);
-    if (member == null) continue;
-    mediaMembers.add({
-      'member': member,
-      'state': _cloneMap(_asMap(raw['state'])),
-      'tracks': _normalizeTracks(raw['tracks']),
-    });
-  }
-  return mediaMembers;
-}
-
 class RoomStateNamespace {
   final RoomClient _client;
   RoomStateNamespace(this._client);
@@ -1790,104 +1300,9 @@ class RoomAdminNamespace {
   RoomAdminNamespace(this._client);
 
   Future<void> kick(String memberId) => _client.sendAdmin('kick', memberId);
-  Future<void> mute(String memberId) => _client.sendAdmin('mute', memberId);
   Future<void> block(String memberId) => _client.sendAdmin('block', memberId);
   Future<void> setRole(String memberId, String role) =>
       _client.sendAdmin('setRole', memberId, {'role': role});
-  Future<void> disableVideo(String memberId) =>
-      _client.sendAdmin('disableVideo', memberId);
-  Future<void> stopScreenShare(String memberId) =>
-      _client.sendAdmin('stopScreenShare', memberId);
-}
-
-class RoomMediaKindNamespace {
-  final RoomClient _client;
-  final String _kind;
-  RoomMediaKindNamespace(this._client, this._kind);
-
-  Future<void> enable([Map<String, dynamic>? payload]) =>
-      _client.sendMedia('publish', _kind, payload);
-  Future<void> disable() => _client.sendMedia('unpublish', _kind);
-  Future<void> setMuted(bool muted) =>
-      _client.sendMedia('mute', _kind, {'muted': muted});
-}
-
-class RoomScreenMediaNamespace {
-  final RoomClient _client;
-  RoomScreenMediaNamespace(this._client);
-
-  Future<void> start([Map<String, dynamic>? payload]) =>
-      _client.sendMedia('publish', 'screen', payload);
-  Future<void> stop() => _client.sendMedia('unpublish', 'screen');
-}
-
-class RoomMediaDevicesNamespace {
-  final RoomClient _client;
-  RoomMediaDevicesNamespace(this._client);
-
-  Future<void> switchInputs(Map<String, dynamic> payload) =>
-      _client.switchMediaDevices(payload);
-}
-
-class RoomCloudflareRealtimeKitNamespace {
-  final RoomClient _client;
-  RoomCloudflareRealtimeKitNamespace(this._client);
-
-  Future<RoomCloudflareRealtimeKitCreateSessionResponse> createSession([
-    RoomCloudflareRealtimeKitCreateSessionRequest? payload,
-  ]) =>
-      _client._requestCloudflareRealtimeKitMedia(
-        'session',
-        'POST',
-        payload,
-      );
-}
-
-class RoomMediaNamespace {
-  final RoomClient _client;
-  late final RoomMediaKindNamespace audio;
-  late final RoomMediaKindNamespace video;
-  late final RoomScreenMediaNamespace screen;
-  late final RoomMediaDevicesNamespace devices;
-  late final RoomCloudflareRealtimeKitNamespace cloudflareRealtimeKit;
-
-  RoomMediaNamespace(this._client) {
-    audio = RoomMediaKindNamespace(_client, 'audio');
-    video = RoomMediaKindNamespace(_client, 'video');
-    screen = RoomScreenMediaNamespace(_client);
-    devices = RoomMediaDevicesNamespace(_client);
-    cloudflareRealtimeKit = RoomCloudflareRealtimeKitNamespace(_client);
-  }
-
-  RoomMediaTransport transport([RoomMediaTransportOptions? options]) {
-    final resolved = options ?? const RoomMediaTransportOptions();
-    switch (resolved.provider) {
-      case 'cloudflare_realtimekit':
-        return RoomCloudflareMediaTransport(
-          _client,
-          resolved.cloudflareRealtimeKit,
-        );
-      case 'p2p':
-        return RoomP2PMediaTransport(
-          _client,
-          resolved.p2p,
-        );
-      default:
-        throw UnsupportedError(
-          'Unknown room media transport provider: ${resolved.provider}',
-        );
-    }
-  }
-
-  List<Map<String, dynamic>> list() => _client.listMediaMembers();
-  RoomSubscription onTrack(MediaTrackHandler handler) =>
-      _client.onMediaTrack(handler);
-  RoomSubscription onTrackRemoved(MediaTrackHandler handler) =>
-      _client.onMediaTrackRemoved(handler);
-  RoomSubscription onStateChange(MediaStateHandler handler) =>
-      _client.onMediaStateChange(handler);
-  RoomSubscription onDeviceChange(MediaDeviceHandler handler) =>
-      _client.onMediaDeviceChange(handler);
 }
 
 class RoomSessionNamespace {

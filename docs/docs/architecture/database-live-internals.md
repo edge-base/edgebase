@@ -288,8 +288,7 @@ onDestroy ─── Cleanup, final save, hibernate
 | **Admin Context** | `ctx.admin` is injected into handlers for DB access from within room logic |
 | **State Size Warning** | `ROOM_STATE_WARNING` event fires when cumulative state reaches 80% of `maxStateSize` |
 | **Members** | `room.members` — built-in presence tracking with join/leave events and TTL cleanup |
-| **Signals** | `room.signals` — lightweight pub/sub for custom coordination (WebRTC signaling, cursors) |
-| **Media Metadata** *(beta)* | `room.media` — track audio/video/screen publish/mute state for conferencing UIs |
+| **Signals** | `room.signals` — lightweight pub/sub for custom coordination (cursors, reactions, transient notifications) |
 
 ### Room Configuration Defaults
 

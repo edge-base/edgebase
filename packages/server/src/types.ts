@@ -7,7 +7,7 @@ export interface Env {
   DATABASE: DurableObjectNamespace;
   AUTH: DurableObjectNamespace;
   DATABASE_LIVE: DurableObjectNamespace;
-  /** Room DO — per-room state synchronization, members, signals, media */
+  /** Room DO — per-room state synchronization, members, and signals */
   ROOMS: DurableObjectNamespace;
 
   // ─── R2 Storage ───
@@ -66,19 +66,6 @@ export interface Env {
   TURNSTILE_SECRET?: string;
   /** Turnstile site key — public, returned to clients via GET /api/config (§34) */
   CAPTCHA_SITE_KEY?: string;
-  /** Cloudflare Realtime app ID for SFU session control. */
-  CF_REALTIME_APP_ID?: string;
-  /** Cloudflare RealtimeKit preset name used when creating participant tokens. */
-  CF_REALTIME_PRESET_NAME?: string;
-  /** Cloudflare Realtime app secret for SFU session control. */
-  CF_REALTIME_APP_SECRET?: string;
-  /** Optional override for the Cloudflare Realtime API base URL. */
-  CF_REALTIME_BASE_URL?: string;
-  /** Cloudflare TURN key ID used to mint short-lived ICE credentials. */
-  CF_REALTIME_TURN_KEY_ID?: string;
-  /** Cloudflare TURN API token returned when the TURN key is created. */
-  CF_REALTIME_TURN_API_TOKEN?: string;
-
   // ─── Environment Identification ───
   /** Server environment name for Service Key constraints.env evaluation */
   ENVIRONMENT?: string;

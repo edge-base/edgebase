@@ -793,7 +793,7 @@ TEST(RoomClientUnit, ReadyBecomesTrueAfterAuthSuccess) {
   EXPECT_EQ(sent_types[1], "join");
 }
 
-TEST(RoomClientUnit, UnifiedSurfaceParsesMembersSignalsMediaAndSessionFrames) {
+TEST(RoomClientUnit, UnifiedSurfaceParsesMembersSignalsAndSessionFrames) {
   edgebase::RoomClient room(
       "http://localhost:8688",
       "game",
@@ -803,8 +803,6 @@ TEST(RoomClientUnit, UnifiedSurfaceParsesMembersSignalsMediaAndSessionFrames) {
   std::vector<json> member_sync_snapshots;
   std::vector<std::string> member_leaves;
   std::vector<std::string> signal_events;
-  std::vector<std::string> media_tracks;
-  std::vector<std::string> media_devices;
   std::vector<std::string> connection_states;
 
   room.members.on_sync([&](const json &members) { member_sync_snapshots.push_back(members); });
@@ -813,12 +811,6 @@ TEST(RoomClientUnit, UnifiedSurfaceParsesMembersSignalsMediaAndSessionFrames) {
   });
   room.signals.on_any([&](const std::string &event, const json &, const json &meta) {
     signal_events.push_back(event + ":" + meta.value("userId", ""));
-  });
-  room.media.on_track([&](const json &track, const json &member) {
-    media_tracks.push_back(track.value("kind", "") + ":" + member.value("memberId", ""));
-  });
-  room.media.on_device_change([&](const json &, const json &change) {
-    media_devices.push_back(change.value("kind", "") + ":" + change.value("deviceId", ""));
   });
   room.session.on_connection_state_change([&](const std::string &state) {
     connection_states.push_back(state);
@@ -829,8 +821,6 @@ TEST(RoomClientUnit, UnifiedSurfaceParsesMembersSignalsMediaAndSessionFrames) {
   room.handle_raw_for_testing(R"({"type":"members_sync","members":[{"memberId":"user-1","userId":"user-1","connectionId":"conn-1","connectionCount":1,"state":{"typing":false}}]})");
   room.handle_raw_for_testing(R"({"type":"member_join","member":{"memberId":"user-2","userId":"user-2","connectionCount":1,"state":{}}})");
   room.handle_raw_for_testing(R"({"type":"signal","event":"cursor.move","payload":{"x":10,"y":20},"meta":{"memberId":"user-2","userId":"user-2","connectionId":"conn-2","sentAt":123}})");
-  room.handle_raw_for_testing(R"({"type":"media_track","member":{"memberId":"user-2","userId":"user-2","state":{}},"track":{"kind":"video","trackId":"video-1","deviceId":"cam-1","muted":false}})");
-  room.handle_raw_for_testing(R"({"type":"media_device","member":{"memberId":"user-2","userId":"user-2","state":{}},"kind":"video","deviceId":"cam-2"})");
   room.handle_raw_for_testing(R"({"type":"member_leave","member":{"memberId":"user-2","userId":"user-2","state":{}},"reason":"timeout"})");
 
   EXPECT_EQ(room.state.get_shared().value("topic", ""), "focus");
@@ -843,16 +833,13 @@ TEST(RoomClientUnit, UnifiedSurfaceParsesMembersSignalsMediaAndSessionFrames) {
   ASSERT_TRUE(member_sync_snapshots[0].is_array());
   EXPECT_EQ(member_sync_snapshots[0][0].value("memberId", ""), "user-1");
   EXPECT_EQ(signal_events, std::vector<std::string>({"cursor.move:user-2"}));
-  EXPECT_EQ(media_tracks, std::vector<std::string>({"video:user-2"}));
-  EXPECT_EQ(media_devices, std::vector<std::string>({"video:cam-2"}));
   EXPECT_EQ(member_leaves, std::vector<std::string>({"user-2:timeout"}));
   ASSERT_TRUE(room.members.list().is_array());
   ASSERT_EQ(room.members.list().size(), 1u);
   EXPECT_EQ(room.members.list()[0].value("memberId", ""), "user-1");
-  EXPECT_EQ(room.media.list().size(), 0u);
 }
 
-TEST(RoomClientUnit, UnifiedSurfaceSendsSignalMemberAdminAndMediaFrames) {
+TEST(RoomClientUnit, UnifiedSurfaceSendsSignalMemberAndAdminFrames) {
   edgebase::RoomClient room(
       "http://localhost:8688",
       "game",
@@ -908,36 +895,21 @@ TEST(RoomClientUnit, UnifiedSurfaceSendsSignalMemberAdminAndMediaFrames) {
   EXPECT_TRUE(member_done);
 
   bool admin_done = false;
-  room.admin.disable_video("user-2", [&]() { admin_done = true; },
-                           [&](const std::string &) {});
+  room.admin.block("user-2", [&]() { admin_done = true; },
+                  [&](const std::string &) {});
   ASSERT_EQ(sent_messages.size(), 3u);
   EXPECT_EQ(sent_messages[2].value("type", ""), "admin");
-  EXPECT_EQ(sent_messages[2].value("operation", ""), "disableVideo");
+  EXPECT_EQ(sent_messages[2].value("operation", ""), "block");
   EXPECT_EQ(sent_messages[2].value("memberId", ""), "user-2");
   room.handle_raw_for_testing(json{{"type", "admin_result"},
                                    {"requestId", sent_messages[2].value("requestId", "")},
-                                   {"operation", "disableVideo"},
+                                   {"operation", "block"},
                                    {"memberId", "user-2"}}
                                   .dump());
   EXPECT_TRUE(admin_done);
 
-  bool media_done = false;
-  room.media.audio.set_muted(true, [&]() { media_done = true; },
-                             [&](const std::string &) {});
-  ASSERT_EQ(sent_messages.size(), 4u);
-  EXPECT_EQ(sent_messages[3].value("type", ""), "media");
-  EXPECT_EQ(sent_messages[3].value("operation", ""), "mute");
-  EXPECT_EQ(sent_messages[3].value("kind", ""), "audio");
-  EXPECT_TRUE(sent_messages[3].value("payload", json::object()).value("muted", false));
-  room.handle_raw_for_testing(json{{"type", "media_result"},
-                                   {"requestId", sent_messages[3].value("requestId", "")},
-                                   {"operation", "mute"},
-                                   {"kind", "audio"}}
-                                  .dump());
-  EXPECT_TRUE(media_done);
-
   EXPECT_EQ(events, std::vector<std::string>(
-                        {"send:signal", "send:member_state", "send:admin", "send:media"}));
+                        {"send:signal", "send:member_state", "send:admin"}));
 }
 
 // ─── PushClient Permission Tests ──────────────────────────────────────────

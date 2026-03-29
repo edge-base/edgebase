@@ -463,41 +463,6 @@ public struct GeneratedDbApi {
         return try await http.get("/room/metadata", queryParams: query)
     }
 
-    /// Get the active room realtime media session — GET /api/room/media/realtime/session
-    public func getRoomRealtimeSession(query: [String: String]? = nil) async throws -> Any {
-        return try await http.get("/room/media/realtime/session", queryParams: query)
-    }
-
-    /// Create a room realtime media session — POST /api/room/media/realtime/session
-    public func createRoomRealtimeSession(_ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
-        return try await http.post("/room/media/realtime/session", body, queryParams: query)
-    }
-
-    /// Generate TURN / ICE credentials for room realtime media — POST /api/room/media/realtime/turn
-    public func createRoomRealtimeIceServers(_ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
-        return try await http.post("/room/media/realtime/turn", body, queryParams: query)
-    }
-
-    /// Add realtime media tracks to a room session — POST /api/room/media/realtime/tracks/new
-    public func addRoomRealtimeTracks(_ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
-        return try await http.post("/room/media/realtime/tracks/new", body, queryParams: query)
-    }
-
-    /// Renegotiate a room realtime media session — PUT /api/room/media/realtime/renegotiate
-    public func renegotiateRoomRealtimeSession(_ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
-        return try await http.put("/room/media/realtime/renegotiate", body, queryParams: query)
-    }
-
-    /// Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close
-    public func closeRoomRealtimeTracks(_ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
-        return try await http.put("/room/media/realtime/tracks/close", body, queryParams: query)
-    }
-
-    /// Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
-    public func createRoomCloudflareRealtimeKitSession(_ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
-        return try await http.post("/room/media/cloudflare_realtimekit/session", body, queryParams: query)
-    }
-
     /// Track custom events — POST /api/analytics/track
     public func trackEvents(_ body: [String: Any]) async throws -> Any {
         return try await http.post("/analytics/track", body)
@@ -678,13 +643,6 @@ public enum ApiPaths {
     public static let PUSH_UNREGISTER = "/api/push/unregister"
     public static let CONNECT_ROOM = "/api/room"
     public static let CHECK_ROOM_CONNECTION = "/api/room/connect-check"
-    public static let CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session"
-    public static let RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate"
-    public static let GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
-    public static let CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
-    public static let CLOSE_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/close"
-    public static let ADD_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/new"
-    public static let CREATE_ROOM_REALTIME_ICE_SERVERS = "/api/room/media/realtime/turn"
     public static let GET_ROOM_METADATA = "/api/room/metadata"
     public static let GET_SCHEMA = "/api/schema"
     public static let EXECUTE_SQL = "/api/sql"

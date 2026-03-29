@@ -307,9 +307,6 @@ describe('defineConfig', () => {
           access: {
             join: (auth) => auth !== null,
             signal: (auth, _roomId, event) => auth !== null && event.length > 0,
-            media: {
-              publish: (auth) => auth?.role === 'host',
-            },
             admin: (auth) => auth?.role === 'admin',
           },
           state: {

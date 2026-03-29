@@ -51,9 +51,6 @@ import java.util.function.Consumer;
 @SuppressWarnings("deprecation")
 public class RoomClient {
     private static final long ROOM_EXPLICIT_LEAVE_CLOSE_DELAY_MS = 40L;
-    private static final String ROOM_MEDIA_DOCS_URL = "https://edgebase.fun/docs/room/media";
-    private static volatile RoomCloudflareRealtimeKitClientFactory defaultCloudflareRealtimeKitClientFactory;
-    private static volatile RoomP2PMediaTransportFactory defaultP2PMediaTransportFactory;
 
     interface RoomSocket {
         void send(String msg);
@@ -80,386 +77,6 @@ public class RoomClient {
         void accept(String event, Object payload, Map<String, Object> meta);
     }
 
-    public static final class RoomMediaRemoteTrackEvent {
-        private final String kind;
-        private final Object track;
-        private final Object view;
-        private final String trackName;
-        private final String providerSessionId;
-        private final String participantId;
-        private final String customParticipantId;
-        private final String userId;
-        private final Map<String, Object> participant;
-
-        public RoomMediaRemoteTrackEvent(
-                String kind,
-                Object track,
-                Object view,
-                String trackName,
-                String providerSessionId,
-                String participantId,
-                String customParticipantId,
-                String userId,
-                Map<String, Object> participant
-        ) {
-            this.kind = kind;
-            this.track = track;
-            this.view = view;
-            this.trackName = trackName;
-            this.providerSessionId = providerSessionId;
-            this.participantId = participantId;
-            this.customParticipantId = customParticipantId;
-            this.userId = userId;
-            this.participant = participant == null ? Map.of() : Map.copyOf(participant);
-        }
-
-        public String getKind() { return kind; }
-        public Object getTrack() { return track; }
-        public Object getView() { return view; }
-        public String getTrackName() { return trackName; }
-        public String getProviderSessionId() { return providerSessionId; }
-        public String getParticipantId() { return participantId; }
-        public String getCustomParticipantId() { return customParticipantId; }
-        public String getUserId() { return userId; }
-        public Map<String, Object> getParticipant() { return participant; }
-    }
-
-    public interface RoomMediaTransport {
-        CompletableFuture<String> connect(Map<String, Object> payload);
-        default CompletableFuture<String> connect() { return connect(Map.of()); }
-        CompletableFuture<Object> enableAudio(Map<String, Object> payload);
-        default CompletableFuture<Object> enableAudio() { return enableAudio(Map.of()); }
-        CompletableFuture<Object> enableVideo(Map<String, Object> payload);
-        default CompletableFuture<Object> enableVideo() { return enableVideo(Map.of()); }
-        CompletableFuture<Object> startScreenShare(Map<String, Object> payload);
-        default CompletableFuture<Object> startScreenShare() { return startScreenShare(Map.of()); }
-        CompletableFuture<Void> disableAudio();
-        CompletableFuture<Void> disableVideo();
-        CompletableFuture<Void> stopScreenShare();
-        CompletableFuture<Void> setMuted(String kind, boolean muted);
-        CompletableFuture<Void> switchDevices(Map<String, Object> payload);
-        Subscription onRemoteTrack(Consumer<RoomMediaRemoteTrackEvent> handler);
-        String getSessionId();
-        Object getPeerConnection();
-        void destroy();
-    }
-
-    public enum RoomMediaTransportProvider {
-        CLOUDFLARE_REALTIMEKIT("cloudflare_realtimekit"),
-        P2P("p2p");
-
-        private final String wireName;
-
-        RoomMediaTransportProvider(String wireName) {
-            this.wireName = wireName;
-        }
-
-        public String wireName() {
-            return wireName;
-        }
-    }
-
-    public static final class RoomCloudflareRealtimeKitTransportOptions {
-        private boolean autoSubscribe = true;
-        private String baseDomain = "dyte.io";
-        private RoomCloudflareRealtimeKitClientFactory clientFactory;
-
-        public boolean isAutoSubscribe() {
-            return autoSubscribe;
-        }
-
-        public RoomCloudflareRealtimeKitTransportOptions setAutoSubscribe(boolean autoSubscribe) {
-            this.autoSubscribe = autoSubscribe;
-            return this;
-        }
-
-        public String getBaseDomain() {
-            return baseDomain;
-        }
-
-        public RoomCloudflareRealtimeKitTransportOptions setBaseDomain(String baseDomain) {
-            this.baseDomain = baseDomain == null || baseDomain.isBlank() ? "dyte.io" : baseDomain;
-            return this;
-        }
-
-        public RoomCloudflareRealtimeKitClientFactory getClientFactory() {
-            return clientFactory;
-        }
-
-        public RoomCloudflareRealtimeKitTransportOptions setClientFactory(RoomCloudflareRealtimeKitClientFactory clientFactory) {
-            this.clientFactory = clientFactory;
-            return this;
-        }
-    }
-
-    public static final class RoomP2PIceServerOptions {
-        private List<String> urls = List.of("stun:stun.l.google.com:19302");
-        private String username;
-        private String credential;
-
-        public List<String> getUrls() {
-            return urls;
-        }
-
-        public RoomP2PIceServerOptions setUrls(List<String> urls) {
-            this.urls = (urls == null || urls.isEmpty())
-                    ? List.of("stun:stun.l.google.com:19302")
-                    : List.copyOf(urls);
-            return this;
-        }
-
-        public String getUsername() {
-            return username;
-        }
-
-        public RoomP2PIceServerOptions setUsername(String username) {
-            this.username = username;
-            return this;
-        }
-
-        public String getCredential() {
-            return credential;
-        }
-
-        public RoomP2PIceServerOptions setCredential(String credential) {
-            this.credential = credential;
-            return this;
-        }
-    }
-
-    public static final class RoomP2PRtcConfigurationOptions {
-        private List<RoomP2PIceServerOptions> iceServers = List.of(new RoomP2PIceServerOptions());
-
-        public List<RoomP2PIceServerOptions> getIceServers() {
-            return iceServers;
-        }
-
-        public RoomP2PRtcConfigurationOptions setIceServers(List<RoomP2PIceServerOptions> iceServers) {
-            this.iceServers = (iceServers == null || iceServers.isEmpty())
-                    ? List.of(new RoomP2PIceServerOptions())
-                    : List.copyOf(iceServers);
-            return this;
-        }
-    }
-
-    public static final class RoomP2PMediaTransportOptions {
-        private String signalPrefix = "edgebase.media.p2p";
-        private RoomP2PRtcConfigurationOptions rtcConfiguration = new RoomP2PRtcConfigurationOptions();
-        private long currentMemberTimeoutMs = 10_000L;
-        private RoomP2PMediaTransportFactory transportFactory;
-
-        public String getSignalPrefix() {
-            return signalPrefix;
-        }
-
-        public RoomP2PMediaTransportOptions setSignalPrefix(String signalPrefix) {
-            this.signalPrefix = signalPrefix == null || signalPrefix.isBlank()
-                    ? "edgebase.media.p2p"
-                    : signalPrefix;
-            return this;
-        }
-
-        public RoomP2PRtcConfigurationOptions getRtcConfiguration() {
-            return rtcConfiguration;
-        }
-
-        public RoomP2PMediaTransportOptions setRtcConfiguration(RoomP2PRtcConfigurationOptions rtcConfiguration) {
-            this.rtcConfiguration = rtcConfiguration == null
-                    ? new RoomP2PRtcConfigurationOptions()
-                    : rtcConfiguration;
-            return this;
-        }
-
-        public long getCurrentMemberTimeoutMs() {
-            return currentMemberTimeoutMs;
-        }
-
-        public RoomP2PMediaTransportOptions setCurrentMemberTimeoutMs(long currentMemberTimeoutMs) {
-            this.currentMemberTimeoutMs = Math.max(0L, currentMemberTimeoutMs);
-            return this;
-        }
-
-        public RoomP2PMediaTransportFactory getTransportFactory() {
-            return transportFactory;
-        }
-
-        public RoomP2PMediaTransportOptions setTransportFactory(RoomP2PMediaTransportFactory transportFactory) {
-            this.transportFactory = transportFactory;
-            return this;
-        }
-    }
-
-    @FunctionalInterface
-    public interface RoomP2PMediaTransportFactory {
-        RoomMediaTransport create(RoomClient room, RoomP2PMediaTransportOptions options);
-    }
-
-    public static final class RoomMediaTransportOptions {
-        private RoomMediaTransportProvider provider = RoomMediaTransportProvider.CLOUDFLARE_REALTIMEKIT;
-        private RoomCloudflareRealtimeKitTransportOptions cloudflareRealtimeKit = new RoomCloudflareRealtimeKitTransportOptions();
-        private RoomP2PMediaTransportOptions p2p = new RoomP2PMediaTransportOptions();
-
-        public RoomMediaTransportProvider getProvider() {
-            return provider;
-        }
-
-        public RoomMediaTransportOptions setProvider(RoomMediaTransportProvider provider) {
-            this.provider = provider == null ? RoomMediaTransportProvider.CLOUDFLARE_REALTIMEKIT : provider;
-            return this;
-        }
-
-        public RoomCloudflareRealtimeKitTransportOptions getCloudflareRealtimeKit() {
-            return cloudflareRealtimeKit;
-        }
-
-        public RoomMediaTransportOptions setCloudflareRealtimeKit(RoomCloudflareRealtimeKitTransportOptions cloudflareRealtimeKit) {
-            this.cloudflareRealtimeKit = cloudflareRealtimeKit == null
-                    ? new RoomCloudflareRealtimeKitTransportOptions()
-                    : cloudflareRealtimeKit;
-            return this;
-        }
-
-        public RoomP2PMediaTransportOptions getP2P() {
-            return p2p;
-        }
-
-        public RoomMediaTransportOptions setP2P(RoomP2PMediaTransportOptions p2p) {
-            this.p2p = p2p == null ? new RoomP2PMediaTransportOptions() : p2p;
-            return this;
-        }
-    }
-
-    public static final class RoomCloudflareRealtimeKitClientFactoryOptions {
-        private final String authToken;
-        private final String displayName;
-        private final boolean enableAudio;
-        private final boolean enableVideo;
-        private final String baseDomain;
-
-        public RoomCloudflareRealtimeKitClientFactoryOptions(
-                String authToken,
-                String displayName,
-                boolean enableAudio,
-                boolean enableVideo,
-                String baseDomain
-        ) {
-            this.authToken = authToken;
-            this.displayName = displayName;
-            this.enableAudio = enableAudio;
-            this.enableVideo = enableVideo;
-            this.baseDomain = baseDomain;
-        }
-
-        public String getAuthToken() { return authToken; }
-        public String getDisplayName() { return displayName; }
-        public boolean isEnableAudio() { return enableAudio; }
-        public boolean isEnableVideo() { return enableVideo; }
-        public String getBaseDomain() { return baseDomain; }
-    }
-
-    @FunctionalInterface
-    public interface RoomCloudflareRealtimeKitClientFactory {
-        CompletableFuture<RoomCloudflareRealtimeKitClientAdapter> create(
-                RoomCloudflareRealtimeKitClientFactoryOptions options
-        );
-    }
-
-    public static final class RoomCloudflareParticipantSnapshot {
-        private final String id;
-        private final String userId;
-        private final String name;
-        private final String picture;
-        private final String customParticipantId;
-        private final boolean audioEnabled;
-        private final boolean videoEnabled;
-        private final boolean screenShareEnabled;
-        private final Object participantHandle;
-
-        public RoomCloudflareParticipantSnapshot(
-                String id,
-                String userId,
-                String name,
-                String picture,
-                String customParticipantId,
-                boolean audioEnabled,
-                boolean videoEnabled,
-                boolean screenShareEnabled,
-                Object participantHandle
-        ) {
-            this.id = id;
-            this.userId = userId;
-            this.name = name;
-            this.picture = picture;
-            this.customParticipantId = customParticipantId;
-            this.audioEnabled = audioEnabled;
-            this.videoEnabled = videoEnabled;
-            this.screenShareEnabled = screenShareEnabled;
-            this.participantHandle = participantHandle;
-        }
-
-        public String getId() { return id; }
-        public String getUserId() { return userId; }
-        public String getName() { return name; }
-        public String getPicture() { return picture; }
-        public String getCustomParticipantId() { return customParticipantId; }
-        public boolean isAudioEnabled() { return audioEnabled; }
-        public boolean isVideoEnabled() { return videoEnabled; }
-        public boolean isScreenShareEnabled() { return screenShareEnabled; }
-        public Object getParticipantHandle() { return participantHandle; }
-
-        public Map<String, Object> toMap() {
-            LinkedHashMap<String, Object> result = new LinkedHashMap<>();
-            result.put("id", id);
-            result.put("userId", userId);
-            result.put("name", name);
-            if (picture != null) result.put("picture", picture);
-            if (customParticipantId != null) result.put("customParticipantId", customParticipantId);
-            result.put("audioEnabled", audioEnabled);
-            result.put("videoEnabled", videoEnabled);
-            result.put("screenShareEnabled", screenShareEnabled);
-            return result;
-        }
-    }
-
-    public interface RoomCloudflareParticipantListener {
-        default void onParticipantJoin(RoomCloudflareParticipantSnapshot participant) {}
-        default void onParticipantLeave(RoomCloudflareParticipantSnapshot participant) {}
-        default void onAudioUpdate(RoomCloudflareParticipantSnapshot participant, boolean enabled) {}
-        default void onVideoUpdate(RoomCloudflareParticipantSnapshot participant, boolean enabled) {}
-        default void onScreenShareUpdate(RoomCloudflareParticipantSnapshot participant, boolean enabled) {}
-        default void onParticipantsSync(List<RoomCloudflareParticipantSnapshot> participants) {}
-    }
-
-    public interface RoomCloudflareRealtimeKitClientAdapter {
-        CompletableFuture<Void> joinRoom();
-        CompletableFuture<Void> leaveRoom();
-        CompletableFuture<Void> enableAudio();
-        CompletableFuture<Void> disableAudio();
-        CompletableFuture<Void> enableVideo();
-        CompletableFuture<Void> disableVideo();
-        CompletableFuture<Void> enableScreenShare();
-        CompletableFuture<Void> disableScreenShare();
-        CompletableFuture<Void> setAudioDevice(String deviceId);
-        CompletableFuture<Void> setVideoDevice(String deviceId);
-        RoomCloudflareParticipantSnapshot getLocalParticipant();
-        List<RoomCloudflareParticipantSnapshot> getJoinedParticipants();
-        Object buildView(RoomCloudflareParticipantSnapshot participant, String kind, boolean isSelf);
-        void addListener(RoomCloudflareParticipantListener listener);
-        void removeListener(RoomCloudflareParticipantListener listener);
-    }
-
-    public static void setDefaultCloudflareRealtimeKitClientFactory(
-            RoomCloudflareRealtimeKitClientFactory clientFactory
-    ) {
-        defaultCloudflareRealtimeKitClientFactory = clientFactory;
-    }
-
-    public static void setDefaultP2PMediaTransportFactory(
-            RoomP2PMediaTransportFactory transportFactory
-    ) {
-        defaultP2PMediaTransportFactory = transportFactory;
-    }
-
     /** Room namespace (e.g. 'game', 'chat'). */
     public final String namespace;
     /** Room instance ID within the namespace. */
@@ -470,7 +87,6 @@ public class RoomClient {
     public final RoomSignalsNamespace signals;
     public final RoomMembersNamespace members;
     public final RoomAdminNamespace admin;
-    public final RoomMediaNamespace media;
     public final RoomSessionNamespace session;
 
     private final String baseUrl;
@@ -487,7 +103,6 @@ public class RoomClient {
     private Map<String, Object> playerState = new ConcurrentHashMap<>();
     private int playerVersion = 0;
     private List<Map<String, Object>> roomMembers = new ArrayList<>();
-    private List<Map<String, Object>> mediaMembers = new ArrayList<>();
 
     private RoomSocket ws;
     private boolean connected = false;
@@ -508,7 +123,6 @@ public class RoomClient {
     private final ConcurrentHashMap<String, CompletableFuture<Void>> pendingSignalRequests = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, CompletableFuture<Void>> pendingAdminRequests = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, CompletableFuture<Void>> pendingMemberStateRequests = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, CompletableFuture<Void>> pendingMediaRequests = new ConcurrentHashMap<>();
 
     private final List<BiConsumer<Map<String, Object>, Map<String, Object>>> sharedStateHandlers = new CopyOnWriteArrayList<>();
     private final List<BiConsumer<Map<String, Object>, Map<String, Object>>> playerStateHandlers = new CopyOnWriteArrayList<>();
@@ -523,10 +137,6 @@ public class RoomClient {
     private final List<BiConsumer<Map<String, Object>, Map<String, Object>>> memberStateHandlers = new CopyOnWriteArrayList<>();
     private final ConcurrentHashMap<String, List<BiConsumer<Object, Map<String, Object>>>> signalHandlers = new ConcurrentHashMap<>();
     private final List<AnySignalHandler> anySignalHandlers = new CopyOnWriteArrayList<>();
-    private final List<BiConsumer<Map<String, Object>, Map<String, Object>>> mediaTrackHandlers = new CopyOnWriteArrayList<>();
-    private final List<BiConsumer<Map<String, Object>, Map<String, Object>>> mediaTrackRemovedHandlers = new CopyOnWriteArrayList<>();
-    private final List<BiConsumer<Map<String, Object>, Map<String, Object>>> mediaStateHandlers = new CopyOnWriteArrayList<>();
-    private final List<BiConsumer<Map<String, Object>, Map<String, Object>>> mediaDeviceHandlers = new CopyOnWriteArrayList<>();
     private final List<Consumer<Map<String, Object>>> reconnectHandlers = new CopyOnWriteArrayList<>();
     private final List<Consumer<String>> connectionStateHandlers = new CopyOnWriteArrayList<>();
 
@@ -599,7 +209,6 @@ public class RoomClient {
         this.signals = new RoomSignalsNamespace();
         this.members = new RoomMembersNamespace();
         this.admin = new RoomAdminNamespace();
-        this.media = new RoomMediaNamespace();
         this.session = new RoomSessionNamespace();
         if (authStateListenerRegistrar != null) {
             authStateListenerRegistrar.register(this::handleAuthStateChange);
@@ -621,12 +230,6 @@ public class RoomClient {
     public List<Map<String, Object>> listMembers() {
         synchronized (stateLock) {
             return cloneMemberList(roomMembers);
-        }
-    }
-
-    public List<Map<String, Object>> listMediaMembers() {
-        synchronized (stateLock) {
-            return cloneMemberList(mediaMembers);
         }
     }
 
@@ -734,65 +337,6 @@ public class RoomClient {
         }
     }
 
-    public CompletableFuture<Map<String, Object>> requestCloudflareRealtimeKitMedia(String path, String method, Map<String, Object> payload) {
-        return CompletableFuture.supplyAsync(() ->
-                requestRoomMedia("cloudflare_realtimekit", path, method, payload)
-        );
-    }
-
-    public CompletableFuture<Map<String, Object>> requestCloudflareRealtimeKitMedia(String path, String method) {
-        return requestCloudflareRealtimeKitMedia(path, method, new LinkedHashMap<>());
-    }
-
-    public Map<String, Object> requestRoomMedia(String providerPath, String path, String method, Map<String, Object> payload) {
-        try {
-            String token = tokenSupplier.get();
-            if (token == null || token.isBlank()) {
-                throw new EdgeBaseError(401, "Authentication required before calling room media APIs. Sign in and join the room first.");
-            }
-
-            String url = baseUrl.replaceAll("/$", "") + "/api/room/media/" + providerPath + "/" + path
-                    + "?namespace=" + encodeURIComponent(namespace)
-                    + "&id=" + encodeURIComponent(roomId);
-
-            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setRequestMethod(method);
-            conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("Authorization", "Bearer " + token);
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setDoInput(true);
-            if (!"GET".equals(method)) {
-                conn.setDoOutput(true);
-                byte[] body = new JSONObject(payload == null ? Map.of() : payload).toString().getBytes(StandardCharsets.UTF_8);
-                conn.getOutputStream().write(body);
-            }
-
-            int status = conn.getResponseCode();
-            byte[] bytes;
-            try (var stream = status >= 400 ? conn.getErrorStream() : conn.getInputStream()) {
-                bytes = stream == null ? new byte[0] : stream.readAllBytes();
-            }
-            String body = new String(bytes, StandardCharsets.UTF_8);
-            if (status < 200 || status >= 300) {
-                String message = "Room media request failed: " + status;
-                if (!body.isBlank()) {
-                    JSONObject errorJson = new JSONObject(body);
-                    message = errorJson.optString("message", message);
-                }
-                throw new EdgeBaseError(status, message);
-            }
-
-            if (body.isBlank()) {
-                return new LinkedHashMap<>();
-            }
-            return jsonObjectToMap(new JSONObject(body));
-        } catch (EdgeBaseError e) {
-            throw e;
-        } catch (Exception e) {
-            throw new EdgeBaseError(500, "Failed to request room media: " + e.getMessage());
-        }
-    }
-
     public void join() {
         intentionallyLeft = false;
         joinRequested = true;
@@ -817,8 +361,6 @@ public class RoomClient {
         rejectPendingVoidRequests(pendingSignalRequests, new EdgeBaseError(499, "Room left"));
         rejectPendingVoidRequests(pendingAdminRequests, new EdgeBaseError(499, "Room left"));
         rejectPendingVoidRequests(pendingMemberStateRequests, new EdgeBaseError(499, "Room left"));
-        rejectPendingVoidRequests(pendingMediaRequests, new EdgeBaseError(499, "Room left"));
-
         RoomSocket socket = ws;
         sendLeaveAndClose(socket);
         ws = null;
@@ -835,7 +377,6 @@ public class RoomClient {
             playerState = new ConcurrentHashMap<>();
             playerVersion = 0;
             roomMembers = new ArrayList<>();
-            mediaMembers = new ArrayList<>();
         }
         setConnectionState("idle");
     }
@@ -843,7 +384,7 @@ public class RoomClient {
     public CompletableFuture<Object> send(String actionType, Object payload) {
         if (!connected || !authenticated) {
             CompletableFuture<Object> future = new CompletableFuture<>();
-            future.completeExceptionally(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media."));
+            future.completeExceptionally(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions or signals."));
             return future;
         }
 
@@ -864,7 +405,7 @@ public class RoomClient {
 
     public CompletableFuture<Void> sendSignal(String event, Object payload, Map<String, Object> options) {
         if (!connected || !authenticated) {
-            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media."));
+            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions or signals."));
         }
         String requestId = UUID.randomUUID().toString();
         CompletableFuture<Void> future = registerPendingVoid(pendingSignalRequests, requestId, "Signal '" + event + "' timed out");
@@ -893,7 +434,7 @@ public class RoomClient {
 
     public CompletableFuture<Void> sendMemberState(Map<String, Object> state) {
         if (!connected || !authenticated) {
-            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media."));
+            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions or signals."));
         }
         String requestId = UUID.randomUUID().toString();
         CompletableFuture<Void> future = registerPendingVoid(pendingMemberStateRequests, requestId, "Member state update timed out");
@@ -907,7 +448,7 @@ public class RoomClient {
 
     public CompletableFuture<Void> clearMemberState() {
         if (!connected || !authenticated) {
-            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media."));
+            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions or signals."));
         }
         String requestId = UUID.randomUUID().toString();
         CompletableFuture<Void> future = registerPendingVoid(pendingMemberStateRequests, requestId, "Member state clear timed out");
@@ -920,7 +461,7 @@ public class RoomClient {
 
     public CompletableFuture<Void> sendAdmin(String operation, String memberId, Map<String, Object> payload) {
         if (!connected || !authenticated) {
-            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media."));
+            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions or signals."));
         }
         String requestId = UUID.randomUUID().toString();
         CompletableFuture<Void> future = registerPendingVoid(pendingAdminRequests, requestId, "Admin operation '" + operation + "' timed out");
@@ -936,40 +477,6 @@ public class RoomClient {
 
     public CompletableFuture<Void> sendAdmin(String operation, String memberId) {
         return sendAdmin(operation, memberId, Collections.emptyMap());
-    }
-
-    public CompletableFuture<Void> sendMedia(String operation, String kind, Map<String, Object> payload) {
-        if (!connected || !authenticated) {
-            return CompletableFuture.failedFuture(new EdgeBaseError(400, "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media."));
-        }
-        String requestId = UUID.randomUUID().toString();
-        CompletableFuture<Void> future = registerPendingVoid(pendingMediaRequests, requestId, "Media operation '" + operation + "' timed out");
-        Map<String, Object> msg = new HashMap<>();
-        msg.put("type", "media");
-        msg.put("operation", operation);
-        msg.put("kind", kind);
-        msg.put("payload", payload != null ? payload : Collections.emptyMap());
-        msg.put("requestId", requestId);
-        sendRaw(new JSONObject(msg));
-        return future;
-    }
-
-    public CompletableFuture<Void> sendMedia(String operation, String kind) {
-        return sendMedia(operation, kind, Collections.emptyMap());
-    }
-
-    public CompletableFuture<Void> switchMediaDevices(Map<String, Object> payload) {
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
-        if (payload.get("audioInputId") instanceof String audioInputId) {
-            futures.add(sendMedia("device", "audio", Map.of("deviceId", audioInputId)));
-        }
-        if (payload.get("videoInputId") instanceof String videoInputId) {
-            futures.add(sendMedia("device", "video", Map.of("deviceId", videoInputId)));
-        }
-        if (payload.get("screenInputId") instanceof String screenInputId) {
-            futures.add(sendMedia("device", "screen", Map.of("deviceId", screenInputId)));
-        }
-        return CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new));
     }
 
     public Subscription onSharedState(BiConsumer<Map<String, Object>, Map<String, Object>> handler) {
@@ -1040,26 +547,6 @@ public class RoomClient {
     public Subscription onAnySignal(AnySignalHandler handler) {
         anySignalHandlers.add(handler);
         return () -> anySignalHandlers.remove(handler);
-    }
-
-    public Subscription onMediaTrack(BiConsumer<Map<String, Object>, Map<String, Object>> handler) {
-        mediaTrackHandlers.add(handler);
-        return () -> mediaTrackHandlers.remove(handler);
-    }
-
-    public Subscription onMediaTrackRemoved(BiConsumer<Map<String, Object>, Map<String, Object>> handler) {
-        mediaTrackRemovedHandlers.add(handler);
-        return () -> mediaTrackRemovedHandlers.remove(handler);
-    }
-
-    public Subscription onMediaStateChange(BiConsumer<Map<String, Object>, Map<String, Object>> handler) {
-        mediaStateHandlers.add(handler);
-        return () -> mediaStateHandlers.remove(handler);
-    }
-
-    public Subscription onMediaDeviceChange(BiConsumer<Map<String, Object>, Map<String, Object>> handler) {
-        mediaDeviceHandlers.add(handler);
-        return () -> mediaDeviceHandlers.remove(handler);
     }
 
     public Subscription onReconnect(Consumer<Map<String, Object>> handler) {
@@ -1148,14 +635,6 @@ public class RoomClient {
             case "admin_result" -> resolvePendingVoidRequest(pendingAdminRequests, msg.optString("requestId", null));
             case "admin_error" -> rejectPendingVoidRequest(pendingAdminRequests, msg.optString("requestId", null),
                     new EdgeBaseError(400, msg.optString("message", "Admin operation failed")));
-            case "media_sync" -> handleMediaSync(msg);
-            case "media_track" -> handleMediaTrackFrame(msg);
-            case "media_track_removed" -> handleMediaTrackRemovedFrame(msg);
-            case "media_state" -> handleMediaStateFrame(msg);
-            case "media_device" -> handleMediaDeviceFrame(msg);
-            case "media_result" -> resolvePendingVoidRequest(pendingMediaRequests, msg.optString("requestId", null));
-            case "media_error" -> rejectPendingVoidRequest(pendingMediaRequests, msg.optString("requestId", null),
-                    new EdgeBaseError(400, msg.optString("message", "Media operation failed")));
             case "kicked" -> handleKicked();
             case "error" -> handleError(msg);
             case "pong" -> {
@@ -1295,26 +774,6 @@ public class RoomClient {
         List<Map<String, Object>> normalized = normalizeMembers(jsonValueToJava(msg.opt("members")));
         synchronized (stateLock) {
             roomMembers = normalized;
-            Set<String> memberIds = ConcurrentHashMap.newKeySet();
-            for (Map<String, Object> member : roomMembers) {
-                Object memberId = member.get("memberId");
-                if (memberId instanceof String id) {
-                    memberIds.add(id);
-                }
-            }
-
-            List<Map<String, Object>> nextMediaMembers = new ArrayList<>();
-            for (Map<String, Object> mediaMember : mediaMembers) {
-                Map<String, Object> member = safeMap(mediaMember.get("member"));
-                Object memberId = member.get("memberId");
-                if (memberId instanceof String id && memberIds.contains(id)) {
-                    nextMediaMembers.add(cloneMap(mediaMember));
-                }
-            }
-            mediaMembers = nextMediaMembers;
-            for (Map<String, Object> member : roomMembers) {
-                syncMediaMemberInfo(member);
-            }
         }
 
         List<Map<String, Object>> snapshot = listMembers();
@@ -1331,7 +790,6 @@ public class RoomClient {
 
         synchronized (stateLock) {
             upsertMember(member);
-            syncMediaMemberInfo(member);
         }
 
         for (Consumer<Map<String, Object>> handler : memberJoinHandlers) {
@@ -1348,7 +806,6 @@ public class RoomClient {
         String memberId = Objects.toString(member.get("memberId"), "");
         synchronized (stateLock) {
             removeMember(memberId);
-            removeMediaMember(memberId);
         }
 
         String reason = normalizeLeaveReason(jsonValueToJava(msg.opt("reason")));
@@ -1367,7 +824,6 @@ public class RoomClient {
 
         synchronized (stateLock) {
             upsertMember(member);
-            syncMediaMemberInfo(member);
         }
 
         String requestId = msg.optString("requestId", null);
@@ -1377,126 +833,6 @@ public class RoomClient {
 
         for (BiConsumer<Map<String, Object>, Map<String, Object>> handler : memberStateHandlers) {
             handler.accept(cloneMap(member), cloneMap(state));
-        }
-    }
-
-    private void handleMediaSync(JSONObject msg) {
-        List<Map<String, Object>> normalized = normalizeMediaMembers(jsonValueToJava(msg.opt("members")));
-        synchronized (stateLock) {
-            mediaMembers = normalized;
-            for (Map<String, Object> member : roomMembers) {
-                syncMediaMemberInfo(member);
-            }
-        }
-    }
-
-    private void handleMediaTrackFrame(JSONObject msg) {
-        Map<String, Object> member = normalizeMember(jsonValueToJava(msg.opt("member")));
-        Map<String, Object> track = normalizeMediaTrack(jsonValueToJava(msg.opt("track")));
-        if (member == null || track == null) {
-            return;
-        }
-
-        Map<String, Object> mediaMember;
-        synchronized (stateLock) {
-            mediaMember = ensureMediaMember(member);
-            upsertMediaTrack(mediaMember, track);
-            Map<String, Object> partial = new HashMap<>();
-            partial.put("published", Boolean.TRUE);
-            partial.put("muted", Boolean.TRUE.equals(track.get("muted")));
-            partial.put("trackId", track.get("trackId"));
-            partial.put("deviceId", track.get("deviceId"));
-            partial.put("publishedAt", track.get("publishedAt"));
-            partial.put("adminDisabled", track.get("adminDisabled"));
-            mergeMediaState(mediaMember, Objects.toString(track.get("kind"), ""), partial);
-        }
-
-        Map<String, Object> memberSnapshot = cloneMap(safeMap(mediaMember.get("member")));
-        Map<String, Object> trackSnapshot = cloneMap(track);
-        for (BiConsumer<Map<String, Object>, Map<String, Object>> handler : mediaTrackHandlers) {
-            handler.accept(trackSnapshot, memberSnapshot);
-        }
-    }
-
-    private void handleMediaTrackRemovedFrame(JSONObject msg) {
-        Map<String, Object> member = normalizeMember(jsonValueToJava(msg.opt("member")));
-        Map<String, Object> track = normalizeMediaTrack(jsonValueToJava(msg.opt("track")));
-        if (member == null || track == null) {
-            return;
-        }
-
-        Map<String, Object> mediaMember;
-        synchronized (stateLock) {
-            mediaMember = ensureMediaMember(member);
-            removeMediaTrack(mediaMember, track);
-            String kind = Objects.toString(track.get("kind"), "");
-            Map<String, Object> state = safeMap(mediaMember.get("state"));
-            state = cloneMap(state);
-            state.put(kind, new HashMap<>(Map.of(
-                    "published", Boolean.FALSE,
-                    "muted", Boolean.FALSE,
-                    "adminDisabled", Boolean.FALSE
-            )));
-            mediaMember.put("state", state);
-        }
-
-        Map<String, Object> memberSnapshot = cloneMap(safeMap(mediaMember.get("member")));
-        Map<String, Object> trackSnapshot = cloneMap(track);
-        for (BiConsumer<Map<String, Object>, Map<String, Object>> handler : mediaTrackRemovedHandlers) {
-            handler.accept(trackSnapshot, memberSnapshot);
-        }
-    }
-
-    private void handleMediaStateFrame(JSONObject msg) {
-        Map<String, Object> member = normalizeMember(jsonValueToJava(msg.opt("member")));
-        if (member == null) {
-            return;
-        }
-
-        Map<String, Object> mediaMember;
-        synchronized (stateLock) {
-            mediaMember = ensureMediaMember(member);
-            mediaMember.put("state", normalizeMediaState(jsonValueToJava(msg.opt("state"))));
-        }
-
-        Map<String, Object> memberSnapshot = cloneMap(safeMap(mediaMember.get("member")));
-        Map<String, Object> stateSnapshot = cloneMap(safeMap(mediaMember.get("state")));
-        for (BiConsumer<Map<String, Object>, Map<String, Object>> handler : mediaStateHandlers) {
-            handler.accept(memberSnapshot, stateSnapshot);
-        }
-    }
-
-    private void handleMediaDeviceFrame(JSONObject msg) {
-        Map<String, Object> member = normalizeMember(jsonValueToJava(msg.opt("member")));
-        String kind = normalizeMediaKind(jsonValueToJava(msg.opt("kind")));
-        String deviceId = msg.optString("deviceId", "");
-        if (member == null || kind == null || deviceId.isEmpty()) {
-            return;
-        }
-
-        Map<String, Object> mediaMember;
-        synchronized (stateLock) {
-            mediaMember = ensureMediaMember(member);
-            mergeMediaState(mediaMember, kind, Map.of("deviceId", deviceId));
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> tracks = (List<Map<String, Object>>) mediaMember.get("tracks");
-            List<Map<String, Object>> nextTracks = new ArrayList<>();
-            for (Map<String, Object> track : tracks) {
-                Map<String, Object> nextTrack = cloneMap(track);
-                if (kind.equals(nextTrack.get("kind"))) {
-                    nextTrack.put("deviceId", deviceId);
-                }
-                nextTracks.add(nextTrack);
-            }
-            mediaMember.put("tracks", nextTracks);
-        }
-
-        Map<String, Object> memberSnapshot = cloneMap(safeMap(mediaMember.get("member")));
-        Map<String, Object> change = new HashMap<>();
-        change.put("kind", kind);
-        change.put("deviceId", deviceId);
-        for (BiConsumer<Map<String, Object>, Map<String, Object>> handler : mediaDeviceHandlers) {
-            handler.accept(memberSnapshot, cloneMap(change));
         }
     }
 
@@ -1635,7 +971,6 @@ public class RoomClient {
         ws = null;
         synchronized (stateLock) {
             roomMembers = new ArrayList<>();
-            mediaMembers = new ArrayList<>();
         }
         userId = null;
         connectionId = null;
@@ -1676,10 +1011,6 @@ public class RoomClient {
         memberStateHandlers.clear();
         signalHandlers.clear();
         anySignalHandlers.clear();
-        mediaTrackHandlers.clear();
-        mediaTrackRemovedHandlers.clear();
-        mediaStateHandlers.clear();
-        mediaDeviceHandlers.clear();
         reconnectHandlers.clear();
         connectionStateHandlers.clear();
         scheduler.shutdownNow();
@@ -1749,7 +1080,6 @@ public class RoomClient {
         rejectPendingVoidRequests(pendingSignalRequests, error);
         rejectPendingVoidRequests(pendingAdminRequests, error);
         rejectPendingVoidRequests(pendingMemberStateRequests, error);
-        rejectPendingVoidRequests(pendingMediaRequests, error);
     }
 
     private void setConnectionState(String next) {
@@ -1781,98 +1111,6 @@ public class RoomClient {
 
     private void removeMember(String memberId) {
         roomMembers.removeIf(member -> Objects.equals(member.get("memberId"), memberId));
-    }
-
-    private void syncMediaMemberInfo(Map<String, Object> member) {
-        String memberId = Objects.toString(member.get("memberId"), "");
-        for (Map<String, Object> mediaMember : mediaMembers) {
-            Map<String, Object> info = safeMap(mediaMember.get("member"));
-            if (Objects.equals(info.get("memberId"), memberId)) {
-                mediaMember.put("member", cloneMap(member));
-                return;
-            }
-        }
-    }
-
-    private Map<String, Object> ensureMediaMember(Map<String, Object> member) {
-        String memberId = Objects.toString(member.get("memberId"), "");
-        for (Map<String, Object> mediaMember : mediaMembers) {
-            Map<String, Object> info = safeMap(mediaMember.get("member"));
-            if (Objects.equals(info.get("memberId"), memberId)) {
-                mediaMember.put("member", cloneMap(member));
-                return mediaMember;
-            }
-        }
-        Map<String, Object> created = new HashMap<>();
-        created.put("member", cloneMap(member));
-        created.put("state", new HashMap<String, Object>());
-        created.put("tracks", new ArrayList<Map<String, Object>>());
-        mediaMembers.add(created);
-        return created;
-    }
-
-    private void removeMediaMember(String memberId) {
-        mediaMembers.removeIf(mediaMember -> {
-            Map<String, Object> member = safeMap(mediaMember.get("member"));
-            return Objects.equals(member.get("memberId"), memberId);
-        });
-    }
-
-    @SuppressWarnings("unchecked")
-    private void upsertMediaTrack(Map<String, Object> mediaMember, Map<String, Object> track) {
-        String kind = Objects.toString(track.get("kind"), "");
-        String trackId = track.get("trackId") instanceof String value ? value : null;
-        List<Map<String, Object>> tracks = new ArrayList<>((List<Map<String, Object>>) mediaMember.get("tracks"));
-
-        for (int i = 0; i < tracks.size(); i++) {
-            Map<String, Object> existing = tracks.get(i);
-            boolean sameTrack = Objects.equals(existing.get("kind"), kind)
-                    && Objects.equals(existing.get("trackId"), trackId);
-            if (sameTrack) {
-                tracks.set(i, cloneMap(track));
-                mediaMember.put("tracks", tracks);
-                return;
-            }
-        }
-
-        if (trackId == null) {
-            tracks.removeIf(existing -> Objects.equals(existing.get("kind"), kind) && existing.get("trackId") == null);
-        }
-        tracks.add(cloneMap(track));
-        mediaMember.put("tracks", tracks);
-    }
-
-    @SuppressWarnings("unchecked")
-    private void removeMediaTrack(Map<String, Object> mediaMember, Map<String, Object> track) {
-        String kind = Objects.toString(track.get("kind"), "");
-        String trackId = track.get("trackId") instanceof String value ? value : null;
-        List<Map<String, Object>> tracks = new ArrayList<>((List<Map<String, Object>>) mediaMember.get("tracks"));
-        tracks.removeIf(existing -> trackId != null
-                ? Objects.equals(existing.get("kind"), kind) && Objects.equals(existing.get("trackId"), trackId)
-                : Objects.equals(existing.get("kind"), kind));
-        mediaMember.put("tracks", tracks);
-    }
-
-    private void mergeMediaState(Map<String, Object> mediaMember, String kind, Map<String, Object> partial) {
-        Map<String, Object> state = cloneMap(safeMap(mediaMember.get("state")));
-        Map<String, Object> current = cloneMap(safeMap(state.get(kind)));
-
-        Map<String, Object> next = new HashMap<>();
-        next.put("published", partial.containsKey("published") ? partial.get("published") : current.getOrDefault("published", Boolean.FALSE));
-        next.put("muted", partial.containsKey("muted") ? partial.get("muted") : current.getOrDefault("muted", Boolean.FALSE));
-
-        Object trackId = partial.containsKey("trackId") ? partial.get("trackId") : current.get("trackId");
-        Object deviceId = partial.containsKey("deviceId") ? partial.get("deviceId") : current.get("deviceId");
-        Object publishedAt = partial.containsKey("publishedAt") ? partial.get("publishedAt") : current.get("publishedAt");
-        Object adminDisabled = partial.containsKey("adminDisabled") ? partial.get("adminDisabled") : current.get("adminDisabled");
-
-        if (trackId != null) next.put("trackId", trackId);
-        if (deviceId != null) next.put("deviceId", deviceId);
-        if (publishedAt != null) next.put("publishedAt", publishedAt);
-        if (adminDisabled != null) next.put("adminDisabled", adminDisabled);
-
-        state.put(kind, next);
-        mediaMember.put("state", state);
     }
 
     @SuppressWarnings("unchecked")
@@ -1923,108 +1161,6 @@ public class RoomClient {
             return new HashMap<>();
         }
         return (Map<String, Object>) deepClone(map);
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> normalizeMediaMembers(Object value) {
-        if (!(value instanceof List<?> list)) {
-            return new ArrayList<>();
-        }
-        List<Map<String, Object>> normalized = new ArrayList<>();
-        for (Object entry : list) {
-            Map<String, Object> mediaMember = normalizeMediaMember(entry);
-            if (mediaMember != null) {
-                normalized.add(mediaMember);
-            }
-        }
-        return normalized;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> normalizeMediaMember(Object value) {
-        if (!(value instanceof Map<?, ?> raw)) {
-            return null;
-        }
-        Map<String, Object> member = normalizeMember(raw.get("member"));
-        if (member == null) {
-            return null;
-        }
-        Map<String, Object> normalized = new HashMap<>();
-        normalized.put("member", member);
-        normalized.put("state", normalizeMediaState(raw.get("state")));
-        normalized.put("tracks", normalizeMediaTracks(raw.get("tracks")));
-        return normalized;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> normalizeMediaState(Object value) {
-        if (!(value instanceof Map<?, ?> raw)) {
-            return new HashMap<>();
-        }
-        Map<String, Object> normalized = new HashMap<>();
-        Map<String, Object> audio = normalizeMediaKindState(raw.get("audio"));
-        Map<String, Object> video = normalizeMediaKindState(raw.get("video"));
-        Map<String, Object> screen = normalizeMediaKindState(raw.get("screen"));
-        if (audio != null) normalized.put("audio", audio);
-        if (video != null) normalized.put("video", video);
-        if (screen != null) normalized.put("screen", screen);
-        return normalized;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> normalizeMediaKindState(Object value) {
-        if (!(value instanceof Map<?, ?> raw)) {
-            return null;
-        }
-        Map<String, Object> normalized = new HashMap<>();
-        normalized.put("published", Boolean.TRUE.equals(raw.get("published")));
-        normalized.put("muted", Boolean.TRUE.equals(raw.get("muted")));
-        if (raw.get("trackId") instanceof String trackId) normalized.put("trackId", trackId);
-        if (raw.get("deviceId") instanceof String deviceId) normalized.put("deviceId", deviceId);
-        if (raw.get("publishedAt") instanceof Number publishedAt) normalized.put("publishedAt", publishedAt);
-        if (raw.containsKey("adminDisabled")) normalized.put("adminDisabled", Boolean.TRUE.equals(raw.get("adminDisabled")));
-        return normalized;
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> normalizeMediaTracks(Object value) {
-        if (!(value instanceof List<?> list)) {
-            return new ArrayList<>();
-        }
-        List<Map<String, Object>> normalized = new ArrayList<>();
-        for (Object entry : list) {
-            Map<String, Object> track = normalizeMediaTrack(entry);
-            if (track != null) {
-                normalized.add(track);
-            }
-        }
-        return normalized;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> normalizeMediaTrack(Object value) {
-        if (!(value instanceof Map<?, ?> raw)) {
-            return null;
-        }
-        String kind = normalizeMediaKind(raw.get("kind"));
-        if (kind == null) {
-            return null;
-        }
-        Map<String, Object> normalized = new HashMap<>();
-        normalized.put("kind", kind);
-        normalized.put("muted", Boolean.TRUE.equals(raw.get("muted")));
-        if (raw.get("trackId") instanceof String trackId) normalized.put("trackId", trackId);
-        if (raw.get("deviceId") instanceof String deviceId) normalized.put("deviceId", deviceId);
-        if (raw.get("publishedAt") instanceof Number publishedAt) normalized.put("publishedAt", publishedAt);
-        if (raw.containsKey("adminDisabled")) normalized.put("adminDisabled", Boolean.TRUE.equals(raw.get("adminDisabled")));
-        return normalized;
-    }
-
-    private String normalizeMediaKind(Object value) {
-        if (value instanceof String kind && ("audio".equals(kind) || "video".equals(kind) || "screen".equals(kind))) {
-            return kind;
-        }
-        return null;
     }
 
     @SuppressWarnings("unchecked")
@@ -2133,466 +1269,12 @@ public class RoomClient {
             return RoomClient.this.sendAdmin("kick", memberId);
         }
 
-        public CompletableFuture<Void> mute(String memberId) {
-            return RoomClient.this.sendAdmin("mute", memberId);
-        }
-
         public CompletableFuture<Void> block(String memberId) {
             return RoomClient.this.sendAdmin("block", memberId);
         }
 
         public CompletableFuture<Void> setRole(String memberId, String role) {
             return RoomClient.this.sendAdmin("setRole", memberId, Map.of("role", role));
-        }
-
-        public CompletableFuture<Void> disableVideo(String memberId) {
-            return RoomClient.this.sendAdmin("disableVideo", memberId);
-        }
-
-        public CompletableFuture<Void> stopScreenShare(String memberId) {
-            return RoomClient.this.sendAdmin("stopScreenShare", memberId);
-        }
-    }
-
-    public final class RoomMediaKindNamespace {
-        private final String kind;
-
-        private RoomMediaKindNamespace(String kind) {
-            this.kind = kind;
-        }
-
-        public CompletableFuture<Void> enable(Map<String, Object> payload) {
-            return RoomClient.this.sendMedia("publish", kind, payload);
-        }
-
-        public CompletableFuture<Void> disable() {
-            return RoomClient.this.sendMedia("unpublish", kind);
-        }
-
-        public CompletableFuture<Void> setMuted(boolean muted) {
-            return RoomClient.this.sendMedia("mute", kind, Map.of("muted", muted));
-        }
-    }
-
-    public final class RoomScreenMediaNamespace {
-        public CompletableFuture<Void> start(Map<String, Object> payload) {
-            return RoomClient.this.sendMedia("publish", "screen", payload);
-        }
-
-        public CompletableFuture<Void> stop() {
-            return RoomClient.this.sendMedia("unpublish", "screen");
-        }
-    }
-
-    public final class RoomMediaDevicesNamespace {
-        public CompletableFuture<Void> switchInputs(Map<String, Object> payload) {
-            return RoomClient.this.switchMediaDevices(payload);
-        }
-    }
-
-    public final class RoomCloudflareRealtimeKitNamespace {
-        public CompletableFuture<Map<String, Object>> createSession(Map<String, Object> payload) {
-            return RoomClient.this.requestCloudflareRealtimeKitMedia("session", "POST", payload);
-        }
-
-        public CompletableFuture<Map<String, Object>> createSession() {
-            return RoomClient.this.requestCloudflareRealtimeKitMedia("session", "POST");
-        }
-    }
-
-    private final class RoomCloudflareMediaTransport implements RoomMediaTransport {
-        private final RoomCloudflareRealtimeKitTransportOptions options;
-        private final ConcurrentHashMap<String, Consumer<RoomMediaRemoteTrackEvent>> remoteTrackHandlers = new ConcurrentHashMap<>();
-        private final Set<String> publishedRemoteKeys = ConcurrentHashMap.newKeySet();
-        private volatile RoomCloudflareRealtimeKitClientAdapter client;
-        private volatile String sessionId;
-        private volatile String providerSessionId;
-        private volatile RoomCloudflareParticipantListener participantListener;
-        private volatile CompletableFuture<String> connectFuture;
-
-        private RoomCloudflareMediaTransport(RoomCloudflareRealtimeKitTransportOptions options) {
-            this.options = options == null ? new RoomCloudflareRealtimeKitTransportOptions() : options;
-        }
-
-        @Override
-        public CompletableFuture<String> connect(Map<String, Object> payload) {
-            if (sessionId != null) {
-                return CompletableFuture.completedFuture(sessionId);
-            }
-            CompletableFuture<String> existingFuture = connectFuture;
-            if (existingFuture != null) {
-                return existingFuture;
-            }
-
-            CompletableFuture<String> createdFuture;
-            synchronized (this) {
-                if (sessionId != null) {
-                    return CompletableFuture.completedFuture(sessionId);
-                }
-                if (connectFuture != null) {
-                    return connectFuture;
-                }
-
-                Map<String, Object> requestPayload = payload == null ? Map.of() : payload;
-                createdFuture = media.cloudflareRealtimeKit.createSession(requestPayload).thenCompose(session -> {
-                String authToken = (String) session.get("authToken");
-                if (authToken == null || authToken.isBlank()) {
-                    return CompletableFuture.failedFuture(
-                            new EdgeBaseError(500, "Cloudflare RealtimeKit session is missing authToken.")
-                    );
-                }
-
-                return resolveClientFactory().create(
-                        new RoomCloudflareRealtimeKitClientFactoryOptions(
-                                authToken,
-                                (String) requestPayload.get("name"),
-                                false,
-                                false,
-                                options.getBaseDomain()
-                        )
-                ).thenCompose(nextClient -> {
-                    client = nextClient;
-                    sessionId = (String) session.get("sessionId");
-                    providerSessionId = (String) session.get("participantId");
-
-                    RoomCloudflareParticipantListener listener = new RoomCloudflareParticipantListener() {
-                        @Override
-                        public void onParticipantJoin(RoomCloudflareParticipantSnapshot participant) {
-                            syncParticipant(participant);
-                        }
-
-                        @Override
-                        public void onParticipantLeave(RoomCloudflareParticipantSnapshot participant) {
-                            removeParticipant(participant);
-                        }
-
-                        @Override
-                        public void onAudioUpdate(RoomCloudflareParticipantSnapshot participant, boolean enabled) {
-                            emitParticipantKind(participant, "audio", enabled);
-                        }
-
-                        @Override
-                        public void onVideoUpdate(RoomCloudflareParticipantSnapshot participant, boolean enabled) {
-                            emitParticipantKind(participant, "video", enabled);
-                        }
-
-                        @Override
-                        public void onScreenShareUpdate(RoomCloudflareParticipantSnapshot participant, boolean enabled) {
-                            emitParticipantKind(participant, "screen", enabled);
-                        }
-
-                        @Override
-                        public void onParticipantsSync(List<RoomCloudflareParticipantSnapshot> participants) {
-                            syncParticipants(participants);
-                        }
-                    };
-                    participantListener = listener;
-                    nextClient.addListener(listener);
-
-                    return nextClient.joinRoom()
-                            .thenApply(ignored -> {
-                                syncParticipants(nextClient.getJoinedParticipants());
-                                return sessionId != null ? sessionId : (String) session.getOrDefault("sessionId", "");
-                            })
-                            .whenComplete((ignored, error) -> {
-                                if (error != null) {
-                                    nextClient.removeListener(listener);
-                                    participantListener = null;
-                                    client = null;
-                                    sessionId = null;
-                                    providerSessionId = null;
-                                }
-                            });
-                });
-            });
-                connectFuture = createdFuture;
-            }
-
-            createdFuture.whenComplete((ignored, error) -> {
-                if (connectFuture == createdFuture) {
-                    connectFuture = null;
-                }
-            });
-            return createdFuture;
-        }
-
-        @Override
-        public CompletableFuture<Object> enableAudio(Map<String, Object> payload) {
-            try {
-                RoomCloudflareRealtimeKitClientAdapter client = requireClient();
-                return client.enableAudio()
-                        .thenCompose(ignored -> media.audio.enable(withProviderSession(payload)))
-                        .thenApply(ignored -> client.getLocalParticipant().getParticipantHandle());
-            } catch (RuntimeException error) {
-                return CompletableFuture.failedFuture(error);
-            }
-        }
-
-        @Override
-        public CompletableFuture<Object> enableVideo(Map<String, Object> payload) {
-            try {
-                RoomCloudflareRealtimeKitClientAdapter client = requireClient();
-                return client.enableVideo()
-                        .thenCompose(ignored -> media.video.enable(withProviderSession(payload)))
-                        .thenApply(ignored -> client.buildView(client.getLocalParticipant(), "video", true));
-            } catch (RuntimeException error) {
-                return CompletableFuture.failedFuture(error);
-            }
-        }
-
-        @Override
-        public CompletableFuture<Object> startScreenShare(Map<String, Object> payload) {
-            try {
-                RoomCloudflareRealtimeKitClientAdapter client = requireClient();
-                return client.enableScreenShare()
-                        .thenCompose(ignored -> media.screen.start(withProviderSession(payload)))
-                        .thenApply(ignored -> client.buildView(client.getLocalParticipant(), "screen", true));
-            } catch (RuntimeException error) {
-                return CompletableFuture.failedFuture(error);
-            }
-        }
-
-        @Override
-        public CompletableFuture<Void> disableAudio() {
-            RoomCloudflareRealtimeKitClientAdapter client = this.client;
-            if (client == null) {
-                return CompletableFuture.completedFuture(null);
-            }
-            return client.disableAudio().thenCompose(ignored -> media.audio.disable());
-        }
-
-        @Override
-        public CompletableFuture<Void> disableVideo() {
-            RoomCloudflareRealtimeKitClientAdapter client = this.client;
-            if (client == null) {
-                return CompletableFuture.completedFuture(null);
-            }
-            return client.disableVideo().thenCompose(ignored -> media.video.disable());
-        }
-
-        @Override
-        public CompletableFuture<Void> stopScreenShare() {
-            RoomCloudflareRealtimeKitClientAdapter client = this.client;
-            if (client == null) {
-                return CompletableFuture.completedFuture(null);
-            }
-            return client.disableScreenShare().thenCompose(ignored -> media.screen.stop());
-        }
-
-        @Override
-        public CompletableFuture<Void> setMuted(String kind, boolean muted) {
-            try {
-                RoomCloudflareRealtimeKitClientAdapter client = requireClient();
-                return switch (kind) {
-                    case "audio" -> {
-                        CompletableFuture<Void> providerFuture = muted
-                                ? client.disableAudio()
-                                : client.enableAudio();
-                        yield providerFuture.thenCompose(ignored -> media.audio.setMuted(muted));
-                    }
-                    case "video" -> {
-                        CompletableFuture<Void> providerFuture = muted
-                                ? client.disableVideo()
-                                : client.enableVideo();
-                        yield providerFuture.thenCompose(ignored -> media.video.setMuted(muted));
-                    }
-                    default -> CompletableFuture.failedFuture(
-                            new UnsupportedOperationException("Unsupported mute kind: " + kind)
-                    );
-                };
-            } catch (RuntimeException error) {
-                return CompletableFuture.failedFuture(error);
-            }
-        }
-
-        @Override
-        public CompletableFuture<Void> switchDevices(Map<String, Object> payload) {
-            try {
-                RoomCloudflareRealtimeKitClientAdapter client = requireClient();
-                CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
-                String audioInputId = payload == null ? null : (String) payload.get("audioInputId");
-                String videoInputId = payload == null ? null : (String) payload.get("videoInputId");
-
-                if (audioInputId != null && !audioInputId.isBlank()) {
-                    chain = chain.thenCompose(ignored -> client.setAudioDevice(audioInputId));
-                }
-                if (videoInputId != null && !videoInputId.isBlank()) {
-                    chain = chain.thenCompose(ignored -> client.setVideoDevice(videoInputId));
-                }
-
-                return chain.thenCompose(ignored -> media.devices.switchInputs(payload == null ? Map.of() : payload));
-            } catch (RuntimeException error) {
-                return CompletableFuture.failedFuture(error);
-            }
-        }
-
-        @Override
-        public Subscription onRemoteTrack(Consumer<RoomMediaRemoteTrackEvent> handler) {
-            String key = UUID.randomUUID().toString();
-            remoteTrackHandlers.put(key, handler);
-            return () -> remoteTrackHandlers.remove(key);
-        }
-
-        @Override
-        public String getSessionId() {
-            return sessionId;
-        }
-
-        @Override
-        public Object getPeerConnection() {
-            return null;
-        }
-
-        @Override
-        public void destroy() {
-            RoomCloudflareRealtimeKitClientAdapter client = this.client;
-            RoomCloudflareParticipantListener listener = participantListener;
-            CompletableFuture<String> connectFuture = this.connectFuture;
-            this.client = null;
-            participantListener = null;
-            sessionId = null;
-            providerSessionId = null;
-            this.connectFuture = null;
-            publishedRemoteKeys.clear();
-            if (connectFuture != null) {
-                connectFuture.cancel(true);
-            }
-
-            if (client != null && listener != null) {
-                client.removeListener(listener);
-                client.leaveRoom();
-            }
-        }
-
-        private RoomCloudflareRealtimeKitClientFactory resolveClientFactory() {
-            if (options.getClientFactory() != null) {
-                return options.getClientFactory();
-            }
-            if (defaultCloudflareRealtimeKitClientFactory != null) {
-                return defaultCloudflareRealtimeKitClientFactory;
-            }
-            throw new UnsupportedOperationException(
-                    "Cloudflare RealtimeKit room media requires either cloudflareRealtimeKit.clientFactory " +
-                            "or the EdgeBase Android runtime package. See " + ROOM_MEDIA_DOCS_URL
-            );
-        }
-
-        private RoomCloudflareRealtimeKitClientAdapter requireClient() {
-            RoomCloudflareRealtimeKitClientAdapter current = client;
-            if (current == null) {
-                throw new IllegalStateException(
-                        "Call room.media.transport().connect() before using media controls."
-                );
-            }
-            return current;
-        }
-
-        private Map<String, Object> withProviderSession(Map<String, Object> payload) {
-            LinkedHashMap<String, Object> result = new LinkedHashMap<>();
-            if (payload != null) {
-                result.putAll(payload);
-            }
-            if (providerSessionId != null) {
-                result.put("providerSessionId", providerSessionId);
-            }
-            return result;
-        }
-
-        private void syncParticipants(List<RoomCloudflareParticipantSnapshot> participants) {
-            for (RoomCloudflareParticipantSnapshot participant : participants) {
-                syncParticipant(participant);
-            }
-        }
-
-        private void syncParticipant(RoomCloudflareParticipantSnapshot participant) {
-            emitParticipantKind(participant, "audio", participant.isAudioEnabled());
-            emitParticipantKind(participant, "video", participant.isVideoEnabled());
-            emitParticipantKind(participant, "screen", participant.isScreenShareEnabled());
-        }
-
-        private void removeParticipant(RoomCloudflareParticipantSnapshot participant) {
-            publishedRemoteKeys.removeIf(key -> key.startsWith(participant.getId() + ":"));
-        }
-
-        private void emitParticipantKind(
-                RoomCloudflareParticipantSnapshot participant,
-                String kind,
-                boolean enabled
-        ) {
-            String key = participant.getId() + ":" + kind;
-            if (!enabled) {
-                publishedRemoteKeys.remove(key);
-                return;
-            }
-            if (!publishedRemoteKeys.add(key)) {
-                return;
-            }
-
-            RoomMediaRemoteTrackEvent event = new RoomMediaRemoteTrackEvent(
-                    kind,
-                    participant.getParticipantHandle(),
-                    client == null ? null : client.buildView(participant, kind, false),
-                    null,
-                    participant.getId(),
-                    participant.getId(),
-                    participant.getCustomParticipantId(),
-                    participant.getUserId(),
-                    participant.toMap()
-            );
-            for (Consumer<RoomMediaRemoteTrackEvent> handler : remoteTrackHandlers.values()) {
-                handler.accept(event);
-            }
-        }
-    }
-
-    public final class RoomMediaNamespace {
-        public final RoomMediaKindNamespace audio = new RoomMediaKindNamespace("audio");
-        public final RoomMediaKindNamespace video = new RoomMediaKindNamespace("video");
-        public final RoomScreenMediaNamespace screen = new RoomScreenMediaNamespace();
-        public final RoomMediaDevicesNamespace devices = new RoomMediaDevicesNamespace();
-        public final RoomCloudflareRealtimeKitNamespace cloudflareRealtimeKit = new RoomCloudflareRealtimeKitNamespace();
-
-        public RoomMediaTransport transport() {
-            return transport(new RoomMediaTransportOptions());
-        }
-
-        public RoomMediaTransport transport(RoomMediaTransportOptions options) {
-            RoomMediaTransportOptions resolved = options == null ? new RoomMediaTransportOptions() : options;
-            if (resolved.getProvider() == RoomMediaTransportProvider.CLOUDFLARE_REALTIMEKIT) {
-                return new RoomCloudflareMediaTransport(resolved.getCloudflareRealtimeKit());
-            }
-            RoomP2PMediaTransportOptions p2pOptions =
-                    resolved.getP2P() == null ? new RoomP2PMediaTransportOptions() : resolved.getP2P();
-            if (p2pOptions.getTransportFactory() != null) {
-                return p2pOptions.getTransportFactory().create(RoomClient.this, p2pOptions);
-            }
-            if (defaultP2PMediaTransportFactory != null) {
-                return defaultP2PMediaTransportFactory.create(RoomClient.this, p2pOptions);
-            }
-            throw new UnsupportedOperationException(
-                    "P2P room media requires either p2p.transportFactory or the EdgeBase Android runtime package. " +
-                            "See " + ROOM_MEDIA_DOCS_URL
-            );
-        }
-
-        public List<Map<String, Object>> list() {
-            return RoomClient.this.listMediaMembers();
-        }
-
-        public Subscription onTrack(BiConsumer<Map<String, Object>, Map<String, Object>> handler) {
-            return RoomClient.this.onMediaTrack(handler);
-        }
-
-        public Subscription onTrackRemoved(BiConsumer<Map<String, Object>, Map<String, Object>> handler) {
-            return RoomClient.this.onMediaTrackRemoved(handler);
-        }
-
-        public Subscription onStateChange(BiConsumer<Map<String, Object>, Map<String, Object>> handler) {
-            return RoomClient.this.onMediaStateChange(handler);
-        }
-
-        public Subscription onDeviceChange(BiConsumer<Map<String, Object>, Map<String, Object>> handler) {
-            return RoomClient.this.onMediaDeviceChange(handler);
         }
     }
 
