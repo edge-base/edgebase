@@ -438,7 +438,6 @@ room.signals.onAny(cb: (event, payload, meta) => void) → Subscription
 
 ```
 room.admin.kick(memberId)                   → Promise<void>
-room.admin.mute(memberId)                   → Promise<void>
 room.admin.block(memberId)                  → Promise<void>
 room.admin.setRole(memberId, role)          → Promise<void>
 ```

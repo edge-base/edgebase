@@ -5,7 +5,6 @@ import {
   type RoomSender,
   type RoomServerAPI,
 } from '@edge-base/shared';
-import type { Env } from '../types.js';
 import { RoomRuntimeBaseDO, type RoomWSMeta } from './room-runtime-base.js';
 
 /**

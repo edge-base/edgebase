@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { defineConfig } from '@edge-base/shared';
 import { OpenAPIHono, type HonoEnv } from '../lib/hono.js';
 import { setConfig } from '../lib/do-router.js';
@@ -29,21 +29,6 @@ function createRoomRuntimeEnv(): Env {
 
 function createRoomApp() {
   const app = new OpenAPIHono<HonoEnv>();
-  app.route('/api/room', roomRoute);
-  return app;
-}
-
-function createAuthedRoomApp() {
-  const app = new OpenAPIHono<HonoEnv>();
-  app.use('/api/*', async (c, next) => {
-    c.set('auth', {
-      id: 'user-1',
-      role: 'user',
-      isAnonymous: false,
-      meta: {},
-    });
-    await next();
-  });
   app.route('/api/room', roomRoute);
   return app;
 }

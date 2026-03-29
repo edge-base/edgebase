@@ -900,7 +900,6 @@ namespace EdgeBase
         private void HandleMembersSync(Dictionary<string, object?> msg)
         {
             _roomMembers = GetDictList(msg, "members");
-            SyncMediaMembersWithRoomMembers();
             var snapshot = CloneDictList(_roomMembers);
             foreach (var handler in _membersSyncHandlers.ToArray())
             {
