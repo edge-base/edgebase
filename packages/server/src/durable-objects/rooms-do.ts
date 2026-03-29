@@ -881,6 +881,14 @@ export class RoomsDO extends RoomRuntimeBaseDO {
   }
 
   override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    await this.ensureRuntimeReady();
+    await this.recoverStateIfNeeded();
+
+    const activityMeta = this.getWSMeta(ws);
+    if (activityMeta) {
+      activityMeta.lastSeenAt = Date.now();
+    }
+
     if (typeof message !== 'string') return;
 
     let msg: Record<string, unknown>;
@@ -1023,17 +1031,18 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     const member = this.ensureMember(userId);
-    const restoredMemberState = this.normalizeRecoveredMemberState(msg.lastMemberState);
+    const restoredMemberState = wasReconnecting
+      ? this.normalizeRecoveredMemberState(msg.lastMemberState)
+      : null;
     if (restoredMemberState) {
       member.state = {
         ...member.state,
         ...restoredMemberState,
       };
     }
-    const restoredMediaKinds = this.restoreRecoveredMemberMediaState(
-      userId,
-      msg.lastMediaState,
-    );
+    const restoredMediaKinds = wasReconnecting
+      ? this.restoreRecoveredMemberMediaState(userId, msg.lastMediaState)
+      : [];
     this.joinedConnectionIds.add(meta.connectionId);
     member.connectionIds.add(meta.connectionId);
     member.reconnectUntil = undefined;

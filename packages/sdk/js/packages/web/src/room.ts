@@ -591,11 +591,13 @@ export class RoomClient {
     resolve: () => void;
     reject: (error: Error) => void;
     timeout: ReturnType<typeof setTimeout>;
+    onSuccess?: () => void;
   }>();
   private pendingMediaRequests = new Map<string, {
     resolve: () => void;
     reject: (error: Error) => void;
     timeout: ReturnType<typeof setTimeout>;
+    onSuccess?: () => void;
   }>();
 
   // ─── Subscriptions ───
@@ -1612,25 +1614,30 @@ export class RoomClient {
   }
 
   private async sendMemberState(state: Record<string, unknown>): Promise<void> {
-    this.lastLocalMemberState = {
+    const nextState = {
       ...(this.lastLocalMemberState ?? {}),
       ...cloneRecord(state),
     };
     return this.sendMemberStateRequest({
       type: 'member_state',
       state,
+    }, () => {
+      this.lastLocalMemberState = nextState;
     });
   }
 
   private async clearMemberState(): Promise<void> {
-    this.lastLocalMemberState = {};
+    const clearedState = {};
     return this.sendMemberStateRequest({
       type: 'member_state_clear',
+    }, () => {
+      this.lastLocalMemberState = clearedState;
     });
   }
 
   private async sendMemberStateRequest(
     payload: { type: 'member_state'; state: Record<string, unknown> } | { type: 'member_state_clear' },
+    onSuccess?: () => void,
   ): Promise<void> {
     this.assertConnected('updating member state');
 
@@ -1641,7 +1648,7 @@ export class RoomClient {
         reject(new EdgeBaseError(408, 'Member state update timed out'));
       }, this.options.sendTimeout);
 
-      this.pendingMemberStateRequests.set(requestId, { resolve, reject, timeout });
+      this.pendingMemberStateRequests.set(requestId, { resolve, reject, timeout, onSuccess });
       this.sendRaw({ ...payload, requestId });
     });
   }
@@ -1677,7 +1684,6 @@ export class RoomClient {
     payload?: Record<string, unknown>,
   ): Promise<void> {
     this.assertConnected(`running media operation '${operation}' for '${kind}'`);
-    this.updateLocalMediaReplayState(operation, kind, payload ?? {});
 
     const requestId = generateRequestId();
     return new Promise<void>((resolve, reject) => {
@@ -1686,7 +1692,12 @@ export class RoomClient {
         reject(new EdgeBaseError(408, `Media operation '${operation}' timed out`));
       }, this.options.sendTimeout);
 
-      this.pendingMediaRequests.set(requestId, { resolve, reject, timeout });
+      this.pendingMediaRequests.set(requestId, {
+        resolve,
+        reject,
+        timeout,
+        onSuccess: () => this.updateLocalMediaReplayState(operation, kind, payload ?? {}),
+      });
       this.sendRaw({
         type: 'media',
         operation,
@@ -2167,6 +2178,7 @@ export class RoomClient {
       if (pending) {
         clearTimeout(pending.timeout);
         this.pendingMemberStateRequests.delete(requestId);
+        pending.onSuccess?.();
         pending.resolve();
       }
     }
@@ -2287,6 +2299,7 @@ export class RoomClient {
     if (!pending) return;
     clearTimeout(pending.timeout);
     this.pendingMediaRequests.delete(requestId);
+    pending.onSuccess?.();
     pending.resolve();
   }
 
@@ -2642,7 +2655,7 @@ export class RoomClient {
 
   private setActiveMediaTransport(transport: RoomMediaTransport | null, cleanup?: (() => void) | null): void {
     if (this.activeMediaTransport && this.activeMediaTransport !== transport) {
-      this.clearActiveMediaTransport();
+      this.teardownTransport(this.activeMediaTransport);
     }
     this.activeMediaTransport = transport ?? null;
     this.activeMediaCleanup = typeof cleanup === 'function' ? cleanup : null;
@@ -2750,11 +2763,19 @@ export class RoomClient {
       this.clearActiveMediaTransport();
       return;
     }
+    const cleanup = this.activeMediaTransport === targetTransport
+      ? this.activeMediaCleanup
+      : null;
     this.clearActiveMediaTransport(targetTransport, { skipCleanup: true });
     try {
       targetTransport.destroy();
     } catch {
       // Ignore transport destroy failures.
+    }
+    try {
+      cleanup?.();
+    } catch {
+      // Ignore transport cleanup failures.
     }
   }
 

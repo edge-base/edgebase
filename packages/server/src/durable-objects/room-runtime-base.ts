@@ -84,7 +84,7 @@ const ACTION_TIMEOUT_MS = 5000;
 const DEFAULT_ROOM_AUTH_TIMEOUT_MS = 5000;
 const DEFAULT_STATE_SAVE_INTERVAL_MS = 60000; // 1 minute
 const DEFAULT_STATE_TTL_MS = 86400000; // 24 hours
-const DEFAULT_SOCKET_STALE_TIMEOUT_MS = 20000;
+const DEFAULT_SOCKET_STALE_TIMEOUT_MS = 45000;
 const SOCKET_HEARTBEAT_CHECK_INTERVAL_MS = 5000;
 const ROOM_EPHEMERAL_TIMERS_STORAGE_KEY = 'roomEphemeralTimers';
 const roomFallbackWarnings = new Set<string>();
@@ -1459,7 +1459,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     this._scheduleNextAlarm();
   }
 
-  private async recoverStateIfNeeded(): Promise<void> {
+  protected async recoverStateIfNeeded(): Promise<void> {
     if (!this.stateRecoveryNeeded) {
       return;
     }
@@ -2025,7 +2025,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     return getGlobalConfig(env);
   }
 
-  private async ensureRuntimeReady(): Promise<void> {
+  protected async ensureRuntimeReady(): Promise<void> {
     if (!this.runtimeReadyPromise) {
       this.runtimeReadyPromise = (async () => {
         await ensureServerStartup();

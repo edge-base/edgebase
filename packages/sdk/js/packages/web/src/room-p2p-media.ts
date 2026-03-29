@@ -1815,10 +1815,6 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       return Array.from(assignedKinds.values())[0];
     }
 
-    if (assignedKinds.size === 0) {
-      return 'video';
-    }
-
     return null;
   }
 
