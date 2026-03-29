@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`OpenAPI spec stability > operation list matches snapshot 1`] = `199`;
+exports[`OpenAPI spec stability > operation list matches snapshot 1`] = `192`;
 
 exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
 [

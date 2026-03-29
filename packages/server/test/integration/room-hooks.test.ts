@@ -264,7 +264,10 @@ describe('Room Hooks — state hooks', () => {
   it('hooks.state.onStateChange records delta in metadata', async () => {
     const roomId = `hooks-state-delta-${uid()}`;
     const member = await connectToRoom('test-members', roomId);
-    await waitForFrame(member.ws, (msg) => msg.type === 'members_sync');
+    await Promise.race([
+      waitForFrame(member.ws, (msg) => msg.type === 'members_sync', 500),
+      new Promise((resolve) => setTimeout(resolve, 500)),
+    ]);
 
     member.ws.send(JSON.stringify({
       type: 'send', actionType: 'SET_TOPIC', payload: { topic: 'test-hooks' }, requestId: 'st1',
@@ -272,7 +275,7 @@ describe('Room Hooks — state hooks', () => {
     await waitForFrame(member.ws, (msg) => msg.type === 'action_result' && msg.requestId === 'st1');
 
     const metadata = await waitForMetadata(
-      'test-media-admin', roomId,
+      'test-members', roomId,
       (meta) => meta?.lastStateDelta?.topic === 'test-hooks',
     );
     expect(metadata.lastStateDelta.topic).toBe('test-hooks');

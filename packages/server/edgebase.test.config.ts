@@ -490,6 +490,13 @@ export default defineConfig({
                         room.kick(payload.memberId);
                         return { ok: true };
                     },
+                    SET_TOPIC: (payload, room) => {
+                        room.setSharedState((state) => ({
+                            ...state,
+                            topic: payload.topic,
+                        }));
+                        return { ok: true, topic: payload.topic };
+                    },
                 },
             },
             hooks: {
@@ -523,6 +530,14 @@ export default defineConfig({
                                 memberId: member.memberId,
                                 state,
                             },
+                        });
+                    },
+                },
+                state: {
+                    onStateChange: (delta, room) => {
+                        room.setMetadata({
+                            ...room.getMetadata(),
+                            lastStateDelta: delta,
                         });
                     },
                 },
