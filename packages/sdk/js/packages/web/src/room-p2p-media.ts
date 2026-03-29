@@ -267,6 +267,17 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
   private readonly localTracks = new Map<RoomMediaKind, LocalTrackState>();
   private readonly peers = new Map<string, P2PPeerState>();
   private readonly remoteTrackHandlers: Array<(event: RoomMediaRemoteTrackEvent) => void> = [];
+  private readonly remoteVideoStateHandlers: Array<(entries: Array<{
+    participantId: string;
+    memberId: string;
+    userId?: string;
+    displayName?: string;
+    stream: MediaStream | null;
+    trackId: string | null;
+    published: boolean;
+    isCameraOff: boolean;
+    updatedAt: number;
+  }>) => void> = [];
   private readonly remoteTrackKinds = new Map<string, RoomMediaKind>();
   private readonly emittedRemoteTracks = new Set<string>();
   private readonly pendingRemoteTracks = new Map<string, {
@@ -282,6 +293,11 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     timer: ReturnType<typeof globalThis.setTimeout> | null;
     flushing: boolean;
   }>();
+  private readonly remoteVideoStreamCache = new Map<string, {
+    trackId: string | null;
+    stream: MediaStream;
+    lastUsableAt: number;
+  }>();
   private readonly subscriptions: Subscription[] = [];
   private localMemberId: string | null = null;
   private connected = false;
@@ -291,6 +307,14 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
   private syncAllPeerSendersPending = false;
   private healthCheckTimer: ReturnType<typeof globalThis.setInterval> | null = null;
   private negotiationTail: Promise<void> = Promise.resolve();
+  private remoteVideoStateSignature = '';
+  private readonly debugEvents: Array<{
+    id: number;
+    at: number;
+    type: string;
+    details: Record<string, unknown>;
+  }> = [];
+  private debugEventCounter = 0;
 
   constructor(room: RoomP2PMediaAdapter, options?: RoomP2PMediaTransportOptions) {
     this.room = room;
@@ -342,6 +366,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       return this.localMemberId;
     }
 
+    this.recordDebugEvent('transport:connect');
     if (payload && typeof payload === 'object' && 'sessionDescription' in payload) {
       throw new Error(
         'RoomP2PMediaTransport.connect() does not accept sessionDescription; use room.signals through the built-in transport instead.',
@@ -383,6 +408,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
           this.ensurePeer(member.memberId);
         }
       }
+      this.emitRemoteVideoStateChange(true);
     } catch (error) {
       this.rollbackConnectedState();
       throw error;
@@ -393,6 +419,176 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
 
   async getCapabilities(): Promise<RoomMediaTransportCapabilities> {
     return this.collectCapabilities({ includeProviderChecks: true });
+  }
+
+  getUsableRemoteVideoStream(memberId: string): MediaStream | null {
+    const now = Date.now();
+    const peer = this.peers.get(memberId);
+    const connectedish = peer
+      ? peer.pc.connectionState === 'connected'
+        || peer.pc.iceConnectionState === 'connected'
+        || peer.pc.iceConnectionState === 'completed'
+      : false;
+    const mediaMembers = this.room.media.list?.() ?? [];
+    const mediaMember = mediaMembers.find((entry) => entry.member.memberId === memberId);
+    const publishedKinds = this.getPublishedVideoLikeKinds(memberId);
+    const stillPublished = publishedKinds.length > 0
+      || Boolean(mediaMember?.state?.video?.published || mediaMember?.state?.screen?.published)
+      || Boolean(mediaMember?.tracks.some((track) =>
+        (track.kind === 'video' || track.kind === 'screen') && track.trackId,
+      ));
+
+    const flow = peer
+      ? Array.from(peer.remoteVideoFlows.values())
+          .filter((entry) => isMediaStreamTrackLike(entry.track) && entry.track.readyState === 'live')
+          .sort((a, b) =>
+            Number((b.lastHealthyAt ?? 0) > 0) - Number((a.lastHealthyAt ?? 0) > 0)
+            || (b.lastHealthyAt ?? 0) - (a.lastHealthyAt ?? 0)
+            || (b.receivedAt ?? 0) - (a.receivedAt ?? 0),
+          )[0] ?? null
+      : null;
+
+    const track = flow?.track;
+    const graceMs = Math.max(this.options.videoFlowGraceMs, this.options.videoFlowStallGraceMs);
+    const connectedTrackGraceMs = Math.max(
+      graceMs,
+      this.options.videoFlowStallGraceMs + 6_000,
+    );
+    const lastObservedAt = Math.max(flow?.receivedAt ?? 0, flow?.lastHealthyAt ?? 0);
+    const isRecentLiveFlow = isMediaStreamTrackLike(track)
+      && track.readyState === 'live'
+      && now - (flow?.receivedAt ?? 0) <= graceMs;
+    const isLiveConnectedFlow = isMediaStreamTrackLike(track)
+      && track.readyState === 'live'
+      && connectedish
+      && stillPublished
+      && lastObservedAt > 0
+      && now - lastObservedAt <= connectedTrackGraceMs;
+    const isHealthyFlow = isMediaStreamTrackLike(track)
+      && track.readyState === 'live'
+      && (((flow?.lastHealthyAt ?? 0) > 0) || track.muted === false || isRecentLiveFlow || isLiveConnectedFlow);
+
+    const cached = this.remoteVideoStreamCache.get(memberId);
+    if (!isHealthyFlow || !isMediaStreamTrackLike(track)) {
+      const pending = this.getPendingRemoteVideoTrack(memberId);
+      if (pending) {
+        this.remoteVideoStreamCache.set(memberId, {
+          trackId: pending.track.id,
+          stream: pending.stream,
+          lastUsableAt: now,
+        });
+        return pending.stream;
+      }
+
+      if (cached) {
+        const cachedTrack = cached.stream.getVideoTracks?.()[0]
+          ?? cached.stream.getTracks?.()[0]
+          ?? null;
+        const cachedTrackStillLive = isMediaStreamTrackLike(cachedTrack)
+          ? cachedTrack.readyState === 'live'
+          : true;
+        if (cachedTrackStillLive && now - cached.lastUsableAt <= graceMs) {
+          return cached.stream;
+        }
+        if (cachedTrackStillLive && connectedish && stillPublished && now - cached.lastUsableAt <= connectedTrackGraceMs) {
+          return cached.stream;
+        }
+      }
+
+      this.remoteVideoStreamCache.delete(memberId);
+      return null;
+    }
+
+    if (cached?.trackId === track.id) {
+      cached.lastUsableAt = now;
+      return cached.stream;
+    }
+
+    const stream = new MediaStream([track]);
+    this.remoteVideoStreamCache.set(memberId, {
+      trackId: track.id,
+      stream,
+      lastUsableAt: now,
+    });
+    return stream;
+  }
+
+  getUsableRemoteVideoEntries(): Array<{
+    memberId: string;
+    userId?: string;
+    displayName?: string;
+    stream: MediaStream | null;
+    trackId: string | null;
+    published: boolean;
+    isCameraOff: boolean;
+  }> {
+    const candidateIds = new Set<string>();
+    for (const memberId of this.peers.keys()) candidateIds.add(memberId);
+    for (const pending of this.pendingRemoteTracks.values()) {
+      if (pending?.memberId) candidateIds.add(pending.memberId);
+    }
+    for (const memberId of this.remoteVideoStreamCache.keys()) candidateIds.add(memberId);
+    for (const mediaMember of this.room.media.list?.() ?? []) {
+      if (mediaMember?.member?.memberId) candidateIds.add(mediaMember.member.memberId);
+    }
+
+    const mediaMembers = this.room.media.list?.() ?? [];
+    return Array.from(candidateIds).map((memberId) => {
+      const stream = this.getUsableRemoteVideoStream(memberId);
+      const trackId = stream?.getVideoTracks?.()[0]?.id
+        ?? stream?.getTracks?.()[0]?.id
+        ?? null;
+      const participant = this.findMember(memberId);
+      const displayName = typeof participant?.state?.displayName === 'string'
+        ? participant.state.displayName
+        : undefined;
+      const published = this.getPublishedVideoLikeKinds(memberId).length > 0
+        || mediaMembers.some((entry) => {
+          if (entry?.member?.memberId !== memberId) return false;
+          return Boolean(
+            entry?.state?.video?.published
+            || entry?.state?.screen?.published
+            || entry?.tracks?.some((track) =>
+              (track.kind === 'video' || track.kind === 'screen') && track.trackId,
+            ),
+          );
+        });
+
+      return {
+        memberId,
+        userId: participant?.userId,
+        displayName,
+        stream,
+        trackId,
+        published,
+        isCameraOff: !(published || stream instanceof MediaStream),
+      };
+    });
+  }
+
+  getRemoteVideoStates(): Array<{
+    participantId: string;
+    memberId: string;
+    userId?: string;
+    displayName?: string;
+    stream: MediaStream | null;
+    trackId: string | null;
+    published: boolean;
+    isCameraOff: boolean;
+    updatedAt: number;
+  }> {
+    const now = Date.now();
+    return this.getUsableRemoteVideoEntries().map((entry) => ({
+      participantId: entry.memberId,
+      updatedAt: now,
+      ...entry,
+    }));
+  }
+
+  getActiveRemoteMemberIds(): string[] {
+    return this.getRemoteVideoStates()
+      .filter((entry) => entry.stream instanceof MediaStream || entry.published)
+      .map((entry) => entry.memberId);
   }
 
   private async collectCapabilities(
@@ -723,6 +919,80 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     });
   }
 
+  onRemoteVideoStateChange(
+    handler: (entries: Array<{
+      participantId: string;
+      memberId: string;
+      userId?: string;
+      displayName?: string;
+      stream: MediaStream | null;
+      trackId: string | null;
+      published: boolean;
+      isCameraOff: boolean;
+      updatedAt: number;
+    }>) => void,
+  ): Subscription {
+    this.remoteVideoStateHandlers.push(handler);
+    try {
+      handler(this.getRemoteVideoStates());
+    } catch {
+      // Ignore eager remote video state handler failures.
+    }
+    return createSubscription(() => {
+      const index = this.remoteVideoStateHandlers.indexOf(handler);
+      if (index >= 0) {
+        this.remoteVideoStateHandlers.splice(index, 1);
+      }
+    });
+  }
+
+  getDebugSnapshot(): unknown {
+    return {
+      localMemberId: this.localMemberId ?? null,
+      connected: Boolean(this.connected),
+      iceServersResolved: Boolean(this.iceServersResolved),
+      localTracks: Array.from(this.localTracks.entries()).map(([kind, localTrack]) => ({
+        kind,
+        trackId: localTrack.track?.id ?? null,
+        readyState: localTrack.track?.readyState ?? null,
+        enabled: localTrack.track?.enabled ?? null,
+      })),
+      peers: Array.from(this.peers.values()).map((peer) => ({
+        memberId: peer.memberId,
+        polite: peer.polite,
+        makingOffer: peer.makingOffer,
+        ignoreOffer: peer.ignoreOffer,
+        pendingNegotiation: peer.pendingNegotiation,
+        recoveryAttempts: peer.recoveryAttempts,
+        signalingState: peer.pc?.signalingState ?? null,
+        connectionState: peer.pc?.connectionState ?? null,
+        iceConnectionState: peer.pc?.iceConnectionState ?? null,
+        senderKinds: Array.from(peer.senders.keys()),
+        senderTrackIds: Array.from(peer.senders.values()).map((sender) => sender.track?.id ?? null),
+        receiverTrackIds: peer.pc?.getReceivers?.().map((receiver) => receiver.track?.id ?? null) ?? [],
+        receiverTrackKinds: peer.pc?.getReceivers?.().map((receiver) => receiver.track?.kind ?? null) ?? [],
+        pendingCandidates: peer.pendingCandidates?.length ?? 0,
+        remoteVideoFlows: Array.from(peer.remoteVideoFlows.values()).map((flow) => ({
+          trackId: flow.track?.id ?? null,
+          readyState: flow.track?.readyState ?? null,
+          muted: flow.track?.muted ?? null,
+          receivedAt: flow.receivedAt ?? null,
+          lastHealthyAt: flow.lastHealthyAt ?? null,
+        })),
+      })),
+      pendingRemoteTracks: Array.from(this.pendingRemoteTracks.values()).map((pending) => ({
+        memberId: pending.memberId,
+        trackId: pending.track?.id ?? null,
+        trackKind: pending.track?.kind ?? null,
+        readyState: pending.track?.readyState ?? null,
+        muted: pending.track?.muted ?? null,
+      })),
+      remoteTrackKinds: Array.from(this.remoteTrackKinds.entries()),
+      emittedRemoteTracks: Array.from(this.emittedRemoteTracks.values()),
+      recentEvents: this.debugEvents.slice(-120),
+    };
+  }
+
   destroy(): void {
     this.connected = false;
     this.localMemberId = null;
@@ -761,6 +1031,8 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     this.remoteTrackKinds.clear();
     this.emittedRemoteTracks.clear();
     this.pendingRemoteTracks.clear();
+    this.remoteVideoStreamCache.clear();
+    this.emitRemoteVideoStateChange(true);
   }
 
   private attachRoomSubscriptions(): void {
@@ -773,6 +1045,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
         if (member.memberId !== this.localMemberId) {
           this.cancelPendingSyncRemoval(member.memberId);
           this.ensurePeer(member.memberId, { passive: true });
+          this.emitRemoteVideoStateChange();
         }
       }),
       this.room.members.onSync((members) => {
@@ -789,10 +1062,12 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
             this.scheduleSyncRemoval(memberId);
           }
         }
+        this.emitRemoteVideoStateChange();
       }),
       this.room.members.onLeave((member) => {
         this.cancelPendingSyncRemoval(member.memberId);
         this.removeRemoteMember(member.memberId);
+        this.emitRemoteVideoStateChange();
       }),
       this.room.signals.on(this.offerEvent, (payload, meta) => {
         void this.handleDescriptionSignal('offer', payload, meta);
@@ -809,10 +1084,12 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
           this.schedulePeerRecoveryCheck(member.memberId, 'media-track');
         }
         this.rememberRemoteTrackKind(track, member);
+        this.emitRemoteVideoStateChange();
       }),
       this.room.media.onTrackRemoved((track, member) => {
         if (!track.trackId) return;
         this.scheduleTrackRemoval(track, member);
+        this.emitRemoteVideoStateChange();
       }),
     );
 
@@ -825,6 +1102,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
           this.ensurePeer(member.memberId, { passive: true });
           this.rememberRemoteTrackKindsFromState(member, state);
           this.schedulePeerRecoveryCheck(member.memberId, 'media-state');
+          this.emitRemoteVideoStateChange();
         }),
       );
     }
@@ -1337,8 +1615,13 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       stream,
       trackName: track.id,
       providerSessionId: memberId,
+      memberId,
       participantId: memberId,
       userId: participant?.userId,
+      displayName:
+        typeof participant?.state?.displayName === 'string'
+          ? participant.state.displayName
+          : undefined,
     };
 
     for (const handler of this.remoteTrackHandlers) {
@@ -1353,6 +1636,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
         this.schedulePeerRecoveryCheck(memberId, 'partial-remote-track');
       }
     }
+    this.emitRemoteVideoStateChange();
   }
 
   private resolveFallbackRemoteTrackKind(memberId: string, track: MediaStreamTrack): RoomMediaKind | null {
@@ -1453,6 +1737,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
         this.pendingRemoteTracks.delete(key);
         this.clearPendingVideoPromotionTimer(key);
         this.schedulePeerRecoveryCheck(member.memberId, 'media-track-removed');
+        this.emitRemoteVideoStateChange();
       }, this.options.trackRemovalGraceMs),
     );
   }
@@ -1557,6 +1842,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
         }
         if (!isMediaStreamTrackLike(pending.track) || pending.track.readyState !== 'live') {
           this.pendingRemoteTracks.delete(key);
+          this.emitRemoteVideoStateChange();
           return;
         }
 
@@ -1572,6 +1858,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
           this.registerPeerRemoteTrack(peer, pending.track, promotedKind);
           this.resetPeerRecovery(peer);
         }
+        this.emitRemoteVideoStateChange();
       }, this.options.pendingVideoPromotionGraceMs),
     );
   }
@@ -1615,7 +1902,9 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
         this.clearPendingVideoPromotionTimer(key);
       }
     });
+    this.remoteVideoStreamCache.delete(memberId);
     this.closePeer(memberId);
+    this.emitRemoteVideoStateChange();
   }
 
   private scheduleSyncRemoval(memberId: string): void {
@@ -1635,6 +1924,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
         }
 
         this.removeRemoteMember(memberId);
+        this.emitRemoteVideoStateChange();
       }, this.options.syncRemovalGraceMs),
     );
   }
@@ -1687,6 +1977,8 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     this.remoteTrackKinds.clear();
     this.emittedRemoteTracks.clear();
     this.pendingRemoteTracks.clear();
+    this.remoteVideoStreamCache.clear();
+    this.emitRemoteVideoStateChange(true);
   }
 
   private destroyPeer(peer: P2PPeerState): void {
@@ -1769,6 +2061,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     const handleEnded = () => {
       flow.cleanup();
       peer.remoteVideoFlows.delete(track.id);
+      this.emitRemoteVideoStateChange();
     };
 
     track.addEventListener('unmute', markHealthy);
@@ -1779,6 +2072,7 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     };
 
     peer.remoteVideoFlows.set(track.id, flow);
+    this.emitRemoteVideoStateChange();
   }
 
   private async inspectPeerVideoHealth(peer: P2PPeerState): Promise<string | null> {
@@ -1952,6 +2246,21 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
       return this.localMemberId;
     }
     return this.connect();
+  }
+
+  private getPendingRemoteVideoTrack(
+    memberId: string,
+  ): { track: MediaStreamTrack; stream: MediaStream } | null {
+    for (const pending of this.pendingRemoteTracks.values()) {
+      if (
+        pending.memberId === memberId
+        && pending.track.kind === 'video'
+        && pending.track.readyState === 'live'
+      ) {
+        return { track: pending.track, stream: pending.stream };
+      }
+    }
+    return null;
   }
 
   private normalizeDescription(payload: unknown): RTCSessionDescriptionInit | null {
@@ -2310,5 +2619,46 @@ export class RoomP2PMediaTransport implements RoomMediaTransport {
     ).length;
 
     return emittedVideoLikeCount + pendingVideoLikeCount < expectedVideoLikeKinds.length;
+  }
+
+  private emitRemoteVideoStateChange(force = false): void {
+    if (this.remoteVideoStateHandlers.length === 0 && !force) {
+      return;
+    }
+
+    const entries = this.getRemoteVideoStates();
+    const signature = JSON.stringify(entries.map((entry) => ({
+      memberId: entry.memberId,
+      userId: entry.userId ?? null,
+      displayName: entry.displayName ?? null,
+      trackId: entry.trackId ?? null,
+      published: entry.published,
+      isCameraOff: entry.isCameraOff,
+      hasStream: entry.stream instanceof MediaStream,
+    })));
+    if (!force && signature === this.remoteVideoStateSignature) {
+      return;
+    }
+    this.remoteVideoStateSignature = signature;
+
+    for (const handler of this.remoteVideoStateHandlers) {
+      try {
+        handler(entries.map((entry) => ({ ...entry })));
+      } catch {
+        // Ignore remote video state handler failures.
+      }
+    }
+  }
+
+  private recordDebugEvent(type: string, details: Record<string, unknown> = {}): void {
+    this.debugEvents.push({
+      id: ++this.debugEventCounter,
+      at: Date.now(),
+      type,
+      details,
+    });
+    if (this.debugEvents.length > 200) {
+      this.debugEvents.splice(0, this.debugEvents.length - 200);
+    }
   }
 }

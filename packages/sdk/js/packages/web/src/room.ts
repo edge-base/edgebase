@@ -42,6 +42,12 @@ export interface RoomOptions {
   connectionTimeout?: number;
   /** Heartbeat ping interval in ms (default: 8000) */
   heartbeatIntervalMs?: number;
+  /** Consider the room socket stale if no pong is observed within this window. */
+  heartbeatStaleTimeoutMs?: number;
+  /** Grace period before reacting to browser network type changes. */
+  networkRecoveryGraceMs?: number;
+  /** Time to wait for recovery before surfacing a session reset recommendation. */
+  disconnectResetTimeoutMs?: number;
 }
 
 // Re-export Subscription + helper from core for backwards compatibility
@@ -82,6 +88,11 @@ export interface RoomMember {
 
 export interface RoomReconnectInfo {
   attempt: number;
+}
+
+export interface RoomRecoveryFailureInfo {
+  state: RoomConnectionState;
+  timeoutMs: number;
 }
 
 export type RoomMediaKind = 'audio' | 'video' | 'screen';
@@ -321,15 +332,73 @@ export interface RoomMediaRemoteTrackEvent {
   stream?: MediaStream;
   trackName?: string;
   providerSessionId?: string;
+  memberId?: string;
   participantId?: string;
   customParticipantId?: string;
   userId?: string;
+  displayName?: string;
+}
+
+export interface RoomMediaConnectCandidate {
+  label?: string;
+  options?: RoomMediaTransportOptions;
+}
+
+export interface RoomMediaUsableRemoteVideoEntry {
+  memberId: string;
+  userId?: string;
+  displayName?: string;
+  stream: MediaStream | null;
+  trackId: string | null;
+  published: boolean;
+  isCameraOff: boolean;
+}
+
+export interface RoomMediaRemoteVideoState extends RoomMediaUsableRemoteVideoEntry {
+  participantId: string;
+  updatedAt: number;
+}
+
+export interface RoomMediaConnectRequest {
+  candidates?: RoomMediaConnectCandidate[];
+  connectPayload?: RoomMediaTransportConnectPayload;
+  onTransport?(transport: RoomMediaTransport): void;
+  onRemoteTrack?(event: RoomMediaRemoteTrackEvent): void;
+  onRemoteVideoStateChange?(entries: RoomMediaRemoteVideoState[]): void;
+}
+
+export interface RoomMediaConnectResult {
+  label: string;
+  provider: RoomMediaTransportProvider;
+  transport: RoomMediaTransport;
+  cleanup(): void;
+}
+
+export interface RoomMediaBootstrapRequest {
+  transport: RoomMediaTransport;
+  muted?: boolean;
+  cameraOff?: boolean;
+  preflightStream?: MediaStream | null;
+  videoConstraints?: MediaTrackConstraints | boolean;
+}
+
+export interface RoomMediaBootstrapResult {
+  muted: boolean;
+  cameraOff: boolean;
+  audioTrack: MediaStreamTrack | null;
+  videoTrack: MediaStreamTrack | null;
 }
 
 export interface RoomMediaTransport {
   connect(payload?: RoomMediaTransportConnectPayload): Promise<string>;
   getCapabilities(): Promise<RoomMediaTransportCapabilities>;
   batchLocalUpdates?<T>(callback: () => Promise<T>): Promise<T>;
+  getUsableRemoteVideoStream?(memberId: string): MediaStream | null;
+  getUsableRemoteVideoEntries?(): RoomMediaUsableRemoteVideoEntry[];
+  getRemoteVideoStates?(): RoomMediaRemoteVideoState[];
+  getActiveRemoteMemberIds?(): string[];
+  onRemoteVideoStateChange?(handler: (entries: RoomMediaRemoteVideoState[]) => void): Subscription;
+  getDebugSnapshot?(): unknown;
   enableAudio(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
   enableVideo(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
   startScreenShare(constraints?: unknown): Promise<MediaStreamTrack>;
@@ -412,6 +481,7 @@ const ROOM_EXPLICIT_LEAVE_CLOSE_CODE = 4005;
 const ROOM_AUTH_STATE_LOST_CLOSE_CODE = 4006;
 const ROOM_EXPLICIT_LEAVE_REASON = 'Client left room';
 const ROOM_HEARTBEAT_INTERVAL_MS = 8000;
+const ROOM_HEARTBEAT_STALE_TIMEOUT_MS = 20_000;
 
 function isSocketOpenOrConnecting(socket: Pick<WebSocket, 'readyState'> | null | undefined): boolean {
   return !!socket && (socket.readyState === WS_OPEN || socket.readyState === WS_CONNECTING);
@@ -423,6 +493,10 @@ function closeSocketAfterLeave(socket: Pick<WebSocket, 'close'>, reason: string)
   } catch {
     // Socket already closed.
   }
+}
+
+function getDefaultHeartbeatStaleTimeoutMs(heartbeatIntervalMs: number): number {
+  return Math.max(Math.floor(heartbeatIntervalMs * 2.5), ROOM_HEARTBEAT_STALE_TIMEOUT_MS);
 }
 
 // ─── RoomClient v2 ───
@@ -458,6 +532,8 @@ export class RoomClient {
   private reconnectInfo: RoomReconnectInfo | null = null;
   private connectingPromise: Promise<void> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private lastHeartbeatAckAt = Date.now();
+  private disconnectResetTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionallyLeft = false;
   private waitingForAuth = false;
   private joinRequested = false;
@@ -530,6 +606,7 @@ export class RoomClient {
   private errorHandlers: ErrorHandler[] = [];
   private kickedHandlers: KickedHandler[] = [];
   private memberSyncHandlers: Array<(members: RoomMember[]) => void> = [];
+  private memberSnapshotHandlers: Array<(members: RoomMember[]) => void> = [];
   private memberJoinHandlers: Array<(member: RoomMember) => void> = [];
   private memberLeaveHandlers: Array<(member: RoomMember, reason: RoomMemberLeaveReason) => void> = [];
   private memberStateHandlers: Array<(member: RoomMember, state: Record<string, unknown>) => void> = [];
@@ -539,8 +616,13 @@ export class RoomClient {
   private mediaTrackRemovedHandlers: Array<(track: RoomMediaTrack, member: RoomMember) => void> = [];
   private mediaStateHandlers: Array<(member: RoomMember, state: RoomMemberMediaState) => void> = [];
   private mediaDeviceHandlers: Array<(member: RoomMember, change: RoomMediaDeviceChange) => void> = [];
+  private remoteMediaTrackHandlers: Array<(event: RoomMediaRemoteTrackEvent) => void> = [];
+  private remoteMediaVideoStateHandlers: Array<(entries: RoomMediaRemoteVideoState[]) => void> = [];
   private reconnectHandlers: Array<(info: RoomReconnectInfo) => void> = [];
+  private recoveryFailureHandlers: Array<(info: RoomRecoveryFailureInfo) => void> = [];
   private connectionStateHandlers: Array<(state: RoomConnectionState) => void> = [];
+  private activeMediaTransport: RoomMediaTransport | null = null;
+  private activeMediaCleanup: (() => void) | null = null;
 
   readonly state = {
     getShared: (): Record<string, unknown> => this.getSharedState(),
@@ -556,10 +638,26 @@ export class RoomClient {
   };
 
   readonly signals = {
-    send: (event: string, payload?: unknown, options?: { includeSelf?: boolean }): Promise<void> =>
-      this.sendSignal(event, payload, options),
-    sendTo: (memberId: string, event: string, payload?: unknown): Promise<void> =>
-      this.sendSignal(event, payload, { memberId }),
+    send: async (event: string, payload?: unknown, options?: { includeSelf?: boolean }): Promise<void> => {
+      try {
+        return await this.sendSignal(event, payload, options);
+      } catch (error) {
+        if (this.shouldDropP2PSignalError(event, error)) {
+          return;
+        }
+        throw error;
+      }
+    },
+    sendTo: async (memberId: string, event: string, payload?: unknown): Promise<void> => {
+      try {
+        return await this.sendSignal(event, payload, { memberId });
+      } catch (error) {
+        if (this.shouldDropP2PSignalError(event, error)) {
+          return;
+        }
+        throw error;
+      }
+    },
     on: (event: string, handler: (payload: unknown, meta: RoomSignalMeta) => void): Subscription =>
       this.onSignal(event, handler),
     onAny: (handler: (event: string, payload: unknown, meta: RoomSignalMeta) => void): Subscription =>
@@ -567,13 +665,13 @@ export class RoomClient {
   };
 
   readonly members = {
-    list: (): RoomMember[] => cloneValue(this._members),
+    list: (): RoomMember[] => this._members.map((member) => this.buildEffectiveMemberSnapshot(member)),
     current: (): RoomMember | null => {
       const connectionId = this.currentConnectionId;
       if (connectionId) {
         const byConnection = this._members.find((member) => member.connectionId === connectionId);
         if (byConnection) {
-          return cloneValue(byConnection);
+          return this.buildEffectiveMemberSnapshot(byConnection);
         }
       }
 
@@ -582,9 +680,11 @@ export class RoomClient {
         return null;
       }
       const member = this._members.find((entry) => entry.userId === userId) ?? null;
-      return member ? cloneValue(member) : null;
+      return member ? this.buildEffectiveMemberSnapshot(member) : null;
     },
+    awaitCurrent: (timeoutMs = 10_000): Promise<RoomMember | null> => this.waitForCurrentMember(timeoutMs),
     onSync: (handler: (members: RoomMember[]) => void): Subscription => this.onMembersSync(handler),
+    onSnapshot: (handler: (members: RoomMember[]) => void): Subscription => this.onMemberSnapshot(handler),
     onJoin: (handler: (member: RoomMember) => void): Subscription => this.onMemberJoin(handler),
     onLeave: (handler: (member: RoomMember, reason: RoomMemberLeaveReason) => void): Subscription =>
       this.onMemberLeave(handler),
@@ -630,6 +730,36 @@ export class RoomClient {
         screenInputId?: string;
       }): Promise<void> => this.switchMediaDevices(payload),
     },
+    local: {
+      enableAudio: (constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack> =>
+        this.activeMediaTransport?.enableAudio?.(constraints)
+        ?? Promise.reject(new Error('Active media transport unavailable')),
+      enableVideo: (constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack> =>
+        this.activeMediaTransport?.enableVideo?.(constraints)
+        ?? Promise.reject(new Error('Active media transport unavailable')),
+      disableAudio: (): Promise<void> =>
+        this.activeMediaTransport?.disableAudio?.()
+        ?? Promise.reject(new Error('Active media transport unavailable')),
+      disableVideo: (): Promise<void> =>
+        this.activeMediaTransport?.disableVideo?.()
+        ?? Promise.reject(new Error('Active media transport unavailable')),
+      setMuted: (kind: Extract<RoomMediaKind, 'audio' | 'video'>, muted: boolean): Promise<void> =>
+        this.activeMediaTransport?.setMuted?.(kind, muted)
+        ?? Promise.reject(new Error('Active media transport unavailable')),
+      startScreenShare: (constraints?: unknown): Promise<MediaStreamTrack> =>
+        this.activeMediaTransport?.startScreenShare?.(constraints)
+        ?? Promise.reject(new Error('Active media transport unavailable')),
+      stopScreenShare: (): Promise<void> =>
+        this.activeMediaTransport?.stopScreenShare?.()
+        ?? Promise.reject(new Error('Active media transport unavailable')),
+      switchDevices: (payload: {
+        audioInputId?: string;
+        videoInputId?: string;
+        screenInputId?: string;
+      }): Promise<void> =>
+        this.activeMediaTransport?.switchDevices?.(payload)
+        ?? Promise.reject(new Error('Active media transport unavailable')),
+    },
     realtime: {
       iceServers: (payload?: RoomRealtimeIceServersRequest): Promise<RoomRealtimeIceServersResponse> =>
         this.requestRealtimeMedia('turn', 'POST', payload),
@@ -642,6 +772,144 @@ export class RoomClient {
       const transport = this.media.transport(options);
       return transport.getCapabilities();
     },
+    getRemoteVideoStates: (): RoomMediaRemoteVideoState[] => this.getActiveMediaTransportRemoteVideoStates(),
+    getRemoteVideoStream: (memberId: string): MediaStream | null =>
+      this.activeMediaTransport?.getUsableRemoteVideoStream?.(memberId) ?? null,
+    getActiveRemoteMemberIds: (): string[] =>
+      this.activeMediaTransport?.getActiveRemoteMemberIds?.()
+      ?? this.getActiveMediaTransportRemoteVideoStates()
+        .filter((entry) => entry.stream instanceof MediaStream || entry.published)
+        .map((entry) => entry.memberId),
+    getTransportDebugSnapshot: (): unknown => this.activeMediaTransport?.getDebugSnapshot?.() ?? null,
+    connect: async (request?: RoomMediaConnectRequest): Promise<RoomMediaConnectResult> => {
+      const candidates = request?.candidates?.length
+        ? request.candidates
+        : [{ label: 'p2p', options: { provider: 'p2p' as const } }];
+      let lastError: unknown = null;
+
+      for (const candidate of candidates) {
+        const options = candidate?.options;
+        const hasCloudflareConfig =
+          options && 'cloudflareRealtimeKit' in options && options.cloudflareRealtimeKit != null;
+        const provider = options?.provider ?? (hasCloudflareConfig ? 'cloudflare_realtimekit' : 'p2p');
+        const label = candidate?.label ?? provider;
+        const transport = this.media.transport(options ?? { provider });
+        const cleanupFns: Array<() => void> = [];
+        const cleanup = () => {
+          while (cleanupFns.length > 0) {
+            const fn = cleanupFns.pop();
+            try {
+              fn?.();
+            } catch {
+              // Ignore cleanup failures.
+            }
+          }
+        };
+
+        try {
+          request?.onTransport?.(transport);
+        } catch {
+          // Ignore observer failures.
+        }
+
+        const trackSub = transport.onRemoteTrack((event) => {
+          this.emitRemoteMediaTrack(event);
+          request?.onRemoteTrack?.(event);
+        });
+        cleanupFns.push(() => {
+          (trackSub as unknown as { unsubscribe?: () => void } | null)?.unsubscribe?.();
+        });
+
+        if (typeof transport.onRemoteVideoStateChange === 'function') {
+          const remoteVideoSub = transport.onRemoteVideoStateChange((entries) => {
+            this.emitRemoteMediaVideoStateChange(entries);
+            request?.onRemoteVideoStateChange?.(entries);
+          });
+          cleanupFns.push(() => {
+            (remoteVideoSub as unknown as { unsubscribe?: () => void } | null)?.unsubscribe?.();
+          });
+        }
+
+        try {
+          await transport.connect(request?.connectPayload);
+          const wrappedCleanup = () => {
+            this.clearActiveMediaTransport(transport, { skipCleanup: true });
+            cleanup();
+          };
+          this.setActiveMediaTransport(transport, cleanup);
+          return {
+            label,
+            provider,
+            transport,
+            cleanup: wrappedCleanup,
+          };
+        } catch (error) {
+          lastError = error;
+          cleanup();
+          try {
+            transport.destroy?.();
+          } catch {
+            // Ignore destroy failures.
+          }
+        }
+      }
+
+      throw lastError ?? new Error('No media transport available');
+    },
+    bootstrapLocalTracks: async (request: RoomMediaBootstrapRequest): Promise<RoomMediaBootstrapResult> => {
+      const transport = request.transport;
+      if (request.preflightStream) {
+        try {
+          request.preflightStream.getTracks().forEach((track) => track.stop());
+        } catch {
+          // Ignore preflight stream cleanup failures.
+        }
+      }
+
+      let resolvedMuted = request.muted ?? true;
+      let resolvedCameraOff = true;
+      let audioTrack: MediaStreamTrack | null = null;
+      let videoTrack: MediaStreamTrack | null = null;
+
+      const applyInitialMedia = async () => {
+        if (!resolvedMuted) {
+          try {
+            audioTrack = await transport.enableAudio(true);
+          } catch {
+            resolvedMuted = true;
+          }
+        }
+
+        if (!request.cameraOff) {
+          try {
+            videoTrack = await transport.enableVideo(request.videoConstraints ?? {
+              width: { ideal: 640 },
+              height: { ideal: 480 },
+              frameRate: { ideal: 24 },
+            });
+            if (videoTrack) {
+              resolvedCameraOff = false;
+            }
+          } catch {
+            // Leave camera off on failure.
+          }
+        }
+      };
+
+      if (typeof transport.batchLocalUpdates === 'function') {
+        await transport.batchLocalUpdates(applyInitialMedia);
+      } else {
+        await applyInitialMedia();
+      }
+
+      return {
+        muted: resolvedMuted,
+        cameraOff: resolvedCameraOff,
+        audioTrack,
+        videoTrack,
+      };
+    },
+    disconnect: (): void => this.teardownTransport(),
     transport: (options?: RoomMediaTransportOptions): RoomMediaTransport => {
       // Infer provider from options: if cloudflareRealtimeKit config is present, use it;
       // otherwise default to p2p for zero-config local development.
@@ -658,10 +926,14 @@ export class RoomClient {
     },
     onTrack: (handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription =>
       this.onMediaTrack(handler),
+    onRemoteTrack: (handler: (event: RoomMediaRemoteTrackEvent) => void): Subscription =>
+      this.onRemoteMediaTrack(handler),
     onTrackRemoved: (handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription =>
       this.onMediaTrackRemoved(handler),
     onStateChange: (handler: (member: RoomMember, state: RoomMemberMediaState) => void): Subscription =>
       this.onMediaStateChange(handler),
+    onRemoteVideoStateChange: (handler: (entries: RoomMediaRemoteVideoState[]) => void): Subscription =>
+      this.onRemoteMediaVideoStateChange(handler),
     onDeviceChange: (handler: (member: RoomMember, change: RoomMediaDeviceChange) => void): Subscription =>
       this.onMediaDeviceChange(handler),
   };
@@ -672,6 +944,11 @@ export class RoomClient {
     onReconnect: (handler: (info: RoomReconnectInfo) => void): Subscription => this.onReconnect(handler),
     onConnectionStateChange: (handler: (state: RoomConnectionState) => void): Subscription =>
       this.onConnectionStateChange(handler),
+    onRecoveryFailure: (handler: (info: RoomRecoveryFailureInfo) => void): Subscription =>
+      this.onRecoveryFailure(handler),
+    teardownTransport: (transport?: Pick<RoomMediaTransport, 'destroy'> | null): void =>
+      this.teardownTransport(transport as RoomMediaTransport | null | undefined),
+    getDebugSnapshot: (): unknown => this.getDebugSnapshot(),
   };
 
   constructor(
@@ -692,6 +969,11 @@ export class RoomClient {
       sendTimeout: options?.sendTimeout ?? 10000,
       connectionTimeout: options?.connectionTimeout ?? 15000,
       heartbeatIntervalMs: options?.heartbeatIntervalMs ?? ROOM_HEARTBEAT_INTERVAL_MS,
+      heartbeatStaleTimeoutMs:
+        options?.heartbeatStaleTimeoutMs
+        ?? getDefaultHeartbeatStaleTimeoutMs(options?.heartbeatIntervalMs ?? ROOM_HEARTBEAT_INTERVAL_MS),
+      networkRecoveryGraceMs: options?.networkRecoveryGraceMs ?? 3500,
+      disconnectResetTimeoutMs: options?.disconnectResetTimeoutMs ?? 8000,
     };
 
     this.unsubAuthState = this.tokenManager.onAuthStateChange((user) => {
@@ -710,6 +992,18 @@ export class RoomClient {
   /** Get current player state (read-only snapshot) */
   getPlayerState(): Record<string, unknown> {
     return cloneRecord(this._playerState);
+  }
+
+  private async waitForCurrentMember(timeoutMs = 10_000): Promise<RoomMember | null> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const member = this.members.current();
+      if (member) {
+        return member;
+      }
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 50));
+    }
+    return this.members.current();
   }
 
   // ─── Metadata (HTTP, no WebSocket needed) ───
@@ -953,6 +1247,8 @@ export class RoomClient {
     this.joinRequested = false;
     this.waitingForAuth = false;
     this.stopHeartbeat();
+    this.clearDisconnectResetTimer();
+    this.teardownTransport();
 
     // Reject all pending send() requests
     this.rejectAllPendingRequests(new EdgeBaseError(499, 'Room left'));
@@ -1170,6 +1466,14 @@ export class RoomClient {
       });
   }
 
+  private onMemberSnapshot(handler: (members: RoomMember[]) => void): Subscription {
+    this.memberSnapshotHandlers.push(handler);
+    return createSubscription(() => {
+      const index = this.memberSnapshotHandlers.indexOf(handler);
+      if (index >= 0) this.memberSnapshotHandlers.splice(index, 1);
+    });
+  }
+
   private onMemberJoin(handler: (member: RoomMember) => void): Subscription {
     this.memberJoinHandlers.push(handler);
     return createSubscription(() => {
@@ -1204,6 +1508,14 @@ export class RoomClient {
         const index = this.reconnectHandlers.indexOf(handler);
         if (index >= 0) this.reconnectHandlers.splice(index, 1);
       });
+  }
+
+  private onRecoveryFailure(handler: (info: RoomRecoveryFailureInfo) => void): Subscription {
+    this.recoveryFailureHandlers.push(handler);
+    return createSubscription(() => {
+      const index = this.recoveryFailureHandlers.indexOf(handler);
+      if (index >= 0) this.recoveryFailureHandlers.splice(index, 1);
+    });
   }
 
   private onConnectionStateChange(handler: (state: RoomConnectionState) => void): Subscription {
@@ -1248,6 +1560,29 @@ export class RoomClient {
         const index = this.mediaDeviceHandlers.indexOf(handler);
         if (index >= 0) this.mediaDeviceHandlers.splice(index, 1);
       });
+  }
+
+  private onRemoteMediaTrack(handler: (event: RoomMediaRemoteTrackEvent) => void): Subscription {
+    this.remoteMediaTrackHandlers.push(handler);
+    return createSubscription(() => {
+      const index = this.remoteMediaTrackHandlers.indexOf(handler);
+      if (index >= 0) this.remoteMediaTrackHandlers.splice(index, 1);
+    });
+  }
+
+  private onRemoteMediaVideoStateChange(
+    handler: (entries: RoomMediaRemoteVideoState[]) => void,
+  ): Subscription {
+    this.remoteMediaVideoStateHandlers.push(handler);
+    try {
+      handler(this.getActiveMediaTransportRemoteVideoStates());
+    } catch {
+      // Ignore eager remote media state handler failures.
+    }
+    return createSubscription(() => {
+      const index = this.remoteMediaVideoStateHandlers.indexOf(handler);
+      if (index >= 0) this.remoteMediaVideoStateHandlers.splice(index, 1);
+    });
   }
 
   private async sendSignal(
@@ -1637,6 +1972,7 @@ export class RoomClient {
         break;
       case 'pong':
         // Heartbeat response — no action needed
+        this.lastHeartbeatAckAt = Date.now();
         break;
     }
   }
@@ -1781,8 +2117,11 @@ export class RoomClient {
     for (const member of members) {
       this.syncMediaMemberInfo(member);
     }
-    const snapshot = cloneValue(this._members);
+    const snapshot = this._members.map((member) => this.buildEffectiveMemberSnapshot(member));
     for (const handler of this.memberSyncHandlers) {
+      handler(snapshot);
+    }
+    for (const handler of this.memberSnapshotHandlers) {
       handler(snapshot);
     }
   }
@@ -1796,7 +2135,7 @@ export class RoomClient {
     if (!member) return;
     this.upsertMember(member);
     this.syncMediaMemberInfo(member);
-    const snapshot = cloneValue(member);
+    const snapshot = this.buildEffectiveMemberSnapshot(member);
     for (const handler of this.memberJoinHandlers) {
       handler(snapshot);
     }
@@ -1808,7 +2147,7 @@ export class RoomClient {
     this.removeMember(member.memberId);
     this.removeMediaMember(member.memberId);
     const reason = this.normalizeLeaveReason(msg.reason);
-    const snapshot = cloneValue(member);
+    const snapshot = this.buildEffectiveMemberSnapshot(member);
     for (const handler of this.memberLeaveHandlers) {
       handler(snapshot, reason);
     }
@@ -1832,7 +2171,7 @@ export class RoomClient {
       }
     }
 
-    const memberSnapshot = cloneValue(member);
+    const memberSnapshot = this.buildEffectiveMemberSnapshot(member);
     const stateSnapshot = cloneRecord(state);
     for (const handler of this.memberStateHandlers) {
       handler(memberSnapshot, stateSnapshot);
@@ -1865,7 +2204,7 @@ export class RoomClient {
       providerSessionId: track.providerSessionId,
     });
 
-    const memberSnapshot = cloneValue(mediaMember.member);
+    const memberSnapshot = this.buildEffectiveMemberSnapshot(mediaMember.member);
     const trackSnapshot = cloneValue(track);
     for (const handler of this.mediaTrackHandlers) {
       handler(trackSnapshot, memberSnapshot);
@@ -1892,7 +2231,7 @@ export class RoomClient {
       },
     };
 
-    const memberSnapshot = cloneValue(mediaMember.member);
+    const memberSnapshot = this.buildEffectiveMemberSnapshot(mediaMember.member);
     const trackSnapshot = cloneValue(track);
     for (const handler of this.mediaTrackRemovedHandlers) {
       handler(trackSnapshot, memberSnapshot);
@@ -1909,7 +2248,7 @@ export class RoomClient {
     const mediaMember = this.ensureMediaMember(member);
     mediaMember.state = this.normalizeMediaState(msg.state);
 
-    const memberSnapshot = cloneValue(mediaMember.member);
+    const memberSnapshot = this.buildEffectiveMemberSnapshot(mediaMember.member);
     const stateSnapshot = cloneValue(mediaMember.state);
     for (const handler of this.mediaStateHandlers) {
       handler(memberSnapshot, stateSnapshot);
@@ -1930,7 +2269,7 @@ export class RoomClient {
       }
     }
 
-    const memberSnapshot = cloneValue(mediaMember.member);
+    const memberSnapshot = this.buildEffectiveMemberSnapshot(mediaMember.member);
     const change = { kind, deviceId } satisfies RoomMediaDeviceChange;
     for (const handler of this.mediaDeviceHandlers) {
       handler(memberSnapshot, change);
@@ -2278,6 +2617,164 @@ export class RoomClient {
     }
   }
 
+  private buildEffectiveMemberSnapshot(member: RoomMember): RoomMember {
+    const snapshot = cloneValue(member);
+    const mediaMember = this._mediaMembers.find((entry) => entry.member.memberId === member.memberId);
+    const videoPublished = mediaMember?.state?.video?.published;
+    if (typeof videoPublished === 'boolean') {
+      snapshot.state = {
+        ...(snapshot.state ?? {}),
+        isCameraOff: !videoPublished,
+      };
+    }
+    return snapshot;
+  }
+
+  private shouldDropP2PSignalError(event: string, error: unknown): boolean {
+    if (typeof event !== 'string' || !event.startsWith('edgebase.media.p2p.')) {
+      return false;
+    }
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    return message.includes('Room connection required')
+      || message.includes('WebSocket connection lost')
+      || message.includes('Room left');
+  }
+
+  private setActiveMediaTransport(transport: RoomMediaTransport | null, cleanup?: (() => void) | null): void {
+    if (this.activeMediaTransport && this.activeMediaTransport !== transport) {
+      this.clearActiveMediaTransport();
+    }
+    this.activeMediaTransport = transport ?? null;
+    this.activeMediaCleanup = typeof cleanup === 'function' ? cleanup : null;
+  }
+
+  private clearActiveMediaTransport(
+    transport?: RoomMediaTransport | null,
+    options: { skipCleanup?: boolean } = {},
+  ): void {
+    if (transport && this.activeMediaTransport && transport !== this.activeMediaTransport) {
+      return;
+    }
+    const cleanup = this.activeMediaCleanup;
+    this.activeMediaTransport = null;
+    this.activeMediaCleanup = null;
+    if (options.skipCleanup) {
+      return;
+    }
+    try {
+      cleanup?.();
+    } catch {
+      // Ignore active media cleanup failures.
+    }
+  }
+
+  private getActiveMediaTransportRemoteVideoStates(): RoomMediaRemoteVideoState[] {
+    const transport = this.activeMediaTransport;
+    if (typeof transport?.getRemoteVideoStates === 'function') {
+      return transport.getRemoteVideoStates();
+    }
+    const now = Date.now();
+    return (transport?.getUsableRemoteVideoEntries?.() ?? []).map((entry) => ({
+      participantId: entry.memberId,
+      updatedAt: now,
+      memberId: entry.memberId,
+      userId: entry.userId,
+      displayName: entry.displayName,
+      stream: entry.stream instanceof MediaStream ? entry.stream : null,
+      trackId: entry.trackId ?? null,
+      published: Boolean(entry.published),
+      isCameraOff:
+        typeof entry.isCameraOff === 'boolean'
+          ? entry.isCameraOff
+          : !(entry.published || entry.stream instanceof MediaStream),
+    }));
+  }
+
+  private normalizeRemoteMediaTrackEvent(event: RoomMediaRemoteTrackEvent): RoomMediaRemoteTrackEvent {
+    const stream = event?.stream instanceof MediaStream
+      ? event.stream
+      : event?.track instanceof MediaStreamTrack
+        ? new MediaStream([event.track])
+        : undefined;
+    const directMemberId =
+      (typeof event?.memberId === 'string' && event.memberId.length > 0 && event.memberId)
+      || (typeof event?.customParticipantId === 'string' && event.customParticipantId.length > 0 && event.customParticipantId)
+      || (typeof event?.participantId === 'string' && event.participantId.length > 0 && event.participantId)
+      || (typeof event?.providerSessionId === 'string' && event.providerSessionId.length > 0 && event.providerSessionId)
+      || null;
+    const member = directMemberId
+      ? this._members.find((entry) => entry.memberId === directMemberId) ?? null
+      : (typeof event?.userId === 'string' && event.userId.length > 0
+        ? this._members.find((entry) => entry.userId === event.userId) ?? null
+        : null);
+    const memberSnapshot = member ? this.buildEffectiveMemberSnapshot(member) : null;
+
+    return {
+      ...event,
+      stream,
+      memberId: event?.memberId ?? memberSnapshot?.memberId ?? directMemberId ?? undefined,
+      participantId: event?.participantId ?? memberSnapshot?.memberId ?? directMemberId ?? undefined,
+      userId: event?.userId ?? memberSnapshot?.userId ?? undefined,
+      displayName:
+        event?.displayName
+        ?? (typeof memberSnapshot?.state?.displayName === 'string'
+          ? memberSnapshot.state.displayName
+          : undefined),
+    };
+  }
+
+  private emitRemoteMediaTrack(event: RoomMediaRemoteTrackEvent): void {
+    const normalizedEvent = this.normalizeRemoteMediaTrackEvent(event);
+    for (const handler of this.remoteMediaTrackHandlers) {
+      try {
+        handler(normalizedEvent);
+      } catch {
+        // Ignore remote media track handler failures.
+      }
+    }
+  }
+
+  private emitRemoteMediaVideoStateChange(entries: RoomMediaRemoteVideoState[]): void {
+    for (const handler of this.remoteMediaVideoStateHandlers) {
+      try {
+        handler(entries.map((entry) => ({ ...entry })));
+      } catch {
+        // Ignore remote media video state handler failures.
+      }
+    }
+  }
+
+  private teardownTransport(transport?: RoomMediaTransport | null): void {
+    const targetTransport = transport ?? this.activeMediaTransport;
+    if (!targetTransport) {
+      this.clearActiveMediaTransport();
+      return;
+    }
+    this.clearActiveMediaTransport(targetTransport, { skipCleanup: true });
+    try {
+      targetTransport.destroy();
+    } catch {
+      // Ignore transport destroy failures.
+    }
+  }
+
+  private getDebugSnapshot(): unknown {
+    return {
+      connectionState: this.connectionState,
+      connected: this.connected,
+      authenticated: this.authenticated,
+      joined: this.joined,
+      currentUserId: this.currentUserId,
+      currentConnectionId: this.currentConnectionId,
+      membersCount: this._members.length,
+      mediaMembersCount: this._mediaMembers.length,
+      reconnectAttempts: this.reconnectAttempts,
+      joinRequested: this.joinRequested,
+      waitingForAuth: this.waitingForAuth,
+      hasActiveMediaTransport: Boolean(this.activeMediaTransport),
+    };
+  }
+
   private upsertMember(member: RoomMember): void {
     const index = this._members.findIndex((entry) => entry.memberId === member.memberId);
     if (index >= 0) {
@@ -2390,11 +2887,60 @@ export class RoomClient {
     pendingRequests.clear();
   }
 
+  private shouldScheduleDisconnectReset(next: RoomConnectionState): boolean {
+    if (this.intentionallyLeft || !this.joinRequested) {
+      return false;
+    }
+    return next === 'disconnected';
+  }
+
+  private clearDisconnectResetTimer(): void {
+    if (this.disconnectResetTimer) {
+      clearTimeout(this.disconnectResetTimer);
+      this.disconnectResetTimer = null;
+    }
+  }
+
+  private scheduleDisconnectReset(stateAtSchedule: RoomConnectionState): void {
+    this.clearDisconnectResetTimer();
+    const timeoutMs = this.options.disconnectResetTimeoutMs;
+    if (!(timeoutMs > 0)) {
+      return;
+    }
+    this.disconnectResetTimer = setTimeout(() => {
+      this.disconnectResetTimer = null;
+      if (this.intentionallyLeft || !this.joinRequested) {
+        return;
+      }
+      if (this.connectionState !== stateAtSchedule) {
+        return;
+      }
+      if (this.connectionState === 'connected') {
+        return;
+      }
+      for (const handler of this.recoveryFailureHandlers) {
+        try {
+          handler({
+            state: this.connectionState,
+            timeoutMs,
+          });
+        } catch {
+          // Ignore recovery failure handler errors.
+        }
+      }
+    }, timeoutMs);
+  }
+
   private setConnectionState(next: RoomConnectionState): void {
     if (this.connectionState === next) {
       return;
     }
     this.connectionState = next;
+    if (this.shouldScheduleDisconnectReset(next)) {
+      this.scheduleDisconnectReset(next);
+    } else {
+      this.clearDisconnectResetTimer();
+    }
     for (const handler of this.connectionStateHandlers) {
       handler(next);
     }
@@ -2484,8 +3030,17 @@ export class RoomClient {
 
   private startHeartbeat(): void {
     this.stopHeartbeat();
+    this.lastHeartbeatAckAt = Date.now();
     this.heartbeatTimer = setInterval(() => {
       if (this.ws && this.connected) {
+        if (Date.now() - this.lastHeartbeatAckAt > this.options.heartbeatStaleTimeoutMs) {
+          try {
+            this.ws.close();
+          } catch {
+            // Socket may already be closing.
+          }
+          return;
+        }
         this.ws.send(JSON.stringify({ type: 'ping' }));
       }
     }, this.options.heartbeatIntervalMs);
