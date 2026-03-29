@@ -7,7 +7,6 @@
  *   - Action flow: send → action_result / action_error
  *   - Signal flow: signal → signal_sent + signal delivery
  *   - Member state flow: member_state → member_state broadcast
- *   - Media flow: media → media_result / media_error
  *   - Admin flow: admin → admin_result
  *   - Ping/pong keepalive
  *   - Leave → graceful disconnect

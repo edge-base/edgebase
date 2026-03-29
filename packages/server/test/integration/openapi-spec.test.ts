@@ -88,9 +88,6 @@ describe('OpenAPI spec stability', () => {
     expect(spec.paths?.['/api/push/register']?.post?.security).toEqual([
       { userBearerAuth: [] },
     ]);
-    expect(spec.paths?.['/api/room/media/realtime/session']?.post?.security).toEqual([
-      { userBearerAuth: [] },
-    ]);
     expect(spec.paths?.['/api/auth/passkeys/auth-options']?.post?.security).toBeUndefined();
     expect(spec.paths?.['/api/storage/{bucket}/upload']?.post?.requestBody?.content).toHaveProperty(
       'multipart/form-data',

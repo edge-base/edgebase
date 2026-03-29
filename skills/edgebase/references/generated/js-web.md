@@ -434,20 +434,6 @@ room.signals.on(event, cb: (payload, meta) => void) → Subscription
 room.signals.onAny(cb: (event, payload, meta) => void) → Subscription
 ```
 
-#### Media
-
-```
-room.media.audio.enable() / disable() / setMuted(bool)      → Promise<void>
-room.media.video.enable() / disable() / setMuted(bool)      → Promise<void>
-room.media.screen.start() / stop()                          → Promise<void>
-room.media.list()                           → RoomMediaMember[]
-room.media.devices.switch({audioInputId?, videoInputId?})    → Promise<void>
-room.media.onTrack(cb)                      → Subscription
-room.media.onTrackRemoved(cb)               → Subscription
-room.media.onStateChange(cb)                → Subscription
-room.media.onDeviceChange(cb)               → Subscription
-```
-
 #### Admin (in-room moderation)
 
 ```
@@ -455,8 +441,6 @@ room.admin.kick(memberId)                   → Promise<void>
 room.admin.mute(memberId)                   → Promise<void>
 room.admin.block(memberId)                  → Promise<void>
 room.admin.setRole(memberId, role)          → Promise<void>
-room.admin.disableVideo(memberId)           → Promise<void>
-room.admin.stopScreenShare(memberId)        → Promise<void>
 ```
 
 #### Meta
@@ -468,44 +452,6 @@ room.getSummary()                           → Promise<{namespace, roomId, meta
 room.checkConnection()                      → Promise<{ok, type, category, message, namespace?, roomId?, runtime?}>
 client.getRoomSummary(namespace, roomId)    → Promise<{namespace, roomId, metadata, occupancy, updatedAt}>
 client.checkRoomConnection(namespace, roomId) → Promise<{ok, type, category, message, namespace?, roomId?, runtime?}>
-```
-
-#### Room Media Transport (Recommended)
-
-```
-room.media.transport({provider?: 'cloudflare_realtimekit'|'p2p'}) → RoomMediaTransport
-
-const transport = room.media.transport({
-  provider: 'cloudflare_realtimekit'
-});
-
-await transport.connect();
-await transport.enableAudio();
-await transport.enableVideo();
-transport.onRemoteTrack(event => { ... });
-```
-
-- `cloudflare_realtimekit` is the default managed provider
-- `p2p` is a STUN-only best-effort mesh provider
-- `room.media.checkReadiness({provider?})` returns transport/browser/provider preflight diagnostics before `connect()`
-
-#### Realtime (WebRTC) — Legacy Low-Level Wrappers
-
-```
-room.media.realtime.createSession(payload?) → Promise<{sessionId, sessionDescription?}>
-room.media.realtime.getIceServers({ttl?}?)  → Promise<{iceServers}>
-room.media.realtime.addTracks({sessionId, tracks, sessionDescription?}) → Promise<{sessionDescription?, tracks?}>
-room.media.realtime.renegotiate({sessionId, sessionDescription})        → Promise<{sessionDescription?, tracks?}>
-room.media.realtime.closeTracks({sessionId, tracks: [{mid}]})           → Promise<{sessionDescription?, tracks?}>
-```
-
-For raw WebRTC/SFU flows, `RoomRealtimeMediaTransport` is still available:
-```
-const transport = room.media.realtime.transport({ autoSubscribe: true });
-await transport.connect();
-await transport.enableAudio();
-await transport.enableVideo();
-transport.onRemoteTrack(event => { ... });
 ```
 
 #### Session

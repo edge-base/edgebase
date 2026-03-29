@@ -5,7 +5,7 @@ vi.mock('cloudflare:workers', () => ({
 }));
 
 describe('room rate-limit scopes', () => {
-  it('keeps signal/media/admin buckets independent per connection', async () => {
+  it('keeps signal/admin buckets independent per connection', async () => {
     const { RoomRuntimeBaseDO } = await import('../durable-objects/room-runtime-base.js');
 
     const room: any = Object.create(RoomRuntimeBaseDO.prototype);
@@ -13,7 +13,6 @@ describe('room rate-limit scopes', () => {
       rateLimit: {
         actions: 2,
         signals: 4,
-        media: 1,
         admin: 1,
       },
     };
@@ -24,9 +23,6 @@ describe('room rate-limit scopes', () => {
     expect(room.checkRateLimit('conn-1', 'signals')).toBe(true);
     expect(room.checkRateLimit('conn-1', 'signals')).toBe(true);
     expect(room.checkRateLimit('conn-1', 'signals')).toBe(false);
-
-    expect(room.checkRateLimit('conn-1', 'media')).toBe(true);
-    expect(room.checkRateLimit('conn-1', 'media')).toBe(false);
 
     expect(room.checkRateLimit('conn-1', 'admin')).toBe(true);
     expect(room.checkRateLimit('conn-1', 'admin')).toBe(false);

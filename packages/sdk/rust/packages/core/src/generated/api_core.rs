@@ -465,41 +465,6 @@ impl<'a> GeneratedDbApi<'a> {
         self.http.get_with_query("/api/room/metadata", query).await
     }
 
-    /// Get the active room realtime media session — GET /api/room/media/realtime/session
-    pub async fn get_room_realtime_session(&self, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.get_with_query("/api/room/media/realtime/session", query).await
-    }
-
-    /// Create a room realtime media session — POST /api/room/media/realtime/session
-    pub async fn create_room_realtime_session(&self, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.post_with_query("/api/room/media/realtime/session", body, query).await
-    }
-
-    /// Generate TURN / ICE credentials for room realtime media — POST /api/room/media/realtime/turn
-    pub async fn create_room_realtime_ice_servers(&self, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.post_with_query("/api/room/media/realtime/turn", body, query).await
-    }
-
-    /// Add realtime media tracks to a room session — POST /api/room/media/realtime/tracks/new
-    pub async fn add_room_realtime_tracks(&self, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.post_with_query("/api/room/media/realtime/tracks/new", body, query).await
-    }
-
-    /// Renegotiate a room realtime media session — PUT /api/room/media/realtime/renegotiate
-    pub async fn renegotiate_room_realtime_session(&self, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.put_with_query("/api/room/media/realtime/renegotiate", body, query).await
-    }
-
-    /// Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close
-    pub async fn close_room_realtime_tracks(&self, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.put_with_query("/api/room/media/realtime/tracks/close", body, query).await
-    }
-
-    /// Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
-    pub async fn create_room_cloudflare_realtime_kit_session(&self, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
-        self.http.post_with_query("/api/room/media/cloudflare_realtimekit/session", body, query).await
-    }
-
     /// Track custom events — POST /api/analytics/track
     pub async fn track_events(&self, body: &Value) -> Result<Value, Error> {
         self.http.post("/api/analytics/track", body).await
@@ -794,13 +759,6 @@ impl ApiPaths {
     pub const PUSH_UNREGISTER: &'static str = "/api/push/unregister";
     pub const CONNECT_ROOM: &'static str = "/api/room";
     pub const CHECK_ROOM_CONNECTION: &'static str = "/api/room/connect-check";
-    pub const CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION: &'static str = "/api/room/media/cloudflare_realtimekit/session";
-    pub const RENEGOTIATE_ROOM_REALTIME_SESSION: &'static str = "/api/room/media/realtime/renegotiate";
-    pub const GET_ROOM_REALTIME_SESSION: &'static str = "/api/room/media/realtime/session";
-    pub const CREATE_ROOM_REALTIME_SESSION: &'static str = "/api/room/media/realtime/session";
-    pub const CLOSE_ROOM_REALTIME_TRACKS: &'static str = "/api/room/media/realtime/tracks/close";
-    pub const ADD_ROOM_REALTIME_TRACKS: &'static str = "/api/room/media/realtime/tracks/new";
-    pub const CREATE_ROOM_REALTIME_ICE_SERVERS: &'static str = "/api/room/media/realtime/turn";
     pub const GET_ROOM_METADATA: &'static str = "/api/room/metadata";
     pub const GET_SCHEMA: &'static str = "/api/schema";
     pub const EXECUTE_SQL: &'static str = "/api/sql";

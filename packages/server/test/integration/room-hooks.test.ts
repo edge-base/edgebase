@@ -2,7 +2,7 @@
  * room-hooks.test.ts — Hooks Contract Gate
  *
  * Validates that the Room runtime correctly invokes lifecycle, member,
- * signal, media, session, and state hooks in the proper order and with
+ * signal, session, and state hooks in the proper order and with
  * the correct context.
  */
 import { describe, it, expect } from 'vitest';
@@ -260,36 +260,11 @@ describe('Room Hooks — session hooks', () => {
   });
 });
 
-// ─── 5. Media Hooks ───
-
-describe('Room Hooks — media hooks', () => {
-  it('media.onPublished tracks publish event in metadata', async () => {
-    const roomId = `hooks-media-${uid()}`;
-    const member = await connectToRoom('test-media-admin', roomId);
-    await waitForFrame(member.ws, (msg) => msg.type === 'members_sync');
-    await waitForFrame(member.ws, (msg) => msg.type === 'media_sync');
-
-    member.ws.send(JSON.stringify({
-      type: 'media', operation: 'publish', kind: 'video',
-      payload: { deviceId: 'cam-1' }, requestId: 'pub1',
-    }));
-    await waitForFrame(member.ws, (msg) => msg.type === 'media_result' && msg.requestId === 'pub1');
-
-    const metadata = await waitForMetadata(
-      'test-media-admin', roomId,
-      (meta) => meta?.lastMediaEvent?.type === 'published',
-    );
-    expect(metadata.lastMediaEvent.kind).toBe('video');
-    expect(metadata.lastMediaEvent.memberId).toBe(member.userId);
-
-    member.ws.close();
-  });
-
+describe('Room Hooks — state hooks', () => {
   it('hooks.state.onStateChange records delta in metadata', async () => {
     const roomId = `hooks-state-delta-${uid()}`;
-    const member = await connectToRoom('test-media-admin', roomId);
+    const member = await connectToRoom('test-members', roomId);
     await waitForFrame(member.ws, (msg) => msg.type === 'members_sync');
-    await waitForFrame(member.ws, (msg) => msg.type === 'media_sync');
 
     member.ws.send(JSON.stringify({
       type: 'send', actionType: 'SET_TOPIC', payload: { topic: 'test-hooks' }, requestId: 'st1',

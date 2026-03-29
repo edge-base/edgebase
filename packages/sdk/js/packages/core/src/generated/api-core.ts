@@ -185,20 +185,6 @@ export interface GeneratedDbApi {
   connectRoom(query: Record<string, string>): Promise<unknown>;
   /** Get room metadata — GET /api/room/metadata */
   getRoomMetadata(query: Record<string, string>): Promise<unknown>;
-  /** Get the active room realtime media session — GET /api/room/media/realtime/session */
-  getRoomRealtimeSession(query: Record<string, string>): Promise<unknown>;
-  /** Create a room realtime media session — POST /api/room/media/realtime/session */
-  createRoomRealtimeSession(body: unknown, query: Record<string, string>): Promise<unknown>;
-  /** Generate TURN / ICE credentials for room realtime media — POST /api/room/media/realtime/turn */
-  createRoomRealtimeIceServers(body: unknown, query: Record<string, string>): Promise<unknown>;
-  /** Add realtime media tracks to a room session — POST /api/room/media/realtime/tracks/new */
-  addRoomRealtimeTracks(body: unknown, query: Record<string, string>): Promise<unknown>;
-  /** Renegotiate a room realtime media session — PUT /api/room/media/realtime/renegotiate */
-  renegotiateRoomRealtimeSession(body: unknown, query: Record<string, string>): Promise<unknown>;
-  /** Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close */
-  closeRoomRealtimeTracks(body: unknown, query: Record<string, string>): Promise<unknown>;
-  /** Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session */
-  createRoomCloudflareRealtimeKitSession(body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Track custom events — POST /api/analytics/track */
   trackEvents(body: unknown): Promise<unknown>;
 }
@@ -573,34 +559,6 @@ export class DefaultDbApi implements GeneratedDbApi {
     return this.transport.request('GET', '/api/room/metadata', { query });
   }
 
-  async getRoomRealtimeSession(query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('GET', '/api/room/media/realtime/session', { query });
-  }
-
-  async createRoomRealtimeSession(body: unknown, query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('POST', '/api/room/media/realtime/session', { body, query });
-  }
-
-  async createRoomRealtimeIceServers(body: unknown, query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('POST', '/api/room/media/realtime/turn', { body, query });
-  }
-
-  async addRoomRealtimeTracks(body: unknown, query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('POST', '/api/room/media/realtime/tracks/new', { body, query });
-  }
-
-  async renegotiateRoomRealtimeSession(body: unknown, query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('PUT', '/api/room/media/realtime/renegotiate', { body, query });
-  }
-
-  async closeRoomRealtimeTracks(body: unknown, query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('PUT', '/api/room/media/realtime/tracks/close', { body, query });
-  }
-
-  async createRoomCloudflareRealtimeKitSession(body: unknown, query: Record<string, string>): Promise<unknown> {
-    return this.transport.request('POST', '/api/room/media/cloudflare_realtimekit/session', { body, query });
-  }
-
   async trackEvents(body: unknown): Promise<unknown> {
     return this.transport.request('POST', '/api/analytics/track', { body });
   }
@@ -781,13 +739,6 @@ export class ApiPaths {
   static readonly PUSH_UNREGISTER = '/api/push/unregister';
   static readonly CONNECT_ROOM = '/api/room';
   static readonly CHECK_ROOM_CONNECTION = '/api/room/connect-check';
-  static readonly CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = '/api/room/media/cloudflare_realtimekit/session';
-  static readonly RENEGOTIATE_ROOM_REALTIME_SESSION = '/api/room/media/realtime/renegotiate';
-  static readonly GET_ROOM_REALTIME_SESSION = '/api/room/media/realtime/session';
-  static readonly CREATE_ROOM_REALTIME_SESSION = '/api/room/media/realtime/session';
-  static readonly CLOSE_ROOM_REALTIME_TRACKS = '/api/room/media/realtime/tracks/close';
-  static readonly ADD_ROOM_REALTIME_TRACKS = '/api/room/media/realtime/tracks/new';
-  static readonly CREATE_ROOM_REALTIME_ICE_SERVERS = '/api/room/media/realtime/turn';
   static readonly GET_ROOM_METADATA = '/api/room/metadata';
   static readonly GET_SCHEMA = '/api/schema';
   static readonly EXECUTE_SQL = '/api/sql';

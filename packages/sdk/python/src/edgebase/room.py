@@ -266,7 +266,7 @@ class RoomClient:
             result = await room.send('SET_SCORE', {'score': 42})
         """
         if not self._ws or not self._connected or not self._authenticated:
-            raise RuntimeError("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.")
+            raise RuntimeError("Not connected to room. Call join() and wait for the room to connect before sending actions or signals.")
 
         request_id = str(uuid.uuid4())
         loop = asyncio.get_running_loop()

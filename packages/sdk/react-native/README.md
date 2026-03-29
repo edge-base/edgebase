@@ -58,7 +58,7 @@ This package is one part of the wider EdgeBase platform. For the full platform, 
 - [Database Client SDK](https://edgebase.fun/docs/database/client-sdk)
   Query and mutation patterns that also apply on React Native
 - [Room Client SDK](https://edgebase.fun/docs/room/client-sdk)
-  Presence, signals, state, and media-ready room flows
+  Presence, signals, state, and room session flows
 - [Push Client SDK](https://edgebase.fun/docs/push/client-sdk)
   General client push concepts
 
@@ -224,61 +224,6 @@ When you pass `appState` to `createClient()`, the SDK automatically coordinates 
 
 - background/inactive: disconnect realtime transports to reduce battery and network use
 - foreground: refresh auth state and reconnect realtime transports
-
-## Room Media Transports
-
-React Native now exposes the same room media surface as the web SDK. Prefer `room.media.connect(...)` for app code and drop down to `room.media.transport(...)` only when you need manual transport control.
-
-```ts
-const room = client.room('calls', 'demo');
-await room.join();
-
-const media = await room.media.connect({
-  candidates: [
-    {
-      label: 'cloudflare_realtimekit',
-      options: { provider: 'cloudflare_realtimekit' },
-    },
-  ],
-  connectPayload: {
-    name: 'June',
-    customParticipantId: 'mobile-june',
-  },
-});
-
-await media.transport.enableAudio();
-await media.transport.enableVideo();
-```
-
-Available providers:
-
-- `cloudflare_realtimekit`
-  Uses Cloudflare RealtimeKit for managed media sessions
-- `p2p`
-  Uses direct peer-to-peer media with signaling through `room.signals`
-
-Install the matching optional peer dependencies for the transport you use:
-
-```bash
-npm install @cloudflare/realtimekit-react-native
-npm install @cloudflare/react-native-webrtc
-```
-
-Practical integration notes from the current host-app smoke matrix:
-
-- `cloudflare_realtimekit` currently expects React Native `0.77+`
-- iOS needs the usual `cd ios && pod install`
-- Android apps using `@cloudflare/realtimekit-react-native` need a `blob_provider_authority` string resource
-- current host-app smoke builds succeeded on both iOS simulator and Android debug
-
-```xml
-<string name="blob_provider_authority">${applicationId}.blobs</string>
-```
-
-For setup details and provider tradeoffs, see the room media docs:
-
-- [Room Media Overview](https://edgebase.fun/docs/room/media)
-- [Room Media Setup](https://edgebase.fun/docs/room/media-setup)
 
 ## Platform Differences vs `@edge-base/web`
 

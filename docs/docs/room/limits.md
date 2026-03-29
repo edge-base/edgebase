@@ -40,7 +40,7 @@ Technical limits for EdgeBase Room (server-authoritative multiplayer state chann
 | Limit | Default | Configurable | Notes |
 |-------|---------|:---:|-------|
 | Action rate limit | **10 actions/sec** | Yes | `rooms.*.rateLimit.actions` (token bucket, min 1) |
-| Signal/media/admin rate limit | **falls back to actions** | Yes | `rooms.*.rateLimit.signals`, `media`, `admin` override their own room WebSocket buckets |
+| Signal/admin rate limit | **falls back to actions** | Yes | `rooms.*.rateLimit.signals`, `admin` override their own room WebSocket buckets |
 | Pending connections per IP | **5** | No | WebSocket DDoS gate |
 | Pending connection TTL | **60 seconds** | No | Auto-expires; no cleanup needed |
 
@@ -62,5 +62,5 @@ Technical limits for EdgeBase Room (server-authoritative multiplayer state chann
 | `handlers.actions` | 5s timeout, try/catch protected | |
 
 :::tip Room config validation
-`maxPlayers` must be between 1 and 32,768. `maxStateSize` minimum is 1 KB. `reconnectTimeout` must be non-negative. `rateLimit.actions` must be at least 1. Additional `rateLimit.signals`, `rateLimit.media`, and `rateLimit.admin` values fall back to `actions` when omitted. Invalid values cause a config validation error at deploy time.
+`maxPlayers` must be between 1 and 32,768. `maxStateSize` minimum is 1 KB. `reconnectTimeout` must be non-negative. `rateLimit.actions` must be at least 1. Additional `rateLimit.signals` and `rateLimit.admin` values fall back to `actions` when omitted. Invalid values cause a config validation error at deploy time.
 :::

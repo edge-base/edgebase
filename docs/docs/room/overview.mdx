@@ -27,24 +27,22 @@ This feature is in **beta**. Core behavior is stable and ready to try, but some 
 - **Hooks**: [Server Hooks and Actions](/docs/room/server) covers lifecycle hooks such as `onCreate`, `onJoin`, `onLeave`, and `onDestroy`.
 - **Triggers**: Room is not a trigger-based surface.
 - **Handlers**: [Server Hooks and Actions](/docs/room/server) also covers `handlers.actions` and `handlers.timers`.
-- **Capabilities**: [State (Room State)](/docs/room/state), [Meta (Room Info)](/docs/room/meta), [Members (Presence)](/docs/room/members), [Signals (Broadcast)](/docs/room/signals), and [Media (Voice/Video)](/docs/room/media) *(beta)* are the five primary Room surfaces.
+- **Capabilities**: [State (Room State)](/docs/room/state), [Meta (Room Info)](/docs/room/meta), [Members (Presence)](/docs/room/members), and [Signals (Broadcast)](/docs/room/signals) are the primary Room surfaces.
 :::
 
 ## What is Room?
 
 Room is a **real-time state synchronization primitive** where the server has full authority over all state changes. Room doesn't just relay messages — it **owns the state** and enforces the rules.
 
-Room combines five core real-time capabilities in one primitive:
+Room combines four core real-time capabilities in one primitive:
 
 - **`room.state`** (room state) — server-authoritative shared / player / server state with automatic delta sync
 - **`room.meta`** (room info) — public-safe room metadata for lobby cards, pre-join summaries, and matchmaking
 - **`room.members`** (presence) — built-in presence tracking and ephemeral member state
-- **`room.signals`** (broadcast) — lightweight pub/sub for chat, cursors, WebRTC signaling, and other transient events
-- **`room.media`** (voice/video) — audio/video/screenshare publish, mute, and device state for conferencing UIs *(beta)*
+- **`room.signals`** (broadcast) — lightweight pub/sub for chat, cursors, reactions, and other transient events
+And the client surface includes two companion namespaces around those four capabilities:
 
-And the client surface includes two companion namespaces around those five capabilities:
-
-- **`room.admin`** — moderation and operator controls such as kick, mute, and role changes
+- **`room.admin`** — moderation and operator controls such as kick, block, and role changes
 - **`room.session`** — connection lifecycle, reconnect, kicked, and error events
 
 This makes Room ideal for anything where **consistency, coordination, or real-time interaction** matter:
@@ -54,13 +52,13 @@ This makes Room ideal for anything where **consistency, coordination, or real-ti
 - **Live dashboards** — real-time metrics, leaderboards
 - **Voting / polls** — tamper-proof state
 - **Auctions** — server-enforced bidding rules
-- **Conferencing** — participant tracking, media state, signaling
+- **Conferencing control planes** — participant tracking, presence, signaling
 
 ---
 
 ## Choosing Room vs Database Subscriptions vs Push
 
-Choose Room when you need interactive real-time coordination — authoritative state, metadata, presence, signals, or media. If you only need database change feeds in the UI, use [Database Subscriptions](/docs/database/subscriptions). If you need delivery to devices outside the active app session, use [Push](/docs/push).
+Choose Room when you need interactive real-time coordination — authoritative state, metadata, presence, or signals. If you only need database change feeds in the UI, use [Database Subscriptions](/docs/database/subscriptions). If you need delivery to devices outside the active app session, use [Push](/docs/push).
 
 For the full comparison, see [Choosing Live Features](/docs/guides/choosing-live-features).
 
@@ -250,8 +248,7 @@ Step 1's `handlers.actions.INCREMENT` runs on the server. `setSharedState` trigg
 | `room.meta.*` | Public-safe room metadata, including pre-join fetches |
 | `room.members.*` | Presence list, member join/leave events, and ephemeral member state |
 | `room.signals.*` | Fire-and-forget room events and direct member targeting |
-| `room.media.*` *(beta)* | Audio/video/screen publish, mute, device, and track state |
-| `room.admin.*` | Moderation controls such as kick, mute, and role changes |
+| `room.admin.*` | Moderation controls such as kick, block, and role changes |
 | `room.session.*` | Errors, reconnect notifications, kicked events, and connection state |
 
 Legacy flat methods such as `room.send(...)`, `room.getSharedState()`, and `room.onMessage(...)` remain available for compatibility, but the unified namespace surface is the recommended shape on the newer client SDKs.
@@ -294,6 +291,5 @@ Room gives you a multiplayer backend that shares the same auth, database, and de
   { icon: "🧠", title: "State (Room State)", description: "Authoritative shared, private, and server-only room state", href: "state" },
   { icon: "🏷️", title: "Meta (Room Info)", description: "Lobby-safe metadata and pre-join room summaries", href: "meta" },
   { icon: "👥", title: "Members (Presence)", description: "Presence, roster sync, and ephemeral member state", href: "members" },
-  { icon: "📡", title: "Signals (Broadcast)", description: "Transient room events, chat, and WebRTC signaling", href: "signals" },
-  { icon: "🎥", title: "Media (Voice/Video)", description: "Audio, video, screen-share, and device state", href: "media" },
+  { icon: "📡", title: "Signals (Broadcast)", description: "Transient room events, chat, and lightweight coordination", href: "signals" },
 ]} />

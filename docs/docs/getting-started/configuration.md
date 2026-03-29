@@ -749,7 +749,7 @@ export default defineConfig({
 | `maxStateSize`      | `number` (bytes)      | `1048576`         | Max combined state size (shared + all player states)      |
 | `stateSaveInterval` | `number` (ms)         | `60000`           | Auto-save interval to DO Storage                          |
 | `stateTTL`          | `number` (ms)         | `86400000`        | Time before persisted state is auto-deleted (24h default) |
-| `rateLimit`         | `{ actions: number; signals?: number; media?: number; admin?: number }` | `{ actions: 10 }` | Room WebSocket rate limits per second. Omitted scopes fall back to `actions`. |
+| `rateLimit`         | `{ actions: number; signals?: number; admin?: number }` | `{ actions: 10 }` | Room WebSocket rate limits per second. Omitted scopes fall back to `actions`. |
 
 **Lifecycle hooks:** `handlers.lifecycle.onCreate` → `handlers.lifecycle.onJoin` (throw to reject) → `handlers.actions[type]` → `handlers.lifecycle.onLeave` (reason: `'leave'` \| `'disconnect'` \| `'kicked'`) → `handlers.lifecycle.onDestroy`. Timer handlers live in `handlers.timers`.
 

@@ -33,34 +33,9 @@ export {
   type RoomSignalMeta,
   type RoomMember,
   type RoomReconnectInfo,
-  type RoomMediaKind,
-  type RoomMediaTrack,
-  type RoomMemberMediaKindState,
-  type RoomMemberMediaState,
-  type RoomMediaMember,
-  type RoomMediaDeviceChange,
-  type RoomRealtimeSessionDescription,
-  type RoomRealtimeTrackObject,
-  type RoomRealtimeCreateSessionRequest,
-  type RoomRealtimeCreateSessionResponse,
   type RoomConnectDiagnostic,
   type RoomSummary,
-  type RoomMediaTransportCapabilityCategory,
-  type RoomMediaTransportCapabilityIssue,
-  type RoomMediaTransportCapabilities,
-  type RoomRealtimeIceServer,
-  type RoomRealtimeIceServersRequest,
-  type RoomRealtimeIceServersResponse,
-  type RoomRealtimeTracksRequest,
-  type RoomRealtimeTracksResponse,
-  type RoomRealtimeRenegotiateRequest,
-  type RoomRealtimeCloseTracksRequest,
 } from './room.js';
-export {
-  RoomRealtimeMediaTransport,
-  type RoomRealtimeMediaTransportOptions,
-  type RoomRealtimeRemoteTrackEvent,
-} from './room-realtime-media.js';
 
 // Analytics
 export { ClientAnalytics } from './analytics.js';

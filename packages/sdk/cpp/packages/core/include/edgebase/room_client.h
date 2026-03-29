@@ -89,9 +89,6 @@ public:
   using SignalHandler = std::function<void(const json &, const json &)>;
   using AnySignalHandler =
       std::function<void(const std::string &, const json &, const json &)>;
-  using MediaTrackHandler = std::function<void(const json &, const json &)>;
-  using MediaStateHandler = std::function<void(const json &, const json &)>;
-  using MediaDeviceHandler = std::function<void(const json &, const json &)>;
   using ReconnectHandler = std::function<void(const json &)>;
   using ConnectionStateHandler = std::function<void(const std::string &)>;
 
@@ -195,13 +192,6 @@ public:
                          std::move(on_success), std::move(on_error));
       }
     }
-    void mute(const std::string &member_id, VoidCallback on_success,
-              ErrorCallback on_error) {
-      if (room) {
-        room->send_admin("mute", member_id, json::object(),
-                         std::move(on_success), std::move(on_error));
-      }
-    }
     void block(const std::string &member_id, VoidCallback on_success,
                ErrorCallback on_error) {
       if (room) {
@@ -215,103 +205,6 @@ public:
         room->send_admin("setRole", member_id, json{{"role", role}},
                          std::move(on_success), std::move(on_error));
       }
-    }
-    void disable_video(const std::string &member_id, VoidCallback on_success,
-                       ErrorCallback on_error) {
-      if (room) {
-        room->send_admin("disableVideo", member_id, json::object(),
-                         std::move(on_success), std::move(on_error));
-      }
-    }
-    void stop_screen_share(const std::string &member_id,
-                           VoidCallback on_success,
-                           ErrorCallback on_error) {
-      if (room) {
-        room->send_admin("stopScreenShare", member_id, json::object(),
-                         std::move(on_success), std::move(on_error));
-      }
-    }
-  };
-
-  struct MediaNamespace {
-    struct KindNamespace {
-      RoomClient *room = nullptr;
-      std::string kind;
-      void enable(const json &payload, VoidCallback on_success,
-                  ErrorCallback on_error) {
-        if (room) {
-          room->send_media("publish", kind, payload, std::move(on_success),
-                           std::move(on_error));
-        }
-      }
-      void disable(VoidCallback on_success, ErrorCallback on_error) {
-        if (room) {
-          room->send_media("unpublish", kind, json::object(),
-                           std::move(on_success), std::move(on_error));
-        }
-      }
-      void set_muted(bool muted, VoidCallback on_success,
-                     ErrorCallback on_error) {
-        if (room) {
-          room->send_media("mute", kind, json{{"muted", muted}},
-                           std::move(on_success), std::move(on_error));
-        }
-      }
-    };
-
-    struct ScreenNamespace {
-      RoomClient *room = nullptr;
-      void start(const json &payload, VoidCallback on_success,
-                 ErrorCallback on_error) {
-        if (room) {
-          room->send_media("publish", "screen", payload,
-                           std::move(on_success), std::move(on_error));
-        }
-      }
-      void stop(VoidCallback on_success, ErrorCallback on_error) {
-        if (room) {
-          room->send_media("unpublish", "screen", json::object(),
-                           std::move(on_success), std::move(on_error));
-        }
-      }
-    };
-
-    struct DevicesNamespace {
-      RoomClient *room = nullptr;
-      void set(const json &payload, VoidCallback on_success,
-               ErrorCallback on_error) {
-        if (room) {
-          room->switch_media_devices(payload, std::move(on_success),
-                                     std::move(on_error));
-        }
-      }
-    };
-
-    explicit MediaNamespace(RoomClient *owner = nullptr)
-        : room(owner), audio{owner, "audio"}, video{owner, "video"},
-          screen{owner}, devices{owner} {}
-
-    RoomClient *room = nullptr;
-    KindNamespace audio;
-    KindNamespace video;
-    ScreenNamespace screen;
-    DevicesNamespace devices;
-
-    json list() const { return room ? room->media_members_ : json::array(); }
-    Subscription on_track(MediaTrackHandler handler) {
-      return room ? room->on_media_track(std::move(handler)) : Subscription{};
-    }
-    Subscription on_track_removed(MediaTrackHandler handler) {
-      return room ? room->on_media_track_removed(std::move(handler))
-                  : Subscription{};
-    }
-    Subscription on_state_change(MediaStateHandler handler) {
-      return room ? room->on_media_state_change(std::move(handler))
-                  : Subscription{};
-    }
-    Subscription on_device_change(MediaDeviceHandler handler) {
-      return room ? room->on_media_device_change(std::move(handler))
-                  : Subscription{};
     }
   };
 
@@ -355,8 +248,7 @@ public:
       : namespace_name_(namespace_name), room_id_(room_id),
         base_url_(trim_trailing_slash(base_url)),
         token_fn_(std::move(token_fn)), opts_(opts), state{this}, meta{this},
-        signals{this}, members{this}, admin{this}, media{this},
-        session{this} {}
+        signals{this}, members{this}, admin{this}, session{this} {}
   ~RoomClient();
 
   // ── Metadata (HTTP, no WebSocket needed) ──────────────────────────────
@@ -436,7 +328,6 @@ public:
   SignalsNamespace signals;
   MembersNamespace members;
   AdminNamespace admin;
-  MediaNamespace media;
   SessionNamespace session;
 
   // ── Inject WebSocket implementations (platform-specific) ─────────────
@@ -479,7 +370,6 @@ private:
   json player_state_ = json::object();
   int player_version_ = 0;
   json room_members_ = json::array();
-  json media_members_ = json::array();
   std::string current_user_id_;
   std::string current_connection_id_;
   std::string connection_state_ = "idle";
@@ -507,7 +397,6 @@ private:
   std::map<std::string, PendingVoidRequest> pending_signal_requests_;
   std::map<std::string, PendingVoidRequest> pending_admin_requests_;
   std::map<std::string, PendingVoidRequest> pending_member_state_requests_;
-  std::map<std::string, PendingVoidRequest> pending_media_requests_;
   mutable std::mutex pending_requests_mx_;
 
   // ── Handler lists (keyed by ID for reliable unsubscribe) ───────────────
@@ -525,10 +414,6 @@ private:
   std::map<int, MemberStateChangeHandler> member_state_handlers_;
   std::map<std::string, std::map<int, SignalHandler>> signal_handlers_;
   std::map<int, AnySignalHandler> any_signal_handlers_;
-  std::map<int, MediaTrackHandler> media_track_handlers_;
-  std::map<int, MediaTrackHandler> media_track_removed_handlers_;
-  std::map<int, MediaStateHandler> media_state_handlers_;
-  std::map<int, MediaDeviceHandler> media_device_handlers_;
   std::map<int, ReconnectHandler> reconnect_handlers_;
   std::map<int, ConnectionStateHandler> connection_state_handlers_;
 
@@ -554,11 +439,6 @@ private:
   void send_admin(const std::string &operation, const std::string &member_id,
                   const json &payload, VoidCallback on_success,
                   ErrorCallback on_error);
-  void send_media(const std::string &operation, const std::string &kind,
-                  const json &payload, VoidCallback on_success,
-                  ErrorCallback on_error);
-  void switch_media_devices(const json &payload, VoidCallback on_success,
-                            ErrorCallback on_error);
   void schedule_reconnect();
   std::string generate_request_id();
   void reject_all_pending(const std::string &reason);
@@ -573,18 +453,10 @@ private:
   Subscription on_member_join(MemberHandler handler);
   Subscription on_member_leave(MemberLeaveHandler handler);
   Subscription on_member_state_change(MemberStateChangeHandler handler);
-  Subscription on_media_track(MediaTrackHandler handler);
-  Subscription on_media_track_removed(MediaTrackHandler handler);
-  Subscription on_media_state_change(MediaStateHandler handler);
-  Subscription on_media_device_change(MediaDeviceHandler handler);
   Subscription on_reconnect(ReconnectHandler handler);
   Subscription on_connection_state_change(ConnectionStateHandler handler);
   void set_connection_state(const std::string &state);
   void upsert_room_member(const json &member);
-  json *ensure_media_member(const json &member);
-  void sync_media_members_with_room_members();
-  void upsert_media_track(const json &member, const json &track);
-  void remove_media_track(const json &member, const json &track);
   static void deep_set(json &obj, const std::string &path, const json &value);
   static std::string trim_trailing_slash(const std::string &s);
   static std::string url_encode(const std::string &s);

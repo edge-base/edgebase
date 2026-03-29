@@ -9,16 +9,14 @@
  *   - namespace + roomId identification (replaces single roomId)
  */
 import type { TokenManager, TokenUser } from './token-manager.js';
-import { EdgeBaseError, createSubscription, networkError, parseErrorResponse, type Subscription } from '@edge-base/core';
+import {
+  EdgeBaseError,
+  createSubscription,
+  networkError,
+  parseErrorResponse,
+  type Subscription,
+} from '@edge-base/core';
 import { refreshAccessToken } from './auth-refresh.js';
-import {
-  RoomCloudflareMediaTransport,
-  type RoomCloudflareMediaTransportOptions,
-} from './room-cloudflare-media.js';
-import {
-  RoomP2PMediaTransport,
-  type RoomP2PMediaTransportOptions,
-} from './room-p2p-media.js';
 
 // ─── Types ───
 
@@ -33,6 +31,14 @@ export interface RoomOptions {
   sendTimeout?: number;
   /** Timeout for WebSocket connection establishment in ms (default: 15000) */
   connectionTimeout?: number;
+  /** Heartbeat ping interval in ms (default: 8000) */
+  heartbeatIntervalMs?: number;
+  /** Consider the room socket stale if no pong is observed within this window. */
+  heartbeatStaleTimeoutMs?: number;
+  /** Grace period before reacting to browser network type changes. */
+  networkRecoveryGraceMs?: number;
+  /** Time to wait for recovery before surfacing a session reset recommendation. */
+  disconnectResetTimeoutMs?: number;
 }
 
 // Re-export Subscription + helper from core for backwards compatibility
@@ -75,115 +81,40 @@ export interface RoomReconnectInfo {
   attempt: number;
 }
 
-export type RoomMediaKind = 'audio' | 'video' | 'screen';
-
-export interface RoomMediaTrack {
-  kind: RoomMediaKind;
-  trackId?: string;
-  deviceId?: string;
-  muted: boolean;
-  publishedAt?: number;
-  adminDisabled?: boolean;
-  providerSessionId?: string;
+export interface RoomRecoveryFailureInfo {
+  state: RoomConnectionState;
+  timeoutMs: number;
 }
 
-export interface RoomMemberMediaKindState {
-  published: boolean;
-  muted: boolean;
-  trackId?: string;
-  deviceId?: string;
-  publishedAt?: number;
-  adminDisabled?: boolean;
-  providerSessionId?: string;
+export interface RoomConnectDiagnostic {
+  ok: boolean;
+  type: string;
+  category: string;
+  message: string;
+  namespace?: string;
+  roomId?: string;
+  runtime?: string;
+  pendingCount?: number;
+  maxPending?: number;
 }
 
-export interface RoomMemberMediaState {
-  audio?: RoomMemberMediaKindState;
-  video?: RoomMemberMediaKindState;
-  screen?: RoomMemberMediaKindState;
+export interface RoomSummary {
+  namespace: string;
+  roomId: string;
+  metadata: Record<string, unknown>;
+  occupancy: {
+    activeMembers: number;
+    activeConnections: number;
+  };
+  updatedAt: string;
 }
 
-export interface RoomMediaMember {
-  member: RoomMember;
-  state: RoomMemberMediaState;
-  tracks: RoomMediaTrack[];
+export interface RoomSummaryCollection {
+  namespace: string;
+  items: RoomSummary[];
+  deniedIds: string[];
+  updatedAt: string;
 }
-
-export interface RoomMediaDeviceChange {
-  kind: RoomMediaKind;
-  deviceId: string;
-}
-
-export interface RoomCloudflareRealtimeKitCreateSessionRequest {
-  connectionId?: string;
-  customParticipantId?: string;
-  name?: string;
-  picture?: string;
-}
-
-export interface RoomCloudflareRealtimeKitCreateSessionResponse {
-  sessionId: string;
-  meetingId: string;
-  participantId: string;
-  authToken: string;
-  presetName: string;
-  connectionId?: string;
-  reused?: boolean;
-}
-
-export interface RoomMediaTransportConnectPayload {
-  connectionId?: string;
-  customParticipantId?: string;
-  name?: string;
-  picture?: string;
-}
-
-export interface RoomMediaRemoteTrackEvent {
-  kind: RoomMediaKind;
-  track: MediaStreamTrack;
-  stream?: MediaStream;
-  trackName?: string;
-  providerSessionId?: string;
-  participantId?: string;
-  customParticipantId?: string;
-  userId?: string;
-}
-
-export interface RoomMediaTransport {
-  connect(payload?: RoomMediaTransportConnectPayload): Promise<string>;
-  enableAudio(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
-  enableVideo(constraints?: MediaTrackConstraints | boolean): Promise<MediaStreamTrack>;
-  startScreenShare(constraints?: unknown): Promise<MediaStreamTrack>;
-  disableAudio(): Promise<void>;
-  disableVideo(): Promise<void>;
-  stopScreenShare(): Promise<void>;
-  setMuted(kind: Extract<RoomMediaKind, 'audio' | 'video'>, muted: boolean): Promise<void>;
-  switchDevices(payload: {
-    audioInputId?: string;
-    videoInputId?: string;
-    screenInputId?: string;
-  }): Promise<void>;
-  onRemoteTrack(handler: (event: RoomMediaRemoteTrackEvent) => void): Subscription;
-  getSessionId(): string | null;
-  getPeerConnection(): RTCPeerConnection | null;
-  destroy(): void;
-}
-
-export type RoomMediaTransportProvider = 'cloudflare_realtimekit' | 'p2p';
-
-export interface RoomCloudflareRealtimeKitTransportFactoryOptions {
-  provider?: 'cloudflare_realtimekit';
-  cloudflareRealtimeKit?: RoomCloudflareMediaTransportOptions;
-}
-
-export interface RoomP2PTransportFactoryOptions {
-  provider: 'p2p';
-  p2p?: RoomP2PMediaTransportOptions;
-}
-
-export type RoomMediaTransportOptions =
-  | RoomCloudflareRealtimeKitTransportFactoryOptions
-  | RoomP2PTransportFactoryOptions;
 
 // ─── Helpers ───
 
@@ -230,21 +161,25 @@ function cloneRecord<T extends Record<string, unknown>>(value: T): T {
 const WS_CONNECTING = 0;
 const WS_OPEN = 1;
 const ROOM_EXPLICIT_LEAVE_CLOSE_CODE = 4005;
+const ROOM_AUTH_STATE_LOST_CLOSE_CODE = 4006;
 const ROOM_EXPLICIT_LEAVE_REASON = 'Client left room';
-const ROOM_EXPLICIT_LEAVE_CLOSE_DELAY_MS = 40;
+const ROOM_HEARTBEAT_INTERVAL_MS = 8000;
+const ROOM_HEARTBEAT_STALE_TIMEOUT_MS = 20_000;
 
 function isSocketOpenOrConnecting(socket: Pick<WebSocket, 'readyState'> | null | undefined): boolean {
   return !!socket && (socket.readyState === WS_OPEN || socket.readyState === WS_CONNECTING);
 }
 
 function closeSocketAfterLeave(socket: Pick<WebSocket, 'close'>, reason: string): void {
-  globalThis.setTimeout(() => {
-    try {
-      socket.close(ROOM_EXPLICIT_LEAVE_CLOSE_CODE, reason);
-    } catch {
-      // Socket already closed.
-    }
-  }, ROOM_EXPLICIT_LEAVE_CLOSE_DELAY_MS);
+  try {
+    socket.close(ROOM_EXPLICIT_LEAVE_CLOSE_CODE, reason);
+  } catch {
+    // Socket already closed.
+  }
+}
+
+function getDefaultHeartbeatStaleTimeoutMs(heartbeatIntervalMs: number): number {
+  return Math.max(Math.floor(heartbeatIntervalMs * 2.5), ROOM_HEARTBEAT_STALE_TIMEOUT_MS);
 }
 
 // ─── RoomClient v2 ───
@@ -265,7 +200,7 @@ export class RoomClient {
   private _playerState: Record<string, unknown> = {};
   private _playerVersion = 0;
   private _members: RoomMember[] = [];
-  private _mediaMembers: RoomMediaMember[] = [];
+  private lastLocalMemberState: Record<string, unknown> | null = null;
   // ─── Connection ───
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
@@ -278,10 +213,44 @@ export class RoomClient {
   private reconnectInfo: RoomReconnectInfo | null = null;
   private connectingPromise: Promise<void> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private lastHeartbeatAckAt = Date.now();
+  private disconnectResetTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionallyLeft = false;
   private waitingForAuth = false;
   private joinRequested = false;
   private unsubAuthState: (() => void) | null = null;
+  private browserNetworkListenersAttached = false;
+  private readonly browserOfflineHandler = () => {
+    if (this.intentionallyLeft || !this.joinRequested) {
+      return;
+    }
+
+    if (this.connectionState === 'connected') {
+      this.setConnectionState('reconnecting');
+    }
+
+    if (isSocketOpenOrConnecting(this.ws)) {
+      try {
+        this.ws?.close();
+      } catch {
+        // Socket may already be closing.
+      }
+    }
+  };
+  private readonly browserOnlineHandler = () => {
+    if (
+      this.intentionallyLeft
+      || !this.joinRequested
+      || this.connectingPromise
+      || isSocketOpenOrConnecting(this.ws)
+    ) {
+      return;
+    }
+
+    if (this.connectionState === 'reconnecting' || this.connectionState === 'disconnected') {
+      this.ensureConnection().catch(() => {});
+    }
+  };
 
   // ─── Pending send() requests (requestId → { resolve, reject, timeout }) ───
   private pendingRequests = new Map<string, {
@@ -303,11 +272,7 @@ export class RoomClient {
     resolve: () => void;
     reject: (error: Error) => void;
     timeout: ReturnType<typeof setTimeout>;
-  }>();
-  private pendingMediaRequests = new Map<string, {
-    resolve: () => void;
-    reject: (error: Error) => void;
-    timeout: ReturnType<typeof setTimeout>;
+    onSuccess?: () => void;
   }>();
 
   // ─── Subscriptions ───
@@ -318,16 +283,14 @@ export class RoomClient {
   private errorHandlers: ErrorHandler[] = [];
   private kickedHandlers: KickedHandler[] = [];
   private memberSyncHandlers: Array<(members: RoomMember[]) => void> = [];
+  private memberSnapshotHandlers: Array<(members: RoomMember[]) => void> = [];
   private memberJoinHandlers: Array<(member: RoomMember) => void> = [];
   private memberLeaveHandlers: Array<(member: RoomMember, reason: RoomMemberLeaveReason) => void> = [];
   private memberStateHandlers: Array<(member: RoomMember, state: Record<string, unknown>) => void> = [];
   private signalHandlers = new Map<string, Array<(payload: unknown, meta: RoomSignalMeta) => void>>();
   private anySignalHandlers: Array<(event: string, payload: unknown, meta: RoomSignalMeta) => void> = [];
-  private mediaTrackHandlers: Array<(track: RoomMediaTrack, member: RoomMember) => void> = [];
-  private mediaTrackRemovedHandlers: Array<(track: RoomMediaTrack, member: RoomMember) => void> = [];
-  private mediaStateHandlers: Array<(member: RoomMember, state: RoomMemberMediaState) => void> = [];
-  private mediaDeviceHandlers: Array<(member: RoomMember, change: RoomMediaDeviceChange) => void> = [];
   private reconnectHandlers: Array<(info: RoomReconnectInfo) => void> = [];
+  private recoveryFailureHandlers: Array<(info: RoomRecoveryFailureInfo) => void> = [];
   private connectionStateHandlers: Array<(state: RoomConnectionState) => void> = [];
 
   readonly state = {
@@ -340,6 +303,7 @@ export class RoomClient {
 
   readonly meta = {
     get: (): Promise<Record<string, unknown>> => this.getMetadata(),
+    summary: (): Promise<RoomSummary> => this.getSummary(),
   };
 
   readonly signals = {
@@ -354,7 +318,7 @@ export class RoomClient {
   };
 
   readonly members = {
-    list: (): RoomMember[] => cloneValue(this._members),
+    list: (): RoomMember[] => this._members.map((member) => cloneValue(member)),
     current: (): RoomMember | null => {
       const connectionId = this.currentConnectionId;
       if (connectionId) {
@@ -371,7 +335,9 @@ export class RoomClient {
       const member = this._members.find((entry) => entry.userId === userId) ?? null;
       return member ? cloneValue(member) : null;
     },
+    awaitCurrent: (timeoutMs = 10_000): Promise<RoomMember | null> => this.waitForCurrentMember(timeoutMs),
     onSync: (handler: (members: RoomMember[]) => void): Subscription => this.onMembersSync(handler),
+    onSnapshot: (handler: (members: RoomMember[]) => void): Subscription => this.onMemberSnapshot(handler),
     onJoin: (handler: (member: RoomMember) => void): Subscription => this.onMemberJoin(handler),
     onLeave: (handler: (member: RoomMember, reason: RoomMemberLeaveReason) => void): Subscription =>
       this.onMemberLeave(handler),
@@ -383,65 +349,9 @@ export class RoomClient {
 
   readonly admin = {
     kick: (memberId: string): Promise<void> => this.sendAdmin('kick', memberId),
-    mute: (memberId: string): Promise<void> => this.sendAdmin('mute', memberId),
     block: (memberId: string): Promise<void> => this.sendAdmin('block', memberId),
     setRole: (memberId: string, role: string): Promise<void> =>
       this.sendAdmin('setRole', memberId, { role }),
-    disableVideo: (memberId: string): Promise<void> => this.sendAdmin('disableVideo', memberId),
-    stopScreenShare: (memberId: string): Promise<void> => this.sendAdmin('stopScreenShare', memberId),
-  };
-
-  readonly media = {
-    list: (): RoomMediaMember[] => cloneValue(this._mediaMembers),
-    audio: {
-      enable: (payload?: { trackId?: string; deviceId?: string }): Promise<void> =>
-        this.sendMedia('publish', 'audio', payload),
-      disable: (): Promise<void> => this.sendMedia('unpublish', 'audio'),
-      setMuted: (muted: boolean): Promise<void> => this.sendMedia('mute', 'audio', { muted }),
-    },
-    video: {
-      enable: (payload?: { trackId?: string; deviceId?: string }): Promise<void> =>
-        this.sendMedia('publish', 'video', payload),
-      disable: (): Promise<void> => this.sendMedia('unpublish', 'video'),
-      setMuted: (muted: boolean): Promise<void> => this.sendMedia('mute', 'video', { muted }),
-    },
-    screen: {
-      start: (payload?: { trackId?: string; deviceId?: string }): Promise<void> =>
-        this.sendMedia('publish', 'screen', payload),
-      stop: (): Promise<void> => this.sendMedia('unpublish', 'screen'),
-    },
-    devices: {
-      switch: (payload: {
-        audioInputId?: string;
-        videoInputId?: string;
-        screenInputId?: string;
-      }): Promise<void> => this.switchMediaDevices(payload),
-    },
-    cloudflareRealtimeKit: {
-      createSession: (
-        payload?: RoomCloudflareRealtimeKitCreateSessionRequest,
-      ): Promise<RoomCloudflareRealtimeKitCreateSessionResponse> =>
-        this.requestCloudflareRealtimeKitMedia('session', 'POST', payload),
-    },
-    transport: (options?: RoomMediaTransportOptions): RoomMediaTransport => {
-      const provider = options?.provider ?? 'cloudflare_realtimekit';
-      if (provider === 'p2p') {
-        const p2pOptions = (options as RoomP2PTransportFactoryOptions | undefined)?.p2p;
-        return new RoomP2PMediaTransport(this, p2pOptions);
-      }
-
-      const cloudflareOptions =
-        (options as RoomCloudflareRealtimeKitTransportFactoryOptions | undefined)?.cloudflareRealtimeKit;
-      return new RoomCloudflareMediaTransport(this, cloudflareOptions);
-    },
-    onTrack: (handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription =>
-      this.onMediaTrack(handler),
-    onTrackRemoved: (handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription =>
-      this.onMediaTrackRemoved(handler),
-    onStateChange: (handler: (member: RoomMember, state: RoomMemberMediaState) => void): Subscription =>
-      this.onMediaStateChange(handler),
-    onDeviceChange: (handler: (member: RoomMember, change: RoomMediaDeviceChange) => void): Subscription =>
-      this.onMediaDeviceChange(handler),
   };
 
   readonly session = {
@@ -450,6 +360,9 @@ export class RoomClient {
     onReconnect: (handler: (info: RoomReconnectInfo) => void): Subscription => this.onReconnect(handler),
     onConnectionStateChange: (handler: (state: RoomConnectionState) => void): Subscription =>
       this.onConnectionStateChange(handler),
+    onRecoveryFailure: (handler: (info: RoomRecoveryFailureInfo) => void): Subscription =>
+      this.onRecoveryFailure(handler),
+    getDebugSnapshot: (): unknown => this.getDebugSnapshot(),
   };
 
   constructor(
@@ -469,11 +382,18 @@ export class RoomClient {
       reconnectBaseDelay: options?.reconnectBaseDelay ?? 1000,
       sendTimeout: options?.sendTimeout ?? 10000,
       connectionTimeout: options?.connectionTimeout ?? 15000,
+      heartbeatIntervalMs: options?.heartbeatIntervalMs ?? ROOM_HEARTBEAT_INTERVAL_MS,
+      heartbeatStaleTimeoutMs:
+        options?.heartbeatStaleTimeoutMs
+        ?? getDefaultHeartbeatStaleTimeoutMs(options?.heartbeatIntervalMs ?? ROOM_HEARTBEAT_INTERVAL_MS),
+      networkRecoveryGraceMs: options?.networkRecoveryGraceMs ?? 3500,
+      disconnectResetTimeoutMs: options?.disconnectResetTimeoutMs ?? 8000,
     };
 
     this.unsubAuthState = this.tokenManager.onAuthStateChange((user) => {
       this.handleAuthStateChange(user);
     });
+    this.attachBrowserNetworkListeners();
   }
 
   // ─── State Accessors ───
@@ -488,6 +408,18 @@ export class RoomClient {
     return cloneRecord(this._playerState);
   }
 
+  private async waitForCurrentMember(timeoutMs = 10_000): Promise<RoomMember | null> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const member = this.members.current();
+      if (member) {
+        return member;
+      }
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 50));
+    }
+    return this.members.current();
+  }
+
   // ─── Metadata (HTTP, no WebSocket needed) ───
 
   /**
@@ -498,49 +430,12 @@ export class RoomClient {
     return RoomClient.getMetadata(this.baseUrl, this.namespace, this.roomId);
   }
 
-  private async requestCloudflareRealtimeKitMedia<T>(
-    path: string,
-    method: 'GET' | 'POST' | 'PUT',
-    payload?: unknown,
-  ): Promise<T> {
-    return this.requestRoomMedia('cloudflare_realtimekit', path, method, payload);
+  async getSummary(): Promise<RoomSummary> {
+    return RoomClient.getSummary(this.baseUrl, this.namespace, this.roomId);
   }
 
-  private async requestRoomMedia<T>(
-    providerPath: string,
-    path: string,
-    method: 'GET' | 'POST' | 'PUT',
-    payload?: unknown,
-  ): Promise<T> {
-    const token = await this.tokenManager.getAccessToken(
-      (refreshToken) => refreshAccessToken(this.baseUrl, refreshToken),
-    );
-    if (!token) {
-      throw new EdgeBaseError(401, 'Authentication required before calling room media APIs. Sign in and join the room first.');
-    }
-
-    const url = new URL(`${this.baseUrl.replace(/\/$/, '')}/api/room/media/${providerPath}/${path}`);
-    url.searchParams.set('namespace', this.namespace);
-    url.searchParams.set('id', this.roomId);
-
-    const response = await fetch(url.toString(), {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: method === 'GET' ? undefined : JSON.stringify(payload ?? {}),
-    });
-
-    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!response.ok) {
-      throw new EdgeBaseError(
-        response.status,
-        (typeof data.message === 'string' && data.message) || `Room media request failed: ${response.statusText}`,
-      );
-    }
-
-    return data as T;
+  async checkConnection(): Promise<RoomConnectDiagnostic> {
+    return RoomClient.checkConnection(this.baseUrl, this.namespace, this.roomId);
   }
 
   /**
@@ -552,30 +447,135 @@ export class RoomClient {
     namespace: string,
     roomId: string,
   ): Promise<Record<string, unknown>> {
-    const url = `${baseUrl.replace(/\/$/, '')}/api/room/metadata?namespace=${encodeURIComponent(namespace)}&id=${encodeURIComponent(roomId)}`;
+    return RoomClient.requestPublicRoomResource<Record<string, unknown>>(
+      baseUrl,
+      'metadata',
+      namespace,
+      roomId,
+      'Failed to get room metadata',
+    );
+  }
+
+  static async getSummary(
+    baseUrl: string,
+    namespace: string,
+    roomId: string,
+  ): Promise<RoomSummary> {
+    return RoomClient.requestPublicRoomResource<RoomSummary>(
+      baseUrl,
+      'summary',
+      namespace,
+      roomId,
+      'Failed to get room summary',
+    );
+  }
+
+  static async getSummaries(
+    baseUrl: string,
+    namespace: string,
+    roomIds: string[],
+  ): Promise<RoomSummaryCollection> {
+    const url = `${baseUrl.replace(/\/$/, '')}/api/room/summaries`;
+    let res: Response;
+
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ namespace, ids: roomIds }),
+      });
+    } catch (error) {
+      throw networkError(
+        `Failed to get room summaries. Could not reach ${baseUrl.replace(/\/$/, '')}. Make sure the EdgeBase server is running and reachable.`,
+        { cause: error },
+      );
+    }
+
+    const data = (await res.json().catch(() => null)) as RoomSummaryCollection | null;
+    if (!res.ok) {
+      const parsed = parseErrorResponse(res.status, data);
+      parsed.message = `Failed to get room summaries: ${parsed.message}`;
+      throw parsed;
+    }
+
+    return data as RoomSummaryCollection;
+  }
+
+  static async checkConnection(
+    baseUrl: string,
+    namespace: string,
+    roomId: string,
+  ): Promise<RoomConnectDiagnostic> {
+    const url = `${baseUrl.replace(/\/$/, '')}/api/room/connect-check?namespace=${encodeURIComponent(namespace)}&id=${encodeURIComponent(roomId)}`;
+    let response: Response;
+
+    try {
+      response = await fetch(url);
+    } catch (error) {
+      throw networkError(
+        `Room connect-check could not reach ${baseUrl.replace(/\/$/, '')}. Make sure the EdgeBase server is running and reachable.`,
+        { cause: error },
+      );
+    }
+
+    const data = (await response.json().catch(() => null)) as Partial<RoomConnectDiagnostic> | null;
+    if (!response.ok) {
+      throw parseErrorResponse(response.status, data);
+    }
+
+    if (
+      typeof data?.ok !== 'boolean'
+      || typeof data?.type !== 'string'
+      || typeof data?.category !== 'string'
+      || typeof data?.message !== 'string'
+    ) {
+      throw new EdgeBaseError(
+        response.status || 500,
+        'Room connect-check returned an unexpected response. The EdgeBase server and SDK may be out of sync.',
+      );
+    }
+
+    const diagnostic = data as RoomConnectDiagnostic;
+
+    return {
+      ok: diagnostic.ok,
+      type: diagnostic.type,
+      category: diagnostic.category,
+      message: diagnostic.message,
+      namespace: typeof diagnostic.namespace === 'string' ? diagnostic.namespace : undefined,
+      roomId: typeof diagnostic.roomId === 'string' ? diagnostic.roomId : undefined,
+      runtime: typeof diagnostic.runtime === 'string' ? diagnostic.runtime : undefined,
+      pendingCount: typeof diagnostic.pendingCount === 'number' ? diagnostic.pendingCount : undefined,
+      maxPending: typeof diagnostic.maxPending === 'number' ? diagnostic.maxPending : undefined,
+    };
+  }
+
+  private static async requestPublicRoomResource<T>(
+    baseUrl: string,
+    resource: 'metadata' | 'summary',
+    namespace: string,
+    roomId: string,
+    failureMessage: string,
+  ): Promise<T> {
+    const url = `${baseUrl.replace(/\/$/, '')}/api/room/${resource}?namespace=${encodeURIComponent(namespace)}&id=${encodeURIComponent(roomId)}`;
     let res: Response;
 
     try {
       res = await fetch(url);
     } catch (error) {
       throw networkError(
-        `Room metadata request could not reach ${url}. Make sure the EdgeBase server is running and reachable.`,
+        `${failureMessage}. Could not reach ${baseUrl.replace(/\/$/, '')}. Make sure the EdgeBase server is running and reachable.`,
         { cause: error },
       );
     }
 
-    const data = await res.json().catch(() => null);
     if (!res.ok) {
+      const data = await res.json().catch(() => null);
       const parsed = parseErrorResponse(res.status, data);
-      if (data && typeof data === 'object' && typeof (data as { message?: unknown }).message === 'string') {
-        throw parsed;
-      }
-      throw new EdgeBaseError(
-        res.status,
-        `Failed to load room metadata for '${roomId}' in namespace '${namespace}'. ${parsed.message}`,
-      );
+      parsed.message = `${failureMessage}: ${parsed.message}`;
+      throw parsed;
     }
-    return (data ?? {}) as Record<string, unknown>;
+    return res.json() as Promise<T>;
   }
 
   // ─── Connection Lifecycle ───
@@ -597,17 +597,10 @@ export class RoomClient {
     this.joinRequested = false;
     this.waitingForAuth = false;
     this.stopHeartbeat();
+    this.clearDisconnectResetTimer();
 
     // Reject all pending send() requests
-    for (const [, pending] of this.pendingRequests) {
-      clearTimeout(pending.timeout);
-      pending.reject(new EdgeBaseError(499, 'Room left'));
-    }
-    this.pendingRequests.clear();
-    this.rejectPendingVoidRequests(this.pendingSignalRequests, new EdgeBaseError(499, 'Room left'));
-    this.rejectPendingVoidRequests(this.pendingAdminRequests, new EdgeBaseError(499, 'Room left'));
-    this.rejectPendingVoidRequests(this.pendingMemberStateRequests, new EdgeBaseError(499, 'Room left'));
-    this.rejectPendingVoidRequests(this.pendingMediaRequests, new EdgeBaseError(499, 'Room left'));
+    this.rejectAllPendingRequests(new EdgeBaseError(499, 'Room left'));
 
     if (this.ws) {
       const socket = this.ws;
@@ -624,18 +617,34 @@ export class RoomClient {
     this._playerState = {};
     this._playerVersion = 0;
     this._members = [];
-    this._mediaMembers = [];
+    this.lastLocalMemberState = null;
     this.currentUserId = null;
     this.currentConnectionId = null;
     this.reconnectInfo = null;
     this.setConnectionState('disconnected');
   }
 
-  /** Destroy the room client, cleaning up all listeners and the auth subscription. */
+  private assertConnected(action: string): void {
+    if (!this.ws || !this.connected || !this.authenticated) {
+      throw new EdgeBaseError(
+        400,
+        `Room connection required before ${action}. Call room.join() and wait for the connection to finish.`,
+      );
+    }
+  }
+
+  /**
+   * Destroy the RoomClient and release all resources.
+   * Calls leave() if still connected, unsubscribes from auth state changes,
+   * and clears all handler arrays to allow garbage collection.
+   */
   destroy(): void {
     this.leave();
+    this.detachBrowserNetworkListeners();
     this.unsubAuthState?.();
     this.unsubAuthState = null;
+
+    // Clear all handler arrays to break references
     this.sharedStateHandlers.length = 0;
     this.playerStateHandlers.length = 0;
     this.messageHandlers.clear();
@@ -648,10 +657,6 @@ export class RoomClient {
     this.memberStateHandlers.length = 0;
     this.signalHandlers.clear();
     this.anySignalHandlers.length = 0;
-    this.mediaTrackHandlers.length = 0;
-    this.mediaTrackRemovedHandlers.length = 0;
-    this.mediaStateHandlers.length = 0;
-    this.mediaDeviceHandlers.length = 0;
     this.reconnectHandlers.length = 0;
     this.connectionStateHandlers.length = 0;
   }
@@ -666,9 +671,7 @@ export class RoomClient {
    * const result = await room.send('SET_SCORE', { score: 42 });
    */
   async send(actionType: string, payload?: unknown): Promise<unknown> {
-    if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, "Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.");
-    }
+    this.assertConnected(`sending action '${actionType}'`);
 
     const requestId = generateRequestId();
 
@@ -806,6 +809,14 @@ export class RoomClient {
       });
   }
 
+  private onMemberSnapshot(handler: (members: RoomMember[]) => void): Subscription {
+    this.memberSnapshotHandlers.push(handler);
+    return createSubscription(() => {
+      const index = this.memberSnapshotHandlers.indexOf(handler);
+      if (index >= 0) this.memberSnapshotHandlers.splice(index, 1);
+    });
+  }
+
   private onMemberJoin(handler: (member: RoomMember) => void): Subscription {
     this.memberJoinHandlers.push(handler);
     return createSubscription(() => {
@@ -842,6 +853,14 @@ export class RoomClient {
       });
   }
 
+  private onRecoveryFailure(handler: (info: RoomRecoveryFailureInfo) => void): Subscription {
+    this.recoveryFailureHandlers.push(handler);
+    return createSubscription(() => {
+      const index = this.recoveryFailureHandlers.indexOf(handler);
+      if (index >= 0) this.recoveryFailureHandlers.splice(index, 1);
+    });
+  }
+
   private onConnectionStateChange(handler: (state: RoomConnectionState) => void): Subscription {
     this.connectionStateHandlers.push(handler);
     return createSubscription(() => {
@@ -850,50 +869,12 @@ export class RoomClient {
       });
   }
 
-  private onMediaTrack(handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription {
-    this.mediaTrackHandlers.push(handler);
-    return createSubscription(() => {
-        const index = this.mediaTrackHandlers.indexOf(handler);
-        if (index >= 0) this.mediaTrackHandlers.splice(index, 1);
-      });
-  }
-
-  private onMediaTrackRemoved(handler: (track: RoomMediaTrack, member: RoomMember) => void): Subscription {
-    this.mediaTrackRemovedHandlers.push(handler);
-    return createSubscription(() => {
-        const index = this.mediaTrackRemovedHandlers.indexOf(handler);
-        if (index >= 0) this.mediaTrackRemovedHandlers.splice(index, 1);
-      });
-  }
-
-  private onMediaStateChange(
-    handler: (member: RoomMember, state: RoomMemberMediaState) => void,
-  ): Subscription {
-    this.mediaStateHandlers.push(handler);
-    return createSubscription(() => {
-        const index = this.mediaStateHandlers.indexOf(handler);
-        if (index >= 0) this.mediaStateHandlers.splice(index, 1);
-      });
-  }
-
-  private onMediaDeviceChange(
-    handler: (member: RoomMember, change: RoomMediaDeviceChange) => void,
-  ): Subscription {
-    this.mediaDeviceHandlers.push(handler);
-    return createSubscription(() => {
-        const index = this.mediaDeviceHandlers.indexOf(handler);
-        if (index >= 0) this.mediaDeviceHandlers.splice(index, 1);
-      });
-  }
-
   private async sendSignal(
     event: string,
     payload?: unknown,
     options?: { includeSelf?: boolean; memberId?: string },
   ): Promise<void> {
-    if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, "Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.");
-    }
+    this.assertConnected(`sending signal '${event}'`);
 
     const requestId = generateRequestId();
     return new Promise<void>((resolve, reject) => {
@@ -915,24 +896,32 @@ export class RoomClient {
   }
 
   private async sendMemberState(state: Record<string, unknown>): Promise<void> {
+    const nextState = {
+      ...(this.lastLocalMemberState ?? {}),
+      ...cloneRecord(state),
+    };
     return this.sendMemberStateRequest({
       type: 'member_state',
       state,
+    }, () => {
+      this.lastLocalMemberState = nextState;
     });
   }
 
   private async clearMemberState(): Promise<void> {
+    const clearedState = {};
     return this.sendMemberStateRequest({
       type: 'member_state_clear',
+    }, () => {
+      this.lastLocalMemberState = clearedState;
     });
   }
 
   private async sendMemberStateRequest(
     payload: { type: 'member_state'; state: Record<string, unknown> } | { type: 'member_state_clear' },
+    onSuccess?: () => void,
   ): Promise<void> {
-    if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, "Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.");
-    }
+    this.assertConnected('updating member state');
 
     const requestId = generateRequestId();
     return new Promise<void>((resolve, reject) => {
@@ -941,7 +930,7 @@ export class RoomClient {
         reject(new EdgeBaseError(408, 'Member state update timed out'));
       }, this.options.sendTimeout);
 
-      this.pendingMemberStateRequests.set(requestId, { resolve, reject, timeout });
+      this.pendingMemberStateRequests.set(requestId, { resolve, reject, timeout, onSuccess });
       this.sendRaw({ ...payload, requestId });
     });
   }
@@ -951,9 +940,7 @@ export class RoomClient {
     memberId: string,
     payload?: Record<string, unknown>,
   ): Promise<void> {
-    if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, "Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.");
-    }
+    this.assertConnected(`running admin operation '${operation}'`);
 
     const requestId = generateRequestId();
     return new Promise<void>((resolve, reject) => {
@@ -971,51 +958,6 @@ export class RoomClient {
         requestId,
       });
     });
-  }
-
-  private async sendMedia(
-    operation: 'publish' | 'unpublish' | 'mute' | 'device',
-    kind: RoomMediaKind,
-    payload?: Record<string, unknown>,
-  ): Promise<void> {
-    if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(400, "Not connected to room. Call room.join() and wait for the room to connect before sending actions, signals, or media.");
-    }
-
-    const requestId = generateRequestId();
-    return new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingMediaRequests.delete(requestId);
-        reject(new EdgeBaseError(408, `Media operation '${operation}' timed out`));
-      }, this.options.sendTimeout);
-
-      this.pendingMediaRequests.set(requestId, { resolve, reject, timeout });
-      this.sendRaw({
-        type: 'media',
-        operation,
-        kind,
-        payload: payload ?? {},
-        requestId,
-      });
-    });
-  }
-
-  private async switchMediaDevices(payload: {
-    audioInputId?: string;
-    videoInputId?: string;
-    screenInputId?: string;
-  }): Promise<void> {
-    const operations: Promise<void>[] = [];
-    if (payload.audioInputId) {
-      operations.push(this.sendMedia('device', 'audio', { deviceId: payload.audioInputId }));
-    }
-    if (payload.videoInputId) {
-      operations.push(this.sendMedia('device', 'video', { deviceId: payload.videoInputId }));
-    }
-    if (payload.screenInputId) {
-      operations.push(this.sendMedia('device', 'screen', { deviceId: payload.screenInputId }));
-    }
-    await Promise.all(operations);
   }
 
   // ─── Private: Connection ───
@@ -1069,12 +1011,25 @@ export class RoomClient {
         this.joined = false;
         this.ws = null;
         this.stopHeartbeat();
-        if (event.code === 4004 && this.connectionState !== 'kicked') {
-          this.handleKicked();
+
+        const closeMessage = event.reason?.trim()
+          ? `Room authentication lost: ${event.reason}`
+          : 'Room authentication lost';
+        const closeError = event.code === ROOM_AUTH_STATE_LOST_CLOSE_CODE
+          ? new EdgeBaseError(401, closeMessage)
+          : new EdgeBaseError(499, 'WebSocket connection lost');
+
+        if (event.code === ROOM_AUTH_STATE_LOST_CLOSE_CODE && this.connectionState !== 'auth_lost') {
+          this.setConnectionState('auth_lost');
         }
 
+        // Reject pending requests immediately so callers don't hang until timeout
         if (!this.intentionallyLeft) {
-          this.rejectAllPendingRequests(new EdgeBaseError(499, 'WebSocket connection lost'));
+          this.rejectAllPendingRequests(closeError);
+        }
+
+        if (event.code === 4004 && this.connectionState !== 'kicked') {
+          this.handleKicked();
         }
 
         if (
@@ -1084,11 +1039,7 @@ export class RoomClient {
           this.reconnectAttempts < this.options.maxReconnectAttempts
         ) {
           this.scheduleReconnect();
-        } else if (
-          !this.intentionallyLeft &&
-          this.connectionState !== 'kicked' &&
-          this.connectionState !== 'auth_lost'
-        ) {
+        } else if (!this.intentionallyLeft && this.connectionState !== 'kicked' && this.connectionState !== 'auth_lost') {
           this.setConnectionState('disconnected');
         }
       };
@@ -1122,12 +1073,20 @@ export class RoomClient {
       refreshAccessToken(this.baseUrl, refreshToken),
     );
     if (!token) {
-      throw new EdgeBaseError(401, 'No access token available. Sign in first.');
+      throw new EdgeBaseError(
+        401,
+        'Room authentication requires a signed-in session. Sign in before joining the room.',
+      );
     }
 
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new EdgeBaseError(401, 'Room auth timeout'));
+        reject(
+          new EdgeBaseError(
+            401,
+            'Room authentication timed out. Check the server auth response and room connectivity.',
+          ),
+        );
       }, 10000);
 
       const originalOnMessage = this.ws?.onmessage;
@@ -1142,15 +1101,16 @@ export class RoomClient {
             if (this.ws) this.ws.onmessage = originalOnMessage ?? null;
 
             // Send join message with last known state for eviction recovery
-            this.sendRaw({
-              type: 'join',
-              lastSharedState: this._sharedState,
-              lastSharedVersion: this._sharedVersion,
-              lastPlayerState: this._playerState,
-              lastPlayerVersion: this._playerVersion,
-            });
-            this.joined = true;
-            resolve();
+                        this.sendRaw({
+                            type: 'join',
+                            lastSharedState: this._sharedState,
+                            lastSharedVersion: this._sharedVersion,
+                            lastPlayerState: this._playerState,
+                            lastPlayerVersion: this._playerVersion,
+                            lastMemberState: this.getReconnectMemberState(),
+                        });
+                        this.joined = true;
+                        resolve();
           } else if (msg.type === 'error') {
             clearTimeout(timeout);
             reject(new EdgeBaseError(401, msg.message as string));
@@ -1209,9 +1169,6 @@ export class RoomClient {
       case 'members_sync':
         this.handleMembersSync(msg);
         break;
-      case 'media_sync':
-        this.handleMediaSync(msg);
-        break;
       case 'member_join':
         this.handleMemberJoinFrame(msg);
         break;
@@ -1223,24 +1180,6 @@ export class RoomClient {
         break;
       case 'member_state_error':
         this.handleMemberStateError(msg);
-        break;
-      case 'media_track':
-        this.handleMediaTrackFrame(msg);
-        break;
-      case 'media_track_removed':
-        this.handleMediaTrackRemovedFrame(msg);
-        break;
-      case 'media_state':
-        this.handleMediaStateFrame(msg);
-        break;
-      case 'media_device':
-        this.handleMediaDeviceFrame(msg);
-        break;
-      case 'media_result':
-        this.handleMediaResult(msg);
-        break;
-      case 'media_error':
-        this.handleMediaError(msg);
         break;
       case 'admin_result':
         this.handleAdminResult(msg);
@@ -1256,6 +1195,7 @@ export class RoomClient {
         break;
       case 'pong':
         // Heartbeat response — no action needed
+        this.lastHeartbeatAckAt = Date.now();
         break;
     }
   }
@@ -1397,24 +1337,19 @@ export class RoomClient {
   private handleMembersSync(msg: Record<string, unknown>): void {
     const members = this.normalizeMembers(msg.members);
     this._members = members;
-    for (const member of members) {
-      this.syncMediaMemberInfo(member);
-    }
-    const snapshot = cloneValue(this._members);
+    const snapshot = this._members.map((member) => cloneValue(member));
     for (const handler of this.memberSyncHandlers) {
       handler(snapshot);
     }
-  }
-
-  private handleMediaSync(msg: Record<string, unknown>): void {
-    this._mediaMembers = this.normalizeMediaMembers(msg.members);
+    for (const handler of this.memberSnapshotHandlers) {
+      handler(snapshot);
+    }
   }
 
   private handleMemberJoinFrame(msg: Record<string, unknown>): void {
     const member = this.normalizeMember(msg.member);
     if (!member) return;
     this.upsertMember(member);
-    this.syncMediaMemberInfo(member);
     const snapshot = cloneValue(member);
     for (const handler of this.memberJoinHandlers) {
       handler(snapshot);
@@ -1425,7 +1360,6 @@ export class RoomClient {
     const member = this.normalizeMember(msg.member);
     if (!member) return;
     this.removeMember(member.memberId);
-    this.removeMediaMember(member.memberId);
     const reason = this.normalizeLeaveReason(msg.reason);
     const snapshot = cloneValue(member);
     for (const handler of this.memberLeaveHandlers) {
@@ -1439,14 +1373,14 @@ export class RoomClient {
     if (!member) return;
     member.state = state;
     this.upsertMember(member);
-    this.syncMediaMemberInfo(member);
 
     const requestId = msg.requestId as string | undefined;
-    if (requestId && member.memberId === this.currentUserId) {
+    if (requestId) {
       const pending = this.pendingMemberStateRequests.get(requestId);
       if (pending) {
         clearTimeout(pending.timeout);
         this.pendingMemberStateRequests.delete(requestId);
+        pending.onSuccess?.();
         pending.resolve();
       }
     }
@@ -1466,104 +1400,6 @@ export class RoomClient {
     clearTimeout(pending.timeout);
     this.pendingMemberStateRequests.delete(requestId);
     pending.reject(new EdgeBaseError(400, (msg.message as string) || 'Member state update failed'));
-  }
-
-  private handleMediaTrackFrame(msg: Record<string, unknown>): void {
-    const member = this.normalizeMember(msg.member);
-    const track = this.normalizeMediaTrack(msg.track);
-    if (!member || !track) return;
-    const mediaMember = this.ensureMediaMember(member);
-    this.upsertMediaTrack(mediaMember, track);
-    this.mergeMediaState(mediaMember, track.kind, {
-      published: true,
-      muted: track.muted,
-      trackId: track.trackId,
-      deviceId: track.deviceId,
-      publishedAt: track.publishedAt,
-      adminDisabled: track.adminDisabled,
-    });
-
-    const memberSnapshot = cloneValue(mediaMember.member);
-    const trackSnapshot = cloneValue(track);
-    for (const handler of this.mediaTrackHandlers) {
-      handler(trackSnapshot, memberSnapshot);
-    }
-  }
-
-  private handleMediaTrackRemovedFrame(msg: Record<string, unknown>): void {
-    const member = this.normalizeMember(msg.member);
-    const track = this.normalizeMediaTrack(msg.track);
-    if (!member || !track) return;
-    const mediaMember = this.ensureMediaMember(member);
-    this.removeMediaTrack(mediaMember, track);
-    mediaMember.state = {
-      ...mediaMember.state,
-      [track.kind]: {
-        published: false,
-        muted: false,
-        adminDisabled: false,
-      },
-    };
-
-    const memberSnapshot = cloneValue(mediaMember.member);
-    const trackSnapshot = cloneValue(track);
-    for (const handler of this.mediaTrackRemovedHandlers) {
-      handler(trackSnapshot, memberSnapshot);
-    }
-  }
-
-  private handleMediaStateFrame(msg: Record<string, unknown>): void {
-    const member = this.normalizeMember(msg.member);
-    if (!member) return;
-    const mediaMember = this.ensureMediaMember(member);
-    mediaMember.state = this.normalizeMediaState(msg.state);
-
-    const memberSnapshot = cloneValue(mediaMember.member);
-    const stateSnapshot = cloneValue(mediaMember.state);
-    for (const handler of this.mediaStateHandlers) {
-      handler(memberSnapshot, stateSnapshot);
-    }
-  }
-
-  private handleMediaDeviceFrame(msg: Record<string, unknown>): void {
-    const member = this.normalizeMember(msg.member);
-    const kind = this.normalizeMediaKind(msg.kind);
-    const deviceId = typeof msg.deviceId === 'string' ? msg.deviceId : '';
-    if (!member || !kind || !deviceId) return;
-
-    const mediaMember = this.ensureMediaMember(member);
-    this.mergeMediaState(mediaMember, kind, { deviceId });
-    for (const track of mediaMember.tracks) {
-      if (track.kind === kind) {
-        track.deviceId = deviceId;
-      }
-    }
-
-    const memberSnapshot = cloneValue(mediaMember.member);
-    const change = { kind, deviceId } satisfies RoomMediaDeviceChange;
-    for (const handler of this.mediaDeviceHandlers) {
-      handler(memberSnapshot, change);
-    }
-  }
-
-  private handleMediaResult(msg: Record<string, unknown>): void {
-    const requestId = msg.requestId as string | undefined;
-    if (!requestId) return;
-    const pending = this.pendingMediaRequests.get(requestId);
-    if (!pending) return;
-    clearTimeout(pending.timeout);
-    this.pendingMediaRequests.delete(requestId);
-    pending.resolve();
-  }
-
-  private handleMediaError(msg: Record<string, unknown>): void {
-    const requestId = msg.requestId as string | undefined;
-    if (!requestId) return;
-    const pending = this.pendingMediaRequests.get(requestId);
-    if (!pending) return;
-    clearTimeout(pending.timeout);
-    this.pendingMediaRequests.delete(requestId);
-    pending.reject(new EdgeBaseError(400, (msg.message as string) || 'Media operation failed'));
   }
 
   private handleAdminResult(msg: Record<string, unknown>): void {
@@ -1595,8 +1431,14 @@ export class RoomClient {
   }
 
   private handleError(msg: Record<string, unknown>): void {
+    const code = typeof msg.code === 'string' ? msg.code : '';
+    const message = typeof msg.message === 'string' ? msg.message : '';
+    if (this.shouldTreatErrorAsAuthLoss(code)) {
+      this.handleRoomAuthStateLoss(message);
+    }
+
     for (const handler of this.errorHandlers) {
-      handler({ code: msg.code as string, message: msg.message as string });
+      handler({ code, message });
     }
   }
 
@@ -1607,10 +1449,6 @@ export class RoomClient {
   }
 
   private handleAuthStateChange(user: TokenUser | null): void {
-    if (user === null) {
-      this.rejectAllPendingRequests(new EdgeBaseError(401, 'Auth state lost'));
-    }
-
     if (user) {
       if (this.ws && this.connected && this.authenticated) {
         this.refreshAuth();
@@ -1619,9 +1457,9 @@ export class RoomClient {
 
       this.waitingForAuth = false;
       if (
-        this.joinRequested &&
-        !this.connectingPromise &&
-        !isSocketOpenOrConnecting(this.ws)
+        this.joinRequested
+        && !this.connectingPromise
+        && !isSocketOpenOrConnecting(this.ws)
       ) {
         this.reconnectAttempts = 0;
         this.ensureConnection().catch(() => {
@@ -1634,6 +1472,10 @@ export class RoomClient {
     this.waitingForAuth = this.joinRequested;
     this.reconnectInfo = null;
     this.setConnectionState('auth_lost');
+
+    // Reject pending requests — auth is gone, server won't respond
+    this.rejectAllPendingRequests(new EdgeBaseError(401, 'Auth state lost'));
+
     if (this.ws) {
       const socket = this.ws;
       this.sendRaw({ type: 'leave' });
@@ -1642,7 +1484,6 @@ export class RoomClient {
       this.connected = false;
       this.authenticated = false;
       this.joined = false;
-      this._mediaMembers = [];
       this.currentUserId = null;
       this.currentConnectionId = null;
       try {
@@ -1656,7 +1497,6 @@ export class RoomClient {
     this.connected = false;
     this.authenticated = false;
     this.joined = false;
-    this._mediaMembers = [];
   }
 
   private handleAuthenticationFailure(error: unknown): void {
@@ -1683,6 +1523,41 @@ export class RoomClient {
     }
   }
 
+  private shouldTreatErrorAsAuthLoss(code: string): boolean {
+    if (code === 'AUTH_STATE_LOST') {
+      return true;
+    }
+    if (code !== 'NOT_AUTHENTICATED') {
+      return false;
+    }
+    return this.authenticated || this.hasPendingRequests();
+  }
+
+  private hasPendingRequests(): boolean {
+    return this.pendingRequests.size > 0
+      || this.pendingSignalRequests.size > 0
+      || this.pendingAdminRequests.size > 0
+      || this.pendingMemberStateRequests.size > 0;
+  }
+
+  private handleRoomAuthStateLoss(message?: string): void {
+    const detail = message?.trim();
+    const authLossMessage = detail
+      ? `Room authentication lost: ${detail}`
+      : 'Room authentication lost';
+
+    this.setConnectionState('auth_lost');
+    this.rejectAllPendingRequests(new EdgeBaseError(401, authLossMessage));
+
+    if (this.ws && this.ws.readyState === WS_OPEN) {
+      try {
+        this.ws.close(ROOM_AUTH_STATE_LOST_CLOSE_CODE, authLossMessage);
+      } catch {
+        // Socket may already be closing.
+      }
+    }
+  }
+
   private normalizeMembers(value: unknown): RoomMember[] {
     if (!Array.isArray(value)) {
       return [];
@@ -1690,15 +1565,6 @@ export class RoomClient {
     return value
       .map((member) => this.normalizeMember(member))
       .filter((member): member is RoomMember => !!member);
-  }
-
-  private normalizeMediaMembers(value: unknown): RoomMediaMember[] {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-    return value
-      .map((member) => this.normalizeMediaMember(member))
-      .filter((member): member is RoomMediaMember => !!member);
   }
 
   private normalizeMember(value: unknown): RoomMember | null {
@@ -1725,88 +1591,6 @@ export class RoomClient {
       return {};
     }
     return cloneRecord(value as Record<string, unknown>);
-  }
-
-  private normalizeMediaMember(value: unknown): RoomMediaMember | null {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return null;
-    }
-    const entry = value as Record<string, unknown>;
-    const member = this.normalizeMember(entry.member);
-    if (!member) {
-      return null;
-    }
-    return {
-      member,
-      state: this.normalizeMediaState(entry.state),
-      tracks: this.normalizeMediaTracks(entry.tracks),
-    };
-  }
-
-  private normalizeMediaState(value: unknown): RoomMemberMediaState {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return {};
-    }
-    const state = value as Record<string, unknown>;
-    return {
-      audio: this.normalizeMediaKindState(state.audio),
-      video: this.normalizeMediaKindState(state.video),
-      screen: this.normalizeMediaKindState(state.screen),
-    };
-  }
-
-  private normalizeMediaKindState(value: unknown): RoomMemberMediaKindState | undefined {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return undefined;
-    }
-    const state = value as Record<string, unknown>;
-    return {
-      published: state.published === true,
-      muted: state.muted === true,
-      trackId: typeof state.trackId === 'string' ? state.trackId : undefined,
-      deviceId: typeof state.deviceId === 'string' ? state.deviceId : undefined,
-      publishedAt: typeof state.publishedAt === 'number' ? state.publishedAt : undefined,
-      adminDisabled: state.adminDisabled === true,
-    };
-  }
-
-  private normalizeMediaTracks(value: unknown): RoomMediaTrack[] {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-    return value
-      .map((track) => this.normalizeMediaTrack(track))
-      .filter((track): track is RoomMediaTrack => !!track);
-  }
-
-  private normalizeMediaTrack(value: unknown): RoomMediaTrack | null {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return null;
-    }
-    const track = value as Record<string, unknown>;
-    const kind = this.normalizeMediaKind(track.kind);
-    if (!kind) {
-      return null;
-    }
-    return {
-      kind,
-      trackId: typeof track.trackId === 'string' ? track.trackId : undefined,
-      deviceId: typeof track.deviceId === 'string' ? track.deviceId : undefined,
-      muted: track.muted === true,
-      publishedAt: typeof track.publishedAt === 'number' ? track.publishedAt : undefined,
-      adminDisabled: track.adminDisabled === true,
-    };
-  }
-
-  private normalizeMediaKind(value: unknown): RoomMediaKind | null {
-    switch (value) {
-      case 'audio':
-      case 'video':
-      case 'screen':
-        return value;
-      default:
-        return null;
-    }
   }
 
   private normalizeSignalMeta(value: unknown): RoomSignalMeta {
@@ -1837,6 +1621,21 @@ export class RoomClient {
     }
   }
 
+  private getDebugSnapshot(): unknown {
+    return {
+      connectionState: this.connectionState,
+      connected: this.connected,
+      authenticated: this.authenticated,
+      joined: this.joined,
+      currentUserId: this.currentUserId,
+      currentConnectionId: this.currentConnectionId,
+      membersCount: this._members.length,
+      reconnectAttempts: this.reconnectAttempts,
+      joinRequested: this.joinRequested,
+      waitingForAuth: this.waitingForAuth,
+    };
+  }
+
   private upsertMember(member: RoomMember): void {
     const index = this._members.findIndex((entry) => entry.memberId === member.memberId);
     if (index >= 0) {
@@ -1850,76 +1649,7 @@ export class RoomClient {
     this._members = this._members.filter((member) => member.memberId !== memberId);
   }
 
-  private syncMediaMemberInfo(member: RoomMember): void {
-    const mediaMember = this._mediaMembers.find((entry) => entry.member.memberId === member.memberId);
-    if (!mediaMember) {
-      return;
-    }
-    mediaMember.member = cloneValue(member);
-  }
-
-  private ensureMediaMember(member: RoomMember): RoomMediaMember {
-    const existing = this._mediaMembers.find((entry) => entry.member.memberId === member.memberId);
-    if (existing) {
-      existing.member = cloneValue(member);
-      return existing;
-    }
-    const created: RoomMediaMember = {
-      member: cloneValue(member),
-      state: {},
-      tracks: [],
-    };
-    this._mediaMembers.push(created);
-    return created;
-  }
-
-  private removeMediaMember(memberId: string): void {
-    this._mediaMembers = this._mediaMembers.filter((member) => member.member.memberId !== memberId);
-  }
-
-  private upsertMediaTrack(mediaMember: RoomMediaMember, track: RoomMediaTrack): void {
-    const index = mediaMember.tracks.findIndex(
-      (entry) =>
-        entry.kind === track.kind &&
-        entry.trackId === track.trackId,
-    );
-    if (index >= 0) {
-      mediaMember.tracks[index] = cloneValue(track);
-      return;
-    }
-    mediaMember.tracks = mediaMember.tracks
-      .filter((entry) => !(entry.kind === track.kind && !track.trackId))
-      .concat(cloneValue(track));
-  }
-
-  private removeMediaTrack(mediaMember: RoomMediaMember, track: RoomMediaTrack): void {
-    mediaMember.tracks = mediaMember.tracks.filter((entry) => {
-      if (track.trackId) {
-        return !(entry.kind === track.kind && entry.trackId === track.trackId);
-      }
-      return entry.kind !== track.kind;
-    });
-  }
-
-  private mergeMediaState(
-    mediaMember: RoomMediaMember,
-    kind: RoomMediaKind,
-    partial: Partial<RoomMemberMediaKindState>,
-  ): void {
-    const next: RoomMemberMediaKindState = {
-      published: partial.published ?? mediaMember.state[kind]?.published ?? false,
-      muted: partial.muted ?? mediaMember.state[kind]?.muted ?? false,
-      trackId: partial.trackId ?? mediaMember.state[kind]?.trackId,
-      deviceId: partial.deviceId ?? mediaMember.state[kind]?.deviceId,
-      publishedAt: partial.publishedAt ?? mediaMember.state[kind]?.publishedAt,
-      adminDisabled: partial.adminDisabled ?? mediaMember.state[kind]?.adminDisabled,
-    };
-    mediaMember.state = {
-      ...mediaMember.state,
-      [kind]: next,
-    };
-  }
-
+  /** Reject all 5 pending request maps at once. */
   private rejectAllPendingRequests(error: EdgeBaseError): void {
     for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
@@ -1929,7 +1659,6 @@ export class RoomClient {
     this.rejectPendingVoidRequests(this.pendingSignalRequests, error);
     this.rejectPendingVoidRequests(this.pendingAdminRequests, error);
     this.rejectPendingVoidRequests(this.pendingMemberStateRequests, error);
-    this.rejectPendingVoidRequests(this.pendingMediaRequests, error);
   }
 
   private rejectPendingVoidRequests(
@@ -1947,11 +1676,60 @@ export class RoomClient {
     pendingRequests.clear();
   }
 
+  private shouldScheduleDisconnectReset(next: RoomConnectionState): boolean {
+    if (this.intentionallyLeft || !this.joinRequested) {
+      return false;
+    }
+    return next === 'disconnected';
+  }
+
+  private clearDisconnectResetTimer(): void {
+    if (this.disconnectResetTimer) {
+      clearTimeout(this.disconnectResetTimer);
+      this.disconnectResetTimer = null;
+    }
+  }
+
+  private scheduleDisconnectReset(stateAtSchedule: RoomConnectionState): void {
+    this.clearDisconnectResetTimer();
+    const timeoutMs = this.options.disconnectResetTimeoutMs;
+    if (!(timeoutMs > 0)) {
+      return;
+    }
+    this.disconnectResetTimer = setTimeout(() => {
+      this.disconnectResetTimer = null;
+      if (this.intentionallyLeft || !this.joinRequested) {
+        return;
+      }
+      if (this.connectionState !== stateAtSchedule) {
+        return;
+      }
+      if (this.connectionState === 'connected') {
+        return;
+      }
+      for (const handler of this.recoveryFailureHandlers) {
+        try {
+          handler({
+            state: this.connectionState,
+            timeoutMs,
+          });
+        } catch {
+          // Ignore recovery failure handler errors.
+        }
+      }
+    }, timeoutMs);
+  }
+
   private setConnectionState(next: RoomConnectionState): void {
     if (this.connectionState === next) {
       return;
     }
     this.connectionState = next;
+    if (this.shouldScheduleDisconnectReset(next)) {
+      this.scheduleDisconnectReset(next);
+    } else {
+      this.clearDisconnectResetTimer();
+    }
     for (const handler of this.connectionStateHandlers) {
       handler(next);
     }
@@ -1972,6 +1750,52 @@ export class RoomClient {
     return `${wsUrl}/api/room?namespace=${encodeURIComponent(this.namespace)}&id=${encodeURIComponent(this.roomId)}`;
   }
 
+  private attachBrowserNetworkListeners(): void {
+    if (this.browserNetworkListenersAttached) {
+      return;
+    }
+
+    const eventTarget = typeof globalThis !== 'undefined'
+      && typeof (globalThis as typeof globalThis & {
+        addEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
+      }).addEventListener === 'function'
+      ? globalThis as typeof globalThis & {
+        addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
+      }
+      : null;
+
+    if (!eventTarget) {
+      return;
+    }
+
+    eventTarget.addEventListener('offline', this.browserOfflineHandler);
+    eventTarget.addEventListener('online', this.browserOnlineHandler);
+    this.browserNetworkListenersAttached = true;
+  }
+
+  private detachBrowserNetworkListeners(): void {
+    if (!this.browserNetworkListenersAttached) {
+      return;
+    }
+
+    const eventTarget = typeof globalThis !== 'undefined'
+      && typeof (globalThis as typeof globalThis & {
+        removeEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
+      }).removeEventListener === 'function'
+      ? globalThis as typeof globalThis & {
+        removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
+      }
+      : null;
+
+    if (!eventTarget) {
+      return;
+    }
+
+    eventTarget.removeEventListener('offline', this.browserOfflineHandler);
+    eventTarget.removeEventListener('online', this.browserOnlineHandler);
+    this.browserNetworkListenersAttached = false;
+  }
+
   private scheduleReconnect(): void {
     const attempt = this.reconnectAttempts + 1;
     const baseDelay = this.options.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts);
@@ -1982,10 +1806,10 @@ export class RoomClient {
     this.setConnectionState('reconnecting');
     setTimeout(() => {
       if (
-        this.connectingPromise ||
-        !this.joinRequested ||
-        this.waitingForAuth ||
-        isSocketOpenOrConnecting(this.ws)
+        this.connectingPromise
+        || !this.joinRequested
+        || this.waitingForAuth
+        || isSocketOpenOrConnecting(this.ws)
       ) {
         return;
       }
@@ -1995,11 +1819,20 @@ export class RoomClient {
 
   private startHeartbeat(): void {
     this.stopHeartbeat();
+    this.lastHeartbeatAckAt = Date.now();
     this.heartbeatTimer = setInterval(() => {
       if (this.ws && this.connected) {
+        if (Date.now() - this.lastHeartbeatAckAt > this.options.heartbeatStaleTimeoutMs) {
+          try {
+            this.ws.close();
+          } catch {
+            // Socket may already be closing.
+          }
+          return;
+        }
         this.ws.send(JSON.stringify({ type: 'ping' }));
       }
-    }, 30000);
+    }, this.options.heartbeatIntervalMs);
   }
 
   private stopHeartbeat(): void {
@@ -2007,5 +1840,13 @@ export class RoomClient {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
+  }
+
+  private getReconnectMemberState(): Record<string, unknown> | undefined {
+    if (!this.lastLocalMemberState) {
+      return undefined;
+    }
+
+    return cloneRecord(this.lastLocalMemberState);
   }
 }

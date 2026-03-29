@@ -26,7 +26,6 @@ import { createPluginCommand } from './commands/create-plugin.js';
 import { webhookTestCommand } from './commands/webhook-test.js';
 import { completionCommand } from './commands/completion.js';
 import { telemetryCommand } from './commands/telemetry.js';
-import { realtimeCommand } from './commands/realtime.js';
 import { describeCommand } from './commands/describe.js';
 import { setContext } from './lib/cli-context.js';
 import { isCliStructuredError, raiseCliError, renderStructuredIssue } from './lib/agent-contract.js';
@@ -174,7 +173,6 @@ program.addCommand(webhookTestCommand);
 program.addCommand(completionCommand);
 program.addCommand(describeCommand);
 program.addCommand(telemetryCommand);
-program.addCommand(realtimeCommand);
 
 // ─── Help Text Grouping ───
 program.addHelpText('after', `
@@ -183,7 +181,7 @@ Commands by category:
   Database:     migration (mg), migrate, seed, backup (bk), export, typegen (tg), neon
   Security:     secret, keys, admin
   Plugins:      plugins, create-plugin, docker, webhook-test
-  Utilities:    completion, describe, telemetry, realtime
+  Utilities:    completion, describe, telemetry
 
 Environment variables:
   NO_COLOR=1              Disable colored output

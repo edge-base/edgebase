@@ -89,9 +89,6 @@ type MemberLeaveHandler = Arc<dyn Fn(&Value, &str) + Send + Sync>;
 type MemberStateHandler = Arc<dyn Fn(&Value, &Value) + Send + Sync>;
 type SignalHandler = Arc<dyn Fn(&Value, &Value) + Send + Sync>;
 type AnySignalHandler = Arc<dyn Fn(&str, &Value, &Value) + Send + Sync>;
-type MediaTrackHandler = Arc<dyn Fn(&Value, &Value) + Send + Sync>;
-type MediaStateHandler = Arc<dyn Fn(&Value, &Value) + Send + Sync>;
-type MediaDeviceHandler = Arc<dyn Fn(&Value, &Value) + Send + Sync>;
 type ReconnectHandler = Arc<dyn Fn(&Value) + Send + Sync>;
 type ConnectionStateHandler = Arc<dyn Fn(&str) + Send + Sync>;
 
@@ -125,7 +122,6 @@ pub struct RoomClient {
     player_state: RwLock<Value>,
     player_version: RwLock<u64>,
     members: RwLock<Value>,
-    media_members: RwLock<Value>,
     current_user_id: Mutex<Option<String>>,
     current_connection_id: Mutex<Option<String>>,
     connection_state: RwLock<String>,
@@ -148,10 +144,6 @@ pub struct RoomClient {
     member_state_handlers: HandlerList<MemberStateHandler>,
     signal_handlers: Arc<Mutex<HashMap<String, Vec<(u64, SignalHandler)>>>>,
     any_signal_handlers: HandlerList<AnySignalHandler>,
-    media_track_handlers: HandlerList<MediaTrackHandler>,
-    media_track_removed_handlers: HandlerList<MediaTrackHandler>,
-    media_state_handlers: HandlerList<MediaStateHandler>,
-    media_device_handlers: HandlerList<MediaDeviceHandler>,
     reconnect_handlers: HandlerList<ReconnectHandler>,
     connection_state_handlers: HandlerList<ConnectionStateHandler>,
     handler_id_counter: Mutex<u64>,
@@ -161,8 +153,6 @@ pub struct RoomClient {
     pending_signal_requests: Mutex<HashMap<String, oneshot::Sender<Result<(), Error>>>>,
     pending_admin_requests: Mutex<HashMap<String, oneshot::Sender<Result<(), Error>>>>,
     pending_member_state_requests: Mutex<HashMap<String, oneshot::Sender<Result<(), Error>>>>,
-    pending_media_requests: Mutex<HashMap<String, oneshot::Sender<Result<(), Error>>>>,
-
     // ── WS send channel ───
     send_tx: Mutex<Option<mpsc::Sender<RoomWsCommand>>>,
 
@@ -195,7 +185,6 @@ impl RoomClient {
             player_state: RwLock::new(json!({})),
             player_version: RwLock::new(0),
             members: RwLock::new(json!([])),
-            media_members: RwLock::new(json!([])),
             current_user_id: Mutex::new(None),
             current_connection_id: Mutex::new(None),
             connection_state: RwLock::new(ROOM_STATE_IDLE.to_string()),
@@ -214,10 +203,6 @@ impl RoomClient {
             member_state_handlers: Arc::new(Mutex::new(vec![])),
             signal_handlers: Arc::new(Mutex::new(HashMap::new())),
             any_signal_handlers: Arc::new(Mutex::new(vec![])),
-            media_track_handlers: Arc::new(Mutex::new(vec![])),
-            media_track_removed_handlers: Arc::new(Mutex::new(vec![])),
-            media_state_handlers: Arc::new(Mutex::new(vec![])),
-            media_device_handlers: Arc::new(Mutex::new(vec![])),
             reconnect_handlers: Arc::new(Mutex::new(vec![])),
             connection_state_handlers: Arc::new(Mutex::new(vec![])),
             handler_id_counter: Mutex::new(0),
@@ -225,7 +210,6 @@ impl RoomClient {
             pending_signal_requests: Mutex::new(HashMap::new()),
             pending_admin_requests: Mutex::new(HashMap::new()),
             pending_member_state_requests: Mutex::new(HashMap::new()),
-            pending_media_requests: Mutex::new(HashMap::new()),
             send_tx: Mutex::new(None),
             stop_tx: Mutex::new(None),
             intentionally_left: Mutex::new(false),
@@ -247,11 +231,6 @@ impl RoomClient {
     /// Get the current logical room members snapshot.
     pub fn list_members(&self) -> Value {
         self.members.read().unwrap().clone()
-    }
-
-    /// Get the current media member snapshot.
-    pub fn list_media_members(&self) -> Value {
-        self.media_members.read().unwrap().clone()
     }
 
     /// Get the current session connection state.
@@ -277,10 +256,6 @@ impl RoomClient {
 
     pub fn admin(self: &Arc<Self>) -> RoomAdminNamespace {
         RoomAdminNamespace::new(Arc::clone(self))
-    }
-
-    pub fn media(self: &Arc<Self>) -> RoomMediaNamespace {
-        RoomMediaNamespace::new(Arc::clone(self))
     }
 
     pub fn session(self: &Arc<Self>) -> RoomSessionNamespace {
@@ -425,7 +400,6 @@ impl RoomClient {
         *self.player_state.write().unwrap() = json!({});
         *self.player_version.write().unwrap() = 0;
         *self.members.write().unwrap() = json!([]);
-        *self.media_members.write().unwrap() = json!([]);
         *self.current_user_id.lock().unwrap() = None;
         *self.current_connection_id.lock().unwrap() = None;
         *self.reconnect_info.write().unwrap() = None;
@@ -443,7 +417,7 @@ impl RoomClient {
     /// ```
     pub async fn send(&self, action_type: &str, payload: Option<Value>) -> Result<Value, Error> {
         if self.send_tx.lock().unwrap().is_none() {
-            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.".to_string()));
+            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions or signals.".to_string()));
         }
 
         let request_id = Uuid::new_v4().to_string();
@@ -668,65 +642,6 @@ impl RoomClient {
         })
     }
 
-    pub fn on_media_track(
-        &self,
-        handler: impl Fn(&Value, &Value) + Send + Sync + 'static,
-    ) -> Subscription {
-        let id = self.next_handler_id();
-        let handler = Arc::new(handler) as MediaTrackHandler;
-        self.media_track_handlers.lock().unwrap().push((id, handler));
-
-        let list = Arc::clone(&self.media_track_handlers);
-        Subscription::new(move || {
-            list.lock().unwrap().retain(|(hid, _)| *hid != id);
-        })
-    }
-
-    pub fn on_media_track_removed(
-        &self,
-        handler: impl Fn(&Value, &Value) + Send + Sync + 'static,
-    ) -> Subscription {
-        let id = self.next_handler_id();
-        let handler = Arc::new(handler) as MediaTrackHandler;
-        self.media_track_removed_handlers
-            .lock()
-            .unwrap()
-            .push((id, handler));
-
-        let list = Arc::clone(&self.media_track_removed_handlers);
-        Subscription::new(move || {
-            list.lock().unwrap().retain(|(hid, _)| *hid != id);
-        })
-    }
-
-    pub fn on_media_state_change(
-        &self,
-        handler: impl Fn(&Value, &Value) + Send + Sync + 'static,
-    ) -> Subscription {
-        let id = self.next_handler_id();
-        let handler = Arc::new(handler) as MediaStateHandler;
-        self.media_state_handlers.lock().unwrap().push((id, handler));
-
-        let list = Arc::clone(&self.media_state_handlers);
-        Subscription::new(move || {
-            list.lock().unwrap().retain(|(hid, _)| *hid != id);
-        })
-    }
-
-    pub fn on_media_device_change(
-        &self,
-        handler: impl Fn(&Value, &Value) + Send + Sync + 'static,
-    ) -> Subscription {
-        let id = self.next_handler_id();
-        let handler = Arc::new(handler) as MediaDeviceHandler;
-        self.media_device_handlers.lock().unwrap().push((id, handler));
-
-        let list = Arc::clone(&self.media_device_handlers);
-        Subscription::new(move || {
-            list.lock().unwrap().retain(|(hid, _)| *hid != id);
-        })
-    }
-
     pub fn on_reconnect(
         &self,
         handler: impl Fn(&Value) + Send + Sync + 'static,
@@ -765,7 +680,7 @@ impl RoomClient {
         options: Option<Value>,
     ) -> Result<(), Error> {
         if self.send_tx.lock().unwrap().is_none() {
-            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.".to_string()));
+            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions or signals.".to_string()));
         }
 
         let request_id = Uuid::new_v4().to_string();
@@ -784,7 +699,7 @@ impl RoomClient {
 
     pub async fn send_member_state(&self, state: Value) -> Result<(), Error> {
         if self.send_tx.lock().unwrap().is_none() {
-            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.".to_string()));
+            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions or signals.".to_string()));
         }
 
         let request_id = Uuid::new_v4().to_string();
@@ -804,7 +719,7 @@ impl RoomClient {
 
     pub async fn clear_member_state(&self) -> Result<(), Error> {
         if self.send_tx.lock().unwrap().is_none() {
-            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.".to_string()));
+            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions or signals.".to_string()));
         }
 
         let request_id = Uuid::new_v4().to_string();
@@ -828,7 +743,7 @@ impl RoomClient {
         payload: Option<Value>,
     ) -> Result<(), Error> {
         if self.send_tx.lock().unwrap().is_none() {
-            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.".to_string()));
+            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions or signals.".to_string()));
         }
 
         let request_id = Uuid::new_v4().to_string();
@@ -846,46 +761,6 @@ impl RoomClient {
             message,
             format!("Admin '{}' timed out", operation),
         ).await
-    }
-
-    pub async fn send_media(
-        &self,
-        operation: &str,
-        kind: &str,
-        payload: Option<Value>,
-    ) -> Result<(), Error> {
-        if self.send_tx.lock().unwrap().is_none() {
-            return Err(Error::Room("Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.".to_string()));
-        }
-
-        let request_id = Uuid::new_v4().to_string();
-        let message = json!({
-            "type": "media",
-            "operation": operation,
-            "kind": kind,
-            "payload": payload.unwrap_or_else(|| json!({})),
-            "requestId": request_id,
-        });
-
-        self.send_unit_request(
-            &self.pending_media_requests,
-            request_id,
-            message,
-            format!("Media '{}:{}' timed out", operation, kind),
-        ).await
-    }
-
-    pub async fn switch_media_devices(&self, payload: Value) -> Result<(), Error> {
-        if let Some(device_id) = payload.get("audioInputId").and_then(Value::as_str) {
-            self.send_media("device", "audio", Some(json!({ "deviceId": device_id }))).await?;
-        }
-        if let Some(device_id) = payload.get("videoInputId").and_then(Value::as_str) {
-            self.send_media("device", "video", Some(json!({ "deviceId": device_id }))).await?;
-        }
-        if let Some(device_id) = payload.get("screenInputId").and_then(Value::as_str) {
-            self.send_media("device", "screen", Some(json!({ "deviceId": device_id }))).await?;
-        }
-        Ok(())
     }
 
     /// Reject all pending requests across all pending maps with an error message.
@@ -913,10 +788,6 @@ impl RoomClient {
             let _ = tx.send(Err(Error::Room(error_msg.clone())));
         }
 
-        // Reject pending media requests
-        for (_, tx) in self.pending_media_requests.lock().unwrap().drain() {
-            let _ = tx.send(Err(Error::Room(error_msg.clone())));
-        }
     }
 
     /// Leave the room, clear all handler lists, and release resources.
@@ -936,10 +807,6 @@ impl RoomClient {
         self.member_state_handlers.lock().unwrap().clear();
         self.signal_handlers.lock().unwrap().clear();
         self.any_signal_handlers.lock().unwrap().clear();
-        self.media_track_handlers.lock().unwrap().clear();
-        self.media_track_removed_handlers.lock().unwrap().clear();
-        self.media_state_handlers.lock().unwrap().clear();
-        self.media_device_handlers.lock().unwrap().clear();
         self.reconnect_handlers.lock().unwrap().clear();
         self.connection_state_handlers.lock().unwrap().clear();
     }
@@ -1103,13 +970,6 @@ impl RoomClient {
             "member_state_error" => self.reject_pending_unit_request(&self.pending_member_state_requests, &msg, "Member state error"),
             "admin_result" => self.resolve_pending_unit_request(&self.pending_admin_requests, &msg),
             "admin_error" => self.reject_pending_unit_request(&self.pending_admin_requests, &msg, "Admin error"),
-            "media_sync" => self.handle_media_sync(&msg),
-            "media_track" => self.handle_media_track(&msg),
-            "media_track_removed" => self.handle_media_track_removed(&msg),
-            "media_state" => self.handle_media_state(&msg),
-            "media_device" => self.handle_media_device(&msg),
-            "media_result" => self.resolve_pending_unit_request(&self.pending_media_requests, &msg),
-            "media_error" => self.reject_pending_unit_request(&self.pending_media_requests, &msg, "Media error"),
             "kicked" => self.handle_kicked(),
             "error" => self.handle_error(&msg),
             "pong" => {}
@@ -1221,7 +1081,6 @@ impl RoomClient {
     fn handle_members_sync(&self, msg: &Value) {
         let members = normalize_members(&msg["members"]);
         *self.members.write().unwrap() = members.clone();
-        self.merge_members_into_media();
 
         for (_, handler) in self.member_sync_handlers.lock().unwrap().iter() {
             handler(&members);
@@ -1257,64 +1116,6 @@ impl RoomClient {
 
             for (_, handler) in self.member_state_handlers.lock().unwrap().iter() {
                 handler(&member, &state);
-            }
-        }
-    }
-
-    fn handle_media_sync(&self, msg: &Value) {
-        let media_members = normalize_media_members(&msg["members"]);
-        *self.media_members.write().unwrap() = media_members.clone();
-        self.merge_members_into_media();
-    }
-
-    fn handle_media_track(&self, msg: &Value) {
-        if let (Some(member), Some(track)) = (
-            normalize_member(&msg["member"]),
-            normalize_track(&msg["track"]),
-        ) {
-            self.upsert_media_track(&member, &track);
-            for (_, handler) in self.media_track_handlers.lock().unwrap().iter() {
-                handler(&track, &member);
-            }
-        }
-    }
-
-    fn handle_media_track_removed(&self, msg: &Value) {
-        if let (Some(member), Some(track)) = (
-            normalize_member(&msg["member"]),
-            normalize_track(&msg["track"]),
-        ) {
-            self.remove_media_track(&member, &track);
-            for (_, handler) in self
-                .media_track_removed_handlers
-                .lock()
-                .unwrap()
-                .iter()
-            {
-                handler(&track, &member);
-            }
-        }
-    }
-
-    fn handle_media_state(&self, msg: &Value) {
-        if let Some(member) = normalize_member(&msg["member"]) {
-            let state = object_or_empty(&msg["state"]);
-            self.upsert_media_state(&member, state.clone());
-            for (_, handler) in self.media_state_handlers.lock().unwrap().iter() {
-                handler(&member, &state);
-            }
-        }
-    }
-
-    fn handle_media_device(&self, msg: &Value) {
-        if let Some(member) = normalize_member(&msg["member"]) {
-            let change = json!({
-                "kind": msg["kind"].clone(),
-                "deviceId": msg["deviceId"].clone(),
-            });
-            self.apply_media_device_change(&member, &change);
-            for (_, handler) in self.media_device_handlers.lock().unwrap().iter() {
-                handler(&member, &change);
             }
         }
     }
@@ -1421,112 +1222,12 @@ impl RoomClient {
         } else {
             list.push(member);
         }
-        drop(members);
-        self.merge_members_into_media();
     }
 
     fn remove_member(&self, member_id: &str) {
-        {
-            let mut members = self.members.write().unwrap();
-            if let Some(list) = members.as_array_mut() {
-                list.retain(|entry| entry["memberId"].as_str() != Some(member_id));
-            }
-        }
-        {
-            let mut media_members = self.media_members.write().unwrap();
-            if let Some(list) = media_members.as_array_mut() {
-                list.retain(|entry| entry["member"]["memberId"].as_str() != Some(member_id));
-            }
-        }
-    }
-
-    fn merge_members_into_media(&self) {
-        let members = self.members.read().unwrap().clone();
-        let mut media_members = self.media_members.write().unwrap();
-        if let Some(list) = media_members.as_array_mut() {
-            for media_member in list.iter_mut() {
-                let member_id = media_member["member"]["memberId"].as_str().unwrap_or("");
-                if let Some(member) = members
-                    .as_array()
-                    .and_then(|entries| {
-                        entries
-                            .iter()
-                            .find(|entry| entry["memberId"].as_str() == Some(member_id))
-                    })
-                {
-                    media_member["member"] = member.clone();
-                }
-            }
-        }
-    }
-
-    fn ensure_media_member(&self, member: &Value) -> usize {
-        self.upsert_member(member.clone());
-        let member_id = member["memberId"].as_str().unwrap_or("");
-        let mut media_members = self.media_members.write().unwrap();
-        let list = media_members.as_array_mut().expect("media members array");
-        if let Some(index) = list
-            .iter()
-            .position(|entry| entry["member"]["memberId"].as_str() == Some(member_id))
-        {
-            list[index]["member"] = member.clone();
-            return index;
-        }
-
-        list.push(json!({
-            "member": member,
-            "state": {},
-            "tracks": [],
-        }));
-        list.len() - 1
-    }
-
-    fn upsert_media_track(&self, member: &Value, track: &Value) {
-        let index = self.ensure_media_member(member);
-        let mut media_members = self.media_members.write().unwrap();
-        let list = media_members.as_array_mut().expect("media members array");
-        let tracks = list[index]["tracks"].as_array_mut().expect("tracks array");
-        let kind = track["kind"].as_str().unwrap_or("");
-        if let Some(existing) = tracks
-            .iter_mut()
-            .find(|entry| entry["kind"].as_str() == Some(kind))
-        {
-            *existing = track.clone();
-        } else {
-            tracks.push(track.clone());
-        }
-        apply_track_to_state(&mut list[index]["state"], track, true);
-    }
-
-    fn remove_media_track(&self, member: &Value, track: &Value) {
-        let index = self.ensure_media_member(member);
-        let mut media_members = self.media_members.write().unwrap();
-        let list = media_members.as_array_mut().expect("media members array");
-        let kind = track["kind"].as_str().unwrap_or("");
-        if let Some(tracks) = list[index]["tracks"].as_array_mut() {
-            tracks.retain(|entry| entry["kind"].as_str() != Some(kind));
-        }
-        apply_track_to_state(&mut list[index]["state"], track, false);
-    }
-
-    fn upsert_media_state(&self, member: &Value, state: Value) {
-        let index = self.ensure_media_member(member);
-        let mut media_members = self.media_members.write().unwrap();
-        let list = media_members.as_array_mut().expect("media members array");
-        list[index]["state"] = state;
-    }
-
-    fn apply_media_device_change(&self, member: &Value, change: &Value) {
-        let index = self.ensure_media_member(member);
-        let mut media_members = self.media_members.write().unwrap();
-        let list = media_members.as_array_mut().expect("media members array");
-        let kind = change["kind"].as_str().unwrap_or("");
-        let device_id = change["deviceId"].clone();
-        if let Some(state) = list[index]["state"].as_object_mut() {
-            let kind_state = state.entry(kind.to_string()).or_insert_with(|| json!({}));
-            if let Some(kind_state_map) = kind_state.as_object_mut() {
-                kind_state_map.insert("deviceId".to_string(), device_id);
-            }
+        let mut members = self.members.write().unwrap();
+        if let Some(list) = members.as_array_mut() {
+            list.retain(|entry| entry["memberId"].as_str() != Some(member_id));
         }
     }
 
@@ -1594,103 +1295,6 @@ fn normalize_members(value: &Value) -> Value {
             .filter_map(normalize_member)
             .collect(),
     )
-}
-
-fn normalize_track(value: &Value) -> Option<Value> {
-    let kind = value["kind"].as_str()?;
-    let mut track = json!({
-        "kind": kind,
-        "muted": value["muted"].as_bool().unwrap_or(false),
-    });
-
-    if let Some(track_id) = value["trackId"].as_str() {
-        track["trackId"] = Value::String(track_id.to_string());
-    }
-    if let Some(device_id) = value["deviceId"].as_str() {
-        track["deviceId"] = Value::String(device_id.to_string());
-    }
-    if let Some(published_at) = value["publishedAt"].as_u64() {
-        track["publishedAt"] = Value::from(published_at);
-    }
-    if let Some(admin_disabled) = value["adminDisabled"].as_bool() {
-        track["adminDisabled"] = Value::Bool(admin_disabled);
-    }
-    Some(track)
-}
-
-fn normalize_tracks(value: &Value) -> Value {
-    Value::Array(
-        value
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(normalize_track)
-            .collect(),
-    )
-}
-
-fn normalize_media_members(value: &Value) -> Value {
-    Value::Array(
-        value
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|entry| {
-                let member = normalize_member(&entry["member"])?;
-                Some(json!({
-                    "member": member,
-                    "state": object_or_empty(&entry["state"]),
-                    "tracks": normalize_tracks(&entry["tracks"]),
-                }))
-            })
-            .collect(),
-    )
-}
-
-fn apply_track_to_state(state: &mut Value, track: &Value, published: bool) {
-    if !state.is_object() {
-        *state = json!({});
-    }
-
-    let kind = match track["kind"].as_str() {
-        Some(kind) => kind,
-        None => return,
-    };
-
-    let state_map = state.as_object_mut().expect("state object");
-    let kind_state = state_map
-        .entry(kind.to_string())
-        .or_insert_with(|| json!({}));
-    let kind_state_map = kind_state.as_object_mut().expect("kind state object");
-    kind_state_map.insert(
-        "published".to_string(),
-        Value::Bool(published),
-    );
-    kind_state_map.insert(
-        "muted".to_string(),
-        Value::Bool(track["muted"].as_bool().unwrap_or(false)),
-    );
-
-    if published {
-        if let Some(track_id) = track.get("trackId") {
-            kind_state_map.insert("trackId".to_string(), track_id.clone());
-        }
-        if let Some(device_id) = track.get("deviceId") {
-            kind_state_map.insert("deviceId".to_string(), device_id.clone());
-        }
-        if let Some(published_at) = track.get("publishedAt") {
-            kind_state_map.insert("publishedAt".to_string(), published_at.clone());
-        }
-        if let Some(admin_disabled) = track.get("adminDisabled") {
-            kind_state_map.insert("adminDisabled".to_string(), admin_disabled.clone());
-        }
-    } else {
-        kind_state_map.remove("trackId");
-        kind_state_map.remove("publishedAt");
-        if let Some(admin_disabled) = track.get("adminDisabled") {
-            kind_state_map.insert("adminDisabled".to_string(), admin_disabled.clone());
-        }
-    }
 }
 
 pub struct RoomStateNamespace {
@@ -1851,10 +1455,6 @@ impl RoomAdminNamespace {
         self.client.send_admin("kick", member_id, None).await
     }
 
-    pub async fn mute(&self, member_id: &str) -> Result<(), Error> {
-        self.client.send_admin("mute", member_id, None).await
-    }
-
     pub async fn block(&self, member_id: &str) -> Result<(), Error> {
         self.client.send_admin("block", member_id, None).await
     }
@@ -1865,130 +1465,6 @@ impl RoomAdminNamespace {
             .await
     }
 
-    pub async fn disable_video(&self, member_id: &str) -> Result<(), Error> {
-        self.client.send_admin("disableVideo", member_id, None).await
-    }
-
-    pub async fn stop_screen_share(&self, member_id: &str) -> Result<(), Error> {
-        self.client
-            .send_admin("stopScreenShare", member_id, None)
-            .await
-    }
-}
-
-pub struct RoomMediaKindNamespace {
-    client: Arc<RoomClient>,
-    kind: &'static str,
-}
-
-impl RoomMediaKindNamespace {
-    fn new(client: Arc<RoomClient>, kind: &'static str) -> Self {
-        Self { client, kind }
-    }
-
-    pub async fn enable(&self, payload: Option<Value>) -> Result<(), Error> {
-        self.client.send_media("publish", self.kind, payload).await
-    }
-
-    pub async fn disable(&self) -> Result<(), Error> {
-        self.client.send_media("unpublish", self.kind, None).await
-    }
-
-    pub async fn set_muted(&self, muted: bool) -> Result<(), Error> {
-        self.client
-            .send_media("mute", self.kind, Some(json!({ "muted": muted })))
-            .await
-    }
-}
-
-pub struct RoomScreenMediaNamespace {
-    client: Arc<RoomClient>,
-}
-
-impl RoomScreenMediaNamespace {
-    fn new(client: Arc<RoomClient>) -> Self {
-        Self { client }
-    }
-
-    pub async fn start(&self, payload: Option<Value>) -> Result<(), Error> {
-        self.client.send_media("publish", "screen", payload).await
-    }
-
-    pub async fn stop(&self) -> Result<(), Error> {
-        self.client.send_media("unpublish", "screen", None).await
-    }
-}
-
-pub struct RoomMediaDevicesNamespace {
-    client: Arc<RoomClient>,
-}
-
-impl RoomMediaDevicesNamespace {
-    fn new(client: Arc<RoomClient>) -> Self {
-        Self { client }
-    }
-
-    pub async fn switch_inputs(&self, payload: Value) -> Result<(), Error> {
-        self.client.switch_media_devices(payload).await
-    }
-}
-
-pub struct RoomMediaNamespace {
-    client: Arc<RoomClient>,
-}
-
-impl RoomMediaNamespace {
-    fn new(client: Arc<RoomClient>) -> Self {
-        Self { client }
-    }
-
-    pub fn list(&self) -> Value {
-        self.client.list_media_members()
-    }
-
-    pub fn audio(&self) -> RoomMediaKindNamespace {
-        RoomMediaKindNamespace::new(Arc::clone(&self.client), "audio")
-    }
-
-    pub fn video(&self) -> RoomMediaKindNamespace {
-        RoomMediaKindNamespace::new(Arc::clone(&self.client), "video")
-    }
-
-    pub fn screen(&self) -> RoomScreenMediaNamespace {
-        RoomScreenMediaNamespace::new(Arc::clone(&self.client))
-    }
-
-    pub fn devices(&self) -> RoomMediaDevicesNamespace {
-        RoomMediaDevicesNamespace::new(Arc::clone(&self.client))
-    }
-
-    pub fn on_track(
-        &self,
-        handler: impl Fn(&Value, &Value) + Send + Sync + 'static,
-    ) -> Subscription {
-        self.client.on_media_track(handler)
-    }
-
-    pub fn on_track_removed(
-        &self,
-        handler: impl Fn(&Value, &Value) + Send + Sync + 'static,
-    ) -> Subscription {
-        self.client.on_media_track_removed(handler)
-    }
-
-    pub fn on_state_change(
-        &self,
-        handler: impl Fn(&Value, &Value) + Send + Sync + 'static,
-    ) -> Subscription {
-        self.client.on_media_state_change(handler)
-    }
-
-    pub fn on_device_change(
-        &self,
-        handler: impl Fn(&Value, &Value) + Send + Sync + 'static,
-    ) -> Subscription {
-        self.client.on_media_device_change(handler)
-    }
 }
 
 pub struct RoomSessionNamespace {

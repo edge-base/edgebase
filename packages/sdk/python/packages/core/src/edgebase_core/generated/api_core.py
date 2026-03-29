@@ -376,34 +376,6 @@ class GeneratedDbApi:
         """Get room metadata — GET /api/room/metadata"""
         return self._http.get("/room/metadata", params=query)
 
-    def get_room_realtime_session(self, query: dict[str, str] | None = None) -> Any:
-        """Get the active room realtime media session — GET /api/room/media/realtime/session"""
-        return self._http.get("/room/media/realtime/session", params=query)
-
-    def create_room_realtime_session(self, body: Any, query: dict[str, str] | None = None) -> Any:
-        """Create a room realtime media session — POST /api/room/media/realtime/session"""
-        return self._http.post("/room/media/realtime/session", body, params=query)
-
-    def create_room_realtime_ice_servers(self, body: Any, query: dict[str, str] | None = None) -> Any:
-        """Generate TURN / ICE credentials for room realtime media — POST /api/room/media/realtime/turn"""
-        return self._http.post("/room/media/realtime/turn", body, params=query)
-
-    def add_room_realtime_tracks(self, body: Any, query: dict[str, str] | None = None) -> Any:
-        """Add realtime media tracks to a room session — POST /api/room/media/realtime/tracks/new"""
-        return self._http.post("/room/media/realtime/tracks/new", body, params=query)
-
-    def renegotiate_room_realtime_session(self, body: Any, query: dict[str, str] | None = None) -> Any:
-        """Renegotiate a room realtime media session — PUT /api/room/media/realtime/renegotiate"""
-        return self._http.put("/room/media/realtime/renegotiate", body, params=query)
-
-    def close_room_realtime_tracks(self, body: Any, query: dict[str, str] | None = None) -> Any:
-        """Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close"""
-        return self._http.put("/room/media/realtime/tracks/close", body, params=query)
-
-    def create_room_cloudflare_realtime_kit_session(self, body: Any, query: dict[str, str] | None = None) -> Any:
-        """Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session"""
-        return self._http.post("/room/media/cloudflare_realtimekit/session", body, params=query)
-
     def track_events(self, body: Any) -> Any:
         """Track custom events — POST /api/analytics/track"""
         return self._http.post("/analytics/track", body)
@@ -527,13 +499,6 @@ class ApiPaths:
     PUSH_UNREGISTER = "/api/push/unregister"
     CONNECT_ROOM = "/api/room"
     CHECK_ROOM_CONNECTION = "/api/room/connect-check"
-    CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session"
-    RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate"
-    GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
-    CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
-    CLOSE_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/close"
-    ADD_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/new"
-    CREATE_ROOM_REALTIME_ICE_SERVERS = "/api/room/media/realtime/turn"
     GET_ROOM_METADATA = "/api/room/metadata"
     GET_SCHEMA = "/api/schema"
     EXECUTE_SQL = "/api/sql"

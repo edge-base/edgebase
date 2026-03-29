@@ -106,14 +106,6 @@ public class ClientEdgeBase {
                 TurnstileProvider.setGeneratedApi(baseUrl, core);
             } catch (Throwable ignored) {
             }
-            try {
-                RoomCloudflareRealtimeKitAndroid.maybeRegisterDefaultTransportFactory();
-            } catch (Throwable ignored) {
-            }
-            try {
-                RoomP2PMediaAndroid.maybeRegisterDefaultTransportFactory();
-            } catch (Throwable ignored) {
-            }
         }
 
         this.auth.onBeforeSignOut(() -> {

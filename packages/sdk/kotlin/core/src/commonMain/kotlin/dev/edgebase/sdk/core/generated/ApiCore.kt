@@ -459,41 +459,6 @@ open class GeneratedDbApi(protected val http: HttpClient) {
     suspend fun getRoomMetadata(query: Map<String, String>? = null): Any? =
         http.get("/room/metadata", query)
 
-    /** Get the active room realtime media session — GET /api/room/media/realtime/session */
-    @Suppress("UNCHECKED_CAST")
-    suspend fun getRoomRealtimeSession(query: Map<String, String>? = null): Any? =
-        http.get("/room/media/realtime/session", query)
-
-    /** Create a room realtime media session — POST /api/room/media/realtime/session */
-    @Suppress("UNCHECKED_CAST")
-    suspend fun createRoomRealtimeSession(body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
-        http.postWithQuery("/room/media/realtime/session", body, query)
-
-    /** Generate TURN / ICE credentials for room realtime media — POST /api/room/media/realtime/turn */
-    @Suppress("UNCHECKED_CAST")
-    suspend fun createRoomRealtimeIceServers(body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
-        http.postWithQuery("/room/media/realtime/turn", body, query)
-
-    /** Add realtime media tracks to a room session — POST /api/room/media/realtime/tracks/new */
-    @Suppress("UNCHECKED_CAST")
-    suspend fun addRoomRealtimeTracks(body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
-        http.postWithQuery("/room/media/realtime/tracks/new", body, query)
-
-    /** Renegotiate a room realtime media session — PUT /api/room/media/realtime/renegotiate */
-    @Suppress("UNCHECKED_CAST")
-    suspend fun renegotiateRoomRealtimeSession(body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
-        http.putWithQuery("/room/media/realtime/renegotiate", body, query)
-
-    /** Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close */
-    @Suppress("UNCHECKED_CAST")
-    suspend fun closeRoomRealtimeTracks(body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
-        http.putWithQuery("/room/media/realtime/tracks/close", body, query)
-
-    /** Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session */
-    @Suppress("UNCHECKED_CAST")
-    suspend fun createRoomCloudflareRealtimeKitSession(body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
-        http.postWithQuery("/room/media/cloudflare_realtimekit/session", body, query)
-
     /** Track custom events — POST /api/analytics/track */
     @Suppress("UNCHECKED_CAST")
     suspend fun trackEvents(body: Map<String, Any?> = emptyMap()): Any? =
@@ -675,13 +640,6 @@ object ApiPaths {
     const val PUSH_UNREGISTER = "/api/push/unregister"
     const val CONNECT_ROOM = "/api/room"
     const val CHECK_ROOM_CONNECTION = "/api/room/connect-check"
-    const val CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session"
-    const val RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate"
-    const val GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
-    const val CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
-    const val CLOSE_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/close"
-    const val ADD_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/new"
-    const val CREATE_ROOM_REALTIME_ICE_SERVERS = "/api/room/media/realtime/turn"
     const val GET_ROOM_METADATA = "/api/room/metadata"
     const val GET_SCHEMA = "/api/schema"
     const val EXECUTE_SQL = "/api/sql"

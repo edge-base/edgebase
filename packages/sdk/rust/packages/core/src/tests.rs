@@ -820,7 +820,7 @@ mod room_tests {
     }
 
     #[test]
-    fn room_unified_surface_parses_members_signals_media_and_session() {
+    fn room_unified_surface_parses_members_signals_and_session() {
         let room = RoomClient::new(
             "http://localhost:8688",
             "game",
@@ -831,7 +831,6 @@ mod room_tests {
 
         let member_sync = Arc::new(Mutex::new(None));
         let signal = Arc::new(Mutex::new(None));
-        let media_track = Arc::new(Mutex::new(None));
         let connection_states = Arc::new(Mutex::new(Vec::<String>::new()));
         let mut subscriptions = Vec::new();
 
@@ -847,15 +846,6 @@ mod room_tests {
                 *signal_capture.lock().unwrap() = Some(json!({
                     "payload": payload,
                     "meta": meta,
-                }));
-            }));
-        }
-        {
-            let media_track_capture = Arc::clone(&media_track);
-            subscriptions.push(room.media().on_track(move |track, member| {
-                *media_track_capture.lock().unwrap() = Some(json!({
-                    "track": track,
-                    "member": member,
                 }));
             }));
         }
@@ -876,19 +866,12 @@ mod room_tests {
             r#"{"type":"members_sync","members":[{"memberId":"user-1","userId":"user-1","connectionId":"conn-1","connectionCount":1,"state":{"cursor":"x:1"}}]}"#,
         );
         room.handle_message_for_testing(
-            r#"{"type":"media_sync","members":[{"member":{"memberId":"user-1","userId":"user-1","connectionId":"conn-1","connectionCount":1,"state":{"cursor":"x:1"}},"state":{"audio":{"published":true,"muted":false,"trackId":"audio-1"}},"tracks":[{"kind":"audio","trackId":"audio-1","muted":false}]}]}"#,
-        );
-        room.handle_message_for_testing(
             r#"{"type":"signal","event":"wave","payload":{"from":"server"},"meta":{"serverSent":true,"sentAt":123}}"#,
-        );
-        room.handle_message_for_testing(
-            r#"{"type":"media_track","member":{"memberId":"user-1","userId":"user-1","connectionId":"conn-1","connectionCount":1,"state":{"cursor":"x:1"}},"track":{"kind":"video","trackId":"video-1","muted":true}}"#,
         );
 
         assert_eq!(room.state().get_shared(), json!({"phase":"lobby"}));
         assert_eq!(room.state().get_mine(), json!({"ready":true}));
         assert_eq!(room.members().list()[0]["memberId"], json!("user-1"));
-        assert_eq!(room.media().list()[0]["member"]["memberId"], json!("user-1"));
         assert_eq!(room.session().connection_state(), "connected");
         assert_eq!(
             member_sync.lock().unwrap().clone(),
@@ -907,25 +890,12 @@ mod room_tests {
                 "meta":{"serverSent":true,"sentAt":123}
             }))
         );
-        assert_eq!(
-            media_track.lock().unwrap().clone(),
-            Some(json!({
-                "track":{"kind":"video","trackId":"video-1","muted":true},
-                "member":{
-                    "memberId":"user-1",
-                    "userId":"user-1",
-                    "connectionId":"conn-1",
-                    "connectionCount":1,
-                    "state":{"cursor":"x:1"}
-                }
-            }))
-        );
         assert_eq!(connection_states.lock().unwrap().as_slice(), ["connected"]);
-        assert_eq!(subscriptions.len(), 4);
+        assert_eq!(subscriptions.len(), 3);
     }
 
     #[tokio::test]
-    async fn room_unified_surface_sends_signal_member_admin_and_media_frames() {
+    async fn room_unified_surface_sends_signal_member_and_admin_frames() {
         let room = RoomClient::new(
             "http://localhost:8688",
             "game",
@@ -1031,41 +1001,5 @@ mod room_tests {
             _ => panic!("expected admin send"),
         }
         admin_task.await.unwrap();
-
-        let media_task = {
-            let room = Arc::clone(&room);
-            tokio::spawn(async move {
-                room.media()
-                    .audio()
-                    .enable(Some(json!({"deviceId":"mic-1"})))
-                    .await
-                    .unwrap();
-            })
-        };
-        let media_frame = timeout(Duration::from_secs(1), rx.recv())
-            .await
-            .expect("media frame")
-            .expect("media payload");
-        match media_frame {
-            RoomWsCommand::Send(payload) => {
-                let msg: serde_json::Value = serde_json::from_str(&payload).expect("media json");
-                assert_eq!(msg["type"], "media");
-                assert_eq!(msg["operation"], "publish");
-                assert_eq!(msg["kind"], "audio");
-                assert_eq!(msg["payload"]["deviceId"], "mic-1");
-                room.handle_message_for_testing(
-                    &json!({
-                        "type":"media_result",
-                        "operation":"publish",
-                        "kind":"audio",
-                        "requestId": msg["requestId"],
-                        "result":{"ok":true},
-                    })
-                    .to_string(),
-                );
-            }
-            _ => panic!("expected media send"),
-        }
-        media_task.await.unwrap();
     }
 }

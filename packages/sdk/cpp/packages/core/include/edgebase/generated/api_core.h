@@ -197,20 +197,6 @@ public:
   Result connect_room(const std::map<std::string, std::string>& query = {}) const;
   /// Get room metadata — GET /api/room/metadata
   Result get_room_metadata(const std::map<std::string, std::string>& query = {}) const;
-  /// Get the active room realtime media session — GET /api/room/media/realtime/session
-  Result get_room_realtime_session(const std::map<std::string, std::string>& query = {}) const;
-  /// Create a room realtime media session — POST /api/room/media/realtime/session
-  Result create_room_realtime_session(const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
-  /// Generate TURN / ICE credentials for room realtime media — POST /api/room/media/realtime/turn
-  Result create_room_realtime_ice_servers(const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
-  /// Add realtime media tracks to a room session — POST /api/room/media/realtime/tracks/new
-  Result add_room_realtime_tracks(const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
-  /// Renegotiate a room realtime media session — PUT /api/room/media/realtime/renegotiate
-  Result renegotiate_room_realtime_session(const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
-  /// Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close
-  Result close_room_realtime_tracks(const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
-  /// Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
-  Result create_room_cloudflare_realtime_kit_session(const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Track custom events — POST /api/analytics/track
   Result track_events(const std::string& json_body) const;
 
@@ -504,13 +490,6 @@ namespace ApiPaths {
   constexpr const char* PUSH_UNREGISTER = "/api/push/unregister";
   constexpr const char* CONNECT_ROOM = "/api/room";
   constexpr const char* CHECK_ROOM_CONNECTION = "/api/room/connect-check";
-  constexpr const char* CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session";
-  constexpr const char* RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate";
-  constexpr const char* GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";
-  constexpr const char* CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";
-  constexpr const char* CLOSE_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/close";
-  constexpr const char* ADD_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/new";
-  constexpr const char* CREATE_ROOM_REALTIME_ICE_SERVERS = "/api/room/media/realtime/turn";
   constexpr const char* GET_ROOM_METADATA = "/api/room/metadata";
   constexpr const char* GET_SCHEMA = "/api/schema";
   constexpr const char* EXECUTE_SQL = "/api/sql";

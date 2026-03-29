@@ -35,7 +35,7 @@ Use this README for the fast overview, then jump into the docs when you need dep
 - [Database Subscriptions](https://edgebase.fun/docs/database/subscriptions)
   Live change listeners and realtime database patterns
 - [Room Client SDK](https://edgebase.fun/docs/room/client-sdk)
-  Presence, room state, signals, and media flows
+  Presence, room state, signals, and session flows
 - [Functions Client SDK](https://edgebase.fun/docs/functions/client-sdk)
   Calling EdgeBase functions from client code
 - [Analytics Client SDK](https://edgebase.fun/docs/analytics/client-sdk)

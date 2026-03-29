@@ -561,48 +561,6 @@ class GeneratedDbApi
         return $this->http->get('/room/metadata', $query);
     }
 
-    /** Get the active room realtime media session — GET /api/room/media/realtime/session */
-    public function get_room_realtime_session(array $query = []): mixed
-    {
-        return $this->http->get('/room/media/realtime/session', $query);
-    }
-
-    /** Create a room realtime media session — POST /api/room/media/realtime/session */
-    public function create_room_realtime_session(mixed $body = null, array $query = []): mixed
-    {
-        return $this->http->postWithQuery('/room/media/realtime/session', $body, $query);
-    }
-
-    /** Generate TURN / ICE credentials for room realtime media — POST /api/room/media/realtime/turn */
-    public function create_room_realtime_ice_servers(mixed $body = null, array $query = []): mixed
-    {
-        return $this->http->postWithQuery('/room/media/realtime/turn', $body, $query);
-    }
-
-    /** Add realtime media tracks to a room session — POST /api/room/media/realtime/tracks/new */
-    public function add_room_realtime_tracks(mixed $body = null, array $query = []): mixed
-    {
-        return $this->http->postWithQuery('/room/media/realtime/tracks/new', $body, $query);
-    }
-
-    /** Renegotiate a room realtime media session — PUT /api/room/media/realtime/renegotiate */
-    public function renegotiate_room_realtime_session(mixed $body = null, array $query = []): mixed
-    {
-        return $this->http->putWithQuery('/room/media/realtime/renegotiate', $body, $query);
-    }
-
-    /** Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close */
-    public function close_room_realtime_tracks(mixed $body = null, array $query = []): mixed
-    {
-        return $this->http->putWithQuery('/room/media/realtime/tracks/close', $body, $query);
-    }
-
-    /** Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session */
-    public function create_room_cloudflare_realtime_kit_session(mixed $body = null, array $query = []): mixed
-    {
-        return $this->http->postWithQuery('/room/media/cloudflare_realtimekit/session', $body, $query);
-    }
-
     /** Track custom events — POST /api/analytics/track */
     public function track_events(mixed $body = null): mixed
     {
@@ -1010,13 +968,6 @@ final class ApiPaths
     public const PUSH_UNREGISTER = '/api/push/unregister';
     public const CONNECT_ROOM = '/api/room';
     public const CHECK_ROOM_CONNECTION = '/api/room/connect-check';
-    public const CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = '/api/room/media/cloudflare_realtimekit/session';
-    public const RENEGOTIATE_ROOM_REALTIME_SESSION = '/api/room/media/realtime/renegotiate';
-    public const GET_ROOM_REALTIME_SESSION = '/api/room/media/realtime/session';
-    public const CREATE_ROOM_REALTIME_SESSION = '/api/room/media/realtime/session';
-    public const CLOSE_ROOM_REALTIME_TRACKS = '/api/room/media/realtime/tracks/close';
-    public const ADD_ROOM_REALTIME_TRACKS = '/api/room/media/realtime/tracks/new';
-    public const CREATE_ROOM_REALTIME_ICE_SERVERS = '/api/room/media/realtime/turn';
     public const GET_ROOM_METADATA = '/api/room/metadata';
     public const GET_SCHEMA = '/api/schema';
     public const EXECUTE_SQL = '/api/sql';

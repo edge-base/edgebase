@@ -77,7 +77,6 @@ exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
   "GET /api/push/tokens",
   "GET /api/room",
   "GET /api/room/connect-check",
-  "GET /api/room/media/realtime/session",
   "GET /api/room/metadata",
   "GET /api/room/summary",
   "GET /api/schema",
@@ -180,10 +179,6 @@ exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
   "POST /api/push/topic/subscribe",
   "POST /api/push/topic/unsubscribe",
   "POST /api/push/unregister",
-  "POST /api/room/media/cloudflare_realtimekit/session",
-  "POST /api/room/media/realtime/session",
-  "POST /api/room/media/realtime/tracks/new",
-  "POST /api/room/media/realtime/turn",
   "POST /api/room/summaries",
   "POST /api/sql",
   "POST /api/storage/{bucket}/delete-batch",
@@ -201,7 +196,5 @@ exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
   "PUT /admin/api/data/users/{id}",
   "PUT /api/auth/admin/users/{id}/claims",
   "PUT /api/push/tokens",
-  "PUT /api/room/media/realtime/renegotiate",
-  "PUT /api/room/media/realtime/tracks/close",
 ]
 `;

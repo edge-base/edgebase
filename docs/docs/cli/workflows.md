@@ -325,28 +325,3 @@ npx edgebase upgrade --check
 npx edgebase upgrade
 npx edgebase upgrade --target 0.2.0 --force
 ```
-
-## 9. Set Up WebRTC For Room Media
-
-Provision Cloudflare Calls resources for Room Media (audio/video/screen-share):
-
-```bash
-npx edgebase realtime provision
-```
-
-This creates the required Calls App and TURN service, then stores the credentials as Workers secrets. You only need to run this once per project.
-
-Common options:
-
-```bash
-# Custom naming
-npx edgebase realtime provision --app-name my-calls-app --turn-name my-turn
-
-# Force re-create if already exists
-npx edgebase realtime provision --force-create-app --force-create-turn
-
-# Skip storing Workers secrets (manual setup)
-npx edgebase realtime provision --skip-workers-secrets
-```
-
-Requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in your environment.

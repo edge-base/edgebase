@@ -5,14 +5,6 @@ import {
   type RoomSender,
   type RoomServerAPI,
 } from '@edge-base/shared';
-import {
-  type CloudflareRealtimeCloseTracksRequest,
-  type CloudflareRealtimeNewSessionRequest,
-  type CloudflareRealtimeNewSessionResponse,
-  type CloudflareRealtimeRenegotiateRequest,
-  type CloudflareRealtimeTracksRequest,
-  type CloudflareRealtimeTracksResponse,
-} from '../lib/cloudflare-realtime.js';
 import type { Env } from '../types.js';
 import { RoomRuntimeBaseDO, type RoomWSMeta } from './room-runtime-base.js';
 
@@ -52,38 +44,12 @@ interface AdminMessage {
   requestId?: string;
 }
 
-type MediaKind = 'audio' | 'video' | 'screen';
-
-interface MediaMessage {
-  type: 'media';
-  operation: 'publish' | 'unpublish' | 'mute' | 'device';
-  kind?: MediaKind;
-  payload?: Record<string, unknown>;
-  requestId?: string;
-}
-
 interface SignalFrameMeta {
   memberId: string | null;
   userId: string | null;
   connectionId: string | null;
   sentAt: number;
   serverSent: boolean;
-}
-
-interface RoomMemberMediaKindState {
-  published: boolean;
-  muted: boolean;
-  trackId?: string;
-  deviceId?: string;
-  publishedAt?: number;
-  adminDisabled?: boolean;
-  providerSessionId?: string;
-}
-
-interface RoomMemberMediaState {
-  audio?: RoomMemberMediaKindState;
-  video?: RoomMemberMediaKindState;
-  screen?: RoomMemberMediaKindState;
 }
 
 interface RoomMemberPresence {
@@ -106,20 +72,11 @@ interface RoomSummaryResponse {
   updatedAt: string;
 }
 
-interface RoomMemberRealtimeSession {
-  sessionId: string;
-  connectionId?: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
 interface RoomsWSAttachmentExtra {
   joined?: boolean;
   joinedAt?: number;
   role?: string;
   state?: Record<string, unknown>;
-  mediaState?: RoomMemberMediaState;
-  realtimeSession?: RoomMemberRealtimeSession;
 }
 
 type RoomMemberSnapshot = RoomMemberInfo & { state: Record<string, unknown> };
@@ -132,9 +89,7 @@ const SYSTEM_SIGNAL_SENDER: RoomSender = {
 
 const DEFAULT_MEMBER_RECONNECT_TIMEOUT_MS = 30000;
 const SIGNAL_DENIED = Symbol('rooms.signal.denied');
-const MEDIA_DENIED = Symbol('rooms.media.denied');
 const WEBSOCKET_OPEN = 1;
-const CLOUDFLARE_REALTIME_KIT_MEETING_STORAGE_KEY = 'cloudflareRealtimeKitMeetingId';
 
 function getRoomHooks(namespaceConfig?: RoomNamespaceConfig | null) {
   return namespaceConfig?.hooks;
@@ -172,10 +127,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
   private readonly members = new Map<string, RoomMemberPresence>();
   private readonly blockedMembers = new Set<string>();
   private readonly memberRoles = new Map<string, string>();
-  private readonly memberMediaStates = new Map<string, RoomMemberMediaState>();
-  private readonly memberRealtimeSessions = new Map<string, RoomMemberRealtimeSession>();
-  private cloudflareRealtimeKitMeetingId: string | null = null;
-  private cloudflareRealtimeKitMeetingIdPromise: Promise<string> | null = null;
 
   protected override buildWSAttachmentExtra(_ws: WebSocket, meta: RoomWSMeta): unknown {
     if (!meta.userId) {
@@ -183,16 +134,12 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     const member = this.members.get(meta.userId);
-    const mediaState = this.buildMediaStateSnapshot(meta.userId);
-    const realtimeSession = this.memberRealtimeSessions.get(meta.userId);
 
     return {
       joined: this.joinedConnectionIds.has(meta.connectionId),
       joinedAt: member?.joinedAt,
       role: this.memberRoles.get(meta.userId) ?? meta.role,
       state: member ? { ...member.state } : undefined,
-      mediaState: Object.keys(mediaState).length > 0 ? mediaState : undefined,
-      realtimeSession: realtimeSession ? { ...realtimeSession } : undefined,
     } satisfies RoomsWSAttachmentExtra;
   }
 
@@ -203,8 +150,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     this.members.clear();
     this.blockedMembers.clear();
     this.memberRoles.clear();
-    this.memberMediaStates.clear();
-    this.memberRealtimeSessions.clear();
 
     for (const ws of this.ctx.getWebSockets()) {
       const meta = this.getWSMeta(ws);
@@ -236,25 +181,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       if (role) {
         this.memberRoles.set(meta.userId, role);
       }
-
-      if (isRecord(extra.mediaState)) {
-        this.restoreRecoveredMemberMediaState(meta.userId, extra.mediaState);
-      }
-
-      if (isRecord(extra.realtimeSession) && typeof extra.realtimeSession.sessionId === 'string') {
-        this.memberRealtimeSessions.set(meta.userId, {
-          sessionId: extra.realtimeSession.sessionId,
-          connectionId: typeof extra.realtimeSession.connectionId === 'string'
-            ? extra.realtimeSession.connectionId
-            : meta.connectionId,
-          createdAt: typeof extra.realtimeSession.createdAt === 'number'
-            ? extra.realtimeSession.createdAt
-            : Date.now(),
-          updatedAt: typeof extra.realtimeSession.updatedAt === 'number'
-            ? extra.realtimeSession.updatedAt
-            : Date.now(),
-        });
-      }
     }
   }
 
@@ -263,32 +189,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
     if (url.pathname === '/summary' && request.method === 'GET') {
       return this.handleSummaryGet(url);
-    }
-
-    if (url.pathname === '/media/cloudflare_realtimekit/session' && request.method === 'POST') {
-      return this.handleCloudflareRealtimeKitSessionCreate(request, url);
-    }
-
-    if (url.pathname === '/media/realtime/session') {
-      if (request.method === 'POST') return this.handleRealtimeSessionCreate(request, url);
-      if (request.method === 'GET') return this.handleRealtimeSessionGet(request, url);
-      return this.jsonResponse(405, { code: 405, message: 'Method not allowed' });
-    }
-
-    if (url.pathname === '/media/realtime/turn' && request.method === 'POST') {
-      return this.handleRealtimeTurn(request, url);
-    }
-
-    if (url.pathname === '/media/realtime/tracks/new' && request.method === 'POST') {
-      return this.handleRealtimeTracksNew(request, url);
-    }
-
-    if (url.pathname === '/media/realtime/renegotiate' && request.method === 'PUT') {
-      return this.handleRealtimeRenegotiate(request, url);
-    }
-
-    if (url.pathname === '/media/realtime/tracks/close' && request.method === 'PUT') {
-      return this.handleRealtimeTracksClose(request, url);
     }
 
     return super.fetch(request);
@@ -314,563 +214,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       },
       updatedAt: new Date().toISOString(),
     });
-  }
-
-  private async handleCloudflareRealtimeKitSessionCreate(request: Request, url: URL): Promise<Response> {
-    try {
-      const body = await this.readJsonBody<{
-        connectionId?: string;
-        customParticipantId?: string;
-        name?: string;
-        picture?: string;
-      }>(request);
-      const { memberId, connectionId, meta } = await this.authenticateRealtimeRequest(
-        request,
-        url,
-        typeof body.connectionId === 'string' ? body.connectionId : undefined,
-      );
-      if (this.hasPublishedTracks(memberId)) {
-        return this.jsonResponse(409, {
-          code: 409,
-          message: 'Unpublish existing room media before creating a new Cloudflare RealtimeKit session',
-        });
-      }
-
-      const config = this.getCloudflareRealtimeKitConfig();
-      const meetingId = await this.ensureCloudflareRealtimeKitMeetingId(config);
-      const participant = await this.createCloudflareRealtimeKitParticipant(config, meetingId, {
-        customParticipantId: this.buildCloudflareRealtimeKitParticipantId(memberId, body.customParticipantId),
-        name: typeof body.name === 'string' && body.name.trim()
-          ? body.name.trim()
-          : meta.auth?.email ?? meta.userId ?? memberId,
-        picture: typeof body.picture === 'string' && body.picture.trim() ? body.picture.trim() : undefined,
-      });
-
-      return this.jsonResponse(200, {
-        sessionId: participant.id,
-        meetingId,
-        participantId: participant.id,
-        authToken: participant.token,
-        presetName: participant.presetName ?? config.presetName,
-        connectionId,
-        reused: false,
-      });
-    } catch (err) {
-      return this.jsonResponse(400, {
-        code: 400,
-        message: err instanceof Error ? err.message : 'Failed to create Cloudflare RealtimeKit session',
-      });
-    }
-  }
-
-  private async handleRealtimeSessionCreate(request: Request, url: URL): Promise<Response> {
-    try {
-      const body = await this.readJsonBody<{
-        connectionId?: string;
-        correlationId?: string;
-        thirdparty?: boolean;
-        sessionDescription?: CloudflareRealtimeNewSessionRequest['sessionDescription'];
-      }>(request);
-      const { memberId, connectionId } = await this.authenticateRealtimeRequest(
-        request,
-        url,
-        typeof body.connectionId === 'string' ? body.connectionId : undefined,
-      );
-
-      if (this.hasPublishedTracks(memberId)) {
-        return this.jsonResponse(409, {
-          code: 409,
-          message: 'Unpublish existing room media before replacing the active realtime session.',
-        });
-      }
-
-      const client = await this.buildRealtimeClient();
-      const response = await client.createSession(
-        {
-          sessionDescription: body.sessionDescription,
-        },
-        {
-          thirdparty: body.thirdparty === true,
-          correlationId:
-            typeof body.correlationId === 'string' && body.correlationId.trim()
-              ? body.correlationId.trim()
-              : `${this.namespace ?? 'room'}::${this.roomId ?? 'unknown'}::${memberId}`,
-        },
-      );
-
-      this.memberRealtimeSessions.set(memberId, {
-        sessionId: response.sessionId,
-        connectionId,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      });
-
-      return this.jsonResponse<CloudflareRealtimeNewSessionResponse & {
-        connectionId: string;
-        reused: false;
-      }>(200, {
-        ...response,
-        connectionId,
-        reused: false,
-      });
-    } catch (err) {
-      return this.jsonResponse(400, {
-        code: 400,
-        message: err instanceof Error ? err.message : 'Failed to create realtime session',
-      });
-    }
-  }
-
-  private async handleRealtimeSessionGet(request: Request, url: URL): Promise<Response> {
-    try {
-      const requestedConnectionId = url.searchParams.get('connectionId') ?? undefined;
-      const { memberId } = await this.authenticateRealtimeRequest(request, url, requestedConnectionId);
-      const session = this.memberRealtimeSessions.get(memberId);
-      if (!session) {
-        return this.jsonResponse(404, {
-          code: 404,
-          message: 'No active realtime session for this room member.',
-        });
-      }
-      return this.jsonResponse(200, session);
-    } catch (err) {
-      return this.jsonResponse(400, {
-        code: 400,
-        message: err instanceof Error ? err.message : 'Failed to read realtime session',
-      });
-    }
-  }
-
-  private async handleRealtimeTurn(request: Request, url: URL): Promise<Response> {
-    try {
-      const body = await this.readJsonBody<{ ttl?: number }>(request);
-      await this.authenticateRealtimeRequest(request, url);
-      const client = await this.buildRealtimeClient();
-      const ttl = typeof body.ttl === 'number' && Number.isFinite(body.ttl) && body.ttl > 0
-        ? Math.floor(body.ttl)
-        : 3600;
-      const response = await client.generateIceServers(ttl);
-      return this.jsonResponse(200, response);
-    } catch (err) {
-      return this.jsonResponse(400, {
-        code: 400,
-        message: err instanceof Error ? err.message : 'Failed to generate ICE servers',
-      });
-    }
-  }
-
-  private async handleRealtimeTracksNew(request: Request, url: URL): Promise<Response> {
-    try {
-      const body = await this.readJsonBody<CloudflareRealtimeTracksRequest & {
-        sessionId?: string;
-        connectionId?: string;
-        publish?: {
-          kind?: MediaKind;
-          trackId?: string;
-          deviceId?: string;
-          muted?: boolean;
-        };
-      }>(request);
-
-      const { memberId, meta } = await this.authenticateRealtimeRequest(
-        request,
-        url,
-        typeof body.connectionId === 'string' ? body.connectionId : undefined,
-      );
-
-      const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
-      if (!sessionId) {
-        throw new Error('sessionId is required');
-      }
-      this.assertRealtimeSessionOwnership(memberId, sessionId);
-
-      if (!Array.isArray(body.tracks) || body.tracks.length === 0) {
-        throw new Error('tracks is required');
-      }
-
-      const client = await this.buildRealtimeClient();
-      const response = await client.addTracks(sessionId, {
-        sessionDescription: body.sessionDescription,
-        tracks: body.tracks,
-        autoDiscover: body.autoDiscover === true,
-      });
-      this.assertRealtimeTracksResponseSuccess(response);
-
-      const publishPayload = body.publish;
-      const publishKind = publishPayload?.kind;
-      if (publishKind) {
-        if (!(await this.canPublishMedia(meta, publishKind, publishPayload ?? {}))) {
-          throw new Error('Denied by room media publish access rule');
-        }
-        const localTrackName = publishPayload.trackId?.trim()
-          || body.tracks.find((track) => track.location === 'local')?.trackName?.trim()
-          || response.tracks?.find((track) => track.location === 'local')?.trackName?.trim();
-        await this.publishMedia(meta, publishKind, {
-          trackId: localTrackName,
-          deviceId: publishPayload.deviceId,
-          muted: publishPayload.muted,
-          providerSessionId: sessionId,
-        });
-      }
-
-      const session = this.memberRealtimeSessions.get(memberId);
-      if (session) {
-        session.updatedAt = Date.now();
-      }
-
-      return this.jsonResponse(200, response);
-    } catch (err) {
-      return this.jsonResponse(400, {
-        code: 400,
-        message: err instanceof Error ? err.message : 'Failed to add realtime tracks',
-      });
-    }
-  }
-
-  private async handleRealtimeRenegotiate(request: Request, url: URL): Promise<Response> {
-    try {
-      const body = await this.readJsonBody<CloudflareRealtimeRenegotiateRequest & {
-        sessionId?: string;
-        connectionId?: string;
-      }>(request);
-      const { memberId } = await this.authenticateRealtimeRequest(
-        request,
-        url,
-        typeof body.connectionId === 'string' ? body.connectionId : undefined,
-      );
-      const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
-      if (!sessionId) throw new Error('sessionId is required');
-      this.assertRealtimeSessionOwnership(memberId, sessionId);
-      if (!body.sessionDescription) {
-        throw new Error('sessionDescription is required');
-      }
-
-      const client = await this.buildRealtimeClient();
-      const response = await client.renegotiate(sessionId, {
-        sessionDescription: body.sessionDescription,
-      });
-      this.assertRealtimeTracksResponseSuccess(response);
-
-      const session = this.memberRealtimeSessions.get(memberId);
-      if (session) {
-        session.updatedAt = Date.now();
-      }
-      return this.jsonResponse(200, response);
-    } catch (err) {
-      return this.jsonResponse(400, {
-        code: 400,
-        message: err instanceof Error ? err.message : 'Failed to renegotiate realtime session',
-      });
-    }
-  }
-
-  private async handleRealtimeTracksClose(request: Request, url: URL): Promise<Response> {
-    try {
-      const body = await this.readJsonBody<CloudflareRealtimeCloseTracksRequest & {
-        sessionId?: string;
-        connectionId?: string;
-        unpublish?: { kind?: MediaKind };
-      }>(request);
-      const { memberId } = await this.authenticateRealtimeRequest(
-        request,
-        url,
-        typeof body.connectionId === 'string' ? body.connectionId : undefined,
-      );
-      const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
-      if (!sessionId) throw new Error('sessionId is required');
-      this.assertRealtimeSessionOwnership(memberId, sessionId);
-      if (!Array.isArray(body.tracks) || body.tracks.length === 0) {
-        throw new Error('tracks is required');
-      }
-
-      const client = await this.buildRealtimeClient();
-      const response = await client.closeTracks(sessionId, {
-        sessionDescription: body.sessionDescription,
-        tracks: body.tracks,
-        force: body.force === true,
-      });
-      this.assertRealtimeTracksResponseSuccess(response);
-
-      const unpublishKind = body.unpublish?.kind;
-      if (unpublishKind) {
-        await this.unpublishMedia(memberId, unpublishKind);
-      }
-
-      const session = this.memberRealtimeSessions.get(memberId);
-      if (session) {
-        session.updatedAt = Date.now();
-      }
-      return this.jsonResponse(200, response);
-    } catch (err) {
-      return this.jsonResponse(400, {
-        code: 400,
-        message: err instanceof Error ? err.message : 'Failed to close realtime tracks',
-      });
-    }
-  }
-
-  private async buildRealtimeClient() {
-    const { createCloudflareRealtimeClient } = await import('../lib/cloudflare-realtime.js');
-    return createCloudflareRealtimeClient(this.env as unknown as Env);
-  }
-
-  private getCloudflareRealtimeKitConfig(): {
-    accountId: string;
-    apiToken: string;
-    appId: string;
-    presetName: string;
-  } {
-    const env = this.env as unknown as Env;
-    const accountId = env.CF_ACCOUNT_ID?.trim();
-    const apiToken = env.CF_API_TOKEN?.trim();
-    const appId = env.CF_REALTIME_APP_ID?.trim();
-    const presetName = env.CF_REALTIME_PRESET_NAME?.trim() || 'group_call_participant';
-
-    if (!accountId || !apiToken || !appId) {
-      throw new Error(
-        'Cloudflare Realtime is not configured. Set CF_ACCOUNT_ID, CF_API_TOKEN, and CF_REALTIME_APP_ID.',
-      );
-    }
-
-    return { accountId, apiToken, appId, presetName };
-  }
-
-  private buildCloudflareRealtimeKitParticipantId(memberId: string, provided?: string): string {
-    const trimmed = typeof provided === 'string' ? provided.trim() : '';
-    if (trimmed) {
-      return trimmed;
-    }
-
-    return [
-      this.namespace ?? 'room',
-      this.roomId ?? 'unknown',
-      memberId,
-      Date.now().toString(36),
-    ].join(':');
-  }
-
-  private async ensureCloudflareRealtimeKitMeetingId(config: {
-    accountId: string;
-    apiToken: string;
-    appId: string;
-  }): Promise<string> {
-    if (this.cloudflareRealtimeKitMeetingId) {
-      return this.cloudflareRealtimeKitMeetingId;
-    }
-
-    if (this.cloudflareRealtimeKitMeetingIdPromise) {
-      return this.cloudflareRealtimeKitMeetingIdPromise;
-    }
-
-    this.cloudflareRealtimeKitMeetingIdPromise = (async () => {
-      const storedMeetingId = await this.ctx.storage.get<string>(CLOUDFLARE_REALTIME_KIT_MEETING_STORAGE_KEY);
-      if (storedMeetingId) {
-        this.cloudflareRealtimeKitMeetingId = storedMeetingId;
-        return storedMeetingId;
-      }
-
-      const response = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(config.accountId)}`
-          + `/realtime/kit/${encodeURIComponent(config.appId)}/meetings`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${config.apiToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            title: `${this.namespace ?? 'room'}::${this.roomId ?? 'unknown'}`,
-          }),
-        },
-      );
-      const data = await this.parseCloudflareApiEnvelope<{ id: string }>(response);
-      this.cloudflareRealtimeKitMeetingId = data.id;
-      await this.ctx.storage.put(CLOUDFLARE_REALTIME_KIT_MEETING_STORAGE_KEY, data.id);
-      return data.id;
-    })();
-
-    try {
-      return await this.cloudflareRealtimeKitMeetingIdPromise;
-    } finally {
-      this.cloudflareRealtimeKitMeetingIdPromise = null;
-    }
-  }
-
-  private async createCloudflareRealtimeKitParticipant(
-    config: {
-      accountId: string;
-      apiToken: string;
-      appId: string;
-      presetName: string;
-    },
-    meetingId: string,
-    payload: {
-      customParticipantId: string;
-      name?: string;
-      picture?: string;
-    },
-  ): Promise<{ id: string; token: string; presetName?: string }> {
-    const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(config.accountId)}`
-        + `/realtime/kit/${encodeURIComponent(config.appId)}`
-        + `/meetings/${encodeURIComponent(meetingId)}/participants`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${config.apiToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          custom_participant_id: payload.customParticipantId,
-          preset_name: config.presetName,
-          name: payload.name,
-          picture: payload.picture,
-        }),
-      },
-    );
-
-    const data = await this.parseCloudflareApiEnvelope<{
-      id: string;
-      token: string;
-      preset_name?: string;
-    }>(response);
-
-    return {
-      id: data.id,
-      token: data.token,
-      presetName: data.preset_name,
-    };
-  }
-
-  private async parseCloudflareApiEnvelope<T>(response: Response): Promise<T> {
-    const payload = (await response.json().catch(() => ({}))) as {
-      success?: boolean;
-      errors?: Array<{ message?: string }>;
-      messages?: Array<{ message?: string }>;
-      result?: T;
-      data?: T;
-    };
-
-    if (!response.ok || payload.success === false) {
-      const message =
-        payload.errors?.find((entry) => typeof entry.message === 'string')?.message
-        ?? payload.messages?.find((entry) => typeof entry.message === 'string')?.message
-        ?? `Cloudflare API request failed (${response.status})`;
-      throw new Error(message);
-    }
-
-    return (payload.data ?? payload.result ?? {}) as T;
-  }
-
-  private async authenticateRealtimeRequest(
-    request: Request,
-    url: URL,
-    requestedConnectionId?: string,
-  ): Promise<{ memberId: string; connectionId: string; meta: RoomWSMeta }> {
-    this.hydrateRoomFromUrl(url);
-
-    const token = this.extractBearerToken(request);
-    if (!token) {
-      throw new Error('Authentication required before the room connection could be established.');
-    }
-
-    const { resolveAuthContextFromToken } = await import('../middleware/auth.js');
-    const auth = await resolveAuthContextFromToken(this.env, token, request);
-    const memberId = auth.id;
-    const member = this.members.get(memberId);
-    if (!member || member.connectionIds.size === 0) {
-      throw new Error('Join the room WebSocket before using realtime media');
-    }
-
-    const connectionId = requestedConnectionId?.trim()
-      || (member.connectionIds.values().next().value as string | undefined);
-    if (!connectionId) {
-      throw new Error('No active room connection for this member');
-    }
-    if (!member.connectionIds.has(connectionId)) {
-      throw new Error('connectionId does not belong to the authenticated room member');
-    }
-
-    const existingMeta = this.findConnectionMeta(connectionId);
-    const meta: RoomWSMeta = existingMeta
-      ? {
-          ...existingMeta,
-          authenticated: true,
-          userId: memberId,
-          role: auth.role,
-          auth,
-        }
-      : {
-          authenticated: true,
-          userId: memberId,
-          role: auth.role,
-          auth,
-          connectionId,
-          ip: request.headers.get('CF-Connecting-IP')
-            || request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim()
-            || undefined,
-          userAgent: request.headers.get('User-Agent') || undefined,
-        };
-
-    return { memberId, connectionId, meta };
-  }
-
-  private assertRealtimeSessionOwnership(memberId: string, sessionId: string): RoomMemberRealtimeSession {
-    const session = this.memberRealtimeSessions.get(memberId);
-    if (!session || session.sessionId !== sessionId) {
-      throw new Error('Realtime session is not owned by the authenticated room member');
-    }
-    return session;
-  }
-
-  private assertRealtimeTracksResponseSuccess(response: CloudflareRealtimeTracksResponse): void {
-    if (response.errorCode) {
-      throw new Error(response.errorDescription || response.errorCode);
-    }
-    const trackFailure = response.tracks?.find((track) => track.errorCode);
-    if (trackFailure?.errorCode) {
-      throw new Error(trackFailure.errorDescription || trackFailure.errorCode);
-    }
-  }
-
-  private hasPublishedTracks(memberId: string): boolean {
-    const state = this.memberMediaStates.get(memberId);
-    return !!state?.audio?.published || !!state?.video?.published || !!state?.screen?.published;
-  }
-
-  private hydrateRoomFromUrl(url: URL): void {
-    const roomFullName = url.searchParams.get('room');
-    if (!roomFullName || this.namespace) {
-      return;
-    }
-
-    const separatorIdx = roomFullName.indexOf('::');
-    if (separatorIdx >= 0) {
-      this.namespace = roomFullName.substring(0, separatorIdx);
-      this.roomId = roomFullName.substring(separatorIdx + 2);
-    } else {
-      this.namespace = roomFullName;
-      this.roomId = roomFullName;
-    }
-    this.namespaceConfig = this.config.rooms?.[this.namespace] ?? null;
-  }
-
-  private extractBearerToken(request: Request): string | null {
-    const header = request.headers.get('Authorization');
-    if (!header) return null;
-    const match = header.match(/^Bearer\s+(.+)$/i);
-    return match?.[1]?.trim() ?? null;
-  }
-
-  private async readJsonBody<T>(request: Request): Promise<T> {
-    if (request.method === 'GET' || request.method === 'HEAD') {
-      return {} as T;
-    }
-    try {
-      return await request.json() as T;
-    } catch {
-      return {} as T;
-    }
   }
 
   private jsonResponse<T>(status: number, body: T): Response {
@@ -973,34 +316,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       return;
     }
 
-    if (msg.type === 'media') {
-      const meta = this.requireAuthenticatedMeta(ws);
-      if (!meta) return;
-
-      const operation = this.normalizeMediaOperation(msg.operation);
-      const kind = this.normalizeMediaKind(msg.kind);
-      const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
-      if (!this.checkRateLimit(meta.connectionId, 'media')) {
-        this.safeSend(ws, {
-          type: 'media_error',
-          operation: operation ?? '',
-          kind: kind ?? null,
-          message: 'Rate limited',
-          requestId,
-        });
-        return;
-      }
-
-      await this.handleMedia(ws, meta, {
-        type: 'media',
-        operation: operation ?? 'publish',
-        kind: kind ?? undefined,
-        payload: this.asRecord(msg.payload),
-        requestId,
-      });
-      return;
-    }
-
     await super.webSocketMessage(ws, message);
   }
 
@@ -1040,9 +355,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
         ...restoredMemberState,
       };
     }
-    const restoredMediaKinds = wasReconnecting
-      ? this.restoreRecoveredMemberMediaState(userId, msg.lastMediaState)
-      : [];
     this.joinedConnectionIds.add(meta.connectionId);
     member.connectionIds.add(meta.connectionId);
     member.reconnectUntil = undefined;
@@ -1055,15 +367,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
     this.broadcastMembersSync();
     this.sendMembersSyncToConnection(ws);
-    if (restoredMediaKinds.length > 0) {
-      for (const kind of restoredMediaKinds) {
-        if (this.buildMediaTrackFrame(userId, kind)) {
-          await this.broadcastMediaTrack(userId, kind);
-        }
-      }
-      await this.broadcastMediaState(userId);
-    }
-    await this.sendMediaSyncToConnection(ws, meta);
 
     if (wasReconnecting) {
       await this.runSessionReconnectHook(this.buildSender(meta));
@@ -1084,9 +387,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
 
     const member = this.removeMemberConnection(userId, meta.connectionId);
     if (member) {
-      if (member.connectionIds.size === 0) {
-        await this.clearPublishedMedia(userId);
-      }
       this.refreshMemberSocketAttachments(userId);
       this.broadcastMembersSync();
     }
@@ -1125,8 +425,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       this.broadcastMembersSync();
       return;
     }
-
-    await this.clearPublishedMedia(userId);
   }
 
   protected override async finalizePlayerLeave(
@@ -1152,8 +450,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     this.deleteMember(userId);
-    this.memberMediaStates.delete(userId);
-    this.memberRealtimeSessions.delete(userId);
 
     const leaveReason: RoomMemberLeaveReason = reason === 'disconnect' ? 'timeout' : reason;
     await this.runMemberLeaveHook(snapshot, leaveReason);
@@ -1286,15 +582,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
           this.broadcastMembersSync();
           break;
         }
-        case 'mute':
-          await this.applyMuteChange(memberId, 'audio', true);
-          break;
-        case 'disableVideo':
-          await this.applyAdminUnpublish(memberId, 'video');
-          break;
-        case 'stopScreenShare':
-          await this.applyAdminUnpublish(memberId, 'screen');
-          break;
         default:
           throw new Error(`Unsupported admin operation '${operation}'`);
       }
@@ -1313,94 +600,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
         memberId,
         requestId,
         message: err instanceof Error ? err.message : 'Admin operation failed',
-      });
-    }
-  }
-
-  private async handleMedia(
-    ws: WebSocket,
-    meta: RoomWSMeta,
-    msg: MediaMessage,
-  ): Promise<void> {
-    const operation = msg.operation;
-    const kind = msg.kind;
-    const requestId = msg.requestId;
-    if (!operation || !kind) {
-      this.safeSend(ws, {
-        type: 'media_error',
-        operation: operation ?? '',
-        kind: kind ?? null,
-        message: 'operation and kind are required',
-        requestId,
-      });
-      return;
-    }
-
-    if (!meta.userId || !this.roomId) {
-      this.safeSend(ws, {
-        type: 'media_error',
-        operation,
-        kind,
-        message: 'User not authenticated',
-        requestId,
-      });
-      return;
-    }
-
-    if (!this.isJoinedConnection(meta.connectionId)) {
-      this.safeSend(ws, {
-        type: 'media_error',
-        operation,
-        kind,
-        message: 'Join the room before using media controls',
-        requestId,
-      });
-      return;
-    }
-
-    try {
-      const payload = msg.payload ?? {};
-      if (operation === 'publish') {
-        if (!(await this.canPublishMedia(meta, kind, payload))) {
-          throw new Error('Denied by room media publish access rule');
-        }
-      } else if (!(await this.canControlMedia(meta, operation, { kind, ...payload }))) {
-        throw new Error('Denied by room media control access rule');
-      }
-
-      switch (operation) {
-        case 'publish':
-          await this.publishMedia(meta, kind, payload);
-          break;
-        case 'unpublish':
-          await this.unpublishMedia(meta.userId, kind);
-          break;
-        case 'mute': {
-          const muted = payload.muted === true;
-          await this.applyMuteChange(meta.userId, kind, muted);
-          break;
-        }
-        case 'device':
-          await this.applyDeviceChange(meta.userId, kind, payload);
-          break;
-        default:
-          throw new Error(`Unsupported media operation '${operation}'`);
-      }
-
-      this.safeSend(ws, {
-        type: 'media_result',
-        operation,
-        kind,
-        requestId,
-        result: { ok: true },
-      });
-    } catch (err) {
-      this.safeSend(ws, {
-        type: 'media_error',
-        operation,
-        kind,
-        requestId,
-        message: err instanceof Error ? err.message : 'Media operation failed',
       });
     }
   }
@@ -1758,567 +957,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
   }
 
-  private async canPublishMedia(
-    meta: RoomWSMeta,
-    kind: MediaKind,
-    payload: Record<string, unknown>,
-  ): Promise<boolean> {
-    const publishAccess = this.namespaceConfig?.access?.media?.publish;
-    if (!publishAccess || !this.roomId) {
-      return !this.config.release;
-    }
-
-    try {
-      return await Promise.resolve(
-        publishAccess(this.buildAuthFromMeta(meta), this.roomId, kind, payload),
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  private async canControlMedia(
-    meta: RoomWSMeta,
-    operation: MediaMessage['operation'],
-    payload: Record<string, unknown>,
-  ): Promise<boolean> {
-    const controlAccess = this.namespaceConfig?.access?.media?.control;
-    if (!controlAccess || !this.roomId) {
-      return !this.config.release;
-    }
-
-    try {
-      return await Promise.resolve(
-        controlAccess(this.buildAuthFromMeta(meta), this.roomId, operation, payload),
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  private async canSubscribeToMedia(
-    meta: RoomWSMeta,
-    payload: Record<string, unknown>,
-  ): Promise<boolean> {
-    if (meta.userId && payload.memberId === meta.userId) {
-      return true;
-    }
-
-    const subscribeAccess = this.namespaceConfig?.access?.media?.subscribe;
-    if (!subscribeAccess || !this.roomId) {
-      return !this.config.release;
-    }
-
-    try {
-      return await Promise.resolve(
-        subscribeAccess(this.buildAuthFromMeta(meta), this.roomId, payload),
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  private ensureMemberMediaState(memberId: string): RoomMemberMediaState {
-    let mediaState = this.memberMediaStates.get(memberId);
-    if (!mediaState) {
-      mediaState = {};
-      this.memberMediaStates.set(memberId, mediaState);
-    }
-    return mediaState;
-  }
-
-  private getKindState(memberId: string, kind: MediaKind): RoomMemberMediaKindState {
-    const mediaState = this.ensureMemberMediaState(memberId);
-    mediaState[kind] ??= {
-      published: false,
-      muted: false,
-    };
-    return mediaState[kind]!;
-  }
-
-  private pruneMediaKindState(memberId: string, kind: MediaKind): void {
-    const mediaState = this.memberMediaStates.get(memberId);
-    const kindState = mediaState?.[kind];
-    if (!mediaState || !kindState) {
-      return;
-    }
-
-    if (
-      !kindState.published &&
-      !kindState.muted &&
-      !kindState.trackId &&
-      !kindState.deviceId &&
-      !kindState.publishedAt &&
-      !kindState.adminDisabled &&
-      !kindState.providerSessionId
-    ) {
-      delete mediaState[kind];
-    }
-
-    if (!mediaState.audio && !mediaState.video && !mediaState.screen) {
-      this.memberMediaStates.delete(memberId);
-    }
-  }
-
-  private buildMediaStateSnapshot(memberId: string): RoomMemberMediaState {
-    const mediaState = this.memberMediaStates.get(memberId);
-    if (!mediaState) {
-      return {};
-    }
-
-    const snapshot: RoomMemberMediaState = {};
-    for (const kind of ['audio', 'video', 'screen'] as const) {
-      const kindState = mediaState[kind];
-      if (kindState) {
-        snapshot[kind] = { ...kindState };
-      }
-    }
-    return snapshot;
-  }
-
-  private buildMediaTrackFrame(memberId: string, kind: MediaKind): {
-    kind: MediaKind;
-    trackId?: string;
-    deviceId?: string;
-    muted: boolean;
-    publishedAt?: number;
-    adminDisabled?: boolean;
-    providerSessionId?: string;
-  } | null {
-    const kindState = this.memberMediaStates.get(memberId)?.[kind];
-    if (!kindState?.published) {
-      return null;
-    }
-
-    return {
-      kind,
-      trackId: kindState.trackId,
-      deviceId: kindState.deviceId,
-      muted: kindState.muted,
-      publishedAt: kindState.publishedAt,
-      adminDisabled: kindState.adminDisabled,
-      providerSessionId: kindState.providerSessionId,
-    };
-  }
-
-  private listPublishedTracks(memberId: string): Array<{
-    kind: MediaKind;
-    trackId?: string;
-    deviceId?: string;
-    muted: boolean;
-    publishedAt?: number;
-    adminDisabled?: boolean;
-    providerSessionId?: string;
-  }> {
-    const tracks: Array<{
-      kind: MediaKind;
-      trackId?: string;
-      deviceId?: string;
-      muted: boolean;
-      publishedAt?: number;
-      adminDisabled?: boolean;
-      providerSessionId?: string;
-    }> = [];
-    for (const kind of ['audio', 'video', 'screen'] as const) {
-      const track = this.buildMediaTrackFrame(memberId, kind);
-      if (track) {
-        tracks.push(track);
-      }
-    }
-    return tracks;
-  }
-
-  private buildMemberSender(memberId: string): RoomSender {
-    const member = this.members.get(memberId);
-    const info = member
-      ? this.buildMemberInfo(member)
-      : { memberId, userId: memberId, connectionId: undefined, connectionCount: 0, role: this.memberRoles.get(memberId) };
-
-    return {
-      userId: info.userId,
-      connectionId: info.connectionId ?? 'server',
-      role: info.role,
-    };
-  }
-
-  private async publishMedia(
-    meta: RoomWSMeta,
-    kind: MediaKind,
-    payload: Record<string, unknown>,
-  ): Promise<void> {
-    if (!meta.userId) {
-      throw new Error('User not authenticated');
-    }
-
-    const member = this.members.get(meta.userId);
-    if (!member) {
-      throw new Error('Member is not joined');
-    }
-
-    const sender = this.buildSender(meta);
-    const roomApi = this.buildRoomServerAPI();
-    const beforePublish = await this.applyMediaBeforePublish(kind, sender, roomApi);
-    if (beforePublish === MEDIA_DENIED) {
-      throw new Error('Rejected by room media hook');
-    }
-
-    const nextPayload = beforePublish && typeof beforePublish === 'object' && !Array.isArray(beforePublish)
-      ? { ...payload, ...(beforePublish as Record<string, unknown>) }
-      : payload;
-    const previousTrack = this.buildMediaTrackFrame(meta.userId, kind);
-    const kindState = this.getKindState(meta.userId, kind);
-    const trackId = typeof nextPayload.trackId === 'string' && nextPayload.trackId.trim()
-      ? nextPayload.trackId.trim()
-      : kindState.trackId ?? `${kind}-${crypto.randomUUID()}`;
-    const deviceId = typeof nextPayload.deviceId === 'string' && nextPayload.deviceId.trim()
-      ? nextPayload.deviceId.trim()
-      : kindState.deviceId;
-    const providerSessionId =
-      typeof nextPayload.providerSessionId === 'string' && nextPayload.providerSessionId.trim()
-        ? nextPayload.providerSessionId.trim()
-        : kindState.providerSessionId;
-
-    kindState.published = true;
-    kindState.muted = nextPayload.muted === true ? true : kindState.muted;
-    kindState.trackId = trackId;
-    kindState.deviceId = deviceId;
-    kindState.publishedAt = Date.now();
-    kindState.adminDisabled = false;
-    kindState.providerSessionId = providerSessionId;
-
-    if (previousTrack && previousTrack.trackId !== trackId) {
-      await this.broadcastMediaTrackRemoved(meta.userId, kind, previousTrack);
-    }
-
-    this.refreshMemberSocketAttachments(meta.userId);
-    await this.broadcastMediaTrack(meta.userId, kind);
-    await this.broadcastMediaState(meta.userId);
-    await this.runMediaPublishedHook(kind, sender, roomApi);
-  }
-
-  private async unpublishMedia(memberId: string, kind: MediaKind): Promise<void> {
-    const mediaState = this.memberMediaStates.get(memberId);
-    const kindState = mediaState?.[kind];
-    if (!kindState) {
-      return;
-    }
-
-    const previousTrack = this.buildMediaTrackFrame(memberId, kind);
-    if (!kindState.published && !previousTrack) {
-      kindState.trackId = undefined;
-      kindState.publishedAt = undefined;
-      kindState.adminDisabled = false;
-      kindState.providerSessionId = undefined;
-      this.pruneMediaKindState(memberId, kind);
-      return;
-    }
-
-    kindState.published = false;
-    kindState.trackId = undefined;
-    kindState.publishedAt = undefined;
-    kindState.adminDisabled = false;
-    kindState.providerSessionId = undefined;
-    this.pruneMediaKindState(memberId, kind);
-
-    if (previousTrack) {
-      this.refreshMemberSocketAttachments(memberId);
-      await this.broadcastMediaTrackRemoved(memberId, kind, previousTrack);
-      await this.broadcastMediaState(memberId);
-      await this.runMediaUnpublishedHook(kind, this.buildMemberSender(memberId), this.buildRoomServerAPI());
-    }
-  }
-
-  private async applyMuteChange(
-    memberId: string,
-    kind: MediaKind,
-    muted: boolean,
-  ): Promise<void> {
-    if (!this.members.has(memberId) && !this.memberMediaStates.has(memberId)) {
-      throw new Error('Unknown member');
-    }
-
-    const kindState = this.getKindState(memberId, kind);
-    if (kindState.muted === muted) {
-      return;
-    }
-
-    kindState.muted = muted;
-    this.pruneMediaKindState(memberId, kind);
-    this.refreshMemberSocketAttachments(memberId);
-    await this.broadcastMediaState(memberId);
-    await this.runMediaMuteChangeHook(
-      kind,
-      this.buildMemberSender(memberId),
-      muted,
-      this.buildRoomServerAPI(),
-    );
-  }
-
-  private async applyDeviceChange(
-    memberId: string,
-    kind: MediaKind,
-    payload: Record<string, unknown>,
-  ): Promise<void> {
-    if (!this.members.has(memberId) && !this.memberMediaStates.has(memberId)) {
-      throw new Error('Unknown member');
-    }
-
-    const deviceId = typeof payload.deviceId === 'string' ? payload.deviceId.trim() : '';
-    if (!deviceId) {
-      throw new Error('deviceId is required');
-    }
-
-    const kindState = this.getKindState(memberId, kind);
-    if (kindState.deviceId === deviceId) {
-      return;
-    }
-
-    kindState.deviceId = deviceId;
-    this.refreshMemberSocketAttachments(memberId);
-    await this.broadcastMediaState(memberId);
-    await this.broadcastMediaDevice(memberId, kind, deviceId);
-  }
-
-  private async applyAdminUnpublish(memberId: string, kind: MediaKind): Promise<void> {
-    const kindState = this.getKindState(memberId, kind);
-    kindState.adminDisabled = true;
-    await this.unpublishMedia(memberId, kind);
-  }
-
-  private async clearPublishedMedia(memberId: string): Promise<void> {
-    for (const kind of ['audio', 'video', 'screen'] as const) {
-      await this.unpublishMedia(memberId, kind);
-    }
-  }
-
-  private async applyMediaBeforePublish(
-    kind: MediaKind,
-    sender: RoomSender,
-    roomApi: RoomServerAPI,
-  ): Promise<unknown | typeof MEDIA_DENIED> {
-    const beforePublish = getRoomHooks(this.namespaceConfig ?? undefined)?.media?.beforePublish;
-    if (!beforePublish) {
-      return undefined;
-    }
-
-    const ctx = await this.buildHandlerContext();
-    const result = await Promise.resolve(beforePublish(kind, sender, roomApi, ctx));
-    if (result === false) {
-      return MEDIA_DENIED;
-    }
-    return result;
-  }
-
-  private async runMediaPublishedHook(
-    kind: MediaKind,
-    sender: RoomSender,
-    roomApi: RoomServerAPI,
-  ): Promise<void> {
-    const onPublished = getRoomHooks(this.namespaceConfig ?? undefined)?.media?.onPublished;
-    if (!onPublished) return;
-
-    try {
-      const ctx = await this.buildHandlerContext();
-      await Promise.resolve(onPublished(kind, sender, roomApi, ctx));
-    } catch (err) {
-      console.error(`[Rooms] media.onPublished error: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  private async runMediaUnpublishedHook(
-    kind: MediaKind,
-    sender: RoomSender,
-    roomApi: RoomServerAPI,
-  ): Promise<void> {
-    const onUnpublished = getRoomHooks(this.namespaceConfig ?? undefined)?.media?.onUnpublished;
-    if (!onUnpublished) return;
-
-    try {
-      const ctx = await this.buildHandlerContext();
-      await Promise.resolve(onUnpublished(kind, sender, roomApi, ctx));
-    } catch (err) {
-      console.error(`[Rooms] media.onUnpublished error: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  private async runMediaMuteChangeHook(
-    kind: MediaKind,
-    sender: RoomSender,
-    muted: boolean,
-    roomApi: RoomServerAPI,
-  ): Promise<void> {
-    const onMuteChange = getRoomHooks(this.namespaceConfig ?? undefined)?.media?.onMuteChange;
-    if (!onMuteChange) return;
-
-    try {
-      const ctx = await this.buildHandlerContext();
-      await Promise.resolve(onMuteChange(kind, sender, muted, roomApi, ctx));
-    } catch (err) {
-      console.error(`[Rooms] media.onMuteChange error: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  private async broadcastMediaTrack(memberId: string, kind: MediaKind): Promise<void> {
-    const member = this.members.get(memberId);
-    const track = this.buildMediaTrackFrame(memberId, kind);
-    if (!member || !track) {
-      return;
-    }
-
-    await this.broadcastMediaFrame(
-      {
-        type: 'media_track',
-        member: this.buildMemberSnapshot(member),
-        track,
-      },
-      {
-        event: 'track',
-        memberId,
-        kind,
-        track,
-      },
-    );
-  }
-
-  private async broadcastMediaTrackRemoved(
-    memberId: string,
-    kind: MediaKind,
-    track?: {
-      kind: MediaKind;
-      trackId?: string;
-      deviceId?: string;
-      muted: boolean;
-      publishedAt?: number;
-      adminDisabled?: boolean;
-    } | null,
-  ): Promise<void> {
-    const member = this.members.get(memberId);
-    if (!member) {
-      return;
-    }
-
-    await this.broadcastMediaFrame(
-      {
-        type: 'media_track_removed',
-        member: this.buildMemberSnapshot(member),
-        track: track ?? { kind },
-      },
-      {
-        event: 'track_removed',
-        memberId,
-        kind,
-        track: track ?? { kind },
-      },
-    );
-  }
-
-  private async broadcastMediaState(memberId: string): Promise<void> {
-    const member = this.members.get(memberId);
-    if (!member) {
-      return;
-    }
-
-    const state = this.buildMediaStateSnapshot(memberId);
-    await this.broadcastMediaFrame(
-      {
-        type: 'media_state',
-        member: this.buildMemberSnapshot(member),
-        state,
-      },
-      {
-        event: 'state',
-        memberId,
-        state,
-      },
-    );
-  }
-
-  private async broadcastMediaDevice(
-    memberId: string,
-    kind: MediaKind,
-    deviceId: string,
-  ): Promise<void> {
-    const member = this.members.get(memberId);
-    if (!member) {
-      return;
-    }
-
-    await this.broadcastMediaFrame(
-      {
-        type: 'media_device',
-        member: this.buildMemberSnapshot(member),
-        kind,
-        deviceId,
-      },
-      {
-        event: 'device',
-        memberId,
-        kind,
-        deviceId,
-      },
-    );
-  }
-
-  private async broadcastMediaFrame(
-    frame: Record<string, unknown>,
-    payload: Record<string, unknown>,
-  ): Promise<void> {
-    const json = JSON.stringify(frame);
-    for (const ws of this.ctx.getWebSockets()) {
-      const meta = this.getWSMeta(ws);
-      if (!meta?.authenticated || !this.joinedConnectionIds.has(meta.connectionId)) {
-        continue;
-      }
-      if (!(await this.canSubscribeToMedia(meta, payload))) {
-        continue;
-      }
-      this.safeSendRaw(ws, json);
-    }
-  }
-
-  private async sendMediaSyncToConnection(ws: WebSocket, meta: RoomWSMeta): Promise<void> {
-    if (!this.isSocketOpen(ws) || !meta.userId) {
-      return;
-    }
-
-    const occupancy = this.buildAuthoritativeOccupancy();
-    const members: Array<{
-      member: RoomMemberInfo;
-      state: RoomMemberMediaState;
-      tracks: Array<{
-        kind: MediaKind;
-        trackId?: string;
-        deviceId?: string;
-        muted: boolean;
-        publishedAt?: number;
-        adminDisabled?: boolean;
-      }>;
-    }> = [];
-
-    for (const member of this.listMembers()) {
-      const state = this.buildMediaStateSnapshot(member.memberId);
-      const tracks = this.listPublishedTracks(member.memberId);
-      if (Object.keys(state).length === 0 && tracks.length === 0) {
-        continue;
-      }
-      if (!(await this.canSubscribeToMedia(meta, {
-        event: 'sync',
-        memberId: member.memberId,
-        state,
-        tracks,
-      }))) {
-        continue;
-      }
-      members.push({ member, state, tracks });
-    }
-
-    this.safeSend(ws, {
-      type: 'media_sync',
-      occupancy,
-      members,
-    });
-  }
-
   private sendMembersSyncToConnection(ws: WebSocket): void {
     if (!this.isSocketOpen(ws)) {
       return;
@@ -2329,35 +967,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       occupancy: this.buildAuthoritativeOccupancy(),
       members: this.listMembers(),
     });
-  }
-
-  private normalizeMediaOperation(operation: unknown): MediaMessage['operation'] | null {
-    if (typeof operation !== 'string') {
-      return null;
-    }
-    switch (operation.trim()) {
-      case 'publish':
-      case 'unpublish':
-      case 'mute':
-      case 'device':
-        return operation.trim() as MediaMessage['operation'];
-      default:
-        return null;
-    }
-  }
-
-  private normalizeMediaKind(kind: unknown): MediaKind | null {
-    if (typeof kind !== 'string') {
-      return null;
-    }
-    switch (kind.trim()) {
-      case 'audio':
-      case 'video':
-      case 'screen':
-        return kind.trim() as MediaKind;
-      default:
-        return null;
-    }
   }
 
   private deliverSignal(
@@ -2464,60 +1073,6 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     return { ...value };
-  }
-
-  private restoreRecoveredMemberMediaState(memberId: string, value: unknown): MediaKind[] {
-    if (!isRecord(value)) {
-      return [];
-    }
-
-    const mediaState = this.ensureMemberMediaState(memberId);
-    const changedKinds: MediaKind[] = [];
-
-    for (const kind of ['audio', 'video', 'screen'] as const) {
-      const nextKind = value[kind];
-      if (!isRecord(nextKind)) {
-        continue;
-      }
-
-      const previous = mediaState[kind] ? { ...mediaState[kind]! } : null;
-      const normalized: RoomMemberMediaKindState = {
-        published: nextKind.published === true,
-        muted: nextKind.muted === true,
-      };
-
-      if (typeof nextKind.trackId === 'string' && nextKind.trackId.trim()) {
-        normalized.trackId = nextKind.trackId.trim();
-      }
-      if (typeof nextKind.deviceId === 'string' && nextKind.deviceId.trim()) {
-        normalized.deviceId = nextKind.deviceId.trim();
-      }
-      if (typeof nextKind.publishedAt === 'number' && Number.isFinite(nextKind.publishedAt)) {
-        normalized.publishedAt = nextKind.publishedAt;
-      } else if (normalized.published) {
-        normalized.publishedAt = Date.now();
-      }
-      if (nextKind.adminDisabled === true) {
-        normalized.adminDisabled = true;
-      }
-      if (
-        typeof nextKind.providerSessionId === 'string'
-        && nextKind.providerSessionId.trim()
-      ) {
-        normalized.providerSessionId = nextKind.providerSessionId.trim();
-      }
-
-      mediaState[kind] = {
-        ...(mediaState[kind] ?? { published: false, muted: false }),
-        ...normalized,
-      };
-
-      if (JSON.stringify(previous) !== JSON.stringify(mediaState[kind])) {
-        changedKinds.push(kind);
-      }
-    }
-
-    return changedKinds;
   }
 
   private removeMemberConnection(userId: string, connectionId: string): RoomMemberPresence | null {

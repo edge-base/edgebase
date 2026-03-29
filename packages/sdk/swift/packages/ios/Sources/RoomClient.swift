@@ -93,7 +93,6 @@ public final class RoomClient: @unchecked Sendable {
     private var _playerState: [String: Any] = [:]
     private var _playerVersion: Int = 0
     private var _members: [[String: Any]] = []
-    private var _mediaMembers: [[String: Any]] = []
 
     // MARK: - Connection state
 
@@ -127,8 +126,6 @@ public final class RoomClient: @unchecked Sendable {
     private var pendingSignalRequests: [String: PendingVoidRequest] = [:]
     private var pendingAdminRequests: [String: PendingVoidRequest] = [:]
     private var pendingMemberStateRequests: [String: PendingVoidRequest] = [:]
-    private var pendingMediaRequests: [String: PendingVoidRequest] = [:]
-
     private struct PendingRequest {
         let continuation: CheckedContinuation<Any?, Error>
         let timeoutTask: Task<Void, Never>
@@ -153,10 +150,6 @@ public final class RoomClient: @unchecked Sendable {
     private var memberStateHandlers: [UUID: ([String: Any], [String: Any]) -> Void] = [:]
     private var signalHandlers: [String: [UUID: (Any?, [String: Any]) -> Void]] = [:]
     private var anySignalHandlers: [UUID: (String, Any?, [String: Any]) -> Void] = [:]
-    private var mediaTrackHandlers: [UUID: ([String: Any], [String: Any]) -> Void] = [:]
-    private var mediaTrackRemovedHandlers: [UUID: ([String: Any], [String: Any]) -> Void] = [:]
-    private var mediaStateHandlers: [UUID: ([String: Any], [String: Any]) -> Void] = [:]
-    private var mediaDeviceHandlers: [UUID: ([String: Any], [String: Any]) -> Void] = [:]
     private var reconnectHandlers: [UUID: ([String: Any]) -> Void] = [:]
     private var connectionStateHandlers: [UUID: (String) -> Void] = [:]
 
@@ -165,7 +158,6 @@ public final class RoomClient: @unchecked Sendable {
     public lazy var signals = RoomSignalsNamespace(room: self)
     public lazy var members = RoomMembersNamespace(room: self)
     public lazy var admin = RoomAdminNamespace(room: self)
-    public lazy var media = RoomMediaNamespace(room: self)
     public lazy var session = RoomSessionNamespace(room: self)
 
     // MARK: - Init
@@ -226,10 +218,6 @@ public final class RoomClient: @unchecked Sendable {
 
     public func listMembers() -> [[String: Any]] {
         return queue.sync { _members.map(cloneRecord) }
-    }
-
-    public func listMediaMembers() -> [[String: Any]] {
-        return queue.sync { _mediaMembers.map(cloneRecord) }
     }
 
     public func userId() -> String? {
@@ -325,63 +313,6 @@ public final class RoomClient: @unchecked Sendable {
         return json
     }
 
-    internal func requestCloudflareRealtimeKitMedia(
-        path: String,
-        method: String = "POST",
-        payload: [String: Any] = [:]
-    ) async throws -> [String: Any] {
-        try await requestRoomMedia(
-            providerPath: "cloudflare_realtimekit",
-            path: path,
-            method: method,
-            payload: payload
-        )
-    }
-
-    internal func requestRoomMedia(
-        providerPath: String,
-        path: String,
-        method: String = "POST",
-        payload: [String: Any] = [:]
-    ) async throws -> [String: Any] {
-        guard let token = try await tokenManager.getAccessToken() else {
-            throw EdgeBaseError(statusCode: 401, message: "Authentication required before calling room media APIs. Sign in and join the room first.")
-        }
-
-        let trimmedUrl = baseUrl.hasSuffix("/") ? String(baseUrl.dropLast()) : baseUrl
-        let ns = namespace.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? namespace
-        let id = roomId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? roomId
-        let urlString = "\(trimmedUrl)/api/room/media/\(providerPath)/\(path)?namespace=\(ns)&id=\(id)"
-
-        guard let url = URL(string: urlString) else {
-            throw EdgeBaseError(statusCode: 0, message: "Invalid room media URL")
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if method != "GET" {
-            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        }
-
-        let (data, response) = try await urlSession.data(for: request)
-        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-            let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
-            let message = json["message"] as? String ?? "Room media request failed: \(httpResponse.statusCode)"
-            throw EdgeBaseError(statusCode: httpResponse.statusCode, message: message)
-        }
-
-        if data.isEmpty {
-            return [:]
-        }
-
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw EdgeBaseError(statusCode: 0, message: "Invalid room media response")
-        }
-        return json
-    }
-
     // MARK: - Connection Lifecycle
 
     /// Connect to the room, authenticate, and join.
@@ -410,7 +341,6 @@ public final class RoomClient: @unchecked Sendable {
             rejectPendingVoidRequests(&pendingSignalRequests, message: "Room left")
             rejectPendingVoidRequests(&pendingAdminRequests, message: "Room left")
             rejectPendingVoidRequests(&pendingMemberStateRequests, message: "Room left")
-            rejectPendingVoidRequests(&pendingMediaRequests, message: "Room left")
         }
 
         let socket = webSocketTask
@@ -428,7 +358,6 @@ public final class RoomClient: @unchecked Sendable {
             _playerState = [:]
             _playerVersion = 0
             _members = []
-            _mediaMembers = []
         }
         currentUserId = nil
         currentConnectionId = nil
@@ -451,7 +380,7 @@ public final class RoomClient: @unchecked Sendable {
     @discardableResult
     public func send(_ actionType: String, payload: Any? = nil) async throws -> Any? {
         guard webSocketTask != nil, isConnected, isAuthenticated else {
-            throw EdgeBaseError(statusCode: 400, message: "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.")
+            throw EdgeBaseError(statusCode: 400, message: "Not connected to room. Call join() and wait for the room to connect before sending actions or signals.")
         }
 
         let requestId = UUID().uuidString
@@ -535,31 +464,6 @@ public final class RoomClient: @unchecked Sendable {
             store: \.pendingAdminRequests,
             timeoutMessage: "Admin operation '\(operation)' timed out"
         )
-    }
-
-    public func sendMedia(_ operation: String, kind: String, payload: [String: Any] = [:]) async throws {
-        try await sendVoidRequest(
-            [
-                "type": "media",
-                "operation": operation,
-                "kind": kind,
-                "payload": payload,
-            ],
-            store: \.pendingMediaRequests,
-            timeoutMessage: "Media operation '\(operation)' timed out"
-        )
-    }
-
-    public func switchMediaDevices(_ payload: [String: Any]) async throws {
-        if let audioInputId = payload["audioInputId"] as? String, !audioInputId.isEmpty {
-            try await sendMedia("device", kind: "audio", payload: ["deviceId": audioInputId])
-        }
-        if let videoInputId = payload["videoInputId"] as? String, !videoInputId.isEmpty {
-            try await sendMedia("device", kind: "video", payload: ["deviceId": videoInputId])
-        }
-        if let screenInputId = payload["screenInputId"] as? String, !screenInputId.isEmpty {
-            try await sendMedia("device", kind: "screen", payload: ["deviceId": screenInputId])
-        }
     }
 
     // MARK: - Subscriptions (v2 API)
@@ -683,42 +587,6 @@ public final class RoomClient: @unchecked Sendable {
         queue.sync(flags: .barrier) { anySignalHandlers[key] = handler }
         return Subscription { [weak self] in
             self?.queue.sync(flags: .barrier) { _ = self?.anySignalHandlers.removeValue(forKey: key) }
-        }
-    }
-
-    @discardableResult
-    func onMediaTrack(_ handler: @escaping ([String: Any], [String: Any]) -> Void) -> Subscription {
-        let key = UUID()
-        queue.sync(flags: .barrier) { mediaTrackHandlers[key] = handler }
-        return Subscription { [weak self] in
-            self?.queue.sync(flags: .barrier) { _ = self?.mediaTrackHandlers.removeValue(forKey: key) }
-        }
-    }
-
-    @discardableResult
-    func onMediaTrackRemoved(_ handler: @escaping ([String: Any], [String: Any]) -> Void) -> Subscription {
-        let key = UUID()
-        queue.sync(flags: .barrier) { mediaTrackRemovedHandlers[key] = handler }
-        return Subscription { [weak self] in
-            self?.queue.sync(flags: .barrier) { _ = self?.mediaTrackRemovedHandlers.removeValue(forKey: key) }
-        }
-    }
-
-    @discardableResult
-    func onMediaStateChange(_ handler: @escaping ([String: Any], [String: Any]) -> Void) -> Subscription {
-        let key = UUID()
-        queue.sync(flags: .barrier) { mediaStateHandlers[key] = handler }
-        return Subscription { [weak self] in
-            self?.queue.sync(flags: .barrier) { _ = self?.mediaStateHandlers.removeValue(forKey: key) }
-        }
-    }
-
-    @discardableResult
-    func onMediaDeviceChange(_ handler: @escaping ([String: Any], [String: Any]) -> Void) -> Subscription {
-        let key = UUID()
-        queue.sync(flags: .barrier) { mediaDeviceHandlers[key] = handler }
-        return Subscription { [weak self] in
-            self?.queue.sync(flags: .barrier) { _ = self?.mediaDeviceHandlers.removeValue(forKey: key) }
         }
     }
 
@@ -921,20 +789,6 @@ public final class RoomClient: @unchecked Sendable {
             handleMemberState(json)
         case "member_state_error":
             rejectPendingVoid(\.pendingMemberStateRequests, requestId: json["requestId"] as? String, message: json["message"] as? String ?? "Member state error")
-        case "media_sync":
-            handleMediaSync(json)
-        case "media_track":
-            handleMediaTrack(json)
-        case "media_track_removed":
-            handleMediaTrackRemoved(json)
-        case "media_state":
-            handleMediaState(json)
-        case "media_device":
-            handleMediaDevice(json)
-        case "media_result":
-            resolvePendingVoid(\.pendingMediaRequests, requestId: json["requestId"] as? String)
-        case "media_error":
-            rejectPendingVoid(\.pendingMediaRequests, requestId: json["requestId"] as? String, message: json["message"] as? String ?? "Media error")
         case "admin_result":
             resolvePendingVoid(\.pendingAdminRequests, requestId: json["requestId"] as? String)
         case "admin_error":
@@ -1065,11 +919,6 @@ public final class RoomClient: @unchecked Sendable {
         let members = (json["members"] as? [[String: Any]] ?? []).map(cloneRecord)
         queue.sync(flags: .barrier) {
             _members = members
-            _mediaMembers.removeAll { mediaMember in
-                guard let member = mediaMember["member"] as? [String: Any],
-                      let memberId = member["memberId"] as? String else { return false }
-                return !members.contains(where: { ($0["memberId"] as? String) == memberId })
-            }
             for handler in membersSyncHandlers.values { handler(members) }
         }
     }
@@ -1091,7 +940,6 @@ public final class RoomClient: @unchecked Sendable {
             let memberId = memberCopy["memberId"] as? String ?? memberCopy["userId"] as? String
             if let memberId {
                 _members.removeAll { ($0["memberId"] as? String ?? $0["userId"] as? String) == memberId }
-                _mediaMembers.removeAll { ($0["member"] as? [String: Any])?["memberId"] as? String == memberId }
             }
             for handler in memberLeaveHandlers.values { handler(memberCopy, reason) }
         }
@@ -1121,59 +969,6 @@ public final class RoomClient: @unchecked Sendable {
         }
     }
 
-    private func handleMediaSync(_ json: [String: Any]) {
-        let members = (json["members"] as? [[String: Any]] ?? []).map(cloneRecord)
-        queue.sync(flags: .barrier) {
-            _mediaMembers = members
-        }
-    }
-
-    private func handleMediaTrack(_ json: [String: Any]) {
-        guard let member = json["member"] as? [String: Any],
-              let track = json["track"] as? [String: Any] else { return }
-        let memberCopy = cloneRecord(member)
-        let trackCopy = cloneRecord(track)
-        queue.sync(flags: .barrier) {
-            upsertMediaTrack(member: memberCopy, track: trackCopy)
-            for handler in mediaTrackHandlers.values { handler(trackCopy, memberCopy) }
-        }
-    }
-
-    private func handleMediaTrackRemoved(_ json: [String: Any]) {
-        guard let member = json["member"] as? [String: Any],
-              let track = json["track"] as? [String: Any] else { return }
-        let memberCopy = cloneRecord(member)
-        let trackCopy = cloneRecord(track)
-        queue.sync(flags: .barrier) {
-            removeMediaTrack(member: memberCopy, track: trackCopy)
-            for handler in mediaTrackRemovedHandlers.values { handler(trackCopy, memberCopy) }
-        }
-    }
-
-    private func handleMediaState(_ json: [String: Any]) {
-        guard let member = json["member"] as? [String: Any] else { return }
-        let memberCopy = cloneRecord(member)
-        let state = cloneRecord(json["state"] as? [String: Any] ?? [:])
-        queue.sync(flags: .barrier) {
-            let index = ensureMediaMember(memberCopy)
-            _mediaMembers[index]["state"] = state
-            for handler in mediaStateHandlers.values { handler(memberCopy, state) }
-        }
-    }
-
-    private func handleMediaDevice(_ json: [String: Any]) {
-        guard let member = json["member"] as? [String: Any] else { return }
-        let memberCopy = cloneRecord(member)
-        let change: [String: Any] = [
-            "kind": json["kind"] as? String ?? "",
-            "deviceId": json["deviceId"] as? String ?? "",
-        ]
-        queue.sync(flags: .barrier) {
-            _ = ensureMediaMember(memberCopy)
-            for handler in mediaDeviceHandlers.values { handler(memberCopy, change) }
-        }
-    }
-
     // MARK: - Private: Helpers
 
     private func sendVoidRequest(
@@ -1182,7 +977,7 @@ public final class RoomClient: @unchecked Sendable {
         timeoutMessage: String
     ) async throws {
         guard webSocketTask != nil, isConnected, isAuthenticated else {
-            throw EdgeBaseError(statusCode: 400, message: "Not connected to room. Call join() and wait for the room to connect before sending actions, signals, or media.")
+            throw EdgeBaseError(statusCode: 400, message: "Not connected to room. Call join() and wait for the room to connect before sending actions or signals.")
         }
 
         let requestId = UUID().uuidString
@@ -1248,7 +1043,6 @@ public final class RoomClient: @unchecked Sendable {
             rejectPendingVoidRequests(&pendingSignalRequests, message: message)
             rejectPendingVoidRequests(&pendingAdminRequests, message: message)
             rejectPendingVoidRequests(&pendingMemberStateRequests, message: message)
-            rejectPendingVoidRequests(&pendingMediaRequests, message: message)
         }
     }
 
@@ -1260,61 +1054,6 @@ public final class RoomClient: @unchecked Sendable {
         } else {
             _members.append(member)
         }
-    }
-
-    private func ensureMediaMember(_ member: [String: Any]) -> Int {
-        let memberId = (member["memberId"] as? String) ?? (member["userId"] as? String)
-        if let memberId,
-           let index = _mediaMembers.firstIndex(where: { (($0["member"] as? [String: Any])?["memberId"] as? String) == memberId }) {
-            _mediaMembers[index]["member"] = member
-            if _mediaMembers[index]["state"] == nil { _mediaMembers[index]["state"] = [String: Any]() }
-            if _mediaMembers[index]["tracks"] == nil { _mediaMembers[index]["tracks"] = [[String: Any]]() }
-            return index
-        }
-
-        let created: [String: Any] = [
-            "member": member,
-            "state": [String: Any](),
-            "tracks": [[String: Any]](),
-        ]
-        _mediaMembers.append(created)
-        return _mediaMembers.count - 1
-    }
-
-    private func upsertMediaTrack(member: [String: Any], track: [String: Any]) {
-        let index = ensureMediaMember(member)
-        var mediaMember = _mediaMembers[index]
-        var tracks = mediaMember["tracks"] as? [[String: Any]] ?? []
-        let trackId = track["trackId"] as? String
-        let kind = track["kind"] as? String
-        if let existingIndex = tracks.firstIndex(where: { existing in
-            if let trackId { return (existing["trackId"] as? String) == trackId }
-            return (existing["kind"] as? String) == kind
-        }) {
-            tracks[existingIndex] = track
-        } else {
-            tracks.append(track)
-        }
-        mediaMember["tracks"] = tracks
-        _mediaMembers[index] = mediaMember
-    }
-
-    private func removeMediaTrack(member: [String: Any], track: [String: Any]) {
-        let memberId = member["memberId"] as? String
-        guard let index = _mediaMembers.firstIndex(where: { (($0["member"] as? [String: Any])?["memberId"] as? String) == memberId }) else {
-            return
-        }
-
-        var mediaMember = _mediaMembers[index]
-        var tracks = mediaMember["tracks"] as? [[String: Any]] ?? []
-        let trackId = track["trackId"] as? String
-        let kind = track["kind"] as? String
-        tracks.removeAll { existing in
-            if let trackId { return (existing["trackId"] as? String) == trackId }
-            return (existing["kind"] as? String) == kind
-        }
-        mediaMember["tracks"] = tracks
-        _mediaMembers[index] = mediaMember
     }
 
     private func setConnectionState(_ nextState: String) {
@@ -1423,10 +1162,6 @@ public final class RoomClient: @unchecked Sendable {
             memberStateHandlers.removeAll()
             signalHandlers.removeAll()
             anySignalHandlers.removeAll()
-            mediaTrackHandlers.removeAll()
-            mediaTrackRemovedHandlers.removeAll()
-            mediaStateHandlers.removeAll()
-            mediaDeviceHandlers.removeAll()
             reconnectHandlers.removeAll()
             connectionStateHandlers.removeAll()
         }
@@ -1545,83 +1280,8 @@ public final class RoomAdminNamespace: @unchecked Sendable {
     }
 
     public func kick(_ memberId: String) async throws { try await room.sendAdmin("kick", memberId: memberId) }
-    public func mute(_ memberId: String) async throws { try await room.sendAdmin("mute", memberId: memberId) }
     public func block(_ memberId: String) async throws { try await room.sendAdmin("block", memberId: memberId) }
     public func setRole(_ memberId: String, role: String) async throws { try await room.sendAdmin("setRole", memberId: memberId, payload: ["role": role]) }
-    public func disableVideo(_ memberId: String) async throws { try await room.sendAdmin("disableVideo", memberId: memberId) }
-    public func stopScreenShare(_ memberId: String) async throws { try await room.sendAdmin("stopScreenShare", memberId: memberId) }
-}
-
-public final class RoomMediaKindNamespace: @unchecked Sendable {
-    private unowned let room: RoomClient
-    private let kind: String
-
-    init(room: RoomClient, kind: String) {
-        self.room = room
-        self.kind = kind
-    }
-
-    public func enable(_ payload: [String: Any] = [:]) async throws { try await room.sendMedia("publish", kind: kind, payload: payload) }
-    public func disable() async throws { try await room.sendMedia("unpublish", kind: kind) }
-    public func setMuted(_ muted: Bool) async throws { try await room.sendMedia("mute", kind: kind, payload: ["muted": muted]) }
-}
-
-public final class RoomScreenMediaNamespace: @unchecked Sendable {
-    private unowned let room: RoomClient
-
-    init(room: RoomClient) {
-        self.room = room
-    }
-
-    public func start(_ payload: [String: Any] = [:]) async throws { try await room.sendMedia("publish", kind: "screen", payload: payload) }
-    public func stop() async throws { try await room.sendMedia("unpublish", kind: "screen") }
-}
-
-public final class RoomMediaDevicesNamespace: @unchecked Sendable {
-    private unowned let room: RoomClient
-
-    init(room: RoomClient) {
-        self.room = room
-    }
-
-    public func `switch`(_ payload: [String: Any]) async throws { try await room.switchMediaDevices(payload) }
-}
-
-public final class RoomCloudflareRealtimeKitNamespace: @unchecked Sendable {
-    private unowned let room: RoomClient
-
-    init(room: RoomClient) {
-        self.room = room
-    }
-
-    public func createSession(_ payload: [String: Any] = [:]) async throws -> [String: Any] {
-        try await room.requestCloudflareRealtimeKitMedia(path: "session", payload: payload)
-    }
-}
-
-public final class RoomMediaNamespace: @unchecked Sendable {
-    unowned let room: RoomClient
-
-    init(room: RoomClient) {
-        self.room = room
-        audio = RoomMediaKindNamespace(room: room, kind: "audio")
-        video = RoomMediaKindNamespace(room: room, kind: "video")
-        screen = RoomScreenMediaNamespace(room: room)
-        devices = RoomMediaDevicesNamespace(room: room)
-        cloudflareRealtimeKit = RoomCloudflareRealtimeKitNamespace(room: room)
-    }
-
-    public let audio: RoomMediaKindNamespace
-    public let video: RoomMediaKindNamespace
-    public let screen: RoomScreenMediaNamespace
-    public let devices: RoomMediaDevicesNamespace
-    public let cloudflareRealtimeKit: RoomCloudflareRealtimeKitNamespace
-
-    public func list() -> [[String: Any]] { room.listMediaMembers() }
-    public func onTrack(_ handler: @escaping ([String: Any], [String: Any]) -> Void) -> Subscription { room.onMediaTrack(handler) }
-    public func onTrackRemoved(_ handler: @escaping ([String: Any], [String: Any]) -> Void) -> Subscription { room.onMediaTrackRemoved(handler) }
-    public func onStateChange(_ handler: @escaping ([String: Any], [String: Any]) -> Void) -> Subscription { room.onMediaStateChange(handler) }
-    public func onDeviceChange(_ handler: @escaping ([String: Any], [String: Any]) -> Void) -> Subscription { room.onMediaDeviceChange(handler) }
 }
 
 public final class RoomSessionNamespace: @unchecked Sendable {

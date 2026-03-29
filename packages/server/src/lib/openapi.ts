@@ -47,10 +47,7 @@ const USER_BEARER_PATHS = new Set([
   '/api/push/topic/unsubscribe',
 ]);
 
-const USER_BEARER_PREFIXES = [
-  '/api/room/media/realtime/',
-  '/api/room/media/cloudflare_realtimekit/',
-];
+const USER_BEARER_PREFIXES: string[] = [];
 
 const SERVICE_KEY_ONLY_PATHS = new Set([
   '/api/db/broadcast',

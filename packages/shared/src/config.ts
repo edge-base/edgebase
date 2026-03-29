@@ -1044,7 +1044,6 @@ export interface RoomNamespaceConfig {
   rateLimit?: {
     actions: number;
     signals?: number;
-    media?: number;
     admin?: number;
   };
   /** Maximum concurrent players. Default: 100 */
@@ -1090,7 +1089,6 @@ export interface RoomAccess {
     event: string,
     payload: unknown,
   ) => boolean | Promise<boolean>;
-  media?: RoomMediaAccess;
   admin?: (
     auth: AuthContext | null,
     roomId: string,
@@ -1144,26 +1142,6 @@ export interface RoomLifecycleHandlers {
   onDestroy?: RoomDestroyHandler;
 }
 
-export interface RoomMediaAccess {
-  subscribe?: (
-    auth: AuthContext | null,
-    roomId: string,
-    payload: unknown,
-  ) => boolean | Promise<boolean>;
-  publish?: (
-    auth: AuthContext | null,
-    roomId: string,
-    kind: string,
-    payload: unknown,
-  ) => boolean | Promise<boolean>;
-  control?: (
-    auth: AuthContext | null,
-    roomId: string,
-    operation: string,
-    payload: unknown,
-  ) => boolean | Promise<boolean>;
-}
-
 export interface RoomStateConfig {
   actions?: RoomActionHandlers;
   timers?: RoomTimerHandlers;
@@ -1214,34 +1192,6 @@ export interface RoomSignalHooks {
   ) => Promise<void> | void;
 }
 
-export interface RoomMediaHooks {
-  beforePublish?: (
-    kind: string,
-    sender: RoomSender,
-    room: RoomServerAPI,
-    ctx: RoomHandlerContext,
-  ) => Promise<unknown | false | void> | unknown | false | void;
-  onPublished?: (
-    kind: string,
-    sender: RoomSender,
-    room: RoomServerAPI,
-    ctx: RoomHandlerContext,
-  ) => Promise<void> | void;
-  onUnpublished?: (
-    kind: string,
-    sender: RoomSender,
-    room: RoomServerAPI,
-    ctx: RoomHandlerContext,
-  ) => Promise<void> | void;
-  onMuteChange?: (
-    kind: string,
-    sender: RoomSender,
-    muted: boolean,
-    room: RoomServerAPI,
-    ctx: RoomHandlerContext,
-  ) => Promise<void> | void;
-}
-
 export interface RoomSessionHooks {
   onReconnect?: (
     sender: RoomSender,
@@ -1260,7 +1210,6 @@ export interface RoomHooks {
   members?: RoomMemberHooks;
   state?: RoomStateHooks;
   signals?: RoomSignalHooks;
-  media?: RoomMediaHooks;
   session?: RoomSessionHooks;
 }
 

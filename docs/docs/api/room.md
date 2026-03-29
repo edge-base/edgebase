@@ -411,18 +411,3 @@ Developers control what data is exposed by choosing what to pass to `room.setMet
 This endpoint is useful for lobby screens, matchmaking UIs, or any scenario where you need to query room information without opening a WebSocket connection.
 
 ---
-
-## Realtime Media API
-
-Room also provides HTTP endpoints for WebRTC-based realtime media (audio/video). These endpoints proxy to the Room Durable Object and require authentication.
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/api/room/media/realtime/session` | `GET` | Get the active realtime media session for the authenticated member |
-| `/api/room/media/realtime/session` | `POST` | Create a Cloudflare Realtime session for the authenticated member |
-| `/api/room/media/realtime/turn` | `POST` | Generate TURN / ICE credentials for WebRTC connectivity |
-| `/api/room/media/realtime/tracks/new` | `POST` | Add (publish or subscribe) realtime media tracks to a session |
-| `/api/room/media/realtime/renegotiate` | `PUT` | Renegotiate a realtime media session with a new session description |
-| `/api/room/media/realtime/tracks/close` | `PUT` | Close realtime media tracks and optionally unpublish room media state |
-
-All realtime media endpoints require `namespace` and `id` query parameters (same as the WebSocket connection) and Bearer Token authentication.

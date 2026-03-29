@@ -44,7 +44,6 @@ namespace EdgeBase
         public readonly RoomSignalsNamespace Signals;
         public readonly RoomMembersNamespace Members;
         public readonly RoomAdminNamespace Admin;
-        public readonly RoomMediaNamespace Media;
         public readonly RoomSessionNamespace Session;
 
         // Lower-case aliases to match the additive unified room shape used in other SDKs.
@@ -53,7 +52,6 @@ namespace EdgeBase
         public RoomSignalsNamespace signals => Signals;
         public RoomMembersNamespace members => Members;
         public RoomAdminNamespace admin => Admin;
-        public RoomMediaNamespace media => Media;
         public RoomSessionNamespace session => Session;
 
         private readonly string _baseUrl;
@@ -68,7 +66,6 @@ namespace EdgeBase
         private Dictionary<string, object?> _playerState = new();
         private int _playerVersion;
         private List<Dictionary<string, object?>> _roomMembers = new();
-        private List<Dictionary<string, object?>> _mediaMembers = new();
 
 #if UNITY_WEBGL && !UNITY_EDITOR
         [DllImport("__Internal")] private static extern int JB_WebSocket_Create(string url, Action<string> onMsg, Action onClose);
@@ -97,7 +94,6 @@ namespace EdgeBase
         private readonly ConcurrentDictionary<string, PendingVoidRequest> _pendingSignalRequests = new();
         private readonly ConcurrentDictionary<string, PendingVoidRequest> _pendingAdminRequests = new();
         private readonly ConcurrentDictionary<string, PendingVoidRequest> _pendingMemberStateRequests = new();
-        private readonly ConcurrentDictionary<string, PendingVoidRequest> _pendingMediaRequests = new();
 
         private readonly List<Action<Dictionary<string, object?>, Dictionary<string, object?>>> _sharedStateHandlers = new();
         private readonly List<Action<Dictionary<string, object?>, Dictionary<string, object?>>> _playerStateHandlers = new();
@@ -112,10 +108,6 @@ namespace EdgeBase
         private readonly List<Action<Dictionary<string, object?>, Dictionary<string, object?>>> _memberStateHandlers = new();
         private readonly Dictionary<string, List<Action<object?, Dictionary<string, object?>>>> _signalHandlers = new();
         private readonly List<Action<string, object?, Dictionary<string, object?>>> _anySignalHandlers = new();
-        private readonly List<Action<Dictionary<string, object?>, Dictionary<string, object?>>> _mediaTrackHandlers = new();
-        private readonly List<Action<Dictionary<string, object?>, Dictionary<string, object?>>> _mediaTrackRemovedHandlers = new();
-        private readonly List<Action<Dictionary<string, object?>, Dictionary<string, object?>>> _mediaStateHandlers = new();
-        private readonly List<Action<Dictionary<string, object?>, Dictionary<string, object?>>> _mediaDeviceHandlers = new();
         private readonly List<Action<Dictionary<string, object?>>> _reconnectHandlers = new();
         private readonly List<Action<string>> _connectionStateHandlers = new();
 
@@ -170,7 +162,6 @@ namespace EdgeBase
             Signals = new RoomSignalsNamespace(this);
             Members = new RoomMembersNamespace(this);
             Admin = new RoomAdminNamespace(this);
-            Media = new RoomMediaNamespace(this);
             Session = new RoomSessionNamespace(this);
         }
 
@@ -181,8 +172,6 @@ namespace EdgeBase
         public Dictionary<string, object?> GetPlayerState() => CloneDict(_playerState);
 
         public List<Dictionary<string, object?>> ListMembers() => CloneDictList(_roomMembers);
-
-        public List<Dictionary<string, object?>> ListMediaMembers() => CloneDictList(_mediaMembers);
 
         public string ConnectionState() => _connectionState;
 
@@ -373,7 +362,6 @@ namespace EdgeBase
             _playerState = new();
             _playerVersion = 0;
             _roomMembers = new();
-            _mediaMembers = new();
             _userId = null;
             _connectionId = null;
             _reconnectInfo = null;
@@ -477,40 +465,6 @@ namespace EdgeBase
             );
         }
 
-        public Task SendMedia(string operation, string kind, object? payload = null)
-        {
-            return SendVoidRequest(
-                new Dictionary<string, object?>
-                {
-                    ["type"] = "media",
-                    ["operation"] = operation,
-                    ["kind"] = kind,
-                    ["payload"] = payload ?? new Dictionary<string, object?>(),
-                },
-                _pendingMediaRequests,
-                $"Media operation '{operation}' timed out"
-            );
-        }
-
-        public async Task SwitchMediaDevices(Dictionary<string, object?> payload)
-        {
-            var tasks = new List<Task>();
-            if (payload.TryGetValue("audioInputId", out var audioInputId) && audioInputId is string audioId && !string.IsNullOrWhiteSpace(audioId))
-            {
-                tasks.Add(SendMedia("device", "audio", new Dictionary<string, object?> { ["deviceId"] = audioId }));
-            }
-            if (payload.TryGetValue("videoInputId", out var videoInputId) && videoInputId is string videoId && !string.IsNullOrWhiteSpace(videoId))
-            {
-                tasks.Add(SendMedia("device", "video", new Dictionary<string, object?> { ["deviceId"] = videoId }));
-            }
-            if (payload.TryGetValue("screenInputId", out var screenInputId) && screenInputId is string screenId && !string.IsNullOrWhiteSpace(screenId))
-            {
-                tasks.Add(SendMedia("device", "screen", new Dictionary<string, object?> { ["deviceId"] = screenId }));
-            }
-
-            await Task.WhenAll(tasks);
-        }
-
         public IDisposable OnSharedState(Action<Dictionary<string, object?>, Dictionary<string, object?>> handler)
             => AddSubscription(_sharedStateHandlers, handler);
 
@@ -580,18 +534,6 @@ namespace EdgeBase
 
         private IDisposable OnConnectionStateChange(Action<string> handler)
             => AddSubscription(_connectionStateHandlers, handler);
-
-        private IDisposable OnMediaTrack(Action<Dictionary<string, object?>, Dictionary<string, object?>> handler)
-            => AddSubscription(_mediaTrackHandlers, handler);
-
-        private IDisposable OnMediaTrackRemoved(Action<Dictionary<string, object?>, Dictionary<string, object?>> handler)
-            => AddSubscription(_mediaTrackRemovedHandlers, handler);
-
-        private IDisposable OnMediaStateChange(Action<Dictionary<string, object?>, Dictionary<string, object?>> handler)
-            => AddSubscription(_mediaStateHandlers, handler);
-
-        private IDisposable OnMediaDeviceChange(Action<Dictionary<string, object?>, Dictionary<string, object?>> handler)
-            => AddSubscription(_mediaDeviceHandlers, handler);
 
         private async Task EstablishConnection()
         {
@@ -823,27 +765,6 @@ namespace EdgeBase
                 case "member_state_error":
                     RejectPendingVoid(_pendingMemberStateRequests, GetString(msg, "requestId"), GetString(msg, "message"), 400);
                     break;
-                case "media_sync":
-                    HandleMediaSync(msg);
-                    break;
-                case "media_track":
-                    HandleMediaTrackFrame(msg);
-                    break;
-                case "media_track_removed":
-                    HandleMediaTrackRemovedFrame(msg);
-                    break;
-                case "media_state":
-                    HandleMediaStateFrame(msg);
-                    break;
-                case "media_device":
-                    HandleMediaDeviceFrame(msg);
-                    break;
-                case "media_result":
-                    ResolvePendingVoid(_pendingMediaRequests, GetString(msg, "requestId"));
-                    break;
-                case "media_error":
-                    RejectPendingVoid(_pendingMediaRequests, GetString(msg, "requestId"), GetString(msg, "message"), 400);
-                    break;
                 case "admin_result":
                     ResolvePendingVoid(_pendingAdminRequests, GetString(msg, "requestId"));
                     break;
@@ -1010,11 +931,6 @@ namespace EdgeBase
             if (!string.IsNullOrWhiteSpace(memberId))
             {
                 _roomMembers.RemoveAll(item => GetNullableString(item, "memberId") == memberId);
-                _mediaMembers.RemoveAll(item =>
-                {
-                    var mediaMember = GetDict(item, "member");
-                    return GetNullableString(mediaMember, "memberId") == memberId;
-                });
             }
 
             var snapshot = CloneDict(member);
@@ -1070,137 +986,6 @@ namespace EdgeBase
             foreach (var handler in _anySignalHandlers.ToArray())
             {
                 handler(eventName, CloneValue(payloadSnapshot), CloneDict(meta));
-            }
-        }
-
-        private void HandleMediaSync(Dictionary<string, object?> msg)
-        {
-            _mediaMembers = GetDictList(msg, "members");
-            SyncMediaMembersWithRoomMembers();
-        }
-
-        private void HandleMediaTrackFrame(Dictionary<string, object?> msg)
-        {
-            var member = GetDict(msg, "member");
-            var track = GetDict(msg, "track");
-            if (member.Count == 0 || track.Count == 0)
-            {
-                return;
-            }
-
-            var mediaMember = EnsureMediaMember(member);
-            if (!mediaMember.TryGetValue("tracks", out var tracksObject) || tracksObject is not List<object?> tracks)
-            {
-                tracks = new List<object?>();
-                mediaMember["tracks"] = tracks;
-            }
-
-            var trackId = GetNullableString(track, "trackId");
-            var kind = GetNullableString(track, "kind");
-            var replaced = false;
-            for (var index = 0; index < tracks.Count; index++)
-            {
-                if (tracks[index] is Dictionary<string, object?> existing)
-                {
-                    var existingTrackId = GetNullableString(existing, "trackId");
-                    var existingKind = GetNullableString(existing, "kind");
-                    if ((!string.IsNullOrWhiteSpace(trackId) && existingTrackId == trackId) ||
-                        (string.IsNullOrWhiteSpace(trackId) && !string.IsNullOrWhiteSpace(kind) && existingKind == kind))
-                    {
-                        tracks[index] = CloneDict(track);
-                        replaced = true;
-                        break;
-                    }
-                }
-            }
-
-            if (!replaced)
-            {
-                tracks.Add(CloneDict(track));
-            }
-
-            var trackSnapshot = CloneDict(track);
-            var memberSnapshot = CloneDict(member);
-            foreach (var handler in _mediaTrackHandlers.ToArray())
-            {
-                handler(CloneDict(trackSnapshot), CloneDict(memberSnapshot));
-            }
-        }
-
-        private void HandleMediaTrackRemovedFrame(Dictionary<string, object?> msg)
-        {
-            var member = GetDict(msg, "member");
-            var track = GetDict(msg, "track");
-            if (member.Count == 0 || track.Count == 0)
-            {
-                return;
-            }
-
-            var mediaMember = EnsureMediaMember(member);
-            if (mediaMember.TryGetValue("tracks", out var tracksObject) && tracksObject is List<object?> tracks)
-            {
-                var trackId = GetNullableString(track, "trackId");
-                var kind = GetNullableString(track, "kind");
-                tracks.RemoveAll(item =>
-                {
-                    if (item is not Dictionary<string, object?> existing)
-                    {
-                        return false;
-                    }
-                    var existingTrackId = GetNullableString(existing, "trackId");
-                    var existingKind = GetNullableString(existing, "kind");
-                    return (!string.IsNullOrWhiteSpace(trackId) && existingTrackId == trackId) ||
-                           (string.IsNullOrWhiteSpace(trackId) && !string.IsNullOrWhiteSpace(kind) && existingKind == kind);
-                });
-            }
-
-            var trackSnapshot = CloneDict(track);
-            var memberSnapshot = CloneDict(member);
-            foreach (var handler in _mediaTrackRemovedHandlers.ToArray())
-            {
-                handler(CloneDict(trackSnapshot), CloneDict(memberSnapshot));
-            }
-        }
-
-        private void HandleMediaStateFrame(Dictionary<string, object?> msg)
-        {
-            var member = GetDict(msg, "member");
-            var state = GetDict(msg, "state");
-            if (member.Count == 0)
-            {
-                return;
-            }
-
-            var mediaMember = EnsureMediaMember(member);
-            mediaMember["state"] = CloneDict(state);
-            var memberSnapshot = CloneDict(member);
-            var stateSnapshot = CloneDict(state);
-            foreach (var handler in _mediaStateHandlers.ToArray())
-            {
-                handler(CloneDict(memberSnapshot), CloneDict(stateSnapshot));
-            }
-        }
-
-        private void HandleMediaDeviceFrame(Dictionary<string, object?> msg)
-        {
-            var member = GetDict(msg, "member");
-            if (member.Count == 0)
-            {
-                return;
-            }
-
-            EnsureMediaMember(member);
-            var change = new Dictionary<string, object?>
-            {
-                ["kind"] = GetString(msg, "kind"),
-                ["deviceId"] = GetString(msg, "deviceId"),
-            };
-
-            var memberSnapshot = CloneDict(member);
-            var changeSnapshot = CloneDict(change);
-            foreach (var handler in _mediaDeviceHandlers.ToArray())
-            {
-                handler(CloneDict(memberSnapshot), CloneDict(changeSnapshot));
             }
         }
 
@@ -1352,7 +1137,6 @@ namespace EdgeBase
             RejectPendingVoidRequests(_pendingSignalRequests, error);
             RejectPendingVoidRequests(_pendingAdminRequests, error);
             RejectPendingVoidRequests(_pendingMemberStateRequests, error);
-            RejectPendingVoidRequests(_pendingMediaRequests, error);
         }
 
         private static void RejectPendingVoidRequests(ConcurrentDictionary<string, PendingVoidRequest> store, Exception error)
@@ -1419,56 +1203,6 @@ namespace EdgeBase
             {
                 _roomMembers.Add(CloneDict(member));
             }
-        }
-
-        private void SyncMediaMembersWithRoomMembers()
-        {
-            _mediaMembers.RemoveAll(item =>
-            {
-                var member = GetDict(item, "member");
-                var memberId = GetNullableString(member, "memberId");
-                return !string.IsNullOrWhiteSpace(memberId) &&
-                       !_roomMembers.Exists(roomMember => GetNullableString(roomMember, "memberId") == memberId);
-            });
-        }
-
-        private Dictionary<string, object?> EnsureMediaMember(Dictionary<string, object?> member)
-        {
-            var memberId = GetNullableString(member, "memberId") ?? GetNullableString(member, "userId");
-            if (string.IsNullOrWhiteSpace(memberId))
-            {
-                return new Dictionary<string, object?>();
-            }
-
-            var index = _mediaMembers.FindIndex(item =>
-            {
-                var existingMember = GetDict(item, "member");
-                return GetNullableString(existingMember, "memberId") == memberId;
-            });
-
-            if (index >= 0)
-            {
-                var existing = _mediaMembers[index];
-                existing["member"] = CloneDict(member);
-                if (!existing.ContainsKey("state"))
-                {
-                    existing["state"] = new Dictionary<string, object?>();
-                }
-                if (!existing.TryGetValue("tracks", out var tracks) || tracks is not List<object?>)
-                {
-                    existing["tracks"] = new List<object?>();
-                }
-                return existing;
-            }
-
-            var created = new Dictionary<string, object?>
-            {
-                ["member"] = CloneDict(member),
-                ["state"] = new Dictionary<string, object?>(),
-                ["tracks"] = new List<object?>(),
-            };
-            _mediaMembers.Add(created);
-            return created;
         }
 
         private void SetConnectionState(string state)
@@ -1797,93 +1531,11 @@ namespace EdgeBase
 
             public Task Kick(string memberId) => _room.SendAdmin("kick", memberId);
 
-            public Task Mute(string memberId) => _room.SendAdmin("mute", memberId);
-
             public Task Block(string memberId) => _room.SendAdmin("block", memberId);
 
             public Task SetRole(string memberId, string role)
                 => _room.SendAdmin("setRole", memberId, new Dictionary<string, object?> { ["role"] = role });
 
-            public Task DisableVideo(string memberId) => _room.SendAdmin("disableVideo", memberId);
-
-            public Task StopScreenShare(string memberId) => _room.SendAdmin("stopScreenShare", memberId);
-        }
-
-        public sealed class RoomMediaKindNamespace
-        {
-            private readonly RoomClient _room;
-            private readonly string _kind;
-
-            internal RoomMediaKindNamespace(RoomClient room, string kind)
-            {
-                _room = room;
-                _kind = kind;
-            }
-
-            public Task Enable(Dictionary<string, object?>? payload = null) => _room.SendMedia("publish", _kind, payload);
-
-            public Task Disable() => _room.SendMedia("unpublish", _kind);
-
-            public Task SetMuted(bool muted)
-                => _room.SendMedia("mute", _kind, new Dictionary<string, object?> { ["muted"] = muted });
-        }
-
-        public sealed class RoomScreenMediaNamespace
-        {
-            private readonly RoomClient _room;
-
-            internal RoomScreenMediaNamespace(RoomClient room) => _room = room;
-
-            public Task Start(Dictionary<string, object?>? payload = null) => _room.SendMedia("publish", "screen", payload);
-
-            public Task Stop() => _room.SendMedia("unpublish", "screen");
-        }
-
-        public sealed class RoomMediaDevicesNamespace
-        {
-            private readonly RoomClient _room;
-
-            internal RoomMediaDevicesNamespace(RoomClient room) => _room = room;
-
-            public Task Switch(Dictionary<string, object?> payload) => _room.SwitchMediaDevices(payload);
-        }
-
-        public sealed class RoomMediaNamespace
-        {
-            private readonly RoomClient _room;
-
-            internal RoomMediaNamespace(RoomClient room)
-            {
-                _room = room;
-                Audio = new RoomMediaKindNamespace(room, "audio");
-                Video = new RoomMediaKindNamespace(room, "video");
-                Screen = new RoomScreenMediaNamespace(room);
-                Devices = new RoomMediaDevicesNamespace(room);
-            }
-
-            public RoomMediaKindNamespace Audio { get; }
-            public RoomMediaKindNamespace Video { get; }
-            public RoomScreenMediaNamespace Screen { get; }
-            public RoomMediaDevicesNamespace Devices { get; }
-
-            public RoomMediaKindNamespace audio => Audio;
-            public RoomMediaKindNamespace video => Video;
-            public RoomScreenMediaNamespace screen => Screen;
-            public RoomMediaDevicesNamespace devices => Devices;
-
-            public List<Dictionary<string, object?>> List() => _room.ListMediaMembers();
-
-            public IDisposable OnTrack(Action<Dictionary<string, object?>, Dictionary<string, object?>> handler)
-                => _room.OnMediaTrack(handler);
-
-            public IDisposable OnTrackRemoved(Action<Dictionary<string, object?>, Dictionary<string, object?>> handler)
-                => _room.OnMediaTrackRemoved(handler);
-
-            public IDisposable OnStateChange(Action<Dictionary<string, object?>, Dictionary<string, object?>> handler)
-                => _room.OnMediaStateChange(handler);
-
-            public IDisposable OnDeviceChange(Action<Dictionary<string, object?>, Dictionary<string, object?>> handler)
-                => _room.OnMediaDeviceChange(handler);
         }
 
         public sealed class RoomSessionNamespace

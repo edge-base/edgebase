@@ -470,41 +470,6 @@ public class GeneratedDbApi {
         return http.getWithQuery("/room/metadata", query);
     }
 
-    /** Get the active room realtime media session — GET /api/room/media/realtime/session */
-    public Object getRoomRealtimeSession(Map<String, String> query) throws EdgeBaseError {
-        return http.getWithQuery("/room/media/realtime/session", query);
-    }
-
-    /** Create a room realtime media session — POST /api/room/media/realtime/session */
-    public Object createRoomRealtimeSession(Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
-        return http.postWithQuery("/room/media/realtime/session", body, query);
-    }
-
-    /** Generate TURN / ICE credentials for room realtime media — POST /api/room/media/realtime/turn */
-    public Object createRoomRealtimeIceServers(Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
-        return http.postWithQuery("/room/media/realtime/turn", body, query);
-    }
-
-    /** Add realtime media tracks to a room session — POST /api/room/media/realtime/tracks/new */
-    public Object addRoomRealtimeTracks(Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
-        return http.postWithQuery("/room/media/realtime/tracks/new", body, query);
-    }
-
-    /** Renegotiate a room realtime media session — PUT /api/room/media/realtime/renegotiate */
-    public Object renegotiateRoomRealtimeSession(Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
-        return http.putWithQuery("/room/media/realtime/renegotiate", body, query);
-    }
-
-    /** Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close */
-    public Object closeRoomRealtimeTracks(Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
-        return http.putWithQuery("/room/media/realtime/tracks/close", body, query);
-    }
-
-    /** Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session */
-    public Object createRoomCloudflareRealtimeKitSession(Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
-        return http.postWithQuery("/room/media/cloudflare_realtimekit/session", body, query);
-    }
-
     /** Track custom events — POST /api/analytics/track */
     public Object trackEvents(Map<String, ?> body) throws EdgeBaseError {
         return http.post("/analytics/track", body);
@@ -799,13 +764,6 @@ public class GeneratedDbApi {
         public static final String PUSH_UNREGISTER = "/api/push/unregister";
         public static final String CONNECT_ROOM = "/api/room";
         public static final String CHECK_ROOM_CONNECTION = "/api/room/connect-check";
-        public static final String CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session";
-        public static final String RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate";
-        public static final String GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";
-        public static final String CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session";
-        public static final String CLOSE_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/close";
-        public static final String ADD_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/new";
-        public static final String CREATE_ROOM_REALTIME_ICE_SERVERS = "/api/room/media/realtime/turn";
         public static final String GET_ROOM_METADATA = "/api/room/metadata";
         public static final String GET_SCHEMA = "/api/schema";
         public static final String EXECUTE_SQL = "/api/sql";

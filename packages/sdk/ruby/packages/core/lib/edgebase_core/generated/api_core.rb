@@ -462,41 +462,6 @@ module EdgebaseCore
       @http.get("/room/metadata", params: query)
     end
 
-    # Get the active room realtime media session — GET /api/room/media/realtime/session
-    def get_room_realtime_session(query: nil)
-      @http.get("/room/media/realtime/session", params: query)
-    end
-
-    # Create a room realtime media session — POST /api/room/media/realtime/session
-    def create_room_realtime_session(body = nil, query: nil)
-      @http.post("/room/media/realtime/session", body, params: query)
-    end
-
-    # Generate TURN / ICE credentials for room realtime media — POST /api/room/media/realtime/turn
-    def create_room_realtime_ice_servers(body = nil, query: nil)
-      @http.post("/room/media/realtime/turn", body, params: query)
-    end
-
-    # Add realtime media tracks to a room session — POST /api/room/media/realtime/tracks/new
-    def add_room_realtime_tracks(body = nil, query: nil)
-      @http.post("/room/media/realtime/tracks/new", body, params: query)
-    end
-
-    # Renegotiate a room realtime media session — PUT /api/room/media/realtime/renegotiate
-    def renegotiate_room_realtime_session(body = nil, query: nil)
-      @http.put("/room/media/realtime/renegotiate", body, params: query)
-    end
-
-    # Close room realtime media tracks — PUT /api/room/media/realtime/tracks/close
-    def close_room_realtime_tracks(body = nil, query: nil)
-      @http.put("/room/media/realtime/tracks/close", body, params: query)
-    end
-
-    # Create a room Cloudflare RealtimeKit session — POST /api/room/media/cloudflare_realtimekit/session
-    def create_room_cloudflare_realtime_kit_session(body = nil, query: nil)
-      @http.post("/room/media/cloudflare_realtimekit/session", body, params: query)
-    end
-
     # Track custom events — POST /api/analytics/track
     def track_events(body = nil)
       @http.post("/analytics/track", body)
@@ -621,13 +586,6 @@ module EdgebaseCore
     PUSH_UNREGISTER = "/api/push/unregister"
     CONNECT_ROOM = "/api/room"
     CHECK_ROOM_CONNECTION = "/api/room/connect-check"
-    CREATE_ROOM_CLOUDFLARE_REALTIME_KIT_SESSION = "/api/room/media/cloudflare_realtimekit/session"
-    RENEGOTIATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/renegotiate"
-    GET_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
-    CREATE_ROOM_REALTIME_SESSION = "/api/room/media/realtime/session"
-    CLOSE_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/close"
-    ADD_ROOM_REALTIME_TRACKS = "/api/room/media/realtime/tracks/new"
-    CREATE_ROOM_REALTIME_ICE_SERVERS = "/api/room/media/realtime/turn"
     GET_ROOM_METADATA = "/api/room/metadata"
     GET_SCHEMA = "/api/schema"
     EXECUTE_SQL = "/api/sql"

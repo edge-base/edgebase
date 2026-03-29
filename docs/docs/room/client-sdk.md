@@ -14,25 +14,18 @@ This feature is in **beta**. Core behavior is stable and ready to try, but some 
 
 In v2 all state mutations happen server-side -- clients can only **read state** and **send actions**. The server mutates state in response to actions via `handlers.actions`.
 
-On the newer Room SDKs, the preferred public shape is a unified namespace surface with five core live capabilities:
+On the newer Room SDKs, the preferred public shape is a unified namespace surface with four core live capabilities:
 
 - `room.state`
 - `room.meta`
 - `room.members`
 - `room.signals`
-- `room.media` *(beta)*
-
 Two companion namespaces round out the client runtime:
 
 - `room.admin`
 - `room.session`
 
 Legacy flat methods such as `room.send(...)`, `room.getSharedState()`, and `room.onMessage(...)` still exist for compatibility. Prefer the unified namespaces when your SDK supports them. See [SDK Support](/docs/room/sdk-support).
-
-For production-oriented room media today, prefer `room.media.transport()` with
-the default `cloudflare_realtimekit` provider. `p2p` is also available on the
-supported SDK matrix, but it remains a best-effort path that depends more
-heavily on client network conditions.
 
 :::note Unified Namespace Availability
 The unified namespace surface is available across the JavaScript/TypeScript, Dart, Swift, Kotlin, and Java Room SDKs. Method names and casing follow each platform's conventions.
@@ -90,7 +83,7 @@ dependencies {
 }
 ```
 
-The shared Room client compiles across Android, JVM, JS, and Apple targets. Built-in Room Media runtime ships on Android, iOS, and JS browser; JVM/macOS use explicit `cloudflareRealtimeKit.clientFactory` and `p2p.transportFactory` injection.
+The shared Room client compiles across Android, JVM, JS, and Apple targets.
 
 </TabItem>
 <TabItem value="java" label="Java">
@@ -322,7 +315,7 @@ Use these helpers when you want to:
 - render room cards before join
 - show occupancy in a lobby list
 - validate room runtime configuration before opening a WebSocket
-- explain why media transport connect would fail before touching browser capture APIs
+- explain why room connection preflight would fail before opening a live session
 
 ---
 
@@ -336,8 +329,7 @@ The unified Room surface groups the product around the same live-session model u
 | `room.meta` | Public-safe metadata before or after joining |
 | `room.members` | Presence list, member join/leave events, and ephemeral member state |
 | `room.signals` | Fire-and-forget room events and direct member sends |
-| `room.media` *(beta)* | Audio/video/screen publish, mute, device, and track state |
-| `room.admin` | Moderation controls like kick, mute, disable video, and role changes |
+| `room.admin` | Moderation controls like kick, block, and role changes |
 | `room.session` | Errors, reconnects, kicked events, and connection state |
 
 ```typescript
@@ -349,7 +341,6 @@ const meta = await room.meta.get();
 room.state.onSharedChange((state) => renderBoard(state));
 room.members.onSync((members) => renderRoster(members));
 room.signals.on('chat.message', (payload) => appendChat(payload));
-room.media.onTrack((track, member) => attachTrack(track, member));
 room.session.onConnectionStateChange((state) => console.log('room state:', state));
 
 await room.state.send('MOVE', { to: { x: 5, y: 3 } });
@@ -357,22 +348,6 @@ await room.signals.send('chat.message', { text: 'hello' });
 ```
 
 The rest of this page keeps the flat compatibility methods documented because they are still useful as cross-SDK fallbacks and map cleanly to the unified namespaces.
-
-:::note Room Media transport status
-`room.media.connect(...)` is the preferred unified entry point for room media. `room.media.transport(...)` is still available when you need lower-level transport control.
-
-The underlying transport surface is active on the Web, React Native, Flutter, Swift iOS, Java Android, Kotlin Android, Kotlin iOS, Kotlin JS, Kotlin JVM/macOS, and the Java core artifact.
-
-The provider mix is still rolling out:
-
-- Web, React Native, and Flutter support `cloudflare_realtimekit` and `p2p`
-- Swift iOS and Java Android ship built-in `cloudflare_realtimekit` and `p2p`
-- Kotlin ships built-in `cloudflare_realtimekit` and `p2p` on Android, iOS, and JS (browser)
-- Kotlin JVM/macOS use `cloudflareRealtimeKit.clientFactory` and `p2p.transportFactory`
-- Java core uses `cloudflareRealtimeKit.clientFactory` and `p2p.transportFactory`
-
-Verification is still deepest on the web live-media path. Mobile SDKs now have build and transport smoke coverage, but native live media E2E is not yet identical across every platform.
-:::
 
 | Preferred namespace API | Compatibility API |
 | --- | --- |
@@ -1139,8 +1114,7 @@ The unified Room namespaces are currently implemented in the SDKs listed on [SDK
 | `room.meta` | `get()` |
 | `room.members` | `list()`, `onSync()`, `onJoin()`, `onLeave()`, `setState()`, `clearState()`, `onStateChange()` |
 | `room.signals` | `send()`, `sendTo()`, `on()`, `onAny()` |
-| `room.media` *(beta)* | `list()`, `audio.enable()`, `audio.setMuted()`, `video.enable()`, `screen.start()`, `devices.switch()`, `onTrack()` |
-| `room.admin` | `kick()`, `mute()`, `block()`, `setRole()`, `disableVideo()`, `stopScreenShare()` |
+| `room.admin` | `kick()`, `block()`, `setRole()` |
 | `room.session` | `onError()`, `onKicked()`, `onReconnect()`, `onConnectionStateChange()` |
 
 ## Compatibility API Reference

@@ -127,35 +127,4 @@ describe('RoomsDO handler context', () => {
       }),
     );
   }, 15_000);
-
-  it('returns 409 when creating a Cloudflare RealtimeKit session while media is already published', async () => {
-    const { RoomsDO } = await import('../durable-objects/rooms-do.js');
-
-    const room: any = Object.create(RoomsDO.prototype);
-    room.readJsonBody = vi.fn().mockResolvedValue({ connectionId: 'conn-1' });
-    room.authenticateRealtimeRequest = vi.fn().mockResolvedValue({
-      memberId: 'member-1',
-      connectionId: 'conn-1',
-      meta: {
-        authenticated: true,
-        connectionId: 'conn-1',
-      },
-    });
-    room.hasPublishedTracks = vi.fn().mockReturnValue(true);
-
-    const response = await room.handleCloudflareRealtimeKitSessionCreate(
-      new Request('http://do/media/cloudflare_realtimekit/session?room=game::room-1', {
-        method: 'POST',
-        body: JSON.stringify({ connectionId: 'conn-1' }),
-        headers: { 'Content-Type': 'application/json' },
-      }),
-      new URL('http://do/media/cloudflare_realtimekit/session?room=game::room-1'),
-    );
-
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toEqual({
-      code: 409,
-      message: 'Unpublish existing room media before creating a new Cloudflare RealtimeKit session',
-    });
-  });
 });

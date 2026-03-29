@@ -208,12 +208,12 @@ posts: {
 EdgeBase provides two real-time systems:
 
 - **Database Subscriptions** — `onSnapshot()` on any database query. When data changes, the DatabaseDO notifies the DatabaseLiveDO via direct DO-to-DO communication (no Worker hop), and updates are pushed to all matching subscribers. Idle connections use Cloudflare's Hibernation API and cost $0. See [Database Subscriptions](/docs/database/subscriptions).
-- **Room** — server-authoritative state channel with built-in members (presence), signals (pub/sub), and media metadata. See [Room](/docs/room).
+- **Room** — server-authoritative state channel with built-in members (presence) and signals (pub/sub). See [Room](/docs/room).
 
 |                  | Database Subscriptions                   | Room                                                              |
 | ---------------- | ---------------------------------------- | ----------------------------------------------------------------- |
 | State management | Client-driven (DB writes trigger events) | Server-authoritative (clients send actions, server mutates state) |
-| Use case         | Live feeds, dashboards                   | Games, collaboration, conferencing, chat                          |
+| Use case         | Live feeds, dashboards                   | Games, collaboration, coordination, chat                          |
 | Idle cost        | $0 (Hibernation API)                     | $0 (Hibernation API)                                              |
 
 ## How do backups work?
