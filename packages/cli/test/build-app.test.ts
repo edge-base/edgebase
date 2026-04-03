@@ -295,6 +295,7 @@ export default defineConfig({
     expect(hasBundledPnpmPackage(portableNodeModules, 'wrangler@', ['wrangler'])).toBe(true);
     expect(hasBundledPnpmPackage(portableNodeModules, 'esbuild@', ['esbuild'])).toBe(true);
     expect(hasBundledPnpmPackage(portableNodeModules, 'unenv@', ['unenv'])).toBe(true);
+    expect(existsSync(join(portableNodeModules, 'unenv', 'package.json'))).toBe(true);
     expect(hasBundledPnpmPackage(portableNodeModules, 'vitest@', ['vitest'])).toBe(false);
     expect(hasBundledPnpmPackage(dockerNodeModules, 'wrangler@', ['wrangler'])).toBe(false);
     expect(hasBundledPnpmPackage(dockerNodeModules, 'vitest@', ['vitest'])).toBe(false);

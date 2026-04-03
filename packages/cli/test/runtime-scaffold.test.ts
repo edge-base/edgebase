@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { __runtimeScaffoldTestUtils } from '../src/lib/runtime-scaffold.js';
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 function normalizePath(value: string): string {
   return value.replace(/\\/g, '/');
@@ -54,5 +65,28 @@ describe('runtime scaffold path utilities', () => {
     expect(
       __runtimeScaffoldTestUtils.buildDirectoryLinkTarget(linkPath, destinationPath, 'darwin'),
     ).toBe('../../miniflare@4.40.2/node_modules/miniflare');
+  });
+
+  it('resolves package directories from pnpm package stores when no top-level entry exists', () => {
+    const candidateRoot = mkdtempSync(join(tmpdir(), 'edgebase-runtime-scaffold-'));
+    tempDirs.push(candidateRoot);
+
+    const packageDir = join(
+      candidateRoot,
+      '.pnpm',
+      'unenv@2.0.0-rc.24',
+      'node_modules',
+      'unenv',
+    );
+    mkdirSync(packageDir, { recursive: true });
+    writeFileSync(
+      join(packageDir, 'package.json'),
+      JSON.stringify({ name: 'unenv', version: '2.0.0-rc.24' }),
+      'utf-8',
+    );
+
+    expect(
+      __runtimeScaffoldTestUtils.resolvePackageDirectoryPath('unenv', [candidateRoot]),
+    ).toBe(resolve(packageDir));
   });
 });

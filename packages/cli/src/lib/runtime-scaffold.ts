@@ -363,7 +363,7 @@ function materializeNodeModulesTree(
 
   if (selectedPackages && selectedPackages.length > 0) {
     for (const packageName of selectedPackages) {
-      const sourceEntry = resolveTopLevelPackageEntry(packageName, normalizedRoots);
+      const sourceEntry = resolvePackageDirectoryPath(packageName, normalizedRoots);
       if (!sourceEntry) continue;
       materializeNodeModulesEntry(
         sourceEntry,
@@ -385,6 +385,28 @@ function materializeNodeModulesTree(
       copiedTargets,
     );
   }
+}
+
+function resolvePackageDirectoryPath(packageName: string, candidateRoots: string[]): string | null {
+  const topLevelEntry = resolveTopLevelPackageEntry(packageName, candidateRoots);
+  if (topLevelEntry) {
+    return topLevelEntry;
+  }
+
+  const packageSegments = packageName.split('/');
+  for (const candidateRoot of dedupeCandidates(candidateRoots)) {
+    const pnpmDir = join(candidateRoot, '.pnpm');
+    if (!existsSync(pnpmDir)) continue;
+
+    for (const entry of readdirSync(pnpmDir)) {
+      const candidatePath = join(pnpmDir, entry, 'node_modules', ...packageSegments);
+      if (existsSync(candidatePath)) {
+        return candidatePath;
+      }
+    }
+  }
+
+  return null;
 }
 
 function resolveTopLevelPackageEntry(packageName: string, candidateRoots: string[]): string | null {
@@ -576,6 +598,7 @@ export const __runtimeScaffoldTestUtils = {
   findContainingRoot,
   getNodeModulesMaterialization,
   getRelativePathSegmentsWithinRoot,
+  resolvePackageDirectoryPath,
 };
 
 function getSharedPackageSourceCandidates(projectDir: string): string[] {
@@ -663,15 +686,13 @@ function expandDependencySelection(
 }
 
 function resolvePackageManifestPath(packageName: string, candidateRoots: string[]): string | null {
-  const packageSegments = packageName.split('/');
-  for (const candidateRoot of dedupeCandidates(candidateRoots)) {
-    const manifestPath = join(candidateRoot, ...packageSegments, 'package.json');
-    if (existsSync(manifestPath)) {
-      return manifestPath;
-    }
+  const packageDir = resolvePackageDirectoryPath(packageName, candidateRoots);
+  if (!packageDir) {
+    return null;
   }
 
-  return null;
+  const manifestPath = join(packageDir, 'package.json');
+  return existsSync(manifestPath) ? manifestPath : null;
 }
 
 function readPackageDependencyNames(packageJsonPath: string): string[] {

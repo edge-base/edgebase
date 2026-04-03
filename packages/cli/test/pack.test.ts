@@ -199,6 +199,7 @@ export default defineConfig({
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'wrangler@', ['wrangler'])).toBe(true);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'esbuild@', ['esbuild'])).toBe(true);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'unenv@', ['unenv'])).toBe(true);
+    expect(existsSync(join(runtimeNodeModulesDir, 'unenv', 'package.json'))).toBe(true);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'vitest@', ['vitest'])).toBe(false);
     expect(existsSync(join(runtimeNodeModulesDir, '@edge-base', 'core', 'package.json'))).toBe(true);
     expect(lstatSync(runtimeNodeModulesDir).isSymbolicLink()).toBe(false);
