@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -8,6 +9,7 @@ import { createAppBundle, syncAppBundle } from '../src/lib/app-bundle.js';
 import { resolveTsxCommand } from '../src/lib/node-tools.js';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const testRequire = createRequire(import.meta.url);
 const tsxCommand = resolveTsxCommand();
 const tsxExecOptions = /\.cmd$/i.test(tsxCommand.command) ? { shell: true as const } : {};
 const tempDirs: string[] = [];
@@ -51,6 +53,13 @@ function hasBundledPnpmPackage(runtimeNodeModulesDir: string, entryPrefix: strin
     entry.startsWith(entryPrefix)
     && existsSync(join(pnpmDir, entry, 'node_modules', ...packagePath, 'package.json'))
   ));
+}
+
+function resolveExpectedPortableMiniflareVersion(): string {
+  const wranglerManifest = testRequire.resolve('wrangler/package.json', { paths: [packageDir] });
+  const wranglerRequire = createRequire(wranglerManifest);
+  const miniflareManifest = wranglerRequire.resolve('miniflare/package.json');
+  return JSON.parse(readFileSync(miniflareManifest, 'utf-8')).version as string;
 }
 
 afterEach(() => {
@@ -291,8 +300,22 @@ export default defineConfig({
 
     const portableNodeModules = join(portableBundle.outputDir, '.edgebase', 'runtime', 'server', 'node_modules');
     const dockerNodeModules = join(dockerBundle.outputDir, '.edgebase', 'runtime', 'server', 'node_modules');
+    const expectedPortableMiniflareVersion = resolveExpectedPortableMiniflareVersion();
+    const bundledPortableMiniflareEntries = readdirSync(join(portableNodeModules, '.pnpm')).filter((entry) =>
+      entry.startsWith('miniflare@'),
+    );
 
     expect(hasBundledPnpmPackage(portableNodeModules, 'wrangler@', ['wrangler'])).toBe(true);
+    expect(
+      hasBundledPnpmPackage(
+        portableNodeModules,
+        `miniflare@${expectedPortableMiniflareVersion}`,
+        ['miniflare'],
+      ),
+    ).toBe(true);
+    expect(bundledPortableMiniflareEntries).toEqual([
+      expect.stringMatching(new RegExp(`^miniflare@${expectedPortableMiniflareVersion.replace(/\./g, '\\.')}`)),
+    ]);
     expect(hasBundledPnpmPackage(portableNodeModules, 'esbuild@', ['esbuild'])).toBe(true);
     expect(hasBundledPnpmPackage(portableNodeModules, 'unenv@', ['unenv'])).toBe(true);
     expect(existsSync(join(portableNodeModules, 'unenv', 'package.json'))).toBe(true);

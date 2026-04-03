@@ -603,8 +603,10 @@ export const __runtimeScaffoldTestUtils = {
   findContainingRoot,
   getNodeModulesMaterialization,
   getRelativePathSegmentsWithinRoot,
+  resolvePackageSelectionFromManifestCandidates,
   resolvePackageDirectoryPath,
   resolveRuntimePackageSelections,
+  resolveRuntimePackageSelectionsFromInitialSelections,
 };
 
 function getSharedPackageSourceCandidates(projectDir: string): string[] {
@@ -621,6 +623,7 @@ function resolveRuntimeDependencySelection(
   projectDir: string,
   profile: RuntimeDependencyProfile,
 ): RuntimePackageSelection[] | null {
+  const candidateRoots = getRuntimeNodeModulesCandidates(projectDir, 'copy');
   const serverDependencies = readPackageDependencyNamesFromCandidates(
     getServerPackageManifestCandidates(projectDir),
   );
@@ -628,15 +631,35 @@ function resolveRuntimeDependencySelection(
     return null;
   }
 
-  const selected = new Set(serverDependencies);
-  if (profile === 'portable') {
-    selected.add('wrangler');
+  const initialSelections: RuntimePackageSelection[] = [];
+  for (const packageName of dedupeCandidates(serverDependencies)) {
+    const selection = resolveRuntimePackageSelection(packageName, candidateRoots);
+    if (selection) {
+      initialSelections.push(selection);
+    }
   }
 
-  return resolveRuntimePackageSelections(
-    Array.from(selected),
-    getRuntimeNodeModulesCandidates(projectDir, 'copy'),
-  );
+  if (profile === 'portable') {
+    const wranglerSelection =
+      resolvePackageSelectionFromManifestCandidates(
+        'wrangler',
+        getPortableWranglerManifestCandidates(projectDir),
+      ) ?? resolveRuntimePackageSelection('wrangler', candidateRoots);
+    if (wranglerSelection) {
+      initialSelections.push(wranglerSelection);
+    }
+  }
+
+  return resolveRuntimePackageSelectionsFromInitialSelections(initialSelections, candidateRoots);
+}
+
+function getPortableWranglerManifestCandidates(projectDir: string): string[] {
+  return dedupeCandidates([
+    join(projectDir, 'node_modules', 'wrangler', 'package.json'),
+    resolve(CLI_NODE_MODULES_SOURCE, 'wrangler', 'package.json'),
+    resolve(WORKSPACE_NODE_MODULES_SOURCE, 'wrangler', 'package.json'),
+    resolve(SERVER_NODE_MODULES_SOURCE, 'wrangler', 'package.json'),
+  ]);
 }
 
 function getServerPackageManifestCandidates(projectDir: string): string[] {
@@ -666,9 +689,7 @@ function resolveRuntimePackageSelections(
   initialPackages: string[],
   candidateRoots: string[],
 ): RuntimePackageSelection[] {
-  const selections = new Map<string, RuntimePackageSelection>();
-  const visitedManifestPaths = new Set<string>();
-  const queue: RuntimePackageSelection[] = [];
+  const initialSelections: RuntimePackageSelection[] = [];
 
   for (const packageName of dedupeCandidates(initialPackages)) {
     const selection = resolveRuntimePackageSelection(packageName, candidateRoots);
@@ -676,7 +697,25 @@ function resolveRuntimePackageSelections(
       continue;
     }
 
-    selections.set(packageName, selection);
+    initialSelections.push(selection);
+  }
+
+  return resolveRuntimePackageSelectionsFromInitialSelections(initialSelections, candidateRoots);
+}
+
+function resolveRuntimePackageSelectionsFromInitialSelections(
+  initialSelections: RuntimePackageSelection[],
+  candidateRoots: string[],
+): RuntimePackageSelection[] {
+  const selections = new Map<string, RuntimePackageSelection>();
+  const visitedManifestPaths = new Set<string>();
+  const queue: RuntimePackageSelection[] = [];
+
+  for (const selection of initialSelections) {
+    if (selections.has(selection.packageName)) {
+      continue;
+    }
+    selections.set(selection.packageName, selection);
     queue.push(selection);
   }
 
@@ -707,6 +746,34 @@ function resolveRuntimePackageSelections(
   }
 
   return Array.from(selections.values());
+}
+
+function resolvePackageSelectionFromManifestCandidates(
+  packageName: string,
+  manifestCandidates: string[],
+): RuntimePackageSelection | null {
+  for (const manifestCandidate of dedupeCandidates(manifestCandidates)) {
+    if (!existsSync(manifestCandidate)) {
+      continue;
+    }
+
+    try {
+      const packageJson = JSON.parse(readFileSync(manifestCandidate, 'utf-8')) as { name?: string };
+      if (packageJson.name !== packageName) {
+        continue;
+      }
+
+      return {
+        packageName,
+        packageDir: dirname(resolve(manifestCandidate)),
+        manifestPath: resolve(manifestCandidate),
+      };
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 function resolveRuntimePackageSelection(

@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { __runtimeScaffoldTestUtils } from '../src/lib/runtime-scaffold.js';
 
@@ -154,5 +154,62 @@ describe('runtime scaffold path utilities', () => {
     const miniflareSelection = selections.find((selection) => selection.packageName === 'miniflare');
 
     expect(miniflareSelection?.packageDir).toBe(realpathSync(miniflarePreferredDir));
+  });
+
+  it('preserves the CLI wrangler dependency graph when an older server wrangler also exists', () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'edgebase-runtime-scaffold-'));
+    tempDirs.push(fixtureRoot);
+
+    const serverRoot = join(fixtureRoot, 'server-node_modules');
+    const cliRoot = join(fixtureRoot, 'cli-node_modules');
+    const serverWranglerDir = join(serverRoot, '.pnpm', 'wrangler@4.70.0-server', 'node_modules', 'wrangler');
+    const cliWranglerDir = join(cliRoot, '.pnpm', 'wrangler@4.70.0-cli', 'node_modules', 'wrangler');
+    const serverMiniflareDir = join(serverRoot, '.pnpm', 'miniflare@4.20250906.0', 'node_modules', 'miniflare');
+    const cliMiniflareDir = join(cliRoot, '.pnpm', 'miniflare@4.20260301.1', 'node_modules', 'miniflare');
+
+    mkdirSync(join(dirname(serverWranglerDir), 'wrangler'), { recursive: true });
+    mkdirSync(join(dirname(cliWranglerDir), 'wrangler'), { recursive: true });
+    mkdirSync(serverMiniflareDir, { recursive: true });
+    mkdirSync(cliMiniflareDir, { recursive: true });
+
+    writeFileSync(
+      join(serverWranglerDir, 'package.json'),
+      JSON.stringify({ name: 'wrangler', version: '4.70.0', dependencies: { miniflare: '4.20250906.0' } }),
+      'utf-8',
+    );
+    writeFileSync(
+      join(cliWranglerDir, 'package.json'),
+      JSON.stringify({ name: 'wrangler', version: '4.70.0', dependencies: { miniflare: '4.20260301.1' } }),
+      'utf-8',
+    );
+    writeFileSync(
+      join(serverMiniflareDir, 'package.json'),
+      JSON.stringify({ name: 'miniflare', version: '4.20250906.0' }),
+      'utf-8',
+    );
+    writeFileSync(
+      join(cliMiniflareDir, 'package.json'),
+      JSON.stringify({ name: 'miniflare', version: '4.20260301.1' }),
+      'utf-8',
+    );
+
+    symlinkSync(resolve(serverWranglerDir), join(serverRoot, 'wrangler'), 'dir');
+    symlinkSync(resolve(cliWranglerDir), join(cliRoot, 'wrangler'), 'dir');
+    symlinkSync(resolve(serverMiniflareDir), join(dirname(serverWranglerDir), 'miniflare'), 'dir');
+    symlinkSync(resolve(cliMiniflareDir), join(dirname(cliWranglerDir), 'miniflare'), 'dir');
+
+    const wranglerSelection = __runtimeScaffoldTestUtils.resolvePackageSelectionFromManifestCandidates(
+      'wrangler',
+      [join(cliWranglerDir, 'package.json'), join(serverWranglerDir, 'package.json')],
+    );
+    expect(wranglerSelection?.packageDir).toBe(resolve(cliWranglerDir));
+
+    const selections = __runtimeScaffoldTestUtils.resolveRuntimePackageSelectionsFromInitialSelections(
+      [wranglerSelection!],
+      [serverRoot, cliRoot],
+    );
+    const miniflareSelection = selections.find((selection) => selection.packageName === 'miniflare');
+
+    expect(miniflareSelection?.packageDir).toBe(realpathSync(cliMiniflareDir));
   });
 });

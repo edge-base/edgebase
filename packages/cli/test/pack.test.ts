@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { resolveTsxCommand } from '../src/lib/node-tools.js';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const testRequire = createRequire(import.meta.url);
 const tsxCommand = resolveTsxCommand();
 const tsxExecOptions = /\.cmd$/i.test(tsxCommand.command) ? { shell: true as const } : {};
 const tempDirs: string[] = [];
@@ -80,6 +82,13 @@ function hasBundledPnpmPackage(runtimeNodeModulesDir: string, entryPrefix: strin
     entry.startsWith(entryPrefix)
     && existsSync(join(pnpmDir, entry, 'node_modules', ...packagePath, 'package.json'))
   ));
+}
+
+function resolveExpectedPortableMiniflareVersion(): string {
+  const wranglerManifest = testRequire.resolve('wrangler/package.json', { paths: [packageDir] });
+  const wranglerRequire = createRequire(wranglerManifest);
+  const miniflareManifest = wranglerRequire.resolve('miniflare/package.json');
+  return JSON.parse(readFileSync(miniflareManifest, 'utf-8')).version as string;
 }
 
 describe('pack command', () => {
@@ -193,10 +202,24 @@ export default defineConfig({
     expect(existsSync(join(projectDir, 'packed', '.edgebase', 'runtime', 'server', 'bundle', 'config', 'edgebase.config.bundle.js'))).toBe(true);
     expect(existsSync(join(projectDir, 'packed', '.edgebase', 'runtime', 'server', 'bundle', 'functions', 'health.js'))).toBe(true);
     const runtimeNodeModulesDir = join(projectDir, 'packed', '.edgebase', 'runtime', 'server', 'node_modules');
+    const expectedPortableMiniflareVersion = resolveExpectedPortableMiniflareVersion();
+    const bundledPortableMiniflareEntries = readdirSync(join(runtimeNodeModulesDir, '.pnpm')).filter((entry) =>
+      entry.startsWith('miniflare@'),
+    );
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'hono@', ['hono'])).toBe(true);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, '@asteasolutions+zod-to-openapi@', ['@asteasolutions', 'zod-to-openapi'])).toBe(true);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'pg-protocol@', ['pg-protocol'])).toBe(true);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'wrangler@', ['wrangler'])).toBe(true);
+    expect(
+      hasBundledPnpmPackage(
+        runtimeNodeModulesDir,
+        `miniflare@${expectedPortableMiniflareVersion}`,
+        ['miniflare'],
+      ),
+    ).toBe(true);
+    expect(bundledPortableMiniflareEntries).toEqual([
+      expect.stringMatching(new RegExp(`^miniflare@${expectedPortableMiniflareVersion.replace(/\./g, '\\.')}`)),
+    ]);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'esbuild@', ['esbuild'])).toBe(true);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'unenv@', ['unenv'])).toBe(true);
     expect(existsSync(join(runtimeNodeModulesDir, 'unenv', 'package.json'))).toBe(true);
