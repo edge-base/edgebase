@@ -14,6 +14,7 @@ const tsxExecOptions = /\.cmd$/i.test(tsxCommand.command) ? { shell: true as con
 const tempDirs: string[] = [];
 const appDataDirs: string[] = [];
 const childProcesses: ChildProcessWithoutNullStreams[] = [];
+const RETRYABLE_CLEANUP_ERROR_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 
 function readLauncherPid(dataDir: string): number | null {
   const lockPath = join(dataDir, 'launcher-lock.json');
@@ -42,6 +43,30 @@ function terminateLauncherPid(pid: number): void {
   } catch {
     // best-effort cleanup
   }
+}
+
+async function removeDirectoryWithRetry(dir: string, attempts = 20, delayMs = 250): Promise<void> {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as NodeJS.ErrnoException).code)
+        : null;
+      if (!code || !RETRYABLE_CLEANUP_ERROR_CODES.has(code)) {
+        throw error;
+      }
+      lastError = error;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Failed to remove temporary directory after ${attempts} attempts: ${dir}`);
 }
 
 function createTempProject(name: string): string {
@@ -82,7 +107,7 @@ function runPack(projectDir: string, outputDirName: string, options?: { format?:
   );
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const child of childProcesses.splice(0)) {
     if (!child.killed) {
       child.kill('SIGKILL');
@@ -93,14 +118,14 @@ afterEach(() => {
     if (launcherPid) {
       terminateLauncherPid(launcherPid);
     }
-    rmSync(dir, { recursive: true, force: true });
+    await removeDirectoryWithRetry(dir);
   }
   for (const dir of appDataDirs.splice(0)) {
     const launcherPid = readLauncherPid(dir);
     if (launcherPid) {
       terminateLauncherPid(launcherPid);
     }
-    rmSync(dir, { recursive: true, force: true });
+    await removeDirectoryWithRetry(dir);
   }
 }, 120_000);
 
