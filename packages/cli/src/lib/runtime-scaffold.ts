@@ -12,7 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join, posix, relative, resolve } from 'node:path';
+import { basename, dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeFrontendMountPath, type FrontendConfigLike } from './frontend-config.js';
 import {
