@@ -1446,6 +1446,29 @@ describe('generateTempWranglerToml', () => {
 
     rmSync(result!);
   });
+
+  it('normalizes legacy assets blocks that use Windows-style separators', () => {
+    const wranglerPath = join(tmpDir, 'wrangler.toml');
+    writeFileSync(
+      wranglerPath,
+      [
+        'name = "my-worker"',
+        '',
+        '[assets]',
+        'directory = ".edgebase\\\\runtime\\\\server\\\\admin-build"',
+        'binding = "ASSETS"',
+      ].join('\n'),
+    );
+
+    const result = generateTempWranglerToml(wranglerPath, { bindings: [] });
+
+    expect(result).not.toBeNull();
+    const content = readFileSync(result!, 'utf-8');
+    expect(content).toContain('directory = ".edgebase/runtime/server/app-assets"');
+    expect(content).toContain('run_worker_first = true');
+
+    rmSync(result!);
+  });
 });
 
 describe('collectManagedCronSchedules', () => {

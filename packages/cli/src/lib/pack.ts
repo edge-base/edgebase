@@ -947,10 +947,12 @@ const child = spawn(process.execPath, wranglerArgs, {
   detached: process.platform !== 'win32',
 });
 
+const shouldMirrorStdIo = Boolean(process.stdout?.isTTY || process.stderr?.isTTY);
+
 const relayOutput = (stream, writer) => {
   if (!stream) return;
   stream.on('data', (chunk) => {
-    if (writer?.writable) {
+    if (shouldMirrorStdIo && writer?.writable) {
       writer.write(chunk);
     }
     logStream.write(chunk);

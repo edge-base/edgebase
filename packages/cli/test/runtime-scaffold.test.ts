@@ -37,4 +37,22 @@ describe('runtime scaffold path utilities', () => {
       'D:/bundle/node_modules/.pnpm/wrangler@4.40.2/node_modules/wrangler',
     );
   });
+
+  it('uses absolute junction targets for Windows-style materialized links', () => {
+    const linkPath = 'D:\\bundle\\node_modules\\.pnpm\\wrangler@4.40.2\\node_modules\\miniflare';
+    const destinationPath = 'D:\\bundle\\node_modules\\.pnpm\\miniflare@4.40.2\\node_modules\\miniflare';
+
+    expect(normalizePath(
+      __runtimeScaffoldTestUtils.buildDirectoryLinkTarget(linkPath, destinationPath, 'win32'),
+    )).toBe('D:/bundle/node_modules/.pnpm/miniflare@4.40.2/node_modules/miniflare');
+  });
+
+  it('uses relative symlink targets for POSIX materialized links', () => {
+    const linkPath = '/bundle/node_modules/.pnpm/wrangler@4.40.2/node_modules/miniflare';
+    const destinationPath = '/bundle/node_modules/.pnpm/miniflare@4.40.2/node_modules/miniflare';
+
+    expect(
+      __runtimeScaffoldTestUtils.buildDirectoryLinkTarget(linkPath, destinationPath, 'darwin'),
+    ).toBe('../../miniflare@4.40.2/node_modules/miniflare');
+  });
 });

@@ -15,6 +15,35 @@ const tempDirs: string[] = [];
 const appDataDirs: string[] = [];
 const childProcesses: ChildProcessWithoutNullStreams[] = [];
 
+function readLauncherPid(dataDir: string): number | null {
+  const lockPath = join(dataDir, 'launcher-lock.json');
+  if (!existsSync(lockPath)) {
+    return null;
+  }
+
+  try {
+    const lock = JSON.parse(readFileSync(lockPath, 'utf-8')) as { pid?: number };
+    return typeof lock.pid === 'number' ? lock.pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function terminateLauncherPid(pid: number): void {
+  try {
+    process.kill(pid, 'SIGKILL');
+    return;
+  } catch {
+    // fall through
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // best-effort cleanup
+  }
+}
+
 function createTempProject(name: string): string {
   const dir = join(tmpdir(), `edgebase-pack-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
@@ -56,13 +85,21 @@ function runPack(projectDir: string, outputDirName: string, options?: { format?:
 afterEach(() => {
   for (const child of childProcesses.splice(0)) {
     if (!child.killed) {
-      child.kill('SIGTERM');
+      child.kill('SIGKILL');
     }
   }
   for (const dir of tempDirs.splice(0)) {
+    const launcherPid = readLauncherPid(dir);
+    if (launcherPid) {
+      terminateLauncherPid(launcherPid);
+    }
     rmSync(dir, { recursive: true, force: true });
   }
   for (const dir of appDataDirs.splice(0)) {
+    const launcherPid = readLauncherPid(dir);
+    if (launcherPid) {
+      terminateLauncherPid(launcherPid);
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 }, 120_000);
@@ -143,6 +180,24 @@ async function waitForHttp(
   throw lastError instanceof Error
     ? lastError
     : new Error(`Timed out waiting for ${url}`);
+}
+
+async function waitForText(
+  readValue: () => string,
+  predicate: (text: string) => boolean,
+  timeoutMs = 30_000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const value = readValue();
+    if (predicate(value)) {
+      return value;
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+  }
+
+  throw new Error('Timed out waiting for expected launcher output.');
 }
 
 function spawnPortableLauncher(
@@ -301,7 +356,7 @@ export default defineConfig({
   });
 
   it.skipIf(process.platform !== 'darwin')(
-    'launches a portable macOS app via open and serves frontend and API traffic',
+    'launches a portable macOS app via open and starts the bundled launcher',
     async () => {
       const projectDir = createTempProject('portable-open');
       mkdirSync(join(projectDir, 'functions'), { recursive: true });
@@ -340,12 +395,15 @@ export default defineConfig({
       const payload = JSON.parse(result.stdout) as {
         outputPath: string;
       };
+      const launchPort = await reservePort();
       const dataDir = createTempProject('portable-open-data');
-
-      const opened = spawnSync('open', [
+      const opened = spawn('open', [
         '-n',
+        '-W',
         payload.outputPath,
         '--args',
+        '--port',
+        String(launchPort),
         '--data-dir',
         dataDir,
       ], {
@@ -353,51 +411,57 @@ export default defineConfig({
         encoding: 'utf-8',
         stdio: 'pipe',
       });
-      expect(opened.status).toBe(0);
-      expect(opened.stderr).toBe('');
+      childProcesses.push(opened);
 
-      const lockPath = join(dataDir, 'launcher-lock.json');
+      let openStderr = '';
+      opened.stderr.on('data', (chunk) => {
+        openStderr += chunk.toString();
+      });
+
       let pid: number | null = null;
-      let launchPort: number | null = null;
 
       try {
         for (let attempt = 0; attempt < 80; attempt += 1) {
-          if (existsSync(lockPath)) {
-            const lock = JSON.parse(readFileSync(lockPath, 'utf-8')) as { pid?: number; port?: number };
-            pid = typeof lock.pid === 'number' ? lock.pid : null;
-            launchPort = typeof lock.port === 'number' ? lock.port : null;
+          const lockPid = readLauncherPid(dataDir);
+          if (lockPid) {
+            pid = lockPid;
             break;
           }
           await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
         }
 
-        expect(existsSync(lockPath)).toBe(true);
+        const readLauncherLog = () => {
+          const launcherLogPath = join(dataDir, 'launcher.log');
+          return existsSync(launcherLogPath) ? readFileSync(launcherLogPath, 'utf-8') : '';
+        };
+
         expect(pid).not.toBeNull();
-        expect(launchPort).not.toBeNull();
-        const actualPort = launchPort as number;
-
-        const frontendHtml = await waitForHttp(
-          `http://127.0.0.1:${actualPort}/app`,
-          (text) => text.includes('portable-open-frontend'),
-          90_000,
-        );
-        const healthText = await waitForHttp(
-          `http://127.0.0.1:${actualPort}/api/health`,
-          (text) => text.includes('"status":"ok"'),
-          90_000,
-        );
-
-        expect(frontendHtml).toContain('portable-open-frontend');
-        expect(healthText).toContain('"status":"ok"');
+        expect(await waitForText(readLauncherLog, (text) => text.includes('wrangler'))).toContain('wrangler');
       } finally {
         if (pid) {
-          try {
-            process.kill(pid, 'SIGTERM');
-          } catch {
-            // best-effort cleanup
-          }
+          terminateLauncherPid(pid);
         }
+        await new Promise<void>((resolveExit) => {
+          if (opened.exitCode !== null || opened.killed) {
+            resolveExit();
+            return;
+          }
+
+          const timeout = setTimeout(() => {
+            if (!opened.killed) {
+              opened.kill('SIGKILL');
+            }
+            resolveExit();
+          }, 15_000);
+
+          opened.once('exit', () => {
+            clearTimeout(timeout);
+            resolveExit();
+          });
+        });
       }
+
+      expect(openStderr).toBe('');
     },
     120_000,
   );

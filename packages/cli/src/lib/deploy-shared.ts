@@ -46,6 +46,19 @@ const EDGEBASE_ASSETS_DIRECTORY = '.edgebase/runtime/server/app-assets';
 const LEGACY_EDGEBASE_ASSETS_DIRECTORY = '.edgebase/runtime/server/admin-build';
 const EDGEBASE_ASSETS_BINDING = 'ASSETS';
 
+function readAssetsDirectory(block: string): string | null {
+  const match = block.match(/^\s*directory\s*=\s*"([^"\n]*)"\s*$/m);
+  return match?.[1] ?? null;
+}
+
+function normalizeAssetsDirectory(directory: string | null): string | null {
+  if (!directory) return null;
+  return directory
+    .replace(/\\\\/g, '/')
+    .replace(/\\/g, '/')
+    .replace(/\/+/g, '/');
+}
+
 function hasAssetsBlock(wranglerToml: string): boolean {
   return /\n?\[assets\][\s\S]*?(?=\n\[\[|\n\[|$)/.test(wranglerToml);
 }
@@ -58,16 +71,17 @@ function normalizeAssetsRunWorkerFirst(
   const normalized = wranglerToml.replace(
     /\n?\[assets\][\s\S]*?(?=\n\[\[|\n\[|$)/g,
     (block) => {
+      const normalizedDirectory = normalizeAssetsDirectory(readAssetsDirectory(block));
       const isEdgeBaseAssetsBlock =
         /^\s*binding\s*=\s*"ASSETS"\s*$/m.test(block) ||
-        /^\s*directory\s*=\s*".*\.edgebase\/runtime\/server\/app-assets"\s*$/m.test(block) ||
-        new RegExp(`^\\s*directory\\s*=\\s*".*${LEGACY_EDGEBASE_ASSETS_DIRECTORY.replace(/\./g, '\\.').replace(/\//g, '\\/')}"\\s*$`, 'm').test(block);
+        normalizedDirectory === EDGEBASE_ASSETS_DIRECTORY ||
+        normalizedDirectory === LEGACY_EDGEBASE_ASSETS_DIRECTORY;
 
       if (!isEdgeBaseAssetsBlock) return block;
       let rewritten = block;
-      if (/^\s*directory\s*=\s*".*\.edgebase\/runtime\/server\/admin-build"\s*$/m.test(rewritten)) {
+      if (normalizedDirectory === LEGACY_EDGEBASE_ASSETS_DIRECTORY) {
         rewritten = rewritten.replace(
-          /^\s*directory\s*=\s*".*\.edgebase\/runtime\/server\/admin-build"\s*$/m,
+          /^\s*directory\s*=\s*"([^"\n]*)"\s*$/m,
           `directory = "${EDGEBASE_ASSETS_DIRECTORY}"`,
         );
         changed = true;

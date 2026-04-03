@@ -416,7 +416,11 @@ function materializeNodeModulesEntry(
     if (!existsSync(resolvedSourceTarget)) {
       rmSync(targetEntry, { recursive: true, force: true });
       mkdirSync(dirname(targetEntry), { recursive: true });
-      symlinkSync(sourceLinkTarget, targetEntry, process.platform === 'win32' ? 'junction' : 'dir');
+      symlinkSync(
+        buildDirectoryLinkTarget(targetEntry, resolvedSourceTarget),
+        targetEntry,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
       return;
     }
 
@@ -454,7 +458,7 @@ function materializeNodeModulesEntry(
     rmSync(targetEntry, { recursive: true, force: true });
     mkdirSync(dirname(targetEntry), { recursive: true });
     symlinkSync(
-      relative(dirname(targetEntry), materialization.targetPath),
+      buildDirectoryLinkTarget(targetEntry, materialization.targetPath),
       targetEntry,
       process.platform === 'win32' ? 'junction' : 'dir',
     );
@@ -554,7 +558,19 @@ function normalizeCrossPlatformPath(pathValue: string): string {
   return normalized;
 }
 
+function buildDirectoryLinkTarget(linkPath: string, destinationPath: string, platform = process.platform): string {
+  if (platform === 'win32') {
+    if (/^[A-Za-z]:[\\/]/.test(destinationPath)) {
+      return destinationPath.replace(/\//g, '\\');
+    }
+    return resolve(destinationPath);
+  }
+
+  return relative(dirname(linkPath), destinationPath);
+}
+
 export const __runtimeScaffoldTestUtils = {
+  buildDirectoryLinkTarget,
   findContainingRoot,
   getNodeModulesMaterialization,
   getRelativePathSegmentsWithinRoot,

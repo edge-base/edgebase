@@ -121,6 +121,31 @@ function readDockerLogs(containerName) {
   }
 }
 
+function readDockerInspect(containerName) {
+  try {
+    return execFileSync(
+      'docker',
+      ['inspect', '--format', '{{.State.Status}} {{.State.ExitCode}}', containerName],
+      {
+        encoding: 'utf-8',
+        timeout: 20_000,
+      },
+    ).trim();
+  } catch (error) {
+    const stdout = typeof error?.stdout === 'string'
+      ? error.stdout
+      : Buffer.isBuffer(error?.stdout)
+        ? error.stdout.toString('utf-8')
+        : '';
+    const stderr = typeof error?.stderr === 'string'
+      ? error.stderr
+      : Buffer.isBuffer(error?.stderr)
+        ? error.stderr.toString('utf-8')
+        : '';
+    return [stdout, stderr].filter(Boolean).join('\n').trim();
+  }
+}
+
 async function main() {
   const skipIfUnavailable = process.argv.includes('--skip-if-unavailable')
     || process.env.EDGEBASE_SKIP_DOCKER_SMOKE_IF_UNAVAILABLE === '1';
@@ -221,10 +246,9 @@ export default defineConfig({
   }
 
   log('Starting Docker container...');
-  run('docker', [
+  const containerId = run('docker', [
     'run',
     '-d',
-    '--rm',
     '--name',
     containerName,
     '-p',
@@ -235,7 +259,8 @@ export default defineConfig({
   ], {
     capture: true,
     timeout: 60_000,
-  });
+  }).trim();
+  ensure(containerId.length > 0, 'Docker run did not return a container id.');
 
   const healthUrl = `http://127.0.0.1:${port}/api/health`;
   const frontendUrl = `http://127.0.0.1:${port}/`;
@@ -250,9 +275,10 @@ export default defineConfig({
     });
   } catch (error) {
     const logs = readDockerLogs(containerName);
+    const inspect = readDockerInspect(containerName);
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Docker smoke failed before the container served traffic.\n${message}${logs ? `\n\nContainer logs:\n${logs}` : ''}`,
+      `Docker smoke failed before the container served traffic.\n${message}${inspect ? `\n\nContainer state:\n${inspect}` : ''}${logs ? `\n\nContainer logs:\n${logs}` : ''}`,
     );
   }
 
