@@ -84,6 +84,10 @@ function hasBundledPnpmPackage(runtimeNodeModulesDir: string, entryPrefix: strin
   ));
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+}
+
 function resolveExpectedPortableMiniflareVersion(): string {
   const wranglerManifest = testRequire.resolve('wrangler/package.json', { paths: [packageDir] });
   const wranglerRequire = createRequire(wranglerManifest);
@@ -218,7 +222,7 @@ export default defineConfig({
       ),
     ).toBe(true);
     expect(bundledPortableMiniflareEntries).toEqual([
-      expect.stringMatching(new RegExp(`^miniflare@${expectedPortableMiniflareVersion.replace(/\./g, '\\.')}`)),
+      expect.stringMatching(new RegExp(`^miniflare@${escapeRegExp(expectedPortableMiniflareVersion)}`)),
     ]);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'esbuild@', ['esbuild'])).toBe(true);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'unenv@', ['unenv'])).toBe(true);
