@@ -293,6 +293,8 @@ export default defineConfig({
     const dockerNodeModules = join(dockerBundle.outputDir, '.edgebase', 'runtime', 'server', 'node_modules');
 
     expect(hasBundledPnpmPackage(portableNodeModules, 'wrangler@', ['wrangler'])).toBe(true);
+    expect(hasBundledPnpmPackage(portableNodeModules, 'esbuild@', ['esbuild'])).toBe(true);
+    expect(hasBundledPnpmPackage(portableNodeModules, 'unenv@', ['unenv'])).toBe(true);
     expect(hasBundledPnpmPackage(portableNodeModules, 'vitest@', ['vitest'])).toBe(false);
     expect(hasBundledPnpmPackage(dockerNodeModules, 'wrangler@', ['wrangler'])).toBe(false);
     expect(hasBundledPnpmPackage(dockerNodeModules, 'vitest@', ['vitest'])).toBe(false);

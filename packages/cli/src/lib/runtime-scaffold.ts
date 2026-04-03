@@ -586,7 +586,10 @@ function resolveRuntimeDependencySelection(
     selected.add('wrangler');
   }
 
-  return Array.from(selected);
+  return expandDependencySelection(
+    Array.from(selected),
+    getRuntimeNodeModulesCandidates(projectDir, 'copy'),
+  );
 }
 
 function getServerPackageManifestCandidates(projectDir: string): string[] {
@@ -603,16 +606,65 @@ function readPackageDependencyNamesFromCandidates(candidates: string[]): string[
     if (!existsSync(candidate)) continue;
 
     try {
-      const packageJson = JSON.parse(readFileSync(candidate, 'utf-8')) as {
-        dependencies?: Record<string, string>;
-      };
-      return Object.keys(packageJson.dependencies ?? {});
+      return readPackageDependencyNames(candidate);
     } catch {
       continue;
     }
   }
 
   return null;
+}
+
+function expandDependencySelection(
+  initialPackages: string[],
+  candidateRoots: string[],
+): string[] {
+  const expanded = new Set<string>();
+  const queue = [...initialPackages];
+
+  while (queue.length > 0) {
+    const packageName = queue.shift();
+    if (!packageName || expanded.has(packageName)) {
+      continue;
+    }
+
+    expanded.add(packageName);
+    const manifestPath = resolvePackageManifestPath(packageName, candidateRoots);
+    if (!manifestPath) {
+      continue;
+    }
+
+    for (const dependencyName of readPackageDependencyNames(manifestPath)) {
+      if (!expanded.has(dependencyName)) {
+        queue.push(dependencyName);
+      }
+    }
+  }
+
+  return Array.from(expanded);
+}
+
+function resolvePackageManifestPath(packageName: string, candidateRoots: string[]): string | null {
+  const packageSegments = packageName.split('/');
+  for (const candidateRoot of dedupeCandidates(candidateRoots)) {
+    const manifestPath = join(candidateRoot, ...packageSegments, 'package.json');
+    if (existsSync(manifestPath)) {
+      return manifestPath;
+    }
+  }
+
+  return null;
+}
+
+function readPackageDependencyNames(packageJsonPath: string): string[] {
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as {
+    dependencies?: Record<string, string>;
+    optionalDependencies?: Record<string, string>;
+  };
+  return [
+    ...Object.keys(packageJson.dependencies ?? {}),
+    ...Object.keys(packageJson.optionalDependencies ?? {}),
+  ];
 }
 
 function dedupeCandidates(candidates: string[]): string[] {

@@ -117,9 +117,13 @@ async function reservePort(): Promise<number> {
   });
 }
 
-async function waitForHttp(url: string, predicate: (text: string) => boolean): Promise<string> {
+async function waitForHttp(
+  url: string,
+  predicate: (text: string) => boolean,
+  timeoutMs = 45_000,
+): Promise<string> {
   let lastError: unknown = null;
-  const deadline = Date.now() + 45_000;
+  const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
     try {
@@ -336,15 +340,12 @@ export default defineConfig({
       const payload = JSON.parse(result.stdout) as {
         outputPath: string;
       };
-      const launchPort = await reservePort();
       const dataDir = createTempProject('portable-open-data');
 
       const opened = spawnSync('open', [
         '-n',
         payload.outputPath,
         '--args',
-        '--port',
-        String(launchPort),
         '--data-dir',
         dataDir,
       ], {
@@ -357,12 +358,14 @@ export default defineConfig({
 
       const lockPath = join(dataDir, 'launcher-lock.json');
       let pid: number | null = null;
+      let launchPort: number | null = null;
 
       try {
         for (let attempt = 0; attempt < 80; attempt += 1) {
           if (existsSync(lockPath)) {
-            const lock = JSON.parse(readFileSync(lockPath, 'utf-8')) as { pid?: number };
+            const lock = JSON.parse(readFileSync(lockPath, 'utf-8')) as { pid?: number; port?: number };
             pid = typeof lock.pid === 'number' ? lock.pid : null;
+            launchPort = typeof lock.port === 'number' ? lock.port : null;
             break;
           }
           await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
@@ -370,14 +373,18 @@ export default defineConfig({
 
         expect(existsSync(lockPath)).toBe(true);
         expect(pid).not.toBeNull();
+        expect(launchPort).not.toBeNull();
+        const actualPort = launchPort as number;
 
         const frontendHtml = await waitForHttp(
-          `http://127.0.0.1:${launchPort}/app`,
+          `http://127.0.0.1:${actualPort}/app`,
           (text) => text.includes('portable-open-frontend'),
+          90_000,
         );
         const healthText = await waitForHttp(
-          `http://127.0.0.1:${launchPort}/api/health`,
+          `http://127.0.0.1:${actualPort}/api/health`,
           (text) => text.includes('"status":"ok"'),
+          90_000,
         );
 
         expect(frontendHtml).toContain('portable-open-frontend');

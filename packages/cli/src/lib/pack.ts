@@ -567,7 +567,7 @@ function finalizePackWrangler(projectDir: string, outputDir: string): void {
 
 function buildLauncherSource(manifest: EdgeBasePackManifest): string {
   return `#!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
@@ -849,9 +849,11 @@ const persistDir = options.persistTo
   : join(dataRoot, DEFAULT_STATE_DIR);
 const statePath = join(dataRoot, 'launcher-state.json');
 const lockPath = join(dataRoot, 'launcher-lock.json');
+const logPath = join(dataRoot, 'launcher.log');
 mkdirSync(dataRoot, { recursive: true });
 mkdirSync(workDir, { recursive: true });
 mkdirSync(persistDir, { recursive: true });
+const logStream = createWriteStream(logPath, { flags: 'a' });
 
 const envFileCandidates = [
   join(process.cwd(), '.env'),
@@ -937,13 +939,26 @@ saveJson(lockPath, {
 
 const child = spawn(process.execPath, wranglerArgs, {
   cwd: workDir,
-  stdio: 'inherit',
+  stdio: ['ignore', 'pipe', 'pipe'],
   env: {
     ...process.env,
     ...mergedEnv,
   },
   detached: process.platform !== 'win32',
 });
+
+const relayOutput = (stream, writer) => {
+  if (!stream) return;
+  stream.on('data', (chunk) => {
+    if (writer?.writable) {
+      writer.write(chunk);
+    }
+    logStream.write(chunk);
+  });
+};
+
+relayOutput(child.stdout, process.stdout);
+relayOutput(child.stderr, process.stderr);
 
 const cleanupLock = () => {
   const current = readJson(lockPath);
@@ -966,8 +981,17 @@ const forward = (signal) => {
 process.on('SIGINT', () => forward('SIGINT'));
 process.on('SIGTERM', () => forward('SIGTERM'));
 
+child.on('error', (error) => {
+  cleanupLock();
+  logStream.write(String(error.stack || error) + '\\n');
+  logStream.end();
+  process.stderr.write(String(error.stack || error) + '\\n');
+  process.exit(1);
+});
+
 child.on('exit', (code, signal) => {
   cleanupLock();
+  logStream.end();
   if (signal) {
     process.exit(1);
     return;

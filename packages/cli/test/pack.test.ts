@@ -197,6 +197,8 @@ export default defineConfig({
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, '@asteasolutions+zod-to-openapi@', ['@asteasolutions', 'zod-to-openapi'])).toBe(true);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'pg-protocol@', ['pg-protocol'])).toBe(true);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'wrangler@', ['wrangler'])).toBe(true);
+    expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'esbuild@', ['esbuild'])).toBe(true);
+    expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'unenv@', ['unenv'])).toBe(true);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'vitest@', ['vitest'])).toBe(false);
     expect(existsSync(join(runtimeNodeModulesDir, '@edge-base', 'core', 'package.json'))).toBe(true);
     expect(lstatSync(runtimeNodeModulesDir).isSymbolicLink()).toBe(false);

@@ -100,6 +100,27 @@ function cleanup() {
   }
 }
 
+function readDockerLogs(containerName) {
+  try {
+    return execFileSync('docker', ['logs', containerName], {
+      encoding: 'utf-8',
+      timeout: 20_000,
+    }).trim();
+  } catch (error) {
+    const stdout = typeof error?.stdout === 'string'
+      ? error.stdout
+      : Buffer.isBuffer(error?.stdout)
+        ? error.stdout.toString('utf-8')
+        : '';
+    const stderr = typeof error?.stderr === 'string'
+      ? error.stderr
+      : Buffer.isBuffer(error?.stderr)
+        ? error.stderr.toString('utf-8')
+        : '';
+    return [stdout, stderr].filter(Boolean).join('\n').trim();
+  }
+}
+
 async function main() {
   const skipIfUnavailable = process.argv.includes('--skip-if-unavailable')
     || process.env.EDGEBASE_SKIP_DOCKER_SMOKE_IF_UNAVAILABLE === '1';
@@ -219,12 +240,21 @@ export default defineConfig({
   const healthUrl = `http://127.0.0.1:${port}/api/health`;
   const frontendUrl = `http://127.0.0.1:${port}/`;
 
-  await waitForHttp(healthUrl, async (response) => response.ok);
-  const frontendResponse = await waitForHttp(frontendUrl, async (response) => {
-    if (!response.ok) return false;
-    const body = await response.text();
-    return body.includes('docker smoke frontend');
-  });
+  let frontendResponse;
+  try {
+    await waitForHttp(healthUrl, async (response) => response.ok);
+    frontendResponse = await waitForHttp(frontendUrl, async (response) => {
+      if (!response.ok) return false;
+      const body = await response.text();
+      return body.includes('docker smoke frontend');
+    });
+  } catch (error) {
+    const logs = readDockerLogs(containerName);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Docker smoke failed before the container served traffic.\n${message}${logs ? `\n\nContainer logs:\n${logs}` : ''}`,
+    );
+  }
 
   ensure(frontendResponse.ok, 'Frontend route did not return a successful response.');
   log(`Docker smoke passed: ${healthUrl} and ${frontendUrl}`);
