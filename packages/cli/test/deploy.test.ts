@@ -982,7 +982,7 @@ describe('generateTempWranglerToml', () => {
     expect(result).not.toBeNull();
     const content = readFileSync(result!, 'utf-8');
     expect(content).toContain('[assets]');
-    expect(content).toContain('directory = ".edgebase/runtime/server/admin-build"');
+    expect(content).toContain('directory = ".edgebase/runtime/server/app-assets"');
     expect(content).toContain('binding = "ASSETS"');
     expect(content).toContain('run_worker_first = true');
 
@@ -1024,6 +1024,7 @@ describe('generateTempWranglerToml', () => {
     expect(result).not.toBeNull();
     const content = readFileSync(result!, 'utf-8');
     expect(content).toContain('[assets]');
+    expect(content).toContain('directory = ".edgebase/runtime/server/app-assets"');
     expect(content).toContain('run_worker_first = true');
 
     rmSync(result!);
@@ -1047,6 +1048,7 @@ describe('generateTempWranglerToml', () => {
 
     expect(result).not.toBeNull();
     const content = readFileSync(result!, 'utf-8');
+    expect(content).toContain('directory = ".edgebase/runtime/server/app-assets"');
     expect(content).toContain('run_worker_first = true');
     expect(content).not.toContain('run_worker_first = false');
 

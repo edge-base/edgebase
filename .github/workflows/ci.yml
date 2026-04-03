@@ -135,6 +135,29 @@ jobs:
       - name: Test React Native SDK package
         run: pnpm --dir packages/sdk/react-native test
 
+  docker-smoke:
+    name: Docker Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Docker Smoke
+        run: pnpm --dir packages/cli run test:docker-smoke
+
   sdk-python:
     name: Python SDK Unit (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

@@ -35,6 +35,7 @@ export function buildBundleWithEsbuild(
   entryPoint: string,
   outfile: string,
   cwd: string,
+  options?: { external?: string[] },
 ): void {
   buildSync({
     absWorkingDir: cwd,
@@ -44,7 +45,7 @@ export function buildBundleWithEsbuild(
     format: 'esm',
     platform: 'node',
     target: 'esnext',
-    external: ['node:*'],
+    external: options?.external ?? ['node:*'],
     logLevel: 'silent',
   });
 }

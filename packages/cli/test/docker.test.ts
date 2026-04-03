@@ -2,7 +2,7 @@
  * Tests for CLI docker command — findProjectRoot, argument construction.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { _internals } from '../src/commands/docker.js';
@@ -59,6 +59,41 @@ describe('Docker build argument construction', () => {
     const tag = 'myorg/edgebase:v1.0';
     const args = ['build', '-t', tag, '.'];
     expect(args[2]).toBe('myorg/edgebase:v1.0');
+  });
+
+  it('creates a minimal docker build context with the bundled app payload', () => {
+    writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:20\nCOPY .edgebase/targets/docker-app/ ./\n');
+    writeFileSync(join(tmpDir, '.dockerignore'), 'node_modules\n');
+    const bundleDir = join(tmpDir, '.edgebase', 'targets', 'docker-app');
+    mkdirSync(join(bundleDir, '.edgebase', 'runtime', 'server', 'node_modules', '.pnpm', 'hono@1.0.0', 'node_modules'), {
+      recursive: true,
+    });
+    writeFileSync(join(bundleDir, 'edgebase-app.json'), '{}\n');
+    writeFileSync(join(bundleDir, '.edgebase', 'runtime', 'server', 'node_modules', '.pnpm', 'hono@1.0.0', 'node_modules', 'index.js'), 'export {};\n');
+    symlinkSync('./.pnpm/hono@1.0.0/node_modules', join(bundleDir, '.edgebase', 'runtime', 'server', 'node_modules', 'hono'));
+    mkdirSync(join(tmpDir, 'node_modules'), { recursive: true });
+    writeFileSync(join(tmpDir, 'node_modules', 'ignored.txt'), 'ignore me\n');
+
+    const contextDir = _internals.prepareDockerBuildContext(tmpDir, bundleDir);
+
+    expect(existsSync(join(contextDir, 'Dockerfile'))).toBe(true);
+    expect(readFileSync(join(contextDir, 'Dockerfile'), 'utf-8')).toContain('COPY .edgebase/targets/docker-app/ ./');
+    expect(readFileSync(join(contextDir, '.dockerignore'), 'utf-8')).toContain('node_modules');
+    expect(existsSync(join(contextDir, '.edgebase', 'targets', 'docker-app', 'edgebase-app.json'))).toBe(true);
+    expect(existsSync(join(contextDir, '.edgebase', 'targets', 'docker-app', '.edgebase', 'runtime', 'server', 'node_modules', 'hono'))).toBe(true);
+    expect(existsSync(join(contextDir, 'node_modules'))).toBe(false);
+  });
+
+  it('detects a responsive docker daemon via docker info', () => {
+    const result = _internals.isDockerDaemonResponsive(() => Buffer.from('"27.0.0"\n'));
+    expect(result).toBe(true);
+  });
+
+  it('treats docker daemon probe failures as unavailable', () => {
+    const result = _internals.isDockerDaemonResponsive(() => {
+      throw new Error('daemon not responding');
+    });
+    expect(result).toBe(false);
   });
 });
 

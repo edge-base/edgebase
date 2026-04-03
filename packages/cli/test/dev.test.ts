@@ -139,6 +139,40 @@ describe('Runtime config scaffold', () => {
     expect(registry).toContain('rebuildCompiledRoutes()');
   });
 
+  it('builds merged app assets with admin under /admin and frontend at the root mount path', () => {
+    mkdirSync(join(tmpDir, 'web', 'dist', 'assets'), { recursive: true });
+    writeFileSync(join(tmpDir, 'web', 'dist', 'index.html'), '<!doctype html><title>app</title>');
+    writeFileSync(join(tmpDir, 'web', 'dist', 'assets', 'main.js'), 'console.log("app");');
+
+    ensureRuntimeScaffold(tmpDir, {
+      frontend: {
+        directory: './web/dist',
+        spaFallback: true,
+      },
+    });
+
+    expect(existsSync(join(tmpDir, '.edgebase', 'runtime', 'server', 'app-assets', 'index.html'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.edgebase', 'runtime', 'server', 'app-assets', 'assets', 'main.js'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.edgebase', 'runtime', 'server', 'app-assets', 'admin', 'index.html'))).toBe(true);
+  });
+
+  it('copies frontend bundles into a custom mount path inside the merged assets directory', () => {
+    mkdirSync(join(tmpDir, 'web', 'dist', 'assets'), { recursive: true });
+    writeFileSync(join(tmpDir, 'web', 'dist', 'index.html'), '<!doctype html><title>app</title>');
+    writeFileSync(join(tmpDir, 'web', 'dist', 'assets', 'main.js'), 'console.log("app");');
+
+    ensureRuntimeScaffold(tmpDir, {
+      frontend: {
+        directory: './web/dist',
+        mountPath: '/app',
+      },
+    });
+
+    expect(existsSync(join(tmpDir, '.edgebase', 'runtime', 'server', 'app-assets', 'app', 'index.html'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.edgebase', 'runtime', 'server', 'app-assets', 'app', 'assets', 'main.js'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.edgebase', 'runtime', 'server', 'app-assets', 'admin', 'index.html'))).toBe(true);
+  });
+
   it('writes an ESM-resolvable @edge-base/shared shim for config evaluation', () => {
     ensureProjectSharedPackageLink(tmpDir);
 

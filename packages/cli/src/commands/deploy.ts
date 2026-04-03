@@ -78,11 +78,9 @@ import {
   resolveProjectWorkerUrl,
 } from '../lib/project-runtime.js';
 import {
-  ensureRuntimeScaffold,
-  getRuntimeServerSrcDir,
   INTERNAL_D1_BINDINGS,
-  writeRuntimeConfigShim,
 } from '../lib/runtime-scaffold.js';
+import { createAppBundle } from '../lib/app-bundle.js';
 import {
   ensureBootstrapAdmin,
   normalizeAdminEmail,
@@ -1628,18 +1626,16 @@ export const deployCommand = new Command('deploy')
     // ─── Cloudflare Authentication Gate ───
     const cfAuth = await ensureCloudflareAuth(projectDir, isTTY);
     ensureWranglerToml(projectDir, cfAuth.accountId);
-    ensureRuntimeScaffold(projectDir);
-    writeRuntimeConfigShim(projectDir, releaseVars);
     runProjectPostScaffoldHook(projectDir);
+    const deployBundle = createAppBundle(projectDir, {
+      outputDir: join('.edgebase', 'targets', 'deploy-app'),
+      overwrite: true,
+      injectedEnv: releaseVars,
+    });
+    const deployRuntimeDir = deployBundle.outputDir;
+    const deployWranglerPath = join(deployRuntimeDir, 'wrangler.toml');
     const previousManifest = readCloudflareDeployManifest(projectDir);
     console.log();
-
-    const serverSrcDir = getRuntimeServerSrcDir(projectDir);
-    const registryPath = join(serverSrcDir, '_functions-registry.ts');
-    generateFunctionRegistry(functions, registryPath, {
-      configImportPath: './generated-config.js',
-      functionsImportBasePath: relative(dirname(registryPath), join(projectDir, 'functions')).replace(/\\/g, '/'),
-    });
 
     if (functions.length > 0) {
       console.log(
@@ -1708,7 +1704,7 @@ export const deployCommand = new Command('deploy')
     manifestResources.push(...provisionedBindings.map(toManifestResourceRecord));
 
     // Generate temp wrangler.toml with bindings + cron triggers
-    const wranglerPath = join(projectDir, 'wrangler.toml');
+    const wranglerPath = deployWranglerPath;
     if (
       existsSync(wranglerPath) &&
       (provisionedBindings.length > 0 || cronSchedules.length > 0 || rateLimitBindings.length > 0)
@@ -1734,7 +1730,7 @@ export const deployCommand = new Command('deploy')
 
     // Generate temp wrangler.toml for cron triggers even if no resource bindings
     if (!tempWranglerPath && (cronSchedules.length > 0 || rateLimitBindings.length > 0)) {
-      const cronOnlyWranglerPath = join(projectDir, 'wrangler.toml');
+      const cronOnlyWranglerPath = deployWranglerPath;
       if (existsSync(cronOnlyWranglerPath)) {
         tempWranglerPath = generateTempWranglerToml(
           cronOnlyWranglerPath,
@@ -1787,7 +1783,7 @@ export const deployCommand = new Command('deploy')
         );
         if (turnstileResult) {
           // §28: Inject siteKey as CAPTCHA_SITE_KEY wrangler var (independent from bundled app config)
-          const targetToml = tempWranglerPath ?? join(projectDir, 'wrangler.toml');
+          const targetToml = tempWranglerPath ?? deployWranglerPath;
           injectCaptchaSiteKey(targetToml, turnstileResult.siteKey);
 
           if (turnstileResult.managed && turnstileResult.widgetName) {
@@ -1827,7 +1823,7 @@ export const deployCommand = new Command('deploy')
         output: string;
       }>((resolveDeploy, rejectDeploy) => {
         const wrangler = spawn(wranglerCommand(), wranglerArgs(deployArgs), {
-          cwd: projectDir,
+          cwd: deployRuntimeDir,
           stdio: ['inherit', 'pipe', 'pipe'],
         });
         let capturedDeployOutput = '';

@@ -81,6 +81,17 @@ npm create edgebase@latest <dir> -- --open
 
 Scaffold a new project and optionally auto-start local development. Pass `--open` if you want the admin dashboard opened in your browser while the dev server starts. `create-edgebase` installs the local CLI dependencies for you before handing the project back.
 
+### `build-app`
+
+```bash
+npx edgebase build-app
+npx edgebase build-app --output ./dist/edgebase-app
+```
+
+Build a self-contained app bundle that no longer imports the source project's `edgebase.config.ts` or `functions/` tree at runtime.
+
+The bundle includes the runtime scaffold, bundled config modules, bundled function entrypoints, admin assets, optional frontend assets, `wrangler.toml`, and `edgebase-app.json`.
+
 ### `dev`
 
 ```bash
@@ -93,6 +104,10 @@ npx edgebase dev --open
 
 Boot the local runtime with config and function hot reload. The default local surface includes the REST API plus the database subscription WebSocket endpoint at `/api/db/subscribe`.
 
+If `edgebase.config.ts` defines `frontend.directory`, `dev` also serves that prebuilt bundle from the same local origin. Build the frontend separately before starting the runtime.
+
+`dev` now runs from a self-contained bundle staged under `.edgebase/targets/dev-app`, so local execution no longer depends on Wrangler importing your source tree directly at runtime.
+
 ### `deploy`
 
 ```bash
@@ -104,6 +119,10 @@ npx edgebase deploy --if-destructive reject
 Validate config, upload release secrets when `.env.release` exists, provision managed Cloudflare resources, and deploy the Worker.
 
 `deploy` also writes `.edgebase/cloudflare-deploy-manifest.json`, which later destroy and cleanup flows use to target the same project-scoped Cloudflare resources.
+
+Before invoking Wrangler, `deploy` now builds a fresh app bundle under `.edgebase/targets/deploy-app` and deploys that self-contained runtime instead of reading the source project tree directly.
+
+If `frontend.directory` is configured, `deploy` packages that prebuilt static bundle into the Worker assets upload. Reserved routes such as `/api/*`, `/admin/*`, and `/openapi.json` still win before the frontend bundle.
 
 In `--json --non-interactive` mode, interactive deploy branches surface as structured issues instead of opening prompts. Destructive schema confirmations return `needs_input`, and Cloudflare auth can return `needs_user_action` with browser-login instructions.
 
@@ -301,6 +320,78 @@ npx edgebase docker run --bootstrap-admin-email admin@example.com
 ```
 
 Build and run the self-hosted Docker image.
+
+When `frontend.directory` is configured, `docker build` copies that prebuilt bundle into the image and `docker run` serves it on the same origin as the API.
+
+`docker build` first creates a portable app bundle under `.edgebase/targets/docker-app`, then builds the image from that bundle-centric runtime layout.
+
+### `pack`
+
+```bash
+npx edgebase pack
+npx edgebase pack --output ./dist/my-app
+npx edgebase pack --format dir
+npx edgebase pack --format portable
+npx edgebase pack --format archive
+```
+
+Create a runnable artifact from the same self-contained app bundle produced by `build-app`.
+
+Use `--format portable` to wrap that runnable bundle for the current platform:
+
+- macOS: `.app` bundle with an embedded Node runtime
+- Linux and Windows: self-contained portable directory with an embedded Node runtime and platform wrapper script
+
+Use `--format archive` when you want a single distributable file built from that portable wrapper:
+
+- macOS and Windows: `.zip`
+- Linux: `.tar.gz`
+
+If `frontend.directory` is configured, the packed artifact also includes the merged runtime assets for that prebuilt bundle. Backend-only projects still pack correctly without any frontend configured.
+
+`pack` also copies the runtime dependencies needed by the generated bundle, rewrites the artifact `wrangler.toml` for local execution, and emits launcher entrypoints:
+
+- `launcher.mjs` for the cross-platform Node launcher
+- `run.sh` for Unix-like shells
+- `run.cmd` for Windows shells
+
+These launchers bind to `127.0.0.1` by default, write `.dev.vars` from the current environment plus optional `.env`/`.env.local` files, and persist local state in an app-specific data directory unless you override it with `--data-dir` or `--persist-to`.
+
+For packed launchers, the default runtime model is now:
+
+- stable high local port derived from the app name instead of always using `8787`
+- single-instance attach behavior by default
+- OS app-data storage by default
+  macOS: `~/Library/Application Support/<app>`
+  Linux: `${XDG_DATA_HOME:-~/.local/share}/<app>`
+  Windows: `%LOCALAPPDATA%\\<app>`
+- explicit overrides via `--port`, `--data-dir`, and `--persist-to`
+
+Archive mode is the current single-file distribution path. Native `.exe` and `AppImage` launcher binaries are still future work.
+
+## Static Frontend Config
+
+```ts title="edgebase.config.ts"
+import { defineConfig } from '@edge-base/shared';
+
+export default defineConfig({
+  frontend: {
+    directory: './web/dist',
+    mountPath: '/',
+    spaFallback: true,
+  },
+});
+```
+
+Use `frontend` when you want EdgeBase to serve a prebuilt static app.
+
+| Field | Meaning |
+| --- | --- |
+| `directory` | Required build output directory to serve |
+| `mountPath` | Optional URL prefix for the bundle, default `/` |
+| `spaFallback` | Optional SPA navigation fallback to `index.html` for HTML requests |
+
+EdgeBase does not run your frontend build command. Build the bundle first, then run `dev`, `deploy`, or `docker build`.
 
 ### `webhook-test`
 

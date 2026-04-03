@@ -128,6 +128,35 @@ npx edgebase dev
 | Data | Local filesystem |
 | Requirements | Node.js 20.19+ (24.x recommended) |
 
+## Static Frontend Bundles
+
+EdgeBase can serve a prebuilt static frontend bundle on the same origin as your API and admin UI. Add a `frontend` block to `edgebase.config.ts` and point it at a build output directory such as `dist`, `build`, or `.vercel/output/static`.
+
+```ts title="edgebase.config.ts"
+import { defineConfig } from '@edge-base/shared';
+
+export default defineConfig({
+  frontend: {
+    directory: './web/dist',
+    mountPath: '/',
+    spaFallback: true,
+  },
+});
+```
+
+`npx edgebase dev`, `npx edgebase deploy`, `npx edgebase docker build`, and `npx edgebase pack` all consume the same prebuilt bundle. EdgeBase does not run your frontend build for you, so build that directory before you start the runtime, build the container image, or create a packed artifact.
+
+Route precedence stays fixed:
+
+- `/api/*` stays reserved for the EdgeBase API
+- `/admin` and `/admin/*` stay reserved for the admin dashboard
+- `/openapi.json` stays reserved for the generated OpenAPI document
+- the frontend bundle serves everything else from `mountPath` (default `/`)
+
+With `spaFallback: true`, only HTML navigation requests without a file extension fall back to `index.html`. Explicit asset requests such as `/assets/app.js` still return `404` when missing instead of silently loading the app shell.
+
+If your frontend already includes a valid web app manifest and service worker, this same-origin model also keeps the app installable as a PWA across cloud deploys, Docker, direct local dev, and packed local launchers. Packed launchers use a stable high localhost port derived from the app name, then reuse that port across restarts unless you override it. For single-file handoff, `npx edgebase pack --format archive` wraps the current-platform portable launcher into a `.zip` on macOS/Windows or `.tar.gz` on Linux.
+
 ## Comparison
 
 | | Edge | Docker | Direct |

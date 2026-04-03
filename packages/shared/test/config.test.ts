@@ -225,8 +225,50 @@ describe('defineConfig', () => {
     expect(config.trustSelfHostedProxy).toBe(true);
   });
 
+  it('should accept frontend config for a built static bundle', () => {
+    const config = defineConfig({
+      frontend: {
+        directory: './web/dist',
+        mountPath: '/app',
+        spaFallback: true,
+      },
+    });
+
+    expect(config.frontend).toEqual({
+      directory: './web/dist',
+      mountPath: '/app',
+      spaFallback: true,
+    });
+  });
+
   it('should reject non-boolean trustSelfHostedProxy values', () => {
     expect(() => defineConfig({ trustSelfHostedProxy: 'yes' as never })).toThrow(/trustSelfHostedProxy must be a boolean/);
+  });
+
+  it('should reject empty frontend.directory values', () => {
+    expect(() => defineConfig({
+      frontend: {
+        directory: '   ',
+      },
+    })).toThrow(/frontend\.directory must be a non-empty string/);
+  });
+
+  it('should reject frontend.mountPath values without a leading slash', () => {
+    expect(() => defineConfig({
+      frontend: {
+        directory: './web/dist',
+        mountPath: 'app',
+      },
+    })).toThrow(/frontend\.mountPath must start with "\/"/);
+  });
+
+  it('should reject non-boolean frontend.spaFallback values', () => {
+    expect(() => defineConfig({
+      frontend: {
+        directory: './web/dist',
+        spaFallback: 'yes' as never,
+      },
+    })).toThrow(/frontend\.spaFallback must be a boolean/);
   });
 
   it('should reject removed rules aliases', () => {

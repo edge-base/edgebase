@@ -944,6 +944,7 @@ export interface RoomSender {
   userId: string;
   connectionId: string;
   role?: string;
+  auth?: AuthContext;
 }
 
 /** DB table proxy available inside Room handlers via ctx.admin.db(). */
@@ -993,6 +994,10 @@ export interface RoomRuntimeConfig {
  * All state mutations are server-only — clients can only read + subscribe + send().
  */
 export interface RoomServerAPI {
+  /** Room namespace (for example 'page' or 'game'). */
+  namespace: string;
+  /** Room instance id inside the namespace. */
+  roomId: string;
   /** Current shared state (visible to all clients). */
   getSharedState(): Record<string, unknown>;
   /** Mutate shared state via updater function. Delta auto-broadcast to all clients. */
@@ -1219,6 +1224,21 @@ export interface RoomHandlers {
   timers?: RoomTimerHandlers;
 }
 
+export interface FrontendConfig {
+  /** Directory containing a prebuilt static frontend bundle. */
+  directory: string;
+  /** URL mount path for the frontend bundle. Default: '/'. */
+  mountPath?: string;
+  /** Whether HTML navigation requests should fall back to index.html. Default: false. */
+  spaFallback?: boolean;
+}
+
+export function normalizeFrontendMountPath(mountPath: string | undefined): string {
+  if (!mountPath) return '/';
+  if (mountPath === '/') return '/';
+  return mountPath.endsWith('/') ? mountPath.slice(0, -1) : mountPath;
+}
+
 // ─── Top-level Config (§9) ───
 // DB blocks are keyed by namespace ('shared', 'workspace', 'user', etc.)
 // Other config is nested under named keys (auth, storage, databaseLive, rooms, ...)
@@ -1246,6 +1266,8 @@ export interface EdgeBaseConfig {
   email?: EmailConfig;
   /** SMS provider configuration for phone authentication. */
   sms?: SmsConfig;
+  /** Optional built static frontend bundle served by the EdgeBase runtime. */
+  frontend?: FrontendConfig;
   storage?: StorageConfig;
   cors?: CorsConfig;
   databaseLive?: DatabaseLiveConfig;
@@ -1884,6 +1906,26 @@ export function defineConfig(config: EdgeBaseConfig): EdgeBaseConfig {
 
   if (config.trustSelfHostedProxy !== undefined && typeof config.trustSelfHostedProxy !== 'boolean') {
     throw new Error('trustSelfHostedProxy must be a boolean.');
+  }
+
+  if (config.frontend !== undefined) {
+    if (!config.frontend || typeof config.frontend !== 'object' || Array.isArray(config.frontend)) {
+      throw new Error('frontend must be an object.');
+    }
+    if (typeof config.frontend.directory !== 'string' || config.frontend.directory.trim().length === 0) {
+      throw new Error('frontend.directory must be a non-empty string.');
+    }
+    if (config.frontend.mountPath !== undefined) {
+      if (typeof config.frontend.mountPath !== 'string' || config.frontend.mountPath.trim().length === 0) {
+        throw new Error('frontend.mountPath must be a non-empty string when provided.');
+      }
+      if (!config.frontend.mountPath.startsWith('/')) {
+        throw new Error('frontend.mountPath must start with "/".');
+      }
+    }
+    if (config.frontend.spaFallback !== undefined && typeof config.frontend.spaFallback !== 'boolean') {
+      throw new Error('frontend.spaFallback must be a boolean.');
+    }
   }
 
   if (config.serviceKeys?.keys?.length) {

@@ -1,8 +1,10 @@
 import {
+  copyFileSync,
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
@@ -10,8 +12,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { normalizeFrontendMountPath, type FrontendConfigLike } from './frontend-config.js';
 import { buildManagedD1DatabaseName } from './managed-resource-names.js';
 import { deriveProjectSlug, INTERNAL_D1_BINDINGS } from './project-runtime.js';
 import { resolveWranglerTool } from './wrangler.js';
@@ -26,8 +29,21 @@ const MONOREPO_ADMIN_BUILD_SOURCES = [
 const CLI_NODE_MODULES_SOURCE = resolve(__dirname, '../../node_modules');
 const WORKSPACE_NODE_MODULES_SOURCE = resolve(WORKSPACE_ROOT, 'node_modules');
 const SERVER_NODE_MODULES_SOURCE = resolve(__dirname, '../../../server/node_modules');
+const MONOREPO_SERVER_PACKAGE_MANIFEST_SOURCE = resolve(__dirname, '../../../server/package.json');
 const MONOREPO_SHARED_SOURCE = resolve(__dirname, '../../../shared');
+const EDGEBASE_ASSETS_DIRNAME = 'app-assets';
 export { deriveProjectSlug, INTERNAL_D1_BINDINGS } from './project-runtime.js';
+
+export type RuntimeDependencyProfile = 'portable' | 'docker';
+
+interface RuntimeScaffoldOptions {
+  frontend?: FrontendConfigLike | null;
+  frontendProjectDir?: string;
+  configImportPath?: string;
+  testConfigImportPath?: string;
+  dependencyMode?: 'symlink' | 'copy';
+  dependencyProfile?: RuntimeDependencyProfile;
+}
 
 export function getRuntimeRoot(projectDir: string): string {
   return join(projectDir, '.edgebase', 'runtime', 'server');
@@ -41,7 +57,11 @@ export function getRuntimeAdminBuildDir(projectDir: string): string {
   return join(getRuntimeRoot(projectDir), 'admin-build');
 }
 
-export function ensureRuntimeScaffold(projectDir: string): void {
+export function getRuntimeAssetsDir(projectDir: string): string {
+  return join(getRuntimeRoot(projectDir), EDGEBASE_ASSETS_DIRNAME);
+}
+
+export function ensureRuntimeScaffold(projectDir: string, options: RuntimeScaffoldOptions = {}): void {
   const runtimeRoot = getRuntimeRoot(projectDir);
   mkdirSync(runtimeRoot, { recursive: true });
 
@@ -49,10 +69,21 @@ export function ensureRuntimeScaffold(projectDir: string): void {
   const adminBuildDir = getRuntimeAdminBuildDir(projectDir);
   copyRuntimeDir(resolveAdminBuildSource(projectDir), adminBuildDir);
   normalizeAdminBuildBase(adminBuildDir);
-  ensureRuntimeNodeModulesLink(projectDir, runtimeRoot);
-  ensureProjectSharedPackageLink(projectDir);
-  writeRuntimeConfigShim(projectDir);
-  writeRuntimeTestConfigShim(projectDir);
+  prepareRuntimeAssets(
+    projectDir,
+    options.frontendProjectDir ?? projectDir,
+    adminBuildDir,
+    options.frontend ?? undefined,
+  );
+  ensureRuntimeNodeModules(
+    projectDir,
+    runtimeRoot,
+    options.dependencyMode ?? 'symlink',
+    options.dependencyProfile ?? 'portable',
+  );
+  ensureProjectSharedPackageLink(projectDir, options.dependencyMode ?? 'symlink');
+  writeRuntimeConfigShim(projectDir, undefined, { importPath: options.configImportPath });
+  writeRuntimeTestConfigShim(projectDir, { importPath: options.testConfigImportPath });
 }
 
 export function ensureLocalWranglerToml(projectDir: string): string {
@@ -111,7 +142,7 @@ id = "local"
 ${internalD1Blocks}
 
 [assets]
-directory = ".edgebase/runtime/server/admin-build"
+directory = ".edgebase/runtime/server/app-assets"
 binding = "ASSETS"
 run_worker_first = true
 `;
@@ -135,10 +166,10 @@ function copyRuntimeDir(source: string, target: string): void {
 
 function resolveServerRuntimeSource(projectDir: string): string {
   const candidates = dedupeCandidates([
+    MONOREPO_SERVER_RUNTIME_SOURCE,
     join(projectDir, 'node_modules', '@edge-base', 'server', 'src'),
     resolve(CLI_NODE_MODULES_SOURCE, '@edge-base/server', 'src'),
     resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edge-base/server', 'src'),
-    MONOREPO_SERVER_RUNTIME_SOURCE,
   ]);
 
   for (const candidate of candidates) {
@@ -152,10 +183,10 @@ function resolveServerRuntimeSource(projectDir: string): string {
 
 function resolveAdminBuildSource(projectDir: string): string {
   const candidates = dedupeCandidates([
+    ...MONOREPO_ADMIN_BUILD_SOURCES,
     join(projectDir, 'node_modules', '@edge-base', 'server', 'admin-build'),
     resolve(CLI_NODE_MODULES_SOURCE, '@edge-base/server', 'admin-build'),
     resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edge-base/server', 'admin-build'),
-    ...MONOREPO_ADMIN_BUILD_SOURCES,
   ]);
 
   for (const candidate of candidates) {
@@ -165,6 +196,47 @@ function resolveAdminBuildSource(projectDir: string): string {
   }
 
   throw new Error(`Admin build source is missing. Checked: ${candidates.join(', ')}`);
+}
+
+function prepareRuntimeAssets(
+  projectDir: string,
+  sourceProjectDir: string,
+  adminBuildDir: string,
+  frontend: FrontendConfigLike | undefined,
+): void {
+  const assetsDir = getRuntimeAssetsDir(projectDir);
+  rmSync(assetsDir, { recursive: true, force: true });
+  mkdirSync(assetsDir, { recursive: true });
+
+  copyRuntimeDir(adminBuildDir, join(assetsDir, 'admin'));
+  copyFrontendBuild(sourceProjectDir, assetsDir, frontend);
+}
+
+function copyFrontendBuild(
+  projectDir: string,
+  assetsDir: string,
+  frontend: FrontendConfigLike | undefined,
+): void {
+  if (!frontend?.directory) return;
+
+  const source = resolve(projectDir, frontend.directory);
+  if (!existsSync(source)) {
+    throw new Error(`Frontend build directory is missing: ${source}`);
+  }
+
+  const mountPath = normalizeFrontendMountPath(frontend.mountPath);
+  if (mountPath === '/') {
+    const conflicts = readdirSync(source).filter((entry) => entry === 'admin');
+    if (conflicts.length > 0) {
+      throw new Error(
+        `Frontend build directory '${frontend.directory}' contains reserved top-level entries: ${conflicts.join(', ')}.`,
+      );
+    }
+  }
+
+  const target = mountPath === '/' ? assetsDir : join(assetsDir, mountPath.slice(1));
+  mkdirSync(target, { recursive: true });
+  copyRuntimeDir(source, target);
 }
 
 function normalizeAdminBuildBase(adminBuildDir: string): void {
@@ -183,11 +255,25 @@ function normalizeAdminBuildBase(adminBuildDir: string): void {
   }
 }
 
-function ensureRuntimeNodeModulesLink(projectDir: string, runtimeRoot: string): void {
-  const source = resolveRuntimeNodeModulesSource(projectDir);
+function ensureRuntimeNodeModules(
+  projectDir: string,
+  runtimeRoot: string,
+  mode: 'symlink' | 'copy',
+  profile: RuntimeDependencyProfile,
+): void {
+  const source = resolveRuntimeNodeModulesSource(projectDir, mode);
   if (!source) return;
 
   const target = join(runtimeRoot, 'node_modules');
+  if (mode === 'copy') {
+    materializeNodeModulesTree(
+      source,
+      target,
+      getRuntimeNodeModulesCandidates(projectDir, mode),
+      resolveRuntimeDependencySelection(projectDir, profile),
+    );
+    return;
+  }
   const currentLink = readExistingSymlinkTarget(target);
   if (currentLink === source) return;
   if (currentLink !== null || existsSync(target)) {
@@ -197,17 +283,20 @@ function ensureRuntimeNodeModulesLink(projectDir: string, runtimeRoot: string): 
   symlinkSync(source, target, process.platform === 'win32' ? 'junction' : 'dir');
 }
 
-export function ensureProjectSharedPackageLink(projectDir: string): void {
+export function ensureProjectSharedPackageLink(
+  projectDir: string,
+  mode: 'symlink' | 'copy' = 'symlink',
+): void {
   const source = resolveSharedPackageSource(projectDir);
   if (!source) return;
 
   for (const root of resolveSharedPackageLinkRoots(projectDir)) {
-    ensureSharedPackageLinkAtRoot(root, source);
+    ensureSharedPackageLinkAtRoot(root, source, mode);
   }
 }
 
-function resolveRuntimeNodeModulesSource(projectDir: string): string | null {
-  return resolveRuntimeNodeModulesSourceFromCandidates(getRuntimeNodeModulesCandidates(projectDir));
+function resolveRuntimeNodeModulesSource(projectDir: string, mode: 'symlink' | 'copy' = 'symlink'): string | null {
+  return resolveRuntimeNodeModulesSourceFromCandidates(getRuntimeNodeModulesCandidates(projectDir, mode));
 }
 
 export function resolveRuntimeNodeModulesSourceFromCandidates(candidates: string[]): string | null {
@@ -234,13 +323,175 @@ export function resolveSharedPackageSourceFromCandidates(candidates: string[]): 
   return null;
 }
 
-function getRuntimeNodeModulesCandidates(projectDir: string): string[] {
+function getRuntimeNodeModulesCandidates(projectDir: string, mode: 'symlink' | 'copy' = 'symlink'): string[] {
+  if (mode === 'copy') {
+    return dedupeCandidates([
+      SERVER_NODE_MODULES_SOURCE,
+      CLI_NODE_MODULES_SOURCE,
+      join(projectDir, 'node_modules'),
+      WORKSPACE_NODE_MODULES_SOURCE,
+    ]);
+  }
+
   return dedupeCandidates([
     SERVER_NODE_MODULES_SOURCE,
     CLI_NODE_MODULES_SOURCE,
     WORKSPACE_NODE_MODULES_SOURCE,
     join(projectDir, 'node_modules'),
   ]);
+}
+
+function materializeNodeModulesTree(
+  sourceRoot: string,
+  targetRoot: string,
+  candidateRoots: string[],
+  selectedPackages?: string[] | null,
+): void {
+  rmSync(targetRoot, { recursive: true, force: true });
+  mkdirSync(targetRoot, { recursive: true });
+
+  const normalizedRoots = dedupeCandidates(candidateRoots)
+    .filter((candidate) => existsSync(candidate))
+    .map((candidate) => resolve(candidate))
+    .sort((left, right) => right.length - left.length);
+  const copiedTargets = new Set<string>();
+
+  if (selectedPackages && selectedPackages.length > 0) {
+    for (const packageName of selectedPackages) {
+      const sourceEntry = resolveTopLevelPackageEntry(packageName, normalizedRoots);
+      if (!sourceEntry) continue;
+      materializeNodeModulesEntry(
+        sourceEntry,
+        join(targetRoot, ...packageName.split('/')),
+        targetRoot,
+        normalizedRoots,
+        copiedTargets,
+      );
+    }
+    return;
+  }
+
+  for (const entry of readdirSync(sourceRoot)) {
+    materializeNodeModulesEntry(
+      join(sourceRoot, entry),
+      join(targetRoot, entry),
+      targetRoot,
+      normalizedRoots,
+      copiedTargets,
+    );
+  }
+}
+
+function resolveTopLevelPackageEntry(packageName: string, candidateRoots: string[]): string | null {
+  const packagePath = packageName.split('/');
+  for (const candidateRoot of candidateRoots) {
+    const candidatePath = join(candidateRoot, ...packagePath);
+    if (existsSync(candidatePath)) {
+      return candidatePath;
+    }
+  }
+
+  return null;
+}
+
+function materializeNodeModulesEntry(
+  sourceEntry: string,
+  targetEntry: string,
+  targetRoot: string,
+  candidateRoots: string[],
+  copiedTargets: Set<string>,
+): void {
+  const stat = lstatSync(sourceEntry);
+
+  if (stat.isSymbolicLink()) {
+    const sourceLinkTarget = readlinkSync(sourceEntry);
+    const resolvedSourceTarget = resolve(dirname(sourceEntry), sourceLinkTarget);
+    const sourceContainerRoot = findContainingRoot(resolvedSourceTarget, candidateRoots);
+    if (!sourceContainerRoot || !existsSync(resolvedSourceTarget)) {
+      rmSync(targetEntry, { recursive: true, force: true });
+      mkdirSync(dirname(targetEntry), { recursive: true });
+      symlinkSync(sourceLinkTarget, targetEntry, process.platform === 'win32' ? 'junction' : 'dir');
+      return;
+    }
+
+    const materialization = getNodeModulesMaterialization(resolvedSourceTarget, sourceContainerRoot, targetRoot);
+    const targetKey = `${materialization.sourceRoot}=>${materialization.targetRoot}`;
+    if (!copiedTargets.has(targetKey)) {
+      copiedTargets.add(targetKey);
+      materializeNodeModulesEntry(
+        materialization.sourceRoot,
+        materialization.targetRoot,
+        targetRoot,
+        candidateRoots,
+        copiedTargets,
+      );
+    }
+
+    rmSync(targetEntry, { recursive: true, force: true });
+    mkdirSync(dirname(targetEntry), { recursive: true });
+    symlinkSync(
+      relative(dirname(targetEntry), materialization.targetPath),
+      targetEntry,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    return;
+  }
+
+  if (stat.isDirectory()) {
+    mkdirSync(targetEntry, { recursive: true });
+    for (const entry of readdirSync(sourceEntry)) {
+      materializeNodeModulesEntry(
+        join(sourceEntry, entry),
+        join(targetEntry, entry),
+        targetRoot,
+        candidateRoots,
+        copiedTargets,
+      );
+    }
+    return;
+  }
+
+  mkdirSync(dirname(targetEntry), { recursive: true });
+  copyFileSync(sourceEntry, targetEntry);
+}
+
+function findContainingRoot(targetPath: string, candidateRoots: string[]): string | null {
+  const normalizedTargetPath = resolve(targetPath);
+  for (const candidateRoot of candidateRoots) {
+    if (
+      normalizedTargetPath === candidateRoot
+      || normalizedTargetPath.startsWith(`${candidateRoot}/`)
+    ) {
+      return candidateRoot;
+    }
+  }
+
+  return null;
+}
+
+function getNodeModulesMaterialization(
+  sourcePath: string,
+  sourceContainerRoot: string,
+  targetRoot: string,
+): { sourceRoot: string; targetRoot: string; targetPath: string } {
+  const relativeSourcePath = relative(sourceContainerRoot, sourcePath);
+  const relativeSegments = relativeSourcePath.split('/').filter(Boolean);
+  const targetPath = join(targetRoot, relativeSourcePath);
+
+  if (relativeSegments[0] === '.pnpm' && relativeSegments.length >= 2) {
+    const packageRoot = join(sourceContainerRoot, '.pnpm', relativeSegments[1]);
+    return {
+      sourceRoot: packageRoot,
+      targetRoot: join(targetRoot, '.pnpm', relativeSegments[1]),
+      targetPath,
+    };
+  }
+
+  return {
+    sourceRoot: sourcePath,
+    targetRoot: targetPath,
+    targetPath,
+  };
 }
 
 function getSharedPackageSourceCandidates(projectDir: string): string[] {
@@ -251,6 +502,51 @@ function getSharedPackageSourceCandidates(projectDir: string): string[] {
     resolve(SERVER_NODE_MODULES_SOURCE, '@edge-base/shared'),
     MONOREPO_SHARED_SOURCE,
   ]);
+}
+
+function resolveRuntimeDependencySelection(
+  projectDir: string,
+  profile: RuntimeDependencyProfile,
+): string[] | null {
+  const serverDependencies = readPackageDependencyNamesFromCandidates(
+    getServerPackageManifestCandidates(projectDir),
+  );
+  if (!serverDependencies) {
+    return null;
+  }
+
+  const selected = new Set(serverDependencies);
+  if (profile === 'portable') {
+    selected.add('wrangler');
+  }
+
+  return Array.from(selected);
+}
+
+function getServerPackageManifestCandidates(projectDir: string): string[] {
+  return dedupeCandidates([
+    MONOREPO_SERVER_PACKAGE_MANIFEST_SOURCE,
+    join(projectDir, 'node_modules', '@edge-base', 'server', 'package.json'),
+    resolve(CLI_NODE_MODULES_SOURCE, '@edge-base', 'server', 'package.json'),
+    resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edge-base', 'server', 'package.json'),
+  ]);
+}
+
+function readPackageDependencyNamesFromCandidates(candidates: string[]): string[] | null {
+  for (const candidate of dedupeCandidates(candidates)) {
+    if (!existsSync(candidate)) continue;
+
+    try {
+      const packageJson = JSON.parse(readFileSync(candidate, 'utf-8')) as {
+        dependencies?: Record<string, string>;
+      };
+      return Object.keys(packageJson.dependencies ?? {});
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 function dedupeCandidates(candidates: string[]): string[] {
@@ -266,7 +562,11 @@ export function resolveSharedPackageLinkRoots(projectDir: string): string[] {
   return Array.from(roots);
 }
 
-function ensureSharedPackageLinkAtRoot(rootDir: string, source: string): void {
+function ensureSharedPackageLinkAtRoot(
+  rootDir: string,
+  source: string,
+  mode: 'symlink' | 'copy',
+): void {
   const target = join(rootDir, 'node_modules', '@edge-base', 'shared');
   const markerPath = join(target, '.edgebase-shim');
   const normalizedSource = resolve(source);
@@ -291,7 +591,11 @@ function ensureSharedPackageLinkAtRoot(rootDir: string, source: string): void {
   mkdirSync(target, { recursive: true });
   writeFileSync(join(target, 'package.json'), buildSharedShimPackageJson(), 'utf-8');
   writeFileSync(markerPath, 'edgebase-shared-shim\n', 'utf-8');
-  ensureDirectorySymlink(join(source, 'src'), join(target, 'src'));
+  if (mode === 'copy') {
+    replaceDirectoryContents(join(source, 'src'), join(target, 'src'));
+  } else {
+    ensureDirectorySymlink(join(source, 'src'), join(target, 'src'));
+  }
 }
 
 function findWorkspaceRoot(startDir: string): string | null {
@@ -341,6 +645,48 @@ function ensureDirectorySymlink(source: string, target: string): void {
   }
 }
 
+function replaceDirectoryContents(
+  source: string,
+  target: string,
+  options: { dereference?: boolean; verbatimSymlinks?: boolean } = {},
+): void {
+  rmSync(target, { recursive: true, force: true });
+  mkdirSync(dirname(target), { recursive: true });
+  if ((options.dereference ?? true) === false && (options.verbatimSymlinks ?? false) === true) {
+    copyDirectoryTreePreservingSymlinks(source, target);
+    return;
+  }
+  cpSync(source, target, {
+    recursive: true,
+    force: true,
+    dereference: options.dereference ?? true,
+    verbatimSymlinks: options.verbatimSymlinks ?? false,
+  });
+}
+
+function copyDirectoryTreePreservingSymlinks(source: string, target: string): void {
+  const stat = lstatSync(source);
+
+  if (stat.isSymbolicLink()) {
+    rmSync(target, { recursive: true, force: true });
+    mkdirSync(dirname(target), { recursive: true });
+    const linkTarget = readlinkSync(source);
+    symlinkSync(linkTarget, target, process.platform === 'win32' ? 'junction' : 'dir');
+    return;
+  }
+
+  if (stat.isDirectory()) {
+    mkdirSync(target, { recursive: true });
+    for (const entry of readdirSync(source)) {
+      copyDirectoryTreePreservingSymlinks(join(source, entry), join(target, entry));
+    }
+    return;
+  }
+
+  mkdirSync(dirname(target), { recursive: true });
+  copyFileSync(source, target);
+}
+
 function readExistingSymlinkTarget(target: string): string | null {
   try {
     if (!lstatSync(target).isSymbolicLink()) {
@@ -374,20 +720,23 @@ function buildSharedShimPackageJson(): string {
   )}\n`;
 }
 
-function buildRuntimeConfigShimContents(injectedEnv?: Record<string, string>): string {
+function buildRuntimeConfigShimContents(
+  injectedEnv?: Record<string, string>,
+  importPath = '../../../../edgebase.config.ts',
+): string {
   const normalizedEnv = Object.fromEntries(
     Object.entries(injectedEnv ?? {}).filter(([, value]) => typeof value === 'string'),
   );
 
   if (Object.keys(normalizedEnv).length === 0) {
-    return `// Auto-generated by edgebase CLI. Re-export the user project config with a static path so Wrangler can bundle it.
-import config from '../../../../edgebase.config.ts';
+    return `// Auto-generated by edgebase CLI. Re-export the runtime config module with a static path so Wrangler can bundle it.
+import config from '${importPath}';
 
 export default config;
 `;
   }
 
-  return `// Auto-generated by edgebase CLI. Inject local config env before evaluating the user project config.
+  return `// Auto-generated by edgebase CLI. Inject local config env before evaluating the runtime config module.
 const injectedEnv = ${JSON.stringify(normalizedEnv, null, 2)} as Record<string, string>;
 
 if (typeof process !== 'undefined' && process?.env) {
@@ -398,7 +747,7 @@ if (typeof process !== 'undefined' && process?.env) {
   }
 }
 
-const mod = await import('../../../../edgebase.config.ts');
+const mod = await import('${importPath}');
 const config = (mod as { default?: unknown }).default ?? mod;
 
 export default config;
@@ -408,24 +757,30 @@ export default config;
 export function writeRuntimeConfigShim(
   projectDir: string,
   injectedEnv?: Record<string, string>,
+  options?: { importPath?: string },
 ): void {
   const shimPath = join(getRuntimeServerSrcDir(projectDir), 'generated-config.ts');
   writeFileSync(
     shimPath,
-    buildRuntimeConfigShimContents(injectedEnv),
+    buildRuntimeConfigShimContents(injectedEnv, options?.importPath),
     'utf-8',
   );
 }
 
-function writeRuntimeTestConfigShim(projectDir: string): void {
+function writeRuntimeTestConfigShim(
+  projectDir: string,
+  options?: { importPath?: string },
+): void {
   const shimPath = join(getRuntimeRoot(projectDir), 'edgebase.test.config.ts');
-  const tsConfigPath = join(projectDir, 'edgebase.test.config.ts');
-  const jsConfigPath = join(projectDir, 'edgebase.test.config.js');
-  const importPath = existsSync(tsConfigPath)
-    ? '../../../edgebase.test.config.ts'
-    : existsSync(jsConfigPath)
-      ? '../../../edgebase.test.config.js'
-      : './src/generated-config.ts';
+  const importPath = options?.importPath ?? (() => {
+    const tsConfigPath = join(projectDir, 'edgebase.test.config.ts');
+    const jsConfigPath = join(projectDir, 'edgebase.test.config.js');
+    return existsSync(tsConfigPath)
+      ? '../../../edgebase.test.config.ts'
+      : existsSync(jsConfigPath)
+        ? '../../../edgebase.test.config.js'
+        : './src/generated-config.ts';
+  })();
 
   writeFileSync(
     shimPath,

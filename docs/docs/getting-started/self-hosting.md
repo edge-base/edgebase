@@ -50,6 +50,8 @@ docker run -d -p 8787:8787 -v edgebase-data:/data --env-file .env.release --name
 
 On first run, `npx edgebase docker run` automatically creates `.env.release` with secure random `JWT_USER_SECRET` and `JWT_ADMIN_SECRET` values. See the [Environment Variables](#environment-variables) section below for details.
 
+If your project defines `frontend.directory` in `edgebase.config.ts`, `npx edgebase docker build` also copies that prebuilt static bundle into the container image and serves it on the same origin as the API. Build the frontend before you run the Docker build so the bundle exists on disk.
+
 ### Docker Compose
 
 ```bash
@@ -134,6 +136,17 @@ npx wrangler dev --config ./wrangler.toml --port 8787 --persist-to ./data
 `npx edgebase dev` is the recommended path. It evaluates `edgebase.config.ts` and injects the managed bindings needed for local development before starting Wrangler.
 
 Use raw `wrangler dev` only for explicit manual setups, such as a dedicated test config, or when your `wrangler.toml` already includes every binding your project needs.
+
+If `frontend.directory` is configured, the local runtime also serves that prebuilt bundle. This keeps the same route layout you get in cloud, Docker, and packed local launchers:
+
+- `/api/*` for the API
+- `/admin` and `/admin/*` for the admin dashboard
+- `/openapi.json` for the generated spec
+- your frontend bundle everywhere else from `mountPath` (default `/`)
+
+When `spaFallback: true` is enabled, only HTML navigation requests fall back to `index.html`. Missing asset files still return `404`.
+
+If the bundle already contains a `manifest.webmanifest` and service worker, this same-origin setup also works well for local PWA testing. Packed launchers default to a stable high localhost port derived from the app name, then reuse that port across restarts unless you override it. If you need a single-file handoff for a local build, `npx edgebase pack --format archive` produces a `.zip` on macOS/Windows or `.tar.gz` on Linux from the same launcher payload.
 
 ### Process Management (PM2 Recommended)
 

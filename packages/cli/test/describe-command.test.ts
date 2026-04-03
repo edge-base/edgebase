@@ -39,6 +39,12 @@ describe('describe command', () => {
             ]),
           }),
           expect.objectContaining({
+            name: 'build-app',
+          }),
+          expect.objectContaining({
+            name: 'pack',
+          }),
+          expect.objectContaining({
             name: 'describe',
           }),
         ]),

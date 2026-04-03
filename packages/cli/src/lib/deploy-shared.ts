@@ -42,7 +42,8 @@ export type GenerateTempWranglerTomlOptions =
       managedCrons: string[];
     });
 
-const EDGEBASE_ASSETS_DIRECTORY = '.edgebase/runtime/server/admin-build';
+const EDGEBASE_ASSETS_DIRECTORY = '.edgebase/runtime/server/app-assets';
+const LEGACY_EDGEBASE_ASSETS_DIRECTORY = '.edgebase/runtime/server/admin-build';
 const EDGEBASE_ASSETS_BINDING = 'ASSETS';
 
 function hasAssetsBlock(wranglerToml: string): boolean {
@@ -59,18 +60,27 @@ function normalizeAssetsRunWorkerFirst(
     (block) => {
       const isEdgeBaseAssetsBlock =
         /^\s*binding\s*=\s*"ASSETS"\s*$/m.test(block) ||
-        /^\s*directory\s*=\s*".*\.edgebase\/runtime\/server\/admin-build"\s*$/m.test(block);
+        /^\s*directory\s*=\s*".*\.edgebase\/runtime\/server\/app-assets"\s*$/m.test(block) ||
+        new RegExp(`^\\s*directory\\s*=\\s*".*${LEGACY_EDGEBASE_ASSETS_DIRECTORY.replace(/\./g, '\\.').replace(/\//g, '\\/')}\"\\s*$`, 'm').test(block);
 
       if (!isEdgeBaseAssetsBlock) return block;
-      if (/^\s*run_worker_first\s*=\s*true\s*$/m.test(block)) return block;
+      let rewritten = block;
+      if (/^\s*directory\s*=\s*".*\.edgebase\/runtime\/server\/admin-build"\s*$/m.test(rewritten)) {
+        rewritten = rewritten.replace(
+          /^\s*directory\s*=\s*".*\.edgebase\/runtime\/server\/admin-build"\s*$/m,
+          `directory = "${EDGEBASE_ASSETS_DIRECTORY}"`,
+        );
+        changed = true;
+      }
+      if (/^\s*run_worker_first\s*=\s*true\s*$/m.test(rewritten)) return rewritten;
 
       changed = true;
 
-      if (/^\s*run_worker_first\s*=\s*(true|false)\s*$/m.test(block)) {
-        return block.replace(/^\s*run_worker_first\s*=\s*(true|false)\s*$/m, 'run_worker_first = true');
+      if (/^\s*run_worker_first\s*=\s*(true|false)\s*$/m.test(rewritten)) {
+        return rewritten.replace(/^\s*run_worker_first\s*=\s*(true|false)\s*$/m, 'run_worker_first = true');
       }
 
-      return `${block.replace(/\s*$/, '')}\nrun_worker_first = true`;
+      return `${rewritten.replace(/\s*$/, '')}\nrun_worker_first = true`;
     },
   );
 
