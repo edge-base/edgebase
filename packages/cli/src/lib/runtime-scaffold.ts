@@ -4,6 +4,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  realpathSync,
   readdirSync,
   readFileSync,
   readlinkSync,
@@ -758,15 +759,16 @@ function resolvePackageSelectionFromManifestCandidates(
     }
 
     try {
-      const packageJson = JSON.parse(readFileSync(manifestCandidate, 'utf-8')) as { name?: string };
+      const resolvedManifestPath = realpathSync(manifestCandidate);
+      const packageJson = JSON.parse(readFileSync(resolvedManifestPath, 'utf-8')) as { name?: string };
       if (packageJson.name !== packageName) {
         continue;
       }
 
       return {
         packageName,
-        packageDir: dirname(resolve(manifestCandidate)),
-        manifestPath: resolve(manifestCandidate),
+        packageDir: dirname(resolvedManifestPath),
+        manifestPath: resolvedManifestPath,
       };
     } catch {
       continue;
@@ -801,7 +803,7 @@ function resolvePackageManifestPath(
   if (packageRequire) {
     try {
       const manifestPath = packageRequire.resolve(`${packageName}/package.json`);
-      return existsSync(manifestPath) ? resolve(manifestPath) : null;
+      return existsSync(manifestPath) ? realpathSync(manifestPath) : null;
     } catch {
       // Fall back to the candidate-root scan below so workspace shims and
       // fixture tests can still resolve packages outside the package graph.
@@ -814,7 +816,7 @@ function resolvePackageManifestPath(
   }
 
   const manifestPath = join(packageDir, 'package.json');
-  return existsSync(manifestPath) ? manifestPath : null;
+  return existsSync(manifestPath) ? realpathSync(manifestPath) : null;
 }
 
 function readPackageDependencyNames(packageJsonPath: string): string[] {

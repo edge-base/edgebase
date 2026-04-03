@@ -55,6 +55,23 @@ function hasBundledPnpmPackage(runtimeNodeModulesDir: string, entryPrefix: strin
   ));
 }
 
+function readBundledPackageVersion(runtimeNodeModulesDir: string, packageName: string): string | null {
+  try {
+    return JSON.parse(
+      readFileSync(join(runtimeNodeModulesDir, ...packageName.split('/'), 'package.json'), 'utf-8'),
+    ).version as string;
+  } catch {
+    return null;
+  }
+}
+
+function resolveBundledWranglerMiniflareVersion(runtimeNodeModulesDir: string): string {
+  const wranglerManifest = join(runtimeNodeModulesDir, 'wrangler', 'package.json');
+  const wranglerRequire = createRequire(wranglerManifest);
+  const miniflareManifest = wranglerRequire.resolve('miniflare/package.json');
+  return JSON.parse(readFileSync(miniflareManifest, 'utf-8')).version as string;
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
 }
@@ -64,6 +81,26 @@ function resolveExpectedPortableMiniflareVersion(): string {
   const wranglerRequire = createRequire(wranglerManifest);
   const miniflareManifest = wranglerRequire.resolve('miniflare/package.json');
   return JSON.parse(readFileSync(miniflareManifest, 'utf-8')).version as string;
+}
+
+function resolveInstalledPackageVersion(packageName: string): string {
+  let current = dirname(testRequire.resolve(packageName, { paths: [packageDir] }));
+
+  while (true) {
+    const manifestPath = join(current, 'package.json');
+    if (existsSync(manifestPath)) {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { name?: string; version?: string };
+      if (manifest.name === packageName && typeof manifest.version === 'string') {
+        return manifest.version;
+      }
+    }
+
+    const parent = dirname(current);
+    if (parent === current) {
+      throw new Error(`Could not resolve installed package version for ${packageName}.`);
+    }
+    current = parent;
+  }
 }
 
 afterEach(() => {
@@ -309,23 +346,26 @@ export default defineConfig({
       entry.startsWith('miniflare@'),
     );
 
-    expect(hasBundledPnpmPackage(portableNodeModules, 'wrangler@', ['wrangler'])).toBe(true);
-    expect(
-      hasBundledPnpmPackage(
-        portableNodeModules,
-        `miniflare@${expectedPortableMiniflareVersion}`,
-        ['miniflare'],
-      ),
-    ).toBe(true);
-    expect(bundledPortableMiniflareEntries).toEqual([
-      expect.stringMatching(new RegExp(`^miniflare@${escapeRegExp(expectedPortableMiniflareVersion)}`)),
-    ]);
-    expect(hasBundledPnpmPackage(portableNodeModules, 'esbuild@', ['esbuild'])).toBe(true);
-    expect(hasBundledPnpmPackage(portableNodeModules, 'unenv@', ['unenv'])).toBe(true);
-    expect(existsSync(join(portableNodeModules, 'unenv', 'package.json'))).toBe(true);
-    expect(hasBundledPnpmPackage(portableNodeModules, 'vitest@', ['vitest'])).toBe(false);
-    expect(hasBundledPnpmPackage(dockerNodeModules, 'wrangler@', ['wrangler'])).toBe(false);
-    expect(hasBundledPnpmPackage(dockerNodeModules, 'vitest@', ['vitest'])).toBe(false);
-    expect(hasBundledPnpmPackage(dockerNodeModules, 'hono@', ['hono'])).toBe(true);
+    expect(readBundledPackageVersion(portableNodeModules, 'wrangler')).toBe(
+      resolveInstalledPackageVersion('wrangler'),
+    );
+    expect(readBundledPackageVersion(portableNodeModules, 'miniflare')).toBe(expectedPortableMiniflareVersion);
+    expect(resolveBundledWranglerMiniflareVersion(portableNodeModules)).toBe(expectedPortableMiniflareVersion);
+    expect(bundledPortableMiniflareEntries).toEqual(
+      bundledPortableMiniflareEntries.map((entry) => (
+        expect.stringMatching(new RegExp(`^miniflare@${escapeRegExp(expectedPortableMiniflareVersion)}`))
+      )),
+    );
+    expect(readBundledPackageVersion(portableNodeModules, 'esbuild')).not.toBeNull();
+    expect(readBundledPackageVersion(portableNodeModules, 'unenv')).toBe(
+      resolveInstalledPackageVersion('unenv'),
+    );
+    expect(readBundledPackageVersion(portableNodeModules, 'vitest')).toBeNull();
+    expect(readBundledPackageVersion(dockerNodeModules, 'wrangler')).toBeNull();
+    expect(readBundledPackageVersion(dockerNodeModules, 'miniflare')).toBeNull();
+    expect(readBundledPackageVersion(dockerNodeModules, 'vitest')).toBeNull();
+    expect(readBundledPackageVersion(dockerNodeModules, 'hono')).toBe(
+      resolveInstalledPackageVersion('hono'),
+    );
   });
 });
