@@ -9,7 +9,7 @@ import {
   chmodSync,
   unlinkSync,
 } from 'node:fs';
-import { dirname, relative, resolve, join, basename } from 'node:path';
+import { resolve, join, basename } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import chalk from 'chalk';
 import { loadConfigSafe } from '../lib/load-config.js';

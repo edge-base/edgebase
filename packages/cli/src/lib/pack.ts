@@ -72,7 +72,7 @@ export interface EdgeBaseArchiveManifest {
   packManifest: string;
 }
 
-export interface CreateDirPackArtifactOptions extends CreateAppBundleOptions {}
+export type CreateDirPackArtifactOptions = CreateAppBundleOptions;
 
 export interface CreatePortablePackArtifactOptions extends CreateAppBundleOptions {
   appName?: string;
@@ -682,7 +682,7 @@ function parseEnvFile(filePath) {
     if (separator <= 0) continue;
     const key = line.slice(0, separator).trim();
     let value = line.slice(separator + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith(\"'\") && value.endsWith(\"'\"))) {
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1);
     }
     values[key] = value;
@@ -1039,7 +1039,7 @@ function createMacPortableArtifact(
 set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 APP_DIR="$(cd -- "$SCRIPT_DIR/../Resources/app" && pwd)"
-export DYLD_LIBRARY_PATH="$SCRIPT_DIR/../Frameworks\${DYLD_LIBRARY_PATH:+:\$DYLD_LIBRARY_PATH}"
+export DYLD_LIBRARY_PATH="$SCRIPT_DIR/../Frameworks\${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 exec "$SCRIPT_DIR/node" "$APP_DIR/launcher.mjs" "$@"
 `,
     'utf-8',

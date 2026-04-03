@@ -61,7 +61,7 @@ function normalizeAssetsRunWorkerFirst(
       const isEdgeBaseAssetsBlock =
         /^\s*binding\s*=\s*"ASSETS"\s*$/m.test(block) ||
         /^\s*directory\s*=\s*".*\.edgebase\/runtime\/server\/app-assets"\s*$/m.test(block) ||
-        new RegExp(`^\\s*directory\\s*=\\s*".*${LEGACY_EDGEBASE_ASSETS_DIRECTORY.replace(/\./g, '\\.').replace(/\//g, '\\/')}\"\\s*$`, 'm').test(block);
+        new RegExp(`^\\s*directory\\s*=\\s*".*${LEGACY_EDGEBASE_ASSETS_DIRECTORY.replace(/\./g, '\\.').replace(/\//g, '\\/')}"\\s*$`, 'm').test(block);
 
       if (!isEdgeBaseAssetsBlock) return block;
       let rewritten = block;
