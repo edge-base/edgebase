@@ -361,9 +361,10 @@ export default defineConfig({
       resolveInstalledPackageVersion('unenv'),
     );
     expect(readBundledPackageVersion(portableNodeModules, 'vitest')).toBeNull();
-    expect(readBundledPackageVersion(dockerNodeModules, 'wrangler')).toBeNull();
-    expect(readBundledPackageVersion(dockerNodeModules, 'miniflare')).toBeNull();
-    expect(readBundledPackageVersion(dockerNodeModules, 'vitest')).toBeNull();
+    expect(hasBundledPnpmPackage(dockerNodeModules, 'wrangler@', ['wrangler'])).toBe(false);
+    expect(hasBundledPnpmPackage(dockerNodeModules, 'miniflare@', ['miniflare'])).toBe(false);
+    expect(hasBundledPnpmPackage(dockerNodeModules, 'vitest@', ['vitest'])).toBe(false);
+    expect(hasBundledPnpmPackage(dockerNodeModules, 'typescript@', ['typescript'])).toBe(false);
     expect(readBundledPackageVersion(dockerNodeModules, 'hono')).toBe(
       resolveInstalledPackageVersion('hono'),
     );

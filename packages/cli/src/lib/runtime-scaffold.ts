@@ -759,6 +759,7 @@ function resolvePackageSelectionFromManifestCandidates(
     }
 
     try {
+      const rawManifestPath = resolve(manifestCandidate);
       const resolvedManifestPath = realpathSync(manifestCandidate);
       const packageJson = JSON.parse(readFileSync(resolvedManifestPath, 'utf-8')) as { name?: string };
       if (packageJson.name !== packageName) {
@@ -767,7 +768,7 @@ function resolvePackageSelectionFromManifestCandidates(
 
       return {
         packageName,
-        packageDir: dirname(resolvedManifestPath),
+        packageDir: dirname(rawManifestPath),
         manifestPath: resolvedManifestPath,
       };
     } catch {
@@ -783,27 +784,32 @@ function resolveRuntimePackageSelection(
   candidateRoots: string[],
   packageRequire?: NodeJS.Require,
 ): RuntimePackageSelection | null {
-  const manifestPath = resolvePackageManifestPath(packageName, candidateRoots, packageRequire);
-  if (!manifestPath) {
+  const location = resolvePackageManifestLocation(packageName, candidateRoots, packageRequire);
+  if (!location) {
     return null;
   }
 
   return {
     packageName,
-    packageDir: dirname(manifestPath),
-    manifestPath,
+    packageDir: location.packageDir,
+    manifestPath: location.manifestPath,
   };
 }
 
-function resolvePackageManifestPath(
+function resolvePackageManifestLocation(
   packageName: string,
   candidateRoots: string[],
   packageRequire?: NodeJS.Require,
-): string | null {
+): { packageDir: string; manifestPath: string } | null {
   if (packageRequire) {
     try {
-      const manifestPath = packageRequire.resolve(`${packageName}/package.json`);
-      return existsSync(manifestPath) ? realpathSync(manifestPath) : null;
+      const rawManifestPath = packageRequire.resolve(`${packageName}/package.json`);
+      if (existsSync(rawManifestPath)) {
+        return {
+          packageDir: dirname(resolve(rawManifestPath)),
+          manifestPath: realpathSync(rawManifestPath),
+        };
+      }
     } catch {
       // Fall back to the candidate-root scan below so workspace shims and
       // fixture tests can still resolve packages outside the package graph.
@@ -815,8 +821,15 @@ function resolvePackageManifestPath(
     return null;
   }
 
-  const manifestPath = join(packageDir, 'package.json');
-  return existsSync(manifestPath) ? realpathSync(manifestPath) : null;
+  const rawManifestPath = join(packageDir, 'package.json');
+  if (!existsSync(rawManifestPath)) {
+    return null;
+  }
+
+  return {
+    packageDir,
+    manifestPath: realpathSync(rawManifestPath),
+  };
 }
 
 function readPackageDependencyNames(packageJsonPath: string): string[] {

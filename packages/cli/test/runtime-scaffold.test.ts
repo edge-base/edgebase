@@ -202,7 +202,7 @@ describe('runtime scaffold path utilities', () => {
       'wrangler',
       [join(cliWranglerDir, 'package.json'), join(serverWranglerDir, 'package.json')],
     );
-    expect(wranglerSelection?.packageDir).toBe(realpathSync(cliWranglerDir));
+    expect(realpathSync(wranglerSelection!.packageDir)).toBe(realpathSync(cliWranglerDir));
 
     const selections = __runtimeScaffoldTestUtils.resolveRuntimePackageSelectionsFromInitialSelections(
       [wranglerSelection!],
@@ -210,7 +210,8 @@ describe('runtime scaffold path utilities', () => {
     );
     const miniflareSelection = selections.find((selection) => selection.packageName === 'miniflare');
 
-    expect(miniflareSelection?.packageDir).toBe(realpathSync(cliMiniflareDir));
+    expect(miniflareSelection?.manifestPath).toBe(realpathSync(join(cliMiniflareDir, 'package.json')));
+    expect(realpathSync(miniflareSelection!.packageDir)).toBe(realpathSync(cliMiniflareDir));
   });
 
   it('realpaths symlink manifest candidates before resolving portable wrangler dependencies', () => {
@@ -244,7 +245,7 @@ describe('runtime scaffold path utilities', () => {
     );
 
     expect(wranglerSelection?.manifestPath).toBe(realpathSync(join(cliWranglerDir, 'package.json')));
-    expect(wranglerSelection?.packageDir).toBe(realpathSync(cliWranglerDir));
+    expect(wranglerSelection?.packageDir).toBe(resolve(cliRoot, 'wrangler'));
 
     const selections = __runtimeScaffoldTestUtils.resolveRuntimePackageSelectionsFromInitialSelections(
       [wranglerSelection!],
@@ -253,6 +254,6 @@ describe('runtime scaffold path utilities', () => {
     const miniflareSelection = selections.find((selection) => selection.packageName === 'miniflare');
 
     expect(miniflareSelection?.manifestPath).toBe(realpathSync(join(cliMiniflareDir, 'package.json')));
-    expect(miniflareSelection?.packageDir).toBe(realpathSync(cliMiniflareDir));
+    expect(realpathSync(miniflareSelection!.packageDir)).toBe(realpathSync(cliMiniflareDir));
   });
 });
