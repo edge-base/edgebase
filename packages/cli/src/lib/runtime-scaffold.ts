@@ -12,6 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { basename, dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeFrontendMountPath, type FrontendConfigLike } from './frontend-config.js';
@@ -39,6 +40,12 @@ const EDGEBASE_ASSETS_DIRNAME = 'app-assets';
 export { deriveProjectSlug, INTERNAL_D1_BINDINGS } from './project-runtime.js';
 
 export type RuntimeDependencyProfile = 'portable' | 'docker';
+
+interface RuntimePackageSelection {
+  packageName: string;
+  packageDir: string;
+  manifestPath: string;
+}
 
 interface RuntimeScaffoldOptions {
   frontend?: FrontendConfigLike | null;
@@ -350,7 +357,7 @@ function materializeNodeModulesTree(
   sourceRoot: string,
   targetRoot: string,
   candidateRoots: string[],
-  selectedPackages?: string[] | null,
+  selectedPackages?: RuntimePackageSelection[] | null,
 ): void {
   rmSync(targetRoot, { recursive: true, force: true });
   mkdirSync(targetRoot, { recursive: true });
@@ -362,12 +369,10 @@ function materializeNodeModulesTree(
   const copiedTargets = new Set<string>();
 
   if (selectedPackages && selectedPackages.length > 0) {
-    for (const packageName of selectedPackages) {
-      const sourceEntry = resolvePackageDirectoryPath(packageName, normalizedRoots);
-      if (!sourceEntry) continue;
+    for (const selection of selectedPackages) {
       materializeNodeModulesEntry(
-        sourceEntry,
-        join(targetRoot, ...packageName.split('/')),
+        selection.packageDir,
+        join(targetRoot, ...selection.packageName.split('/')),
         targetRoot,
         normalizedRoots,
         copiedTargets,
@@ -599,6 +604,7 @@ export const __runtimeScaffoldTestUtils = {
   getNodeModulesMaterialization,
   getRelativePathSegmentsWithinRoot,
   resolvePackageDirectoryPath,
+  resolveRuntimePackageSelections,
 };
 
 function getSharedPackageSourceCandidates(projectDir: string): string[] {
@@ -614,7 +620,7 @@ function getSharedPackageSourceCandidates(projectDir: string): string[] {
 function resolveRuntimeDependencySelection(
   projectDir: string,
   profile: RuntimeDependencyProfile,
-): string[] | null {
+): RuntimePackageSelection[] | null {
   const serverDependencies = readPackageDependencyNamesFromCandidates(
     getServerPackageManifestCandidates(projectDir),
   );
@@ -627,7 +633,7 @@ function resolveRuntimeDependencySelection(
     selected.add('wrangler');
   }
 
-  return expandDependencySelection(
+  return resolveRuntimePackageSelections(
     Array.from(selected),
     getRuntimeNodeModulesCandidates(projectDir, 'copy'),
   );
@@ -656,36 +662,85 @@ function readPackageDependencyNamesFromCandidates(candidates: string[]): string[
   return null;
 }
 
-function expandDependencySelection(
+function resolveRuntimePackageSelections(
   initialPackages: string[],
   candidateRoots: string[],
-): string[] {
-  const expanded = new Set<string>();
-  const queue = [...initialPackages];
+): RuntimePackageSelection[] {
+  const selections = new Map<string, RuntimePackageSelection>();
+  const visitedManifestPaths = new Set<string>();
+  const queue: RuntimePackageSelection[] = [];
+
+  for (const packageName of dedupeCandidates(initialPackages)) {
+    const selection = resolveRuntimePackageSelection(packageName, candidateRoots);
+    if (!selection) {
+      continue;
+    }
+
+    selections.set(packageName, selection);
+    queue.push(selection);
+  }
 
   while (queue.length > 0) {
-    const packageName = queue.shift();
-    if (!packageName || expanded.has(packageName)) {
+    const selection = queue.shift();
+    if (!selection || visitedManifestPaths.has(selection.manifestPath)) {
       continue;
     }
 
-    expanded.add(packageName);
-    const manifestPath = resolvePackageManifestPath(packageName, candidateRoots);
-    if (!manifestPath) {
-      continue;
-    }
+    visitedManifestPaths.add(selection.manifestPath);
+    const packageRequire = createRequire(selection.manifestPath);
 
-    for (const dependencyName of readPackageDependencyNames(manifestPath)) {
-      if (!expanded.has(dependencyName)) {
-        queue.push(dependencyName);
+    for (const dependencyName of readPackageDependencyNames(selection.manifestPath)) {
+      const dependencySelection = resolveRuntimePackageSelection(
+        dependencyName,
+        candidateRoots,
+        packageRequire,
+      );
+      if (!dependencySelection) {
+        continue;
+      }
+
+      queue.push(dependencySelection);
+      if (!selections.has(dependencyName)) {
+        selections.set(dependencyName, dependencySelection);
       }
     }
   }
 
-  return Array.from(expanded);
+  return Array.from(selections.values());
 }
 
-function resolvePackageManifestPath(packageName: string, candidateRoots: string[]): string | null {
+function resolveRuntimePackageSelection(
+  packageName: string,
+  candidateRoots: string[],
+  packageRequire?: NodeJS.Require,
+): RuntimePackageSelection | null {
+  const manifestPath = resolvePackageManifestPath(packageName, candidateRoots, packageRequire);
+  if (!manifestPath) {
+    return null;
+  }
+
+  return {
+    packageName,
+    packageDir: dirname(manifestPath),
+    manifestPath,
+  };
+}
+
+function resolvePackageManifestPath(
+  packageName: string,
+  candidateRoots: string[],
+  packageRequire?: NodeJS.Require,
+): string | null {
+  if (packageRequire) {
+    try {
+      const manifestPath = packageRequire.resolve(`${packageName}/package.json`);
+      return existsSync(manifestPath) ? resolve(manifestPath) : null;
+    } catch {
+      // Fall back to the candidate-root scan below so workspace shims and
+      // fixture tests can still resolve packages outside the package graph.
+    }
+  }
+
   const packageDir = resolvePackageDirectoryPath(packageName, candidateRoots);
   if (!packageDir) {
     return null;

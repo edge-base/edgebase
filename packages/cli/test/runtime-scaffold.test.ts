@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -88,5 +88,71 @@ describe('runtime scaffold path utilities', () => {
     expect(
       __runtimeScaffoldTestUtils.resolvePackageDirectoryPath('unenv', [candidateRoot]),
     ).toBe(resolve(packageDir));
+  });
+
+  it('follows a parent package resolution when multiple pnpm store versions exist', () => {
+    const candidateRoot = mkdtempSync(join(tmpdir(), 'edgebase-runtime-scaffold-'));
+    tempDirs.push(candidateRoot);
+
+    const wranglerDir = join(
+      candidateRoot,
+      '.pnpm',
+      'wrangler@4.70.0',
+      'node_modules',
+      'wrangler',
+    );
+    const miniflarePreferredDir = join(
+      candidateRoot,
+      '.pnpm',
+      'miniflare@4.20260301.1',
+      'node_modules',
+      'miniflare',
+    );
+    const miniflareStaleDir = join(
+      candidateRoot,
+      '.pnpm',
+      'miniflare@4.20250906.0',
+      'node_modules',
+      'miniflare',
+    );
+    const zodDir = join(candidateRoot, '.pnpm', 'zod@4.3.6', 'node_modules', 'zod');
+
+    mkdirSync(join(wranglerDir, 'node_modules'), { recursive: true });
+    mkdirSync(miniflarePreferredDir, { recursive: true });
+    mkdirSync(miniflareStaleDir, { recursive: true });
+    mkdirSync(zodDir, { recursive: true });
+
+    writeFileSync(
+      join(wranglerDir, 'package.json'),
+      JSON.stringify({ name: 'wrangler', version: '4.70.0', dependencies: { miniflare: '4.20260301.1' } }),
+      'utf-8',
+    );
+    writeFileSync(
+      join(miniflarePreferredDir, 'package.json'),
+      JSON.stringify({ name: 'miniflare', version: '4.20260301.1' }),
+      'utf-8',
+    );
+    writeFileSync(
+      join(miniflareStaleDir, 'package.json'),
+      JSON.stringify({ name: 'miniflare', version: '4.20250906.0', dependencies: { zod: '3.22.3' } }),
+      'utf-8',
+    );
+    writeFileSync(
+      join(zodDir, 'package.json'),
+      JSON.stringify({ name: 'zod', version: '4.3.6' }),
+      'utf-8',
+    );
+
+    symlinkSync(resolve(wranglerDir), join(candidateRoot, 'wrangler'), 'dir');
+    symlinkSync(resolve(zodDir), join(candidateRoot, 'zod'), 'dir');
+    symlinkSync(resolve(miniflarePreferredDir), join(wranglerDir, 'node_modules', 'miniflare'), 'dir');
+
+    const selections = __runtimeScaffoldTestUtils.resolveRuntimePackageSelections(
+      ['wrangler', 'zod'],
+      [candidateRoot],
+    );
+    const miniflareSelection = selections.find((selection) => selection.packageName === 'miniflare');
+
+    expect(miniflareSelection?.packageDir).toBe(realpathSync(miniflarePreferredDir));
   });
 });
