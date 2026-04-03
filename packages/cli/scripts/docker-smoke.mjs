@@ -234,8 +234,15 @@ try {
   await main();
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`${message}\n`);
-  process.exitCode = 1;
+  const skipIfUnavailable = process.argv.includes('--skip-if-unavailable')
+    || process.env.EDGEBASE_SKIP_DOCKER_SMOKE_IF_UNAVAILABLE === '1';
+  if (skipIfUnavailable && /Cannot connect to the Docker daemon|Docker daemon is not responding/i.test(message)) {
+    process.stdout.write('Skipping docker smoke test because the Docker daemon is not responding.\n');
+    process.exitCode = 0;
+  } else {
+    process.stderr.write(`${message}\n`);
+    process.exitCode = 1;
+  }
 } finally {
   cleanup();
 }
