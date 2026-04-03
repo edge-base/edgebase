@@ -73,6 +73,20 @@ describe('Runtime config scaffold', () => {
     expect(wranglerToml).toContain('bucket_name = "instagram-clone-edgebase-storage"');
   });
 
+  it('normalizes long local worker and storage names for Wrangler compatibility', () => {
+    const wranglerToml = buildDefaultWranglerToml(
+      undefined,
+      'EdgeBase Pack Portable Runtime 1775206607004 very-long-project-name-that-keeps-going',
+    );
+    const workerName = wranglerToml.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? '';
+    const bucketName = wranglerToml.match(/^bucket_name\s*=\s*"([^"]+)"/m)?.[1] ?? '';
+
+    expect(workerName).toMatch(/^[a-z0-9-]+$/);
+    expect(workerName.length).toBeLessThanOrEqual(55);
+    expect(bucketName).toMatch(/^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$/);
+    expect(bucketName.length).toBeLessThanOrEqual(63);
+  });
+
   it('creates a runtime test-config shim that points at the project test config when present', () => {
     writeFileSync(
       join(tmpDir, 'edgebase.test.config.ts'),

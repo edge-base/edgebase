@@ -1157,6 +1157,8 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   protected buildRoomServerAPI(): RoomServerAPI {
     return {
+      namespace: this.namespace ?? '',
+      roomId: this.roomId ?? '',
       getSharedState: (): Record<string, unknown> => {
         return cloneState(this.sharedState);
       },

@@ -198,6 +198,7 @@ export default defineConfig({
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'pg-protocol@', ['pg-protocol'])).toBe(true);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'wrangler@', ['wrangler'])).toBe(true);
     expect(hasBundledPnpmPackage(runtimeNodeModulesDir, 'vitest@', ['vitest'])).toBe(false);
+    expect(existsSync(join(runtimeNodeModulesDir, '@edge-base', 'core', 'package.json'))).toBe(true);
     expect(lstatSync(runtimeNodeModulesDir).isSymbolicLink()).toBe(false);
     expect(existsSync(join(projectDir, 'packed', '.edgebase', 'runtime', 'server', 'app-assets', 'admin', 'index.html'))).toBe(true);
     expect(existsSync(join(projectDir, 'packed', '.edgebase', 'runtime', 'server', 'app-assets', 'index.html'))).toBe(false);

@@ -284,9 +284,7 @@ async function buildApp() {
     }
 
     if (env.ASSETS) {
-      const url = new URL(c.req.url);
-      url.pathname = '/admin/favicon.svg';
-      return env.ASSETS.fetch(new Request(url.toString(), c.req.raw));
+      return env.ASSETS.fetch(c.req.raw);
     }
 
     return c.json({ code: 404, message: assetUnavailableMessage('admin dashboard') }, 404);
@@ -295,9 +293,7 @@ async function buildApp() {
   app.get('/_app/*', async (c) => {
     const env = c.env as Env;
     if (env.ASSETS) {
-      const url = new URL(c.req.url);
-      url.pathname = `/admin${url.pathname}`;
-      return env.ASSETS.fetch(new Request(url.toString(), c.req.raw));
+      return env.ASSETS.fetch(c.req.raw);
     }
 
     return c.json({ code: 404, message: assetUnavailableMessage('admin dashboard') }, 404);

@@ -1,5 +1,6 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,7 @@ const tsxCommand = resolveTsxCommand();
 const tsxExecOptions = /\.cmd$/i.test(tsxCommand.command) ? { shell: true as const } : {};
 const tempDirs: string[] = [];
 const appDataDirs: string[] = [];
+const childProcesses: ChildProcessWithoutNullStreams[] = [];
 
 function createTempProject(name: string): string {
   const dir = join(tmpdir(), `edgebase-pack-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -52,6 +54,11 @@ function runPack(projectDir: string, outputDirName: string, options?: { format?:
 }
 
 afterEach(() => {
+  for (const child of childProcesses.splice(0)) {
+    if (!child.killed) {
+      child.kill('SIGTERM');
+    }
+  }
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -85,6 +92,74 @@ function createFakePortableArtifact(projectDir: string): string {
   writeFileSync(join(portableRoot, process.platform === 'win32' ? 'run.cmd' : 'run.sh'), 'echo ok\n');
   writeFileSync(join(portableRoot, 'app', 'edgebase-pack.json'), '{}\n');
   return portableRoot;
+}
+
+async function reservePort(): Promise<number> {
+  return new Promise((resolvePort, reject) => {
+    const server = createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('Failed to reserve an ephemeral port.')));
+        return;
+      }
+      const { port } = address;
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolvePort(port);
+      });
+    });
+  });
+}
+
+async function waitForHttp(url: string, predicate: (text: string) => boolean): Promise<string> {
+  let lastError: unknown = null;
+  const deadline = Date.now() + 45_000;
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url);
+      const text = await response.text();
+      if (response.ok && predicate(text)) {
+        return text;
+      }
+      lastError = new Error(`Unexpected response ${response.status} for ${url}: ${text.slice(0, 200)}`);
+    } catch (error) {
+      lastError = error;
+    }
+
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 500));
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Timed out waiting for ${url}`);
+}
+
+function spawnPortableLauncher(
+  launcherPath: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): ChildProcessWithoutNullStreams {
+  if (process.platform === 'win32') {
+    return spawn('cmd.exe', ['/d', '/s', '/c', launcherPath, ...args], {
+      cwd,
+      env,
+      stdio: 'pipe',
+    });
+  }
+
+  return spawn(launcherPath, args, {
+    cwd,
+    env,
+    stdio: 'pipe',
+  });
 }
 
 describe('pack distribution formats', () => {
@@ -152,6 +227,19 @@ export default defineConfig({
       expect(existsSync(join(appRoot, 'Contents', 'MacOS', 'node'))).toBe(true);
       expect(existsSync(join(appRoot, 'Contents', 'Resources', 'app', 'edgebase-pack.json'))).toBe(true);
 
+      const codesignVerify = spawnSync(
+        'codesign',
+        ['--verify', '--deep', '--strict', appRoot],
+        {
+          cwd: projectDir,
+          encoding: 'utf-8',
+          stdio: 'pipe',
+        },
+      );
+
+      expect(codesignVerify.status).toBe(0);
+      expect(codesignVerify.stderr).toBe('');
+
       const dryRun = spawnSync(
         join(appRoot, 'Contents', 'MacOS', 'Portable-Test'),
         ['--dry-run', '--json'],
@@ -207,4 +295,203 @@ export default defineConfig({
     expect(archiveType).toBe('zip');
     expect(existsSync(archivePath)).toBe(true);
   });
+
+  it.skipIf(process.platform !== 'darwin')(
+    'launches a portable macOS app via open and serves frontend and API traffic',
+    async () => {
+      const projectDir = createTempProject('portable-open');
+      mkdirSync(join(projectDir, 'functions'), { recursive: true });
+      mkdirSync(join(projectDir, 'web', 'dist', 'assets'), { recursive: true });
+
+      writeFileSync(
+        join(projectDir, 'edgebase.config.ts'),
+        `import { defineConfig } from '@edge-base/shared';
+
+export default defineConfig({
+  databases: {
+    shared: {
+      tables: {},
+    },
+  },
+  frontend: {
+    directory: './web/dist',
+    mountPath: '/app',
+    spaFallback: true,
+  },
+});
+`,
+      );
+      writeFileSync(join(projectDir, 'functions', 'hello.ts'), 'export async function GET() { return Response.json({ ok: true, route: \"hello\" }); }\n');
+      writeFileSync(join(projectDir, 'web', 'dist', 'index.html'), '<!doctype html><html><body>portable-open-frontend</body></html>\n');
+      writeFileSync(join(projectDir, 'web', 'dist', 'assets', 'main.12345678.js'), 'console.log("portable-open-frontend");\n');
+
+      const result = runPack(projectDir, 'Portable Open.app', {
+        format: 'portable',
+        appName: 'Portable Open',
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+
+      const payload = JSON.parse(result.stdout) as {
+        outputPath: string;
+        packManifest: {
+          launcher: {
+            defaultPort: number;
+            appDataDirName: string;
+          };
+        };
+      };
+
+      const appDataRoot = resolveAppDataRoot(payload.packManifest.launcher.appDataDirName);
+      appDataDirs.push(appDataRoot);
+      rmSync(appDataRoot, { recursive: true, force: true });
+
+      const opened = spawnSync('open', [payload.outputPath], {
+        cwd: projectDir,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+      });
+      expect(opened.status).toBe(0);
+      expect(opened.stderr).toBe('');
+
+      const lockPath = join(appDataRoot, 'launcher-lock.json');
+      let pid: number | null = null;
+
+      try {
+        for (let attempt = 0; attempt < 80; attempt += 1) {
+          if (existsSync(lockPath)) {
+            const lock = JSON.parse(readFileSync(lockPath, 'utf-8')) as { pid?: number };
+            pid = typeof lock.pid === 'number' ? lock.pid : null;
+            break;
+          }
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+        }
+
+        expect(existsSync(lockPath)).toBe(true);
+        expect(pid).not.toBeNull();
+
+        const frontendHtml = await waitForHttp(
+          `http://127.0.0.1:${payload.packManifest.launcher.defaultPort}/app`,
+          (text) => text.includes('portable-open-frontend'),
+        );
+        const healthText = await waitForHttp(
+          `http://127.0.0.1:${payload.packManifest.launcher.defaultPort}/api/health`,
+          (text) => text.includes('"status":"ok"'),
+        );
+
+        expect(frontendHtml).toContain('portable-open-frontend');
+        expect(healthText).toContain('"status":"ok"');
+      } finally {
+        if (pid) {
+          try {
+            process.kill(pid, 'SIGTERM');
+          } catch {
+            // best-effort cleanup
+          }
+        }
+      }
+    },
+    120_000,
+  );
+
+  it('boots a portable artifact and serves both frontend and API traffic', async () => {
+    const projectDir = createTempProject('portable-runtime');
+    mkdirSync(join(projectDir, 'functions'), { recursive: true });
+    mkdirSync(join(projectDir, 'web', 'dist', 'assets'), { recursive: true });
+
+    writeFileSync(
+      join(projectDir, 'edgebase.config.ts'),
+      `import { defineConfig } from '@edge-base/shared';
+
+export default defineConfig({
+  databases: {
+    shared: {
+      tables: {},
+    },
+  },
+  frontend: {
+    directory: './web/dist',
+    mountPath: '/app',
+    spaFallback: true,
+  },
+});
+`,
+    );
+    writeFileSync(join(projectDir, 'functions', 'hello.ts'), 'export async function GET() { return Response.json({ ok: true, route: \"hello\" }); }\n');
+    writeFileSync(join(projectDir, 'web', 'dist', 'index.html'), '<!doctype html><html><body>portable-frontend</body></html>\n');
+    writeFileSync(join(projectDir, 'web', 'dist', 'assets', 'main.12345678.js'), 'console.log("portable-frontend");\n');
+
+    const outputName = process.platform === 'darwin' ? 'Portable Runtime.app' : 'portable-runtime';
+    const result = runPack(projectDir, outputName, {
+      format: 'portable',
+      appName: 'Portable Runtime',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+
+    const payload = JSON.parse(result.stdout) as {
+      launcherPath: string;
+      outputPath: string;
+      packManifest: {
+        launcher: {
+          appDataDirName: string;
+        };
+      };
+    };
+
+    const launchPort = await reservePort();
+    const dataDir = createTempProject('portable-runtime-data');
+    const appDataRoot = resolveAppDataRoot(payload.packManifest.launcher.appDataDirName);
+    appDataDirs.push(appDataRoot);
+    const launcherCwd = process.platform === 'darwin'
+      ? payload.outputPath
+      : payload.outputPath;
+    const child = spawnPortableLauncher(
+      payload.launcherPath,
+      ['--port', String(launchPort), '--data-dir', dataDir],
+      launcherCwd,
+      {
+        ...process.env,
+        EDGEBASE_OPEN: '0',
+        NO_COLOR: '1',
+      },
+    );
+    childProcesses.push(child);
+
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    let frontendHtml: string;
+    try {
+      frontendHtml = await waitForHttp(`http://127.0.0.1:${launchPort}/app`, (text) => text.includes('portable-frontend'));
+    } catch (error) {
+      throw new Error(
+        `Portable launcher failed before serving the frontend.\n${stderr}`,
+        { cause: error },
+      );
+    }
+    expect(frontendHtml).toContain('portable-frontend');
+
+    let healthText: string;
+    try {
+      healthText = await waitForHttp(`http://127.0.0.1:${launchPort}/api/health`, (text) => text.includes('"status":"ok"'));
+    } catch (error) {
+      throw new Error(
+        `Portable launcher failed before serving the API.\n${stderr}`,
+        { cause: error },
+      );
+    }
+    expect(healthText).toContain('"status":"ok"');
+
+    child.kill('SIGTERM');
+    await new Promise<void>((resolveExit, reject) => {
+      child.once('exit', () => resolveExit());
+      child.once('error', reject);
+      setTimeout(() => reject(new Error(`Portable launcher did not exit cleanly.\n${stderr}`)), 15_000);
+    });
+  }, 120_000);
 });

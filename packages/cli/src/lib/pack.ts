@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
   createAppBundle,
@@ -259,6 +259,258 @@ function sanitizeExecutableName(appName: string): string {
     .replace(/^-+|-+$/g, '');
 
   return normalized || 'edgebase-app';
+}
+
+function commandExists(command: string): boolean {
+  try {
+    execFileSync('which', [command], { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isMacSystemLibraryPath(libraryPath: string): boolean {
+  return libraryPath.startsWith('/System/')
+    || libraryPath.startsWith('/usr/lib/');
+}
+
+function listMachODependencies(binaryPath: string): string[] {
+  const output = execFileSync('otool', ['-L', binaryPath], {
+    encoding: 'utf-8',
+    stdio: 'pipe',
+  });
+
+  return output
+    .split(/\r?\n/)
+    .slice(1)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/\s+\(compatibility version.*$/, ''));
+}
+
+function listMachORpaths(binaryPath: string): string[] {
+  const output = execFileSync('otool', ['-l', binaryPath], {
+    encoding: 'utf-8',
+    stdio: 'pipe',
+  });
+  const lines = output.split(/\r?\n/);
+  const rpaths: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index]?.trim() !== 'cmd LC_RPATH') continue;
+    for (let lookahead = index + 1; lookahead < lines.length; lookahead += 1) {
+      const trimmed = lines[lookahead]?.trim() ?? '';
+      if (trimmed.startsWith('path ')) {
+        const match = trimmed.match(/^path\s+(.+?)\s+\(offset \d+\)$/);
+        if (match?.[1]) {
+          rpaths.push(match[1]);
+        }
+        break;
+      }
+      if (trimmed.startsWith('cmd ')) {
+        break;
+      }
+    }
+  }
+
+  return rpaths;
+}
+
+function resolveMachOReferencePath(
+  reference: string,
+  binaryPath: string,
+  executableDir: string,
+  visited = new Set<string>(),
+): string | null {
+  if (reference.startsWith('/')) {
+    return existsSync(reference) ? realpathSync(reference) : null;
+  }
+
+  if (reference.startsWith('@loader_path/')) {
+    const candidate = resolve(dirname(binaryPath), reference.slice('@loader_path/'.length));
+    return existsSync(candidate) ? realpathSync(candidate) : null;
+  }
+
+  if (reference.startsWith('@executable_path/')) {
+    const candidate = resolve(executableDir, reference.slice('@executable_path/'.length));
+    return existsSync(candidate) ? realpathSync(candidate) : null;
+  }
+
+  if (reference.startsWith('@rpath/')) {
+    const key = `${binaryPath}::${reference}`;
+    if (visited.has(key)) return null;
+    visited.add(key);
+
+    const suffix = reference.slice('@rpath/'.length);
+    for (const rpath of listMachORpaths(binaryPath)) {
+      const resolvedRpath = resolveMachOReferencePath(rpath, binaryPath, executableDir, visited);
+      if (!resolvedRpath) continue;
+      const candidate = join(resolvedRpath, suffix);
+      if (existsSync(candidate)) {
+        return realpathSync(candidate);
+      }
+    }
+  }
+
+  return null;
+}
+
+function collectMacPortableLibraries(entryBinaryPath: string): Map<string, string> {
+  const executablePath = realpathSync(entryBinaryPath);
+  const executableDir = dirname(executablePath);
+  const libraries = new Map<string, string>();
+  const queue = [executablePath];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+
+    for (const dependency of listMachODependencies(current)) {
+      const resolvedDependency = resolveMachOReferencePath(dependency, current, executableDir);
+      if (!resolvedDependency || isMacSystemLibraryPath(resolvedDependency)) {
+        continue;
+      }
+      if (resolvedDependency === executablePath) {
+        continue;
+      }
+
+      const destinationName = basename(resolvedDependency);
+      const existingSource = [...libraries.entries()]
+        .find(([, existingDestination]) => existingDestination === destinationName)?.[0];
+      if (existingSource && existingSource !== resolvedDependency) {
+        throw new Error(
+          `Portable macOS packaging found two libraries with the same filename: ${existingSource} and ${resolvedDependency}.`,
+        );
+      }
+
+      if (libraries.has(resolvedDependency)) continue;
+      libraries.set(resolvedDependency, destinationName);
+      queue.push(resolvedDependency);
+    }
+  }
+
+  return libraries;
+}
+
+function rewriteMacPortableBinary(
+  targetPath: string,
+  sourcePath: string,
+  libraries: Map<string, string>,
+  mode: 'executable' | 'library',
+): void {
+  const executableDir = dirname(realpathSync(process.execPath));
+  const args: string[] = [];
+
+  if (mode === 'library') {
+    args.push('-id', `@loader_path/${basename(targetPath)}`);
+  }
+
+  for (const dependency of listMachODependencies(sourcePath)) {
+    const resolvedDependency = resolveMachOReferencePath(dependency, sourcePath, executableDir);
+    if (!resolvedDependency || isMacSystemLibraryPath(resolvedDependency)) {
+      continue;
+    }
+
+    const destinationName = libraries.get(resolvedDependency);
+    if (!destinationName) continue;
+
+    const rewrittenDependency = mode === 'executable'
+      ? `@loader_path/../Frameworks/${destinationName}`
+      : `@loader_path/${destinationName}`;
+
+    if (dependency !== rewrittenDependency) {
+      args.push('-change', dependency, rewrittenDependency);
+    }
+  }
+
+  if (args.length === 0) return;
+
+  execFileSync('install_name_tool', [...args, targetPath], {
+    stdio: 'pipe',
+  });
+}
+
+function signMacPortableBundle(bundlePath: string): void {
+  if (!commandExists('codesign')) return;
+  execFileSync('codesign', ['--force', '--deep', '--sign', '-', bundlePath], {
+    stdio: 'pipe',
+  });
+}
+
+function copyPortableNodeRuntime(
+  embeddedNodePath: string,
+  options: {
+    macFrameworksDir?: string;
+    portableLibDir?: string;
+  } = {},
+): void {
+  const sourceNodePath = realpathSync(process.execPath);
+  copyFileSync(sourceNodePath, embeddedNodePath);
+  chmodSync(embeddedNodePath, 0o755);
+
+  if (process.platform === 'darwin') {
+    const frameworksDir = options.macFrameworksDir;
+    if (!frameworksDir) {
+      throw new Error('macFrameworksDir is required when creating a macOS portable artifact.');
+    }
+
+    mkdirSync(frameworksDir, { recursive: true });
+    const libraries = collectMacPortableLibraries(sourceNodePath);
+    for (const [sourcePath, destinationName] of libraries) {
+      const targetPath = join(frameworksDir, destinationName);
+      copyFileSync(sourcePath, targetPath);
+      chmodSync(targetPath, 0o755);
+    }
+
+    rewriteMacPortableBinary(embeddedNodePath, sourceNodePath, libraries, 'executable');
+    for (const [sourcePath, destinationName] of libraries) {
+      rewriteMacPortableBinary(
+        join(frameworksDir, destinationName),
+        sourcePath,
+        libraries,
+        'library',
+      );
+    }
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    const sourceDir = dirname(sourceNodePath);
+    for (const entry of readdirSync(sourceDir)) {
+      if (!/\.dll$/i.test(entry)) continue;
+      copyFileSync(join(sourceDir, entry), join(dirname(embeddedNodePath), entry));
+    }
+    return;
+  }
+
+  if (process.platform === 'linux') {
+    const portableLibDir = options.portableLibDir;
+    if (!portableLibDir || !commandExists('ldd')) {
+      return;
+    }
+
+    mkdirSync(portableLibDir, { recursive: true });
+    const output = execFileSync('ldd', [sourceNodePath], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
+    const copiedLibraries = new Set<string>();
+
+    for (const line of output.split(/\r?\n/)) {
+      const match = line.match(/=>\s+(\/[^ ]+)/) ?? line.match(/^\s*(\/[^ ]+)/);
+      const libraryPath = match?.[1];
+      if (!libraryPath || !existsSync(libraryPath)) continue;
+      if (libraryPath.startsWith('/lib/') || libraryPath.startsWith('/usr/lib/')) {
+        continue;
+      }
+      const resolvedPath = realpathSync(libraryPath);
+      const destinationName = basename(resolvedPath);
+      if (copiedLibraries.has(destinationName)) continue;
+      copiedLibraries.add(destinationName);
+      copyFileSync(resolvedPath, join(portableLibDir, destinationName));
+    }
+  }
 }
 
 export function createArchiveFromPortableArtifact(sourcePath: string, archivePath: string): EdgeBaseArchiveManifest['archiveType'] {
@@ -761,6 +1013,7 @@ function createMacPortableArtifact(
   const executableName = sanitizeExecutableName(appName);
   const contentsDir = join(outputPath, 'Contents');
   const macOsDir = join(contentsDir, 'MacOS');
+  const frameworksDir = join(contentsDir, 'Frameworks');
   const resourcesDir = join(contentsDir, 'Resources');
   const bundledAppDir = join(resourcesDir, 'app');
   const embeddedNodePath = join(macOsDir, 'node');
@@ -768,6 +1021,7 @@ function createMacPortableArtifact(
 
   rmSync(outputPath, { recursive: true, force: true });
   mkdirSync(macOsDir, { recursive: true });
+  mkdirSync(frameworksDir, { recursive: true });
   mkdirSync(resourcesDir, { recursive: true });
   cpSync(dirArtifact.outputDir, bundledAppDir, {
     recursive: true,
@@ -775,8 +1029,9 @@ function createMacPortableArtifact(
     dereference: false,
     verbatimSymlinks: true,
   });
-  copyFileSync(realpathSync(process.execPath), embeddedNodePath);
-  chmodSync(embeddedNodePath, 0o755);
+  copyPortableNodeRuntime(embeddedNodePath, {
+    macFrameworksDir: frameworksDir,
+  });
 
   writeFileSync(
     launcherPath,
@@ -784,6 +1039,7 @@ function createMacPortableArtifact(
 set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 APP_DIR="$(cd -- "$SCRIPT_DIR/../Resources/app" && pwd)"
+export DYLD_LIBRARY_PATH="$SCRIPT_DIR/../Frameworks\${DYLD_LIBRARY_PATH:+:\$DYLD_LIBRARY_PATH}"
 exec "$SCRIPT_DIR/node" "$APP_DIR/launcher.mjs" "$@"
 `,
     'utf-8',
@@ -817,7 +1073,6 @@ exec "$SCRIPT_DIR/node" "$APP_DIR/launcher.mjs" "$@"
 `,
     'utf-8',
   );
-
   const manifest = buildPortableManifest({
     outputPath,
     bundledAppDir,
@@ -830,6 +1085,7 @@ exec "$SCRIPT_DIR/node" "$APP_DIR/launcher.mjs" "$@"
   });
   const manifestPath = join(resourcesDir, 'edgebase-portable.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+  signMacPortableBundle(outputPath);
 
   return {
     format: 'portable',
@@ -865,8 +1121,9 @@ function createPortableDirectoryArtifact(
     dereference: false,
     verbatimSymlinks: true,
   });
-  copyFileSync(realpathSync(process.execPath), embeddedNodePath);
-  chmodSync(embeddedNodePath, 0o755);
+  copyPortableNodeRuntime(embeddedNodePath, {
+    portableLibDir: process.platform === 'linux' ? join(outputPath, 'lib') : undefined,
+  });
 
   if (process.platform === 'win32') {
     writeFileSync(
@@ -878,12 +1135,15 @@ set SCRIPT_DIR=%~dp0
       'utf-8',
     );
   } else {
+    const libraryEnvExport = process.platform === 'linux'
+      ? 'export LD_LIBRARY_PATH="$SCRIPT_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n'
+      : '';
     writeFileSync(
       launcherPath,
       `#!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
-exec "$SCRIPT_DIR/bin/${embeddedNodeName}" "$SCRIPT_DIR/app/launcher.mjs" "$@"
+${libraryEnvExport}exec "$SCRIPT_DIR/bin/${embeddedNodeName}" "$SCRIPT_DIR/app/launcher.mjs" "$@"
 `,
       'utf-8',
     );
