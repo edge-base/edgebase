@@ -3,11 +3,13 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, symlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { _internals } from '../src/commands/docker.js';
 
 let tmpDir: string;
+const dockerfilePath = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'Dockerfile');
 
 beforeEach(() => {
   tmpDir = join(tmpdir(), `eb-docker-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -194,6 +196,15 @@ describe('Dockerfile detection', () => {
 
   it('detects missing Dockerfile', () => {
     expect(existsSync(join(tmpDir, 'Dockerfile'))).toBe(false);
+  });
+
+  it('bootstraps writable persistence before dropping to the edgebase user', () => {
+    const dockerfile = readFileSync(dockerfilePath, 'utf-8');
+
+    expect(dockerfile).toContain('edgebase-entrypoint.sh');
+    expect(dockerfile).toContain('chown -R edgebase:edgebase "${PERSIST_DIR}" /home/edgebase/.config');
+    expect(dockerfile).toContain("exec su -s /bin/sh edgebase -c 'exec wrangler dev");
+    expect(dockerfile).toContain('USER root');
   });
 
   it('detects edgebase.config.ts as a project root marker', () => {
