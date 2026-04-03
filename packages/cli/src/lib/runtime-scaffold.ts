@@ -12,7 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeFrontendMountPath, type FrontendConfigLike } from './frontend-config.js';
 import {
@@ -566,7 +566,9 @@ function buildDirectoryLinkTarget(linkPath: string, destinationPath: string, pla
     return resolve(destinationPath);
   }
 
-  return relative(dirname(linkPath), destinationPath);
+  const sourceDir = normalizeCrossPlatformPath(dirname(linkPath));
+  const targetPath = normalizeCrossPlatformPath(destinationPath);
+  return posix.relative(sourceDir, targetPath) || '.';
 }
 
 export const __runtimeScaffoldTestUtils = {

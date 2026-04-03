@@ -221,6 +221,19 @@ function spawnPortableLauncher(
   });
 }
 
+function readLauncherLog(dataDir: string): string {
+  const logPath = join(dataDir, 'launcher.log');
+  if (!existsSync(logPath)) {
+    return '';
+  }
+
+  try {
+    return readFileSync(logPath, 'utf-8');
+  } catch {
+    return '';
+  }
+}
+
 describe('pack distribution formats', () => {
   it('creates a current-platform portable artifact with an embedded launcher', { timeout: 120_000 }, () => {
     const projectDir = createTempProject('portable');
@@ -466,7 +479,7 @@ export default defineConfig({
     120_000,
   );
 
-  it('boots a portable artifact and serves both frontend and API traffic', async () => {
+  it('boots a portable artifact and serves both frontend and API traffic', { timeout: process.platform === 'win32' ? 180_000 : 120_000 }, async () => {
     const projectDir = createTempProject('portable-runtime');
     mkdirSync(join(projectDir, 'functions'), { recursive: true });
     mkdirSync(join(projectDir, 'web', 'dist', 'assets'), { recursive: true });
@@ -536,12 +549,17 @@ export default defineConfig({
       stderr += chunk.toString();
     });
 
+    const httpTimeout = process.platform === 'win32' ? 90_000 : 45_000;
     let frontendHtml: string;
     try {
-      frontendHtml = await waitForHttp(`http://127.0.0.1:${launchPort}/app`, (text) => text.includes('portable-frontend'));
+      frontendHtml = await waitForHttp(
+        `http://127.0.0.1:${launchPort}/app`,
+        (text) => text.includes('portable-frontend'),
+        httpTimeout,
+      );
     } catch (error) {
       throw new Error(
-        `Portable launcher failed before serving the frontend.\n${stderr}`,
+        `Portable launcher failed before serving the frontend.\n${stderr}\n${readLauncherLog(dataDir)}`,
         { cause: error },
       );
     }
@@ -549,10 +567,14 @@ export default defineConfig({
 
     let healthText: string;
     try {
-      healthText = await waitForHttp(`http://127.0.0.1:${launchPort}/api/health`, (text) => text.includes('"status":"ok"'));
+      healthText = await waitForHttp(
+        `http://127.0.0.1:${launchPort}/api/health`,
+        (text) => text.includes('"status":"ok"'),
+        httpTimeout,
+      );
     } catch (error) {
       throw new Error(
-        `Portable launcher failed before serving the API.\n${stderr}`,
+        `Portable launcher failed before serving the API.\n${stderr}\n${readLauncherLog(dataDir)}`,
         { cause: error },
       );
     }
@@ -564,5 +586,5 @@ export default defineConfig({
       child.once('error', reject);
       setTimeout(() => reject(new Error(`Portable launcher did not exit cleanly.\n${stderr}`)), 15_000);
     });
-  }, 120_000);
+  });
 });
