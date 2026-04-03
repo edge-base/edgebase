@@ -484,12 +484,8 @@ function materializeNodeModulesEntry(
 }
 
 function findContainingRoot(targetPath: string, candidateRoots: string[]): string | null {
-  const normalizedTargetPath = resolve(targetPath);
   for (const candidateRoot of candidateRoots) {
-    if (
-      normalizedTargetPath === candidateRoot
-      || normalizedTargetPath.startsWith(`${candidateRoot}/`)
-    ) {
+    if (getRelativePathSegmentsWithinRoot(candidateRoot, targetPath) !== null) {
       return candidateRoot;
     }
   }
@@ -502,9 +498,12 @@ function getNodeModulesMaterialization(
   sourceContainerRoot: string,
   targetRoot: string,
 ): { sourceRoot: string; targetRoot: string; targetPath: string } {
-  const relativeSourcePath = relative(sourceContainerRoot, sourcePath);
-  const relativeSegments = relativeSourcePath.split('/').filter(Boolean);
-  const targetPath = join(targetRoot, relativeSourcePath);
+  const relativeSegments = getRelativePathSegmentsWithinRoot(sourceContainerRoot, sourcePath);
+  if (!relativeSegments) {
+    throw new Error(`Could not resolve '${sourcePath}' inside runtime dependency root '${sourceContainerRoot}'.`);
+  }
+
+  const targetPath = join(targetRoot, ...relativeSegments);
 
   if (relativeSegments[0] === '.pnpm' && relativeSegments.length >= 2) {
     const packageRoot = join(sourceContainerRoot, '.pnpm', relativeSegments[1]);
@@ -521,6 +520,45 @@ function getNodeModulesMaterialization(
     targetPath,
   };
 }
+
+function getRelativePathSegmentsWithinRoot(rootPath: string, targetPath: string): string[] | null {
+  const rootSegments = splitCrossPlatformPathSegments(rootPath);
+  const targetSegments = splitCrossPlatformPathSegments(targetPath);
+
+  if (rootSegments.length > targetSegments.length) {
+    return null;
+  }
+
+  for (let index = 0; index < rootSegments.length; index += 1) {
+    if (rootSegments[index] !== targetSegments[index]) {
+      return null;
+    }
+  }
+
+  return targetSegments.slice(rootSegments.length);
+}
+
+function splitCrossPlatformPathSegments(pathValue: string): string[] {
+  const normalized = normalizeCrossPlatformPath(pathValue);
+  return normalized.split('/').filter(Boolean);
+}
+
+function normalizeCrossPlatformPath(pathValue: string): string {
+  let normalized = pathValue.replace(/\\/g, '/').replace(/\/+/g, '/');
+  if (normalized.length > 1 && normalized.endsWith('/')) {
+    normalized = normalized.slice(0, -1);
+  }
+  if (/^[A-Z]:($|\/)/.test(normalized)) {
+    normalized = `${normalized[0].toLowerCase()}${normalized.slice(1)}`;
+  }
+  return normalized;
+}
+
+export const __runtimeScaffoldTestUtils = {
+  findContainingRoot,
+  getNodeModulesMaterialization,
+  getRelativePathSegmentsWithinRoot,
+};
 
 function getSharedPackageSourceCandidates(projectDir: string): string[] {
   return dedupeCandidates([

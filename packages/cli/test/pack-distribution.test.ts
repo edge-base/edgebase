@@ -335,19 +335,19 @@ export default defineConfig({
 
       const payload = JSON.parse(result.stdout) as {
         outputPath: string;
-        packManifest: {
-          launcher: {
-            defaultPort: number;
-            appDataDirName: string;
-          };
-        };
       };
+      const launchPort = await reservePort();
+      const dataDir = createTempProject('portable-open-data');
 
-      const appDataRoot = resolveAppDataRoot(payload.packManifest.launcher.appDataDirName);
-      appDataDirs.push(appDataRoot);
-      rmSync(appDataRoot, { recursive: true, force: true });
-
-      const opened = spawnSync('open', [payload.outputPath], {
+      const opened = spawnSync('open', [
+        '-n',
+        payload.outputPath,
+        '--args',
+        '--port',
+        String(launchPort),
+        '--data-dir',
+        dataDir,
+      ], {
         cwd: projectDir,
         encoding: 'utf-8',
         stdio: 'pipe',
@@ -355,7 +355,7 @@ export default defineConfig({
       expect(opened.status).toBe(0);
       expect(opened.stderr).toBe('');
 
-      const lockPath = join(appDataRoot, 'launcher-lock.json');
+      const lockPath = join(dataDir, 'launcher-lock.json');
       let pid: number | null = null;
 
       try {
@@ -372,11 +372,11 @@ export default defineConfig({
         expect(pid).not.toBeNull();
 
         const frontendHtml = await waitForHttp(
-          `http://127.0.0.1:${payload.packManifest.launcher.defaultPort}/app`,
+          `http://127.0.0.1:${launchPort}/app`,
           (text) => text.includes('portable-open-frontend'),
         );
         const healthText = await waitForHttp(
-          `http://127.0.0.1:${payload.packManifest.launcher.defaultPort}/api/health`,
+          `http://127.0.0.1:${launchPort}/api/health`,
           (text) => text.includes('"status":"ok"'),
         );
 
