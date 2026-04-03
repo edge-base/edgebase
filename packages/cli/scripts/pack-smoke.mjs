@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync, spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -115,6 +115,19 @@ function spawnPortableLauncher(launcherPath, args, cwd, env) {
     env,
     stdio: 'pipe',
   });
+}
+
+function readLauncherLog(dataDir) {
+  const logPath = join(dataDir, 'launcher.log');
+  if (!existsSync(logPath)) {
+    return '';
+  }
+
+  try {
+    return readFileSync(logPath, 'utf-8');
+  } catch {
+    return '';
+  }
 }
 
 function cleanup() {
@@ -239,19 +252,37 @@ export default defineConfig({
   );
   childProcesses.push(child);
 
+  let stdout = '';
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk.toString();
+  });
+
   let stderr = '';
   child.stderr.on('data', (chunk) => {
     stderr += chunk.toString();
   });
 
+  const httpTimeout = process.platform === 'win32' ? 240_000 : 120_000;
+
   try {
-    const frontendHtml = await waitForHttp(`http://127.0.0.1:${port}/app`, (body) => body.includes('pack smoke frontend'));
-    const healthText = await waitForHttp(`http://127.0.0.1:${port}/api/health`, (body) => body.includes('"status":"ok"'));
+    const frontendHtml = await waitForHttp(
+      `http://127.0.0.1:${port}/app`,
+      (body) => body.includes('pack smoke frontend'),
+      httpTimeout,
+    );
+    const healthText = await waitForHttp(
+      `http://127.0.0.1:${port}/api/health`,
+      (body) => body.includes('"status":"ok"'),
+      httpTimeout,
+    );
 
     ensure(frontendHtml.includes('pack smoke frontend'), 'Portable artifact frontend route did not return the expected HTML.');
     ensure(healthText.includes('"status":"ok"'), 'Portable artifact API route did not return the expected health payload.');
   } catch (error) {
-    throw new Error(`Portable artifact failed smoke verification.\n${stderr}`, { cause: error });
+    throw new Error(
+      `Portable artifact failed smoke verification.\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}\nLAUNCHER LOG:\n${readLauncherLog(dataDir)}`,
+      { cause: error },
+    );
   }
 
   child.kill('SIGTERM');
