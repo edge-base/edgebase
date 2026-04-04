@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # Deployment
 
-EdgeBase supports three deployment modes. The same code runs identically in all environments.
+EdgeBase supports three runtime deployment environments plus a packaged local distribution path. The same code runs identically in every runtime environment, and `pack` turns that same app bundle into a portable local artifact.
 
 ## Cloud Edge
 
@@ -128,6 +128,24 @@ npx edgebase dev
 | Data | Local filesystem |
 | Requirements | Node.js 20.19+ (24.x recommended) |
 
+## Packed Local Distribution
+
+Create a runnable local artifact from the same app bundle used by `deploy`, `docker build`, and `dev`.
+
+```bash
+npx edgebase pack --format portable
+npx edgebase pack --format archive
+```
+
+Use `pack` when you want to hand off a local launcher instead of deploying to Cloudflare or running Docker/Node.js directly.
+
+| Feature | Detail |
+|---------|--------|
+| Best for | QA handoff, demos, local installs, offline distribution |
+| Runtime | Local packaged launcher built from the Direct/runtime bundle |
+| Formats | Portable directory/app bundle, or archive |
+| Requirements | Build machine for the target platform |
+
 ## Static Frontend Bundles
 
 EdgeBase can serve a prebuilt static frontend bundle on the same origin as your API and admin UI. Add a `frontend` block to `edgebase.config.ts` and point it at a build output directory such as `dist`, `build`, or `.vercel/output/static`.
@@ -159,13 +177,13 @@ If your frontend already includes a valid web app manifest and service worker, t
 
 ## Comparison
 
-| | Edge | Docker | Direct |
-|---|---|---|---|
-| **Command** | `npx edgebase deploy` | `npx edgebase docker run` | `npx edgebase dev` |
-| **Requires** | Cloudflare account | Docker | Node.js only |
-| **Scaling** | Auto global | Manual | Single instance |
-| **Best for** | Production | Self-hosted prod | Dev / lightweight |
-| **Cost** | ~$5–30/month | VPS cost | Free |
+| | Edge | Docker | Direct | Pack |
+|---|---|---|---|---|
+| **Command** | `npx edgebase deploy` | `npx edgebase docker run` | `npx edgebase dev` | `npx edgebase pack --format portable` |
+| **Requires** | Cloudflare account | Docker | Node.js only | Target-platform build machine |
+| **Scaling** | Auto global | Manual | Single instance | Single local launcher |
+| **Best for** | Production | Self-hosted prod | Dev / lightweight | Handoff / portable local distribution |
+| **Cost** | ~$5–30/month | VPS cost | Free | Free |
 
 ## Environment Variables
 

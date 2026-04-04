@@ -422,7 +422,7 @@ const notes = await client.db('notes', userId).table('notes').getList();
 See [Isolation & Multi-tenancy](/docs/why-edgebase/data-isolation) for details.
 :::
 
-## 5. Deploy
+## 5. Deploy Or Package
 
 ```bash
 # Cloudflare Edge (global serverless)
@@ -434,7 +434,15 @@ npx edgebase docker run
 
 # Direct run (any Node.js server)
 npx edgebase dev
+
+# Portable local handoff
+npx edgebase pack --format portable
+
+# Single-file archive handoff
+npx edgebase pack --format archive
 ```
+
+`deploy`, `docker`, and `dev` are the three runtime environments. `pack` builds a distributable local artifact from that same app bundle when you want a portable launcher or archive instead of a cloud/container rollout.
 
 ## Next Steps
 
