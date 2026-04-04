@@ -58,6 +58,8 @@ describe('CLI: init command', () => {
     expect(existsSync(join(testDir, '.edgebase', 'runtime', 'server', 'edgebase.test.config.ts'))).toBe(true);
     expect(existsSync(join(testDir, '.edgebase', 'runtime', 'server', 'admin-build', 'index.html'))).toBe(true);
     expect(existsSync(join(testDir, '.edgebase', 'runtime', 'server', 'admin-build', '_app', 'version.json'))).toBe(true);
+    expect(existsSync(join(testDir, '.edgebase', 'runtime', 'server', 'app-assets', 'admin', 'index.html'))).toBe(true);
+    expect(existsSync(join(testDir, '.edgebase', 'runtime', 'server', 'app-assets', 'admin', '_app', 'version.json'))).toBe(true);
   });
 
   it('should generate .env.development with 64-char hex secrets', async () => {
@@ -314,7 +316,7 @@ describe('CLI: init command', () => {
     expect(packageJson).toContain(`"@edge-base/shared": "${EXPECTED_PUBLIC_VERSION}"`);
     expect(wranglerToml).toContain(`name = "${basename(testDir)}"`);
     expect(wranglerToml).toContain('main = ".edgebase/runtime/server/src/index.ts"');
-    expect(wranglerToml).toContain('directory = ".edgebase/runtime/server/admin-build"');
+    expect(wranglerToml).toContain('directory = ".edgebase/runtime/server/app-assets"');
     expect(wranglerToml).toContain('{ name = "ROOMS", class_name = "RoomsDO" }');
     expect(wranglerToml).toContain('{ name = "LOGS", class_name = "LogsDO" }');
     expect(wranglerToml).toContain('new_sqlite_classes = ["DatabaseDO", "AuthDO", "DatabaseLiveDO", "RoomsDO"]');

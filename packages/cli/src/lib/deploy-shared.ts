@@ -42,14 +42,28 @@ export type GenerateTempWranglerTomlOptions =
       managedCrons: string[];
     });
 
-const EDGEBASE_ASSETS_DIRECTORY = '.edgebase/runtime/server/admin-build';
+const EDGEBASE_ASSETS_DIRECTORY = '.edgebase/runtime/server/app-assets';
+const LEGACY_EDGEBASE_ASSETS_DIRECTORY = '.edgebase/runtime/server/admin-build';
 const EDGEBASE_ASSETS_BINDING = 'ASSETS';
+
+function readAssetsDirectory(block: string): string | null {
+  const match = block.match(/^\s*directory\s*=\s*"([^"\n]*)"\s*$/m);
+  return match?.[1] ?? null;
+}
+
+function normalizeAssetsDirectory(directory: string | null): string | null {
+  if (!directory) return null;
+  return directory
+    .replace(/\\\\/g, '/')
+    .replace(/\\/g, '/')
+    .replace(/\/+/g, '/');
+}
 
 function hasAssetsBlock(wranglerToml: string): boolean {
   return /\n?\[assets\][\s\S]*?(?=\n\[\[|\n\[|$)/.test(wranglerToml);
 }
 
-function normalizeAssetsRunWorkerFirst(
+export function normalizeLegacyEdgeBaseAssetsDirectory(
   wranglerToml: string,
 ): { normalized: string; changed: boolean } {
   let changed = false;
@@ -57,20 +71,56 @@ function normalizeAssetsRunWorkerFirst(
   const normalized = wranglerToml.replace(
     /\n?\[assets\][\s\S]*?(?=\n\[\[|\n\[|$)/g,
     (block) => {
+      const normalizedDirectory = normalizeAssetsDirectory(readAssetsDirectory(block));
       const isEdgeBaseAssetsBlock =
         /^\s*binding\s*=\s*"ASSETS"\s*$/m.test(block) ||
-        /^\s*directory\s*=\s*".*\.edgebase\/runtime\/server\/admin-build"\s*$/m.test(block);
+        normalizedDirectory === EDGEBASE_ASSETS_DIRECTORY ||
+        normalizedDirectory === LEGACY_EDGEBASE_ASSETS_DIRECTORY;
+
+      if (!isEdgeBaseAssetsBlock || normalizedDirectory !== LEGACY_EDGEBASE_ASSETS_DIRECTORY) {
+        return block;
+      }
+
+      changed = true;
+      return block.replace(
+        /^\s*directory\s*=\s*"([^"\n]*)"\s*$/m,
+        `directory = "${EDGEBASE_ASSETS_DIRECTORY}"`,
+      );
+    },
+  );
+
+  return { normalized, changed };
+}
+
+function normalizeAssetsRunWorkerFirst(
+  wranglerToml: string,
+): { normalized: string; changed: boolean } {
+  const {
+    normalized: normalizedLegacyAssets,
+    changed: normalizedLegacyAssetsDirectory,
+  } = normalizeLegacyEdgeBaseAssetsDirectory(wranglerToml);
+  let changed = normalizedLegacyAssetsDirectory;
+
+  const normalized = normalizedLegacyAssets.replace(
+    /\n?\[assets\][\s\S]*?(?=\n\[\[|\n\[|$)/g,
+    (block) => {
+      const normalizedDirectory = normalizeAssetsDirectory(readAssetsDirectory(block));
+      const isEdgeBaseAssetsBlock =
+        /^\s*binding\s*=\s*"ASSETS"\s*$/m.test(block) ||
+        normalizedDirectory === EDGEBASE_ASSETS_DIRECTORY ||
+        normalizedDirectory === LEGACY_EDGEBASE_ASSETS_DIRECTORY;
 
       if (!isEdgeBaseAssetsBlock) return block;
-      if (/^\s*run_worker_first\s*=\s*true\s*$/m.test(block)) return block;
+      const rewritten = block;
+      if (/^\s*run_worker_first\s*=\s*true\s*$/m.test(rewritten)) return rewritten;
 
       changed = true;
 
-      if (/^\s*run_worker_first\s*=\s*(true|false)\s*$/m.test(block)) {
-        return block.replace(/^\s*run_worker_first\s*=\s*(true|false)\s*$/m, 'run_worker_first = true');
+      if (/^\s*run_worker_first\s*=\s*(true|false)\s*$/m.test(rewritten)) {
+        return rewritten.replace(/^\s*run_worker_first\s*=\s*(true|false)\s*$/m, 'run_worker_first = true');
       }
 
-      return `${block.replace(/\s*$/, '')}\nrun_worker_first = true`;
+      return `${rewritten.replace(/\s*$/, '')}\nrun_worker_first = true`;
     },
   );
 

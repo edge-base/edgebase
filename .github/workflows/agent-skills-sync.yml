@@ -32,6 +32,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: agent-skills-sync-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.sync_mode == 'tag' && (github.event.inputs.tag_name || 'missing-tag') || 'main') || (github.ref_type == 'tag' && github.ref_name || 'main') }}
   cancel-in-progress: false
@@ -52,7 +55,7 @@ jobs:
           fi
 
       - name: Checkout source repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false

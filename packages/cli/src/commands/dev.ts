@@ -21,11 +21,7 @@ import { checkWranglerAuth } from '../lib/cf-auth.js';
 import { parseDevVars } from '../lib/dev-sidecar.js';
 import { writeLocalSecrets } from '../lib/local-secrets.js';
 import {
-  ensureLocalWranglerToml,
-  ensureRuntimeScaffold,
-  getRuntimeServerSrcDir,
   resolveWranglerCommand,
-  writeRuntimeConfigShim,
 } from '../lib/runtime-scaffold.js';
 import { resolveLocalDevBindings } from '../lib/project-runtime.js';
 import {
@@ -57,6 +53,7 @@ import {
 } from '../lib/migrator.js';
 import { isCliStructuredError, raiseCliError } from '../lib/agent-contract.js';
 import { isNonInteractive } from '../lib/cli-context.js';
+import { createAppBundle, syncAppBundle } from '../lib/app-bundle.js';
 
 const FULL_CONFIG_EVAL = { allowRegexFallback: false } as const;
 const DEFAULT_DEV_PORT = 8787;
@@ -742,6 +739,8 @@ export const devCommand = new Command('dev')
     const projectDir = resolve('.');
     const configPath = join(projectDir, 'edgebase.config.ts');
     const configDir = join(projectDir, 'config');
+    const devBundleOutput = join('.edgebase', 'targets', 'dev-app');
+    let devBundleDir = resolve(projectDir, devBundleOutput);
 
     if (!existsSync(configPath)) {
       raiseCliError({
@@ -814,13 +813,16 @@ export const devCommand = new Command('dev')
       );
     }
 
-    ensureRuntimeScaffold(projectDir);
-    ensureLocalWranglerToml(projectDir);
-
     // Display release mode
     try {
-      syncDevEnvToProcess(projectDir);
+      const envValues = syncDevEnvToProcess(projectDir);
       const config = loadConfigSafe(configPath, projectDir, FULL_CONFIG_EVAL);
+      const initialBundle = createAppBundle(projectDir, {
+        outputDir: devBundleOutput,
+        overwrite: true,
+        injectedEnv: envValues,
+      });
+      devBundleDir = initialBundle.outputDir;
       if (config.release) {
         console.log(
           chalk.yellow('🔒'),
@@ -842,6 +844,7 @@ export const devCommand = new Command('dev')
           ),
         );
       }
+      console.log(chalk.dim(`  Bundle: ${relative(projectDir, devBundleDir) || devBundleDir}`));
 
       checkWranglerAuth(projectDir);
     } catch (err) {
@@ -856,11 +859,26 @@ export const devCommand = new Command('dev')
 
     console.log();
 
-    // ─── Initial Build: Functions + Config ───
-    // Plugin functions are registered at runtime from config.plugins[] (Explicit Import Pattern).
     const functionsDir = join(projectDir, 'functions');
-    const serverSrcDir = getRuntimeServerSrcDir(projectDir);
-    const registryPath = join(serverSrcDir, '_functions-registry.ts');
+    const syncDevBundle = (): boolean => {
+      const envValues = syncDevEnvToProcess(projectDir);
+
+      try {
+        const result = syncAppBundle(projectDir, devBundleDir, {
+          injectedEnv: envValues,
+        });
+        devBundleDir = result.outputDir;
+        return true;
+      } catch (err) {
+        console.error(
+          chalk.red('✗'),
+          'App bundle refresh failed:',
+          (err as Error).message?.split('\n')[0] ?? 'Unknown app bundle error.',
+        );
+        console.log(chalk.dim(`  → Check ${configPath} and the frontend/functions inputs, then save again.`));
+        return false;
+      }
+    };
     let configDebounce: ReturnType<typeof setTimeout> | null = null;
     let wranglerProcess: ChildProcess | null = null;
     let lastConfigSignature = getPathSignature(configPath);
@@ -878,11 +896,6 @@ export const devCommand = new Command('dev')
     let interruptionSignal: NodeJS.Signals | null = null;
     let sessionSettled = false;
 
-    rebuildFunctionsRegistry(functionsDir, registryPath);
-
-    // Hidden runtime imports edgebase.config.ts directly from the project root.
-    void rebundleConfig(projectDir, configPath);
-
     // ─── Watch: functions/ → 자동 재생성 ───
     if (existsSync(functionsDir)) {
       let functionsDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -895,8 +908,10 @@ export const devCommand = new Command('dev')
           if (functionsDebounce) clearTimeout(functionsDebounce);
           functionsDebounce = setTimeout(() => {
             console.log();
-            console.log(chalk.blue('🔄'), `functions/${filename} changed — rebuilding registry...`);
-            rebuildFunctionsRegistry(functionsDir, registryPath);
+            console.log(chalk.blue('🔄'), `functions/${filename} changed — refreshing app bundle...`);
+            if (syncDevBundle()) {
+              console.log(chalk.green('✓'), 'Dev app bundle refreshed');
+            }
           }, 300);
         });
         cleanupHandles.push(watcher);
@@ -960,7 +975,10 @@ export const devCommand = new Command('dev')
       configDebounce = setTimeout(() => {
         console.log();
         console.log(chalk.blue('🔄'), `${label} changed — reloading config...`);
-        void rebundleConfig(projectDir, configPath).then(async () => {
+        if (!syncDevBundle()) {
+          return;
+        }
+        void (async () => {
           // Schema destructive change detection + provider change migration
           // Returns true if wrangler was already restarted (reset/migration action)
           const handled = await checkSchemaChanges(
@@ -983,7 +1001,7 @@ export const devCommand = new Command('dev')
             restartRequested = true;
             void terminateChildProcessTree(wranglerProcess, 'SIGTERM');
           }
-        });
+        })();
       }, 500);
     };
 
@@ -1098,13 +1116,14 @@ export const devCommand = new Command('dev')
     function refreshTempWrangler(): void {
       cleanupTempWrangler();
 
-      const wranglerPath = join(projectDir, 'wrangler.toml');
-      if (!existsSync(wranglerPath)) return;
-
       let config: Record<string, unknown> | undefined;
       try {
-        syncDevEnvToProcess(projectDir);
+        const envValues = syncDevEnvToProcess(projectDir);
         config = loadConfigSafe(configPath, projectDir, FULL_CONFIG_EVAL);
+        const bundle = syncAppBundle(projectDir, devBundleDir, {
+          injectedEnv: envValues,
+        });
+        devBundleDir = bundle.outputDir;
       } catch (err) {
         const detail = (err as Error).message ?? String(err);
         const firstLine = detail.split('\n')[0];
@@ -1115,7 +1134,7 @@ export const devCommand = new Command('dev')
       }
 
       tempWranglerPath = generateTempWranglerToml(
-        wranglerPath,
+        join(devBundleDir, 'wrangler.toml'),
         {
           bindings: resolveLocalDevBindings(config),
           triggerMode: 'preserve',
@@ -1164,7 +1183,7 @@ export const devCommand = new Command('dev')
       }
 
       wranglerProcess = spawn(wranglerTool.command, wranglerArgs, {
-        cwd: projectDir,
+        cwd: devBundleDir,
         stdio: ['inherit', 'inherit', 'pipe'],
         detached: process.platform !== 'win32',
       });
@@ -1459,27 +1478,6 @@ export const _devInternals = {
   shouldSuppressWranglerStderrLine,
   filterWranglerStderrChunkForDisplay,
 };
-
-// ─── Helper: Config Sync ───
-
-/**
- * Hidden runtime imports edgebase.config.ts directly.
- * Preserve .dev.vars secrets copied from .env.development.
- */
-async function rebundleConfig(projectDir: string, configPath: string): Promise<void> {
-  const envValues = syncDevEnvToProcess(projectDir);
-
-  try {
-    writeRuntimeConfigShim(projectDir, envValues);
-  } catch (err) {
-    console.error(
-      chalk.red('✗'),
-      'Config sync failed:',
-      (err as Error).message?.split('\n')[0] ?? 'Unknown config sync error. Check the filesystem permissions and worker config paths.',
-    );
-    console.log(chalk.dim(`  → Check that ${configPath} is readable and .dev.vars is writable.`));
-  }
-}
 
 /**
  * Check for destructive schema changes and provider changes after config rebundle.

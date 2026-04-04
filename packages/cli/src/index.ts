@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initCommand } from './commands/init.js';
+import { buildAppCommand } from './commands/build-app.js';
 import { devCommand } from './commands/dev.js';
 import { deployCommand } from './commands/deploy.js';
 import { destroyCommand } from './commands/destroy.js';
@@ -21,6 +22,7 @@ import { seedCommand } from './commands/seed.js';
 import { adminCommand } from './commands/admin.js';
 import { neonCommand } from './commands/neon.js';
 import { dockerCommand } from './commands/docker.js';
+import { packCommand } from './commands/pack.js';
 import { pluginsCommand } from './commands/plugins.js';
 import { createPluginCommand } from './commands/create-plugin.js';
 import { webhookTestCommand } from './commands/webhook-test.js';
@@ -145,6 +147,7 @@ program.hook('postAction', (_thisCommand, actionCommand) => {
 
 // ─── Core ───
 program.addCommand(initCommand);
+program.addCommand(buildAppCommand);
 program.addCommand(devCommand);
 program.addCommand(deployCommand);
 program.addCommand(destroyCommand);
@@ -169,6 +172,7 @@ program.addCommand(adminCommand);
 program.addCommand(pluginsCommand);
 program.addCommand(createPluginCommand);
 program.addCommand(dockerCommand);
+program.addCommand(packCommand);
 program.addCommand(webhookTestCommand);
 program.addCommand(completionCommand);
 program.addCommand(describeCommand);
@@ -177,10 +181,10 @@ program.addCommand(telemetryCommand);
 // ─── Help Text Grouping ───
 program.addHelpText('after', `
 Commands by category:
-  Core:         init, dev (dv), deploy (dp), destroy, logs (l), upgrade (up)
+  Core:         init, build-app, dev (dv), deploy (dp), destroy, logs (l), upgrade (up)
   Database:     migration (mg), migrate, seed, backup (bk), export, typegen (tg), neon
   Security:     secret, keys, admin
-  Plugins:      plugins, create-plugin, docker, webhook-test
+  Plugins:      plugins, create-plugin, docker, pack, webhook-test
   Utilities:    completion, describe, telemetry
 
 Environment variables:

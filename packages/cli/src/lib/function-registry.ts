@@ -149,7 +149,11 @@ export function validateRouteNames(functions: ScannedFunction[]): void {
 export function generateFunctionRegistry(
   functions: ScannedFunction[],
   outputPath: string,
-  options?: { configImportPath?: string; functionsImportBasePath?: string },
+  options?: {
+    configImportPath?: string;
+    functionsImportBasePath?: string;
+    resolveFunctionImportPath?: (fn: ScannedFunction, baseImportPath: string) => string;
+  },
 ): void {
   const imports: string[] = [];
   const registrations: string[] = [];
@@ -159,9 +163,11 @@ export function generateFunctionRegistry(
     options?.functionsImportBasePath ??
     relative(dirname(outputPath), join(dirname(outputPath), '..', '..', '..', '..', 'functions'))
       .replace(/\\/g, '/');
+  const resolveFunctionImportPath = options?.resolveFunctionImportPath
+    ?? ((fn: ScannedFunction, baseImportPath: string) => `${baseImportPath}/${fn.relativePath}`);
 
   for (const fn of functions) {
-    const importPath = `${functionsImportBasePath}/${fn.relativePath}`;
+    const importPath = resolveFunctionImportPath(fn, functionsImportBasePath);
     const safeName = fn.relativePath.replace(/\.ts$/, '').replace(/[^a-zA-Z0-9_]/g, '_');
 
     if (fn.isMiddleware) {

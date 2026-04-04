@@ -1,7 +1,7 @@
 import { Command } from 'commander';
-import { spawn, execSync, execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { spawn, execFileSync } from 'node:child_process';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import chalk from 'chalk';
 import { raiseCliError, raiseNeedsInput } from '../lib/agent-contract.js';
@@ -14,11 +14,11 @@ import {
   validateAdminEmail,
   type EnsureBootstrapAdminResult,
 } from '../lib/admin-bootstrap.js';
+import { createAppBundle } from '../lib/app-bundle.js';
 
 const EDGEBASE_CONFIG_FILES = ['edgebase.config.ts', 'edgebase.config.js'];
 const SELF_HOSTING_GUIDE_URL = 'https://edgebase.fun/docs/getting-started/self-hosting';
 const RELEASE_ENV_HEADER = '# EdgeBase Production Environment Variables';
-
 interface DockerProcessResult {
   stdout: string;
   stderr: string;
@@ -106,7 +106,7 @@ async function runDockerProcess(
 
 function ensureDockerAvailable(): void {
   try {
-    execSync('docker --version', { stdio: 'ignore' });
+    execFileSync('docker', ['--version'], { stdio: 'ignore', timeout: 5_000 });
   } catch {
     raiseCliError({
       code: 'docker_unavailable',
@@ -116,6 +116,28 @@ function ensureDockerAvailable(): void {
         installUrl: 'https://docs.docker.com/get-docker/',
       },
     });
+  }
+
+  if (!isDockerDaemonResponsive()) {
+    raiseCliError({
+      code: 'docker_daemon_unavailable',
+      message: 'Docker is installed, but the Docker daemon is not responding.',
+      hint: 'Start Docker Desktop and wait for the engine to become ready before retrying.',
+    });
+  }
+}
+
+function isDockerDaemonResponsive(
+  runner: typeof execFileSync = execFileSync,
+): boolean {
+  try {
+    runner('docker', ['info', '--format', '{{json .ServerVersion}}'], {
+      stdio: 'ignore',
+      timeout: 5_000,
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -197,6 +219,46 @@ function buildDockerBuildArgs(options: { tag: string; cache: boolean }): string[
   }
   args.push('.');
   return args;
+}
+
+function buildSyntheticDockerignore(sourceDockerignore: string): string {
+  const preservedRules = existsSync(sourceDockerignore)
+    ? readFileSync(sourceDockerignore, 'utf-8').replace(/\s+$/, '')
+    : '';
+
+  const requiredIncludes = [
+    '# Preserve the generated bundle in the synthetic Docker context.',
+    '!Dockerfile',
+    '!.dockerignore',
+    '!.edgebase',
+    '!.edgebase/targets',
+    '!.edgebase/targets/docker-app',
+    '!.edgebase/targets/docker-app/**',
+  ].join('\n');
+
+  return preservedRules.length > 0
+    ? `${preservedRules}\n\n${requiredIncludes}\n`
+    : `${requiredIncludes}\n`;
+}
+
+function prepareDockerBuildContext(projectDir: string, dockerBundleDir: string): string {
+  const contextDir = resolve(projectDir, '.edgebase', 'targets', 'docker-context');
+  const contextBundleDir = join(contextDir, '.edgebase', 'targets', 'docker-app');
+  const sourceDockerfile = resolve(projectDir, 'Dockerfile');
+  const sourceDockerignore = resolve(projectDir, '.dockerignore');
+
+  rmSync(contextDir, { recursive: true, force: true });
+  mkdirSync(join(contextDir, '.edgebase', 'targets'), { recursive: true });
+  copyFileSync(sourceDockerfile, join(contextDir, 'Dockerfile'));
+  writeFileSync(join(contextDir, '.dockerignore'), buildSyntheticDockerignore(sourceDockerignore));
+  cpSync(dockerBundleDir, contextBundleDir, {
+    recursive: true,
+    force: true,
+    dereference: false,
+    verbatimSymlinks: true,
+  });
+
+  return contextDir;
 }
 
 function buildDockerRunArgs(options: {
@@ -312,6 +374,8 @@ export const _internals = {
   findProjectRoot,
   buildDockerBuildArgs,
   buildDockerRunArgs,
+  prepareDockerBuildContext,
+  isDockerDaemonResponsive,
 };
 
 export const dockerCommand = new Command('docker')
@@ -335,17 +399,37 @@ dockerCommand
 
     ensureDockerAvailable();
 
+    let dockerBundle: ReturnType<typeof createAppBundle>;
+    try {
+      dockerBundle = createAppBundle(projectDir, {
+        outputDir: join('.edgebase', 'targets', 'docker-app'),
+        overwrite: true,
+        portableDependencies: true,
+        dependencyProfile: 'docker',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      raiseCliError({
+        code: 'docker_bundle_failed',
+        message,
+        hint: 'Run the command from an EdgeBase app project with edgebase.config.ts, then retry `npx edgebase docker build`.',
+      });
+    }
+
     const args = buildDockerBuildArgs(options);
+    const contextDir = prepareDockerBuildContext(projectDir, dockerBundle.outputDir);
 
     if (!isQuiet()) {
       console.log(chalk.blue('🐳 Building EdgeBase Docker image...'));
       console.log(chalk.dim(`  Tag: ${options.tag}`));
+      console.log(chalk.dim(`  Bundle: ${dockerBundle.outputDir}`));
+      console.log(chalk.dim(`  Context: ${contextDir}`));
       console.log();
     }
 
     try {
       await runDockerProcess(args, {
-        cwd: projectDir,
+        cwd: contextDir,
         inheritOutput: !isJson(),
       });
     } catch (error) {
@@ -368,6 +452,8 @@ dockerCommand
         operation: 'build',
         tag: options.tag,
         projectDir,
+        bundleDir: dockerBundle.outputDir,
+        contextDir,
       }));
       return;
     }

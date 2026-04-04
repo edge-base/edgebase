@@ -13,11 +13,20 @@ This feature is in **beta**. Core behavior is stable and ready to try, but some 
 The `edgebase` CLI is the front door for the full project lifecycle:
 
 - scaffold a project
+- build a self-contained app bundle
 - run local development
 - deploy and destroy Cloudflare resources
+- package an app bundle into a directory artifact
 - generate types and migration snippets
 - move data with seed, export, migrate, and backup flows
 - manage Service Keys, JWT secrets, plugins, Docker, and developer tooling
+
+The bundle-centric commands now converge on the same self-contained runtime shape:
+
+- `dev` refreshes `.edgebase/targets/dev-app`
+- `deploy` stages `.edgebase/targets/deploy-app`
+- `docker build` stages `.edgebase/targets/docker-app`
+- `pack` packages that same app-bundle layout into a runnable directory artifact, a current-platform portable wrapper, or a single-file archive
 
 If you are trying to understand **which command to use when**, start with [CLI Workflows](/docs/cli/workflows). If you already know what you want and need the exact syntax, jump to [CLI Reference](/docs/cli/reference).
 
@@ -39,7 +48,7 @@ npx edgebase <command>
 
 | Area | Commands | What it covers |
 | --- | --- | --- |
-| Project lifecycle | `init`, `dev`, `deploy`, `destroy`, `logs`, `upgrade` | Bootstrap, local runtime, Cloudflare deploy/cleanup, runtime logs, package upgrades |
+| Project lifecycle | `init`, `build-app`, `dev`, `deploy`, `destroy`, `logs`, `upgrade`, `pack` | Bootstrap, self-contained app bundles, local runtime, Cloudflare deploy/cleanup, runtime logs, package upgrades, and directory packaging artifacts |
 | Data workflow | `migration`, `migrate`, `seed`, `backup`, `export`, `typegen`, `neon` | Schema changes, provider moves, fixture data, portable backup/restore, table exports, generated TS types, Neon setup |
 | Security and admin | `secret`, `keys`, `admin` | Workers Secrets, Service Key and JWT rotation, admin password recovery |
 | Plugins and tooling | `plugins`, `create-plugin`, `docker`, `webhook-test`, `completion`, `describe`, `telemetry` | Plugin inspection/cleanup, plugin scaffolding, self-hosting commands, webhook simulation, shell completion, machine-readable CLI introspection, and telemetry preferences |

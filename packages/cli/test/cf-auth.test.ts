@@ -166,7 +166,7 @@ describe('ensureWranglerToml', () => {
     expect(content).toContain(`account_id = "${testAccountId}"`);
     expect(content).toContain(`name = "${basename(tmpDir)}"`);
     expect(content).toContain('main = ".edgebase/runtime/server/src/index.ts"');
-    expect(content).toContain('directory = ".edgebase/runtime/server/admin-build"');
+    expect(content).toContain('directory = ".edgebase/runtime/server/app-assets"');
     expect(content).toContain('compatibility_date');
     expect(content).toContain('[durable_objects]');
     expect(content).toContain('DatabaseDO');

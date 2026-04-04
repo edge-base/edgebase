@@ -8,18 +8,18 @@ import {
 
 describe('admin asset path resolution', () => {
   it('serves index for the admin root', () => {
-    expect(resolveAdminAssetPath('/admin')).toBe('/');
-    expect(resolveAdminAssetPath('/admin/')).toBe('/');
+    expect(resolveAdminAssetPath('/admin')).toBe('/admin/index.html');
+    expect(resolveAdminAssetPath('/admin/')).toBe('/admin/index.html');
   });
 
   it('strips the /admin prefix for built assets', () => {
-    expect(resolveAdminAssetPath('/admin/_app/version.json')).toBe('/_app/version.json');
-    expect(resolveAdminAssetPath('/admin/favicon.png')).toBe('/favicon.png');
+    expect(resolveAdminAssetPath('/admin/_app/version.json')).toBe('/admin/_app/version.json');
+    expect(resolveAdminAssetPath('/admin/favicon.png')).toBe('/admin/favicon.png');
   });
 
   it('falls back to index for client-side admin routes', () => {
-    expect(resolveAdminAssetPath('/admin/login')).toBe('/');
-    expect(resolveAdminAssetPath('/admin/database/tables')).toBe('/');
+    expect(resolveAdminAssetPath('/admin/login')).toBe('/admin/index.html');
+    expect(resolveAdminAssetPath('/admin/database/tables')).toBe('/admin/index.html');
   });
 
   it('rewrites requests without dropping the query string', () => {
@@ -27,7 +27,7 @@ describe('admin asset path resolution', () => {
     const rewritten = createAdminAssetRequest(request);
     const url = new URL(rewritten.url);
 
-    expect(url.pathname).toBe('/');
+    expect(url.pathname).toBe('/admin/index.html');
     expect(url.search).toBe('?next=%2Fadmin%2Fdatabase');
   });
 });

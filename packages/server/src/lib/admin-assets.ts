@@ -1,6 +1,6 @@
 export function resolveAdminAssetPath(pathname: string): string {
   if (pathname === '/admin' || pathname === '/admin/') {
-    return '/';
+    return '/admin/index.html';
   }
 
   if (!pathname.startsWith('/admin/')) {
@@ -9,19 +9,19 @@ export function resolveAdminAssetPath(pathname: string): string {
 
   const assetPath = pathname.slice('/admin'.length) || '/';
   if (assetPath === '/' || assetPath === '') {
-    return '/';
+    return '/admin/index.html';
   }
 
   if (assetPath.startsWith('/_app/')) {
-    return assetPath;
+    return `/admin${assetPath}`;
   }
 
   const lastSegment = assetPath.split('/').pop() ?? '';
   if (lastSegment.includes('.')) {
-    return assetPath;
+    return `/admin${assetPath}`;
   }
 
-  return '/';
+  return '/admin/index.html';
 }
 
 export function createAdminAssetRequest(request: Request): Request {

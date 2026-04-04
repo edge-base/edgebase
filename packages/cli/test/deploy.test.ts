@@ -982,7 +982,7 @@ describe('generateTempWranglerToml', () => {
     expect(result).not.toBeNull();
     const content = readFileSync(result!, 'utf-8');
     expect(content).toContain('[assets]');
-    expect(content).toContain('directory = ".edgebase/runtime/server/admin-build"');
+    expect(content).toContain('directory = ".edgebase/runtime/server/app-assets"');
     expect(content).toContain('binding = "ASSETS"');
     expect(content).toContain('run_worker_first = true');
 
@@ -1024,6 +1024,7 @@ describe('generateTempWranglerToml', () => {
     expect(result).not.toBeNull();
     const content = readFileSync(result!, 'utf-8');
     expect(content).toContain('[assets]');
+    expect(content).toContain('directory = ".edgebase/runtime/server/app-assets"');
     expect(content).toContain('run_worker_first = true');
 
     rmSync(result!);
@@ -1047,6 +1048,7 @@ describe('generateTempWranglerToml', () => {
 
     expect(result).not.toBeNull();
     const content = readFileSync(result!, 'utf-8');
+    expect(content).toContain('directory = ".edgebase/runtime/server/app-assets"');
     expect(content).toContain('run_worker_first = true');
     expect(content).not.toContain('run_worker_first = false');
 
@@ -1441,6 +1443,29 @@ describe('generateTempWranglerToml', () => {
     expect(result).not.toBeNull();
     const content = readFileSync(result!, 'utf-8');
     expect((content.match(/\[\[d1_databases\]\]/g) || []).length).toBe(1);
+
+    rmSync(result!);
+  });
+
+  it('normalizes legacy assets blocks that use Windows-style separators', () => {
+    const wranglerPath = join(tmpDir, 'wrangler.toml');
+    writeFileSync(
+      wranglerPath,
+      [
+        'name = "my-worker"',
+        '',
+        '[assets]',
+        'directory = ".edgebase\\\\runtime\\\\server\\\\admin-build"',
+        'binding = "ASSETS"',
+      ].join('\n'),
+    );
+
+    const result = generateTempWranglerToml(wranglerPath, { bindings: [] });
+
+    expect(result).not.toBeNull();
+    const content = readFileSync(result!, 'utf-8');
+    expect(content).toContain('directory = ".edgebase/runtime/server/app-assets"');
+    expect(content).toContain('run_worker_first = true');
 
     rmSync(result!);
   });

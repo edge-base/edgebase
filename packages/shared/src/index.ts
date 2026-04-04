@@ -20,11 +20,13 @@ export {
   getRoomLifecycleHandlers,
   getRoomActionHandlers,
   getRoomTimerHandlers,
+  normalizeFrontendMountPath,
   materializeConfig,
 } from './config.js';
 export type {
   // ─── Core Config ───
   EdgeBaseConfig,
+  FrontendConfig,
   // ─── Database-first (§1,) ───
   DbBlock,
   DbAdminConfig,

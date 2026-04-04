@@ -31,6 +31,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: swift-split-sync-${{ github.ref }}
   cancel-in-progress: false
@@ -105,7 +108,7 @@ jobs:
     if: needs.resolve.outputs.requested_target == 'all' || needs.resolve.outputs.requested_target == 'core'
     steps:
       - name: Checkout source repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -138,7 +141,7 @@ jobs:
       (needs.sync-core.result == 'success' || needs.sync-core.result == 'skipped')
     steps:
       - name: Checkout source repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false

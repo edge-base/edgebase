@@ -73,6 +73,20 @@ describe('Runtime config scaffold', () => {
     expect(wranglerToml).toContain('bucket_name = "instagram-clone-edgebase-storage"');
   });
 
+  it('normalizes long local worker and storage names for Wrangler compatibility', () => {
+    const wranglerToml = buildDefaultWranglerToml(
+      undefined,
+      'EdgeBase Pack Portable Runtime 1775206607004 very-long-project-name-that-keeps-going',
+    );
+    const workerName = wranglerToml.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? '';
+    const bucketName = wranglerToml.match(/^bucket_name\s*=\s*"([^"]+)"/m)?.[1] ?? '';
+
+    expect(workerName).toMatch(/^[a-z0-9-]+$/);
+    expect(workerName.length).toBeLessThanOrEqual(55);
+    expect(bucketName).toMatch(/^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$/);
+    expect(bucketName.length).toBeLessThanOrEqual(63);
+  });
+
   it('creates a runtime test-config shim that points at the project test config when present', () => {
     writeFileSync(
       join(tmpDir, 'edgebase.test.config.ts'),
@@ -137,6 +151,40 @@ describe('Runtime config scaffold', () => {
     expect(registry).toContain('Plugin Functions + Hooks Registration');
     expect(registry).toContain('registerFunction(`${plugin.name}/${funcName}`');
     expect(registry).toContain('rebuildCompiledRoutes()');
+  });
+
+  it('builds merged app assets with admin under /admin and frontend at the root mount path', () => {
+    mkdirSync(join(tmpDir, 'web', 'dist', 'assets'), { recursive: true });
+    writeFileSync(join(tmpDir, 'web', 'dist', 'index.html'), '<!doctype html><title>app</title>');
+    writeFileSync(join(tmpDir, 'web', 'dist', 'assets', 'main.js'), 'console.log("app");');
+
+    ensureRuntimeScaffold(tmpDir, {
+      frontend: {
+        directory: './web/dist',
+        spaFallback: true,
+      },
+    });
+
+    expect(existsSync(join(tmpDir, '.edgebase', 'runtime', 'server', 'app-assets', 'index.html'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.edgebase', 'runtime', 'server', 'app-assets', 'assets', 'main.js'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.edgebase', 'runtime', 'server', 'app-assets', 'admin', 'index.html'))).toBe(true);
+  });
+
+  it('copies frontend bundles into a custom mount path inside the merged assets directory', () => {
+    mkdirSync(join(tmpDir, 'web', 'dist', 'assets'), { recursive: true });
+    writeFileSync(join(tmpDir, 'web', 'dist', 'index.html'), '<!doctype html><title>app</title>');
+    writeFileSync(join(tmpDir, 'web', 'dist', 'assets', 'main.js'), 'console.log("app");');
+
+    ensureRuntimeScaffold(tmpDir, {
+      frontend: {
+        directory: './web/dist',
+        mountPath: '/app',
+      },
+    });
+
+    expect(existsSync(join(tmpDir, '.edgebase', 'runtime', 'server', 'app-assets', 'app', 'index.html'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.edgebase', 'runtime', 'server', 'app-assets', 'app', 'assets', 'main.js'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.edgebase', 'runtime', 'server', 'app-assets', 'admin', 'index.html'))).toBe(true);
   });
 
   it('writes an ESM-resolvable @edge-base/shared shim for config evaluation', () => {

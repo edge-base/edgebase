@@ -1,6 +1,7 @@
 import type { HonoEnv } from './lib/hono.js';
 import type { OpenApiSpec } from './lib/openapi.js';
 import type { Env } from './types.js';
+import type { FrontendConfigLike } from './lib/frontend-config.js';
 import { ensureServerStartup } from './lib/runtime-startup.js';
 
 // ─── DO Re-exports (wrangler needs exports from main entry) ───
@@ -11,12 +12,14 @@ export { RoomsDO } from './durable-objects/rooms-do.js';
 export { LogsDO } from './durable-objects/logs-do.js';
 
 let appPromise: Promise<Awaited<ReturnType<typeof buildApp>>> | null = null;
+const FRONTEND_ASSET_REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
+const FRONTEND_ASSET_REDIRECT_LIMIT = 4;
 
 function assetUnavailableMessage(
-  assetName: 'admin dashboard' | 'harness assets',
+  assetName: 'admin dashboard' | 'frontend bundle' | 'harness assets',
 ): string {
   const label = `${assetName[0].toUpperCase()}${assetName.slice(1)}`;
-  const verb = assetName === 'admin dashboard' ? 'is' : 'are';
+  const verb = assetName === 'harness assets' ? 'are' : 'is';
   return `${label} ${verb} not deployed for this worker. Deploy the assets bundle or configure ADMIN_ORIGIN if they are hosted elsewhere.`;
 }
 
@@ -56,6 +59,7 @@ async function buildApp() {
     analyticsRouteModule,
     adminAssetsModule,
     adminRoutingModule,
+    frontendAssetsModule,
     schemasModule,
     pluginMigrationsModule,
     pluginMigrationRoutingModule,
@@ -95,6 +99,7 @@ async function buildApp() {
     import('./routes/analytics-api.js'),
     import('./lib/admin-assets.js'),
     import('./lib/admin-routing.js'),
+    import('./lib/frontend-assets.js'),
     import('./lib/schemas.js'),
     import('./lib/plugin-migrations.js'),
     import('./lib/plugin-migration-routing.js'),
@@ -116,6 +121,7 @@ async function buildApp() {
   const { SERVER_VERSION } = versionModule;
   const { createAdminAssetRequest } = adminAssetsModule;
   const { resolveAdminFaviconTarget, resolveAdminRedirectTarget } = adminRoutingModule;
+  const { applyFrontendAssetHeaders, createFrontendAssetRequest } = frontendAssetsModule;
   const { zodDefaultHook } = schemasModule;
   const { executePluginMigrations } = pluginMigrationsModule;
   const { shouldRunPluginMigrationsForRequestPath } = pluginMigrationRoutingModule;
@@ -163,8 +169,75 @@ async function buildApp() {
   app.route('/admin/api', adminRouteModule.adminRoute);
   app.route('/admin/api/backup', backupRouteModule.backupRoute);
 
-  app.get('/', (c) => {
+  function getFrontendConfig(env: Env): FrontendConfigLike | undefined {
+    return (doRouterModule.parseConfig(env) as { frontend?: FrontendConfigLike } | undefined)?.frontend;
+  }
+
+  async function fetchFrontendAssetResponse(
+    assetsBinding: { fetch(request: Request): Promise<Response> },
+    assetRequest: Request,
+  ): Promise<Response> {
+    let currentRequest = assetRequest;
+    const visitedUrls = new Set<string>();
+
+    for (let attempt = 0; attempt <= FRONTEND_ASSET_REDIRECT_LIMIT; attempt += 1) {
+      visitedUrls.add(currentRequest.url);
+      const assetResponse = await assetsBinding.fetch(currentRequest);
+      if (!FRONTEND_ASSET_REDIRECT_STATUSES.has(assetResponse.status)) {
+        return assetResponse;
+      }
+
+      const location = assetResponse.headers.get('location');
+      if (!location) {
+        return assetResponse;
+      }
+
+      const nextUrl = new URL(location, currentRequest.url);
+      if (nextUrl.origin !== new URL(currentRequest.url).origin) {
+        return assetResponse;
+      }
+
+      if (visitedUrls.has(nextUrl.toString())) {
+        return assetResponse;
+      }
+
+      currentRequest = new Request(nextUrl.toString(), currentRequest);
+    }
+
+    return assetsBinding.fetch(currentRequest);
+  }
+
+  async function serveFrontendAsset(c: { env: Env; req: { raw: Request } }): Promise<Response | null> {
+    const frontend = getFrontendConfig(c.env);
+    if (!frontend) {
+      return null;
+    }
+
+    if (!c.env.ASSETS) {
+      return new Response(
+        JSON.stringify({ code: 404, message: assetUnavailableMessage('frontend bundle') }),
+        {
+          status: 404,
+          headers: { 'content-type': 'application/json; charset=UTF-8' },
+        },
+      );
+    }
+
+    const assetRequest = createFrontendAssetRequest(c.req.raw, frontend);
+    if (!assetRequest) {
+      return null;
+    }
+
+    const assetResponse = await fetchFrontendAssetResponse(c.env.ASSETS, assetRequest);
+    return applyFrontendAssetHeaders(assetResponse, new URL(assetRequest.url).pathname);
+  }
+
+  app.get('/', async (c) => {
     const env = c.env as Env;
+    const frontendResponse = await serveFrontendAsset({ env, req: c.req });
+    if (frontendResponse) {
+      return frontendResponse;
+    }
     const externalAdminUrl = resolveAdminRedirectTarget(c.req.url, env.ADMIN_ORIGIN);
     if (externalAdminUrl) {
       return c.redirect(externalAdminUrl, 302);
@@ -181,6 +254,10 @@ async function buildApp() {
 
   app.get('/favicon.ico', async (c) => {
     const env = c.env as Env;
+    const frontendResponse = await serveFrontendAsset({ env, req: c.req });
+    if (frontendResponse) {
+      return frontendResponse;
+    }
     const externalFaviconUrl = resolveAdminFaviconTarget(env.ADMIN_ORIGIN);
     if (externalFaviconUrl) {
       return c.redirect(externalFaviconUrl, 302);
@@ -197,6 +274,10 @@ async function buildApp() {
 
   app.get('/favicon.svg', async (c) => {
     const env = c.env as Env;
+    const frontendResponse = await serveFrontendAsset({ env, req: c.req });
+    if (frontendResponse) {
+      return frontendResponse;
+    }
     const externalFaviconUrl = resolveAdminFaviconTarget(env.ADMIN_ORIGIN);
     if (externalFaviconUrl) {
       return c.redirect(externalFaviconUrl, 302);
@@ -273,6 +354,19 @@ async function buildApp() {
     });
 
     return c.json(normalizeOpenApiDocument(spec as OpenApiSpec, new URL(c.req.url).origin));
+  });
+
+  app.on(['GET', 'HEAD'], '*', async (c) => {
+    const env = c.env as Env;
+    const frontendResponse = await serveFrontendAsset({ env, req: c.req });
+    if (frontendResponse) {
+      return frontendResponse;
+    }
+
+    return c.json({
+      code: 404,
+      message: `Path '${new URL(c.req.url).pathname}' was not found on this EdgeBase server.`,
+    }, 404);
   });
 
   app.notFound((c) => {
