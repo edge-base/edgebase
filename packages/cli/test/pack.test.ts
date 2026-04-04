@@ -13,12 +13,22 @@ const tsxCommand = resolveTsxCommand();
 const tsxExecOptions = /\.cmd$/i.test(tsxCommand.command) ? { shell: true as const } : {};
 const tempDirs: string[] = [];
 const appDataDirs: string[] = [];
+const CLEANUP_RETRY_OPTIONS = {
+  recursive: true,
+  force: true,
+  maxRetries: 20,
+  retryDelay: 250,
+} as const;
 
 function createTempProject(name: string): string {
   const dir = join(tmpdir(), `edgebase-pack-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   tempDirs.push(dir);
   return dir;
+}
+
+function cleanupTemporaryDirectory(dir: string): void {
+  rmSync(dir, CLEANUP_RETRY_OPTIONS);
 }
 
 function runPack(projectDir: string, outputDirName: string, options?: { format?: 'dir' | 'portable' | 'archive'; appName?: string }) {
@@ -57,10 +67,10 @@ function runPack(projectDir: string, outputDirName: string, options?: { format?:
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTemporaryDirectory(dir);
   }
   for (const dir of appDataDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTemporaryDirectory(dir);
   }
 }, 120_000);
 

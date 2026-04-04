@@ -13,12 +13,22 @@ const testRequire = createRequire(import.meta.url);
 const tsxCommand = resolveTsxCommand();
 const tsxExecOptions = /\.cmd$/i.test(tsxCommand.command) ? { shell: true as const } : {};
 const tempDirs: string[] = [];
+const CLEANUP_RETRY_OPTIONS = {
+  recursive: true,
+  force: true,
+  maxRetries: 20,
+  retryDelay: 250,
+} as const;
 
 function createTempProject(name: string): string {
   const dir = join(tmpdir(), `edgebase-build-app-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   tempDirs.push(dir);
   return dir;
+}
+
+function cleanupTemporaryDirectory(dir: string): void {
+  rmSync(dir, CLEANUP_RETRY_OPTIONS);
 }
 
 function runBuildApp(projectDir: string, outputDirName: string) {
@@ -105,9 +115,9 @@ function resolveInstalledPackageVersion(packageName: string): string {
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTemporaryDirectory(dir);
   }
-});
+}, 120_000);
 
 describe('build-app command', () => {
   it('builds a self-contained app bundle that does not rely on project config or function source files', async () => {
