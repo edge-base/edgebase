@@ -160,7 +160,11 @@ async function stopPortableLauncher(child, stderr) {
     return;
   }
 
-  child.kill('SIGTERM');
+  if (process.platform === 'win32') {
+    killProcessTree(child.pid);
+  } else {
+    child.kill('SIGTERM');
+  }
   await new Promise((resolveExit, reject) => {
     const onExit = () => {
       clearTimeout(timeout);
@@ -193,7 +197,7 @@ function cleanup() {
 
   while (childProcesses.length > 0) {
     const child = childProcesses.pop();
-    if (!child || child.killed || child.pid == null) continue;
+    if (!child || child.pid == null || child.exitCode !== null || child.signalCode !== null) continue;
     try {
       killProcessTree(child.pid);
     } catch {

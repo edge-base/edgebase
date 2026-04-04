@@ -128,7 +128,7 @@ function runPack(projectDir: string, outputDirName: string, options?: { format?:
 
 afterEach(() => {
   for (const child of childProcesses.splice(0)) {
-    if (!child.killed && child.pid) {
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
       terminateProcessTree(child.pid);
     }
   }
@@ -294,7 +294,11 @@ async function stopPortableLauncher(
     return;
   }
 
-  child.kill('SIGTERM');
+  if (process.platform === 'win32') {
+    terminateProcessTree(child.pid);
+  } else {
+    child.kill('SIGTERM');
+  }
   await new Promise<void>((resolveExit, reject) => {
     const onExit = () => {
       clearTimeout(timeout);

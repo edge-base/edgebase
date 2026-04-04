@@ -568,7 +568,7 @@ function finalizePackWrangler(projectDir: string, outputDir: string): void {
 function buildLauncherSource(manifest: EdgeBasePackManifest): string {
   return `#!/usr/bin/env node
 import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -715,6 +715,21 @@ function isProcessAlive(pid) {
     return true;
   } catch {
     return false;
+  }
+}
+
+function terminateProcessTree(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore' });
+    return;
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // best-effort cleanup only
   }
 }
 
@@ -977,6 +992,10 @@ if (options.open) {
 
 const forward = (signal) => {
   if (child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === 'win32') {
+    terminateProcessTree(child.pid);
+    return;
+  }
   child.kill(signal);
 };
 
