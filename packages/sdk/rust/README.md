@@ -61,14 +61,14 @@ For published application code, prefer the narrower crates:
 
 ```toml
 [dependencies]
-edgebase-admin = "0.2.7"
+edgebase-admin = "0.2.8"
 ```
 
 Or for lower-level primitives:
 
 ```toml
 [dependencies]
-edgebase-core = "0.2.7"
+edgebase-core = "0.2.8"
 ```
 
 The current public Rust release unit focuses on `edgebase-core` and `edgebase-admin`.

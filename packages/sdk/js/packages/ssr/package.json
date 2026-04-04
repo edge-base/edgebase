@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/ssr",
-    "version": "0.2.7",
+    "version": "0.2.8",
     "description": "EdgeBase SSR helpers — cookie-based token management for server-side rendering",
     "license": "MIT",
     "repository": {

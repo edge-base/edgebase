@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>10.0</LangVersion>
     <PackageId>dev.edgebase.core</PackageId>
-    <Version>0.2.7</Version>
+    <Version>0.2.8</Version>
     <Description>EdgeBase Core SDK for .NET - low-level HTTP, database, storage, push, and field-operation primitives</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://edgebase.fun/docs/database/client-sdk</PackageProjectUrl>

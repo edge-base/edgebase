@@ -1,6 +1,6 @@
 {
     "name": "create-edgebase",
-    "version": "0.2.7",
+    "version": "0.2.8",
     "description": "Bootstrap a new EdgeBase project",
     "license": "MIT",
     "repository": {
