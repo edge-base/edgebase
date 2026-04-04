@@ -111,7 +111,7 @@ function normalizeAssetsRunWorkerFirst(
         normalizedDirectory === LEGACY_EDGEBASE_ASSETS_DIRECTORY;
 
       if (!isEdgeBaseAssetsBlock) return block;
-      let rewritten = block;
+      const rewritten = block;
       if (/^\s*run_worker_first\s*=\s*true\s*$/m.test(rewritten)) return rewritten;
 
       changed = true;
