@@ -170,6 +170,21 @@ export default defineConfig({
     );
     writeFileSync(join(projectDir, 'config', 'rate-limits.ts'), 'export const DEFAULT_RATE_LIMITS = {};\n');
     writeFileSync(join(projectDir, '.env.release'), 'SERVICE_KEY=super-secret\n');
+    writeFileSync(
+      join(projectDir, 'wrangler.toml'),
+      [
+        'name = "pack-worker"',
+        '',
+        '[[d1_databases]]',
+        'binding = "DB_D1_SHARED"',
+        'database_name = "shared"',
+        'database_id = "local"',
+        '',
+        '[assets]',
+        'directory = ".edgebase/runtime/server/admin-build"',
+        'binding = "ASSETS"',
+      ].join('\n'),
+    );
 
     const result = runPack(projectDir, 'packed');
 
@@ -287,6 +302,8 @@ export default defineConfig({
     expect(existsSync(join(projectDir, 'packed', '.edgebase', 'runtime', 'server', 'app-assets', 'index.html'))).toBe(false);
     expect(existsSync(join(projectDir, 'packed', 'wrangler.toml'))).toBe(true);
     expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).toContain('binding = "DB_D1_SHARED"');
+    expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).toContain('directory = ".edgebase/runtime/server/app-assets"');
+    expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).not.toContain('directory = ".edgebase/runtime/server/admin-build"');
     expect(existsSync(join(projectDir, 'packed', '.env.release'))).toBe(false);
 
     const dryRun = spawnSync(

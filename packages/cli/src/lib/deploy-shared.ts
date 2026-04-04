@@ -63,7 +63,7 @@ function hasAssetsBlock(wranglerToml: string): boolean {
   return /\n?\[assets\][\s\S]*?(?=\n\[\[|\n\[|$)/.test(wranglerToml);
 }
 
-function normalizeAssetsRunWorkerFirst(
+export function normalizeLegacyEdgeBaseAssetsDirectory(
   wranglerToml: string,
 ): { normalized: string; changed: boolean } {
   let changed = false;
@@ -77,15 +77,41 @@ function normalizeAssetsRunWorkerFirst(
         normalizedDirectory === EDGEBASE_ASSETS_DIRECTORY ||
         normalizedDirectory === LEGACY_EDGEBASE_ASSETS_DIRECTORY;
 
+      if (!isEdgeBaseAssetsBlock || normalizedDirectory !== LEGACY_EDGEBASE_ASSETS_DIRECTORY) {
+        return block;
+      }
+
+      changed = true;
+      return block.replace(
+        /^\s*directory\s*=\s*"([^"\n]*)"\s*$/m,
+        `directory = "${EDGEBASE_ASSETS_DIRECTORY}"`,
+      );
+    },
+  );
+
+  return { normalized, changed };
+}
+
+function normalizeAssetsRunWorkerFirst(
+  wranglerToml: string,
+): { normalized: string; changed: boolean } {
+  const {
+    normalized: normalizedLegacyAssets,
+    changed: normalizedLegacyAssetsDirectory,
+  } = normalizeLegacyEdgeBaseAssetsDirectory(wranglerToml);
+  let changed = normalizedLegacyAssetsDirectory;
+
+  const normalized = normalizedLegacyAssets.replace(
+    /\n?\[assets\][\s\S]*?(?=\n\[\[|\n\[|$)/g,
+    (block) => {
+      const normalizedDirectory = normalizeAssetsDirectory(readAssetsDirectory(block));
+      const isEdgeBaseAssetsBlock =
+        /^\s*binding\s*=\s*"ASSETS"\s*$/m.test(block) ||
+        normalizedDirectory === EDGEBASE_ASSETS_DIRECTORY ||
+        normalizedDirectory === LEGACY_EDGEBASE_ASSETS_DIRECTORY;
+
       if (!isEdgeBaseAssetsBlock) return block;
       let rewritten = block;
-      if (normalizedDirectory === LEGACY_EDGEBASE_ASSETS_DIRECTORY) {
-        rewritten = rewritten.replace(
-          /^\s*directory\s*=\s*"([^"\n]*)"\s*$/m,
-          `directory = "${EDGEBASE_ASSETS_DIRECTORY}"`,
-        );
-        changed = true;
-      }
       if (/^\s*run_worker_first\s*=\s*true\s*$/m.test(rewritten)) return rewritten;
 
       changed = true;

@@ -148,7 +148,17 @@ export default defineConfig({
 };
 `,
     );
-    writeFileSync(join(projectDir, 'wrangler.toml'), 'name = "bundle-worker"\naccount_id = "acct-123"\n');
+    writeFileSync(
+      join(projectDir, 'wrangler.toml'),
+      [
+        'name = "bundle-worker"',
+        'account_id = "acct-123"',
+        '',
+        '[assets]',
+        'directory = ".edgebase/runtime/server/admin-build"',
+        'binding = "ASSETS"',
+      ].join('\n'),
+    );
     writeFileSync(join(projectDir, 'config', 'meta.ts'), `export const META_TAG = 'bundle-ok';\n`);
     writeFileSync(join(projectDir, 'lib', 'message.ts'), `export const MESSAGE = 'hello bundle';\n`);
     writeFileSync(
@@ -231,6 +241,8 @@ export async function GET() {
     expect(existsSync(join(outputDir, 'edgebase-app.json'))).toBe(true);
     expect(existsSync(join(outputDir, 'wrangler.toml'))).toBe(true);
     expect(readFileSync(join(outputDir, 'wrangler.toml'), 'utf-8')).toContain('name = "bundle-worker"');
+    expect(readFileSync(join(outputDir, 'wrangler.toml'), 'utf-8')).toContain('directory = ".edgebase/runtime/server/app-assets"');
+    expect(readFileSync(join(outputDir, 'wrangler.toml'), 'utf-8')).not.toContain('directory = ".edgebase/runtime/server/admin-build"');
   });
 
   it('syncs an existing app bundle in place and removes stale bundled modules', () => {

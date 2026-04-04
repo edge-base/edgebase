@@ -18,6 +18,7 @@ import {
   validateRouteNames,
   type ScannedFunction,
 } from './function-registry.js';
+import { normalizeLegacyEdgeBaseAssetsDirectory } from './deploy-shared.js';
 
 const EDGEBASE_CONFIG_FILES = ['edgebase.config.ts', 'edgebase.config.js'];
 const EDGEBASE_TEST_CONFIG_FILES = ['edgebase.test.config.ts', 'edgebase.test.config.js'];
@@ -188,7 +189,9 @@ function copyProjectWranglerToml(projectDir: string, outputDir: string): boolean
     return false;
   }
 
-  cpSync(sourceWranglerPath, join(outputDir, 'wrangler.toml'), { force: true });
+  const sourceWranglerToml = readFileSync(sourceWranglerPath, 'utf-8');
+  const { normalized } = normalizeLegacyEdgeBaseAssetsDirectory(sourceWranglerToml);
+  writeFileSync(join(outputDir, 'wrangler.toml'), normalized, 'utf-8');
   return true;
 }
 
