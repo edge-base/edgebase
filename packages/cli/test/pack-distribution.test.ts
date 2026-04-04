@@ -655,6 +655,21 @@ export default defineConfig({
     }
     expect(frontendHtml).toContain('portable-frontend');
 
+    let frontendAsset: string;
+    try {
+      frontendAsset = await waitForHttp(
+        `http://127.0.0.1:${launchPort}/app/assets/main.12345678.js`,
+        (text) => text.includes('portable-frontend'),
+        httpTimeout,
+      );
+    } catch (error) {
+      throw new Error(
+        `Portable launcher failed before serving the frontend asset.\n${stderr}\n${readLauncherLog(dataDir)}`,
+        { cause: error },
+      );
+    }
+    expect(frontendAsset).toContain('portable-frontend');
+
     let healthText: string;
     try {
       healthText = await waitForHttp(

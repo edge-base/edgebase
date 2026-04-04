@@ -330,6 +330,11 @@ export default defineConfig({
       (body) => body.includes('pack smoke frontend'),
       httpTimeout,
     );
+    const frontendAsset = await waitForHttp(
+      `http://127.0.0.1:${port}/app/assets/main.12345678.js`,
+      (body) => body.includes('pack smoke frontend'),
+      httpTimeout,
+    );
     const healthText = await waitForHttp(
       `http://127.0.0.1:${port}/api/health`,
       (body) => body.includes('"status":"ok"'),
@@ -337,6 +342,7 @@ export default defineConfig({
     );
 
     ensure(frontendHtml.includes('pack smoke frontend'), 'Portable artifact frontend route did not return the expected HTML.');
+    ensure(frontendAsset.includes('pack smoke frontend'), 'Portable artifact frontend asset route did not return the expected JavaScript.');
     ensure(healthText.includes('"status":"ok"'), 'Portable artifact API route did not return the expected health payload.');
   } catch (error) {
     throw new Error(
@@ -347,7 +353,7 @@ export default defineConfig({
 
   await stopPortableLauncher(child, () => stderr);
 
-  log(`Pack smoke passed: http://127.0.0.1:${port}/app and http://127.0.0.1:${port}/api/health`);
+  log(`Pack smoke passed: http://127.0.0.1:${port}/app, http://127.0.0.1:${port}/app/assets/main.12345678.js, and http://127.0.0.1:${port}/api/health`);
 }
 
 try {
