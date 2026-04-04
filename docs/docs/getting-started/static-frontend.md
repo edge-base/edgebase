@@ -78,18 +78,18 @@ This keeps SPA navigation behavior and static asset behavior distinct.
 
 If your frontend bundle already includes a valid `manifest.webmanifest` and service worker, the same-origin setup also works for PWA installs and local testing.
 
-That PWA behavior comes from the frontend bundle itself plus same-origin serving. It is not a separate deployment mode.
+That PWA behavior comes from the frontend bundle itself plus same-origin serving.
 
 ## How Other Commands Relate
 
-These commands are still separate concerns:
+How these commands use the built bundle:
 
 - `dev` starts a local runtime
 - `deploy` publishes a cloud runtime
 - `docker build` / `docker run` build and run a containerized runtime
 - `pack` creates a portable local artifact
 
-If `frontend` is configured, each of those commands can carry the same prebuilt static bundle along. That does **not** make static frontend hosting part of deployment or packaging itself.
+If `frontend` is configured, each of those commands can use the same prebuilt static bundle.
 
 ## Related Docs
 

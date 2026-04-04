@@ -104,7 +104,7 @@ npx edgebase dev --open
 
 Boot the local runtime with config and function hot reload. The default local surface includes the REST API plus the database subscription WebSocket endpoint at `/api/db/subscribe`.
 
-If `edgebase.config.ts` defines `frontend.directory`, `dev` also serves that prebuilt bundle from the same local origin. Build the frontend separately before starting the runtime.
+If `edgebase.config.ts` defines `frontend.directory`, `dev` also serves that prebuilt bundle from the same local origin. Build the frontend before starting the runtime.
 
 `dev` now runs from a self-contained bundle staged under `.edgebase/targets/dev-app`, so local execution no longer depends on Wrangler importing your source tree directly at runtime.
 

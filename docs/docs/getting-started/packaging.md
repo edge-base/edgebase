@@ -90,7 +90,7 @@ Default app-data locations:
 - Linux: `${XDG_DATA_HOME:-~/.local/share}/<app>`
 - Windows: `%LOCALAPPDATA%\\<app>`
 
-Frontend behavior such as route precedence, `mountPath`, `spaFallback`, and PWA/service worker handling belongs to the separate static frontend configuration, not to packaging itself.
+For route precedence, `mountPath`, `spaFallback`, and PWA/service worker handling, see [Static Frontend Guide](/docs/getting-started/static-frontend).
 
 ## Current Limits
 
