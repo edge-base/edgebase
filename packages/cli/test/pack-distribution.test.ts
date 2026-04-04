@@ -14,6 +14,7 @@ const tsxExecOptions = /\.cmd$/i.test(tsxCommand.command) ? { shell: true as con
 const tempDirs: string[] = [];
 const appDataDirs: string[] = [];
 const childProcesses: ChildProcessWithoutNullStreams[] = [];
+const RETRYABLE_CLEANUP_ERROR_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 const CLEANUP_RETRY_OPTIONS = {
   recursive: true,
   force: true,
@@ -47,6 +48,19 @@ function terminateLauncherPid(pid: number): void {
     process.kill(pid, 'SIGTERM');
   } catch {
     // best-effort cleanup
+  }
+}
+
+function cleanupTemporaryDirectory(dir: string): void {
+  try {
+    rmSync(dir, CLEANUP_RETRY_OPTIONS);
+  } catch (error) {
+    const code = typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as NodeJS.ErrnoException).code)
+      : null;
+    if (!code || !RETRYABLE_CLEANUP_ERROR_CODES.has(code)) {
+      throw error;
+    }
   }
 }
 
@@ -99,14 +113,14 @@ afterEach(() => {
     if (launcherPid) {
       terminateLauncherPid(launcherPid);
     }
-    rmSync(dir, CLEANUP_RETRY_OPTIONS);
+    cleanupTemporaryDirectory(dir);
   }
   for (const dir of appDataDirs.splice(0)) {
     const launcherPid = readLauncherPid(dir);
     if (launcherPid) {
       terminateLauncherPid(launcherPid);
     }
-    rmSync(dir, CLEANUP_RETRY_OPTIONS);
+    cleanupTemporaryDirectory(dir);
   }
 }, 120_000);
 
