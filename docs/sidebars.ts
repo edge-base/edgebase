@@ -54,6 +54,7 @@ const sidebars = {
             'getting-started/quickstart',
             'getting-started/ai',
             'getting-started/configuration',
+            'getting-started/static-frontend',
             'getting-started/deployment',
             'getting-started/packaging',
             'getting-started/self-hosting',

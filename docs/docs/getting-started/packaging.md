@@ -56,13 +56,9 @@ pnpm --filter web build
 npx edgebase pack --format portable
 ```
 
-If `frontend.directory` is configured, the packed artifact includes that prebuilt static bundle and serves it on the same origin as:
+If `frontend` is configured, `pack` includes that separately configured prebuilt bundle in the output artifact.
 
-- `/api/*`
-- `/admin` and `/admin/*`
-- `/openapi.json`
-
-Everything else is served from your configured frontend `mountPath`.
+`pack` does not define frontend behavior by itself. It only copies whatever the independent frontend config points to. See [Static Frontend Guide](/docs/getting-started/static-frontend).
 
 ## Output Layout
 
@@ -71,7 +67,7 @@ Everything else is served from your configured frontend `mountPath`.
 Common generated pieces include:
 
 - the bundled runtime and config
-- the packaged static frontend, when configured
+- the referenced prebuilt frontend bundle, when separately configured
 - `launcher.mjs`
 - `run.sh` on Unix-like systems
 - `run.cmd` on Windows
@@ -94,11 +90,7 @@ Default app-data locations:
 - Linux: `${XDG_DATA_HOME:-~/.local/share}/<app>`
 - Windows: `%LOCALAPPDATA%\\<app>`
 
-## Frontend Notes
-
-If your frontend already ships a valid `manifest.webmanifest` and service worker, the packed launcher keeps the same-origin setup needed for local PWA-style installs and testing.
-
-When `spaFallback: true` is enabled, only HTML navigation requests fall back to `index.html`. Missing static assets still return `404`.
+Frontend behavior such as route precedence, `mountPath`, `spaFallback`, and PWA/service worker handling belongs to the separate static frontend configuration, not to packaging itself.
 
 ## Current Limits
 
@@ -108,6 +100,7 @@ When `spaFallback: true` is enabled, only HTML navigation requests fall back to 
 
 ## Related Docs
 
+- [Static Frontend Guide](/docs/getting-started/static-frontend)
 - [Deployment](/docs/getting-started/deployment)
 - [Self-Hosting](/docs/getting-started/self-hosting)
 - [CLI Reference](/docs/cli/reference)

@@ -385,13 +385,15 @@ export default defineConfig({
 
 Use `frontend` when you want EdgeBase to serve a prebuilt static app.
 
+This config is independent from runtime selection or packaging format. Commands such as `dev`, `deploy`, `docker build`, and `pack` can consume it, but they do not define it.
+
 | Field | Meaning |
 | --- | --- |
 | `directory` | Required build output directory to serve |
 | `mountPath` | Optional URL prefix for the bundle, default `/` |
 | `spaFallback` | Optional SPA navigation fallback to `index.html` for HTML requests |
 
-EdgeBase does not run your frontend build command. Build the bundle first, then run `dev`, `deploy`, or `docker build`.
+EdgeBase does not run your frontend build command. Build the bundle first, then run the runtime or packaging command you want.
 
 ### `webhook-test`
 

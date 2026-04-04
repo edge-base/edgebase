@@ -447,6 +447,7 @@ npx edgebase pack --format archive
 ## Next Steps
 
 - [**Configuration →**](./configuration) — Customize your `edgebase.config.ts`
+- [**Static Frontend →**](./static-frontend) — Configure prebuilt frontend asset serving
 - [**Packaging →**](./packaging) — Create portable or archive local handoff builds
 - [**Database →**](../database/client-sdk) — Learn CRUD operations
 - [**Authentication →**](../authentication/email-password) — Set up user auth
