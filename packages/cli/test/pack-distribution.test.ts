@@ -21,8 +21,8 @@ const CLEANUP_RETRY_OPTIONS = {
   maxRetries: 20,
   retryDelay: 250,
 } as const;
-// Dedicated pack smoke jobs exercise live launcher boot paths more reliably than Vitest workers.
-const RUN_PORTABLE_LAUNCHER_SMOKE = process.env.EDGEBASE_RUN_PORTABLE_LAUNCHER_SMOKE === '1';
+// Dedicated pack smoke jobs exercise portable artifact creation and launcher boot paths more reliably than Vitest workers.
+const RUN_PORTABLE_DISTRIBUTION_SMOKE = process.env.EDGEBASE_RUN_PORTABLE_DISTRIBUTION_SMOKE === '1';
 
 function terminateProcessTree(pid: number | null | undefined): void {
   if (!Number.isInteger(pid) || (pid ?? 0) <= 0) {
@@ -321,7 +321,7 @@ async function stopPortableLauncher(
 }
 
 describe('pack distribution formats', () => {
-  it('creates a current-platform portable artifact with an embedded launcher', { timeout: 120_000 }, () => {
+  it.skipIf(!RUN_PORTABLE_DISTRIBUTION_SMOKE)('creates a current-platform portable artifact with an embedded launcher', { timeout: 120_000 }, () => {
     const projectDir = createTempProject('portable');
     mkdirSync(join(projectDir, 'functions'), { recursive: true });
 
@@ -454,7 +454,7 @@ export default defineConfig({
     expect(existsSync(archivePath)).toBe(true);
   });
 
-  it.skipIf(!RUN_PORTABLE_LAUNCHER_SMOKE || process.platform !== 'darwin')(
+  it.skipIf(!RUN_PORTABLE_DISTRIBUTION_SMOKE || process.platform !== 'darwin')(
     'launches a portable macOS app via open and starts the bundled launcher',
     async () => {
       const projectDir = createTempProject('portable-open');
@@ -565,7 +565,7 @@ export default defineConfig({
     120_000,
   );
 
-  it.skipIf(!RUN_PORTABLE_LAUNCHER_SMOKE)('boots a portable artifact and serves both frontend and API traffic', { timeout: process.platform === 'win32' ? 180_000 : 120_000 }, async () => {
+  it.skipIf(!RUN_PORTABLE_DISTRIBUTION_SMOKE)('boots a portable artifact and serves both frontend and API traffic', { timeout: process.platform === 'win32' ? 180_000 : 120_000 }, async () => {
     const projectDir = createTempProject('portable-runtime');
     mkdirSync(join(projectDir, 'functions'), { recursive: true });
     mkdirSync(join(projectDir, 'web', 'dist', 'assets'), { recursive: true });
