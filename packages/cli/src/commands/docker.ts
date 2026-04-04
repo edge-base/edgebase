@@ -221,6 +221,26 @@ function buildDockerBuildArgs(options: { tag: string; cache: boolean }): string[
   return args;
 }
 
+function buildSyntheticDockerignore(sourceDockerignore: string): string {
+  const preservedRules = existsSync(sourceDockerignore)
+    ? readFileSync(sourceDockerignore, 'utf-8').replace(/\s+$/, '')
+    : '';
+
+  const requiredIncludes = [
+    '# Preserve the generated bundle in the synthetic Docker context.',
+    '!Dockerfile',
+    '!.dockerignore',
+    '!.edgebase',
+    '!.edgebase/targets',
+    '!.edgebase/targets/docker-app',
+    '!.edgebase/targets/docker-app/**',
+  ].join('\n');
+
+  return preservedRules.length > 0
+    ? `${preservedRules}\n\n${requiredIncludes}\n`
+    : `${requiredIncludes}\n`;
+}
+
 function prepareDockerBuildContext(projectDir: string, dockerBundleDir: string): string {
   const contextDir = resolve(projectDir, '.edgebase', 'targets', 'docker-context');
   const contextBundleDir = join(contextDir, '.edgebase', 'targets', 'docker-app');
@@ -230,9 +250,7 @@ function prepareDockerBuildContext(projectDir: string, dockerBundleDir: string):
   rmSync(contextDir, { recursive: true, force: true });
   mkdirSync(join(contextDir, '.edgebase', 'targets'), { recursive: true });
   copyFileSync(sourceDockerfile, join(contextDir, 'Dockerfile'));
-  if (existsSync(sourceDockerignore)) {
-    copyFileSync(sourceDockerignore, join(contextDir, '.dockerignore'));
-  }
+  writeFileSync(join(contextDir, '.dockerignore'), buildSyntheticDockerignore(sourceDockerignore));
   cpSync(dockerBundleDir, contextBundleDir, {
     recursive: true,
     force: true,

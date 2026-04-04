@@ -65,7 +65,7 @@ describe('Docker build argument construction', () => {
 
   it('creates a minimal docker build context with the bundled app payload', () => {
     writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:20\nCOPY .edgebase/targets/docker-app/ ./\n');
-    writeFileSync(join(tmpDir, '.dockerignore'), 'node_modules\n');
+    writeFileSync(join(tmpDir, '.dockerignore'), 'node_modules\n.edgebase\n');
     const bundleDir = join(tmpDir, '.edgebase', 'targets', 'docker-app');
     mkdirSync(join(bundleDir, '.edgebase', 'runtime', 'server', 'node_modules', '.pnpm', 'hono@1.0.0', 'node_modules'), {
       recursive: true,
@@ -80,7 +80,10 @@ describe('Docker build argument construction', () => {
 
     expect(existsSync(join(contextDir, 'Dockerfile'))).toBe(true);
     expect(readFileSync(join(contextDir, 'Dockerfile'), 'utf-8')).toContain('COPY .edgebase/targets/docker-app/ ./');
-    expect(readFileSync(join(contextDir, '.dockerignore'), 'utf-8')).toContain('node_modules');
+    const dockerignore = readFileSync(join(contextDir, '.dockerignore'), 'utf-8');
+    expect(dockerignore).toContain('node_modules');
+    expect(dockerignore).toContain('.edgebase');
+    expect(dockerignore).toContain('!.edgebase/targets/docker-app/**');
     expect(existsSync(join(contextDir, '.edgebase', 'targets', 'docker-app', 'edgebase-app.json'))).toBe(true);
     expect(existsSync(join(contextDir, '.edgebase', 'targets', 'docker-app', '.edgebase', 'runtime', 'server', 'node_modules', 'hono'))).toBe(true);
     expect(existsSync(join(contextDir, 'node_modules'))).toBe(false);
