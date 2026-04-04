@@ -311,7 +311,7 @@ export default defineConfig({
     ).toContain("import config from './src/generated-config.ts'");
   });
 
-  it('supports slimmer copy profiles for portable and docker runtime dependencies', { timeout: 60_000 }, () => {
+  it('supports slimmer copy profiles for portable and docker runtime dependencies', { timeout: process.platform === 'win32' ? 180_000 : 60_000 }, () => {
     const projectDir = createTempProject('dependency-profiles');
     mkdirSync(join(projectDir, 'functions'), { recursive: true });
 
