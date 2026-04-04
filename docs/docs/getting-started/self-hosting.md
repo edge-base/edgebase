@@ -137,7 +137,9 @@ npx wrangler dev --config ./wrangler.toml --port 8787 --persist-to ./data
 
 Use raw `wrangler dev` only for explicit manual setups, such as a dedicated test config, or when your `wrangler.toml` already includes every binding your project needs.
 
-If `frontend` is configured, the local runtime can also serve that prebuilt bundle. That does not make static assets part of self-hosting itself; it only means the local runtime can consume the separate frontend config documented in [Static Frontend Guide](/docs/getting-started/static-frontend).
+If `frontend` is configured, the local runtime can also serve that prebuilt bundle.
+
+For `mountPath`, `spaFallback`, and route behavior, see [Static Frontend Guide](/docs/getting-started/static-frontend).
 
 ### Process Management (PM2 Recommended)
 

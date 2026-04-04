@@ -56,9 +56,9 @@ pnpm --filter web build
 npx edgebase pack --format portable
 ```
 
-If `frontend` is configured, `pack` includes that separately configured prebuilt bundle in the output artifact.
+If `frontend` is configured, `pack` copies that prebuilt bundle into the output artifact.
 
-`pack` does not define frontend behavior by itself. It only copies whatever the independent frontend config points to. See [Static Frontend Guide](/docs/getting-started/static-frontend).
+For `directory`, `mountPath`, `spaFallback`, and route behavior, see [Static Frontend Guide](/docs/getting-started/static-frontend).
 
 ## Output Layout
 
@@ -67,7 +67,7 @@ If `frontend` is configured, `pack` includes that separately configured prebuilt
 Common generated pieces include:
 
 - the bundled runtime and config
-- the referenced prebuilt frontend bundle, when separately configured
+- the prebuilt frontend bundle, when configured
 - `launcher.mjs`
 - `run.sh` on Unix-like systems
 - `run.cmd` on Windows

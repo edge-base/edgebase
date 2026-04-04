@@ -5,19 +5,9 @@ title: Static Frontend Guide
 
 # Static Frontend Guide
 
-Static frontend hosting is a **separate application concern**. It is not a deployment mode, runtime choice, or packaging format.
-
-`frontend` tells EdgeBase how to serve a prebuilt static app. It does **not** choose your runtime, deployment target, or packaging format.
-
-Those are separate decisions:
-
-- runtime/deployment: `dev`, `deploy`, `docker`
-- packaging/distribution: `pack`
-- static frontend serving: `frontend` config
+Use `frontend` when you want EdgeBase to serve a prebuilt static app from the same origin as your API and admin UI.
 
 ## What `frontend` Controls
-
-Use `frontend` when you want EdgeBase to serve a prebuilt static bundle on the same origin as your API and admin UI.
 
 ```ts title="edgebase.config.ts"
 import { defineConfig } from '@edge-base/shared';
@@ -37,22 +27,11 @@ export default defineConfig({
 | `mountPath` | Optional URL prefix for the bundle, default `/` |
 | `spaFallback` | Optional SPA navigation fallback to `index.html` for HTML requests |
 
-## What It Does Not Control
-
-`frontend` does not decide whether you:
-
-- run locally with `npx edgebase dev`
-- deploy to Cloudflare with `npx edgebase deploy`
-- self-host with `npx edgebase docker build` / `run`
-- package a local artifact with `npx edgebase pack`
-
-Those commands can all **consume** the same frontend config, but the config itself is independent from them.
-
 ## Build Responsibility
 
 EdgeBase does not run your frontend build command for you.
 
-Build the bundle first, then run whichever runtime or packaging command you want:
+Build the bundle first, then run the command you want:
 
 ```bash
 pnpm --filter web build
@@ -72,6 +51,8 @@ Or:
 pnpm --filter web build
 npx edgebase pack --format portable
 ```
+
+The same built output can be used with `dev`, `deploy`, `docker build`, and `pack`.
 
 ## Request Routing
 

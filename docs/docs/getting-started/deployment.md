@@ -148,9 +148,9 @@ For the full packaging flow, output formats, and launcher behavior, see [Packagi
 | Formats | Portable directory/app bundle, or archive |
 | Requirements | Build machine for the target platform |
 
-Static frontend serving is a separate concern from deployment mode selection. Choosing Edge, Docker, Direct, or Pack says nothing by itself about whether you serve static assets.
+If your app config defines `frontend`, deployed runtimes can also serve that prebuilt bundle.
 
-If your app config defines `frontend`, any runtime can consume that same prebuilt bundle, but the frontend setup itself is documented separately in [Static Frontend Guide](/docs/getting-started/static-frontend).
+For `directory`, `mountPath`, `spaFallback`, and route behavior, see [Static Frontend Guide](/docs/getting-started/static-frontend).
 
 ## Comparison
 

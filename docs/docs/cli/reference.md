@@ -385,7 +385,7 @@ export default defineConfig({
 
 Use `frontend` when you want EdgeBase to serve a prebuilt static app.
 
-This config is independent from runtime selection or packaging format. Commands such as `dev`, `deploy`, `docker build`, and `pack` can consume it, but they do not define it.
+Build the frontend first. Commands such as `dev`, `deploy`, `docker build`, and `pack` then use this config when serving or bundling it.
 
 | Field | Meaning |
 | --- | --- |
