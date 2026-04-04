@@ -63,7 +63,7 @@ flutter pub get
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.1.4")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.2.8")
 ]
 ```
 
@@ -79,7 +79,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-client:v0.1.4")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.2.8")
 }
 ```
 
@@ -95,7 +95,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.1.4'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.2.8'
 }
 ```
 
@@ -114,16 +114,19 @@ dotnet add package dev.edgebase.unity
 <TabItem value="cpp" label="C++/Unreal">
 
 ```cmake
+include(FetchContent)
+
 FetchContent_Declare(
   edgebase
-  GIT_REPOSITORY https://github.com/edge-base/edgebase-cpp.git
-  GIT_TAG v0.1.4
+  GIT_REPOSITORY https://github.com/edge-base/edgebase.git
+  GIT_TAG v0.2.8
+  SOURCE_SUBDIR packages/sdk/cpp/packages/core
 )
 FetchContent_MakeAvailable(edgebase)
-target_link_libraries(your_target edgebase)
+target_link_libraries(your_target PRIVATE edgebase_core)
 ```
 
-Requires: `nlohmann/json` header library.
+Requires: CMake 3.16+, C++17, and a libcurl toolchain.
 
 </TabItem>
 </Tabs>

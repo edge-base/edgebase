@@ -83,7 +83,7 @@ npm install @edge-base/react-native
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.1.4")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.2.8")
 ]
 ```
 
@@ -97,7 +97,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-client:v0.1.4")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.2.8")
 }
 ```
 
@@ -112,7 +112,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.1.4'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.2.8'
 }
 ```
 

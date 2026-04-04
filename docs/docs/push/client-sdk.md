@@ -555,7 +555,7 @@ https://github.com/firebase/firebase-ios-sdk
 https://github.com/edge-base/edgebase-swift
 ```
 
-Use the current `0.1.4` release of the Swift package and import the `EdgeBase` module in your app target.
+Use the current `0.2.8` release of the Swift package and import the `EdgeBase` module in your app target.
 
 ## Setup
 
@@ -870,7 +870,7 @@ repositories {
 
 dependencies {
     implementation 'com.google.firebase:firebase-messaging:24.0.0'
-    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.1.4'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.2.8'
 }
 ```
 
