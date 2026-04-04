@@ -157,4 +157,4 @@ jobs:
           # Keep SARIF categories stable across direct codeql.yml runs and
           # reusable invocations from pipeline.yml so PR summaries compare
           # against the same configuration IDs on the base branch.
-          category: '.github/workflows/codeql.yml:analyze/build_mode:${{ matrix.build_mode }}/label:${{ matrix.label }}/language:${{ matrix.language }}/os:${{ matrix.os }}'
+          category: '.github/workflows/pipeline.yml:analyze/build_mode:${{ matrix.build_mode }}/label:${{ matrix.label }}/language:${{ matrix.language }}/os:${{ matrix.os }}'
