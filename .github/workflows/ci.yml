@@ -115,7 +115,7 @@ jobs:
         run: pnpm --dir packages/shared test
 
       - name: Test CLI package
-        run: pnpm --dir packages/cli test
+        run: pnpm --dir packages/cli run test:compat
 
       - name: Test server package
         run: pnpm --dir packages/server test
