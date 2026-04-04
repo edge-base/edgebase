@@ -32,9 +32,10 @@ cd my-app
 npx edgebase dev                # Local dev + Admin Dashboard
 npx edgebase docker run         # Self-host with Docker
 npx edgebase deploy             # Deploy globally on Cloudflare
+npx edgebase pack --format portable  # Portable local handoff
 ```
 
-Same codebase, familiar workflow — choose your runtime, switch when you need to.
+Same codebase, familiar workflow — choose your runtime, switch when you need to, or package a portable local handoff with `pack`.
 
 `npm create edgebase@latest` now starts from a blank app data model: auth, storage, and a sample health function are scaffolded, and dependencies are installed automatically. In local dev, the API runs on `http://localhost:8787` and the Admin Dashboard opens on `http://localhost:8787/admin`.
 
