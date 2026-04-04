@@ -101,9 +101,34 @@ function resolveAppDataRoot(appDataDirName) {
   return join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), appDataDirName);
 }
 
+function killProcessTree(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore' });
+    return;
+  }
+
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // best effort
+  }
+}
+
 function spawnPortableLauncher(launcherPath, args, cwd, env) {
   if (process.platform === 'win32') {
-    return spawn('cmd.exe', ['/d', '/s', '/c', launcherPath, ...args], {
+    const launcherEntryPath = join(dirname(launcherPath), 'launcher.mjs');
+    // Launch the Node entrypoint directly so shutdown signals reach the launcher on Windows CI.
+    const canLaunchNodeDirectly = existsSync(launcherEntryPath);
+    const command = canLaunchNodeDirectly ? process.execPath : 'cmd.exe';
+    const commandArgs = canLaunchNodeDirectly
+      ? [launcherEntryPath, ...args]
+      : ['/d', '/s', '/c', launcherPath, ...args];
+
+    return spawn(command, commandArgs, {
       cwd,
       env,
       stdio: 'pipe',
@@ -130,6 +155,37 @@ function readLauncherLog(dataDir) {
   }
 }
 
+async function stopPortableLauncher(child, stderr) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  child.kill('SIGTERM');
+  await new Promise((resolveExit, reject) => {
+    const onExit = () => {
+      clearTimeout(timeout);
+      child.off('error', onError);
+      resolveExit();
+    };
+    const onError = (error) => {
+      clearTimeout(timeout);
+      child.off('exit', onExit);
+      reject(error);
+    };
+    const timeout = setTimeout(() => {
+      child.off('exit', onExit);
+      child.off('error', onError);
+      if (child.pid) {
+        killProcessTree(child.pid);
+      }
+      reject(new Error(`Portable launcher did not exit cleanly.\n${stderr()}`));
+    }, 15_000);
+
+    child.once('exit', onExit);
+    child.once('error', onError);
+  });
+}
+
 function cleanup() {
   if (keepTemp) {
     return;
@@ -137,9 +193,9 @@ function cleanup() {
 
   while (childProcesses.length > 0) {
     const child = childProcesses.pop();
-    if (!child || child.killed) continue;
+    if (!child || child.killed || child.pid == null) continue;
     try {
-      child.kill('SIGTERM');
+      killProcessTree(child.pid);
     } catch {
       // best effort
     }
@@ -285,12 +341,7 @@ export default defineConfig({
     );
   }
 
-  child.kill('SIGTERM');
-  await new Promise((resolveExit, reject) => {
-    child.once('exit', () => resolveExit());
-    child.once('error', reject);
-    setTimeout(() => reject(new Error(`Portable launcher did not exit cleanly.\n${stderr}`)), 15_000);
-  });
+  await stopPortableLauncher(child, () => stderr);
 
   log(`Pack smoke passed: http://127.0.0.1:${port}/app and http://127.0.0.1:${port}/api/health`);
 }

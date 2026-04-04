@@ -21,6 +21,25 @@ const CLEANUP_RETRY_OPTIONS = {
   maxRetries: 20,
   retryDelay: 250,
 } as const;
+// Dedicated pack smoke jobs exercise live launcher boot paths more reliably than Vitest workers.
+const RUN_PORTABLE_LAUNCHER_SMOKE = process.env.EDGEBASE_RUN_PORTABLE_LAUNCHER_SMOKE === '1';
+
+function terminateProcessTree(pid: number | null | undefined): void {
+  if (!Number.isInteger(pid) || (pid ?? 0) <= 0) {
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore' });
+    return;
+  }
+
+  try {
+    process.kill(pid as number, 'SIGKILL');
+  } catch {
+    // best-effort cleanup
+  }
+}
 
 function readLauncherPid(dataDir: string): number | null {
   const lockPath = join(dataDir, 'launcher-lock.json');
@@ -37,6 +56,11 @@ function readLauncherPid(dataDir: string): number | null {
 }
 
 function terminateLauncherPid(pid: number): void {
+  if (process.platform === 'win32') {
+    terminateProcessTree(pid);
+    return;
+  }
+
   try {
     process.kill(pid, 'SIGKILL');
     return;
@@ -104,8 +128,8 @@ function runPack(projectDir: string, outputDirName: string, options?: { format?:
 
 afterEach(() => {
   for (const child of childProcesses.splice(0)) {
-    if (!child.killed) {
-      child.kill('SIGKILL');
+    if (!child.killed && child.pid) {
+      terminateProcessTree(child.pid);
     }
   }
   for (const dir of tempDirs.splice(0)) {
@@ -227,7 +251,15 @@ function spawnPortableLauncher(
   env: NodeJS.ProcessEnv,
 ): ChildProcessWithoutNullStreams {
   if (process.platform === 'win32') {
-    return spawn('cmd.exe', ['/d', '/s', '/c', launcherPath, ...args], {
+    const launcherEntryPath = join(dirname(launcherPath), 'launcher.mjs');
+    // Launch the Node entrypoint directly so SIGTERM reaches the launcher on Windows CI.
+    const canLaunchNodeDirectly = existsSync(launcherEntryPath);
+    const command = canLaunchNodeDirectly ? process.execPath : 'cmd.exe';
+    const commandArgs = canLaunchNodeDirectly
+      ? [launcherEntryPath, ...args]
+      : ['/d', '/s', '/c', launcherPath, ...args];
+
+    return spawn(command, commandArgs, {
       cwd,
       env,
       stdio: 'pipe',
@@ -252,6 +284,40 @@ function readLauncherLog(dataDir: string): string {
   } catch {
     return '';
   }
+}
+
+async function stopPortableLauncher(
+  child: ChildProcessWithoutNullStreams,
+  stderr: () => string,
+): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  child.kill('SIGTERM');
+  await new Promise<void>((resolveExit, reject) => {
+    const onExit = () => {
+      clearTimeout(timeout);
+      child.off('error', onError);
+      resolveExit();
+    };
+    const onError = (error: Error) => {
+      clearTimeout(timeout);
+      child.off('exit', onExit);
+      reject(error);
+    };
+    const timeout = setTimeout(() => {
+      child.off('exit', onExit);
+      child.off('error', onError);
+      if (child.pid) {
+        terminateProcessTree(child.pid);
+      }
+      reject(new Error(`Portable launcher did not exit cleanly.\n${stderr()}`));
+    }, 15_000);
+
+    child.once('exit', onExit);
+    child.once('error', onError);
+  });
 }
 
 describe('pack distribution formats', () => {
@@ -388,7 +454,7 @@ export default defineConfig({
     expect(existsSync(archivePath)).toBe(true);
   });
 
-  it.skipIf(process.platform !== 'darwin')(
+  it.skipIf(!RUN_PORTABLE_LAUNCHER_SMOKE || process.platform !== 'darwin')(
     'launches a portable macOS app via open and starts the bundled launcher',
     async () => {
       const projectDir = createTempProject('portable-open');
@@ -499,7 +565,7 @@ export default defineConfig({
     120_000,
   );
 
-  it('boots a portable artifact and serves both frontend and API traffic', { timeout: process.platform === 'win32' ? 180_000 : 120_000 }, async () => {
+  it.skipIf(!RUN_PORTABLE_LAUNCHER_SMOKE)('boots a portable artifact and serves both frontend and API traffic', { timeout: process.platform === 'win32' ? 180_000 : 120_000 }, async () => {
     const projectDir = createTempProject('portable-runtime');
     mkdirSync(join(projectDir, 'functions'), { recursive: true });
     mkdirSync(join(projectDir, 'web', 'dist', 'assets'), { recursive: true });
@@ -600,11 +666,6 @@ export default defineConfig({
     }
     expect(healthText).toContain('"status":"ok"');
 
-    child.kill('SIGTERM');
-    await new Promise<void>((resolveExit, reject) => {
-      child.once('exit', () => resolveExit());
-      child.once('error', reject);
-      setTimeout(() => reject(new Error(`Portable launcher did not exit cleanly.\n${stderr}`)), 15_000);
-    });
+    await stopPortableLauncher(child, () => stderr);
   });
 });
