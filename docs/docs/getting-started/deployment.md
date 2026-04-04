@@ -139,6 +139,8 @@ npx edgebase pack --format archive
 
 Use `pack` when you want to hand off a local launcher instead of deploying to Cloudflare or running Docker/Node.js directly.
 
+For the full packaging flow, output formats, and launcher behavior, see [Packaging Guide](/docs/getting-started/packaging).
+
 | Feature | Detail |
 |---------|--------|
 | Best for | QA handoff, demos, local installs, offline distribution |
