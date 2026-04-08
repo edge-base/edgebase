@@ -50,7 +50,7 @@ npm install @edge-base/react-native
 ```yaml
 # pubspec.yaml
 dependencies:
-  edgebase_flutter: ^0.2.8
+  edgebase_flutter: ^0.2.9
 ```
 
 ```bash
