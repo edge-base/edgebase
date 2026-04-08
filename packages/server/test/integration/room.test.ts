@@ -479,32 +479,21 @@ describe('Room v2 — Server State', () => {
 
 describe('Room v2 — Lifecycle', () => {
   it('onJoin throw → join 거부', async () => {
-    // Create a blocked user
-    const email = 'blocked-user@test.com';
-    const res = await (globalThis as any).SELF.fetch(`${BASE}/api/auth/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password: 'Block1234!' }),
-    });
-    const data = await res.json() as any;
-
-    // The test-lifecycle namespace blocks userId that contains 'blocked-user'
-    // But actually, the userId is a UUID from signup, not 'blocked-user'.
-    // This test needs to be adjusted based on how userId is generated.
-    // For now, we'll test that the mechanism works in principle.
     const ws = await createWS('test-lifecycle', `lc-${uid()}`);
-    ws.send(JSON.stringify({ type: 'auth', token: data.accessToken }));
-    const authMsg = await waitForMessage(ws, 'auth_success').catch(() => null);
-    if (authMsg) {
-      ws.send(JSON.stringify({ type: 'join' }));
-      // Should succeed for normal users (not 'blocked-user' ID)
-      const syncOrError = await Promise.race([
-        waitForMessage(ws, 'sync'),
-        waitForMessage(ws, 'error'),
-      ]);
-      // Either sync (allowed) or error (rejected) is fine
-      expect(syncOrError.type).toBeTruthy();
-    }
+    ws.send(JSON.stringify({
+      type: 'auth',
+      authPayload: {
+        type: 'anonymous',
+        subject: 'blocked-user',
+      },
+    }));
+    const authMsg = await waitForMessage(ws, 'auth_success');
+    expect(authMsg.userId).toBe('blocked-user');
+
+    ws.send(JSON.stringify({ type: 'join' }));
+    const err = await waitForMessage(ws, 'error');
+    expect(err.code).toBe('JOIN_DENIED');
+    expect(err.message).toBe('You are blocked');
     ws.close();
   });
 
