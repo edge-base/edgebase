@@ -1052,6 +1052,67 @@ describe('RoomClient — construction', () => {
     tm.destroy();
   });
 
+  it('supports anonymous room auth payloads when no access token exists', async () => {
+    const tm = new TokenManager('http://localhost:8688');
+    const room = new RoomClient('http://localhost:8688', 'default', 'room-share', tm, {
+      authPayload: {
+        type: 'anonymous',
+        subject: 'share:session-1',
+        role: 'share_viewer',
+        isAnonymous: true,
+        meta: {
+          roomShareToken: 'share-token-1',
+        },
+      },
+    });
+    const ws = { send: vi.fn(), onmessage: null as ((event: MessageEvent) => void) | null } as unknown as WebSocket;
+    (room as any).ws = ws;
+    (room as any).connected = true;
+
+    const authPromise = (room as any).authenticate();
+    await vi.waitFor(() => {
+      expect(ws.send).toHaveBeenCalledTimes(1);
+    });
+
+    expect(ws.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        type: 'auth',
+        token: null,
+        authPayload: {
+          type: 'anonymous',
+          subject: 'share:session-1',
+          role: 'share_viewer',
+          isAnonymous: true,
+          meta: {
+            roomShareToken: 'share-token-1',
+          },
+        },
+      }),
+    );
+
+    ws.onmessage?.({
+      data: JSON.stringify({ type: 'auth_success', userId: 'share:session-1', connectionId: 'conn-1' }),
+    } as MessageEvent);
+    await authPromise;
+
+    expect((room as any).authenticated).toBe(true);
+    expect((room as any).joined).toBe(true);
+    expect((room as any).currentUserId).toBe('share:session-1');
+    tm.destroy();
+  });
+
+  it('keeps idle state when anonymous room auth payload is configured without a signed-in user', () => {
+    const tm = new TokenManager('http://localhost:8688');
+    const room = new RoomClient('http://localhost:8688', 'default', 'room-share', tm, {
+      authPayload: {
+        type: 'anonymous',
+        subject: 'share:session-2',
+      },
+    });
+    expect(room.getConnectionState()).toBe('idle');
+    tm.destroy();
+  });
+
   it('handles auth success that arrives in the same tick as the auth send', async () => {
     const tm = new TokenManager('http://localhost:8688');
     const room = new RoomClient('http://localhost:8688', 'default', 'room-1', tm);
@@ -1685,6 +1746,461 @@ describe('RoomClient — rooms adapter APIs', () => {
 
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
+    tm.destroy();
+  });
+
+  it('collab awareness uses namespaced member state and emits peer snapshots', async () => {
+    const { room, tm, send } = createConnectedRoom('collab-awareness');
+    (room as any).currentUserId = 'member-1';
+    (room as any).currentConnectionId = 'conn-1';
+
+    const collab = room.collab({ format: 'yjs', key: 'body' });
+    const awarenessHandler = vi.fn();
+    collab.awareness.onChange(awarenessHandler);
+
+    (room as any).handleMessage(JSON.stringify({
+      type: 'members_sync',
+      members: [
+        {
+          memberId: 'member-1',
+          userId: 'member-1',
+          connectionId: 'conn-1',
+          connectionCount: 1,
+          role: 'owner',
+          state: {
+            __collab: {
+              'yjs:body': { cursor: { line: 1 }, typing: true },
+            },
+          },
+        },
+        {
+          memberId: 'member-2',
+          userId: 'member-2',
+          connectionId: 'conn-2',
+          connectionCount: 1,
+          role: 'member',
+          state: {
+            __collab: {
+              'yjs:body': { cursor: { line: 2 }, typing: false },
+            },
+          },
+        },
+      ],
+    }));
+
+    expect(collab.awareness.getSelf()).toEqual(
+      expect.objectContaining({
+        memberId: 'member-1',
+        isSelf: true,
+        state: { cursor: { line: 1 }, typing: true },
+      }),
+    );
+    expect(collab.awareness.getPeers()).toEqual([
+      expect.objectContaining({
+        memberId: 'member-2',
+        isSelf: false,
+        state: { cursor: { line: 2 }, typing: false },
+      }),
+    ]);
+    expect(awarenessHandler).toHaveBeenCalledWith([
+      expect.objectContaining({
+        memberId: 'member-2',
+        state: { cursor: { line: 2 }, typing: false },
+      }),
+    ]);
+
+    const setLocalStatePromise = collab.awareness.setLocalState({ cursor: { line: 3 }, typing: true });
+    const outbound = JSON.parse(send.mock.calls[0][0]) as Record<string, unknown>;
+    expect(outbound).toMatchObject({
+      type: 'member_state',
+      state: {
+        __collab: {
+          'yjs:body': { cursor: { line: 3 }, typing: true },
+        },
+      },
+    });
+
+    (room as any).handleMessage(JSON.stringify({
+      type: 'member_state',
+      requestId: outbound.requestId,
+      member: {
+        memberId: 'member-1',
+        userId: 'member-1',
+        connectionId: 'conn-1',
+        connectionCount: 1,
+        role: 'owner',
+        state: {
+          __collab: {
+            'yjs:body': { cursor: { line: 3 }, typing: true },
+          },
+        },
+      },
+      state: {
+        __collab: {
+          'yjs:body': { cursor: { line: 3 }, typing: true },
+        },
+      },
+    }));
+    await setLocalStatePromise;
+
+    expect(collab.awareness.getSelf()).toEqual(
+      expect.objectContaining({
+        state: { cursor: { line: 3 }, typing: true },
+      }),
+    );
+    tm.destroy();
+  });
+
+  it('collab status follows room connection state transitions', () => {
+    const { room, tm } = createConnectedRoom('collab-status');
+    const collab = room.collab({ format: 'yjs', key: 'body' });
+    const statuses: string[] = [];
+
+    collab.onStatusChange((status) => statuses.push(status));
+
+    (room as any).setConnectionState('connecting');
+    (room as any).setConnectionState('reconnecting');
+    (room as any).setConnectionState('connected');
+    (room as any).setConnectionState('auth_lost');
+
+    expect(statuses).toEqual(['connecting', 'reconnecting', 'ready', 'degraded']);
+    expect(collab.getStatus()).toBe('degraded');
+    expect(collab.getMode()).toBe('editable');
+    tm.destroy();
+  });
+
+  it('collab surfaces room reconnect attempts through the public API', () => {
+    vi.useFakeTimers();
+    const { room, tm } = createConnectedRoom('collab-reconnect');
+    const collab = room.collab({ format: 'yjs', key: 'body' });
+    const reconnectHandler = vi.fn();
+
+    collab.onReconnect(reconnectHandler);
+
+    (room as any).setConnectionState('connecting');
+    (room as any).scheduleReconnect();
+
+    expect(collab.getStatus()).toBe('reconnecting');
+
+    (room as any).handleMessage(JSON.stringify({
+      type: 'sync',
+      sharedState: {},
+      sharedVersion: 1,
+      playerState: {},
+      playerVersion: 1,
+    }));
+
+    expect(reconnectHandler).toHaveBeenCalledWith({ attempt: 1 });
+    expect(collab.getStatus()).toBe('ready');
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+    tm.destroy();
+  });
+
+  it('collab surfaces recovery failures from the room session', () => {
+    vi.useFakeTimers();
+    const tm = new TokenManager('http://localhost:8688');
+    tm.setTokens({
+      accessToken: makeValidJwt('room-collab-recovery'),
+      refreshToken: makeValidJwt('room-collab-recovery'),
+    });
+    const room = new RoomClient('http://localhost:8688', 'default', 'collab-recovery', tm, {
+      disconnectResetTimeoutMs: 25,
+    });
+    (room as any).ws = { send: vi.fn(), close: vi.fn(), readyState: 1 } as WebSocket;
+    (room as any).connected = true;
+    (room as any).authenticated = true;
+    (room as any).joinRequested = true;
+
+    const collab = room.collab({ format: 'yjs', key: 'body' });
+    const recoveryHandler = vi.fn();
+    collab.onRecoveryFailure(recoveryHandler);
+
+    (room as any).setConnectionState('reconnecting');
+    (room as any).scheduleDisconnectReset('reconnecting');
+    vi.advanceTimersByTime(26);
+
+    expect(recoveryHandler).toHaveBeenCalledWith({
+      state: 'reconnecting',
+      timeoutMs: 25,
+    });
+    vi.useRealTimers();
+    tm.destroy();
+  });
+
+  it('collab exposes a yjs alias and explicit sync entrypoint', async () => {
+    const { room, tm } = createConnectedRoom('collab-sync');
+    (room as any).setConnectionState('connected');
+    const collab = room.collab.yjs({ key: 'body' });
+    const doc = {
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+
+    collab.bind(doc as any);
+    await expect(collab.sync()).resolves.toBeUndefined();
+
+    expect(doc.on).toHaveBeenCalledWith('update', expect.any(Function));
+    expect(collab.getStatus()).toBe('ready');
+    tm.destroy();
+  });
+
+  it('collab mode and capability fingerprint follow collab member meta', () => {
+    const { room, tm } = createConnectedRoom('collab-meta');
+    (room as any).currentUserId = 'member-1';
+    (room as any).currentConnectionId = 'conn-1';
+
+    const collab = room.collab({ format: 'yjs', key: 'body', initialMode: 'editable' });
+    const modes: string[] = [];
+    const fingerprints: Array<string | null> = [];
+    collab.onModeChange((mode) => modes.push(mode));
+    collab.onCapabilityFingerprintChange((fingerprint) => fingerprints.push(fingerprint));
+
+    (room as any).handleMessage(JSON.stringify({
+      type: 'members_sync',
+      members: [
+        {
+          memberId: 'member-1',
+          userId: 'member-1',
+          connectionId: 'conn-1',
+          connectionCount: 1,
+          role: 'owner',
+          state: {
+            __collab_meta: {
+              'yjs:body': {
+                mode: 'read_only',
+                capabilityFingerprint: 'cap_v1_demo',
+              },
+            },
+          },
+        },
+      ],
+    }));
+
+    expect(collab.getMode()).toBe('read_only');
+    expect(collab.getCapabilityFingerprint()).toBe('cap_v1_demo');
+    expect(modes).toEqual(['read_only']);
+    expect(fingerprints).toEqual(['cap_v1_demo']);
+    tm.destroy();
+  });
+
+  it('collab control signals override mode and capability fingerprint from the server', () => {
+    const { room, tm } = createConnectedRoom('collab-control');
+    const collab = room.collab({ format: 'yjs', key: 'body', initialMode: 'editable' });
+    const modes: string[] = [];
+    const fingerprints: Array<string | null> = [];
+
+    collab.onModeChange((mode) => modes.push(mode));
+    collab.onCapabilityFingerprintChange((fingerprint) => fingerprints.push(fingerprint));
+
+    (room as any).handleMessage(JSON.stringify({
+      type: 'signal',
+      event: 'collab.control',
+      payload: {
+        format: 'yjs',
+        key: 'body',
+        mode: 'read_only',
+        capabilityFingerprint: 'cap_live_v2',
+      },
+      meta: {
+        memberId: 'server',
+        userId: 'server',
+        serverSent: true,
+      },
+    }));
+
+    expect(collab.getMode()).toBe('read_only');
+    expect(collab.getCapabilityFingerprint()).toBe('cap_live_v2');
+    expect(modes).toEqual(['read_only']);
+    expect(fingerprints).toEqual(['cap_live_v2']);
+    tm.destroy();
+  });
+
+  it('collab requests a durable server sync when server sync is advertised', async () => {
+    const { room, tm, send } = createConnectedRoom('collab-server-sync');
+    (room as any).setConnectionState('connected');
+    const collab = room.collab({ format: 'yjs', key: 'body', initialMode: 'editable', syncTimeoutMs: 50 });
+    const yjs = await import('yjs');
+    const doc = new yjs.Doc();
+
+    await collab.join();
+    collab.bind(doc as any);
+
+    (room as any).handleMessage(JSON.stringify({
+      type: 'signal',
+      event: 'collab.control',
+      payload: {
+        format: 'yjs',
+        key: 'body',
+        mode: 'editable',
+        capabilityFingerprint: 'cap_sync_v1',
+        serverSync: true,
+      },
+      meta: {
+        memberId: 'server',
+        userId: 'server',
+        serverSent: true,
+      },
+    }));
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const outbound = JSON.parse(send.mock.calls[0][0]) as Record<string, any>;
+    expect(outbound).toMatchObject({
+      type: 'signal',
+      event: 'collab.sync_request',
+      payload: {
+        format: 'yjs',
+        key: 'body',
+      },
+    });
+
+    const sourceDoc = new yjs.Doc();
+    sourceDoc.getMap('page').set('title', 'Server durable state');
+    const updateBase64 = Buffer.from(yjs.encodeStateAsUpdate(sourceDoc)).toString('base64');
+
+    (room as any).handleMessage(JSON.stringify({
+      type: 'signal',
+      event: 'collab.sync_response',
+      payload: {
+        format: 'yjs',
+        key: 'body',
+        requestId: outbound.payload.requestId,
+        update: updateBase64,
+        syncSource: 'server_durable',
+      },
+      meta: {
+        memberId: 'server',
+        userId: 'server',
+        serverSent: true,
+      },
+    }));
+
+    await vi.waitFor(() => {
+      expect(doc.getMap('page').get('title')).toBe('Server durable state');
+      expect(collab.getStatus()).toBe('ready');
+    });
+    tm.destroy();
+  });
+
+  it('collab keeps waiting for peer live sync after a server durable baseline when peers exist', async () => {
+    const { room, tm, send } = createConnectedRoom('collab-server-peer-sync');
+    (room as any).setConnectionState('connected');
+    const collab = room.collab({ format: 'yjs', key: 'body', initialMode: 'editable', syncTimeoutMs: 5000 });
+    const yjs = await import('yjs');
+    const doc = new yjs.Doc();
+
+    (room as any).currentUserId = 'member-1';
+    (room as any).currentConnectionId = 'conn-1';
+    (room as any).handleMessage(JSON.stringify({
+      type: 'members_sync',
+      members: [
+        {
+          memberId: 'member-1',
+          userId: 'member-1',
+          connectionId: 'conn-1',
+          connectionCount: 1,
+          role: 'owner',
+          state: {
+            __collab: {
+              'yjs:body': { cursor: { line: 1 } },
+            },
+          },
+        },
+        {
+          memberId: 'member-2',
+          userId: 'member-2',
+          connectionId: 'conn-2',
+          connectionCount: 1,
+          role: 'member',
+          state: {
+            __collab: {
+              'yjs:body': { cursor: { line: 2 } },
+            },
+          },
+        },
+      ],
+    }));
+
+    await collab.join();
+    collab.bind(doc as any);
+
+    (room as any).handleMessage(JSON.stringify({
+      type: 'signal',
+      event: 'collab.control',
+      payload: {
+        format: 'yjs',
+        key: 'body',
+        mode: 'editable',
+        capabilityFingerprint: 'cap_sync_v2',
+        serverSync: true,
+      },
+      meta: {
+        memberId: 'server',
+        userId: 'server',
+        serverSent: true,
+      },
+    }));
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const outbound = JSON.parse(send.mock.calls[0][0]) as Record<string, any>;
+    const requestId = outbound.payload.requestId as string;
+
+    const serverDoc = new yjs.Doc();
+    serverDoc.getMap('page').set('title', 'Server durable state');
+    const serverUpdateBase64 = Buffer.from(yjs.encodeStateAsUpdate(serverDoc)).toString('base64');
+
+    (room as any).handleMessage(JSON.stringify({
+      type: 'signal',
+      event: 'collab.sync_response',
+      payload: {
+        format: 'yjs',
+        key: 'body',
+        requestId,
+        update: serverUpdateBase64,
+        syncSource: 'server_durable',
+      },
+      meta: {
+        memberId: 'server',
+        userId: 'server',
+        serverSent: true,
+      },
+    }));
+
+    await vi.waitFor(() => {
+      expect(doc.getMap('page').get('title')).toBe('Server durable state');
+      expect(collab.getStatus()).toBe('syncing');
+    });
+
+    const peerDoc = new yjs.Doc();
+    yjs.applyUpdate(peerDoc, yjs.encodeStateAsUpdate(serverDoc));
+    peerDoc.getMap('page').set('title', 'Peer live state');
+    const peerUpdateBase64 = Buffer.from(yjs.encodeStateAsUpdate(peerDoc)).toString('base64');
+
+    (room as any).handleMessage(JSON.stringify({
+      type: 'signal',
+      event: 'collab.sync_response',
+      payload: {
+        format: 'yjs',
+        key: 'body',
+        requestId,
+        update: peerUpdateBase64,
+        syncSource: 'peer_live',
+      },
+      meta: {
+        memberId: 'member-2',
+        userId: 'member-2',
+        serverSent: false,
+      },
+    }));
+
+    await vi.waitFor(() => {
+      expect(doc.getMap('page').get('title')).toBe('Peer live state');
+      expect(collab.getStatus()).toBe('ready');
+    });
     tm.destroy();
   });
 });
