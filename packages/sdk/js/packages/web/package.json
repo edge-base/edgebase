@@ -40,11 +40,20 @@
         "test": "tsc --noEmit && vitest run test/unit/",
         "prepack": "pnpm run build"
     },
+    "peerDependencies": {
+        "yjs": "^13.6.27"
+    },
+    "peerDependenciesMeta": {
+        "yjs": {
+            "optional": true
+        }
+    },
     "dependencies": {
         "@edge-base/core": "workspace:*"
     },
     "devDependencies": {
         "typescript": "^5.7.0",
-        "vitest": "^3.0.0"
+        "vitest": "^3.0.0",
+        "yjs": "^13.6.27"
     }
 }

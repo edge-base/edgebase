@@ -17,6 +17,14 @@ import {
   type Subscription,
 } from '@edge-base/core';
 import { refreshAccessToken } from './auth-refresh.js';
+import {
+  createRoomCollab,
+  type RoomCollabClient,
+  type RoomCollabMode,
+  type RoomCollabOptions,
+  type RoomCollabPeer,
+  type RoomCollabStatus,
+} from './room-collab-core.js';
 
 // ─── Types ───
 
@@ -39,7 +47,23 @@ export interface RoomOptions {
   networkRecoveryGraceMs?: number;
   /** Time to wait for recovery before surfacing a session reset recommendation. */
   disconnectResetTimeoutMs?: number;
+  /** Optional anonymous auth payload for room-level actors such as share-link viewers. */
+  authPayload?: RoomAnonymousAuthPayload;
 }
+
+export interface RoomAnonymousAuthPayload {
+  type: 'anonymous';
+  subject: string;
+  role?: string;
+  email?: string;
+  isAnonymous?: boolean;
+  custom?: Record<string, unknown>;
+  meta?: Record<string, unknown>;
+}
+
+type ResolvedRoomOptions = Omit<Required<RoomOptions>, 'authPayload'> & {
+  authPayload?: RoomAnonymousAuthPayload;
+};
 
 // Re-export Subscription + helper from core for backwards compatibility
 export type { Subscription };
@@ -116,6 +140,19 @@ export interface RoomSummaryCollection {
   updatedAt: string;
 }
 
+export type {
+  RoomCollabClient,
+  RoomCollabMode,
+  RoomCollabOptions,
+  RoomCollabPeer,
+  RoomCollabStatus,
+} from './room-collab-core.js';
+
+export interface RoomCollabFactory {
+  (options: RoomCollabOptions): RoomCollabClient;
+  yjs(options: Omit<RoomCollabOptions, 'format'>): RoomCollabClient;
+}
+
 // ─── Helpers ───
 
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -187,7 +224,8 @@ function getDefaultHeartbeatStaleTimeoutMs(heartbeatIntervalMs: number): number 
 export class RoomClient {
   private baseUrl: string;
   private tokenManager: TokenManager;
-  private options: Required<RoomOptions>;
+  private options: ResolvedRoomOptions;
+  private authPayload: RoomAnonymousAuthPayload | null;
 
   /** Room namespace (e.g. 'game', 'chat') */
   public readonly namespace: string;
@@ -365,6 +403,8 @@ export class RoomClient {
     getDebugSnapshot: (): unknown => this.getDebugSnapshot(),
   };
 
+  readonly collab: RoomCollabFactory;
+
   constructor(
     baseUrl: string,
     namespace: string,
@@ -388,7 +428,16 @@ export class RoomClient {
         ?? getDefaultHeartbeatStaleTimeoutMs(options?.heartbeatIntervalMs ?? ROOM_HEARTBEAT_INTERVAL_MS),
       networkRecoveryGraceMs: options?.networkRecoveryGraceMs ?? 3500,
       disconnectResetTimeoutMs: options?.disconnectResetTimeoutMs ?? 8000,
+      authPayload: options?.authPayload,
     };
+    this.authPayload = options?.authPayload ?? null;
+    this.collab = Object.assign(
+      (collabOptions: RoomCollabOptions) => createRoomCollab(this, collabOptions),
+      {
+        yjs: (collabOptions: Omit<RoomCollabOptions, 'format'>) =>
+          createRoomCollab(this, { ...collabOptions, format: 'yjs' }),
+      },
+    );
 
     this.unsubAuthState = this.tokenManager.onAuthStateChange((user) => {
       this.handleAuthStateChange(user);
@@ -406,6 +455,11 @@ export class RoomClient {
   /** Get current player state (read-only snapshot) */
   getPlayerState(): Record<string, unknown> {
     return cloneRecord(this._playerState);
+  }
+
+  /** Get the current room connection state. */
+  getConnectionState(): RoomConnectionState {
+    return this.connectionState;
   }
 
   private async waitForCurrentMember(timeoutMs = 10_000): Promise<RoomMember | null> {
@@ -1072,7 +1126,8 @@ export class RoomClient {
     const token = await this.tokenManager.getAccessToken((refreshToken) =>
       refreshAccessToken(this.baseUrl, refreshToken),
     );
-    if (!token) {
+    const authPayload = this.authPayload;
+    if (!token && !authPayload) {
       throw new EdgeBaseError(
         401,
         'Room authentication requires a signed-in session. Sign in before joining the room.',
@@ -1118,7 +1173,7 @@ export class RoomClient {
         };
       }
 
-      this.sendRaw({ type: 'auth', token });
+      this.sendRaw({ type: 'auth', token: token ?? null, authPayload: authPayload ?? undefined });
     });
   }
 
@@ -1449,6 +1504,10 @@ export class RoomClient {
   }
 
   private handleAuthStateChange(user: TokenUser | null): void {
+    if (this.authPayload) {
+      return;
+    }
+
     if (user) {
       if (this.ws && this.connected && this.authenticated) {
         this.refreshAuth();

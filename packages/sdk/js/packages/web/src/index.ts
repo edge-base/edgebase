@@ -26,6 +26,12 @@ export { getCaptchaToken, fetchSiteKey, resolveCaptchaToken } from './turnstile.
 // Room
 export {
   RoomClient,
+  type RoomCollabClient,
+  type RoomCollabFactory,
+  type RoomCollabMode,
+  type RoomCollabOptions,
+  type RoomCollabPeer,
+  type RoomCollabStatus,
   type RoomOptions,
   type Subscription,
   type RoomConnectionState,
@@ -33,6 +39,7 @@ export {
   type RoomSignalMeta,
   type RoomMember,
   type RoomReconnectInfo,
+  type RoomRecoveryFailureInfo,
   type RoomConnectDiagnostic,
   type RoomSummary,
 } from './room.js';

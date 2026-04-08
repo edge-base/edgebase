@@ -52,6 +52,33 @@ export interface RoomWSMeta {
   lastSeenAt?: number;
 }
 
+function normalizeAnonymousRoomAuthPayload(value: unknown): SharedAuthContext | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const typed = value as Record<string, unknown>;
+  if (typed.type !== 'anonymous' || typeof typed.subject !== 'string' || typed.subject.trim().length === 0) {
+    return null;
+  }
+
+  const subject = typed.subject.trim();
+  return {
+    id: subject,
+    role: typeof typed.role === 'string' && typed.role.trim().length > 0 ? typed.role.trim() : undefined,
+    email: typeof typed.email === 'string' && typed.email.trim().length > 0 ? typed.email.trim() : undefined,
+    isAnonymous: typed.isAnonymous !== false,
+    custom:
+      typed.custom && typeof typed.custom === 'object' && !Array.isArray(typed.custom)
+        ? (typed.custom as Record<string, unknown>)
+        : undefined,
+    meta:
+      typed.meta && typeof typed.meta === 'object' && !Array.isArray(typed.meta)
+        ? (typed.meta as Record<string, unknown>)
+        : undefined,
+  };
+}
+
 interface PersistedRoomWSAttachment {
   version: 1;
   meta: RoomWSMeta;
@@ -489,7 +516,12 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
     // Auth must be first
     if (type === 'auth') {
-      await this.handleAuth(ws, meta, msg.token as string);
+      await this.handleAuth(
+        ws,
+        meta,
+        typeof msg.token === 'string' ? msg.token : undefined,
+        msg.authPayload,
+      );
       return;
     }
 
@@ -765,12 +797,50 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   // ─── Auth Handler ───
 
-  private async handleAuth(ws: WebSocket, meta: RoomWSMeta, token: string): Promise<void> {
+  private async handleAuth(
+    ws: WebSocket,
+    meta: RoomWSMeta,
+    token?: string,
+    authPayload?: unknown,
+  ): Promise<void> {
     const isReAuth = meta.authenticated;
 
-    if (!token) {
+    const anonymousAuth = !token ? normalizeAnonymousRoomAuthPayload(authPayload) : null;
+    if (!token && !anonymousAuth) {
       this.safeSend(ws, { type: 'error', code: 'AUTH_FAILED', message: 'Token required' });
       ws.close(4002, 'Authentication failed');
+      return;
+    }
+
+    if (anonymousAuth) {
+      meta.authenticated = true;
+      meta.authStateLost = false;
+      meta.lastSeenAt = Date.now();
+      meta.userId = anonymousAuth.id;
+      meta.role = anonymousAuth.role;
+      meta.auth = anonymousAuth;
+      this.setWSMeta(ws, meta);
+
+      if (this.pendingAuth.delete(meta.connectionId)) {
+        this.syncEphemeralTimersToStorage();
+        this._scheduleNextAlarm();
+      }
+
+      if (!isReAuth && meta.userId) {
+        if (this.disconnectTimers.delete(meta.userId)) {
+          this.syncEphemeralTimersToStorage();
+          this._scheduleNextAlarm();
+        }
+        this.addPlayer(meta.connectionId, meta.userId);
+      }
+
+      this.safeSend(ws, {
+        type: isReAuth ? 'auth_refreshed' : 'auth_success',
+        userId: anonymousAuth.id,
+        connectionId: meta.connectionId,
+      });
+      this.syncRoomMonitoringSnapshot();
+      await this.recoverStateIfNeeded();
       return;
     }
 
@@ -782,14 +852,15 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     }
 
     try {
+      const accessToken = token as string;
       const headers = new Headers();
       if (meta.ip) headers.set('CF-Connecting-IP', meta.ip);
       if (meta.userAgent) headers.set('User-Agent', meta.userAgent);
-      headers.set('Authorization', `Bearer ${token}`);
+      headers.set('Authorization', `Bearer ${accessToken}`);
       const { resolveAuthContextFromToken } = await import('../middleware/auth.js');
       const auth = await resolveAuthContextFromToken(
         this.env,
-        token,
+        accessToken,
         new Request('http://internal/api/room/auth', { headers }),
       );
       meta.authenticated = true;
@@ -1345,7 +1416,8 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       userId: meta.userId!,
       connectionId: meta.connectionId,
       role: meta.role,
-    };
+      auth: this.buildAuthFromMeta(meta),
+    } as RoomSender;
   }
 
   protected buildAuthFromMeta(meta: RoomWSMeta): SharedAuthContext {
