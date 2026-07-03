@@ -8670,6 +8670,26 @@
             "required": true,
             "name": "bucket",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional signed upload key echoed from a signed upload URL."
+            },
+            "required": false,
+            "description": "Optional signed upload key echoed from a signed upload URL.",
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional signed upload token for write-rule-bypassing upload grants."
+            },
+            "required": false,
+            "description": "Optional signed upload token for write-rule-bypassing upload grants.",
+            "name": "token",
+            "in": "query"
           }
         ],
         "requestBody": {
@@ -8725,6 +8745,32 @@
           },
           "403": {
             "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload too large",
             "content": {
               "application/json": {
                 "schema": {
@@ -9120,6 +9166,9 @@
           "200": {
             "description": "File content"
           },
+          "206": {
+            "description": "Partial file content"
+          },
           "403": {
             "description": "Forbidden",
             "content": {
@@ -9171,6 +9220,9 @@
                 }
               }
             }
+          },
+          "416": {
+            "description": "Range not satisfiable"
           }
         }
       },
@@ -9296,6 +9348,16 @@
             },
             "required": true,
             "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional signed upload token for write-rule-bypassing upload grants."
+            },
+            "required": false,
+            "description": "Optional signed upload token for write-rule-bypassing upload grants.",
+            "name": "token",
             "in": "query"
           }
         ],
@@ -9897,6 +9959,26 @@
             "required": true,
             "name": "bucket",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional signed upload key echoed from a signed upload URL."
+            },
+            "required": false,
+            "description": "Optional signed upload key echoed from a signed upload URL.",
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional signed upload token for write-rule-bypassing upload grants."
+            },
+            "required": false,
+            "description": "Optional signed upload token for write-rule-bypassing upload grants.",
+            "name": "token",
+            "in": "query"
           }
         ],
         "requestBody": {
@@ -10009,15 +10091,49 @@
             "required": true,
             "name": "bucket",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "uploadId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "partNumber",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional signed upload token for write-rule-bypassing upload grants."
+            },
+            "required": false,
+            "description": "Optional signed upload token for write-rule-bypassing upload grants.",
+            "name": "token",
+            "in": "query"
           }
         ],
         "requestBody": {
           "required": true,
           "content": {
-            "application/json": {
+            "application/octet-stream": {
               "schema": {
-                "type": "object",
-                "additionalProperties": {}
+                "type": "string",
+                "format": "binary"
               }
             }
           }
@@ -10086,6 +10202,32 @@
                 }
               }
             }
+          },
+          "413": {
+            "description": "Payload too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -10105,6 +10247,26 @@
             "required": true,
             "name": "bucket",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional signed upload key echoed from a signed upload URL."
+            },
+            "required": false,
+            "description": "Optional signed upload key echoed from a signed upload URL.",
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional signed upload token for write-rule-bypassing upload grants."
+            },
+            "required": false,
+            "description": "Optional signed upload token for write-rule-bypassing upload grants.",
+            "name": "token",
+            "in": "query"
           }
         ],
         "requestBody": {
@@ -10212,6 +10374,32 @@
                 }
               }
             }
+          },
+          "413": {
+            "description": "Payload too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -10231,6 +10419,26 @@
             "required": true,
             "name": "bucket",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional signed upload key echoed from a signed upload URL."
+            },
+            "required": false,
+            "description": "Optional signed upload key echoed from a signed upload URL.",
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional signed upload token for write-rule-bypassing upload grants."
+            },
+            "required": false,
+            "description": "Optional signed upload token for write-rule-bypassing upload grants.",
+            "name": "token",
+            "in": "query"
           }
         ],
         "requestBody": {

@@ -394,6 +394,22 @@ auto result = bucket.download("user-1.jpg");
 `getUrl()` is **synchronous** — it builds the URL locally without a network call. Use `createSignedUrl()` if the bucket requires authentication for reads.
 :::
 
+### Range Requests
+
+Storage downloads support HTTP byte ranges for media players, PDF viewers, and resumable clients:
+
+```typescript
+const res = await fetch(bucket.getUrl('video.mp4'), {
+  headers: { Range: 'bytes=0-1048575' },
+});
+
+if (res.status === 206) {
+  console.log(res.headers.get('Content-Range'));
+}
+```
+
+Valid range requests return `206 Partial Content` with `Content-Range` and `Accept-Ranges: bytes`. Unsatisfiable ranges return `416 Range Not Satisfiable`.
+
 ## Check File Exists
 
 <Tabs groupId="sdk-language">

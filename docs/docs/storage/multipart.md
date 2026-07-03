@@ -338,6 +338,8 @@ const { parts } = await bucket.getUploadParts('large-video.mp4', uploadId);
 
 Part tracking data is stored in KV with a 7-day TTL (synced with R2's auto-abort window).
 
+Signed upload URLs can authorize multipart requests too. Pass the signed URL's `token` and `key` query parameters to `multipart/create`, `multipart/upload-part`, `multipart/complete`, `multipart/abort`, and `uploads/:uploadId/parts` when the client should continue without auth headers after the original `write` rule check.
+
 ## Cancel Upload
 
 Multipart uploads can be cancelled mid-flight using `.cancel()`:

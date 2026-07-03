@@ -23,7 +23,7 @@ Do not ship this package to Android apps, browser bundles, or other untrusted cl
 
 ## Public Artifact
 
-- `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.3.0`
+- `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.3.1`
 
 ## Canonical Examples
 

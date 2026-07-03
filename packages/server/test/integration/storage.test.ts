@@ -131,6 +131,30 @@ describe('1-15 storage — download', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-length')).toBeDefined();
   });
+
+  it('Range 헤더 → 206과 Content-Range 반환', async () => {
+    const res = await (globalThis as any).SELF.fetch(`${BASE}/api/storage/${BUCKET}/${key}`, {
+      headers: {
+        'X-EdgeBase-Service-Key': SK,
+        Range: 'bytes=0-7',
+      },
+    });
+    expect(res.status).toBe(206);
+    expect(res.headers.get('accept-ranges')).toBe('bytes');
+    expect(res.headers.get('content-range')).toBe(`bytes 0-7/${content.length}`);
+    expect(await res.text()).toBe(content.slice(0, 8));
+  });
+
+  it('범위를 벗어난 Range 헤더 → 416', async () => {
+    const res = await (globalThis as any).SELF.fetch(`${BASE}/api/storage/${BUCKET}/${key}`, {
+      headers: {
+        'X-EdgeBase-Service-Key': SK,
+        Range: `bytes=${content.length + 10}-${content.length + 20}`,
+      },
+    });
+    expect(res.status).toBe(416);
+    expect(res.headers.get('content-range')).toBe(`bytes */${content.length}`);
+  });
 });
 
 // ─── 3. List ──────────────────────────────────────────────────────────────────
@@ -357,6 +381,36 @@ describe('1-15 storage — signed-upload-url', () => {
       body: form,
     });
     expect(res.status).toBe(400);
+  });
+
+  it('signed-upload-url token으로 multipart create/abort 가능', async () => {
+    const key = `test-signed-up-mp-${crypto.randomUUID().slice(0, 8)}.bin`;
+    const { data } = await api('POST', `/api/storage/${BUCKET}/signed-upload-url`, { key });
+    const signed = new URL(data.url);
+    const signedQuery = `token=${encodeURIComponent(signed.searchParams.get('token')!)}&key=${encodeURIComponent(key)}`;
+
+    const createRes = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/storage/${BUCKET}/multipart/create?${signedQuery}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, contentType: 'application/octet-stream' }),
+      },
+    );
+    expect(createRes.status).toBe(200);
+    const created = await createRes.json() as any;
+    expect(created.key).toBe(key);
+    expect(typeof created.uploadId).toBe('string');
+
+    const abortRes = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/storage/${BUCKET}/multipart/abort?${signedQuery}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, uploadId: created.uploadId }),
+      },
+    );
+    expect(abortRes.status).toBe(200);
   });
 
   it('key 누락 → 400', async () => {

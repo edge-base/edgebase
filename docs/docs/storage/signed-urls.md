@@ -473,6 +473,10 @@ auto signed = bucket.createSignedUploadUrl("large-file.zip", "10m");
 Signed upload URLs validate `write` rules when the URL is created.
 :::
 
+Signed upload tokens can also be sent to multipart upload endpoints as `token` and `key` query parameters. This lets browser clients create, upload, complete, abort, and resume multipart uploads after the initial `write` rule check.
+
+When `maxFileSize` is set, single uploads are rejected if the file is too large. Multipart uploads require `Content-Length` on each part and validate the completed tracked part sizes before finalizing.
+
 ## REST API
 
 | Endpoint | Description |

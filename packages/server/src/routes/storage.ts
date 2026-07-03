@@ -307,6 +307,17 @@ type SignedTokenClaims = {
   maxBytes: number | null;
 };
 
+type TrackedMultipartPart = {
+  partNumber: number;
+  etag: string;
+  size?: number;
+};
+
+type ParsedDownloadRange =
+  | { kind: 'full' }
+  | { kind: 'partial'; offset: number; end: number; length: number }
+  | { kind: 'unsatisfiable' };
+
 function parseByteSize(value?: string): number | null {
   if (!value) return null;
   const trimmed = value.trim();
@@ -389,6 +400,61 @@ async function verifySignedToken(
   };
 }
 
+async function verifySignedUploadQuery(
+  c: Context<HonoEnv>,
+  bucketName: string,
+  key: string,
+): Promise<SignedTokenClaims | null> {
+  const token = c.req.query('token');
+  const tokenKey = c.req.query('key');
+  if (!token) return null;
+  if (tokenKey && tokenKey !== key) {
+    throw new EdgeBaseError(400, 'Signed upload key mismatch.', undefined, 'validation-failed');
+  }
+  const secret = c.env.JWT_USER_SECRET;
+  if (!secret) {
+    throw new EdgeBaseError(403, 'Signed upload tokens require JWT_USER_SECRET to be configured.', undefined, 'access-denied');
+  }
+  const verified = await verifySignedToken(token, key, bucketName, secret);
+  if (!verified.valid) {
+    throw new EdgeBaseError(403, 'Signed upload token is invalid or expired.', undefined, 'access-denied');
+  }
+  return verified.claims;
+}
+
+function requestContentLength(c: Context<HonoEnv>): number | null {
+  const header = c.req.header('content-length');
+  if (!header) return null;
+  const size = Number(header);
+  return Number.isFinite(size) && size >= 0 ? Math.floor(size) : null;
+}
+
+async function assertSignedMultipartSizeWithinLimit(
+  c: Context<HonoEnv>,
+  bucketName: string,
+  key: string,
+  uploadId: string,
+  parts: Array<{ partNumber: number; etag: string }>,
+  maxBytes: number,
+) {
+  const kvKey = partTrackingKey(bucketName, key, uploadId);
+  const existing = await c.env.KV.get(kvKey, 'json') as TrackedMultipartPart[] | null;
+  const tracked = new Map(
+    (existing ?? []).map((part) => [`${part.partNumber}:${part.etag}`, part] as const),
+  );
+  let total = 0;
+  for (const part of parts) {
+    const trackedPart = tracked.get(`${part.partNumber}:${part.etag}`);
+    if (!trackedPart || typeof trackedPart.size !== 'number' || !Number.isFinite(trackedPart.size)) {
+      throw new EdgeBaseError(400, 'Signed multipart upload is missing tracked part size metadata.', undefined, 'validation-failed');
+    }
+    total += trackedPart.size;
+    if (total > maxBytes) {
+      throw new EdgeBaseError(413, `Signed upload exceeds maxFileSize of ${maxBytes} bytes.`, undefined, 'payload-too-large');
+    }
+  }
+}
+
 /** Parse duration string (e.g. '1h', '30m') to milliseconds. Max 7 days. */
 export function parseDuration(str: string): number {
   const match = str.match(/^(\d+)(s|m|h|d)$/);
@@ -445,6 +511,56 @@ function buildMetadata(obj: R2Object): R2FileMeta {
     uploadedBy: obj.customMetadata?.uploadedBy || null,
     customMetadata: obj.customMetadata || {},
   } as R2FileMeta;
+}
+
+function parseDownloadRange(header: string | undefined, size: number): ParsedDownloadRange {
+  if (!header) return { kind: 'full' };
+  const match = header.trim().match(/^bytes=(.+)$/i);
+  if (!match) return { kind: 'full' };
+  const range = match[1]?.trim() ?? '';
+  if (!range || range.includes(',')) return { kind: 'unsatisfiable' };
+
+  const [rawStart, rawEnd] = range.split('-', 2);
+  if (rawStart === undefined || rawEnd === undefined) return { kind: 'unsatisfiable' };
+
+  let offset: number;
+  let end: number;
+
+  if (rawStart === '') {
+    const suffixLength = Number(rawEnd);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0 || size <= 0) {
+      return { kind: 'unsatisfiable' };
+    }
+    offset = Math.max(size - suffixLength, 0);
+    end = size - 1;
+  } else {
+    const start = Number(rawStart);
+    const requestedEnd = rawEnd === '' ? size - 1 : Number(rawEnd);
+    if (
+      !Number.isSafeInteger(start)
+      || !Number.isSafeInteger(requestedEnd)
+      || start < 0
+      || requestedEnd < start
+      || start >= size
+    ) {
+      return { kind: 'unsatisfiable' };
+    }
+    offset = start;
+    end = Math.min(requestedEnd, size - 1);
+  }
+
+  return { kind: 'partial', offset, end, length: end - offset + 1 };
+}
+
+function createDownloadHeaders(obj: R2Object): Headers {
+  const headers = new Headers();
+  headers.set('Content-Type', obj.httpMetadata?.contentType || 'application/octet-stream');
+  headers.set('ETag', obj.etag);
+  headers.set('Accept-Ranges', 'bytes');
+  if (obj.uploaded) {
+    headers.set('Last-Modified', obj.uploaded.toUTCString());
+  }
+  return headers;
 }
 
 const STORAGE_OFFSET_CURSOR_PREFIX = 'offset:';
@@ -616,12 +732,17 @@ const uploadFile = createRoute({
   summary: 'Upload file',
   request: {
     params: z.object({ bucket: z.string() }),
+    query: z.object({
+      key: z.string().optional().openapi({ description: 'Optional signed upload key echoed from a signed upload URL.' }),
+      token: z.string().optional().openapi({ description: 'Optional signed upload token for write-rule-bypassing upload grants.' }),
+    }),
     body: { content: { 'multipart/form-data': { schema: z.object({}).passthrough() } }, required: true },
   },
   responses: {
     201: { description: 'File uploaded', content: { 'application/json': { schema: jsonResponseSchema } } },
     400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
     403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
+    413: { description: 'Payload too large', content: { 'application/json': { schema: errorResponseSchema } } },
   },
 });
 
@@ -908,7 +1029,10 @@ const getUploadParts = createRoute({
   summary: 'Get uploaded parts',
   request: {
     params: z.object({ bucket: z.string(), uploadId: z.string() }),
-    query: z.object({ key: z.string() }),
+    query: z.object({
+      key: z.string(),
+      token: z.string().optional().openapi({ description: 'Optional signed upload token for write-rule-bypassing upload grants.' }),
+    }),
   },
   responses: {
     200: { description: 'Success', content: { 'application/json': { schema: jsonResponseSchema } } },
@@ -928,14 +1052,17 @@ storage.openapi(getUploadParts, async (c) => {
   }
 
   // Security: check write rule (resume upload = write operation)
-  const serviceKeyBypass = checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
-  if (!serviceKeyBypass) {
+  const signedClaims = await verifySignedUploadQuery(c, bucketName, key);
+  const serviceKeyBypass = signedClaims
+    ? false
+    : checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
+  if (!signedClaims && !serviceKeyBypass) {
     const auth = c.get('auth') as AuthContext | null;
     checkStorageRule(bucketConfig.access?.write, auth, null, 'write', bucketName, release);
   }
 
   const kvKey = partTrackingKey(bucketName, key, uploadId);
-  const parts = await c.env.KV.get(kvKey, 'json') as Array<{ partNumber: number; etag: string }> | null;
+  const parts = await c.env.KV.get(kvKey, 'json') as TrackedMultipartPart[] | null;
 
   return c.json({
     uploadId,
@@ -955,8 +1082,10 @@ const downloadFile = createRoute({
   },
   responses: {
     200: { description: 'File content' },
+    206: { description: 'Partial file content' },
     403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
     404: { description: 'Not found', content: { 'application/json': { schema: errorResponseSchema } } },
+    416: { description: 'Range not satisfiable' },
   },
 });
 
@@ -981,8 +1110,11 @@ const handleDownloadFile = async (c: Context<HonoEnv>) => {
   }
 
   const fullKey = r2Key(bucketName, key);
-  const obj = await c.env.STORAGE.get(fullKey);
-  if (!obj) {
+  const rangeHeader = c.req.header('Range') ?? c.req.header('range');
+  const file = rangeHeader
+    ? await c.env.STORAGE.head(fullKey)
+    : await c.env.STORAGE.get(fullKey);
+  if (!file) {
     throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
   }
 
@@ -991,7 +1123,7 @@ const handleDownloadFile = async (c: Context<HonoEnv>) => {
     const serviceKeyBypass = checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:read`, c.req);
     if (!serviceKeyBypass) {
       const auth = c.get('auth') as AuthContext | null;
-      const resource = buildMetadata(obj);
+      const resource = buildMetadata(file);
       checkStorageRule(bucketConfig.access?.read, auth, resource, 'read', bucketName, release);
     }
   }
@@ -999,7 +1131,7 @@ const handleDownloadFile = async (c: Context<HonoEnv>) => {
   // Plugin blocking storage hooks (beforeDownload)
   {
     const dlAuth = c.get('auth') as AuthContext | null;
-    const dlMeta = buildMetadata(obj);
+    const dlMeta = buildMetadata(file);
     await executeBlockingStorageHooks('beforeDownload', { ...dlMeta, bucket: bucketName }, dlAuth, c.env, getWorkerUrl(c.req.url, c.env));
   }
 
@@ -1007,7 +1139,7 @@ const handleDownloadFile = async (c: Context<HonoEnv>) => {
   const hooks = getStorageHooks(c.env, bucketName);
   if (hooks?.beforeDownload) {
     const auth = c.get('auth') as AuthContext | null;
-    const meta = buildMetadata(obj);
+    const meta = buildMetadata(file);
     const hookCtx = buildStorageHookCtx(c.env, c.executionCtx, getWorkerUrl(c.req.url, c.env));
     try {
       await hooks.beforeDownload(auth, meta, hookCtx);
@@ -1016,16 +1148,33 @@ const handleDownloadFile = async (c: Context<HonoEnv>) => {
     }
   }
 
-  // Stream response
-  const headers = new Headers();
-  headers.set('Content-Type', obj.httpMetadata?.contentType || 'application/octet-stream');
-  headers.set('Content-Length', String(obj.size));
-  headers.set('ETag', obj.etag);
-  if (obj.uploaded) {
-    headers.set('Last-Modified', obj.uploaded.toUTCString());
+  const parsedRange = parseDownloadRange(rangeHeader, file.size);
+  const headers = createDownloadHeaders(file);
+
+  if (parsedRange.kind === 'unsatisfiable') {
+    headers.set('Content-Range', `bytes */${file.size}`);
+    headers.set('Content-Length', '0');
+    return new Response(null, { status: 416, headers });
   }
 
-  return new Response(obj.body, { headers });
+  if (parsedRange.kind === 'partial') {
+    const rangedObj = await c.env.STORAGE.get(fullKey, {
+      range: { offset: parsedRange.offset, length: parsedRange.length },
+    });
+    if (!rangedObj) {
+      throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
+    }
+    headers.set('Content-Length', String(parsedRange.length));
+    headers.set('Content-Range', `bytes ${parsedRange.offset}-${parsedRange.end}/${file.size}`);
+    return new Response(rangedObj.body, { status: 206, headers });
+  }
+
+  const bodyObj = rangeHeader ? await c.env.STORAGE.get(fullKey) : file as R2ObjectBody;
+  if (!bodyObj) {
+    throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
+  }
+  headers.set('Content-Length', String(file.size));
+  return new Response((bodyObj as R2ObjectBody).body, { headers });
 };
 storage.openapi(downloadFile, handleDownloadFile);
 
@@ -1445,6 +1594,10 @@ const createMultipartUpload = createRoute({
   summary: 'Start multipart upload',
   request: {
     params: z.object({ bucket: z.string() }),
+    query: z.object({
+      key: z.string().optional().openapi({ description: 'Optional signed upload key echoed from a signed upload URL.' }),
+      token: z.string().optional().openapi({ description: 'Optional signed upload token for write-rule-bypassing upload grants.' }),
+    }),
     body: { content: { 'application/json': { schema: z.object({ key: z.string(), contentType: z.string().optional(), customMetadata: z.record(z.string(), z.string()).optional() }) } }, required: true },
   },
   responses: {
@@ -1458,18 +1611,21 @@ storage.openapi(createMultipartUpload, async (c) => {
   const bucketName = c.req.param('bucket')!;
   const { bucketConfig, release } = getBucketConfig(c.env, bucketName);
 
-  // Security: check write rule
-  const serviceKeyBypass = checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
-  if (!serviceKeyBypass) {
-    const auth = c.get('auth') as AuthContext | null;
-    checkStorageRule(bucketConfig.access?.write, auth, null, 'write', bucketName, release);
-  }
-
   const body = await c.req.json<{ key: string; contentType?: string; customMetadata?: Record<string, string> }>();
   if (!body.key) {
     throw new EdgeBaseError(400, 'Missing required field: key.', undefined, 'validation-failed');
   }
   validateStorageKey(body.key);
+
+  // Security: check signed upload token or write rule
+  const signedClaims = await verifySignedUploadQuery(c, bucketName, body.key);
+  const serviceKeyBypass = signedClaims
+    ? false
+    : checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
+  if (!signedClaims && !serviceKeyBypass) {
+    const auth = c.get('auth') as AuthContext | null;
+    checkStorageRule(bucketConfig.access?.write, auth, null, 'write', bucketName, release);
+  }
 
   const auth = c.get('auth') as AuthContext | null;
   const customMetadata = body.customMetadata || {};
@@ -1497,12 +1653,19 @@ const uploadPart = createRoute({
   summary: 'Upload a part',
   request: {
     params: z.object({ bucket: z.string() }),
-    body: { content: { 'application/json': { schema: z.record(z.string(), z.unknown()) } }, required: true },
+    query: z.object({
+      uploadId: z.string(),
+      partNumber: z.string(),
+      key: z.string(),
+      token: z.string().optional().openapi({ description: 'Optional signed upload token for write-rule-bypassing upload grants.' }),
+    }),
+    body: { content: { 'application/octet-stream': { schema: z.string().openapi({ format: 'binary' }) } }, required: true },
   },
   responses: {
     200: { description: 'Success', content: { 'application/json': { schema: jsonResponseSchema } } },
     400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
     403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
+    413: { description: 'Payload too large', content: { 'application/json': { schema: errorResponseSchema } } },
   },
 });
 
@@ -1510,19 +1673,30 @@ storage.openapi(uploadPart, async (c) => {
   const bucketName = c.req.param('bucket')!;
   const { bucketConfig, release } = getBucketConfig(c.env, bucketName);
 
-  // Security: check write rule
-  const serviceKeyBypass = checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
-  if (!serviceKeyBypass) {
-    const auth = c.get('auth') as AuthContext | null;
-    checkStorageRule(bucketConfig.access?.write, auth, null, 'write', bucketName, release);
-  }
-
   const uploadId = c.req.query('uploadId');
   const partNumber = parseInt(c.req.query('partNumber') || '0', 10);
   const key = c.req.query('key');
 
   if (!uploadId || !partNumber || !key) {
     throw new EdgeBaseError(400, 'Missing required query params: uploadId, partNumber, key.', undefined, 'validation-failed');
+  }
+  validateStorageKey(key);
+
+  // Security: check signed upload token or write rule
+  const signedClaims = await verifySignedUploadQuery(c, bucketName, key);
+  const serviceKeyBypass = signedClaims
+    ? false
+    : checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
+  if (!signedClaims && !serviceKeyBypass) {
+    const auth = c.get('auth') as AuthContext | null;
+    checkStorageRule(bucketConfig.access?.write, auth, null, 'write', bucketName, release);
+  }
+  const partSize = requestContentLength(c);
+  if (signedClaims?.maxBytes != null && partSize == null) {
+    throw new EdgeBaseError(400, 'Signed multipart upload parts require Content-Length.', undefined, 'validation-failed');
+  }
+  if (signedClaims?.maxBytes != null && partSize !== null && partSize > signedClaims.maxBytes) {
+    throw new EdgeBaseError(413, `Signed upload exceeds maxFileSize of ${signedClaims.maxBytes} bytes.`, undefined, 'payload-too-large');
   }
 
   const fullKey = r2Key(bucketName, key);
@@ -1532,14 +1706,16 @@ storage.openapi(uploadPart, async (c) => {
 
   // M17: Save part info to KV for resume tracking
   const kvKey = partTrackingKey(bucketName, key, uploadId);
-  const existing = await c.env.KV.get(kvKey, 'json') as Array<{ partNumber: number; etag: string }> | null;
+  const existing = await c.env.KV.get(kvKey, 'json') as TrackedMultipartPart[] | null;
   const parts = existing || [];
   // Replace if same partNumber exists (re-upload), otherwise append
   const idx = parts.findIndex(p => p.partNumber === part.partNumber);
+  const trackedPart: TrackedMultipartPart = { partNumber: part.partNumber, etag: part.etag };
+  if (partSize !== null) trackedPart.size = partSize;
   if (idx >= 0) {
-    parts[idx] = { partNumber: part.partNumber, etag: part.etag };
+    parts[idx] = trackedPart;
   } else {
-    parts.push({ partNumber: part.partNumber, etag: part.etag });
+    parts.push(trackedPart);
   }
   await c.env.KV.put(kvKey, JSON.stringify(parts), { expirationTtl: PART_TRACKING_TTL });
 
@@ -1557,25 +1733,23 @@ const completeMultipartUpload = createRoute({
   summary: 'Complete multipart upload',
   request: {
     params: z.object({ bucket: z.string() }),
+    query: z.object({
+      key: z.string().optional().openapi({ description: 'Optional signed upload key echoed from a signed upload URL.' }),
+      token: z.string().optional().openapi({ description: 'Optional signed upload token for write-rule-bypassing upload grants.' }),
+    }),
     body: { content: { 'application/json': { schema: z.object({ uploadId: z.string(), key: z.string(), parts: z.array(z.object({ partNumber: z.number(), etag: z.string() })) }) } }, required: true },
   },
   responses: {
     200: { description: 'Success', content: { 'application/json': { schema: jsonResponseSchema } } },
     400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
     403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
+    413: { description: 'Payload too large', content: { 'application/json': { schema: errorResponseSchema } } },
   },
 });
 
 storage.openapi(completeMultipartUpload, async (c) => {
   const bucketName = c.req.param('bucket')!;
   const { bucketConfig, release } = getBucketConfig(c.env, bucketName);
-
-  // Security: check write rule
-  const serviceKeyBypass = checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
-  if (!serviceKeyBypass) {
-    const auth = c.get('auth') as AuthContext | null;
-    checkStorageRule(bucketConfig.access?.write, auth, null, 'write', bucketName, release);
-  }
 
   const body = await c.req.json<{
     uploadId: string;
@@ -1585,6 +1759,20 @@ storage.openapi(completeMultipartUpload, async (c) => {
 
   if (!body.uploadId || !body.key || !body.parts?.length) {
     throw new EdgeBaseError(400, 'Missing required fields: uploadId, key, parts.', undefined, 'validation-failed');
+  }
+  validateStorageKey(body.key);
+
+  // Security: check signed upload token or write rule
+  const signedClaims = await verifySignedUploadQuery(c, bucketName, body.key);
+  const serviceKeyBypass = signedClaims
+    ? false
+    : checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
+  if (!signedClaims && !serviceKeyBypass) {
+    const auth = c.get('auth') as AuthContext | null;
+    checkStorageRule(bucketConfig.access?.write, auth, null, 'write', bucketName, release);
+  }
+  if (signedClaims?.maxBytes != null) {
+    await assertSignedMultipartSizeWithinLimit(c, bucketName, body.key, body.uploadId, body.parts, signedClaims.maxBytes);
   }
 
   const fullKey = r2Key(bucketName, body.key);
@@ -1610,6 +1798,10 @@ const abortMultipartUpload = createRoute({
   summary: 'Abort multipart upload',
   request: {
     params: z.object({ bucket: z.string() }),
+    query: z.object({
+      key: z.string().optional().openapi({ description: 'Optional signed upload key echoed from a signed upload URL.' }),
+      token: z.string().optional().openapi({ description: 'Optional signed upload token for write-rule-bypassing upload grants.' }),
+    }),
     body: { content: { 'application/json': { schema: z.object({ uploadId: z.string(), key: z.string() }) } }, required: true },
   },
   responses: {
@@ -1623,16 +1815,20 @@ storage.openapi(abortMultipartUpload, async (c) => {
   const bucketName = c.req.param('bucket')!;
   const { bucketConfig, release } = getBucketConfig(c.env, bucketName);
 
-  // Security: check write rule
-  const serviceKeyBypass = checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
-  if (!serviceKeyBypass) {
-    const auth = c.get('auth') as AuthContext | null;
-    checkStorageRule(bucketConfig.access?.write, auth, null, 'write', bucketName, release);
-  }
-
   const body = await c.req.json<{ uploadId: string; key: string }>();
   if (!body.uploadId || !body.key) {
     throw new EdgeBaseError(400, 'Missing required fields: uploadId, key.', undefined, 'validation-failed');
+  }
+  validateStorageKey(body.key);
+
+  // Security: check signed upload token or write rule
+  const signedClaims = await verifySignedUploadQuery(c, bucketName, body.key);
+  const serviceKeyBypass = signedClaims
+    ? false
+    : checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
+  if (!signedClaims && !serviceKeyBypass) {
+    const auth = c.get('auth') as AuthContext | null;
+    checkStorageRule(bucketConfig.access?.write, auth, null, 'write', bucketName, release);
   }
 
   const fullKey = r2Key(bucketName, body.key);

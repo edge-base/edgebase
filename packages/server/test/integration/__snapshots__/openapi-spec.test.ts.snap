@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`OpenAPI spec stability > operation list matches snapshot 1`] = `192`;
+exports[`OpenAPI spec stability > operation list matches snapshot 1`] = `193`;
 
 exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
 [
@@ -136,6 +136,7 @@ exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
   "POST /api/auth/link/email",
   "POST /api/auth/link/phone",
   "POST /api/auth/mfa/recovery",
+  "POST /api/auth/mfa/recovery-codes",
   "POST /api/auth/mfa/totp/enroll",
   "POST /api/auth/mfa/totp/verify",
   "POST /api/auth/mfa/verify",
