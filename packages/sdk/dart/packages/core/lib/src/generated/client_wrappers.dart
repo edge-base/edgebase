@@ -233,18 +233,18 @@ class GeneratedStorageMethods {
   }
 
   /// Start multipart upload
-  Future<dynamic> createMultipartUpload(String bucket, Object? body) async {
-    return _core.createMultipartUpload(bucket, body);
+  Future<dynamic> createMultipartUpload(String bucket, Object? body, Map<String, String>? query) async {
+    return _core.createMultipartUpload(bucket, body, query);
   }
 
   /// Complete multipart upload
-  Future<dynamic> completeMultipartUpload(String bucket, Object? body) async {
-    return _core.completeMultipartUpload(bucket, body);
+  Future<dynamic> completeMultipartUpload(String bucket, Object? body, Map<String, String>? query) async {
+    return _core.completeMultipartUpload(bucket, body, query);
   }
 
   /// Abort multipart upload
-  Future<dynamic> abortMultipartUpload(String bucket, Object? body) async {
-    return _core.abortMultipartUpload(bucket, body);
+  Future<dynamic> abortMultipartUpload(String bucket, Object? body, Map<String, String>? query) async {
+    return _core.abortMultipartUpload(bucket, body, query);
   }
 }
 

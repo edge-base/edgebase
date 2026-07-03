@@ -351,8 +351,8 @@ impl<'a> GeneratedDbApi<'a> {
     }
 
     /// Upload file — POST /api/storage/{bucket}/upload
-    pub async fn upload_file(&self, bucket: &str, body: &Value) -> Result<Value, Error> {
-        self.http.post(&format!("/api/storage/{}/upload", encode_path_param(bucket)), body).await
+    pub async fn upload_file(&self, bucket: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.post_with_query(&format!("/api/storage/{}/upload", encode_path_param(bucket)), body, query).await
     }
 
     /// Get file metadata — GET /api/storage/{bucket}/{key}/metadata
@@ -411,23 +411,23 @@ impl<'a> GeneratedDbApi<'a> {
     }
 
     /// Start multipart upload — POST /api/storage/{bucket}/multipart/create
-    pub async fn create_multipart_upload(&self, bucket: &str, body: &Value) -> Result<Value, Error> {
-        self.http.post(&format!("/api/storage/{}/multipart/create", encode_path_param(bucket)), body).await
+    pub async fn create_multipart_upload(&self, bucket: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.post_with_query(&format!("/api/storage/{}/multipart/create", encode_path_param(bucket)), body, query).await
     }
 
     /// Upload a part — POST /api/storage/{bucket}/multipart/upload-part
-    pub async fn upload_part(&self, bucket: &str, body: &Value) -> Result<Value, Error> {
-        self.http.post(&format!("/api/storage/{}/multipart/upload-part", encode_path_param(bucket)), body).await
+    pub async fn upload_part(&self, bucket: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.post_with_query(&format!("/api/storage/{}/multipart/upload-part", encode_path_param(bucket)), body, query).await
     }
 
     /// Complete multipart upload — POST /api/storage/{bucket}/multipart/complete
-    pub async fn complete_multipart_upload(&self, bucket: &str, body: &Value) -> Result<Value, Error> {
-        self.http.post(&format!("/api/storage/{}/multipart/complete", encode_path_param(bucket)), body).await
+    pub async fn complete_multipart_upload(&self, bucket: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.post_with_query(&format!("/api/storage/{}/multipart/complete", encode_path_param(bucket)), body, query).await
     }
 
     /// Abort multipart upload — POST /api/storage/{bucket}/multipart/abort
-    pub async fn abort_multipart_upload(&self, bucket: &str, body: &Value) -> Result<Value, Error> {
-        self.http.post(&format!("/api/storage/{}/multipart/abort", encode_path_param(bucket)), body).await
+    pub async fn abort_multipart_upload(&self, bucket: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.post_with_query(&format!("/api/storage/{}/multipart/abort", encode_path_param(bucket)), body, query).await
     }
 
     /// Get public configuration — GET /api/config

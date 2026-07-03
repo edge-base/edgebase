@@ -288,21 +288,21 @@ class GeneratedStorageMethods
     }
 
     /** Start multipart upload */
-    public function create_multipart_upload(string $bucket, mixed $body = null): mixed
+    public function create_multipart_upload(string $bucket, mixed $body = null, array $query = []): mixed
     {
-        return $this->core->create_multipart_upload($bucket, $body);
+        return $this->core->create_multipart_upload($bucket, $body, $query);
     }
 
     /** Complete multipart upload */
-    public function complete_multipart_upload(string $bucket, mixed $body = null): mixed
+    public function complete_multipart_upload(string $bucket, mixed $body = null, array $query = []): mixed
     {
-        return $this->core->complete_multipart_upload($bucket, $body);
+        return $this->core->complete_multipart_upload($bucket, $body, $query);
     }
 
     /** Abort multipart upload */
-    public function abort_multipart_upload(string $bucket, mixed $body = null): mixed
+    public function abort_multipart_upload(string $bucket, mixed $body = null, array $query = []): mixed
     {
-        return $this->core->abort_multipart_upload($bucket, $body);
+        return $this->core->abort_multipart_upload($bucket, $body, $query);
     }
 }
 

@@ -347,8 +347,8 @@ open class GeneratedDbApi(protected val http: HttpClient) {
 
     /** Upload file — POST /api/storage/{bucket}/upload */
     @Suppress("UNCHECKED_CAST")
-    suspend fun uploadFile(bucket: String, body: Map<String, Any?> = emptyMap()): Any? =
-        http.post("/storage/${platformUrlEncode(bucket)}/upload", body)
+    suspend fun uploadFile(bucket: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
+        http.postWithQuery("/storage/${platformUrlEncode(bucket)}/upload", body, query)
 
     /** Get file metadata — GET /api/storage/{bucket}/{key}/metadata */
     @Suppress("UNCHECKED_CAST")
@@ -406,23 +406,23 @@ open class GeneratedDbApi(protected val http: HttpClient) {
 
     /** Start multipart upload — POST /api/storage/{bucket}/multipart/create */
     @Suppress("UNCHECKED_CAST")
-    suspend fun createMultipartUpload(bucket: String, body: Map<String, Any?> = emptyMap()): Any? =
-        http.post("/storage/${platformUrlEncode(bucket)}/multipart/create", body)
+    suspend fun createMultipartUpload(bucket: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
+        http.postWithQuery("/storage/${platformUrlEncode(bucket)}/multipart/create", body, query)
 
     /** Upload a part — POST /api/storage/{bucket}/multipart/upload-part */
     @Suppress("UNCHECKED_CAST")
-    suspend fun uploadPart(bucket: String, body: Map<String, Any?> = emptyMap()): Any? =
-        http.post("/storage/${platformUrlEncode(bucket)}/multipart/upload-part", body)
+    suspend fun uploadPart(bucket: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
+        http.postWithQuery("/storage/${platformUrlEncode(bucket)}/multipart/upload-part", body, query)
 
     /** Complete multipart upload — POST /api/storage/{bucket}/multipart/complete */
     @Suppress("UNCHECKED_CAST")
-    suspend fun completeMultipartUpload(bucket: String, body: Map<String, Any?> = emptyMap()): Any? =
-        http.post("/storage/${platformUrlEncode(bucket)}/multipart/complete", body)
+    suspend fun completeMultipartUpload(bucket: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
+        http.postWithQuery("/storage/${platformUrlEncode(bucket)}/multipart/complete", body, query)
 
     /** Abort multipart upload — POST /api/storage/{bucket}/multipart/abort */
     @Suppress("UNCHECKED_CAST")
-    suspend fun abortMultipartUpload(bucket: String, body: Map<String, Any?> = emptyMap()): Any? =
-        http.post("/storage/${platformUrlEncode(bucket)}/multipart/abort", body)
+    suspend fun abortMultipartUpload(bucket: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
+        http.postWithQuery("/storage/${platformUrlEncode(bucket)}/multipart/abort", body, query)
 
     /** Get public configuration — GET /api/config */
     @Suppress("UNCHECKED_CAST")

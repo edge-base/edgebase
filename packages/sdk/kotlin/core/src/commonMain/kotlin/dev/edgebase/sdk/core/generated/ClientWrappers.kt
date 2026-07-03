@@ -227,18 +227,18 @@ open class GeneratedStorageMethods(protected val core: GeneratedDbApi) {
 
     /** Start multipart upload */
     @Suppress("UNCHECKED_CAST")
-    open suspend fun createMultipartUpload(bucket: String, body: Map<String, Any?> = emptyMap()): Any? =
-        core.createMultipartUpload(bucket, body)
+    open suspend fun createMultipartUpload(bucket: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
+        core.createMultipartUpload(bucket, body, query)
 
     /** Complete multipart upload */
     @Suppress("UNCHECKED_CAST")
-    open suspend fun completeMultipartUpload(bucket: String, body: Map<String, Any?> = emptyMap()): Any? =
-        core.completeMultipartUpload(bucket, body)
+    open suspend fun completeMultipartUpload(bucket: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
+        core.completeMultipartUpload(bucket, body, query)
 
     /** Abort multipart upload */
     @Suppress("UNCHECKED_CAST")
-    open suspend fun abortMultipartUpload(bucket: String, body: Map<String, Any?> = emptyMap()): Any? =
-        core.abortMultipartUpload(bucket, body)
+    open suspend fun abortMultipartUpload(bucket: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
+        core.abortMultipartUpload(bucket, body, query)
 }
 
 /** Analytics wrapper methods */

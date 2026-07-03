@@ -284,9 +284,9 @@ class GeneratedDbApi:
         """Get table schema — GET /api/schema"""
         return self._http.get("/schema")
 
-    def upload_file(self, bucket: str, body: Any) -> Any:
+    def upload_file(self, bucket: str, body: Any, query: dict[str, str] | None = None) -> Any:
         """Upload file — POST /api/storage/{bucket}/upload"""
-        return self._http.post(f"/storage/{urllib.parse.quote(bucket, safe='')}/upload", body)
+        return self._http.post(f"/storage/{urllib.parse.quote(bucket, safe='')}/upload", body, params=query)
 
     def get_file_metadata(self, bucket: str, key: str) -> Any:
         """Get file metadata — GET /api/storage/{bucket}/{key}/metadata"""
@@ -332,21 +332,21 @@ class GeneratedDbApi:
         """Create signed upload URL — POST /api/storage/{bucket}/signed-upload-url"""
         return self._http.post(f"/storage/{urllib.parse.quote(bucket, safe='')}/signed-upload-url", body)
 
-    def create_multipart_upload(self, bucket: str, body: Any) -> Any:
+    def create_multipart_upload(self, bucket: str, body: Any, query: dict[str, str] | None = None) -> Any:
         """Start multipart upload — POST /api/storage/{bucket}/multipart/create"""
-        return self._http.post(f"/storage/{urllib.parse.quote(bucket, safe='')}/multipart/create", body)
+        return self._http.post(f"/storage/{urllib.parse.quote(bucket, safe='')}/multipart/create", body, params=query)
 
-    def upload_part(self, bucket: str, body: Any) -> Any:
+    def upload_part(self, bucket: str, body: Any, query: dict[str, str] | None = None) -> Any:
         """Upload a part — POST /api/storage/{bucket}/multipart/upload-part"""
-        return self._http.post(f"/storage/{urllib.parse.quote(bucket, safe='')}/multipart/upload-part", body)
+        return self._http.post(f"/storage/{urllib.parse.quote(bucket, safe='')}/multipart/upload-part", body, params=query)
 
-    def complete_multipart_upload(self, bucket: str, body: Any) -> Any:
+    def complete_multipart_upload(self, bucket: str, body: Any, query: dict[str, str] | None = None) -> Any:
         """Complete multipart upload — POST /api/storage/{bucket}/multipart/complete"""
-        return self._http.post(f"/storage/{urllib.parse.quote(bucket, safe='')}/multipart/complete", body)
+        return self._http.post(f"/storage/{urllib.parse.quote(bucket, safe='')}/multipart/complete", body, params=query)
 
-    def abort_multipart_upload(self, bucket: str, body: Any) -> Any:
+    def abort_multipart_upload(self, bucket: str, body: Any, query: dict[str, str] | None = None) -> Any:
         """Abort multipart upload — POST /api/storage/{bucket}/multipart/abort"""
-        return self._http.post(f"/storage/{urllib.parse.quote(bucket, safe='')}/multipart/abort", body)
+        return self._http.post(f"/storage/{urllib.parse.quote(bucket, safe='')}/multipart/abort", body, params=query)
 
     def get_config(self) -> Any:
         """Get public configuration — GET /api/config"""

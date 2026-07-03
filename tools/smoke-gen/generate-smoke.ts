@@ -103,6 +103,18 @@ function sampleQuery(operationId?: string): string | null {
   return operationId ? samples[operationId] ?? null : null;
 }
 
+function sampleNoAuthQuery(operationId?: string): string | null {
+  const samples: Record<string, string> = {
+    uploadPart: 'uploadId=smoke-upload&partNumber=1&key=smoke-multipart.txt',
+  };
+  return operationId ? samples[operationId] ?? null : null;
+}
+
+function appendQuery(path: string, query: string | null): string {
+  if (!query) return path;
+  return `${path}${path.includes('?') ? '&' : '?'}${query}`;
+}
+
 /**
  * Replace {param} placeholders in a path with sample values.
  */
@@ -119,10 +131,7 @@ function resolvePath(path: string, operationId?: string): string {
   }
 
   const query = sampleQuery(operationId);
-  if (query) {
-    return `${resolvedPath}${resolvedPath.includes('?') ? '&' : '?'}${query}`;
-  }
-  return resolvedPath;
+  return appendQuery(resolvedPath, query);
 }
 
 // ─── Sample Request Bodies ────────────────────────────────────────────────
@@ -575,16 +584,17 @@ function generateTestFile(tag: string, routes: RouteEntry[]): string {
 
     // ── Test 2: No auth → 401 or 403 (only if auth required) ─────────
     if (route.requiresAuth && !NO_AUTH_SMOKE_EXEMPT_OPS.has(route.operationId)) {
+      const noAuthPath = appendQuery(route.resolvedPath, sampleNoAuthQuery(route.operationId));
       lines.push(`  ${itFn}('${desc}: no auth → 401/403', async () => {`);
       if (needsPushMocks) {
         lines.push(`    await withPushMocks(async () => {`);
       }
       if (body) {
-        lines.push(`    const { status } = await api('${route.method}', '${route.resolvedPath}', {`);
+        lines.push(`    const { status } = await api('${route.method}', '${noAuthPath}', {`);
         lines.push(`      body: ${body},`);
         lines.push(`    });`);
       } else {
-        lines.push(`    const { status } = await api('${route.method}', '${route.resolvedPath}');`);
+        lines.push(`    const { status } = await api('${route.method}', '${noAuthPath}');`);
       }
       lines.push(`    expect([401, 403]).toContain(status);`);
       if (needsPushMocks) {

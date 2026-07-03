@@ -290,8 +290,8 @@ public class GeneratedDbApi
         => _http.GetAsync("/api/schema", ct);
 
     /// <summary>Upload file — POST /api/storage/{bucket}/upload</summary>
-    public Task<Dictionary<string, object?>> UploadFileAsync(string bucket, object? body = null, CancellationToken ct = default)
-        => _http.PostAsync($"/api/storage/{EncodePathParam(bucket)}/upload", body, ct);
+    public Task<Dictionary<string, object?>> UploadFileAsync(string bucket, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.PostAsyncWithQuery($"/api/storage/{EncodePathParam(bucket)}/upload", body, query, ct);
 
     /// <summary>Get file metadata — GET /api/storage/{bucket}/{key}/metadata</summary>
     public Task<Dictionary<string, object?>> GetFileMetadataAsync(string bucket, string key, CancellationToken ct = default)
@@ -338,20 +338,20 @@ public class GeneratedDbApi
         => _http.PostAsync($"/api/storage/{EncodePathParam(bucket)}/signed-upload-url", body, ct);
 
     /// <summary>Start multipart upload — POST /api/storage/{bucket}/multipart/create</summary>
-    public Task<Dictionary<string, object?>> CreateMultipartUploadAsync(string bucket, object? body = null, CancellationToken ct = default)
-        => _http.PostAsync($"/api/storage/{EncodePathParam(bucket)}/multipart/create", body, ct);
+    public Task<Dictionary<string, object?>> CreateMultipartUploadAsync(string bucket, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.PostAsyncWithQuery($"/api/storage/{EncodePathParam(bucket)}/multipart/create", body, query, ct);
 
     /// <summary>Upload a part — POST /api/storage/{bucket}/multipart/upload-part</summary>
-    public Task<Dictionary<string, object?>> UploadPartAsync(string bucket, object? body = null, CancellationToken ct = default)
-        => _http.PostAsync($"/api/storage/{EncodePathParam(bucket)}/multipart/upload-part", body, ct);
+    public Task<Dictionary<string, object?>> UploadPartAsync(string bucket, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.PostAsyncWithQuery($"/api/storage/{EncodePathParam(bucket)}/multipart/upload-part", body, query, ct);
 
     /// <summary>Complete multipart upload — POST /api/storage/{bucket}/multipart/complete</summary>
-    public Task<Dictionary<string, object?>> CompleteMultipartUploadAsync(string bucket, object? body = null, CancellationToken ct = default)
-        => _http.PostAsync($"/api/storage/{EncodePathParam(bucket)}/multipart/complete", body, ct);
+    public Task<Dictionary<string, object?>> CompleteMultipartUploadAsync(string bucket, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.PostAsyncWithQuery($"/api/storage/{EncodePathParam(bucket)}/multipart/complete", body, query, ct);
 
     /// <summary>Abort multipart upload — POST /api/storage/{bucket}/multipart/abort</summary>
-    public Task<Dictionary<string, object?>> AbortMultipartUploadAsync(string bucket, object? body = null, CancellationToken ct = default)
-        => _http.PostAsync($"/api/storage/{EncodePathParam(bucket)}/multipart/abort", body, ct);
+    public Task<Dictionary<string, object?>> AbortMultipartUploadAsync(string bucket, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.PostAsyncWithQuery($"/api/storage/{EncodePathParam(bucket)}/multipart/abort", body, query, ct);
 
     /// <summary>Get public configuration — GET /api/config</summary>
     public Task<Dictionary<string, object?>> GetConfigAsync(CancellationToken ct = default)

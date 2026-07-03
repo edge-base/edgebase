@@ -180,16 +180,16 @@ Result GeneratedStorageMethods::create_signed_upload_url(const std::string& buck
   return core_.create_signed_upload_url(bucket, json_body);
 }
 
-Result GeneratedStorageMethods::create_multipart_upload(const std::string& bucket, const std::string& json_body) const {
-  return core_.create_multipart_upload(bucket, json_body);
+Result GeneratedStorageMethods::create_multipart_upload(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query) const {
+  return core_.create_multipart_upload(bucket, json_body, query);
 }
 
-Result GeneratedStorageMethods::complete_multipart_upload(const std::string& bucket, const std::string& json_body) const {
-  return core_.complete_multipart_upload(bucket, json_body);
+Result GeneratedStorageMethods::complete_multipart_upload(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query) const {
+  return core_.complete_multipart_upload(bucket, json_body, query);
 }
 
-Result GeneratedStorageMethods::abort_multipart_upload(const std::string& bucket, const std::string& json_body) const {
-  return core_.abort_multipart_upload(bucket, json_body);
+Result GeneratedStorageMethods::abort_multipart_upload(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query) const {
+  return core_.abort_multipart_upload(bucket, json_body, query);
 }
 
 Result GeneratedAnalyticsMethods::track(const std::string& json_body) const {

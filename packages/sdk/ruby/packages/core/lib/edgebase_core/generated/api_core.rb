@@ -348,8 +348,8 @@ module EdgebaseCore
     end
 
     # Upload file — POST /api/storage/{bucket}/upload
-    def upload_file(bucket, body = nil)
-      @http.post("/storage/#{CGI.escape(bucket).gsub('+', '%20')}/upload", body)
+    def upload_file(bucket, body = nil, query: nil)
+      @http.post("/storage/#{CGI.escape(bucket).gsub('+', '%20')}/upload", body, params: query)
     end
 
     # Get file metadata — GET /api/storage/{bucket}/{key}/metadata
@@ -408,23 +408,23 @@ module EdgebaseCore
     end
 
     # Start multipart upload — POST /api/storage/{bucket}/multipart/create
-    def create_multipart_upload(bucket, body = nil)
-      @http.post("/storage/#{CGI.escape(bucket).gsub('+', '%20')}/multipart/create", body)
+    def create_multipart_upload(bucket, body = nil, query: nil)
+      @http.post("/storage/#{CGI.escape(bucket).gsub('+', '%20')}/multipart/create", body, params: query)
     end
 
     # Upload a part — POST /api/storage/{bucket}/multipart/upload-part
-    def upload_part(bucket, body = nil)
-      @http.post("/storage/#{CGI.escape(bucket).gsub('+', '%20')}/multipart/upload-part", body)
+    def upload_part(bucket, body = nil, query: nil)
+      @http.post("/storage/#{CGI.escape(bucket).gsub('+', '%20')}/multipart/upload-part", body, params: query)
     end
 
     # Complete multipart upload — POST /api/storage/{bucket}/multipart/complete
-    def complete_multipart_upload(bucket, body = nil)
-      @http.post("/storage/#{CGI.escape(bucket).gsub('+', '%20')}/multipart/complete", body)
+    def complete_multipart_upload(bucket, body = nil, query: nil)
+      @http.post("/storage/#{CGI.escape(bucket).gsub('+', '%20')}/multipart/complete", body, params: query)
     end
 
     # Abort multipart upload — POST /api/storage/{bucket}/multipart/abort
-    def abort_multipart_upload(bucket, body = nil)
-      @http.post("/storage/#{CGI.escape(bucket).gsub('+', '%20')}/multipart/abort", body)
+    def abort_multipart_upload(bucket, body = nil, query: nil)
+      @http.post("/storage/#{CGI.escape(bucket).gsub('+', '%20')}/multipart/abort", body, params: query)
     end
 
     # Get public configuration — GET /api/config

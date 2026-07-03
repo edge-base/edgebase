@@ -207,16 +207,16 @@ public class GeneratedStorageMethods
         => _core.CreateSignedUploadUrlAsync(bucket, body, ct);
 
     /// <summary>Start multipart upload</summary>
-    public virtual Task<Dictionary<string, object?>> CreateMultipartUploadAsync(string bucket, object? body = null, CancellationToken ct = default)
-        => _core.CreateMultipartUploadAsync(bucket, body, ct);
+    public virtual Task<Dictionary<string, object?>> CreateMultipartUploadAsync(string bucket, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _core.CreateMultipartUploadAsync(bucket, body, query, ct);
 
     /// <summary>Complete multipart upload</summary>
-    public virtual Task<Dictionary<string, object?>> CompleteMultipartUploadAsync(string bucket, object? body = null, CancellationToken ct = default)
-        => _core.CompleteMultipartUploadAsync(bucket, body, ct);
+    public virtual Task<Dictionary<string, object?>> CompleteMultipartUploadAsync(string bucket, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _core.CompleteMultipartUploadAsync(bucket, body, query, ct);
 
     /// <summary>Abort multipart upload</summary>
-    public virtual Task<Dictionary<string, object?>> AbortMultipartUploadAsync(string bucket, object? body = null, CancellationToken ct = default)
-        => _core.AbortMultipartUploadAsync(bucket, body, ct);
+    public virtual Task<Dictionary<string, object?>> AbortMultipartUploadAsync(string bucket, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _core.AbortMultipartUploadAsync(bucket, body, query, ct);
 }
 
 /// <summary>

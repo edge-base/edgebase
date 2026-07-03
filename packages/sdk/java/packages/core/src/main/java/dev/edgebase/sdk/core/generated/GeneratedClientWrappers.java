@@ -246,18 +246,18 @@ public class GeneratedClientWrappers {
         }
 
         /** Start multipart upload */
-        public Object createMultipartUpload(String bucket, Map<String, ?> body) throws EdgeBaseError {
-            return core.createMultipartUpload(bucket, body);
+        public Object createMultipartUpload(String bucket, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
+            return core.createMultipartUpload(bucket, body, query);
         }
 
         /** Complete multipart upload */
-        public Object completeMultipartUpload(String bucket, Map<String, ?> body) throws EdgeBaseError {
-            return core.completeMultipartUpload(bucket, body);
+        public Object completeMultipartUpload(String bucket, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
+            return core.completeMultipartUpload(bucket, body, query);
         }
 
         /** Abort multipart upload */
-        public Object abortMultipartUpload(String bucket, Map<String, ?> body) throws EdgeBaseError {
-            return core.abortMultipartUpload(bucket, body);
+        public Object abortMultipartUpload(String bucket, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
+            return core.abortMultipartUpload(bucket, body, query);
         }
     }
 

@@ -197,17 +197,17 @@ class GeneratedStorageMethods:
         """Create signed upload URL"""
         return self._core.create_signed_upload_url(bucket, body)
 
-    def create_multipart_upload(self, bucket: str, body: Any = None) -> Any:
+    def create_multipart_upload(self, bucket: str, body: Any = None, query: dict[str, str] | None = None) -> Any:
         """Start multipart upload"""
-        return self._core.create_multipart_upload(bucket, body)
+        return self._core.create_multipart_upload(bucket, body, query)
 
-    def complete_multipart_upload(self, bucket: str, body: Any = None) -> Any:
+    def complete_multipart_upload(self, bucket: str, body: Any = None, query: dict[str, str] | None = None) -> Any:
         """Complete multipart upload"""
-        return self._core.complete_multipart_upload(bucket, body)
+        return self._core.complete_multipart_upload(bucket, body, query)
 
-    def abort_multipart_upload(self, bucket: str, body: Any = None) -> Any:
+    def abort_multipart_upload(self, bucket: str, body: Any = None, query: dict[str, str] | None = None) -> Any:
         """Abort multipart upload"""
-        return self._core.abort_multipart_upload(bucket, body)
+        return self._core.abort_multipart_upload(bucket, body, query)
 
 
 class GeneratedAnalyticsMethods:

@@ -22,6 +22,7 @@ export interface RefreshTokenPayload {
   sub: string;          // userId
   type: 'refresh';
   jti?: string;         // unique session ID for token uniqueness
+  nonce?: string;       // per-token randomness while preserving session jti
 }
 
 export interface AdminTokenPayload {
@@ -106,6 +107,7 @@ export async function signRefreshToken(
 ): Promise<string> {
   const builder = new SignJWT({
     type: 'refresh',
+    nonce: payload.nonce ?? crypto.randomUUID(),
   })
     .setProtectedHeader({ alg: ALGORITHM })
     .setIssuedAt()

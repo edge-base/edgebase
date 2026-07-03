@@ -326,6 +326,30 @@ describe('Smoke: client', () => {
     expect(status).toBeLessThan(500);
   });
 
+  it('authMfaRecoveryCodesRegenerate: POST /api/auth/mfa/recovery-codes → not 5xx', async () => {
+    const { status, data } = await api('POST', '/api/auth/mfa/recovery-codes', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('authMfaRecoveryCodesRegenerate: no auth → 401/403', async () => {
+    const { status } = await api('POST', '/api/auth/mfa/recovery-codes', {
+      body: {},
+    });
+    expect([401, 403]).toContain(status);
+  });
+
+  it('authMfaRecoveryCodesRegenerate: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/auth/mfa/recovery-codes', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
   it('authMfaTotpDelete: DELETE /api/auth/mfa/totp → not 5xx', async () => {
     const { status, data } = await api('DELETE', '/api/auth/mfa/totp', {
       headers: { 'X-EdgeBase-Service-Key': SK },
@@ -1122,7 +1146,7 @@ describe('Smoke: client', () => {
   });
 
   it('uploadPart: no auth → 401/403', async () => {
-    const { status } = await api('POST', '/api/storage/documents/multipart/upload-part', {
+    const { status } = await api('POST', '/api/storage/documents/multipart/upload-part?uploadId=smoke-upload&partNumber=1&key=smoke-multipart.txt', {
       body: { uploadId: "smoke-upload", partNumber: 1 },
     });
     expect([401, 403]).toContain(status);

@@ -349,8 +349,8 @@ public struct GeneratedDbApi {
     }
 
     /// Upload file — POST /api/storage/{bucket}/upload
-    public func uploadFile(_ bucket: String, _ body: [String: Any]) async throws -> Any {
-        return try await http.post("/storage/\(edgebaseEncodePathParam(bucket))/upload", body)
+    public func uploadFile(_ bucket: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
+        return try await http.post("/storage/\(edgebaseEncodePathParam(bucket))/upload", body, queryParams: query)
     }
 
     /// Get file metadata — GET /api/storage/{bucket}/{key}/metadata
@@ -409,23 +409,23 @@ public struct GeneratedDbApi {
     }
 
     /// Start multipart upload — POST /api/storage/{bucket}/multipart/create
-    public func createMultipartUpload(_ bucket: String, _ body: [String: Any]) async throws -> Any {
-        return try await http.post("/storage/\(edgebaseEncodePathParam(bucket))/multipart/create", body)
+    public func createMultipartUpload(_ bucket: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
+        return try await http.post("/storage/\(edgebaseEncodePathParam(bucket))/multipart/create", body, queryParams: query)
     }
 
     /// Upload a part — POST /api/storage/{bucket}/multipart/upload-part
-    public func uploadPart(_ bucket: String, _ body: [String: Any]) async throws -> Any {
-        return try await http.post("/storage/\(edgebaseEncodePathParam(bucket))/multipart/upload-part", body)
+    public func uploadPart(_ bucket: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
+        return try await http.post("/storage/\(edgebaseEncodePathParam(bucket))/multipart/upload-part", body, queryParams: query)
     }
 
     /// Complete multipart upload — POST /api/storage/{bucket}/multipart/complete
-    public func completeMultipartUpload(_ bucket: String, _ body: [String: Any]) async throws -> Any {
-        return try await http.post("/storage/\(edgebaseEncodePathParam(bucket))/multipart/complete", body)
+    public func completeMultipartUpload(_ bucket: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
+        return try await http.post("/storage/\(edgebaseEncodePathParam(bucket))/multipart/complete", body, queryParams: query)
     }
 
     /// Abort multipart upload — POST /api/storage/{bucket}/multipart/abort
-    public func abortMultipartUpload(_ bucket: String, _ body: [String: Any]) async throws -> Any {
-        return try await http.post("/storage/\(edgebaseEncodePathParam(bucket))/multipart/abort", body)
+    public func abortMultipartUpload(_ bucket: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
+        return try await http.post("/storage/\(edgebaseEncodePathParam(bucket))/multipart/abort", body, queryParams: query)
     }
 
     /// Get public configuration — GET /api/config

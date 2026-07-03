@@ -232,18 +232,18 @@ func (w *GeneratedStorageMethods) CreateSignedUploadUrl(ctx context.Context, buc
 }
 
 // CreateMultipartUpload — Start multipart upload
-func (w *GeneratedStorageMethods) CreateMultipartUpload(ctx context.Context, bucket string, body interface{}) (map[string]interface{}, error) {
-	return w.Core.CreateMultipartUpload(ctx, bucket, body)
+func (w *GeneratedStorageMethods) CreateMultipartUpload(ctx context.Context, bucket string, body interface{}, query map[string]string) (map[string]interface{}, error) {
+	return w.Core.CreateMultipartUpload(ctx, bucket, body, query)
 }
 
 // CompleteMultipartUpload — Complete multipart upload
-func (w *GeneratedStorageMethods) CompleteMultipartUpload(ctx context.Context, bucket string, body interface{}) (map[string]interface{}, error) {
-	return w.Core.CompleteMultipartUpload(ctx, bucket, body)
+func (w *GeneratedStorageMethods) CompleteMultipartUpload(ctx context.Context, bucket string, body interface{}, query map[string]string) (map[string]interface{}, error) {
+	return w.Core.CompleteMultipartUpload(ctx, bucket, body, query)
 }
 
 // AbortMultipartUpload — Abort multipart upload
-func (w *GeneratedStorageMethods) AbortMultipartUpload(ctx context.Context, bucket string, body interface{}) (map[string]interface{}, error) {
-	return w.Core.AbortMultipartUpload(ctx, bucket, body)
+func (w *GeneratedStorageMethods) AbortMultipartUpload(ctx context.Context, bucket string, body interface{}, query map[string]string) (map[string]interface{}, error) {
+	return w.Core.AbortMultipartUpload(ctx, bucket, body, query)
 }
 
 // GeneratedAnalyticsMethods — Analytics wrapper methods

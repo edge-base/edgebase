@@ -140,7 +140,7 @@ export interface GeneratedDbApi {
   /** Get table schema — GET /api/schema */
   getSchema(): Promise<unknown>;
   /** Upload file — POST /api/storage/{bucket}/upload */
-  uploadFile(bucket: string, body: unknown): Promise<unknown>;
+  uploadFile(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Get file metadata — GET /api/storage/{bucket}/{key}/metadata */
   getFileMetadata(bucket: string, key: string): Promise<unknown>;
   /** Update file metadata — PATCH /api/storage/{bucket}/{key}/metadata */
@@ -164,13 +164,13 @@ export interface GeneratedDbApi {
   /** Create signed upload URL — POST /api/storage/{bucket}/signed-upload-url */
   createSignedUploadUrl(bucket: string, body: unknown): Promise<unknown>;
   /** Start multipart upload — POST /api/storage/{bucket}/multipart/create */
-  createMultipartUpload(bucket: string, body: unknown): Promise<unknown>;
+  createMultipartUpload(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Upload a part — POST /api/storage/{bucket}/multipart/upload-part */
-  uploadPart(bucket: string, body: unknown): Promise<unknown>;
+  uploadPart(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Complete multipart upload — POST /api/storage/{bucket}/multipart/complete */
-  completeMultipartUpload(bucket: string, body: unknown): Promise<unknown>;
+  completeMultipartUpload(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Abort multipart upload — POST /api/storage/{bucket}/multipart/abort */
-  abortMultipartUpload(bucket: string, body: unknown): Promise<unknown>;
+  abortMultipartUpload(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Get public configuration — GET /api/config */
   getConfig(): Promise<unknown>;
   /** Register push token — POST /api/push/register */
@@ -469,8 +469,8 @@ export class DefaultDbApi implements GeneratedDbApi {
     return this.transport.request('GET', '/api/schema');
   }
 
-  async uploadFile(bucket: string, body: unknown): Promise<unknown> {
-    return this.transport.request('POST', `/api/storage/${bucket}/upload`, { body });
+  async uploadFile(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('POST', `/api/storage/${bucket}/upload`, { body, query });
   }
 
   async getFileMetadata(bucket: string, key: string): Promise<unknown> {
@@ -517,20 +517,20 @@ export class DefaultDbApi implements GeneratedDbApi {
     return this.transport.request('POST', `/api/storage/${bucket}/signed-upload-url`, { body });
   }
 
-  async createMultipartUpload(bucket: string, body: unknown): Promise<unknown> {
-    return this.transport.request('POST', `/api/storage/${bucket}/multipart/create`, { body });
+  async createMultipartUpload(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('POST', `/api/storage/${bucket}/multipart/create`, { body, query });
   }
 
-  async uploadPart(bucket: string, body: unknown): Promise<unknown> {
-    return this.transport.request('POST', `/api/storage/${bucket}/multipart/upload-part`, { body });
+  async uploadPart(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('POST', `/api/storage/${bucket}/multipart/upload-part`, { body, query });
   }
 
-  async completeMultipartUpload(bucket: string, body: unknown): Promise<unknown> {
-    return this.transport.request('POST', `/api/storage/${bucket}/multipart/complete`, { body });
+  async completeMultipartUpload(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('POST', `/api/storage/${bucket}/multipart/complete`, { body, query });
   }
 
-  async abortMultipartUpload(bucket: string, body: unknown): Promise<unknown> {
-    return this.transport.request('POST', `/api/storage/${bucket}/multipart/abort`, { body });
+  async abortMultipartUpload(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('POST', `/api/storage/${bucket}/multipart/abort`, { body, query });
   }
 
   async getConfig(): Promise<unknown> {

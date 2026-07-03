@@ -351,8 +351,8 @@ func (a *GeneratedDbApi) GetSchema(ctx context.Context) (map[string]interface{},
 }
 
 // UploadFile — Upload file — POST /api/storage/{bucket}/upload
-func (a *GeneratedDbApi) UploadFile(ctx context.Context, bucket string, body interface{}) (map[string]interface{}, error) {
-	return a.client.do(ctx, "POST", fmt.Sprintf("/api/storage/%s/upload", url.PathEscape(bucket)), body)
+func (a *GeneratedDbApi) UploadFile(ctx context.Context, bucket string, body interface{}, query map[string]string) (map[string]interface{}, error) {
+	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/storage/%s/upload", url.PathEscape(bucket)), body, query)
 }
 
 // GetFileMetadata — Get file metadata — GET /api/storage/{bucket}/{key}/metadata
@@ -411,23 +411,23 @@ func (a *GeneratedDbApi) CreateSignedUploadUrl(ctx context.Context, bucket strin
 }
 
 // CreateMultipartUpload — Start multipart upload — POST /api/storage/{bucket}/multipart/create
-func (a *GeneratedDbApi) CreateMultipartUpload(ctx context.Context, bucket string, body interface{}) (map[string]interface{}, error) {
-	return a.client.do(ctx, "POST", fmt.Sprintf("/api/storage/%s/multipart/create", url.PathEscape(bucket)), body)
+func (a *GeneratedDbApi) CreateMultipartUpload(ctx context.Context, bucket string, body interface{}, query map[string]string) (map[string]interface{}, error) {
+	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/storage/%s/multipart/create", url.PathEscape(bucket)), body, query)
 }
 
 // UploadPart — Upload a part — POST /api/storage/{bucket}/multipart/upload-part
-func (a *GeneratedDbApi) UploadPart(ctx context.Context, bucket string, body interface{}) (map[string]interface{}, error) {
-	return a.client.do(ctx, "POST", fmt.Sprintf("/api/storage/%s/multipart/upload-part", url.PathEscape(bucket)), body)
+func (a *GeneratedDbApi) UploadPart(ctx context.Context, bucket string, body interface{}, query map[string]string) (map[string]interface{}, error) {
+	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/storage/%s/multipart/upload-part", url.PathEscape(bucket)), body, query)
 }
 
 // CompleteMultipartUpload — Complete multipart upload — POST /api/storage/{bucket}/multipart/complete
-func (a *GeneratedDbApi) CompleteMultipartUpload(ctx context.Context, bucket string, body interface{}) (map[string]interface{}, error) {
-	return a.client.do(ctx, "POST", fmt.Sprintf("/api/storage/%s/multipart/complete", url.PathEscape(bucket)), body)
+func (a *GeneratedDbApi) CompleteMultipartUpload(ctx context.Context, bucket string, body interface{}, query map[string]string) (map[string]interface{}, error) {
+	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/storage/%s/multipart/complete", url.PathEscape(bucket)), body, query)
 }
 
 // AbortMultipartUpload — Abort multipart upload — POST /api/storage/{bucket}/multipart/abort
-func (a *GeneratedDbApi) AbortMultipartUpload(ctx context.Context, bucket string, body interface{}) (map[string]interface{}, error) {
-	return a.client.do(ctx, "POST", fmt.Sprintf("/api/storage/%s/multipart/abort", url.PathEscape(bucket)), body)
+func (a *GeneratedDbApi) AbortMultipartUpload(ctx context.Context, bucket string, body interface{}, query map[string]string) (map[string]interface{}, error) {
+	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/storage/%s/multipart/abort", url.PathEscape(bucket)), body, query)
 }
 
 // GetConfig — Get public configuration — GET /api/config

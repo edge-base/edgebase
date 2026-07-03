@@ -344,8 +344,8 @@ class GeneratedDbApi {
   }
 
   /// Upload file — POST /api/storage/{bucket}/upload
-  Future<dynamic> uploadFile(String bucket, Object? body) async {
-    return _http.post('/storage/${Uri.encodeComponent(bucket)}/upload', body);
+  Future<dynamic> uploadFile(String bucket, Object? body, Map<String, String>? query) async {
+    return _http.postWithQuery('/storage/${Uri.encodeComponent(bucket)}/upload', body, query);
   }
 
   /// Get file metadata — GET /api/storage/{bucket}/{key}/metadata
@@ -404,23 +404,23 @@ class GeneratedDbApi {
   }
 
   /// Start multipart upload — POST /api/storage/{bucket}/multipart/create
-  Future<dynamic> createMultipartUpload(String bucket, Object? body) async {
-    return _http.post('/storage/${Uri.encodeComponent(bucket)}/multipart/create', body);
+  Future<dynamic> createMultipartUpload(String bucket, Object? body, Map<String, String>? query) async {
+    return _http.postWithQuery('/storage/${Uri.encodeComponent(bucket)}/multipart/create', body, query);
   }
 
   /// Upload a part — POST /api/storage/{bucket}/multipart/upload-part
-  Future<dynamic> uploadPart(String bucket, Object? body) async {
-    return _http.post('/storage/${Uri.encodeComponent(bucket)}/multipart/upload-part', body);
+  Future<dynamic> uploadPart(String bucket, Object? body, Map<String, String>? query) async {
+    return _http.postWithQuery('/storage/${Uri.encodeComponent(bucket)}/multipart/upload-part', body, query);
   }
 
   /// Complete multipart upload — POST /api/storage/{bucket}/multipart/complete
-  Future<dynamic> completeMultipartUpload(String bucket, Object? body) async {
-    return _http.post('/storage/${Uri.encodeComponent(bucket)}/multipart/complete', body);
+  Future<dynamic> completeMultipartUpload(String bucket, Object? body, Map<String, String>? query) async {
+    return _http.postWithQuery('/storage/${Uri.encodeComponent(bucket)}/multipart/complete', body, query);
   }
 
   /// Abort multipart upload — POST /api/storage/{bucket}/multipart/abort
-  Future<dynamic> abortMultipartUpload(String bucket, Object? body) async {
-    return _http.post('/storage/${Uri.encodeComponent(bucket)}/multipart/abort', body);
+  Future<dynamic> abortMultipartUpload(String bucket, Object? body, Map<String, String>? query) async {
+    return _http.postWithQuery('/storage/${Uri.encodeComponent(bucket)}/multipart/abort', body, query);
   }
 
   /// Get public configuration — GET /api/config

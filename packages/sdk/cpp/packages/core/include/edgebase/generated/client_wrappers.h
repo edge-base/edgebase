@@ -114,11 +114,11 @@ public:
   /// Create signed upload URL
   Result create_signed_upload_url(const std::string& bucket, const std::string& json_body) const;
   /// Start multipart upload
-  Result create_multipart_upload(const std::string& bucket, const std::string& json_body) const;
+  Result create_multipart_upload(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Complete multipart upload
-  Result complete_multipart_upload(const std::string& bucket, const std::string& json_body) const;
+  Result complete_multipart_upload(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Abort multipart upload
-  Result abort_multipart_upload(const std::string& bucket, const std::string& json_body) const;
+  Result abort_multipart_upload(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
 
 private:
   GeneratedDbApi& core_;

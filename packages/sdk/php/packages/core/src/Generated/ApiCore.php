@@ -424,9 +424,9 @@ class GeneratedDbApi
     }
 
     /** Upload file — POST /api/storage/{bucket}/upload */
-    public function upload_file(string $bucket, mixed $body = null): mixed
+    public function upload_file(string $bucket, mixed $body = null, array $query = []): mixed
     {
-        return $this->http->post('/storage/' . rawurlencode($bucket) . '/upload', $body);
+        return $this->http->postWithQuery('/storage/' . rawurlencode($bucket) . '/upload', $body, $query);
     }
 
     /** Get file metadata — GET /api/storage/{bucket}/{key}/metadata */
@@ -496,27 +496,27 @@ class GeneratedDbApi
     }
 
     /** Start multipart upload — POST /api/storage/{bucket}/multipart/create */
-    public function create_multipart_upload(string $bucket, mixed $body = null): mixed
+    public function create_multipart_upload(string $bucket, mixed $body = null, array $query = []): mixed
     {
-        return $this->http->post('/storage/' . rawurlencode($bucket) . '/multipart/create', $body);
+        return $this->http->postWithQuery('/storage/' . rawurlencode($bucket) . '/multipart/create', $body, $query);
     }
 
     /** Upload a part — POST /api/storage/{bucket}/multipart/upload-part */
-    public function upload_part(string $bucket, mixed $body = null): mixed
+    public function upload_part(string $bucket, mixed $body = null, array $query = []): mixed
     {
-        return $this->http->post('/storage/' . rawurlencode($bucket) . '/multipart/upload-part', $body);
+        return $this->http->postWithQuery('/storage/' . rawurlencode($bucket) . '/multipart/upload-part', $body, $query);
     }
 
     /** Complete multipart upload — POST /api/storage/{bucket}/multipart/complete */
-    public function complete_multipart_upload(string $bucket, mixed $body = null): mixed
+    public function complete_multipart_upload(string $bucket, mixed $body = null, array $query = []): mixed
     {
-        return $this->http->post('/storage/' . rawurlencode($bucket) . '/multipart/complete', $body);
+        return $this->http->postWithQuery('/storage/' . rawurlencode($bucket) . '/multipart/complete', $body, $query);
     }
 
     /** Abort multipart upload — POST /api/storage/{bucket}/multipart/abort */
-    public function abort_multipart_upload(string $bucket, mixed $body = null): mixed
+    public function abort_multipart_upload(string $bucket, mixed $body = null, array $query = []): mixed
     {
-        return $this->http->post('/storage/' . rawurlencode($bucket) . '/multipart/abort', $body);
+        return $this->http->postWithQuery('/storage/' . rawurlencode($bucket) . '/multipart/abort', $body, $query);
     }
 
     /** Get public configuration — GET /api/config */

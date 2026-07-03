@@ -237,18 +237,18 @@ public struct GeneratedStorageMethods {
     }
 
     /// Start multipart upload
-    public func createMultipartUpload(_ bucket: String, _ body: [String: Any]) async throws -> Any {
-        return try await core.createMultipartUpload(bucket, body)
+    public func createMultipartUpload(_ bucket: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
+        return try await core.createMultipartUpload(bucket, body, query: query)
     }
 
     /// Complete multipart upload
-    public func completeMultipartUpload(_ bucket: String, _ body: [String: Any]) async throws -> Any {
-        return try await core.completeMultipartUpload(bucket, body)
+    public func completeMultipartUpload(_ bucket: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
+        return try await core.completeMultipartUpload(bucket, body, query: query)
     }
 
     /// Abort multipart upload
-    public func abortMultipartUpload(_ bucket: String, _ body: [String: Any]) async throws -> Any {
-        return try await core.abortMultipartUpload(bucket, body)
+    public func abortMultipartUpload(_ bucket: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
+        return try await core.abortMultipartUpload(bucket, body, query: query)
     }
 }
 

@@ -243,18 +243,18 @@ impl<'a> GeneratedStorageMethods<'a> {
     }
 
     /// Start multipart upload
-    pub async fn create_multipart_upload(&self, bucket: &str, body: &Value) -> Result<Value, Error> {
-        self.core.create_multipart_upload(bucket, body).await
+    pub async fn create_multipart_upload(&self, bucket: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.core.create_multipart_upload(bucket, body, query).await
     }
 
     /// Complete multipart upload
-    pub async fn complete_multipart_upload(&self, bucket: &str, body: &Value) -> Result<Value, Error> {
-        self.core.complete_multipart_upload(bucket, body).await
+    pub async fn complete_multipart_upload(&self, bucket: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.core.complete_multipart_upload(bucket, body, query).await
     }
 
     /// Abort multipart upload
-    pub async fn abort_multipart_upload(&self, bucket: &str, body: &Value) -> Result<Value, Error> {
-        self.core.abort_multipart_upload(bucket, body).await
+    pub async fn abort_multipart_upload(&self, bucket: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.core.abort_multipart_upload(bucket, body, query).await
     }
 }
 

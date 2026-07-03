@@ -293,8 +293,8 @@ Result GeneratedDbApi::get_schema() const {
   return http_.get("/api/schema");
 }
 
-Result GeneratedDbApi::upload_file(const std::string& bucket, const std::string& json_body) const {
-  return http_.post("/api/storage/" + edgebase_encode_path_param(bucket) + "/upload", json_body);
+Result GeneratedDbApi::upload_file(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query) const {
+  return http_.post_with_query("/api/storage/" + edgebase_encode_path_param(bucket) + "/upload", json_body, query);
 }
 
 Result GeneratedDbApi::get_file_metadata(const std::string& bucket, const std::string& key) const {
@@ -341,20 +341,20 @@ Result GeneratedDbApi::create_signed_upload_url(const std::string& bucket, const
   return http_.post("/api/storage/" + edgebase_encode_path_param(bucket) + "/signed-upload-url", json_body);
 }
 
-Result GeneratedDbApi::create_multipart_upload(const std::string& bucket, const std::string& json_body) const {
-  return http_.post("/api/storage/" + edgebase_encode_path_param(bucket) + "/multipart/create", json_body);
+Result GeneratedDbApi::create_multipart_upload(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query) const {
+  return http_.post_with_query("/api/storage/" + edgebase_encode_path_param(bucket) + "/multipart/create", json_body, query);
 }
 
-Result GeneratedDbApi::upload_part(const std::string& bucket, const std::string& json_body) const {
-  return http_.post("/api/storage/" + edgebase_encode_path_param(bucket) + "/multipart/upload-part", json_body);
+Result GeneratedDbApi::upload_part(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query) const {
+  return http_.post_with_query("/api/storage/" + edgebase_encode_path_param(bucket) + "/multipart/upload-part", json_body, query);
 }
 
-Result GeneratedDbApi::complete_multipart_upload(const std::string& bucket, const std::string& json_body) const {
-  return http_.post("/api/storage/" + edgebase_encode_path_param(bucket) + "/multipart/complete", json_body);
+Result GeneratedDbApi::complete_multipart_upload(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query) const {
+  return http_.post_with_query("/api/storage/" + edgebase_encode_path_param(bucket) + "/multipart/complete", json_body, query);
 }
 
-Result GeneratedDbApi::abort_multipart_upload(const std::string& bucket, const std::string& json_body) const {
-  return http_.post("/api/storage/" + edgebase_encode_path_param(bucket) + "/multipart/abort", json_body);
+Result GeneratedDbApi::abort_multipart_upload(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query) const {
+  return http_.post_with_query("/api/storage/" + edgebase_encode_path_param(bucket) + "/multipart/abort", json_body, query);
 }
 
 Result GeneratedDbApi::get_config() const {

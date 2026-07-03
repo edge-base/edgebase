@@ -237,18 +237,18 @@ module EdgebaseCore
     end
 
     # Start multipart upload
-    def create_multipart_upload(bucket, body = nil)
-      @core.create_multipart_upload(bucket, body)
+    def create_multipart_upload(bucket, body = nil, query: nil)
+      @core.create_multipart_upload(bucket, body, query: query)
     end
 
     # Complete multipart upload
-    def complete_multipart_upload(bucket, body = nil)
-      @core.complete_multipart_upload(bucket, body)
+    def complete_multipart_upload(bucket, body = nil, query: nil)
+      @core.complete_multipart_upload(bucket, body, query: query)
     end
 
     # Abort multipart upload
-    def abort_multipart_upload(bucket, body = nil)
-      @core.abort_multipart_upload(bucket, body)
+    def abort_multipart_upload(bucket, body = nil, query: nil)
+      @core.abort_multipart_upload(bucket, body, query: query)
     end
   end
 

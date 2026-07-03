@@ -356,8 +356,8 @@ public class GeneratedDbApi {
     }
 
     /** Upload file — POST /api/storage/{bucket}/upload */
-    public Object uploadFile(String bucket, Map<String, ?> body) throws EdgeBaseError {
-        return http.post("/storage/" + encodePathParam(bucket) + "/upload", body);
+    public Object uploadFile(String bucket, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
+        return http.postWithQuery("/storage/" + encodePathParam(bucket) + "/upload", body, query);
     }
 
     /** Get file metadata — GET /api/storage/{bucket}/{key}/metadata */
@@ -416,23 +416,23 @@ public class GeneratedDbApi {
     }
 
     /** Start multipart upload — POST /api/storage/{bucket}/multipart/create */
-    public Object createMultipartUpload(String bucket, Map<String, ?> body) throws EdgeBaseError {
-        return http.post("/storage/" + encodePathParam(bucket) + "/multipart/create", body);
+    public Object createMultipartUpload(String bucket, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
+        return http.postWithQuery("/storage/" + encodePathParam(bucket) + "/multipart/create", body, query);
     }
 
     /** Upload a part — POST /api/storage/{bucket}/multipart/upload-part */
-    public Object uploadPart(String bucket, Map<String, ?> body) throws EdgeBaseError {
-        return http.post("/storage/" + encodePathParam(bucket) + "/multipart/upload-part", body);
+    public Object uploadPart(String bucket, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
+        return http.postWithQuery("/storage/" + encodePathParam(bucket) + "/multipart/upload-part", body, query);
     }
 
     /** Complete multipart upload — POST /api/storage/{bucket}/multipart/complete */
-    public Object completeMultipartUpload(String bucket, Map<String, ?> body) throws EdgeBaseError {
-        return http.post("/storage/" + encodePathParam(bucket) + "/multipart/complete", body);
+    public Object completeMultipartUpload(String bucket, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
+        return http.postWithQuery("/storage/" + encodePathParam(bucket) + "/multipart/complete", body, query);
     }
 
     /** Abort multipart upload — POST /api/storage/{bucket}/multipart/abort */
-    public Object abortMultipartUpload(String bucket, Map<String, ?> body) throws EdgeBaseError {
-        return http.post("/storage/" + encodePathParam(bucket) + "/multipart/abort", body);
+    public Object abortMultipartUpload(String bucket, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
+        return http.postWithQuery("/storage/" + encodePathParam(bucket) + "/multipart/abort", body, query);
     }
 
     /** Get public configuration — GET /api/config */

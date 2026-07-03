@@ -236,18 +236,18 @@ export class GeneratedStorageMethods {
   }
 
   /** Start multipart upload */
-  async createMultipartUpload(bucket: string, body: unknown): Promise<unknown> {
-    return this.core.createMultipartUpload(bucket, body);
+  async createMultipartUpload(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown> {
+    return this.core.createMultipartUpload(bucket, body, query);
   }
 
   /** Complete multipart upload */
-  async completeMultipartUpload(bucket: string, body: unknown): Promise<unknown> {
-    return this.core.completeMultipartUpload(bucket, body);
+  async completeMultipartUpload(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown> {
+    return this.core.completeMultipartUpload(bucket, body, query);
   }
 
   /** Abort multipart upload */
-  async abortMultipartUpload(bucket: string, body: unknown): Promise<unknown> {
-    return this.core.abortMultipartUpload(bucket, body);
+  async abortMultipartUpload(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown> {
+    return this.core.abortMultipartUpload(bucket, body, query);
   }
 
 }

@@ -152,7 +152,7 @@ public:
   /// Get table schema — GET /api/schema
   Result get_schema() const;
   /// Upload file — POST /api/storage/{bucket}/upload
-  Result upload_file(const std::string& bucket, const std::string& json_body) const;
+  Result upload_file(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Get file metadata — GET /api/storage/{bucket}/{key}/metadata
   Result get_file_metadata(const std::string& bucket, const std::string& key) const;
   /// Update file metadata — PATCH /api/storage/{bucket}/{key}/metadata
@@ -176,13 +176,13 @@ public:
   /// Create signed upload URL — POST /api/storage/{bucket}/signed-upload-url
   Result create_signed_upload_url(const std::string& bucket, const std::string& json_body) const;
   /// Start multipart upload — POST /api/storage/{bucket}/multipart/create
-  Result create_multipart_upload(const std::string& bucket, const std::string& json_body) const;
+  Result create_multipart_upload(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Upload a part — POST /api/storage/{bucket}/multipart/upload-part
-  Result upload_part(const std::string& bucket, const std::string& json_body) const;
+  Result upload_part(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Complete multipart upload — POST /api/storage/{bucket}/multipart/complete
-  Result complete_multipart_upload(const std::string& bucket, const std::string& json_body) const;
+  Result complete_multipart_upload(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Abort multipart upload — POST /api/storage/{bucket}/multipart/abort
-  Result abort_multipart_upload(const std::string& bucket, const std::string& json_body) const;
+  Result abort_multipart_upload(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Get public configuration — GET /api/config
   Result get_config() const;
   /// Register push token — POST /api/push/register
