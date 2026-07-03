@@ -372,6 +372,94 @@ import { ClientAnalytics } from '../../src/analytics.js';
 import { refreshAccessToken } from '../../src/auth-refresh.js';
 import { ApiPaths, HttpClient, ContextManager, EdgeBaseError } from '@edge-base/core';
 
+type RefreshLeaderElectionHarness = TokenManager & {
+  refreshWithLeaderElection: (
+    refreshToken: string,
+    doRefresh: (refreshToken: string) => Promise<{ accessToken: string; refreshToken: string }>,
+  ) => Promise<string>;
+};
+
+function tokenManagerHarness(tm: TokenManager): RefreshLeaderElectionHarness {
+  return tm as unknown as RefreshLeaderElectionHarness;
+}
+
+describe('TokenManager — cross-tab refresh coordination', () => {
+  it('does not refresh when another tab wins the localStorage lock race', async () => {
+    installBrowserMocks();
+
+    const staleAccessToken = makeExpiredJwt('u-lock-race');
+    const refreshToken = makeValidJwt('u-lock-race', {
+      exp: Math.floor(Date.now() / 1000) + 7200,
+    });
+    const refreshedAccessToken = makeValidJwt('u-lock-race-fresh');
+    const refreshedRefreshToken = makeValidJwt('u-lock-race-fresh', {
+      exp: Math.floor(Date.now() / 1000) + 7200,
+    });
+    const tm = new TokenManager('http://localhost:8688');
+    tm.setTokens({ accessToken: staleAccessToken, refreshToken });
+
+    const originalSetItem = localStorage.setItem.bind(localStorage);
+    let overwroteLock = false;
+    vi.spyOn(localStorage, 'setItem').mockImplementation((key: string, value: string) => {
+      originalSetItem(key, value);
+      if (key !== 'edgebase:refresh-lock' || overwroteLock) return;
+      overwroteLock = true;
+      originalSetItem(
+        key,
+        JSON.stringify({ ownerId: 'other-tab', timestamp: Date.now() }),
+      );
+      setTimeout(() => {
+        const peer = new MockBroadcastChannel('edgebase:auth');
+        peer.postMessage({
+          type: 'token-refreshed',
+          accessToken: refreshedAccessToken,
+          refreshToken: refreshedRefreshToken,
+        });
+        peer.close();
+      }, 30);
+    });
+
+    const doRefresh = vi.fn(async () => {
+      throw new Error('This tab should wait for the winning tab.');
+    });
+
+    await expect(tm.getAccessToken(doRefresh)).resolves.toBe(refreshedAccessToken);
+    expect(doRefresh).not.toHaveBeenCalled();
+    expect(tm.getRefreshToken()).toBe(refreshedRefreshToken);
+
+    tm.destroy();
+  });
+
+  it('keeps a newer stored refresh token when a stale refresh request fails', async () => {
+    installBrowserMocks();
+
+    const staleRefreshToken = makeValidJwt('u-stale', {
+      exp: Math.floor(Date.now() / 1000) + 7200,
+    });
+    const newerRefreshToken = makeValidJwt('u-newer', {
+      exp: Math.floor(Date.now() / 1000) + 7200,
+    });
+    const tm = new TokenManager('http://localhost:8688');
+    localStorage.setItem('edgebase:refresh-token', staleRefreshToken);
+
+    await expect(
+      tokenManagerHarness(tm).refreshWithLeaderElection(staleRefreshToken, async () => {
+        localStorage.setItem('edgebase:refresh-token', newerRefreshToken);
+        throw new EdgeBaseError(401, 'Refresh token reuse detected. Session revoked.');
+      }),
+    ).rejects.toMatchObject({ code: 401 });
+
+    expect(localStorage.getItem('edgebase:refresh-token')).toBe(newerRefreshToken);
+    expect(
+      MockBroadcastChannel.messages.filter(
+        (message) => (message.data as { type?: string })?.type === 'signed-out',
+      ),
+    ).toHaveLength(0);
+
+    tm.destroy();
+  });
+});
+
 // ─── E. TokenManager — expired token handling ────────────────────────────────
 
 describe('TokenManager — expired token', () => {

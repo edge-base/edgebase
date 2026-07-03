@@ -93,6 +93,12 @@ function extractSessionId(token: string): string | null {
 
 type StorageAdapter = ReturnType<typeof createBrowserStorage>;
 const LOCK_TIMEOUT_MS = 10_000;
+const LOCK_VERIFY_DELAY_MS = 16;
+
+interface RefreshLock {
+  ownerId: string;
+  timestamp: number;
+}
 
 interface TokenManagerKeySet {
   refreshTokenKey: string;
@@ -103,6 +109,54 @@ interface TokenManagerKeySet {
 
 export interface TokenManagerOptions {
   authNamespace?: string;
+}
+
+function createRefreshOwnerId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function parseRefreshLock(value: string | null): RefreshLock | null {
+  if (!value) return null;
+
+  const legacyTimestamp = Number.parseInt(value, 10);
+  if (Number.isFinite(legacyTimestamp)) {
+    return { ownerId: 'legacy', timestamp: legacyTimestamp };
+  }
+
+  try {
+    const parsed = JSON.parse(value) as { ownerId?: unknown; owner?: unknown; timestamp?: unknown; time?: unknown };
+    const ownerId =
+      typeof parsed.ownerId === 'string'
+        ? parsed.ownerId
+        : typeof parsed.owner === 'string'
+          ? parsed.owner
+          : '';
+    const timestamp =
+      typeof parsed.timestamp === 'number'
+        ? parsed.timestamp
+        : typeof parsed.time === 'number'
+          ? parsed.time
+          : NaN;
+    if (!ownerId || !Number.isFinite(timestamp)) return null;
+    return { ownerId, timestamp };
+  } catch {
+    return null;
+  }
+}
+
+function serializeRefreshLock(ownerId: string): string {
+  return JSON.stringify({ ownerId, timestamp: Date.now() });
+}
+
+function isFreshRefreshLock(lock: RefreshLock): boolean {
+  return Date.now() - lock.timestamp < LOCK_TIMEOUT_MS;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildTokenManagerKeys(authNamespace?: string): TokenManagerKeySet {
@@ -127,6 +181,7 @@ export class TokenManager {
   private storageListener: ((e: StorageEvent) => void) | null = null;
   private cachedUser: TokenUser | null = null;
   private keys: TokenManagerKeySet;
+  private readonly refreshOwnerId = createRefreshOwnerId();
 
   constructor(private baseUrl: string, options: TokenManagerOptions = {}) {
     this.storage = createBrowserStorage();
@@ -225,20 +280,26 @@ export class TokenManager {
     }
 
     // Check if another tab is refreshing (localStorage mutex)
-    const lockValue = this.storage.getItem(this.keys.refreshLockKey);
-    if (lockValue) {
-      const lockTime = parseInt(lockValue, 10);
-      if (Date.now() - lockTime < LOCK_TIMEOUT_MS) {
-        // Another tab is refreshing, wait for result
-        return this.waitForRefreshResult();
-      }
-      // Lock is stale, proceed as leader
+    const activeLock = parseRefreshLock(this.storage.getItem(this.keys.refreshLockKey));
+    if (activeLock && isFreshRefreshLock(activeLock) && activeLock.ownerId !== this.refreshOwnerId) {
+      return this.waitForRefreshResult();
     }
 
-    // Acquire lock and refresh
-    this.storage.setItem(this.keys.refreshLockKey, Date.now().toString());
+    // Acquire lock and verify ownership. Two tabs can otherwise both read an
+    // empty lock and refresh with the same rotating refresh token.
+    this.storage.setItem(this.keys.refreshLockKey, serializeRefreshLock(this.refreshOwnerId));
+    await delay(LOCK_VERIFY_DELAY_MS);
+    const acquiredLock = parseRefreshLock(this.storage.getItem(this.keys.refreshLockKey));
+    if (!acquiredLock || acquiredLock.ownerId !== this.refreshOwnerId) {
+      return this.waitForRefreshResult();
+    }
 
-    this.refreshPromise = doRefresh(refreshToken)
+    const storedRefreshToken = this.storage.getItem(this.keys.refreshTokenKey);
+    const tokenForRefresh = storedRefreshToken && storedRefreshToken !== refreshToken
+      ? storedRefreshToken
+      : refreshToken;
+
+    this.refreshPromise = doRefresh(tokenForRefresh)
       .then((tokens) => {
         this.setTokens(tokens);
         this.broadcastTokenRefreshed(tokens);
@@ -247,17 +308,29 @@ export class TokenManager {
       .catch((err) => {
         // If refresh fails with 401, clear everything (token revoked/expired)
         if (err instanceof EdgeBaseError && err.code === 401) {
-          this.clearTokens();
+          const currentRefreshToken = this.storage.getItem(this.keys.refreshTokenKey);
+          if (currentRefreshToken && currentRefreshToken !== tokenForRefresh) {
+            this.accessToken = null;
+          } else {
+            this.clearTokens();
+          }
         }
         throw err;
       })
       .finally(() => {
-        this.storage.removeItem(this.keys.refreshLockKey);
+        this.releaseRefreshLock();
         this.refreshPromise = null;
       });
 
     const result = await this.refreshPromise;
     return result.accessToken;
+  }
+
+  private releaseRefreshLock(): void {
+    const activeLock = parseRefreshLock(this.storage.getItem(this.keys.refreshLockKey));
+    if (!activeLock || activeLock.ownerId === this.refreshOwnerId || !isFreshRefreshLock(activeLock)) {
+      this.storage.removeItem(this.keys.refreshLockKey);
+    }
   }
 
   /** Wait for another tab's refresh result (max 10s) */
