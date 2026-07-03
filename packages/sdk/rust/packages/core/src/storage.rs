@@ -5,7 +5,7 @@
 use crate::{Error, http_client::HttpClient};
 use crate::generated::api_core::{GeneratedDbApi, ApiPaths};
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 /// Storage client — access buckets by name.
 pub struct StorageClient {
@@ -149,7 +149,8 @@ impl StorageBucket {
         if !content_type.is_empty() {
             body["contentType"] = json!(content_type);
         }
-        let resp = self.core().create_multipart_upload(&self.name, &body).await?;
+        let query = HashMap::new();
+        let resp = self.core().create_multipart_upload(&self.name, &body, &query).await?;
         resp["uploadId"].as_str()
             .map(|s: &str| s.to_string())
             .ok_or_else(|| Error::Api { status: 500, message: "Missing uploadId".into() })
@@ -172,7 +173,8 @@ impl StorageBucket {
         &self, key: &str, upload_id: &str, parts: Vec<Value>,
     ) -> Result<Value, Error> {
         let body = json!({ "uploadId": upload_id, "key": key, "parts": parts });
-        self.core().complete_multipart_upload(&self.name, &body).await
+        let query = HashMap::new();
+        self.core().complete_multipart_upload(&self.name, &body, &query).await
     }
 
     /// Abort a multipart upload before completion.
@@ -180,7 +182,8 @@ impl StorageBucket {
         &self, key: &str, upload_id: &str,
     ) -> Result<Value, Error> {
         let body = json!({ "uploadId": upload_id, "key": key });
-        self.core().abort_multipart_upload(&self.name, &body).await
+        let query = HashMap::new();
+        self.core().abort_multipart_upload(&self.name, &body, &query).await
     }
 
     /// Upload a chunk for a resumable upload (legacy convenience wrapper).
