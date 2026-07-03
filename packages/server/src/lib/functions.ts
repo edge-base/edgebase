@@ -1918,7 +1918,15 @@ export function buildFunctionStorageProxy(
       if (!secret) throw new Error('Signed URLs require JWT_USER_SECRET to be configured.');
       const expiresIn = options?.expiresIn ?? 3600;
       const expiresAt = Date.now() + expiresIn * 1000;
-      const token = await createSignedToken(key, bucket, expiresAt, secret);
+      const obj = await r2.head(prefix(key));
+      const token = await createSignedToken(key, bucket, expiresAt, secret, obj ? {
+        file: {
+          size: obj.size,
+          contentType: obj.httpMetadata?.contentType || 'application/octet-stream',
+          etag: obj.etag,
+          uploadedAt: obj.uploaded?.toISOString(),
+        },
+      } : undefined);
       const base = workerUrl ?? 'http://localhost:8787';
       return `${base}/api/storage/${encodeURIComponent(bucket)}/${key}?token=${token}`;
     },

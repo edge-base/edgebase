@@ -305,6 +305,21 @@ function checkServiceKey(env: Env, header: string | undefined, scope: string, re
 type SignedTokenClaims = {
   expiresAt: number;
   maxBytes: number | null;
+  file?: SignedTokenFileMetadata | null;
+};
+
+type SignedTokenFileMetadata = {
+  size: number;
+  contentType?: string;
+  etag?: string;
+  uploadedAt?: string;
+  uploadedBy?: string | null;
+  customMetadata?: Record<string, string>;
+};
+
+type SignedTokenOptions = {
+  maxBytes?: number | null;
+  file?: SignedTokenFileMetadata | null;
 };
 
 type TrackedMultipartPart = {
@@ -339,18 +354,98 @@ function parseByteSize(value?: string): number | null {
   return amount * multiplier;
 }
 
+function emptySignedTokenClaims(expiresAt = 0, maxBytes: number | null = null): SignedTokenClaims {
+  return { expiresAt, maxBytes, file: null };
+}
+
+function normalizeSignedTokenOptions(options?: number | null | SignedTokenOptions): Required<Pick<SignedTokenOptions, 'maxBytes'>> & Pick<SignedTokenOptions, 'file'> {
+  const rawMaxBytes = typeof options === 'object' && options !== null
+    ? options.maxBytes
+    : options;
+  const maxBytes = typeof rawMaxBytes === 'number' && Number.isFinite(rawMaxBytes)
+    ? Math.max(0, Math.trunc(rawMaxBytes))
+    : null;
+  const file = typeof options === 'object' && options !== null
+    ? normalizeSignedFileMetadata(options.file)
+    : null;
+  return { maxBytes, file };
+}
+
+function normalizeSignedFileMetadata(file?: SignedTokenFileMetadata | null): SignedTokenFileMetadata | null {
+  if (!file || typeof file.size !== 'number' || !Number.isFinite(file.size) || file.size < 0) {
+    return null;
+  }
+
+  const customMetadata: Record<string, string> = {};
+  if (file.customMetadata && typeof file.customMetadata === 'object') {
+    for (const [key, value] of Object.entries(file.customMetadata)) {
+      if (typeof value === 'string') customMetadata[key] = value;
+    }
+  }
+
+  const normalized: SignedTokenFileMetadata = {
+    size: Math.trunc(file.size),
+  };
+  if (typeof file.contentType === 'string' && file.contentType) normalized.contentType = file.contentType;
+  if (typeof file.etag === 'string' && file.etag) normalized.etag = file.etag;
+  if (typeof file.uploadedAt === 'string' && file.uploadedAt) normalized.uploadedAt = file.uploadedAt;
+  if (typeof file.uploadedBy === 'string' || file.uploadedBy === null) normalized.uploadedBy = file.uploadedBy;
+  if (Object.keys(customMetadata).length > 0) normalized.customMetadata = customMetadata;
+  return normalized;
+}
+
+function encodeBase64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function decodeBase64Url(value: string): string {
+  const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+function signedFileMetadataFromObject(obj: R2Object): SignedTokenFileMetadata {
+  return {
+    size: obj.size,
+    contentType: obj.httpMetadata?.contentType || 'application/octet-stream',
+    etag: obj.etag,
+    uploadedAt: obj.uploaded?.toISOString(),
+  };
+}
+
 /** Create HMAC-based signed URL token. */
 export async function createSignedToken(
   key: string,
   bucket: string,
   expiresAt: number,
   secret: string,
-  maxBytes?: number | null,
+  options?: number | null | SignedTokenOptions,
 ): Promise<string> {
   const encoder = new TextEncoder();
-  const normalizedMaxBytes = typeof maxBytes === 'number' && Number.isFinite(maxBytes)
-    ? Math.max(0, Math.trunc(maxBytes))
-    : null;
+  const { maxBytes: normalizedMaxBytes, file } = normalizeSignedTokenOptions(options);
+  if (file) {
+    const payload = encodeBase64Url(JSON.stringify({
+      v: 2,
+      bucket,
+      key,
+      exp: Math.trunc(expiresAt),
+      max: normalizedMaxBytes,
+      file,
+    }));
+    const data = `v2.${payload}`;
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+    );
+    const signature = await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(data));
+    const sigHex = Array.from(new Uint8Array(signature)).map(b => b.toString(16).padStart(2, '0')).join('');
+    return `${data}.${sigHex}`;
+  }
+
   const data = `${bucket}:${key}:${expiresAt}:${normalizedMaxBytes ?? ''}`;
   const cryptoKey = await crypto.subtle.importKey(
     'raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
@@ -370,18 +465,63 @@ async function verifySignedToken(
   secret: string,
 ): Promise<{ valid: boolean; claims: SignedTokenClaims }> {
   const parts = token.split('.');
+  if (parts.length === 3 && parts[0] === 'v2') {
+    const payload = parts[1]!;
+    const signature = parts[2]!;
+    let claims: SignedTokenClaims = emptySignedTokenClaims();
+    try {
+      const parsed = JSON.parse(decodeBase64Url(payload)) as {
+        v?: unknown;
+        bucket?: unknown;
+        key?: unknown;
+        exp?: unknown;
+        max?: unknown;
+        file?: unknown;
+      };
+      const expiresAt = typeof parsed.exp === 'number' ? Math.trunc(parsed.exp) : NaN;
+      const maxBytes = typeof parsed.max === 'number' && Number.isFinite(parsed.max)
+        ? Math.max(0, Math.trunc(parsed.max))
+        : null;
+      const file = normalizeSignedFileMetadata(parsed.file as SignedTokenFileMetadata | null | undefined);
+      claims = { expiresAt, maxBytes, file };
+      if (
+        parsed.v !== 2
+        || parsed.bucket !== bucket
+        || parsed.key !== key
+        || !Number.isFinite(expiresAt)
+        || Date.now() > expiresAt
+      ) {
+        return { valid: false, claims };
+      }
+    } catch {
+      return { valid: false, claims: emptySignedTokenClaims() };
+    }
+
+    const encoder = new TextEncoder();
+    const data = `v2.${payload}`;
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+    );
+    const expected = await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(data));
+    const expectedHex = Array.from(new Uint8Array(expected)).map(b => b.toString(16).padStart(2, '0')).join('');
+    return {
+      valid: timingSafeEqual(signature, expectedHex),
+      claims,
+    };
+  }
+
   if (parts.length !== 2 && parts.length !== 3) {
-    return { valid: false, claims: { expiresAt: 0, maxBytes: null } };
+    return { valid: false, claims: emptySignedTokenClaims() };
   }
   const expiresAt = parseInt(parts[0]!, 10);
   const maxBytes = parts.length === 3 ? parseInt(parts[1]!, 10) : null;
   const signature = parts[parts.length - 1]!;
 
   if (isNaN(expiresAt) || Date.now() > expiresAt) {
-    return { valid: false, claims: { expiresAt, maxBytes: Number.isFinite(maxBytes ?? NaN) ? maxBytes : null } };
+    return { valid: false, claims: emptySignedTokenClaims(expiresAt, Number.isFinite(maxBytes ?? NaN) ? maxBytes : null) };
   }
   if (parts.length === 3 && !Number.isFinite(maxBytes)) {
-    return { valid: false, claims: { expiresAt, maxBytes: null } };
+    return { valid: false, claims: emptySignedTokenClaims(expiresAt) };
   }
 
   const encoder = new TextEncoder();
@@ -396,6 +536,7 @@ async function verifySignedToken(
     claims: {
       expiresAt,
       maxBytes: parts.length === 3 ? maxBytes : null,
+      file: null,
     },
   };
 }
@@ -513,6 +654,24 @@ function buildMetadata(obj: R2Object): R2FileMeta {
   } as R2FileMeta;
 }
 
+function buildMetadataFromSignedFile(key: string, file: SignedTokenFileMetadata): R2FileMeta {
+  return {
+    key,
+    size: file.size,
+    contentType: file.contentType || 'application/octet-stream',
+    etag: file.etag || '',
+    uploadedAt: file.uploadedAt,
+    uploadedBy: file.uploadedBy ?? file.customMetadata?.uploadedBy ?? null,
+    customMetadata: file.customMetadata || {},
+  } as R2FileMeta;
+}
+
+function hasBlockingBeforeDownloadHooks(env: Env, bucketName: string): boolean {
+  const pluginHooks = getFunctionsByTrigger('storage', { type: 'storage', event: 'beforeDownload' } as unknown as StorageTrigger);
+  if (pluginHooks.length > 0) return true;
+  return !!getStorageHooks(env, bucketName)?.beforeDownload;
+}
+
 function parseDownloadRange(header: string | undefined, size: number): ParsedDownloadRange {
   if (!header) return { kind: 'full' };
   const match = header.trim().match(/^bytes=(.+)$/i);
@@ -552,13 +711,24 @@ function parseDownloadRange(header: string | undefined, size: number): ParsedDow
   return { kind: 'partial', offset, end, length: end - offset + 1 };
 }
 
-function createDownloadHeaders(obj: R2Object): Headers {
+function createDownloadHeaders(meta: R2FileMeta, signedClaims?: SignedTokenClaims | null): Headers {
   const headers = new Headers();
-  headers.set('Content-Type', obj.httpMetadata?.contentType || 'application/octet-stream');
-  headers.set('ETag', obj.etag);
+  headers.set('Content-Type', meta.contentType || 'application/octet-stream');
+  if (meta.etag) {
+    headers.set('ETag', meta.etag);
+  }
   headers.set('Accept-Ranges', 'bytes');
-  if (obj.uploaded) {
-    headers.set('Last-Modified', obj.uploaded.toUTCString());
+  if (meta.uploadedAt) {
+    const uploadedAt = new Date(meta.uploadedAt);
+    if (!Number.isNaN(uploadedAt.getTime())) {
+      headers.set('Last-Modified', uploadedAt.toUTCString());
+    }
+  }
+  if (signedClaims) {
+    const maxAge = Math.max(0, Math.floor((signedClaims.expiresAt - Date.now()) / 1000));
+    if (maxAge > 0) {
+      headers.set('Cache-Control', `private, max-age=${Math.min(maxAge, 3600)}`);
+    }
   }
   return headers;
 }
@@ -1097,6 +1267,7 @@ const handleDownloadFile = async (c: Context<HonoEnv>) => {
   // Check for signed URL token
   const token = c.req.query('token');
   let skipRules = false;
+  let signedClaims: SignedTokenClaims | null = null;
 
   if (token) {
     // Asymmetric fail-closed (#99): secret 미설정 시 토큰 무시 → 보안 규칙으로 fallback
@@ -1105,17 +1276,31 @@ const handleDownloadFile = async (c: Context<HonoEnv>) => {
       const verified = await verifySignedToken(token, key, bucketName, secret);
       if (verified.valid) {
         skipRules = true;
+        signedClaims = verified.claims;
       }
     }
   }
 
   const fullKey = r2Key(bucketName, key);
   const rangeHeader = c.req.header('Range') ?? c.req.header('range');
-  const file = rangeHeader
-    ? await c.env.STORAGE.head(fullKey)
-    : await c.env.STORAGE.get(fullKey);
-  if (!file) {
-    throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
+  const isByteRangeRequest = !!rangeHeader && /^bytes=/i.test(rangeHeader.trim());
+  const signedMetadataAllowed = skipRules && isByteRangeRequest && !!signedClaims?.file && !hasBlockingBeforeDownloadHooks(c.env, bucketName);
+  let fileMeta: R2FileMeta | null = signedMetadataAllowed && signedClaims?.file
+    ? buildMetadataFromSignedFile(key, signedClaims.file)
+    : null;
+  let bodyObj: R2ObjectBody | null = null;
+
+  if (!fileMeta) {
+    const file = rangeHeader
+      ? await c.env.STORAGE.head(fullKey)
+      : await c.env.STORAGE.get(fullKey);
+    if (!file) {
+      throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
+    }
+    fileMeta = buildMetadata(file);
+    if (!rangeHeader) {
+      bodyObj = file as R2ObjectBody;
+    }
   }
 
   // Security: check read rule
@@ -1123,36 +1308,33 @@ const handleDownloadFile = async (c: Context<HonoEnv>) => {
     const serviceKeyBypass = checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:read`, c.req);
     if (!serviceKeyBypass) {
       const auth = c.get('auth') as AuthContext | null;
-      const resource = buildMetadata(file);
-      checkStorageRule(bucketConfig.access?.read, auth, resource, 'read', bucketName, release);
+      checkStorageRule(bucketConfig.access?.read, auth, fileMeta, 'read', bucketName, release);
     }
   }
 
   // Plugin blocking storage hooks (beforeDownload)
   {
     const dlAuth = c.get('auth') as AuthContext | null;
-    const dlMeta = buildMetadata(file);
-    await executeBlockingStorageHooks('beforeDownload', { ...dlMeta, bucket: bucketName }, dlAuth, c.env, getWorkerUrl(c.req.url, c.env));
+    await executeBlockingStorageHooks('beforeDownload', { ...fileMeta, bucket: bucketName }, dlAuth, c.env, getWorkerUrl(c.req.url, c.env));
   }
 
   // beforeDownload hook — blocking, throw to reject
   const hooks = getStorageHooks(c.env, bucketName);
   if (hooks?.beforeDownload) {
     const auth = c.get('auth') as AuthContext | null;
-    const meta = buildMetadata(file);
     const hookCtx = buildStorageHookCtx(c.env, c.executionCtx, getWorkerUrl(c.req.url, c.env));
     try {
-      await hooks.beforeDownload(auth, meta, hookCtx);
+      await hooks.beforeDownload(auth, fileMeta, hookCtx);
     } catch (error) {
       throw normalizeStorageHookError(error, 'beforeDownload');
     }
   }
 
-  const parsedRange = parseDownloadRange(rangeHeader, file.size);
-  const headers = createDownloadHeaders(file);
+  const parsedRange = parseDownloadRange(rangeHeader, fileMeta.size);
+  const headers = createDownloadHeaders(fileMeta, skipRules ? signedClaims : null);
 
   if (parsedRange.kind === 'unsatisfiable') {
-    headers.set('Content-Range', `bytes */${file.size}`);
+    headers.set('Content-Range', `bytes */${fileMeta.size}`);
     headers.set('Content-Length', '0');
     return new Response(null, { status: 416, headers });
   }
@@ -1165,16 +1347,18 @@ const handleDownloadFile = async (c: Context<HonoEnv>) => {
       throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
     }
     headers.set('Content-Length', String(parsedRange.length));
-    headers.set('Content-Range', `bytes ${parsedRange.offset}-${parsedRange.end}/${file.size}`);
+    headers.set('Content-Range', `bytes ${parsedRange.offset}-${parsedRange.end}/${fileMeta.size}`);
     return new Response(rangedObj.body, { status: 206, headers });
   }
 
-  const bodyObj = rangeHeader ? await c.env.STORAGE.get(fullKey) : file as R2ObjectBody;
   if (!bodyObj) {
-    throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
+    bodyObj = await c.env.STORAGE.get(fullKey);
+    if (!bodyObj) {
+      throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
+    }
   }
-  headers.set('Content-Length', String(file.size));
-  return new Response((bodyObj as R2ObjectBody).body, { headers });
+  headers.set('Content-Length', String(fileMeta.size));
+  return new Response(bodyObj.body, { headers });
 };
 storage.openapi(downloadFile, handleDownloadFile);
 
@@ -1447,7 +1631,9 @@ storage.openapi(createSignedDownloadUrl, async (c) => {
   if (!secret) {
     throw new EdgeBaseError(500, 'Signed URLs require JWT_USER_SECRET to be configured.', undefined, 'internal-error');
   }
-  const token = await createSignedToken(body.key, bucketName, expiresAt, secret);
+  const token = await createSignedToken(body.key, bucketName, expiresAt, secret, {
+    file: signedFileMetadataFromObject(obj),
+  });
 
   // Build signed URL
   const url = new URL(c.req.url);
@@ -1511,7 +1697,9 @@ storage.openapi(createSignedDownloadUrls, async (c) => {
     const obj = await c.env.STORAGE.head(fullKey);
     if (!obj) continue; // skip non-existent files
 
-    const token = await createSignedToken(key, bucketName, expiresAt, secret);
+    const token = await createSignedToken(key, bucketName, expiresAt, secret, {
+      file: signedFileMetadataFromObject(obj),
+    });
     urls.push({
       key,
       url: `${url.protocol}//${url.host}/api/storage/${encodeURIComponent(bucketName)}/${encodeURIComponent(key)}?token=${token}`,

@@ -477,6 +477,8 @@ Signed upload tokens can also be sent to multipart upload endpoints as `token` a
 
 When `maxFileSize` is set, single uploads are rejected if the file is too large. Multipart uploads require `Content-Length` on each part and validate the completed tracked part sizes before finalizing.
 
+Signed download URLs carry signed file metadata such as size, type, and ETag. This lets byte-range media playback seek directly to the requested range without a second metadata lookup on each seek, and range responses are marked `Cache-Control: private` for the remaining signed URL lifetime so the same browser can reuse cached segments.
+
 ## REST API
 
 | Endpoint | Description |

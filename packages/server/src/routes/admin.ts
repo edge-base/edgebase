@@ -1539,7 +1539,14 @@ api.openapi(adminCreateSignedUrl, async (c) => {
 
   const expiresInMs = parseDuration(body.expiresIn || '1h');
   const expiresAt = Date.now() + expiresInMs;
-  const token = await createSignedToken(body.key, bucketName, expiresAt, secret);
+  const token = await createSignedToken(body.key, bucketName, expiresAt, secret, {
+    file: {
+      size: obj.size,
+      contentType: obj.httpMetadata?.contentType || 'application/octet-stream',
+      etag: obj.etag,
+      uploadedAt: obj.uploaded?.toISOString(),
+    },
+  });
 
   // Build signed URL using the public storage endpoint
   const url = new URL(c.req.url);

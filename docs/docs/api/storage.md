@@ -290,6 +290,7 @@ Update the custom metadata of an existing file. Provide key-value pairs to set o
 `POST /api/storage/:bucket/signed-url`
 
 Generate a temporary signed URL for downloading a file. The URL provides public access without authentication for a limited time.
+Signed download URLs include signed file metadata, which lets byte-range media playback seek with a direct range read and return private browser-cacheable range responses until the URL expires.
 
 **Auth**: Bearer Token required
 

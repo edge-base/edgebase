@@ -408,7 +408,7 @@ if (res.status === 206) {
 }
 ```
 
-Valid range requests return `206 Partial Content` with `Content-Range` and `Accept-Ranges: bytes`. Unsatisfiable ranges return `416 Range Not Satisfiable`.
+Valid range requests return `206 Partial Content` with `Content-Range` and `Accept-Ranges: bytes`. Unsatisfiable ranges return `416 Range Not Satisfiable`. Signed download URLs include the file size in the signed grant, so media seeks can usually fetch only the requested byte range without an extra metadata lookup; those responses also use `Cache-Control: private` within the signed URL lifetime so the same browser can reuse cached ranges.
 
 ## Check File Exists
 
