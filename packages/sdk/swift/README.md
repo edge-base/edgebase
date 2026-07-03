@@ -25,7 +25,7 @@ Use the higher-level client package for most app and trusted-service workflows:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.2.9")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.3.0")
 ]
 ```
 
@@ -33,7 +33,7 @@ If you only need the low-level shared primitives, install `EdgeBaseCore` directl
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift-core", from: "0.2.9")
+    .package(url: "https://github.com/edge-base/edgebase-swift-core", from: "0.3.0")
 ]
 ```
 

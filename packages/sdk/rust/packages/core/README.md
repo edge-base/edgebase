@@ -51,7 +51,7 @@ For published applications:
 
 ```toml
 [dependencies]
-edgebase-core = "0.2.9"
+edgebase-core = "0.3.0"
 ```
 
 Or:
