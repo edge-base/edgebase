@@ -710,9 +710,12 @@ jobs:
         with:
           elixir-version: '1.17.3'
           otp-version: '27.1'
+          install-hex: false
           install-rebar: false
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Prepare Elixir tooling
+        run: mix archive.install github hexpm/hex branch latest --force
       - name: Start EdgeBase test server and run Elixir E2E
         run: |
           node ./scripts/run-with-services.mjs --server -- \
