@@ -1579,6 +1579,12 @@ export const deployCommand = new Command('deploy')
     // - origin: '*' + credentials: true conflict (M10)
 
     if (options.dryRun) {
+      const dryRunBundle = createAppBundle(projectDir, {
+        outputDir: join('.edgebase', 'targets', 'deploy-app-dry-run'),
+        overwrite: true,
+        injectedEnv: releaseVars,
+      });
+
       if (isJson()) {
         const result: Record<string, unknown> = {
           status: 'dry-run',
@@ -1586,6 +1592,8 @@ export const deployCommand = new Command('deploy')
           functions: functionsCount,
           warnings: warnings.length,
           errors: 0,
+          bundleDir: dryRunBundle.outputDir,
+          frontend: dryRunBundle.manifest.frontend,
         };
         if (hasSchemaSnapshot || currentSnapshot) result.schemaSnapshot = true;
         console.log(JSON.stringify(result));
@@ -1599,6 +1607,13 @@ export const deployCommand = new Command('deploy')
       if (functionsCount > 0) {
         console.log(chalk.green('✓'), `Functions validated: ${functionsCount} file(s)`);
       }
+      console.log(chalk.green('✓'), `Deploy bundle: ${dryRunBundle.outputDir}`);
+      console.log(
+        chalk.green('✓'),
+        dryRunBundle.manifest.frontend.enabled
+          ? `Frontend bundle: enabled at ${dryRunBundle.manifest.frontend.mountPath ?? '/'}`
+          : 'Frontend bundle: disabled',
+      );
       if (warnings.length > 0) {
         console.log(chalk.yellow('⚠'), `Warnings: ${warnings.length}`);
       }

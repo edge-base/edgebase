@@ -237,9 +237,11 @@ export default defineConfig({
 
   // ─── Email ────────────────────────────────────────────
   email: {
-    provider: 'resend',
+    provider: 'resend', // 'resend' | 'sendgrid' | 'mailgun' | 'ses' | 'cloudflare'
     apiKey: '...',
     from: 'noreply@my-app.com',
+    accountId: '...', // Cloudflare REST only
+    binding: 'EMAIL', // Cloudflare Workers send_email binding only
   },
 
   // ─── KV (User-defined namespaces) ──────────────────── 

@@ -98,6 +98,11 @@ public struct GeneratedDbApi {
         return try await http.post("/auth/mfa/recovery", body)
     }
 
+    /// Regenerate MFA recovery codes — POST /api/auth/mfa/recovery-codes
+    public func authMfaRecoveryCodesRegenerate(_ body: [String: Any]) async throws -> Any {
+        return try await http.post("/auth/mfa/recovery-codes", body)
+    }
+
     /// Disable TOTP factor — DELETE /api/auth/mfa/totp
     public func authMfaTotpDelete(_ body: [String: Any]) async throws -> Any {
         return try await http.delete("/auth/mfa/totp", body)
@@ -569,6 +574,7 @@ public enum ApiPaths {
     public static let AUTH_GET_ME = "/api/auth/me"
     public static let AUTH_MFA_FACTORS = "/api/auth/mfa/factors"
     public static let AUTH_MFA_RECOVERY = "/api/auth/mfa/recovery"
+    public static let AUTH_MFA_RECOVERY_CODES_REGENERATE = "/api/auth/mfa/recovery-codes"
     public static let AUTH_MFA_TOTP_DELETE = "/api/auth/mfa/totp"
     public static let AUTH_MFA_TOTP_ENROLL = "/api/auth/mfa/totp/enroll"
     public static let AUTH_MFA_TOTP_VERIFY = "/api/auth/mfa/totp/verify"

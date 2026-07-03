@@ -908,6 +908,8 @@ const wranglerArgs = [
   'dev',
   '--config',
   join(artifactRoot, 'wrangler.toml'),
+  '--env-file',
+  devVarsPath,
   '--port',
   String(selectedPort.port),
   '--ip',

@@ -114,12 +114,6 @@ const KNOWN_EXTERNAL = new Set([
   'checkDatabaseSubscriptionConnection',
   'checkRoomConnection',
   'getRoomMetadata',
-  'getRoomRealtimeSession',
-  'createRoomRealtimeSession',
-  'createRoomRealtimeIceServers',
-  'addRoomRealtimeTracks',
-  'renegotiateRoomRealtimeSession',
-  'closeRoomRealtimeTracks',
   'trackEvents',
 ]);
 

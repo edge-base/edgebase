@@ -93,6 +93,11 @@ class GeneratedDbApi {
     return _http.post('/auth/mfa/recovery', body);
   }
 
+  /// Regenerate MFA recovery codes — POST /api/auth/mfa/recovery-codes
+  Future<dynamic> authMfaRecoveryCodesRegenerate(Object? body) async {
+    return _http.post('/auth/mfa/recovery-codes', body);
+  }
+
   /// Disable TOTP factor — DELETE /api/auth/mfa/totp
   Future<dynamic> authMfaTotpDelete(Object? body) async {
     return _http.delete('/auth/mfa/totp', body);
@@ -566,6 +571,7 @@ class ApiPaths {
   static const AUTH_GET_ME = '/api/auth/me';
   static const AUTH_MFA_FACTORS = '/api/auth/mfa/factors';
   static const AUTH_MFA_RECOVERY = '/api/auth/mfa/recovery';
+  static const AUTH_MFA_RECOVERY_CODES_REGENERATE = '/api/auth/mfa/recovery-codes';
   static const AUTH_MFA_TOTP_DELETE = '/api/auth/mfa/totp';
   static const AUTH_MFA_TOTP_ENROLL = '/api/auth/mfa/totp/enroll';
   static const AUTH_MFA_TOTP_VERIFY = '/api/auth/mfa/totp/verify';

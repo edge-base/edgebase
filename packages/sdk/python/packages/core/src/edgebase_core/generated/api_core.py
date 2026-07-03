@@ -84,6 +84,10 @@ class GeneratedDbApi:
         """Use recovery code during MFA signin — POST /api/auth/mfa/recovery"""
         return self._http.post("/auth/mfa/recovery", body)
 
+    def auth_mfa_recovery_codes_regenerate(self, body: Any) -> Any:
+        """Regenerate MFA recovery codes — POST /api/auth/mfa/recovery-codes"""
+        return self._http.post("/auth/mfa/recovery-codes", body)
+
     def auth_mfa_totp_delete(self, body: Any) -> Any:
         """Disable TOTP factor — DELETE /api/auth/mfa/totp"""
         return self._http.delete("/auth/mfa/totp", body)
@@ -451,6 +455,7 @@ class ApiPaths:
     AUTH_GET_ME = "/api/auth/me"
     AUTH_MFA_FACTORS = "/api/auth/mfa/factors"
     AUTH_MFA_RECOVERY = "/api/auth/mfa/recovery"
+    AUTH_MFA_RECOVERY_CODES_REGENERATE = "/api/auth/mfa/recovery-codes"
     AUTH_MFA_TOTP_DELETE = "/api/auth/mfa/totp"
     AUTH_MFA_TOTP_ENROLL = "/api/auth/mfa/totp/enroll"
     AUTH_MFA_TOTP_VERIFY = "/api/auth/mfa/totp/verify"

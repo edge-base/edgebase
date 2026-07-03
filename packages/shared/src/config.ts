@@ -578,11 +578,16 @@ export interface EmailSubjectOverrides {
 }
 
 export interface EmailConfig {
-  provider: 'resend' | 'sendgrid' | 'mailgun' | 'ses';
-  apiKey: string;
+  provider: 'resend' | 'sendgrid' | 'mailgun' | 'ses' | 'cloudflare';
+  /** Provider API key. Cloudflare Workers bindings do not require this. */
+  apiKey?: string;
   from: string;
   domain?: string;
   region?: string;
+  /** Cloudflare account ID for Email Service REST API delivery. */
+  accountId?: string;
+  /** Cloudflare Workers send_email binding name. Defaults to 'EMAIL'. */
+  binding?: string;
   appName?: string;
   /** Default locale for auth emails when user has no preference. Default: 'en' */
   defaultLocale?: string;
@@ -669,6 +674,7 @@ export interface AuthAccess {
   mfaTotpVerify?: AuthAccessRule;
   mfaVerify?: AuthAccessRule;
   mfaRecovery?: AuthAccessRule;
+  mfaRecoveryCodesRegenerate?: AuthAccessRule;
   mfaTotpDelete?: AuthAccessRule;
   mfaFactors?: AuthAccessRule;
   requestPasswordReset?: AuthAccessRule;
@@ -1080,25 +1086,36 @@ export interface RoomNamespaceConfig {
 }
 
 export interface RoomAccess {
-  metadata?: (auth: AuthContext | null, roomId: string) => boolean | Promise<boolean>;
-  join?: (auth: AuthContext | null, roomId: string) => boolean | Promise<boolean>;
+  metadata?: (
+    auth: AuthContext | null,
+    roomId: string,
+    ctx: RoomHandlerContext,
+  ) => boolean | Promise<boolean>;
+  join?: (
+    auth: AuthContext | null,
+    roomId: string,
+    ctx: RoomHandlerContext,
+  ) => boolean | Promise<boolean>;
   action?: (
     auth: AuthContext | null,
     roomId: string,
     actionType: string,
     payload: unknown,
+    ctx: RoomHandlerContext,
   ) => boolean | Promise<boolean>;
   signal?: (
     auth: AuthContext | null,
     roomId: string,
     event: string,
     payload: unknown,
+    ctx: RoomHandlerContext,
   ) => boolean | Promise<boolean>;
   admin?: (
     auth: AuthContext | null,
     roomId: string,
     operation: string,
     payload: unknown,
+    ctx: RoomHandlerContext,
   ) => boolean | Promise<boolean>;
 }
 
@@ -1705,6 +1722,38 @@ export type FunctionTrigger =
   | StorageTrigger;
 
 /** Context object passed to function handlers at runtime. */
+export interface FunctionStorageProxy {
+  bucket(bucket: string): FunctionStorageProxy;
+  put(
+    key: string,
+    value: ReadableStream | ArrayBuffer | string,
+    options?: { contentType?: string; customMetadata?: Record<string, string> },
+  ): Promise<void>;
+  get(key: string): Promise<{
+    body: ReadableStream;
+    contentType: string;
+    size: number;
+    customMetadata: Record<string, string>;
+  } | null>;
+  delete(key: string): Promise<void>;
+  getSignedUrl(key: string, options?: { expiresIn?: number }): Promise<string>;
+  getSignedUploadUrl(
+    key: string,
+    options?: { expiresIn?: number; maxBytes?: number | null },
+  ): Promise<{ url: string; expiresAt: string; maxBytes: number | null }>;
+  list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<{
+    keys: Array<{ key: string; size: number; contentType: string }>;
+    cursor?: string;
+    truncated: boolean;
+  }>;
+  head(key: string): Promise<{
+    key: string;
+    size: number;
+    contentType: string;
+    customMetadata: Record<string, string>;
+  } | null>;
+}
+
 export interface FunctionContext {
   /** The incoming HTTP request (for HTTP-triggered functions). */
   request?: Request;
@@ -1726,6 +1775,15 @@ export interface FunctionContext {
   admin?: unknown;
   /** Convenience database proxy available in EdgeBase runtime. */
   db?: unknown;
+  /** Configured server-side email sender, when an EdgeBase email provider is available. */
+  email?: {
+    send(options: {
+      to: string;
+      subject: string;
+      html?: string;
+      text?: string;
+    }): Promise<{ success: boolean; messageId?: string }>;
+  };
   /** Trigger metadata for DB/storage/auth/schedule functions. */
   trigger?: {
     namespace?: string;
@@ -1739,7 +1797,7 @@ export interface FunctionContext {
   after?: Record<string, unknown>;
   /** Storage trigger file metadata. */
   file?: Record<string, unknown>;
-  storage?: unknown;
+  storage?: FunctionStorageProxy;
   analytics?: unknown;
   pluginConfig?: Record<string, unknown>;
 }

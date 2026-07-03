@@ -8,6 +8,7 @@ import {
   rebuildCompiledRoutes,
   registerFunction,
   registerMiddleware,
+  wrapMethodExport,
 } from '../lib/functions.js';
 import { functionsRoute } from '../routes/functions.js';
 import type { Env } from '../types.js';
@@ -102,6 +103,20 @@ afterEach(() => {
   clearMiddlewareRegistry();
   rebuildCompiledRoutes();
   setConfig({});
+});
+
+describe('function registry wrapping', () => {
+  it('preserves full default-export function definitions with non-HTTP triggers', () => {
+    const scheduleFunction: FunctionDefinition = {
+      trigger: { type: 'schedule', cron: '*/15 * * * *' },
+      handler: async () => ({ ok: true }),
+    };
+
+    const wrapped = wrapMethodExport(scheduleFunction, '*');
+
+    expect(wrapped).toBe(scheduleFunction);
+    expect(wrapped.trigger).toEqual({ type: 'schedule', cron: '*/15 * * * *' });
+  });
 });
 
 describe('functionsRoute FunctionError compatibility', () => {

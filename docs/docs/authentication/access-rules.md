@@ -89,6 +89,7 @@ type AuthAccessRule = (
 | `mfaTotpVerify` | Confirm TOTP enrollment |
 | `mfaVerify` | Complete MFA challenge |
 | `mfaRecovery` | Complete MFA via recovery code |
+| `mfaRecoveryCodesRegenerate` | Regenerate MFA recovery codes |
 | `mfaTotpDelete` | Disable TOTP |
 | `mfaFactors` | List MFA factors |
 | `requestPasswordReset` | Request password reset |

@@ -94,7 +94,7 @@ export class ClientEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> 
 
   constructor(url: string, options?: JuneClientOptions<Schema>) {
     if (!url || typeof url !== 'string') {
-      throw new EdgeBaseError(0, `[EdgeBase] Invalid URL: expected a non-empty string, got ${url === undefined ? 'undefined' : url === null ? 'null' : JSON.stringify(url)}. Set NEXT_PUBLIC_EDGEBASE_URL or pass a URL to createClient().`, undefined, 'invalid-url');
+      throw new EdgeBaseError(0, `[EdgeBase] Invalid URL: expected a non-empty string, got ${url === undefined ? 'undefined' : url === null ? 'null' : JSON.stringify(url)}. Pass a URL to createClient() or set your app's public EdgeBase URL env var (for example VITE_EDGEBASE_URL or NEXT_PUBLIC_EDGEBASE_URL).`, undefined, 'invalid-url');
     }
     const baseUrl = url.replace(/\/$/, '');
     this.tokenManager = new TokenManager(baseUrl, {

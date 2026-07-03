@@ -41,6 +41,7 @@ import { generateId } from './uuid.js';
 import { DbRef, TableRef, DefaultDbApi, HttpClient, ContextManager } from '@edge-base/core';
 import { InternalHttpTransport } from './internal-transport.js';
 import { executeProviderAwareSql } from './provider-aware-sql.js';
+import { createEmailProvider } from './email-provider.js';
 
 // ─── Function Context Types ───
 
@@ -67,6 +68,15 @@ export interface AdminAuthContext {
   deleteUser(userId: string): Promise<void>;
   setCustomClaims(userId: string, claims: Record<string, unknown>): Promise<void>;
   revokeAllSessions(userId: string): Promise<void>;
+}
+
+export interface FunctionEmailProxy {
+  send(options: {
+    to: string;
+    subject: string;
+    html?: string;
+    text?: string;
+  }): Promise<{ success: boolean; messageId?: string }>;
 }
 
 /**
@@ -186,6 +196,8 @@ export interface FunctionPushProxy {
 
 /** Storage proxy for App Functions — wraps R2Bucket with convenience methods. */
 export interface FunctionStorageProxy {
+  /** Return a proxy scoped to a named storage bucket. */
+  bucket(bucket: string): FunctionStorageProxy;
   put(
     key: string,
     value: ReadableStream | ArrayBuffer | string,
@@ -199,6 +211,10 @@ export interface FunctionStorageProxy {
   } | null>;
   delete(key: string): Promise<void>;
   getSignedUrl(key: string, options?: { expiresIn?: number }): Promise<string>;
+  getSignedUploadUrl(
+    key: string,
+    options?: { expiresIn?: number; maxBytes?: number | null },
+  ): Promise<{ url: string; expiresAt: string; maxBytes: number | null }>;
   list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<{
     keys: Array<{ key: string; size: number; contentType: string }>;
     cursor?: string;
@@ -357,10 +373,27 @@ export interface FunctionContext {
   data?: { before?: Record<string, unknown>; after?: Record<string, unknown> };
   before?: Record<string, unknown>;
   after?: Record<string, unknown>;
+  /** Configured server-side email sender, when an EdgeBase email provider is available. */
+  email?: FunctionEmailProxy;
+  /** Environment variables, secrets, and bindings available to the Worker. */
+  env?: Record<string, unknown>;
   storage?: FunctionStorageProxy; // Available when R2 binding present
   analytics?: unknown; // AnalyticsAdapter when ANALYTICS_APP binding present
   /** Plugin-specific config from edgebase.config.ts plugins section. */
   pluginConfig?: Record<string, unknown>;
+}
+
+function escapeEmailHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function textEmailToHtml(text: string): string {
+  return `<pre style="font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; white-space: pre-wrap;">${escapeEmailHtml(text)}</pre>`;
 }
 
 // ─── Function Registry ───
@@ -693,6 +726,19 @@ export function wrapMethodExport(
   method: string,
   runtimeTrigger?: { path?: string },
 ): FunctionDefinition {
+  if (
+    method === '*' &&
+    handler &&
+    typeof handler === 'object' &&
+    'handler' in handler &&
+    'trigger' in handler &&
+    handler.trigger &&
+    typeof handler.trigger === 'object' &&
+    'type' in handler.trigger
+  ) {
+    return handler as FunctionDefinition;
+  }
+
   // handler can be: raw function, or { handler, captcha? } from defineFunction()
   let fn: (ctx: unknown) => Promise<unknown>;
   let captcha: boolean | undefined;
@@ -1096,6 +1142,19 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
     executionCtx: options.executionCtx,
     preferDirectDo: options.preferDirectDoDb,
   });
+  const emailProvider = createEmailProvider(options.config.email, options.env);
+  const email: FunctionEmailProxy | undefined = emailProvider
+    ? {
+        async send(message) {
+          const to = message.to.trim();
+          const subject = message.subject.trim();
+          if (!to) throw new Error('email.send() requires a recipient.');
+          if (!subject) throw new Error('email.send() requires a subject.');
+          const html = message.html ?? textEmailToHtml(message.text ?? '');
+          return emailProvider.send({ to, subject, html });
+        },
+      }
+    : undefined;
   const sqlProviderAware = (
     namespace: string,
     id: string | undefined,
@@ -1282,6 +1341,8 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
     auth: options.auth,
     db: admin.db,
     admin,
+    ...(options.env ? { env: options.env as unknown as Record<string, unknown> } : {}),
+    ...(email ? { email } : {}),
     params: options.params ?? {},
   };
 
@@ -1826,6 +1887,10 @@ export function buildFunctionStorageProxy(
   const prefix = (key: string) => `${bucket}/${key}`;
 
   return {
+    bucket(name) {
+      return buildFunctionStorageProxy(r2, name, env, workerUrl);
+    },
+
     async put(key, value, options) {
       const httpMeta: R2PutOptions = {};
       if (options?.contentType) httpMeta.httpMetadata = { contentType: options.contentType };
@@ -1856,6 +1921,23 @@ export function buildFunctionStorageProxy(
       const token = await createSignedToken(key, bucket, expiresAt, secret);
       const base = workerUrl ?? 'http://localhost:8787';
       return `${base}/api/storage/${encodeURIComponent(bucket)}/${key}?token=${token}`;
+    },
+
+    async getSignedUploadUrl(key, options) {
+      const secret = (env as unknown as Record<string, string>).JWT_USER_SECRET;
+      if (!secret) throw new Error('Signed upload URLs require JWT_USER_SECRET to be configured.');
+      const expiresIn = options?.expiresIn ?? 1800;
+      const expiresAt = Date.now() + expiresIn * 1000;
+      const maxBytes = typeof options?.maxBytes === 'number' && Number.isFinite(options.maxBytes)
+        ? Math.max(0, Math.trunc(options.maxBytes))
+        : null;
+      const token = await createSignedToken(key, bucket, expiresAt, secret, maxBytes);
+      const base = workerUrl ?? 'http://localhost:8787';
+      return {
+        url: `${base}/api/storage/${encodeURIComponent(bucket)}/upload?token=${token}&key=${encodeURIComponent(key)}`,
+        expiresAt: new Date(expiresAt).toISOString(),
+        maxBytes,
+      };
     },
 
     async list(options) {

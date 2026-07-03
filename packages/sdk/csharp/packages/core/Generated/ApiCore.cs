@@ -89,6 +89,10 @@ public class GeneratedDbApi
     public Task<Dictionary<string, object?>> AuthMfaRecoveryAsync(object? body = null, CancellationToken ct = default)
         => _http.PostAsync("/api/auth/mfa/recovery", body, ct);
 
+    /// <summary>Regenerate MFA recovery codes — POST /api/auth/mfa/recovery-codes</summary>
+    public Task<Dictionary<string, object?>> AuthMfaRecoveryCodesRegenerateAsync(object? body = null, CancellationToken ct = default)
+        => _http.PostAsync("/api/auth/mfa/recovery-codes", body, ct);
+
     /// <summary>Disable TOTP factor — DELETE /api/auth/mfa/totp</summary>
     public Task<Dictionary<string, object?>> AuthMfaTotpDeleteAsync(object? body = null, CancellationToken ct = default)
         => _http.DeleteAsync("/api/auth/mfa/totp", body, ct);
@@ -489,6 +493,7 @@ public static class ApiPaths
     public const string AUTH_GET_ME = "/api/auth/me";
     public const string AUTH_MFA_FACTORS = "/api/auth/mfa/factors";
     public const string AUTH_MFA_RECOVERY = "/api/auth/mfa/recovery";
+    public const string AUTH_MFA_RECOVERY_CODES_REGENERATE = "/api/auth/mfa/recovery-codes";
     public const string AUTH_MFA_TOTP_DELETE = "/api/auth/mfa/totp";
     public const string AUTH_MFA_TOTP_ENROLL = "/api/auth/mfa/totp/enroll";
     public const string AUTH_MFA_TOTP_VERIFY = "/api/auth/mfa/totp/verify";

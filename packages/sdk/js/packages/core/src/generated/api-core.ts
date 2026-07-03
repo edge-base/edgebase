@@ -39,6 +39,8 @@ export interface GeneratedDbApi {
   authMfaVerify(body: unknown): Promise<unknown>;
   /** Use recovery code during MFA signin — POST /api/auth/mfa/recovery */
   authMfaRecovery(body: unknown): Promise<unknown>;
+  /** Regenerate MFA recovery codes — POST /api/auth/mfa/recovery-codes */
+  authMfaRecoveryCodesRegenerate(body: unknown): Promise<unknown>;
   /** Disable TOTP factor — DELETE /api/auth/mfa/totp */
   authMfaTotpDelete(body: unknown): Promise<unknown>;
   /** List MFA factors for authenticated user — GET /api/auth/mfa/factors */
@@ -265,6 +267,10 @@ export class DefaultDbApi implements GeneratedDbApi {
 
   async authMfaRecovery(body: unknown): Promise<unknown> {
     return this.transport.request('POST', '/api/auth/mfa/recovery', { body });
+  }
+
+  async authMfaRecoveryCodesRegenerate(body: unknown): Promise<unknown> {
+    return this.transport.request('POST', '/api/auth/mfa/recovery-codes', { body });
   }
 
   async authMfaTotpDelete(body: unknown): Promise<unknown> {
@@ -665,6 +671,7 @@ export class ApiPaths {
   static readonly AUTH_GET_ME = '/api/auth/me';
   static readonly AUTH_MFA_FACTORS = '/api/auth/mfa/factors';
   static readonly AUTH_MFA_RECOVERY = '/api/auth/mfa/recovery';
+  static readonly AUTH_MFA_RECOVERY_CODES_REGENERATE = '/api/auth/mfa/recovery-codes';
   static readonly AUTH_MFA_TOTP_DELETE = '/api/auth/mfa/totp';
   static readonly AUTH_MFA_TOTP_ENROLL = '/api/auth/mfa/totp/enroll';
   static readonly AUTH_MFA_TOTP_VERIFY = '/api/auth/mfa/totp/verify';

@@ -82,6 +82,15 @@ function extractUser(token: string): TokenUser | null {
   }
 }
 
+function extractSessionId(token: string): string | null {
+  try {
+    const payload = decodeJwtPayload(token);
+    return typeof payload.jti === 'string' && payload.jti ? payload.jti : null;
+  } catch {
+    return null;
+  }
+}
+
 type StorageAdapter = ReturnType<typeof createBrowserStorage>;
 const LOCK_TIMEOUT_MS = 10_000;
 
@@ -367,6 +376,12 @@ export class TokenManager {
   /** Get the stored refresh token (for signout) */
   getRefreshToken(): string | null {
     return this.storage.getItem(this.keys.refreshTokenKey);
+  }
+
+  /** Get the current refresh-token session id when the token carries a jti claim. */
+  getCurrentSessionId(): string | null {
+    const refreshToken = this.storage.getItem(this.keys.refreshTokenKey);
+    return refreshToken ? extractSessionId(refreshToken) : null;
   }
 
   /** Drop the current access token so the next request must re-authenticate or refresh. */

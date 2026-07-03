@@ -27,11 +27,13 @@ export default defineConfig({
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `provider` | `string` | ✅ | `'resend'` \| `'sendgrid'` \| `'mailgun'` \| `'ses'` |
-| `apiKey` | `string` | ✅ | API key from your email provider |
+| `provider` | `string` | ✅ | `'resend'` \| `'sendgrid'` \| `'mailgun'` \| `'ses'` \| `'cloudflare'` |
+| `apiKey` | `string` | Provider-dependent | API key from your email provider. Not required when Cloudflare Workers `send_email` binding is used |
 | `from` | `string` | ✅ | Sender email address (must be verified with provider) |
 | `domain` | `string` | Mailgun only | Mailgun sending domain |
 | `region` | `string` | SES only | AWS region (e.g. `'us-east-1'`) |
+| `accountId` | `string` | Cloudflare REST only | Cloudflare account ID for Email Service REST delivery |
+| `binding` | `string` | Cloudflare Workers only | Workers `send_email` binding name. Defaults to `'EMAIL'` |
 | `appName` | `string` | — | Display name shown in email templates (e.g. "My App") |
 | `verifyUrl` | `string` | — | Custom email verification URL. Use `{token}` as placeholder |
 | `resetUrl` | `string` | — | Custom password reset URL. Use `{token}` as placeholder |
@@ -163,6 +165,43 @@ SES HTTP API requests must be AWS SigV4-signed. EdgeBase expects `apiKey` in the
 If your AWS account is still in the SES sandbox, you may need to verify **both** the sender and the recipient email address before any smoke test mail can be delivered.
 :::
 
+### Cloudflare Email Service
+
+Works with Cloudflare Workers `send_email` bindings in hosted Workers runtimes
+and the Cloudflare REST API in local, Docker, or other non-Workers runtimes.
+
+Workers binding:
+
+```typescript
+email: {
+  provider: 'cloudflare',
+  from: 'noreply@my-app.com',
+  binding: 'EMAIL',
+},
+```
+
+REST API:
+
+```typescript
+email: {
+  provider: 'cloudflare',
+  apiKey: process.env.CLOUDFLARE_EMAIL_API_TOKEN,
+  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+  from: 'noreply@my-app.com',
+},
+```
+
+- **Setup**: Cloudflare Dashboard → Email Service → Sending
+- **Workers**: configure a `send_email` binding, then set `binding` if the
+  binding name is not `EMAIL`
+- **REST**: set an API token with permission to send through Email Service and
+  the Cloudflare account ID
+
+:::caution Cloudflare Email Service availability
+Cloudflare Email Service is still evolving. Verify your sending domain and test
+delivery in the exact runtime target before relying on it for production auth.
+:::
+
 ## Provider Comparison
 
 | Provider | Free Tier | Best For |
@@ -171,6 +210,7 @@ If your AWS account is still in the SES sandbox, you may need to verify **both**
 | SendGrid | 100/day | Teams already using SendGrid |
 | Mailgun | 1,000/month (3mo) | EU data residency requirements |
 | AWS SES | Pay-as-you-go | High-volume (100K+ emails/month) |
+| Cloudflare Email Service | Cloudflare plan-dependent | Workers-first apps and Cloudflare-hosted auth mail |
 
 ## What Emails Are Sent?
 
@@ -214,7 +254,7 @@ In this repository, local worker startup also uses a generated dev shim. If you 
 
 ## Smoke Test Strategy Across Providers
 
-For `Resend / SendGrid / Mailgun / SES`, reuse the same harness buttons instead of making provider-specific clients:
+For `Resend / SendGrid / Mailgun / SES / Cloudflare`, reuse the same harness buttons instead of making provider-specific clients:
 
 1. Configure the provider in `edgebase.config.ts`
 2. Restart the local EdgeBase dev server
@@ -229,7 +269,7 @@ That means:
 
 ## Self-Hosting (Docker)
 
-When self-hosting with Docker, the same email configuration works identically. All four HTTP REST providers are fully supported in the Docker environment.
+When self-hosting with Docker, the same email configuration works identically. All HTTP REST providers are fully supported in the Docker environment.
 
 ```typescript
 // Works the same in Docker

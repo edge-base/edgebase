@@ -65,6 +65,13 @@ describe('auth-phone — signin/phone', () => {
     // In dev mode (no SMS provider), code is returned for testing
     expect(typeof data.code).toBe('string');
     expect(data.code.length).toBe(6);
+
+    const storedOtp = await (globalThis as any).env.KV.get(`phone-otp:${phone}`, 'json') as {
+      code?: string;
+      codeHash?: string;
+    } | null;
+    expect(storedOtp?.code).toBeUndefined();
+    expect(storedOtp?.codeHash).toMatch(/^hmac-sha256:[a-f0-9]{64}$/);
   });
 
   it('phone 누락 → 400', async () => {
@@ -221,6 +228,13 @@ describe('auth-phone — link/phone', () => {
     expect(data.ok).toBe(true);
     // Dev mode: code returned for testing
     expect(typeof data.code).toBe('string');
+
+    const storedOtp = await (globalThis as any).env.KV.get(`phone-link-otp:${phone}`, 'json') as {
+      code?: string;
+      codeHash?: string;
+    } | null;
+    expect(storedOtp?.code).toBeUndefined();
+    expect(storedOtp?.codeHash).toMatch(/^hmac-sha256:[a-f0-9]{64}$/);
   });
 
   it('미인증 → 401', async () => {

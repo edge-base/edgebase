@@ -10,6 +10,28 @@ describe('buildFunctionContext admin.db', () => {
     vi.unstubAllGlobals();
   });
 
+  it('exposes worker environment values to app functions', async () => {
+    const env = {
+      NOTION_IMPORT_SECRET: 'test-secret',
+      CUSTOM_BINDING: { id: 'binding' },
+    };
+
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/feed-summary'),
+      auth: null,
+      databaseNamespace: {} as DurableObjectNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      d1Database: {} as D1Database,
+      config: {
+        databases: {},
+      },
+      env: env as never,
+    });
+
+    expect(ctx.env?.NOTION_IMPORT_SECRET).toBe('test-secret');
+    expect(ctx.env?.CUSTOM_BINDING).toBe(env.CUSTOM_BINDING);
+  });
+
   it('routes table proxy calls through the worker when workerUrl is available', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ items: [{ id: 'p1' }] }), {
@@ -195,6 +217,71 @@ describe('buildFunctionContext admin.db', () => {
         }),
       }),
     );
+  });
+
+  it('exposes the configured email provider to app functions', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ messageId: 'msg_1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/send-invite'),
+      auth: null,
+      databaseNamespace: {} as DurableObjectNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      d1Database: {} as D1Database,
+      config: {
+        email: {
+          provider: 'cloudflare',
+          from: 'noreply@example.com',
+        },
+      },
+      env: {
+        EDGEBASE_EMAIL_API_URL: 'http://mail.local',
+      } as never,
+    });
+
+    expect(ctx.email).toBeDefined();
+    await expect(
+      ctx.email?.send({
+        to: 'member@example.com',
+        subject: 'Workspace invite',
+        html: '<p>Join the workspace</p>',
+      }),
+    ).resolves.toEqual({ success: true, messageId: 'msg_1' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://mail.local/send',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+        }),
+        body: JSON.stringify({
+          from: 'noreply@example.com',
+          to: 'member@example.com',
+          subject: 'Workspace invite',
+          html: '<p>Join the workspace</p>',
+        }),
+      }),
+    );
+  });
+
+  it('omits the email sender when no provider is configured', () => {
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/no-email'),
+      auth: null,
+      databaseNamespace: {} as DurableObjectNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      d1Database: {} as D1Database,
+      config: {},
+    });
+
+    expect(ctx.email).toBeUndefined();
   });
 
   it('rejects instance ids for single-instance admin.sqlProviderAware calls before touching direct backends', async () => {

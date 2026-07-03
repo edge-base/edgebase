@@ -95,6 +95,11 @@ open class GeneratedDbApi(protected val http: HttpClient) {
     suspend fun authMfaRecovery(body: Map<String, Any?> = emptyMap()): Any? =
         http.post("/auth/mfa/recovery", body)
 
+    /** Regenerate MFA recovery codes — POST /api/auth/mfa/recovery-codes */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun authMfaRecoveryCodesRegenerate(body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/auth/mfa/recovery-codes", body)
+
     /** Disable TOTP factor — DELETE /api/auth/mfa/totp */
     @Suppress("UNCHECKED_CAST")
     suspend fun authMfaTotpDelete(body: Map<String, Any?> = emptyMap()): Any? =
@@ -566,6 +571,7 @@ object ApiPaths {
     const val AUTH_GET_ME = "/api/auth/me"
     const val AUTH_MFA_FACTORS = "/api/auth/mfa/factors"
     const val AUTH_MFA_RECOVERY = "/api/auth/mfa/recovery"
+    const val AUTH_MFA_RECOVERY_CODES_REGENERATE = "/api/auth/mfa/recovery-codes"
     const val AUTH_MFA_TOTP_DELETE = "/api/auth/mfa/totp"
     const val AUTH_MFA_TOTP_ENROLL = "/api/auth/mfa/totp/enroll"
     const val AUTH_MFA_TOTP_VERIFY = "/api/auth/mfa/totp/verify"

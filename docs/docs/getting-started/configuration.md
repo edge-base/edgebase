@@ -827,9 +827,11 @@ Configure an email provider for verification emails, password resets, and magic 
 ```typescript
 export default defineConfig({
   email: {
-    provider: 'resend', // 'resend' | 'sendgrid' | 'mailgun' | 'ses'
+    provider: 'resend', // 'resend' | 'sendgrid' | 'mailgun' | 'ses' | 'cloudflare'
     apiKey: 'RESEND_API_KEY',
     from: 'noreply@example.com',
+    accountId: '...', // Cloudflare REST only
+    binding: 'EMAIL', // Cloudflare Workers send_email binding only
     appName: 'My App',
     verifyUrl: 'https://app.com/auth/verify?token={token}',
     resetUrl: 'https://app.com/auth/reset?token={token}',

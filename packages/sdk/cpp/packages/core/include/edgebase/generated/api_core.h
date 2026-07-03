@@ -51,6 +51,8 @@ public:
   Result auth_mfa_verify(const std::string& json_body) const;
   /// Use recovery code during MFA signin — POST /api/auth/mfa/recovery
   Result auth_mfa_recovery(const std::string& json_body) const;
+  /// Regenerate MFA recovery codes — POST /api/auth/mfa/recovery-codes
+  Result auth_mfa_recovery_codes_regenerate(const std::string& json_body) const;
   /// Disable TOTP factor — DELETE /api/auth/mfa/totp
   Result auth_mfa_totp_delete(const std::string& json_body) const;
   /// List MFA factors for authenticated user — GET /api/auth/mfa/factors
@@ -364,6 +366,7 @@ namespace ApiPaths {
   constexpr const char* AUTH_GET_ME = "/api/auth/me";
   constexpr const char* AUTH_MFA_FACTORS = "/api/auth/mfa/factors";
   constexpr const char* AUTH_MFA_RECOVERY = "/api/auth/mfa/recovery";
+  constexpr const char* AUTH_MFA_RECOVERY_CODES_REGENERATE = "/api/auth/mfa/recovery-codes";
   constexpr const char* AUTH_MFA_TOTP_DELETE = "/api/auth/mfa/totp";
   constexpr const char* AUTH_MFA_TOTP_ENROLL = "/api/auth/mfa/totp/enroll";
   constexpr const char* AUTH_MFA_TOTP_VERIFY = "/api/auth/mfa/totp/verify";

@@ -801,12 +801,14 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     try {
+      const accessCtx = await this.buildHandlerContext();
       return await Promise.resolve(
         this.namespaceConfig.access.signal(
           this.buildAuthFromMeta(meta),
           this.roomId,
           event,
           payload,
+          accessCtx,
         ),
       );
     } catch {
@@ -948,8 +950,9 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     try {
+      const accessCtx = await this.buildHandlerContext();
       return await Promise.resolve(
-        adminAccess(this.buildAuthFromMeta(meta), this.roomId, operation, payload),
+        adminAccess(this.buildAuthFromMeta(meta), this.roomId, operation, payload, accessCtx),
       );
     } catch {
       return false;

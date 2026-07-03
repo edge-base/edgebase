@@ -98,4 +98,30 @@ describe('Room route access policy', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ visibility: 'public' });
   });
+
+  it('passes admin context into metadata access rules', async () => {
+    setConfig(defineConfig({
+      release: true,
+      rooms: {
+        game: {
+          access: {
+            metadata: (_auth, roomId, ctx) =>
+              roomId === 'room-1' && typeof ctx.admin.db === 'function',
+          },
+        },
+      },
+    }));
+
+    const app = createApp({
+      id: 'user-1',
+      role: 'user',
+      isAnonymous: false,
+    });
+    const response = await app.request('/api/room/metadata?namespace=game&id=room-1', {
+      method: 'GET',
+    }, createRoomEnv());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ visibility: 'public' });
+  });
 });

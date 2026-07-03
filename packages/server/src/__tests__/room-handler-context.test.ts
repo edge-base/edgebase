@@ -37,6 +37,7 @@ describe('RoomsDO handler context', () => {
     room.config = {
       databases: {
         shared: {
+          provider: 'do',
           tables: {
             signals: {
               schema: {
@@ -93,6 +94,7 @@ describe('RoomsDO handler context', () => {
     room.config = {
       databases: {
         shared: {
+          provider: 'do',
           tables: {
             signals: {
               schema: {

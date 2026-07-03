@@ -962,7 +962,8 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     }
     if (joinAccess && this.roomId) {
       try {
-        const allowed = await Promise.resolve(joinAccess(this.buildAuthFromMeta(meta), this.roomId));
+        const accessCtx = await this.buildHandlerContext();
+        const allowed = await Promise.resolve(joinAccess(this.buildAuthFromMeta(meta), this.roomId, accessCtx));
         if (!allowed) {
           this.safeSend(ws, {
             type: 'error',
@@ -972,11 +973,19 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
           ws.close(4003, 'Join denied');
           return;
         }
-      } catch {
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.error('[Room] join access rule failed', {
+          room: this.namespace && this.roomId ? `${this.namespace}::${this.roomId}` : null,
+          connectionId: meta.connectionId,
+          userId: meta.userId ?? null,
+          message: detail,
+          stack: error instanceof Error ? error.stack : undefined,
+        });
         this.safeSend(ws, {
           type: 'error',
           code: 'JOIN_DENIED',
-          message: 'Denied by room join access rule',
+          message: this.config.release ? 'Denied by room join access rule' : `Denied by room join access rule: ${detail}`,
         });
         ws.close(4003, 'Join denied');
         return;
@@ -1111,11 +1120,13 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     }
     if (actionAccess && this.roomId) {
       try {
+        const accessCtx = await this.buildHandlerContext();
         const allowed = await Promise.resolve(actionAccess(
           this.buildAuthFromMeta(meta),
           this.roomId,
           actionType,
           payload,
+          accessCtx,
         ));
         if (!allowed) {
           this.safeSend(ws, {
@@ -1400,8 +1411,8 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       env: this.env as never,
       executionCtx: this.ctx as never,
       serviceKey: resolveRootServiceKey(this.config, this.env as never),
-      // Room handlers run inside a DO and should always talk to DB DOs directly.
-      preferDirectDoDb: true,
+      // Keep room handler DB access provider-aware. Static D1/Postgres apps must
+      // read the same store as function routes, while DO-backed DBs still use DOs.
     });
     return {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

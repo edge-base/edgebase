@@ -105,6 +105,11 @@ public class GeneratedDbApi {
         return http.post("/auth/mfa/recovery", body);
     }
 
+    /** Regenerate MFA recovery codes — POST /api/auth/mfa/recovery-codes */
+    public Object authMfaRecoveryCodesRegenerate(Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/auth/mfa/recovery-codes", body);
+    }
+
     /** Disable TOTP factor — DELETE /api/auth/mfa/totp */
     public Object authMfaTotpDelete(Map<String, ?> body) throws EdgeBaseError {
         return http.delete("/auth/mfa/totp", body);
@@ -638,6 +643,7 @@ public class GeneratedDbApi {
         public static final String AUTH_GET_ME = "/api/auth/me";
         public static final String AUTH_MFA_FACTORS = "/api/auth/mfa/factors";
         public static final String AUTH_MFA_RECOVERY = "/api/auth/mfa/recovery";
+        public static final String AUTH_MFA_RECOVERY_CODES_REGENERATE = "/api/auth/mfa/recovery-codes";
         public static final String AUTH_MFA_TOTP_DELETE = "/api/auth/mfa/totp";
         public static final String AUTH_MFA_TOTP_ENROLL = "/api/auth/mfa/totp/enroll";
         public static final String AUTH_MFA_TOTP_VERIFY = "/api/auth/mfa/totp/verify";

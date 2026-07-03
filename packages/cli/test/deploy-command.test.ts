@@ -6,6 +6,22 @@ import { tmpdir } from 'node:os';
 const ensureCloudflareAuth = vi.fn();
 const ensureWranglerToml = vi.fn();
 const ensureRuntimeScaffold = vi.fn();
+const createAppBundle = vi.fn((projectDir: string) => ({
+  format: 'app-bundle',
+  projectDir,
+  outputDir: join(projectDir, '.edgebase', 'targets', 'deploy-app-dry-run'),
+  manifestPath: join(projectDir, '.edgebase', 'targets', 'deploy-app-dry-run', 'edgebase-app.json'),
+  manifest: {
+    frontend: {
+      enabled: true,
+      mountPath: '/',
+      spaFallback: true,
+    },
+    functions: {
+      count: 1,
+    },
+  },
+}));
 const loadConfigSafe = vi.fn(() => ({
   release: true,
   databases: {
@@ -28,6 +44,10 @@ vi.mock('../src/lib/runtime-scaffold.js', () => ({
   ensureRuntimeScaffold,
   getRuntimeServerSrcDir: vi.fn(() => '/tmp/runtime'),
   INTERNAL_D1_BINDINGS: [],
+}));
+
+vi.mock('../src/lib/app-bundle.js', () => ({
+  createAppBundle,
 }));
 
 vi.mock('../src/lib/load-config.js', () => ({
@@ -65,12 +85,17 @@ describe('deploy command dry-run', () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('skips remote auth and snapshot writes', async () => {
+  it('builds a deploy dry-run bundle while skipping remote auth and snapshot writes', async () => {
     const { deployCommand } = await import('../src/commands/deploy.js');
 
     await deployCommand.parseAsync(['--dry-run'], { from: 'user' });
 
     expect(loadConfigSafe).toHaveBeenCalled();
+    expect(createAppBundle).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      injectedEnv: {},
+      outputDir: join('.edgebase', 'targets', 'deploy-app-dry-run'),
+      overwrite: true,
+    }));
     expect(ensureCloudflareAuth).not.toHaveBeenCalled();
     expect(ensureWranglerToml).not.toHaveBeenCalled();
     expect(ensureRuntimeScaffold).not.toHaveBeenCalled();

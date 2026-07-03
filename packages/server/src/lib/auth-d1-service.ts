@@ -14,6 +14,7 @@
  */
 
 import type { AuthDb } from './auth-db-adapter.js';
+import { authSecretLookupKeys, hashAuthSecret } from './auth-token.js';
 
 // ─── Types ───
 
@@ -660,11 +661,12 @@ export async function createEmailToken(
   input: CreateEmailTokenInput,
 ): Promise<void> {
   const now = new Date().toISOString();
+  const tokenHash = await hashAuthSecret(input.token);
 
   await db.run(
     `INSERT INTO _email_tokens (token, userId, type, expiresAt, createdAt)
      VALUES (?, ?, ?, ?, ?)`,
-    [input.token, input.userId, input.type, input.expiresAt, now],
+    [tokenHash, input.userId, input.type, input.expiresAt, now],
   );
 }
 
@@ -676,9 +678,10 @@ export async function getEmailToken(
   db: AuthDb,
   token: string,
 ): Promise<Record<string, unknown> | null> {
+  const lookupKeys = await authSecretLookupKeys(token);
   const row = await db.first(
-    `SELECT * FROM _email_tokens WHERE token = ?`,
-    [token],
+    `SELECT * FROM _email_tokens WHERE token IN (${lookupKeys.map(() => '?').join(', ')})`,
+    lookupKeys,
   );
 
   if (!row) return null;
@@ -686,7 +689,10 @@ export async function getEmailToken(
   // Check expiration
   if (new Date(row.expiresAt as string) < new Date()) {
     // Clean up expired token
-    await db.run(`DELETE FROM _email_tokens WHERE token = ?`, [token]);
+    await db.run(
+      `DELETE FROM _email_tokens WHERE token IN (${lookupKeys.map(() => '?').join(', ')})`,
+      lookupKeys,
+    );
     return null;
   }
 
@@ -702,9 +708,10 @@ export async function getEmailTokenByType(
   token: string,
   type: string,
 ): Promise<Record<string, unknown> | null> {
+  const lookupKeys = await authSecretLookupKeys(token);
   return await db.first(
-    `SELECT * FROM _email_tokens WHERE token = ? AND type = ?`,
-    [token, type],
+    `SELECT * FROM _email_tokens WHERE token IN (${lookupKeys.map(() => '?').join(', ')}) AND type = ?`,
+    [...lookupKeys, type],
   );
 }
 
@@ -715,7 +722,11 @@ export async function deleteEmailToken(
   db: AuthDb,
   token: string,
 ): Promise<void> {
-  await db.run(`DELETE FROM _email_tokens WHERE token = ?`, [token]);
+  const lookupKeys = await authSecretLookupKeys(token);
+  await db.run(
+    `DELETE FROM _email_tokens WHERE token IN (${lookupKeys.map(() => '?').join(', ')})`,
+    lookupKeys,
+  );
 }
 
 /**
@@ -921,6 +932,25 @@ export async function createRecoveryCodes(
       params: [code.id, userId, code.codeHash, now],
     })),
   );
+}
+
+/**
+ * Replace all recovery codes for a user with a freshly generated batch.
+ */
+export async function replaceRecoveryCodes(
+  db: AuthDb,
+  userId: string,
+  codes: Array<{ id: string; codeHash: string }>,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db.batch([
+    { sql: `DELETE FROM _mfa_recovery_codes WHERE userId = ?`, params: [userId] },
+    ...codes.map((code) => ({
+      sql: `INSERT INTO _mfa_recovery_codes (id, userId, codeHash, used, createdAt)
+         VALUES (?, ?, ?, 0, ?)`,
+      params: [code.id, userId, code.codeHash, now],
+    })),
+  ]);
 }
 
 /**

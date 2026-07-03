@@ -93,6 +93,10 @@ Result GeneratedDbApi::auth_mfa_recovery(const std::string& json_body) const {
   return http_.post("/api/auth/mfa/recovery", json_body);
 }
 
+Result GeneratedDbApi::auth_mfa_recovery_codes_regenerate(const std::string& json_body) const {
+  return http_.post("/api/auth/mfa/recovery-codes", json_body);
+}
+
 Result GeneratedDbApi::auth_mfa_totp_delete(const std::string& json_body) const {
   return http_.del("/api/auth/mfa/totp", json_body);
 }

@@ -89,6 +89,34 @@ describe('Docker build argument construction', () => {
     expect(existsSync(join(contextDir, 'node_modules'))).toBe(false);
   });
 
+  it('adds managed D1 bindings to the Docker bundle wrangler config', () => {
+    writeFileSync(join(tmpDir, 'edgebase.config.ts'), 'export default { databases: { app: { tables: {} } } };\n');
+    writeFileSync(
+      join(tmpDir, 'wrangler.toml'),
+      [
+        'name = "docker-worker"',
+        'main = ".edgebase/runtime/server/src/index.ts"',
+        'compatibility_date = "2025-02-10"',
+        '',
+        '[[d1_databases]]',
+        'binding = "AUTH_DB"',
+        'database_name = "docker-worker-auth"',
+        'database_id = "local"',
+      ].join('\n'),
+    );
+    const bundleDir = join(tmpDir, '.edgebase', 'targets', 'docker-app');
+    mkdirSync(bundleDir, { recursive: true });
+    writeFileSync(join(bundleDir, 'wrangler.toml'), readFileSync(join(tmpDir, 'wrangler.toml'), 'utf-8'));
+
+    _internals.finalizeDockerWrangler(tmpDir, bundleDir);
+
+    const wranglerToml = readFileSync(join(bundleDir, 'wrangler.toml'), 'utf-8');
+    expect(wranglerToml).toContain('binding = "AUTH_DB"');
+    expect(wranglerToml).toContain('binding = "CONTROL_DB"');
+    expect(wranglerToml).toContain('binding = "DB_D1_APP"');
+    expect(wranglerToml).toContain('database_name = "docker-worker-db-app"');
+  });
+
   it('detects a responsive docker daemon via docker info', () => {
     const result = _internals.isDockerDaemonResponsive(() => Buffer.from('"27.0.0"\n'));
     expect(result).toBe(true);
@@ -206,7 +234,10 @@ describe('Dockerfile detection', () => {
 
     expect(dockerfile).toContain('edgebase-entrypoint.sh');
     expect(dockerfile).toContain('chown -R edgebase:edgebase "${PERSIST_DIR}" /home/edgebase/.config');
-    expect(dockerfile).toContain("exec su -s /bin/sh edgebase -c 'exec wrangler dev");
+    expect(dockerfile).toContain('exec su -s /bin/sh edgebase -c');
+    expect(dockerfile).toContain('exec wrangler dev --config "$WRANGLER_CONFIG"');
+    expect(dockerfile).toContain('--show-interactive-dev-session=false');
+    expect(dockerfile).toContain('> /usr/local/bin/edgebase-entrypoint.sh && chmod +x');
     expect(dockerfile).toContain('USER root');
   });
 

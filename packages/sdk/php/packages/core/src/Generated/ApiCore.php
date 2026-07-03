@@ -123,6 +123,12 @@ class GeneratedDbApi
         return $this->http->post('/auth/mfa/recovery', $body);
     }
 
+    /** Regenerate MFA recovery codes — POST /api/auth/mfa/recovery-codes */
+    public function auth_mfa_recovery_codes_regenerate(mixed $body = null): mixed
+    {
+        return $this->http->post('/auth/mfa/recovery-codes', $body);
+    }
+
     /** Disable TOTP factor — DELETE /api/auth/mfa/totp */
     public function auth_mfa_totp_delete(mixed $body = null): mixed
     {
@@ -790,6 +796,7 @@ final class ApiPaths
     public const AUTH_GET_ME = '/api/auth/me';
     public const AUTH_MFA_FACTORS = '/api/auth/mfa/factors';
     public const AUTH_MFA_RECOVERY = '/api/auth/mfa/recovery';
+    public const AUTH_MFA_RECOVERY_CODES_REGENERATE = '/api/auth/mfa/recovery-codes';
     public const AUTH_MFA_TOTP_DELETE = '/api/auth/mfa/totp';
     public const AUTH_MFA_TOTP_ENROLL = '/api/auth/mfa/totp/enroll';
     public const AUTH_MFA_TOTP_VERIFY = '/api/auth/mfa/totp/verify';

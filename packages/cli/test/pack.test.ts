@@ -347,6 +347,8 @@ export default defineConfig({
       'dev',
       '--config',
       realpathSync(join(projectDir, 'packed', 'wrangler.toml')),
+      '--env-file',
+      join(appDataRoot, manifest.launcher.runtimeDir, '.dev.vars'),
       '--persist-to',
       join(appDataRoot, manifest.launcher.stateDir),
     ]));

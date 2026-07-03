@@ -12,11 +12,13 @@
  *   - KV counter with expirationTtl: 60s
  */
 import { OpenAPIHono, createRoute, z, type HonoEnv } from '../lib/hono.js';
-import type { RoomNamespaceConfig } from '@edge-base/shared';
+import type { EdgeBaseConfig, RoomHandlerContext, RoomNamespaceConfig } from '@edge-base/shared';
 import type { Context } from 'hono';
 import { parseConfig } from '../lib/do-router.js';
+import { buildFunctionContext } from '../lib/functions.js';
 import { resolveRoomRuntime } from '../lib/room-runtime.js';
 import { zodDefaultHook, jsonResponseSchema, errorResponseSchema } from '../lib/schemas.js';
+import { resolveRootServiceKey } from '../lib/service-key.js';
 import {
   acquirePendingWebSocketSlot,
   getPendingWebSocketCount,
@@ -108,6 +110,33 @@ function getRoomAuthContext(
     custom: auth.custom ?? undefined,
     isAnonymous: auth.isAnonymous,
     meta: auth.meta,
+  };
+}
+
+function buildRoomRouteAccessContext(
+  c: Context<HonoEnv>,
+  config: EdgeBaseConfig,
+): RoomHandlerContext {
+  let executionCtx: ExecutionContext | undefined;
+  try {
+    executionCtx = c.executionCtx;
+  } catch {
+    executionCtx = undefined;
+  }
+  const ctx = buildFunctionContext({
+    request: c.req.raw,
+    auth: getRoomAuthContext(c.get('auth') as never),
+    databaseNamespace: c.env.DATABASE,
+    authNamespace: c.env.AUTH,
+    d1Database: c.env.AUTH_DB,
+    kvNamespace: c.env.KV,
+    config,
+    env: c.env,
+    executionCtx,
+    serviceKey: resolveRootServiceKey(config, c.env),
+  });
+  return {
+    admin: ctx.admin as never,
   };
 }
 
@@ -433,9 +462,11 @@ roomRoute.openapi(getRoomMetadata, async (c) => {
   }
   if (metadataAccess) {
     const auth = (c.get('auth') as { id?: string; role?: string; email?: string | null; custom?: Record<string, unknown> | null; isAnonymous?: boolean; meta?: Record<string, unknown> } | null | undefined) ?? null;
+    const accessCtx = buildRoomRouteAccessContext(c, config);
     const allowed = await Promise.resolve(metadataAccess(
       getRoomAuthContext(auth),
       roomId,
+      accessCtx,
     )).catch(() => false);
     if (!allowed) {
       return c.json({ code: 403, message: 'Denied by room metadata access rule' }, 403);
@@ -493,9 +524,11 @@ roomRoute.openapi(getRoomSummary, async (c) => {
   }
   if (metadataAccess) {
     const auth = (c.get('auth') as { id?: string; role?: string; email?: string | null; custom?: Record<string, unknown> | null; isAnonymous?: boolean; meta?: Record<string, unknown> } | null | undefined) ?? null;
+    const accessCtx = buildRoomRouteAccessContext(c, config);
     const allowed = await Promise.resolve(metadataAccess(
       getRoomAuthContext(auth),
       roomId,
+      accessCtx,
     )).catch(() => false);
     if (!allowed) {
       return c.json({ code: 403, message: 'Denied by room metadata access rule' }, 403);
@@ -557,8 +590,9 @@ roomRoute.openapi(getRoomSummaries, async (c) => {
   const deniedIds: string[] = [];
 
   if (metadataAccess) {
+    const accessCtx = buildRoomRouteAccessContext(c, config);
     for (const roomId of roomIds) {
-      const allowed = await Promise.resolve(metadataAccess(authContext, roomId)).catch(() => false);
+      const allowed = await Promise.resolve(metadataAccess(authContext, roomId, accessCtx)).catch(() => false);
       if (allowed) {
         allowedRoomIds.push(roomId);
       } else {

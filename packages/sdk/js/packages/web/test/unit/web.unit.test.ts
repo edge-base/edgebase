@@ -579,6 +579,25 @@ describe('AuthClient — method signatures', () => {
     tm.destroy();
   });
 
+  it('regenerateRecoveryCodes is a function', () => {
+    const tm = new TokenManager('http://localhost:8688');
+    const cm = new ContextManager();
+    const http = new HttpClient({ baseUrl: 'http://localhost:8688', tokenManager: tm, contextManager: cm });
+    const auth = new AuthClient(http, tm);
+    expect(typeof auth.mfa.regenerateRecoveryCodes).toBe('function');
+    tm.destroy();
+  });
+
+  it('getCurrentSessionId decodes the refresh token jti', () => {
+    const tm = new TokenManager('http://localhost:8688');
+    tm.setTokens({
+      accessToken: makeValidJwt('session-user'),
+      refreshToken: makeValidJwt('session-user', { type: 'refresh', jti: 'sess-current' }),
+    });
+    expect(tm.getCurrentSessionId()).toBe('sess-current');
+    tm.destroy();
+  });
+
   it('updateProfile is a function', () => {
     const tm = new TokenManager('http://localhost:8688');
     const cm = new ContextManager();

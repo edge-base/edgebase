@@ -79,6 +79,16 @@ export interface Env {
   EDGEBASE_INTERNAL_WORKER_URL?: string;
   /** Optional override for email delivery in deployed/local mock environments. */
   EDGEBASE_EMAIL_API_URL?: string;
+  /** Generic EmailProvider API key, or Cloudflare Email Service API token. */
+  EDGEBASE_EMAIL_API_KEY?: string;
+  /** Cloudflare Email Service API token override. */
+  EDGEBASE_EMAIL_CLOUDFLARE_API_TOKEN?: string;
+  /** Cloudflare account ID for Email Service REST API delivery. */
+  EDGEBASE_EMAIL_CLOUDFLARE_ACCOUNT_ID?: string;
+  /** Cloudflare Workers send_email binding name. Defaults to EMAIL. */
+  EDGEBASE_EMAIL_CLOUDFLARE_BINDING?: string;
+  /** Cloudflare Workers send_email binding, when configured as [[send_email]] name = "EMAIL". */
+  EMAIL?: { send(message: { to: string; from: string; subject: string; html?: string; text?: string }): Promise<{ messageId?: string }> };
   /** Optional override for SMS delivery in deployed/local mock environments. */
   EDGEBASE_SMS_API_URL?: string;
   /** Test-only flag set by wrangler.test.toml for SDK E2E flows. */

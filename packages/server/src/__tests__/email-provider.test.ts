@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  CloudflareEmailProvider,
   SESProvider,
   SendGridProvider,
   createEmailProvider,
@@ -75,6 +76,87 @@ describe('SendGridProvider', () => {
 
     expect(result).toEqual({ success: true, messageId: 'sg-message-1' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('CloudflareEmailProvider', () => {
+  it('uses the Workers send_email binding when available', async () => {
+    const send = vi.fn().mockResolvedValue({ messageId: 'cf-binding-1' });
+
+    const provider = createEmailProvider(
+      { provider: 'cloudflare', from: 'noreply@example.com' },
+      { EMAIL: { send } },
+    );
+    expect(provider).not.toBeNull();
+
+    const result = await provider!.send({
+      to: 'user@example.com',
+      subject: 'Hello',
+      html: '<p>hello</p>',
+    });
+
+    expect(result).toEqual({ success: true, messageId: 'cf-binding-1' });
+    expect(send).toHaveBeenCalledWith({
+      to: 'user@example.com',
+      from: 'noreply@example.com',
+      subject: 'Hello',
+      html: '<p>hello</p>',
+    });
+  });
+
+  it('sends through the Cloudflare Email Service REST API when no binding exists', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        success: true,
+        errors: [],
+        messages: [],
+        result: { delivered: ['user@example.com'], permanent_bounces: [], queued: [] },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new CloudflareEmailProvider({
+      from: 'noreply@example.com',
+      accountId: 'acct-1',
+      apiKey: 'cf-token',
+    });
+    const result = await provider.send({
+      to: 'user@example.com',
+      subject: 'Hello',
+      html: '<p>hello</p>',
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.cloudflare.com/client/v4/accounts/acct-1/email/sending/send',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer cf-token',
+          'Content-Type': 'application/json',
+        }),
+      }),
+    );
+  });
+
+  it('fails without REST credentials when no Workers binding exists', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = createEmailProvider({ provider: 'cloudflare', from: 'noreply@example.com' });
+    expect(provider).not.toBeNull();
+
+    const result = await provider!.send({
+      to: 'user@example.com',
+      subject: 'Hello',
+      html: '<p>hello</p>',
+    });
+
+    expect(result).toEqual({ success: false });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

@@ -27,6 +27,7 @@ import {
   buildEmailActionUrl,
   parseClientRedirectInput,
 } from '../lib/auth-redirect.js';
+import { hashOtpSecret, verifyOtpSecret } from '../lib/auth-token.js';
 import {
   signAccessToken, signRefreshToken, verifyRefreshTokenWithFallback,
   parseDuration, TokenExpiredError,
@@ -176,7 +177,7 @@ function getMaxActiveSessions(env: Env): number {
 }
 
 function isEmailProviderName(value: unknown): value is EmailConfig['provider'] {
-  return value === 'resend' || value === 'sendgrid' || value === 'mailgun' || value === 'ses';
+  return value === 'resend' || value === 'sendgrid' || value === 'mailgun' || value === 'ses' || value === 'cloudflare';
 }
 
 function getEmailConfig(env: Env): EmailConfig | undefined {
@@ -187,22 +188,29 @@ function getEmailConfig(env: Env): EmailConfig | undefined {
   const provider = configured?.provider
     ?? (isEmailProviderName(runtimeEnv.EDGEBASE_EMAIL_PROVIDER) ? runtimeEnv.EDGEBASE_EMAIL_PROVIDER : undefined);
   const apiKey = configured?.apiKey
-    ?? (typeof runtimeEnv.EDGEBASE_EMAIL_API_KEY === 'string' ? runtimeEnv.EDGEBASE_EMAIL_API_KEY : undefined);
+    ?? (typeof runtimeEnv.EDGEBASE_EMAIL_API_KEY === 'string' ? runtimeEnv.EDGEBASE_EMAIL_API_KEY : undefined)
+    ?? (typeof runtimeEnv.EDGEBASE_EMAIL_CLOUDFLARE_API_TOKEN === 'string' ? runtimeEnv.EDGEBASE_EMAIL_CLOUDFLARE_API_TOKEN : undefined);
   const from = configured?.from
     ?? (typeof runtimeEnv.EDGEBASE_EMAIL_FROM === 'string' ? runtimeEnv.EDGEBASE_EMAIL_FROM : undefined);
+  const cloudflareAccountId = configured?.accountId
+    ?? (typeof runtimeEnv.EDGEBASE_EMAIL_CLOUDFLARE_ACCOUNT_ID === 'string' ? runtimeEnv.EDGEBASE_EMAIL_CLOUDFLARE_ACCOUNT_ID : undefined);
+  const cloudflareBinding = configured?.binding
+    ?? (typeof runtimeEnv.EDGEBASE_EMAIL_CLOUDFLARE_BINDING === 'string' ? runtimeEnv.EDGEBASE_EMAIL_CLOUDFLARE_BINDING : undefined);
 
-  if (!provider || !apiKey || !from) {
+  if (!provider || !from || (provider !== 'cloudflare' && !apiKey)) {
     return configured;
   }
 
   return {
     provider,
-    apiKey,
     from,
+    ...(apiKey ? { apiKey } : {}),
     domain: configured?.domain
       ?? (typeof runtimeEnv.EDGEBASE_EMAIL_MAILGUN_DOMAIN === 'string' ? runtimeEnv.EDGEBASE_EMAIL_MAILGUN_DOMAIN : undefined),
     region: configured?.region
       ?? (typeof runtimeEnv.EDGEBASE_EMAIL_SES_REGION === 'string' ? runtimeEnv.EDGEBASE_EMAIL_SES_REGION : undefined),
+    accountId: cloudflareAccountId,
+    binding: cloudflareBinding,
     appName: configured?.appName ?? 'EdgeBase Local Auth Harness',
     defaultLocale: configured?.defaultLocale,
     verifyUrl: configured?.verifyUrl
@@ -539,7 +547,7 @@ async function rotateRefreshTokenFlow(
   }
 
   const newRefreshToken = await signRefreshToken(
-    { sub: userId, type: 'refresh', jti: generateId() },
+    { sub: userId, type: 'refresh', jti: session.id as string },
     getUserSecret(env),
     getRefreshTokenTTL(env),
   );
@@ -781,7 +789,11 @@ async function sendMailWithHook(
     }
   }
 
-  return provider.send({ to, subject: finalSubject, html: finalHtml });
+  const result = await provider.send({ to, subject: finalSubject, html: finalHtml });
+  if (!result.success) {
+    throw new EdgeBaseError(502, 'Email delivery failed.', undefined, 'email-delivery-failed');
+  }
+  return result;
 }
 
 async function sendSmsWithHook(
@@ -1452,7 +1464,7 @@ authRoute.openapi(signinMagicLink, async (c) => {
         await sendMailWithHook(
           c.env, c.executionCtx, provider, 'magicLink', body.email,
           resolveSubject(c.env, 'magicLink', defaultSubject, locale), html, locale,
-        ).catch(() => {});
+        );
       } else {
         if (!isReleaseMode(c.env)) {
           debugToken = token;
@@ -1627,10 +1639,12 @@ authRoute.openapi(signinPhone, async (c) => {
     const code = generateOTP();
     if (exposeTestSecrets) devCode = code;
 
+    const codeHash = await hashOtpSecret(code, getUserSecret(c.env));
+
     // Store OTP in KV with 5 min TTL
     await c.env.KV.put(
       `phone-otp:${phone}`,
-      JSON.stringify({ code, userId, attempts: 0 }),
+      JSON.stringify({ codeHash, userId, attempts: 0 }),
       { expirationTtl: 300 },
     );
 
@@ -1679,10 +1693,12 @@ authRoute.openapi(signinPhone, async (c) => {
       const code = generateOTP();
       if (exposeTestSecrets) devCode = code;
 
+      const codeHash = await hashOtpSecret(code, getUserSecret(c.env));
+
       // Store OTP in KV
       await c.env.KV.put(
         `phone-otp:${phone}`,
-        JSON.stringify({ code, userId, attempts: 0 }),
+        JSON.stringify({ codeHash, userId, attempts: 0 }),
         { expirationTtl: 300 },
       );
 
@@ -1756,7 +1772,7 @@ authRoute.openapi(verifyPhone, async (c) => {
 
   // Look up phone → userId via KV OTP data
   const otpData = await c.env.KV.get(`phone-otp:${phone}`, 'json') as {
-    code: string; userId: string; attempts: number;
+    codeHash?: string; code?: string; userId: string; attempts: number;
   } | null;
 
   if (!otpData) {
@@ -1769,8 +1785,11 @@ authRoute.openapi(verifyPhone, async (c) => {
     throw new EdgeBaseError(429, 'Too many failed OTP attempts. Please request a new code.', undefined, 'rate-limited');
   }
 
-  // Verify code (timing-safe comparison)
-  if (!timingSafeEqual(otpData.code, body.code)) {
+  const submittedCode = body.code.trim();
+  const otpMatches = otpData.codeHash
+    ? await verifyOtpSecret(submittedCode, otpData.codeHash, getUserSecret(c.env))
+    : timingSafeEqual(otpData.code ?? '', submittedCode);
+  if (!otpMatches) {
     await c.env.KV.put(
       `phone-otp:${phone}`,
       JSON.stringify({ ...otpData, attempts: otpData.attempts + 1 }),
@@ -1895,10 +1914,12 @@ authRoute.openapi(linkPhone, async (c) => {
   const code = generateOTP();
   const exposeTestSecrets = shouldExposeAuthTestSecrets(c.env);
 
+  const codeHash = await hashOtpSecret(code, getUserSecret(c.env));
+
   // Store link OTP in KV (separate key pattern)
   await c.env.KV.put(
     `phone-link-otp:${phone}`,
-    JSON.stringify({ code, userId, attempts: 0 }),
+    JSON.stringify({ codeHash, userId, attempts: 0 }),
     { expirationTtl: 300 },
   );
 
@@ -1964,7 +1985,7 @@ authRoute.openapi(verifyLinkPhone, async (c) => {
 
   // Verify OTP from KV
   const otpData = await c.env.KV.get(`phone-link-otp:${phone}`, 'json') as {
-    code: string; userId: string; attempts: number;
+    codeHash?: string; code?: string; userId: string; attempts: number;
   } | null;
 
   if (!otpData) {
@@ -1980,7 +2001,11 @@ authRoute.openapi(verifyLinkPhone, async (c) => {
     throw new EdgeBaseError(429, 'Too many failed OTP attempts. Please request a new code.', undefined, 'rate-limited');
   }
 
-  if (!timingSafeEqual(otpData.code, body.code)) {
+  const submittedCode = body.code.trim();
+  const otpMatches = otpData.codeHash
+    ? await verifyOtpSecret(submittedCode, otpData.codeHash, getUserSecret(c.env))
+    : timingSafeEqual(otpData.code ?? '', submittedCode);
+  if (!otpMatches) {
     await c.env.KV.put(
       `phone-link-otp:${phone}`,
       JSON.stringify({ ...otpData, attempts: otpData.attempts + 1 }),
@@ -2083,11 +2108,12 @@ authRoute.openapi(signinEmailOtp, async (c) => {
 
     const code = generateOTP();
     if (exposeTestSecrets) devCode = code;
+    const codeHash = await hashOtpSecret(code, getUserSecret(c.env));
 
     // Store OTP in KV with 5 min TTL
     await c.env.KV.put(
       `email-otp:${email}`,
-      JSON.stringify({ code, userId, attempts: 0 }),
+      JSON.stringify({ codeHash, userId, attempts: 0 }),
       { expirationTtl: 300 },
     );
 
@@ -2141,11 +2167,12 @@ authRoute.openapi(signinEmailOtp, async (c) => {
 
       const code = generateOTP();
       if (exposeTestSecrets) devCode = code;
+      const codeHash = await hashOtpSecret(code, getUserSecret(c.env));
 
       // Store OTP in KV
       await c.env.KV.put(
         `email-otp:${email}`,
-        JSON.stringify({ code, userId, attempts: 0 }),
+        JSON.stringify({ codeHash, userId, attempts: 0 }),
         { expirationTtl: 300 },
       );
 
@@ -2218,7 +2245,7 @@ authRoute.openapi(verifyEmailOtp, async (c) => {
 
   // Look up OTP data from KV
   const otpData = await c.env.KV.get(`email-otp:${email}`, 'json') as {
-    code: string; userId: string; attempts: number;
+    codeHash?: string; code?: string; userId: string; attempts: number;
   } | null;
 
   if (!otpData) {
@@ -2230,7 +2257,11 @@ authRoute.openapi(verifyEmailOtp, async (c) => {
     throw new EdgeBaseError(429, 'Too many failed OTP attempts. Please request a new code.', undefined, 'rate-limited');
   }
 
-  if (!timingSafeEqual(otpData.code, body.code)) {
+  const submittedCode = body.code.trim();
+  const otpMatches = otpData.codeHash
+    ? await verifyOtpSecret(submittedCode, otpData.codeHash, getUserSecret(c.env))
+    : timingSafeEqual(otpData.code ?? '', submittedCode);
+  if (!otpMatches) {
     await c.env.KV.put(
       `email-otp:${email}`,
       JSON.stringify({ ...otpData, attempts: otpData.attempts + 1 }),
@@ -2575,6 +2606,67 @@ authRoute.openapi(mfaRecovery, async (c) => {
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
   });
+});
+
+// POST /mfa/recovery-codes — regenerate recovery codes (authenticated)
+const mfaRecoveryCodesRegenerate = createRoute({
+  operationId: 'authMfaRecoveryCodesRegenerate',
+  method: 'post',
+  path: '/mfa/recovery-codes',
+  tags: ['client'],
+  summary: 'Regenerate MFA recovery codes',
+  request: {
+    body: { content: { 'application/json': { schema: z.object({
+      password: z.string().optional(),
+      code: z.string().optional(),
+    }).passthrough() } }, required: false },
+  },
+  responses: {
+    200: { description: 'Success', content: { 'application/json': { schema: jsonResponseSchema } } },
+    400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
+    401: { description: 'Authentication required or verification failed', content: { 'application/json': { schema: errorResponseSchema } } },
+  },
+});
+
+authRoute.openapi(mfaRecoveryCodesRegenerate, async (c) => {
+  const userId = requireAuth(c.get('auth'));
+  const bodyText = await c.req.text();
+  let body: { password?: string; code?: string } = {};
+  try { body = bodyText ? JSON.parse(bodyText) : {}; } catch { throw new EdgeBaseError(400, 'Invalid JSON.', undefined, 'invalid-json'); }
+  await ensureAuthActionAllowed(c, 'mfaRecoveryCodesRegenerate', {
+    userId,
+    passwordProvided: !!body.password,
+    codeProvided: !!body.code,
+  });
+  const db = getAuthDb(c);
+
+  const user = await authService.getUserById(db, userId);
+  if (!user) throw new EdgeBaseError(404, 'User not found.', undefined, 'user-not-found');
+  const factor = await authService.getMfaFactorByUser(db, userId, 'totp');
+  if (!factor || !factor.verified) {
+    throw new EdgeBaseError(400, 'No verified TOTP factor found.', undefined, 'invalid-input');
+  }
+
+  if (body.password) {
+    if (!user.passwordHash) throw new EdgeBaseError(400, 'This account has no password set.', undefined, 'invalid-input');
+    const valid = await verifyPassword(body.password, user.passwordHash as string);
+    if (!valid) throw new EdgeBaseError(401, 'Invalid password.', undefined, 'invalid-password');
+  } else if (body.code) {
+    const secret = await decryptSecret(factor.secret as string, getUserSecret(c.env));
+    const valid = await verifyTOTP(secret, body.code);
+    if (!valid) throw new EdgeBaseError(401, 'Invalid TOTP code.', undefined, 'invalid-totp');
+  } else {
+    throw new EdgeBaseError(400, 'Either password or TOTP code is required to regenerate recovery codes.', undefined, 'invalid-input');
+  }
+
+  const recoveryCodes = generateRecoveryCodes(8);
+  const hashedCodes: { id: string; codeHash: string }[] = [];
+  for (const code of recoveryCodes) {
+    hashedCodes.push({ id: generateId(), codeHash: await hashRecoveryCode(code) });
+  }
+  await authService.replaceRecoveryCodes(db, userId, hashedCodes);
+
+  return c.json({ recoveryCodes });
 });
 
 // DELETE /mfa/totp — disable TOTP (authenticated)

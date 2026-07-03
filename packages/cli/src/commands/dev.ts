@@ -71,6 +71,48 @@ const PORT_RESERVATION_DIR = process.env.EDGEBASE_DEV_PORT_RESERVATION_DIR
 
 export { resolveLocalDevBindings };
 
+type PreservedDevState = {
+  backupDir: string;
+  stateDir: string;
+};
+
+async function preserveDevBundleState(bundleDir: string): Promise<PreservedDevState | null> {
+  const stateDir = join(bundleDir, '.wrangler', 'state');
+  if (!existsSync(stateDir)) return null;
+
+  const backupDir = await fsPromises.mkdtemp(join(tmpdir(), 'edgebase-dev-state-'));
+  await fsPromises.cp(stateDir, join(backupDir, 'state'), {
+    recursive: true,
+    force: true,
+    errorOnExist: false,
+  });
+
+  return { backupDir, stateDir };
+}
+
+async function discardPreservedDevBundleState(preserved: PreservedDevState | null): Promise<void> {
+  if (!preserved) return;
+  await fsPromises.rm(preserved.backupDir, { recursive: true, force: true });
+}
+
+async function restoreDevBundleState(preserved: PreservedDevState | null): Promise<void> {
+  if (!preserved) return;
+
+  try {
+    const backupStateDir = join(preserved.backupDir, 'state');
+    await fsPromises.mkdir(dirname(preserved.stateDir), { recursive: true });
+    await fsPromises.rm(preserved.stateDir, { recursive: true, force: true });
+    await fsPromises.cp(backupStateDir, preserved.stateDir, {
+      recursive: true,
+      force: true,
+      errorOnExist: false,
+    });
+    console.log(chalk.dim(`  State: preserved ${relative(process.cwd(), preserved.stateDir)}`));
+  } finally {
+    await discardPreservedDevBundleState(preserved);
+  }
+}
+
 function resolveDevRateLimitBindings(): ReturnType<typeof resolveRateLimitBindings> {
   // Wrangler currently prints a noisy experimental "unsafe.bindings" warning for
   // CLI-generated rate limit bindings. Local dev already enforces the in-process
@@ -817,11 +859,19 @@ export const devCommand = new Command('dev')
     try {
       const envValues = syncDevEnvToProcess(projectDir);
       const config = loadConfigSafe(configPath, projectDir, FULL_CONFIG_EVAL);
-      const initialBundle = createAppBundle(projectDir, {
-        outputDir: devBundleOutput,
-        overwrite: true,
-        injectedEnv: envValues,
-      });
+      const preservedDevState = await preserveDevBundleState(devBundleDir);
+      let initialBundle: ReturnType<typeof createAppBundle>;
+      try {
+        initialBundle = createAppBundle(projectDir, {
+          outputDir: devBundleOutput,
+          overwrite: true,
+          injectedEnv: envValues,
+        });
+        await restoreDevBundleState(preservedDevState);
+      } catch (err) {
+        await discardPreservedDevBundleState(preservedDevState);
+        throw err;
+      }
       devBundleDir = initialBundle.outputDir;
       if (config.release) {
         console.log(

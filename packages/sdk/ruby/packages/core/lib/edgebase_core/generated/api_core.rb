@@ -97,6 +97,11 @@ module EdgebaseCore
       @http.post("/auth/mfa/recovery", body)
     end
 
+    # Regenerate MFA recovery codes — POST /api/auth/mfa/recovery-codes
+    def auth_mfa_recovery_codes_regenerate(body = nil)
+      @http.post("/auth/mfa/recovery-codes", body)
+    end
+
     # Disable TOTP factor — DELETE /api/auth/mfa/totp
     def auth_mfa_totp_delete(body = nil)
       @http.delete("/auth/mfa/totp", body)
@@ -538,6 +543,7 @@ module EdgebaseCore
     AUTH_GET_ME = "/api/auth/me"
     AUTH_MFA_FACTORS = "/api/auth/mfa/factors"
     AUTH_MFA_RECOVERY = "/api/auth/mfa/recovery"
+    AUTH_MFA_RECOVERY_CODES_REGENERATE = "/api/auth/mfa/recovery-codes"
     AUTH_MFA_TOTP_DELETE = "/api/auth/mfa/totp"
     AUTH_MFA_TOTP_ENROLL = "/api/auth/mfa/totp/enroll"
     AUTH_MFA_TOTP_VERIFY = "/api/auth/mfa/totp/verify"

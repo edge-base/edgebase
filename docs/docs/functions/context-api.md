@@ -22,6 +22,7 @@ Every App Function receives a `context` object that provides access to all EdgeB
 | Run relational SQL on D1 | `admin.d1(database)` | [admin.d1()](#contextadmind1database) |
 | Search by vector similarity | `admin.vector(index)` | [admin.vector()](#contextadminvectorindex) |
 | Send push notifications | `admin.push` | [admin.push](#contextadminpush) |
+| Send email through the configured EmailProvider | `email` | [context.email](#contextemail) |
 | Upload/download files directly | `storage` | [context.storage](#contextstorage) |
 | Check who made this request | `auth` | [context.auth](#contextauth) |
 | Get URL path parameters | `params` | [context.params](#contextparams) |
@@ -36,6 +37,7 @@ interface FunctionContext {
   admin: FunctionAdminContext;   // Server SDK — full access to all services
   auth: AuthContext | null;      // Current user (if request is authenticated)
   params: Record<string, string>; // Dynamic route params from [param] segments
+  env?: Record<string, unknown>; // Worker environment variables, secrets, and bindings
   trigger?: {                    // Trigger metadata (DB triggers: namespace, table, event)
     namespace: string;
     id?: string;
@@ -43,6 +45,7 @@ interface FunctionContext {
     event?: 'insert' | 'update' | 'delete';
   };
   request: Request;              // The original HTTP Request object
+  email?: EmailSender;           // Configured EmailProvider sender
   storage?: StorageClient;       // R2 storage (if binding exists)
   analytics?: AnalyticsClient;   // Analytics Engine (if binding exists)
   data?: {                       // DB trigger data (trigger functions only)
@@ -340,6 +343,32 @@ await context.admin.push.broadcast({
 | `sendToToken(token, payload, platform?)` | Send directly using an FCM token (Service Key only) |
 | `sendToTopic(topic, payload)` | Send to an FCM topic (Service Key only) |
 | `broadcast(payload)` | Broadcast to all devices via `/topics/all` (Service Key only) |
+
+## context.email
+
+Send email from App Functions through the configured EdgeBase `email` provider.
+This uses the same EmailProvider adapter as auth emails, including Cloudflare
+Email Service Workers `send_email` bindings and REST fallback when configured.
+
+```typescript
+export const POST = defineFunction(async ({ email, request }) => {
+  if (!email) {
+    return Response.json({ error: 'Email provider is not configured' }, { status: 503 });
+  }
+
+  const body = await request.json();
+  const result = await email.send({
+    to: body.to,
+    subject: 'You were invited',
+    html: '<p>Open your workspace invitation.</p>',
+  });
+
+  return Response.json(result);
+});
+```
+
+If no email provider is configured, `context.email` is `undefined`. Handle that
+case explicitly for product flows such as invitations or transactional notices.
 
 ## context.storage
 

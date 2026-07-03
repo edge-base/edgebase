@@ -68,6 +68,10 @@ export interface TotpEnrollResult {
   recoveryCodes: string[];
 }
 
+export interface RecoveryCodesResult {
+  recoveryCodes: string[];
+}
+
 export interface DisableTotpOptions {
   password?: string;
   code?: string;
@@ -78,6 +82,7 @@ export interface Session {
   createdAt: string;
   userAgent?: string;
   ip?: string;
+  current?: boolean;
 }
 
 export interface UpdateProfileOptions {
@@ -501,7 +506,11 @@ export class AuthClient {
   /** List active sessions */
   async listSessions(): Promise<Session[]> {
     const result = await this.core.authGetSessions() as { sessions: Session[] };
-    return result.sessions;
+    const currentSessionId = this.tokenManager.getCurrentSessionId();
+    return (result.sessions ?? []).map((session) => ({
+      ...session,
+      current: Boolean(currentSessionId && session.id === currentSessionId),
+    }));
   }
 
   /** Revoke a specific session */
@@ -717,6 +726,11 @@ export class AuthClient {
         }) as AuthResult;
         syncAuthResult(result);
         return result;
+      },
+
+      /** Regenerate recovery codes for the current user. Existing unused codes are invalidated. */
+      async regenerateRecoveryCodes(options?: DisableTotpOptions): Promise<RecoveryCodesResult> {
+        return core.authMfaRecoveryCodesRegenerate(options ?? {}) as Promise<RecoveryCodesResult>;
       },
 
       /** Disable TOTP for the current user. Requires password or TOTP code. */

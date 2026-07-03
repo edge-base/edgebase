@@ -11,6 +11,7 @@ import type { EdgeBaseConfig } from '@edge-base/shared';
 import {
   callDO,
   formatDbTargetValidationIssue,
+  getD1BindingName,
   getDbDoName,
   resolveDbTarget,
   shouldRouteToD1,
@@ -92,6 +93,12 @@ function parsePath(
   const directPath = `/tables/${tableName}${rest.length ? '/' + rest.join('/') : ''}`;
 
   return { namespace, instanceId, tableName, directPath };
+}
+
+function hasD1Binding(env: Env | undefined, namespace: string): boolean {
+  if (!env) return false;
+  const bindingName = getD1BindingName(namespace);
+  return Boolean((env as unknown as Record<string, unknown>)[bindingName]);
 }
 
 export class InternalHttpTransport implements HttpTransport {
@@ -196,7 +203,14 @@ export class InternalHttpTransport implements HttpTransport {
     const httpMethod = method === 'PUT' ? 'PATCH' : method; // normalize PUT → PATCH
 
     // 1. D1 route
-    if (!this.preferDirectDo && !dynamic && shouldRouteToD1(namespace, this.config) && this.env) {
+    const shouldUseD1 =
+      !this.preferDirectDo
+      && !dynamic
+      && shouldRouteToD1(namespace, this.config)
+      && this.env
+      && (provider === 'd1' || hasD1Binding(this.env, namespace));
+
+    if (shouldUseD1) {
       return this.requestViaD1Handler(httpMethod, namespace, normalizedInstanceId, tableName, directPath, headers, query, body);
     }
 

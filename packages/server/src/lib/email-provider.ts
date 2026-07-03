@@ -4,7 +4,7 @@
  * Workers cannot use SMTP directly. Instead, we use HTTP REST API-based
  * external email services via a common interface.
  *
- * Supported: Resend (default), SendGrid, Mailgun, AWS SES
+ * Supported: Resend (default), SendGrid, Mailgun, AWS SES, Cloudflare Email Service
  */
 
 // ─── Interface ───
@@ -26,6 +26,24 @@ export interface EmailProvider {
 
 interface EmailProviderEnv {
   EDGEBASE_EMAIL_API_URL?: string;
+  EDGEBASE_EMAIL_CLOUDFLARE_API_TOKEN?: string;
+  EDGEBASE_EMAIL_CLOUDFLARE_ACCOUNT_ID?: string;
+  EDGEBASE_EMAIL_CLOUDFLARE_BINDING?: string;
+  EMAIL?: CloudflareSendEmailBinding;
+}
+
+interface CloudflareSendEmailBinding {
+  send(message: {
+    to: string;
+    from: string;
+    subject: string;
+    html?: string;
+    text?: string;
+  }): Promise<{ messageId?: string }>;
+}
+
+function isCloudflareSendEmailBinding(value: unknown): value is CloudflareSendEmailBinding {
+  return !!value && typeof value === 'object' && typeof (value as { send?: unknown }).send === 'function';
 }
 
 const encoder = new TextEncoder();
@@ -331,14 +349,83 @@ export class SESProvider implements EmailProvider {
   }
 }
 
+// ─── Cloudflare Email Service Provider ───
+
+export class CloudflareEmailProvider implements EmailProvider {
+  private apiBaseUrl: string;
+
+  constructor(
+    private options: {
+      from: string;
+      apiKey?: string;
+      accountId?: string;
+      binding?: CloudflareSendEmailBinding;
+      apiBaseUrl?: string;
+    },
+  ) {
+    this.apiBaseUrl = options.apiBaseUrl?.replace(/\/$/, '') ?? 'https://api.cloudflare.com/client/v4';
+  }
+
+  async send(options: EmailSendOptions): Promise<EmailSendResult> {
+    if (this.options.binding) {
+      try {
+        const result = await this.options.binding.send({
+          to: options.to,
+          from: this.options.from,
+          subject: options.subject,
+          html: options.html,
+        });
+        return { success: true, messageId: result.messageId };
+      } catch (err) {
+        console.error('[EmailProvider:Cloudflare] Workers binding failed:', err);
+        return { success: false };
+      }
+    }
+
+    if (!this.options.apiKey || !this.options.accountId) {
+      console.error(
+        '[EmailProvider:Cloudflare] accountId and apiKey are required when a Workers send_email binding is not available.',
+      );
+      return { success: false };
+    }
+
+    const resp = await fetch(
+      `${this.apiBaseUrl}/accounts/${encodeURIComponent(this.options.accountId)}/email/sending/send`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.options.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: options.to,
+          from: this.options.from,
+          subject: options.subject,
+          html: options.html,
+        }),
+      },
+    );
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      console.error('[EmailProvider:Cloudflare] Failed:', resp.status, text);
+      return { success: false };
+    }
+
+    return { success: true };
+  }
+}
+
 // ─── Factory ───
 
 export interface EmailConfig {
-  provider: 'resend' | 'sendgrid' | 'mailgun' | 'ses';
-  apiKey: string;    // SES uses accessKeyId:secretAccessKey[:sessionToken]
+  provider: 'resend' | 'sendgrid' | 'mailgun' | 'ses' | 'cloudflare';
+  apiKey?: string;    // SES uses accessKeyId:secretAccessKey[:sessionToken]
   from: string;
   domain?: string;    // Mailgun domain
   region?: string;    // SES region
+  accountId?: string; // Cloudflare REST API account ID
+  binding?: string;   // Cloudflare Workers send_email binding name
 }
 
 /**
@@ -358,22 +445,45 @@ export function createEmailProvider(
     return null;
   }
 
-  if (!config.apiKey || !config.from) {
-    console.warn('[EmailProvider] apiKey and from are required. Email features disabled.');
+  if (!config.from) {
+    console.warn('[EmailProvider] from is required. Email features disabled.');
     return null;
   }
 
   switch (config.provider) {
+    case 'cloudflare': {
+      const bindingName = config.binding
+        ?? env?.EDGEBASE_EMAIL_CLOUDFLARE_BINDING?.trim()
+        ?? 'EMAIL';
+      const envRecord = env as Record<string, unknown> | undefined;
+      const bindingCandidate = envRecord?.[bindingName];
+      const binding = isCloudflareSendEmailBinding(bindingCandidate)
+        ? bindingCandidate
+        : undefined;
+      return new CloudflareEmailProvider({
+        from: config.from,
+        apiKey: config.apiKey ?? env?.EDGEBASE_EMAIL_CLOUDFLARE_API_TOKEN,
+        accountId: config.accountId ?? env?.EDGEBASE_EMAIL_CLOUDFLARE_ACCOUNT_ID,
+        binding,
+      });
+    }
     case 'resend':
+      if (!config.apiKey) break;
       return new ResendProvider(config.apiKey, config.from);
     case 'sendgrid':
+      if (!config.apiKey) break;
       return new SendGridProvider(config.apiKey, config.from);
     case 'mailgun':
+      if (!config.apiKey) break;
       return new MailgunProvider(config.apiKey, config.from, config.domain);
     case 'ses':
+      if (!config.apiKey) break;
       return new SESProvider(config.apiKey, config.from, config.region);
     default:
       console.warn(`[EmailProvider] Unknown provider: ${config.provider}. Email features disabled.`);
       return null;
   }
+
+  console.warn('[EmailProvider] apiKey and from are required. Email features disabled.');
+  return null;
 }

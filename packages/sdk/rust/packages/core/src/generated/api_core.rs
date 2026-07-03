@@ -100,6 +100,11 @@ impl<'a> GeneratedDbApi<'a> {
         self.http.post("/api/auth/mfa/recovery", body).await
     }
 
+    /// Regenerate MFA recovery codes — POST /api/auth/mfa/recovery-codes
+    pub async fn auth_mfa_recovery_codes_regenerate(&self, body: &Value) -> Result<Value, Error> {
+        self.http.post("/api/auth/mfa/recovery-codes", body).await
+    }
+
     /// Disable TOTP factor — DELETE /api/auth/mfa/totp
     pub async fn auth_mfa_totp_delete(&self, body: &Value) -> Result<Value, Error> {
         self.http.delete_with_body("/api/auth/mfa/totp", body).await
@@ -633,6 +638,7 @@ impl ApiPaths {
     pub const AUTH_GET_ME: &'static str = "/api/auth/me";
     pub const AUTH_MFA_FACTORS: &'static str = "/api/auth/mfa/factors";
     pub const AUTH_MFA_RECOVERY: &'static str = "/api/auth/mfa/recovery";
+    pub const AUTH_MFA_RECOVERY_CODES_REGENERATE: &'static str = "/api/auth/mfa/recovery-codes";
     pub const AUTH_MFA_TOTP_DELETE: &'static str = "/api/auth/mfa/totp";
     pub const AUTH_MFA_TOTP_ENROLL: &'static str = "/api/auth/mfa/totp/enroll";
     pub const AUTH_MFA_TOTP_VERIFY: &'static str = "/api/auth/mfa/totp/verify";

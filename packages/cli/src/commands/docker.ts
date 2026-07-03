@@ -15,6 +15,9 @@ import {
   type EnsureBootstrapAdminResult,
 } from '../lib/admin-bootstrap.js';
 import { createAppBundle } from '../lib/app-bundle.js';
+import { generateTempWranglerToml } from '../lib/deploy-shared.js';
+import { loadConfigSafe } from '../lib/load-config.js';
+import { resolveLocalDevBindings } from '../lib/project-runtime.js';
 
 const EDGEBASE_CONFIG_FILES = ['edgebase.config.ts', 'edgebase.config.js'];
 const SELF_HOSTING_GUIDE_URL = 'https://edgebase.fun/docs/getting-started/self-hosting';
@@ -261,6 +264,29 @@ function prepareDockerBuildContext(projectDir: string, dockerBundleDir: string):
   return contextDir;
 }
 
+function finalizeDockerWrangler(projectDir: string, outputDir: string): void {
+  const configFile = EDGEBASE_CONFIG_FILES
+    .map((name) => join(projectDir, name))
+    .find((path) => existsSync(path));
+  if (!configFile) {
+    throw new Error(`No EdgeBase config file found in ${projectDir}.`);
+  }
+
+  const config = loadConfigSafe(configFile, projectDir, {
+    allowRegexFallback: false,
+  }) as Record<string, unknown>;
+  const wranglerPath = join(outputDir, 'wrangler.toml');
+  const generatedPath = generateTempWranglerToml(wranglerPath, {
+    bindings: resolveLocalDevBindings(config),
+    triggerMode: 'preserve',
+  });
+
+  if (!generatedPath) return;
+
+  writeFileSync(wranglerPath, readFileSync(generatedPath, 'utf-8'), 'utf-8');
+  rmSync(generatedPath, { force: true });
+}
+
 function buildDockerRunArgs(options: {
   tag: string;
   port: string;
@@ -374,6 +400,7 @@ export const _internals = {
   findProjectRoot,
   buildDockerBuildArgs,
   buildDockerRunArgs,
+  finalizeDockerWrangler,
   prepareDockerBuildContext,
   isDockerDaemonResponsive,
 };
@@ -415,6 +442,7 @@ dockerCommand
         hint: 'Run the command from an EdgeBase app project with edgebase.config.ts, then retry `npx edgebase docker build`.',
       });
     }
+    finalizeDockerWrangler(projectDir, dockerBundle.outputDir);
 
     const args = buildDockerBuildArgs(options);
     const contextDir = prepareDockerBuildContext(projectDir, dockerBundle.outputDir);
@@ -577,9 +605,10 @@ dockerCommand
       });
     }
 
-    const dashboardUrl = `http://localhost:${options.port}/admin`;
-    const healthUrl = `http://localhost:${options.port}/api/health`;
-    const baseUrl = `http://localhost:${options.port}`;
+    const loopbackHost = '127.0.0.1';
+    const dashboardUrl = `http://${loopbackHost}:${options.port}/admin`;
+    const healthUrl = `http://${loopbackHost}:${options.port}/api/health`;
+    const baseUrl = `http://${loopbackHost}:${options.port}`;
 
     const waitForHealthy = async (): Promise<void> => {
       const deadline = Date.now() + 20_000;

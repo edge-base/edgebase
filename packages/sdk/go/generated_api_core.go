@@ -100,6 +100,11 @@ func (a *GeneratedDbApi) AuthMfaRecovery(ctx context.Context, body interface{}) 
 	return a.client.do(ctx, "POST", "/api/auth/mfa/recovery", body)
 }
 
+// AuthMfaRecoveryCodesRegenerate — Regenerate MFA recovery codes — POST /api/auth/mfa/recovery-codes
+func (a *GeneratedDbApi) AuthMfaRecoveryCodesRegenerate(ctx context.Context, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", "/api/auth/mfa/recovery-codes", body)
+}
+
 // AuthMfaTotpDelete — Disable TOTP factor — DELETE /api/auth/mfa/totp
 func (a *GeneratedDbApi) AuthMfaTotpDelete(ctx context.Context, body interface{}) (map[string]interface{}, error) {
 	return a.client.do(ctx, "DELETE", "/api/auth/mfa/totp", body)
@@ -540,6 +545,7 @@ const (
 	PathAuthGetMe = "/api/auth/me"
 	PathAuthMfaFactors = "/api/auth/mfa/factors"
 	PathAuthMfaRecovery = "/api/auth/mfa/recovery"
+	PathAuthMfaRecoveryCodesRegenerate = "/api/auth/mfa/recovery-codes"
 	PathAuthMfaTotpDelete = "/api/auth/mfa/totp"
 	PathAuthMfaTotpEnroll = "/api/auth/mfa/totp/enroll"
 	PathAuthMfaTotpVerify = "/api/auth/mfa/totp/verify"
