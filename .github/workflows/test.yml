@@ -710,12 +710,9 @@ jobs:
         with:
           elixir-version: '1.17.3'
           otp-version: '27.1'
+          install-rebar: false
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Prepare Elixir tooling
-        run: |
-          mix local.hex --force
-          mix local.rebar --force
       - name: Start EdgeBase test server and run Elixir E2E
         run: |
           node ./scripts/run-with-services.mjs --server -- \
