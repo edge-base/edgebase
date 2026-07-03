@@ -1450,7 +1450,7 @@ func (b *StorageBucket) InitiateResumableUpload(ctx context.Context, path, conte
 	if totalSize > 0 {
 		body["totalSize"] = totalSize
 	}
-	return b.core.CreateMultipartUpload(ctx, b.name, body)
+	return b.core.CreateMultipartUpload(ctx, b.name, body, map[string]string{})
 }
 
 // AbortResumableUpload aborts an in-flight multipart upload.
@@ -1458,7 +1458,7 @@ func (b *StorageBucket) AbortResumableUpload(ctx context.Context, path, uploadID
 	return b.core.AbortMultipartUpload(ctx, b.name, map[string]interface{}{
 		"key":      path,
 		"uploadId": uploadID,
-	})
+	}, map[string]string{})
 }
 
 // KvClient provides KV namespace operations.
