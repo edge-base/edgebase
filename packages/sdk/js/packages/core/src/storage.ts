@@ -431,7 +431,7 @@ export class StorageBucket {
     // 1. Create multipart upload
     const createBody = { key, contentType, customMetadata: options?.customMetadata };
     const { uploadId } = this.core
-      ? await this.core.createMultipartUpload(this.bucketName, createBody) as { uploadId: string; key: string }
+      ? await this.core.createMultipartUpload(this.bucketName, createBody, {}) as { uploadId: string; key: string }
       : await this.httpClient.post<{ uploadId: string; key: string }>(`/api/storage/${this.bucketName}/multipart/create`, createBody);
 
     // 2. Upload parts (5MB chunks)
@@ -488,7 +488,7 @@ export class StorageBucket {
     // 3. Complete multipart upload
     const completeBody = { uploadId, key, parts };
     return this.core
-      ? await this.core.completeMultipartUpload(this.bucketName, completeBody) as FileInfo
+      ? await this.core.completeMultipartUpload(this.bucketName, completeBody, {}) as FileInfo
       : this.httpClient.post<FileInfo>(`/api/storage/${this.bucketName}/multipart/complete`, completeBody);
   }
 
@@ -502,7 +502,7 @@ export class StorageBucket {
     }
 
     const result = this.core
-      ? await this.core.createMultipartUpload(this.bucketName, createBody) as { uploadId: string }
+      ? await this.core.createMultipartUpload(this.bucketName, createBody, {}) as { uploadId: string }
       : await this.httpClient.post<{ uploadId: string }>(
         `/api/storage/${this.bucketName}/multipart/create`,
         createBody,
@@ -619,7 +619,7 @@ export class StorageBucket {
     allParts.sort((a, b) => a.partNumber - b.partNumber);
     const completeBody = { uploadId, key, parts: allParts };
     return this.core
-      ? await this.core.completeMultipartUpload(this.bucketName, completeBody) as FileInfo
+      ? await this.core.completeMultipartUpload(this.bucketName, completeBody, {}) as FileInfo
       : this.httpClient.post<FileInfo>(`/api/storage/${this.bucketName}/multipart/complete`, completeBody);
   }
 }

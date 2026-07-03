@@ -350,7 +350,7 @@ class StorageBucket {
   }) async {
     final body = <String, dynamic>{'key': key};
     if (contentType != null) body['contentType'] = contentType;
-    final json = await _core.createMultipartUpload(name, body)
+    final json = await _core.createMultipartUpload(name, body, null)
         as Map<String, dynamic>;
     return json['uploadId'] as String;
   }
@@ -388,7 +388,7 @@ class StorageBucket {
         'uploadId': uploadId,
         'key': key,
         'parts': [part],
-      }) as Map<String, dynamic>;
+      }, null) as Map<String, dynamic>;
       return FileInfo.fromJson(result);
     }
     return null;
