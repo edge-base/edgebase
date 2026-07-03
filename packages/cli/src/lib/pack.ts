@@ -954,13 +954,21 @@ saveJson(lockPath, {
   createdAt: new Date().toISOString(),
 });
 
+const wranglerEnv = {
+  ...process.env,
+  ...mergedEnv,
+};
+if (process.platform === 'win32' && !wranglerEnv.CHOKIDAR_USEPOLLING) {
+  wranglerEnv.CHOKIDAR_USEPOLLING = '1';
+}
+if (process.env.CI && !wranglerEnv.WRANGLER_CI_DISABLE_CONFIG_WATCHING) {
+  wranglerEnv.WRANGLER_CI_DISABLE_CONFIG_WATCHING = '1';
+}
+
 const child = spawn(process.execPath, wranglerArgs, {
   cwd: workDir,
   stdio: ['ignore', 'pipe', 'pipe'],
-  env: {
-    ...process.env,
-    ...mergedEnv,
-  },
+  env: wranglerEnv,
   detached: process.platform !== 'win32',
 });
 
