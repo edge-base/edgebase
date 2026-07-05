@@ -21,6 +21,8 @@ export interface ScannedFunction {
   hasDefaultExport: boolean;
   /** Whether this file exports module-level trigger metadata. */
   hasTriggerExport?: boolean;
+  /** Named `export const X = defineFunction(...)` exports (non-HTTP functions, e.g. DB triggers). */
+  definedFunctionExports?: string[];
   /** Whether this is a middleware file (_middleware.ts). */
   isMiddleware: boolean;
 }
@@ -49,6 +51,7 @@ export function detectExports(filePath: string): {
   methods: string[];
   hasDefaultExport: boolean;
   hasTriggerExport: boolean;
+  definedFunctionExports: string[];
 } {
   const content = readFileSync(filePath, 'utf-8');
   const methods: string[] = [];
@@ -61,7 +64,15 @@ export function detectExports(filePath: string): {
   const hasDefaultExport = /export\s+default\b/.test(content);
   const hasTriggerExport =
     /export\s+(?:(?:const|let|var)\s+trigger\b|(?:async\s+)?function\s+trigger\b)/.test(content);
-  return { methods, hasDefaultExport, hasTriggerExport };
+  // Named defineFunction exports (DB/auth/storage/schedule triggers that are
+  // not HTTP routes). Without registration these definitions never reach the
+  // function registry, so their triggers silently never fire.
+  const definedFunctionExports: string[] = [];
+  const defineFunctionPattern = /export\s+const\s+([A-Za-z_$][\w$]*)\s*=\s*defineFunction\s*\(/g;
+  for (let match = defineFunctionPattern.exec(content); match; match = defineFunctionPattern.exec(content)) {
+    if (!validMethods.includes(match[1])) definedFunctionExports.push(match[1]);
+  }
+  return { methods, hasDefaultExport, hasTriggerExport, definedFunctionExports };
 }
 
 /**
@@ -105,7 +116,8 @@ export function scanFunctions(functionsDir: string): ScannedFunction[] {
 
       const relPath = relative(functionsDir, fullPath).replace(/\\/g, '/');
       const routeName = buildRouteName(relPath);
-      const { methods, hasDefaultExport, hasTriggerExport } = detectExports(fullPath);
+      const { methods, hasDefaultExport, hasTriggerExport, definedFunctionExports } =
+        detectExports(fullPath);
 
       results.push({
         name: routeName,
@@ -113,6 +125,7 @@ export function scanFunctions(functionsDir: string): ScannedFunction[] {
         methods,
         hasDefaultExport,
         hasTriggerExport,
+        definedFunctionExports,
         isMiddleware: false,
       });
     }
@@ -177,6 +190,7 @@ export function generateFunctionRegistry(
       continue;
     }
 
+    const namedDefinitions = fn.definedFunctionExports ?? [];
     if (fn.methods.length > 0) {
       imports.push(`import * as ${safeName}_module from '${importPath}';`);
       for (const method of fn.methods) {
@@ -189,6 +203,15 @@ export function generateFunctionRegistry(
     } else if (fn.hasDefaultExport) {
       imports.push(`import ${safeName}_module from '${importPath}';`);
       registrations.push(`  registerFunction('${fn.name || '/'}', wrapMethodExport(${safeName}_module, '*'));`);
+    } else if (namedDefinitions.length > 0) {
+      imports.push(`import * as ${safeName}_module from '${importPath}';`);
+    }
+    // Named defineFunction exports register alongside any HTTP methods in the
+    // same file. Registry keys are namespaced per export to avoid collisions.
+    for (const exportName of namedDefinitions) {
+      registrations.push(
+        `  registerFunction('${fn.name || '/'}#${exportName}', ${safeName}_module.${exportName} as FunctionDefinition);`,
+      );
     }
   }
 

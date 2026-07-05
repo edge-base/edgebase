@@ -10,10 +10,11 @@
  * Convention: vitest, tmpdir-based file system fixtures, cleanup in afterEach.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { _internals } from '../src/commands/deploy.js';
+import { generateFunctionRegistry } from '../src/lib/function-registry.js';
 
 const { buildRouteName, detectExports, scanFunctions, validateRouteNames } = _internals;
 
@@ -454,5 +455,51 @@ describe('validateRouteNames — edge cases', () => {
       { name: 'hello', relativePath: 'hello.ts', methods: ['GET'], hasDefaultExport: false, isMiddleware: false },
     ];
     expect(() => validateRouteNames(functions)).not.toThrow();
+  });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Named defineFunction exports (non-HTTP functions, e.g. DB triggers)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('detectExports — named defineFunction exports', () => {
+  it('detects named defineFunction exports and excludes HTTP method names', () => {
+    const filePath = join(tmpDir, 'on-page-index.ts');
+    writeFileSync(
+      filePath,
+      [
+        `import { defineFunction } from '@edge-base/shared';`,
+        `export const onPageInsert = defineFunction({ trigger: { type: 'db', table: 'pages', event: 'insert' }, handler: async () => {} });`,
+        `export const onPageDelete = defineFunction({ trigger: { type: 'db', table: 'pages', event: 'delete' }, handler: async () => {} });`,
+        `export const POST = defineFunction({ trigger: { type: 'http', method: 'POST' }, handler: async () => {} });`,
+      ].join('\n'),
+    );
+    const { methods, definedFunctionExports } = detectExports(filePath);
+    expect(methods).toEqual(['POST']);
+    expect(definedFunctionExports).toEqual(['onPageInsert', 'onPageDelete']);
+  });
+});
+
+describe('generateFunctionRegistry — named defineFunction exports', () => {
+  it('registers trigger-only files that have no HTTP or default export', () => {
+    const fnDir = join(tmpDir, 'functions');
+    mkdirSync(fnDir, { recursive: true });
+    const filePath = join(fnDir, 'on-page-index.ts');
+    writeFileSync(
+      filePath,
+      [
+        `import { defineFunction } from '@edge-base/shared';`,
+        `export const onPageInsert = defineFunction({ trigger: { type: 'db', table: 'pages', event: 'insert' }, handler: async () => {} });`,
+      ].join('\n'),
+    );
+    const functions = scanFunctions(fnDir);
+    const outPath = join(tmpDir, '_functions-registry.ts');
+    generateFunctionRegistry(functions, outPath);
+    const generated = readFileSync(outPath, 'utf-8');
+    expect(generated).toContain(`import * as on_page_index_module from`);
+    expect(generated).toContain(
+      `registerFunction('on-page-index#onPageInsert', on_page_index_module.onPageInsert as FunctionDefinition);`,
+    );
   });
 });
