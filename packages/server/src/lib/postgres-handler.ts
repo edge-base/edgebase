@@ -65,7 +65,7 @@ function postgresInvalidJsonMessage(context: string, tableName: string): string 
   return `Invalid JSON body for ${context} on table '${tableName}'. Send application/json with the expected fields.`;
 }
 
-function postgresRuleRejectedMessage(tableName: string, action: 'insert' | 'update' | 'delete'): string {
+function postgresRuleRejectedMessage(tableName: string, action: 'read' | 'insert' | 'update' | 'delete'): string {
   return `Access denied by access rules for ${action} on table '${tableName}'.`;
 }
 
@@ -91,6 +91,35 @@ export async function handlePgRequest(
   doPath: string,
 ): Promise<Response> {
   const resolved = resolvePgConnection(c.env, namespace);
+
+  // Multi-table transact has no table path segment — handle before table
+  // validation. Requires a session-scoped connection for BEGIN/COMMIT, which
+  // the local dev sidecar (independent statement calls) cannot provide.
+  if (doPath === '/transact' && c.req.raw.method === 'POST') {
+    const transactLocalDev = getLocalDevPostgresExecOptions(
+      c.env as unknown as Record<string, unknown>,
+      namespace,
+    );
+    if (transactLocalDev) {
+      return c.json({
+        code: 501,
+        message:
+          'transact is not supported through the local dev PostgreSQL sidecar: '
+          + 'statements execute on independent connections, so BEGIN/COMMIT cannot span them.',
+      }, 501);
+    }
+    return withPostgresConnection(resolved.connectionString, async (query) => {
+      await ensurePgSchema(resolved.connectionString, namespace, resolved.dbBlock.tables ?? {}, query);
+      return handleTransact(
+        c,
+        resolved,
+        (c.get('auth') as AuthContext | null | undefined) ?? null,
+        checkServiceKey(c),
+        query,
+      );
+    });
+  }
+
   const tableConfig = resolved.dbBlock.tables?.[tableName];
   if (!tableConfig) {
     return c.json({ code: 404, message: `Table '${tableName}' not found in database '${namespace}'.` }, 404);
@@ -988,6 +1017,300 @@ async function handleBatch(
     inserted: results,
     items: results,
   });
+}
+
+// ─── TRANSACT (multi-table atomic writes) ───
+
+interface PgTransactOp {
+  table?: unknown;
+  op?: unknown;
+  id?: unknown;
+  data?: unknown;
+  where?: unknown;
+  exists?: unknown;
+}
+
+/**
+ * Multi-table atomic writes on a single session-scoped connection via
+ * BEGIN/COMMIT. `expect` ops run real SELECTs inside the transaction, so
+ * assertions hold at commit time under PostgreSQL's isolation, and any
+ * failure rolls the whole batch back.
+ */
+async function handleTransact(
+  c: Context<HonoEnv>,
+  resolved: PgResolvedDb,
+  auth: AuthContext | null,
+  isServiceKey: boolean,
+  query: PostgresExecutor,
+): Promise<Response> {
+  let body: { operations?: PgTransactOp[] };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ code: 400, message: postgresInvalidJsonMessage('transact operations', '(multi-table)') }, 400);
+  }
+  const operations = body.operations;
+  if (!Array.isArray(operations) || operations.length === 0) {
+    return c.json({ code: 400, message: 'transact requires a non-empty operations array.' }, 400);
+  }
+  const MAX_TRANSACT_OPS = 500;
+  if (operations.length > MAX_TRANSACT_OPS) {
+    return c.json({ code: 400, message: `Transact limit exceeded: ${operations.length} operations (max ${MAX_TRANSACT_OPS}).` }, 400);
+  }
+
+  const tables = resolved.dbBlock.tables ?? {};
+  const tableCtx = new Map<string, TableConfig>();
+  for (const op of operations) {
+    if (typeof op?.table !== 'string' || !op.table) {
+      return c.json({ code: 400, message: 'Each transact operation must name a table.' }, 400);
+    }
+    if (op.op !== 'insert' && op.op !== 'update' && op.op !== 'delete' && op.op !== 'expect') {
+      return c.json({ code: 400, message: `Unknown transact op '${String(op.op)}'. Expected insert | update | delete | expect.` }, 400);
+    }
+    if (op.op === 'insert' && (!op.data || typeof op.data !== 'object')) {
+      return c.json({ code: 400, message: 'transact insert requires a data object.' }, 400);
+    }
+    if (op.op === 'update' && (typeof op.id !== 'string' || !op.id || !op.data || typeof op.data !== 'object')) {
+      return c.json({ code: 400, message: 'transact update requires an id and a data object.' }, 400);
+    }
+    if (op.op === 'delete' && (typeof op.id !== 'string' || !op.id)) {
+      return c.json({ code: 400, message: 'transact delete requires an id.' }, 400);
+    }
+    if (op.op === 'expect') {
+      const hasId = typeof op.id === 'string' && op.id.length > 0;
+      const hasWhere = Array.isArray(op.where) && op.where.length > 0;
+      if (!hasId && !hasWhere) {
+        return c.json({ code: 400, message: 'transact expect requires an id and/or where conditions.' }, 400);
+      }
+      if (typeof op.exists !== 'boolean') {
+        return c.json({ code: 400, message: 'transact expect requires a boolean exists.' }, 400);
+      }
+    }
+    if (!tableCtx.has(op.table)) {
+      const tableConfig = tables[op.table];
+      if (!tableConfig) {
+        return c.json({ code: 400, message: `Table '${op.table}' not found in database '${resolved.namespace}'.` }, 400);
+      }
+      tableCtx.set(op.table, tableConfig);
+    }
+  }
+
+  // Table-level insert rules (matches batch semantics).
+  if (!isServiceKey) {
+    const checkedInsert = new Set<string>();
+    for (const op of operations) {
+      if (op.op !== 'insert' || checkedInsert.has(op.table as string)) continue;
+      checkedInsert.add(op.table as string);
+      const access = getTableAccess(tableCtx.get(op.table as string)!);
+      if (access?.insert !== undefined && !(await evalInsertRule(access.insert, auth))) {
+        return c.json({ code: 403, message: postgresRuleRejectedMessage(op.table as string, 'insert') }, 403);
+      }
+    }
+  }
+
+  const results: Record<string, unknown>[] = [];
+  const liveChanges: Array<{
+    table: string;
+    type: 'added' | 'modified' | 'removed';
+    docId: string;
+    data: Record<string, unknown> | null;
+  }> = [];
+
+  await query('BEGIN');
+  try {
+    for (const op of operations) {
+      const name = op.table as string;
+      const tableConfig = tableCtx.get(name)!;
+
+      if (op.op === 'expect') {
+        const clauses: string[] = [];
+        const params: unknown[] = [];
+        if (typeof op.id === 'string' && op.id) {
+          params.push(op.id);
+          clauses.push(`"id" = $${params.length}`);
+        }
+        for (const cond of (op.where as unknown[]) ?? []) {
+          if (!Array.isArray(cond) || cond.length !== 3) {
+            throw new EdgeBaseError(400, 'transact expect where entries must be [field, "==", value].');
+          }
+          const [field, cmp, value] = cond as [unknown, unknown, unknown];
+          if (typeof field !== 'string' || !field) {
+            throw new EdgeBaseError(400, 'transact expect where field must be a string.');
+          }
+          if (cmp !== '==') {
+            throw new EdgeBaseError(400, `transact expect only supports '==' conditions (got '${String(cmp)}').`);
+          }
+          if (value === null) {
+            clauses.push(`${escapePgIdentifier(field)} IS NULL`);
+            continue;
+          }
+          if (typeof value === 'object') {
+            throw new EdgeBaseError(400, 'transact expect cannot compare object values.');
+          }
+          params.push(value);
+          clauses.push(`${escapePgIdentifier(field)} = $${params.length}`);
+        }
+        const probe = await query(
+          `SELECT * FROM ${escapePgIdentifier(name)} WHERE ${clauses.join(' AND ')} LIMIT 1`,
+          params,
+        );
+        // Read rule guards expect probes so they cannot leak row existence.
+        if (!isServiceKey && probe.rows.length > 0) {
+          const access = getTableAccess(tableConfig);
+          if (
+            access?.read !== undefined
+            && !(await evalRowRule(access.read, auth, probe.rows[0] as Record<string, unknown>))
+          ) {
+            throw new EdgeBaseError(403, postgresRuleRejectedMessage(name, 'read'));
+          }
+        }
+        if (op.exists === true && probe.rows.length === 0) {
+          throw new EdgeBaseError(409, `Transaction expectation failed: expected a matching row in "${name}".`);
+        }
+        if (op.exists === false && probe.rows.length > 0) {
+          throw new EdgeBaseError(409, `Transaction expectation failed: expected no matching row in "${name}".`);
+        }
+        results.push({ expected: true });
+        continue;
+      }
+
+      if (op.op === 'insert') {
+        const item = op.data as Record<string, unknown>;
+        const validation = validateInsert(item, tableConfig.schema);
+        if (!validation.valid) {
+          throw new EdgeBaseError(
+            400,
+            postgresValidationMessage('transact insert', name),
+            toFieldErrorData(validation.errors) as never,
+          );
+        }
+        const { data } = preparePgInsertData(item, tableConfig);
+        const columns = Object.keys(data);
+        const values = columns.map((col) => data[col] ?? null);
+        const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+        const sql = `INSERT INTO ${escapePgIdentifier(name)} (${columns.map(escapePgIdentifier).join(', ')}) VALUES (${placeholders}) RETURNING *`;
+        const inserted = await query(sql, values);
+        const row = inserted.rows.length > 0
+          ? stripInternalPgFields(inserted.rows[0] as Record<string, unknown>)
+          : { ...data };
+        results.push({ inserted: row });
+        liveChanges.push({ table: name, type: 'added', docId: String(row.id ?? ''), data: row });
+        continue;
+      }
+
+      if (op.op === 'update') {
+        const id = op.id as string;
+        const bodyData = op.data as Record<string, unknown>;
+        const validation = validateUpdate(bodyData, tableConfig.schema);
+        if (!validation.valid) {
+          throw new EdgeBaseError(
+            400,
+            postgresValidationMessage('transact update', name),
+            toFieldErrorData(validation.errors) as never,
+          );
+        }
+        // Per-row update rule on the current row, read inside the transaction.
+        if (!isServiceKey) {
+          const access = getTableAccess(tableConfig);
+          if (access?.update !== undefined) {
+            const { sql: getSql, params: getParams } = buildGetQuery(name, id, undefined, 'postgres');
+            const current = await query(getSql, getParams);
+            const row = current.rows.length > 0 ? (current.rows[0] as Record<string, unknown>) : {};
+            if (!(await evalRowRule(access.update, auth, row))) {
+              throw new EdgeBaseError(403, postgresRuleRejectedMessage(name, 'update'));
+            }
+          }
+        }
+        const { data } = preparePgUpdateData(bodyData, tableConfig);
+        if (Object.keys(data).length === 0) {
+          results.push({ updated: { id } });
+          continue;
+        }
+        const { setClauses, params, nextParamIndex } = parseUpdateBody(
+          data,
+          ['id'],
+          { dialect: 'postgres', startIndex: 1 },
+        );
+        const sql = `UPDATE ${escapePgIdentifier(name)} SET ${setClauses.join(', ')} WHERE "id" = $${nextParamIndex} RETURNING *`;
+        const updated = await query(sql, [...params, id]);
+        const row = updated.rows.length > 0
+          ? stripInternalPgFields(updated.rows[0] as Record<string, unknown>)
+          : { id, ...bodyData };
+        results.push({ updated: row });
+        if (updated.rows.length > 0) {
+          liveChanges.push({ table: name, type: 'modified', docId: id, data: row });
+        }
+        continue;
+      }
+
+      // delete
+      const id = op.id as string;
+      if (!isServiceKey) {
+        const access = getTableAccess(tableConfig);
+        if (access?.delete !== undefined) {
+          const { sql: getSql, params: getParams } = buildGetQuery(name, id, undefined, 'postgres');
+          const current = await query(getSql, getParams);
+          const row = current.rows.length > 0 ? (current.rows[0] as Record<string, unknown>) : {};
+          if (!(await evalRowRule(access.delete, auth, row))) {
+            throw new EdgeBaseError(403, postgresRuleRejectedMessage(name, 'delete'));
+          }
+        }
+      }
+      const deleted = await query(
+        `DELETE FROM ${escapePgIdentifier(name)} WHERE "id" = $1 RETURNING "id"`,
+        [id],
+      );
+      if (deleted.rows.length > 0) {
+        liveChanges.push({ table: name, type: 'removed', docId: id, data: null });
+      }
+      results.push({ deleted: true, id });
+    }
+    await query('COMMIT');
+  } catch (error) {
+    try {
+      await query('ROLLBACK');
+    } catch {
+      // connection-level failure — the transaction dies with the session
+    }
+    if (error instanceof EdgeBaseError) {
+      return c.json(error.toJSON(), error.status as 400);
+    }
+    throw error;
+  }
+
+  // Emit database-live events grouped per table (same thresholds as batch).
+  const changesByTable = new Map<string, typeof liveChanges>();
+  for (const change of liveChanges) {
+    const list = changesByTable.get(change.table) ?? [];
+    list.push(change);
+    changesByTable.set(change.table, list);
+  }
+  for (const [table, changes] of changesByTable) {
+    if (changes.length >= 10) {
+      scheduleDbLive(
+        c.executionCtx,
+        emitDbLiveBatchEvent(
+          c.env,
+          resolved.namespace,
+          table,
+          changes.map(({ type, docId, data }) => ({ type, docId, data })),
+        ),
+        `emit transact batch ${resolved.namespace}.${table} (${changes.length} changes)`,
+      );
+    } else {
+      scheduleDbLive(
+        c.executionCtx,
+        Promise.all(
+          changes.map((ch) =>
+            emitDbLiveEvent(c.env, resolved.namespace, table, ch.type, ch.docId, ch.data),
+          ),
+        ).then(() => undefined),
+        `emit transact fan-out ${resolved.namespace}.${table} (${changes.length} changes)`,
+      );
+    }
+  }
+
+  return c.json({ results });
 }
 
 // ─── BATCH BY FILTER ───

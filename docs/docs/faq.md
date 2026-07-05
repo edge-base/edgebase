@@ -74,7 +74,7 @@ See the [Self-Hosting Guide](/docs/getting-started/self-hosting) for setup instr
 | ----------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
 | Geospatial queries (PostGIS)  | Switch the block to `provider: 'postgres'`             | EdgeBase's PostgreSQL provider gives you Postgres, but PostGIS setup still requires manual configuration.    |
 | Existing PostgreSQL ecosystem | Use PostgreSQL-backed blocks for shared/static data    | Covers most general Postgres use cases; some extension-heavy workflows may still require direct setup.       |
-| Multi-statement transactions  | Use `db.transact()` for atomic multi-table writes      | Raw `BEGIN`/`COMMIT` is not exposed. `db.transact()` applies ordered insert/update/delete ops plus `expect` assertions atomically on DO/D1 providers.   |
+| Multi-statement transactions  | Use `db.transact()` for atomic multi-table writes      | Raw `BEGIN`/`COMMIT` is not exposed. `db.transact()` applies ordered insert/update/delete ops plus `expect` assertions atomically on DO/D1/PostgreSQL providers.   |
 
 **Other platforms may be a better fit for:**
 

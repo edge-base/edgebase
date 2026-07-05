@@ -23,7 +23,7 @@ Technical limits for EdgeBase Database. Limits marked **configurable** can be ch
 | Limit | Default | Configurable | Notes |
 |-------|---------|:---:|-------|
 | Batch size (inserts + updates + deletes) | **500** per request | No | All-or-nothing transaction via `transactionSync()` |
-| `db.transact()` operations (multi-table) | **500** per request | No | All-or-nothing across tables. DO provider: `transactionSync()`; D1 provider: single `db.batch()` transaction. Not supported on PostgreSQL. |
+| `db.transact()` operations (multi-table) | **500** per request | No | All-or-nothing across tables. DO: `transactionSync()`; D1: single `db.batch()` transaction; PostgreSQL: `BEGIN`/`COMMIT` on a session-scoped connection (local dev sidecar unsupported). |
 | `batch-by-filter` per iteration | **500** rows | No | SDK auto-repeats until `processed === 0` (max 100 iterations) |
 | `insertMany` chunk size | **500** | No | SDK auto-chunks; each chunk is an independent transaction |
 | Rule evaluation timeout (Worker-level) | **50 ms** | No | Fail-closed — timeout = deny. Applies to insert/update/delete access rule checks evaluated in the Worker. |

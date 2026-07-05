@@ -1083,8 +1083,8 @@ export class DbRef<Tables extends EdgeBaseTableMap = EdgeBaseTableMap> {
    * All-or-nothing: if any operation fails (validation, access rule, or an
    * unmet `expect` assertion), the whole transaction rolls back.
    *
-   * Supported on the Durable Object (SQLite) provider. D1/PostgreSQL-backed
-   * namespaces reject the call.
+   * Supported on Durable Object, D1, and PostgreSQL providers (the local dev
+   * PostgreSQL sidecar rejects the call — no session-scoped connection).
    *
    * @example
    * await db.transact([

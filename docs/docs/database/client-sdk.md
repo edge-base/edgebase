@@ -1456,7 +1456,7 @@ instead of applying a stale write.
 
 :::info transact support & semantics
 - **Maximum 500 operations** per call; results return in request order.
-- **Providers**: Durable Object (via `transactionSync()`) and D1 (single `db.batch()` transaction). PostgreSQL-backed namespaces return an error.
+- **Providers**: Durable Object (`transactionSync()`), D1 (single `db.batch()` transaction), and PostgreSQL (`BEGIN`/`COMMIT` on a session-scoped connection; the local dev PG sidecar returns an error because its statements run on independent connections).
 - **Access rules**: table-level `insert` rules run before the transaction; `update`/`delete` (and `expect` probes via the `read` rule) are evaluated per row. Service Key requests bypass rules as usual.
 - `expect.where` supports `'=='` comparisons only.
 :::

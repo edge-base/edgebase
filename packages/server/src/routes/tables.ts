@@ -634,15 +634,9 @@ async function handleTransactRoute(
       message: formatDbTargetValidationIssue(target.issue, namespace),
     }, target.status);
   }
-  const provider = target.value.dbBlock.provider;
-  if (provider === 'neon' || provider === 'postgres') {
-    return c.json({
-      code: 501,
-      message:
-        `transact is not supported for namespace '${namespace}' (provider '${provider}'). `
-        + 'Multi-table transactions require the Durable Object or D1 provider.',
-    }, 501);
-  }
+  // All providers accept /transact: DO via transactionSync, D1 via a single
+  // db.batch() transaction, PostgreSQL via BEGIN/COMMIT on a session-scoped
+  // connection (the PG handler itself rejects the local dev sidecar).
 
   // Service Key validation per write-op table (rules middleware skipped this path).
   const provided = resolveServiceKeyCandidate(

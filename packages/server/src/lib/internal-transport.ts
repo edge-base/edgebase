@@ -220,16 +220,6 @@ export class InternalHttpTransport implements HttpTransport {
       && this.env
       && (provider === 'd1' || hasD1Binding(this.env, namespace));
 
-    // Multi-table transact is implemented by the DO (transactionSync) and D1
-    // (single db.batch() transaction) providers. PostgreSQL is not wired yet —
-    // fail loudly instead of writing non-atomically.
-    if (directPath === '/transact' && (provider === 'neon' || provider === 'postgres')) {
-      throw new Error(
-        `db.transact() is not supported for namespace '${namespace}' (provider '${provider}'). ` +
-        'Multi-table transactions require the Durable Object or D1 provider.',
-      );
-    }
-
     if (shouldUseD1) {
       return this.requestViaD1Handler(httpMethod, namespace, normalizedInstanceId, tableName, directPath, headers, query, body);
     }
