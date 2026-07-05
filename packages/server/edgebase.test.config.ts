@@ -858,6 +858,42 @@ export default defineConfig({
             },
         },
 
+        // Dynamic (per-instance) DO coverage for multi-table transact
+        // (transact.test.ts): each instanceId gets its own DatabaseDO,
+        // exercising the /{ns}/{id}/transact route and the needsCreate
+        // first-touch bootstrap path.
+        txws: {
+            instance: true,
+            access: {
+                canCreate: () => true,
+            },
+            tables: {
+                ws_pages: {
+                    schema: {
+                        title: { type: 'string', required: true },
+                        status: { type: 'string' },
+                    },
+                    access: {
+                        read: () => true,
+                        insert: () => true,
+                        update: () => true,
+                        delete: (auth) => auth !== null,
+                    },
+                },
+                ws_audit: {
+                    schema: {
+                        action: { type: 'string', required: true },
+                    },
+                    access: {
+                        read: () => true,
+                        insert: () => true,
+                        update: () => false,
+                        delete: () => false,
+                    },
+                },
+            },
+        },
+
         // Durable Object provider coverage for multi-table transact (transact.test.ts).
         // 'shared' defaults to D1 routing, so this block pins provider: 'do'.
         txdo: {

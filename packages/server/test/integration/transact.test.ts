@@ -248,6 +248,75 @@ describe('transact — Durable Object provider (txdo namespace)', () => {
   });
 });
 
+describe('transact — dynamic per-instance namespace (txws)', () => {
+  const instanceA = `ws-${crypto.randomUUID().slice(0, 8)}`;
+  const instanceB = `ws-${crypto.randomUUID().slice(0, 8)}`;
+
+  it('bootstraps a fresh instance on first transact (needsCreate 2-RTT) and applies ops atomically', async () => {
+    const { status, data } = await api('POST', `/api/db/txws/${instanceA}/transact`, {
+      operations: [
+        { table: 'ws_pages', op: 'insert', data: { title: 'First page', status: 'active' } },
+        { table: 'ws_audit', op: 'insert', data: { action: 'bootstrap' } },
+      ],
+    });
+    expect(status).toBe(200);
+    expect(data.results).toHaveLength(2);
+    const pageId = data.results[0].inserted.id as string;
+
+    const row = await api('GET', `/api/db/txws/${instanceA}/tables/ws_pages/${pageId}`);
+    expect(row.status).toBe(200);
+    expect(row.data.title).toBe('First page');
+  });
+
+  it('keeps instances isolated: rows from one instance are invisible in another', async () => {
+    const seeded = await api('POST', `/api/db/txws/${instanceB}/transact`, {
+      operations: [
+        { table: 'ws_pages', op: 'insert', data: { title: 'B-only page' } },
+      ],
+    });
+    expect(seeded.status).toBe(200);
+
+    const inA = await api('GET', '/api/db/txws/' + instanceA + '/tables/ws_pages');
+    const titlesInA = (inA.data.items ?? []).map((item: any) => item.title);
+    expect(titlesInA).not.toContain('B-only page');
+  });
+
+  it('rolls back with 409 on unmet expect inside a dynamic instance', async () => {
+    const seed = await api('POST', `/api/db/txws/${instanceA}/tables/ws_pages`, {
+      title: 'Expect target',
+      status: 'active',
+    });
+    const id = seed.data.id as string;
+
+    const countBefore = (await api('GET', `/api/db/txws/${instanceA}/tables/ws_pages/count`)).data.total;
+    const { status } = await api('POST', `/api/db/txws/${instanceA}/transact`, {
+      operations: [
+        { table: 'ws_pages', op: 'insert', data: { title: 'rollback probe' } },
+        { table: 'ws_pages', op: 'expect', id, where: [['status', '==', 'archived']], exists: true },
+      ],
+    });
+    expect(status).toBe(409);
+    const countAfter = (await api('GET', `/api/db/txws/${instanceA}/tables/ws_pages/count`)).data.total;
+    expect(countAfter).toBe(countBefore);
+  });
+
+  it('applies per-row rules without a Service Key and rolls back on denial', async () => {
+    const seed = await api('POST', `/api/db/txws/${instanceA}/tables/ws_pages`, { title: 'rules target' });
+    const id = seed.data.id as string;
+
+    const countBefore = (await api('GET', `/api/db/txws/${instanceA}/tables/ws_pages/count`)).data.total;
+    const { status } = await api('POST', `/api/db/txws/${instanceA}/transact`, {
+      operations: [
+        { table: 'ws_pages', op: 'insert', data: { title: 'rules probe' } },
+        { table: 'ws_pages', op: 'delete', id }, // delete requires auth
+      ],
+    }, false);
+    expect(status).toBe(403);
+    const countAfter = (await api('GET', `/api/db/txws/${instanceA}/tables/ws_pages/count`)).data.total;
+    expect(countAfter).toBe(countBefore);
+  });
+});
+
 describe('transact — access rules without Service Key', () => {
   it('applies per-row rules inside the transaction and rolls back on denial', async () => {
     // posts.delete requires auth — anonymous transact deleting a post must 403
