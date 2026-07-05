@@ -245,6 +245,10 @@ Result GeneratedDbApi::db_single_batch_by_filter(const std::string& namespace_, 
   return http_.post_with_query("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/batch-by-filter", json_body, query);
 }
 
+Result GeneratedDbApi::db_single_transact(const std::string& namespace_, const std::string& json_body) const {
+  return http_.post("/api/db/" + edgebase_encode_path_param(namespace_) + "/transact", json_body);
+}
+
 Result GeneratedDbApi::db_count_records(const std::string& namespace_, const std::string& instance_id, const std::string& table, const std::map<std::string, std::string>& query) const {
   return http_.get("/api/db/" + edgebase_encode_path_param(namespace_) + "/" + edgebase_encode_path_param(instance_id) + "/tables/" + edgebase_encode_path_param(table) + "/count", query);
 }
@@ -279,6 +283,10 @@ Result GeneratedDbApi::db_batch_records(const std::string& namespace_, const std
 
 Result GeneratedDbApi::db_batch_by_filter(const std::string& namespace_, const std::string& instance_id, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query) const {
   return http_.post_with_query("/api/db/" + edgebase_encode_path_param(namespace_) + "/" + edgebase_encode_path_param(instance_id) + "/tables/" + edgebase_encode_path_param(table) + "/batch-by-filter", json_body, query);
+}
+
+Result GeneratedDbApi::db_transact(const std::string& namespace_, const std::string& instance_id, const std::string& json_body) const {
+  return http_.post("/api/db/" + edgebase_encode_path_param(namespace_) + "/" + edgebase_encode_path_param(instance_id) + "/transact", json_body);
 }
 
 Result GeneratedDbApi::check_database_subscription_connection(const std::map<std::string, std::string>& query) const {

@@ -241,6 +241,10 @@ public class GeneratedDbApi
     public Task<Dictionary<string, object?>> DbSingleBatchByFilterAsync(string @namespace, string table, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
         => _http.PostAsyncWithQuery($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/batch-by-filter", body, query, ct);
 
+    /// <summary>Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact</summary>
+    public Task<Dictionary<string, object?>> DbSingleTransactAsync(string @namespace, object? body = null, CancellationToken ct = default)
+        => _http.PostAsync($"/api/db/{EncodePathParam(@namespace)}/transact", body, ct);
+
     /// <summary>Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count</summary>
     public Task<Dictionary<string, object?>> DbCountRecordsAsync(string @namespace, string instanceId, string table, Dictionary<string, string>? query = null, CancellationToken ct = default)
         => _http.GetWithQueryAsync($"/api/db/{EncodePathParam(@namespace)}/{EncodePathParam(instanceId)}/tables/{EncodePathParam(table)}/count", query, ct);
@@ -276,6 +280,10 @@ public class GeneratedDbApi
     /// <summary>Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter</summary>
     public Task<Dictionary<string, object?>> DbBatchByFilterAsync(string @namespace, string instanceId, string table, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
         => _http.PostAsyncWithQuery($"/api/db/{EncodePathParam(@namespace)}/{EncodePathParam(instanceId)}/tables/{EncodePathParam(table)}/batch-by-filter", body, query, ct);
+
+    /// <summary>Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact</summary>
+    public Task<Dictionary<string, object?>> DbTransactAsync(string @namespace, string instanceId, object? body = null, CancellationToken ct = default)
+        => _http.PostAsync($"/api/db/{EncodePathParam(@namespace)}/{EncodePathParam(instanceId)}/transact", body, ct);
 
     /// <summary>Check database live subscription WebSocket prerequisites — GET /api/db/connect-check</summary>
     public Task<Dictionary<string, object?>> CheckDatabaseSubscriptionConnectionAsync(Dictionary<string, string>? query = null, CancellationToken ct = default)
@@ -539,6 +547,7 @@ public static class ApiPaths
     public static string DbBatchByFilter(string @namespace, string instanceId, string table) => $"/api/db/{@namespace}/{instanceId}/tables/{table}/batch-by-filter";
     public static string DbCountRecords(string @namespace, string instanceId, string table) => $"/api/db/{@namespace}/{instanceId}/tables/{table}/count";
     public static string DbSearchRecords(string @namespace, string instanceId, string table) => $"/api/db/{@namespace}/{instanceId}/tables/{table}/search";
+    public static string DbTransact(string @namespace, string instanceId) => $"/api/db/{@namespace}/{instanceId}/transact";
     public static string DbSingleListRecords(string @namespace, string table) => $"/api/db/{@namespace}/tables/{table}";
     public static string DbSingleInsertRecord(string @namespace, string table) => $"/api/db/{@namespace}/tables/{table}";
     public static string DbSingleGetRecord(string @namespace, string table, string id) => $"/api/db/{@namespace}/tables/{table}/{id}";
@@ -548,6 +557,7 @@ public static class ApiPaths
     public static string DbSingleBatchByFilter(string @namespace, string table) => $"/api/db/{@namespace}/tables/{table}/batch-by-filter";
     public static string DbSingleCountRecords(string @namespace, string table) => $"/api/db/{@namespace}/tables/{table}/count";
     public static string DbSingleSearchRecords(string @namespace, string table) => $"/api/db/{@namespace}/tables/{table}/search";
+    public static string DbSingleTransact(string @namespace) => $"/api/db/{@namespace}/transact";
     public const string DATABASE_LIVE_BROADCAST = "/api/db/broadcast";
     public const string CHECK_DATABASE_SUBSCRIPTION_CONNECTION = "/api/db/connect-check";
     public const string CONNECT_DATABASE_SUBSCRIPTION = "/api/db/subscribe";

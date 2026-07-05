@@ -6548,6 +6548,86 @@
         }
       }
     },
+    "/api/db/{namespace}/transact": {
+      "post": {
+        "operationId": "dbSingleTransact",
+        "tags": [
+          "client"
+        ],
+        "summary": "Apply multi-table write operations atomically in a single-instance database",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Database namespace",
+              "example": "app"
+            },
+            "required": true,
+            "description": "Database namespace",
+            "name": "namespace",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operations": {
+                    "type": "array",
+                    "description": "Ordered operations applied atomically in one transaction. op: insert | update | delete | expect. insert: { table, op, data }. update: { table, op, id, data }. delete: { table, op, id }. expect: { table, op, id?, where?, exists } asserts row state and aborts the transaction with 409 when unmet.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  }
+                },
+                "required": [
+                  "operations"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ordered per-operation results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      }
+                    }
+                  },
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error (unknown table, malformed op, batch limit exceeded)"
+          },
+          "403": {
+            "description": "An access rule rejected one of the operations"
+          },
+          "409": {
+            "description": "An expect operation was not satisfied; transaction rolled back"
+          },
+          "501": {
+            "description": "Provider does not support multi-table transactions (d1/postgres)"
+          }
+        }
+      }
+    },
     "/api/db/{namespace}/{instanceId}/tables/{table}/count": {
       "get": {
         "operationId": "dbCountRecords",
@@ -8134,6 +8214,97 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/db/{namespace}/{instanceId}/transact": {
+      "post": {
+        "operationId": "dbTransact",
+        "tags": [
+          "client"
+        ],
+        "summary": "Apply multi-table write operations atomically in a dynamic database instance",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Database namespace",
+              "example": "app"
+            },
+            "required": true,
+            "description": "Database namespace",
+            "name": "namespace",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Database instance ID",
+              "example": "ws-456"
+            },
+            "required": true,
+            "description": "Database instance ID",
+            "name": "instanceId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operations": {
+                    "type": "array",
+                    "description": "Ordered operations applied atomically in one transaction. op: insert | update | delete | expect. insert: { table, op, data }. update: { table, op, id, data }. delete: { table, op, id }. expect: { table, op, id?, where?, exists } asserts row state and aborts the transaction with 409 when unmet.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  }
+                },
+                "required": [
+                  "operations"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ordered per-operation results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      }
+                    }
+                  },
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error (unknown table, malformed op, batch limit exceeded)"
+          },
+          "403": {
+            "description": "An access rule rejected one of the operations"
+          },
+          "409": {
+            "description": "An expect operation was not satisfied; transaction rolled back"
+          },
+          "501": {
+            "description": "Provider does not support multi-table transactions (d1/postgres)"
           }
         }
       }

@@ -65,6 +65,17 @@ export async function handleD1Request(
   // 1. Resolve D1 binding
   const resolved = resolveD1Binding(c.env, namespace);
 
+  // Multi-table transact has no table path segment — handle before table validation.
+  if (doPath === '/transact' && c.req.raw.method === 'POST') {
+    await ensureD1Schema(resolved.db, namespace, resolved.dbBlock.tables ?? {});
+    return handleTransact(
+      c,
+      resolved,
+      (c.get('auth') as AuthContext | null | undefined) ?? null,
+      checkServiceKey(c),
+    );
+  }
+
   // 2. Validate table exists in config
   const tableConfig = resolved.dbBlock.tables?.[tableName];
   if (!tableConfig) {
@@ -132,7 +143,7 @@ function invalidD1BodyMessage(context: string): string {
 
 function d1RuleRejectedMessage(
   tableName: string,
-  action: 'read' | 'insert' | 'delete' | 'list' | 'count' | 'search',
+  action: 'read' | 'insert' | 'update' | 'delete' | 'list' | 'count' | 'search',
   id?: string,
 ): string {
   if (id) {
@@ -1242,6 +1253,351 @@ async function handleBatch(
   }
 
   return c.json(results);
+}
+
+// ─── TRANSACT (multi-table atomic writes) ───
+
+/**
+ * Guard table backing `expect` assertions. Each expect op becomes an
+ * `INSERT INTO _edgebase_tx_guard(id) SELECT NULL WHERE <unmet>` statement:
+ * when the expectation is unmet the SELECT yields a row, the NOT NULL primary
+ * key rejects it, and the whole db.batch() transaction rolls back — enforcing
+ * the assertion at commit time, not merely at pre-read time.
+ */
+const TX_GUARD_TABLE = '_edgebase_tx_guard';
+
+interface D1TransactOp {
+  table?: unknown;
+  op?: unknown;
+  id?: unknown;
+  data?: unknown;
+  where?: unknown;
+  exists?: unknown;
+}
+
+async function handleTransact(
+  c: Context<HonoEnv>,
+  resolved: D1ResolvedDb,
+  auth: AuthContext | null,
+  isServiceKey: boolean,
+): Promise<Response> {
+  let body: { operations?: D1TransactOp[] };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ code: 400, message: invalidD1BodyMessage('transact operations') }, 400);
+  }
+  const operations = body.operations;
+  if (!Array.isArray(operations) || operations.length === 0) {
+    return c.json({ code: 400, message: 'transact requires a non-empty operations array.' }, 400);
+  }
+  const MAX_TRANSACT_OPS = 500;
+  if (operations.length > MAX_TRANSACT_OPS) {
+    return c.json({ code: 400, message: `Transact limit exceeded: ${operations.length} operations (max ${MAX_TRANSACT_OPS}).` }, 400);
+  }
+
+  const tables = resolved.dbBlock.tables ?? {};
+  interface TxTable {
+    tableConfig: TableConfig;
+    effective: ReturnType<typeof buildEffectiveSchema>;
+  }
+  const tableCtx = new Map<string, TxTable>();
+  for (const op of operations) {
+    if (typeof op?.table !== 'string' || !op.table) {
+      return c.json({ code: 400, message: 'Each transact operation must name a table.' }, 400);
+    }
+    if (op.op !== 'insert' && op.op !== 'update' && op.op !== 'delete' && op.op !== 'expect') {
+      return c.json({ code: 400, message: `Unknown transact op '${String(op.op)}'. Expected insert | update | delete | expect.` }, 400);
+    }
+    if (op.op === 'insert' && (!op.data || typeof op.data !== 'object')) {
+      return c.json({ code: 400, message: 'transact insert requires a data object.' }, 400);
+    }
+    if (op.op === 'update' && (typeof op.id !== 'string' || !op.id || !op.data || typeof op.data !== 'object')) {
+      return c.json({ code: 400, message: 'transact update requires an id and a data object.' }, 400);
+    }
+    if (op.op === 'delete' && (typeof op.id !== 'string' || !op.id)) {
+      return c.json({ code: 400, message: 'transact delete requires an id.' }, 400);
+    }
+    if (op.op === 'expect') {
+      const hasId = typeof op.id === 'string' && op.id.length > 0;
+      const hasWhere = Array.isArray(op.where) && op.where.length > 0;
+      if (!hasId && !hasWhere) {
+        return c.json({ code: 400, message: 'transact expect requires an id and/or where conditions.' }, 400);
+      }
+      if (typeof op.exists !== 'boolean') {
+        return c.json({ code: 400, message: 'transact expect requires a boolean exists.' }, 400);
+      }
+    }
+    if (!tableCtx.has(op.table)) {
+      const tableConfig = tables[op.table];
+      if (!tableConfig) {
+        return c.json({ code: 400, message: `Table '${op.table}' not found in database '${resolved.namespace}'.` }, 400);
+      }
+      tableCtx.set(op.table, {
+        tableConfig,
+        effective: buildEffectiveSchema(tableConfig.schema),
+      });
+    }
+  }
+
+  // Table-level insert rules (matches handleBatch semantics).
+  if (!isServiceKey) {
+    const checkedInsert = new Set<string>();
+    for (const op of operations) {
+      if (op.op !== 'insert' || checkedInsert.has(op.table as string)) continue;
+      checkedInsert.add(op.table as string);
+      const access = getTableAccess(tableCtx.get(op.table as string)!.tableConfig);
+      if (access?.insert !== undefined && !(await evalInsertRule(access.insert, auth))) {
+        return c.json({ code: 403, message: d1RuleRejectedMessage(op.table as string, 'insert') }, 403);
+      }
+    }
+  }
+
+  const now = new Date().toISOString();
+  const stmts: D1PreparedStatement[] = [];
+  // Post-commit result builders aligned with op order.
+  const resultBuilders: Array<() => Promise<Record<string, unknown>>> = [];
+  const allChanges: Array<{
+    table: string;
+    type: 'added' | 'modified' | 'removed';
+    docId: string;
+    data: Record<string, unknown> | null;
+  }> = [];
+  const postFetchChanges: Array<{ table: string; id: string; type: 'added' | 'modified'; resultIndex: number }> = [];
+
+  const escapeCondField = (field: string) => esc(field);
+
+  for (const op of operations) {
+    const name = op.table as string;
+    const { tableConfig, effective } = tableCtx.get(name)!;
+
+    if (op.op === 'expect') {
+      const clauses: string[] = [];
+      const params: unknown[] = [];
+      if (typeof op.id === 'string' && op.id) {
+        clauses.push('"id" = ?');
+        params.push(op.id);
+      }
+      for (const cond of (op.where as unknown[]) ?? []) {
+        if (!Array.isArray(cond) || cond.length !== 3) {
+          return c.json({ code: 400, message: 'transact expect where entries must be [field, "==", value].' }, 400);
+        }
+        const [field, cmp, value] = cond as [unknown, unknown, unknown];
+        if (typeof field !== 'string' || !field) {
+          return c.json({ code: 400, message: 'transact expect where field must be a string.' }, 400);
+        }
+        if (cmp !== '==') {
+          return c.json({ code: 400, message: `transact expect only supports '==' conditions (got '${String(cmp)}').` }, 400);
+        }
+        if (value === null) {
+          clauses.push(`${escapeCondField(field)} IS NULL`);
+          continue;
+        }
+        if (typeof value === 'object') {
+          return c.json({ code: 400, message: 'transact expect cannot compare object values.' }, 400);
+        }
+        clauses.push(`${escapeCondField(field)} = ?`);
+        params.push(
+          effective[field]?.type === 'boolean'
+            ? (value === true || value === 'true' || value === 1 || value === '1' ? 1 : 0)
+            : value,
+        );
+      }
+      const condition = `SELECT 1 FROM ${esc(name)} WHERE ${clauses.join(' AND ')}`;
+
+      // Read rule on the probed row (worker-side, like other D1 read paths).
+      if (!isServiceKey) {
+        const access = getTableAccess(tableConfig);
+        if (access?.read !== undefined) {
+          const probe = await executeD1Query(resolved.db, `SELECT * FROM ${esc(name)} WHERE ${clauses.join(' AND ')} LIMIT 1`, params);
+          if (probe.rows.length > 0) {
+            const row = normalizeRow(stripInternalFields(probe.rows[0]), tableConfig);
+            if (!(await evalRowRule(access.read, auth, row))) {
+              return c.json({ code: 403, message: d1RuleRejectedMessage(name, 'read') }, 403);
+            }
+          }
+        }
+      }
+
+      const guardCondition = op.exists === true
+        ? `NOT EXISTS (${condition})`
+        : `EXISTS (${condition})`;
+      const guard = resolved.db.prepare(
+        `INSERT INTO ${esc(TX_GUARD_TABLE)} ("id") SELECT NULL WHERE ${guardCondition}`,
+      );
+      stmts.push(params.length > 0 ? guard.bind(...params) : guard);
+      resultBuilders.push(async () => ({ expected: true }));
+      continue;
+    }
+
+    if (op.op === 'insert') {
+      const item = applySchemaFieldAliases(op.data as Record<string, unknown>, tableConfig.schema);
+      const validation = validateInsert(item, tableConfig.schema);
+      if (!validation.valid) {
+        return c.json({
+          code: 400,
+          message: `Transact insert on '${name}' failed validation. See data for field-level errors.`,
+          data: Object.fromEntries(Object.entries(validation.errors).map(([k, v]) => [k, { code: 'invalid', message: v }])),
+        }, 400);
+      }
+      const id = (item.id as string) || generateId();
+      const record: Record<string, unknown> = { ...item, id };
+      if (effective.createdAt) record.createdAt = now;
+      if (effective.updatedAt) record.updatedAt = now;
+      for (const [fname, field] of Object.entries(effective)) {
+        if (record[fname] === undefined && field.default !== undefined) {
+          record[fname] = field.default;
+        }
+      }
+      const data = filterToSchemaColumns(record, effective);
+      serializeJsonFields(data, effective);
+      const columns = Object.keys(data);
+      const values = columns.map((col) => data[col] ?? null);
+      const placeholders = columns.map(() => '?').join(', ');
+      const colStr = columns.map(esc).join(', ');
+      const stmt = resolved.db.prepare(`INSERT INTO ${esc(name)} (${colStr}) VALUES (${placeholders})`);
+      stmts.push(values.length > 0 ? stmt.bind(...values) : stmt);
+      postFetchChanges.push({ table: name, id, type: 'added', resultIndex: resultBuilders.length });
+      resultBuilders.push(async () => {
+        const fetched = await executeD1Query(resolved.db, `SELECT * FROM ${esc(name)} WHERE "id" = ?`, [id]);
+        const row = fetched.rows.length > 0
+          ? normalizeRow(stripInternalFields(fetched.rows[0]), tableConfig)
+          : { id, ...record };
+        return { inserted: row };
+      });
+      continue;
+    }
+
+    if (op.op === 'update') {
+      const id = op.id as string;
+      const aliased = applySchemaFieldAliases(op.data as Record<string, unknown>, tableConfig.schema);
+      const validation = validateUpdate(aliased, tableConfig.schema);
+      if (!validation.valid) {
+        return c.json({
+          code: 400,
+          message: `Transact update on '${name}' failed validation. See data for field-level errors.`,
+          data: Object.fromEntries(Object.entries(validation.errors).map(([k, v]) => [k, { code: 'invalid', message: v }])),
+        }, 400);
+      }
+      // Per-row update rule on the current row (stricter than handleBatch,
+      // which skips update rules entirely on D1).
+      if (!isServiceKey) {
+        const access = getTableAccess(tableConfig);
+        if (access?.update !== undefined) {
+          const current = await executeD1Query(resolved.db, `SELECT * FROM ${esc(name)} WHERE "id" = ?`, [id]);
+          const row = current.rows.length > 0
+            ? normalizeRow(stripInternalFields(current.rows[0]), tableConfig)
+            : {};
+          if (!(await evalRowRule(access.update, auth, row))) {
+            return c.json({ code: 403, message: d1RuleRejectedMessage(name, 'update') }, 403);
+          }
+        }
+      }
+      const updateData = { ...aliased };
+      delete updateData.id;
+      delete updateData.createdAt;
+      if (effective.updatedAt?.onUpdate === 'now') {
+        updateData.updatedAt = now;
+      }
+      for (const [key, value] of Object.entries(updateData)) {
+        if (effective[key]?.type === 'json' && value !== null && value !== undefined && typeof value === 'object' && !('$op' in (value as Record<string, unknown>))) {
+          updateData[key] = JSON.stringify(value);
+        } else if (effective[key]?.type === 'boolean' && value !== null && value !== undefined && (typeof value !== 'object' || !('$op' in value))) {
+          updateData[key] = value === true || value === 'true' || value === 1 || value === '1' ? 1 : 0;
+        }
+      }
+      const { setClauses, params } = parseUpdateBody(updateData);
+      if (setClauses.length > 0) {
+        const stmt = resolved.db.prepare(`UPDATE ${esc(name)} SET ${setClauses.join(', ')} WHERE "id" = ?`);
+        stmts.push(stmt.bind(...params, id));
+      }
+      postFetchChanges.push({ table: name, id, type: 'modified', resultIndex: resultBuilders.length });
+      resultBuilders.push(async () => {
+        const fetched = await executeD1Query(resolved.db, `SELECT * FROM ${esc(name)} WHERE "id" = ?`, [id]);
+        const row = fetched.rows.length > 0
+          ? normalizeRow(stripInternalFields(fetched.rows[0]), tableConfig)
+          : { id, ...(op.data as Record<string, unknown>) };
+        return { updated: row };
+      });
+      continue;
+    }
+
+    // delete
+    const id = op.id as string;
+    if (!isServiceKey) {
+      const access = getTableAccess(tableConfig);
+      if (access?.delete !== undefined) {
+        const current = await executeD1Query(resolved.db, `SELECT * FROM ${esc(name)} WHERE "id" = ?`, [id]);
+        const row = current.rows.length > 0
+          ? normalizeRow(stripInternalFields(current.rows[0]), tableConfig)
+          : {};
+        if (!(await evalRowRule(access.delete, auth, row))) {
+          return c.json({ code: 403, message: d1RuleRejectedMessage(name, 'delete') }, 403);
+        }
+      }
+    }
+    const stmt = resolved.db.prepare(`DELETE FROM ${esc(name)} WHERE "id" = ?`);
+    stmts.push(stmt.bind(id));
+    allChanges.push({ table: name, type: 'removed', docId: id, data: null });
+    resultBuilders.push(async () => ({ deleted: true, id }));
+  }
+
+  // Lazy guard table, then apply the whole transaction in ONE db.batch().
+  // NOT NULL is explicit: SQLite TEXT PRIMARY KEY alone still allows NULLs.
+  await executeD1Query(resolved.db, `CREATE TABLE IF NOT EXISTS ${esc(TX_GUARD_TABLE)} ("id" TEXT NOT NULL PRIMARY KEY)`, []);
+  try {
+    if (stmts.length > 0) await resolved.db.batch(stmts);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes(TX_GUARD_TABLE)) {
+      return c.json({ code: 409, message: 'Transaction expectation failed; no operations were applied.' }, 409);
+    }
+    throw err;
+  }
+
+  const results: Record<string, unknown>[] = [];
+  for (const build of resultBuilders) {
+    results.push(await build());
+  }
+  for (const change of postFetchChanges) {
+    const built = results[change.resultIndex];
+    const row = built ? (((built.inserted ?? built.updated) as Record<string, unknown>) ?? null) : null;
+    allChanges.push({ table: change.table, type: change.type, docId: change.id, data: row });
+  }
+
+  // Emit database-live events grouped per table (same thresholds as handleBatch).
+  const changesByTable = new Map<string, typeof allChanges>();
+  for (const change of allChanges) {
+    const list = changesByTable.get(change.table) ?? [];
+    list.push(change);
+    changesByTable.set(change.table, list);
+  }
+  for (const [tableName, changes] of changesByTable) {
+    if (changes.length >= 10) {
+      scheduleDbLive(
+        c.executionCtx,
+        emitDbLiveBatchEvent(
+          c.env,
+          resolved.namespace,
+          tableName,
+          changes.map(({ type, docId, data }) => ({ type, docId, data })),
+        ),
+        `emit transact batch ${resolved.namespace}.${tableName} (${changes.length} changes)`,
+      );
+    } else {
+      scheduleDbLive(
+        c.executionCtx,
+        Promise.all(
+          changes.map((ch) =>
+            emitDbLiveEvent(c.env, resolved.namespace, tableName, ch.type, ch.docId, ch.data),
+          ),
+        ).then(() => undefined),
+        `emit transact fan-out ${resolved.namespace}.${tableName} (${changes.length} changes)`,
+      );
+    }
+  }
+
+  return c.json({ results });
 }
 
 // ─── BATCH BY FILTER ───

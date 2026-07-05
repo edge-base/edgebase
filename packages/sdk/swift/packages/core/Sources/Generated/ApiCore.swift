@@ -288,6 +288,11 @@ public struct GeneratedDbApi {
         return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/batch-by-filter", body, queryParams: query)
     }
 
+    /// Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
+    public func dbSingleTransact(_ namespace: String, _ body: [String: Any]) async throws -> Any {
+        return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/transact", body)
+    }
+
     /// Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
     public func dbCountRecords(_ namespace: String, _ instanceId: String, _ table: String, query: [String: String]? = nil) async throws -> Any {
         return try await http.get("/db/\(edgebaseEncodePathParam(namespace))/\(edgebaseEncodePathParam(instanceId))/tables/\(edgebaseEncodePathParam(table))/count", queryParams: query)
@@ -331,6 +336,11 @@ public struct GeneratedDbApi {
     /// Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter
     public func dbBatchByFilter(_ namespace: String, _ instanceId: String, _ table: String, _ body: [String: Any], query: [String: String]? = nil) async throws -> Any {
         return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/\(edgebaseEncodePathParam(instanceId))/tables/\(edgebaseEncodePathParam(table))/batch-by-filter", body, queryParams: query)
+    }
+
+    /// Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact
+    public func dbTransact(_ namespace: String, _ instanceId: String, _ body: [String: Any]) async throws -> Any {
+        return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/\(edgebaseEncodePathParam(instanceId))/transact", body)
     }
 
     /// Check database live subscription WebSocket prerequisites — GET /api/db/connect-check
@@ -620,6 +630,7 @@ public enum ApiPaths {
     public static func dbBatchByFilter(_ namespace: String, _ instanceId: String, _ table: String) -> String { "/api/db/\(namespace)/\(instanceId)/tables/\(table)/batch-by-filter" }
     public static func dbCountRecords(_ namespace: String, _ instanceId: String, _ table: String) -> String { "/api/db/\(namespace)/\(instanceId)/tables/\(table)/count" }
     public static func dbSearchRecords(_ namespace: String, _ instanceId: String, _ table: String) -> String { "/api/db/\(namespace)/\(instanceId)/tables/\(table)/search" }
+    public static func dbTransact(_ namespace: String, _ instanceId: String) -> String { "/api/db/\(namespace)/\(instanceId)/transact" }
     public static func dbSingleListRecords(_ namespace: String, _ table: String) -> String { "/api/db/\(namespace)/tables/\(table)" }
     public static func dbSingleInsertRecord(_ namespace: String, _ table: String) -> String { "/api/db/\(namespace)/tables/\(table)" }
     public static func dbSingleGetRecord(_ namespace: String, _ table: String, _ id: String) -> String { "/api/db/\(namespace)/tables/\(table)/\(id)" }
@@ -629,6 +640,7 @@ public enum ApiPaths {
     public static func dbSingleBatchByFilter(_ namespace: String, _ table: String) -> String { "/api/db/\(namespace)/tables/\(table)/batch-by-filter" }
     public static func dbSingleCountRecords(_ namespace: String, _ table: String) -> String { "/api/db/\(namespace)/tables/\(table)/count" }
     public static func dbSingleSearchRecords(_ namespace: String, _ table: String) -> String { "/api/db/\(namespace)/tables/\(table)/search" }
+    public static func dbSingleTransact(_ namespace: String) -> String { "/api/db/\(namespace)/transact" }
     public static let DATABASE_LIVE_BROADCAST = "/api/db/broadcast"
     public static let CHECK_DATABASE_SUBSCRIPTION_CONNECTION = "/api/db/connect-check"
     public static let CONNECT_DATABASE_SUBSCRIPTION = "/api/db/subscribe"

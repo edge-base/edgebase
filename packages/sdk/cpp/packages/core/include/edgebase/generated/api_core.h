@@ -127,6 +127,8 @@ public:
   virtual Result db_single_batch_records(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
   virtual Result db_single_batch_by_filter(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
+  /// Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
+  virtual Result db_single_transact(const std::string& namespace_, const std::string& json_body) const;
   /// Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
   Result db_count_records(const std::string& namespace_, const std::string& instance_id, const std::string& table, const std::map<std::string, std::string>& query = {}) const;
   /// Search records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/search
@@ -145,6 +147,8 @@ public:
   Result db_batch_records(const std::string& namespace_, const std::string& instance_id, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter
   Result db_batch_by_filter(const std::string& namespace_, const std::string& instance_id, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
+  /// Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact
+  Result db_transact(const std::string& namespace_, const std::string& instance_id, const std::string& json_body) const;
   /// Check database live subscription WebSocket prerequisites — GET /api/db/connect-check
   Result check_database_subscription_connection(const std::map<std::string, std::string>& query = {}) const;
   /// Connect to database live subscriptions WebSocket — GET /api/db/subscribe
@@ -444,6 +448,9 @@ namespace ApiPaths {
   inline std::string db_search_records(const std::string& namespace_, const std::string& instance_id, const std::string& table) {
     return "/api/db/" + namespace_ + "/" + instance_id + "/tables/" + table + "/search";
   }
+  inline std::string db_transact(const std::string& namespace_, const std::string& instance_id) {
+    return "/api/db/" + namespace_ + "/" + instance_id + "/transact";
+  }
   inline std::string db_single_list_records(const std::string& namespace_, const std::string& table) {
     return "/api/db/" + namespace_ + "/tables/" + table;
   }
@@ -470,6 +477,9 @@ namespace ApiPaths {
   }
   inline std::string db_single_search_records(const std::string& namespace_, const std::string& table) {
     return "/api/db/" + namespace_ + "/tables/" + table + "/search";
+  }
+  inline std::string db_single_transact(const std::string& namespace_) {
+    return "/api/db/" + namespace_ + "/transact";
   }
   constexpr const char* DATABASE_LIVE_BROADCAST = "/api/db/broadcast";
   constexpr const char* CHECK_DATABASE_SUBSCRIPTION_CONNECTION = "/api/db/connect-check";

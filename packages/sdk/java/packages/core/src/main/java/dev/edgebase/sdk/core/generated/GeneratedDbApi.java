@@ -295,6 +295,11 @@ public class GeneratedDbApi {
         return http.postWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/batch-by-filter", body, query);
     }
 
+    /** Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact */
+    public Object dbSingleTransact(String namespace, Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/db/" + encodePathParam(namespace) + "/transact", body);
+    }
+
     /** Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count */
     public Object dbCountRecords(String namespace, String instanceId, String table, Map<String, String> query) throws EdgeBaseError {
         return http.getWithQuery("/db/" + encodePathParam(namespace) + "/" + encodePathParam(instanceId) + "/tables/" + encodePathParam(table) + "/count", query);
@@ -338,6 +343,11 @@ public class GeneratedDbApi {
     /** Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter */
     public Object dbBatchByFilter(String namespace, String instanceId, String table, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
         return http.postWithQuery("/db/" + encodePathParam(namespace) + "/" + encodePathParam(instanceId) + "/tables/" + encodePathParam(table) + "/batch-by-filter", body, query);
+    }
+
+    /** Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact */
+    public Object dbTransact(String namespace, String instanceId, Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/db/" + encodePathParam(namespace) + "/" + encodePathParam(instanceId) + "/transact", body);
     }
 
     /** Check database live subscription WebSocket prerequisites — GET /api/db/connect-check */
@@ -721,6 +731,9 @@ public class GeneratedDbApi {
         public static String dbSearchRecords(String namespace, String instanceId, String table) {
             return "/api/db/" + namespace + "/" + instanceId + "/tables/" + table + "/search";
         }
+        public static String dbTransact(String namespace, String instanceId) {
+            return "/api/db/" + namespace + "/" + instanceId + "/transact";
+        }
         public static String dbSingleListRecords(String namespace, String table) {
             return "/api/db/" + namespace + "/tables/" + table;
         }
@@ -747,6 +760,9 @@ public class GeneratedDbApi {
         }
         public static String dbSingleSearchRecords(String namespace, String table) {
             return "/api/db/" + namespace + "/tables/" + table + "/search";
+        }
+        public static String dbSingleTransact(String namespace) {
+            return "/api/db/" + namespace + "/transact";
         }
         public static final String DATABASE_LIVE_BROADCAST = "/api/db/broadcast";
         public static final String CHECK_DATABASE_SUBSCRIPTION_CONNECTION = "/api/db/connect-check";

@@ -77,6 +77,16 @@ function parsePath(
   } else {
     // Heuristic fallback: find first 'tables' keyword
     tablesIdx = segments.indexOf('tables', 1);
+    if (tablesIdx < 0) tablesIdx = segments.indexOf('transact', 1);
+  }
+  // DB-level transact path has no table segment: /{ns}/transact or /{ns}/{id}/transact
+  if (segments[tablesIdx] === 'transact' && tablesIdx === segments.length - 1) {
+    return {
+      namespace: segments[0],
+      instanceId: tablesIdx === 2 ? segments[1] : undefined,
+      tableName: '',
+      directPath: '/transact',
+    };
   }
   if (tablesIdx < 0 || segments[tablesIdx] !== 'tables') {
     throw new Error(`Invalid DB path: missing 'tables' segment in ${path}`);
@@ -209,6 +219,16 @@ export class InternalHttpTransport implements HttpTransport {
       && shouldRouteToD1(namespace, this.config)
       && this.env
       && (provider === 'd1' || hasD1Binding(this.env, namespace));
+
+    // Multi-table transact is implemented by the DO (transactionSync) and D1
+    // (single db.batch() transaction) providers. PostgreSQL is not wired yet —
+    // fail loudly instead of writing non-atomically.
+    if (directPath === '/transact' && (provider === 'neon' || provider === 'postgres')) {
+      throw new Error(
+        `db.transact() is not supported for namespace '${namespace}' (provider '${provider}'). ` +
+        'Multi-table transactions require the Durable Object or D1 provider.',
+      );
+    }
 
     if (shouldUseD1) {
       return this.requestViaD1Handler(httpMethod, namespace, normalizedInstanceId, tableName, directPath, headers, query, body);

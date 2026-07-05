@@ -1649,6 +1649,428 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       return c.json({ processed, succeeded });
     });
 
+    // TRANSACT: POST /transact — multi-table atomic writes (SQLite DO provider).
+    // Ordered insert/update/delete ops across tables in ONE transactionSync,
+    // plus `expect` ops that assert row state and abort with 409 when unmet —
+    // closing check-then-write races for app servers without exposing raw
+    // BEGIN/COMMIT. Rule semantics mirror /tables/:name/batch: table-level
+    // insert rules before the transaction, per-row update/delete (and expect
+    // read) rules inside it, Service Key bypasses.
+    app.post('/transact', async (c) => {
+      interface TransactOp {
+        table?: unknown;
+        op?: unknown;
+        id?: unknown;
+        data?: unknown;
+        where?: unknown;
+        exists?: unknown;
+      }
+      const body = await c.req.json<{ operations?: TransactOp[] }>();
+      const operations = body.operations;
+      if (!Array.isArray(operations) || operations.length === 0) {
+        throw validationError('transact requires a non-empty operations array.');
+      }
+      const MAX_TRANSACT_OPS = 500;
+      if (operations.length > MAX_TRANSACT_OPS) {
+        throw validationError(
+          `Transact limit exceeded: ${operations.length} operations (max ${MAX_TRANSACT_OPS}).`,
+        );
+      }
+
+      const auth = this.parseAuthContext(c.req.raw);
+      const isSK = this.isServiceKeyRequest(c.req.raw);
+
+      // Validate shapes + resolve per-table context up front.
+      interface TxTableCtx {
+        tableConfig: TableConfig;
+        effective: ReturnType<typeof buildEffectiveSchema>;
+        rules: TableRules | undefined;
+      }
+      const tableCtx = new Map<string, TxTableCtx>();
+      for (const op of operations) {
+        if (typeof op?.table !== 'string' || !op.table) {
+          throw validationError('Each transact operation must name a table.');
+        }
+        if (op.op !== 'insert' && op.op !== 'update' && op.op !== 'delete' && op.op !== 'expect') {
+          throw validationError(
+            `Unknown transact op '${String(op.op)}'. Expected insert | update | delete | expect.`,
+          );
+        }
+        if (op.op === 'insert' && (!op.data || typeof op.data !== 'object')) {
+          throw validationError('transact insert requires a data object.');
+        }
+        if (op.op === 'update') {
+          if (typeof op.id !== 'string' || !op.id) {
+            throw validationError('transact update requires an id.');
+          }
+          if (!op.data || typeof op.data !== 'object') {
+            throw validationError('transact update requires a data object.');
+          }
+        }
+        if (op.op === 'delete' && (typeof op.id !== 'string' || !op.id)) {
+          throw validationError('transact delete requires an id.');
+        }
+        if (op.op === 'expect') {
+          const hasId = typeof op.id === 'string' && op.id.length > 0;
+          const hasWhere = Array.isArray(op.where) && op.where.length > 0;
+          if (!hasId && !hasWhere) {
+            throw validationError('transact expect requires an id and/or where conditions.');
+          }
+          if (typeof op.exists !== 'boolean') {
+            throw validationError('transact expect requires a boolean exists.');
+          }
+        }
+        if (!tableCtx.has(op.table)) {
+          this.ensureTableExists(op.table);
+          const tableConfig = this.getTableConfig(op.table);
+          if (!tableConfig) {
+            throw validationError(
+              `Table '${op.table}' is not defined in the schema configuration.`,
+            );
+          }
+          tableCtx.set(op.table, {
+            tableConfig,
+            effective: buildEffectiveSchema(tableConfig.schema),
+            rules: getTableAccess(tableConfig ?? undefined) as TableRules | undefined,
+          });
+        }
+      }
+
+      // Table-level insert rules — evaluated before the transaction (like /batch).
+      if (!isSK) {
+        const checked = new Set<string>();
+        for (const op of operations) {
+          if (op.op !== 'insert' || checked.has(op.table as string)) continue;
+          checked.add(op.table as string);
+          const rules = tableCtx.get(op.table as string)?.rules;
+          if (rules?.insert) {
+            const canInsert = await this.evalRowRule(rules.insert, auth, {});
+            if (!canInsert) {
+              throw new EdgeBaseError(
+                403,
+                `Access denied: 'insert' rule blocked transact insert on table "${op.table}".`,
+              );
+            }
+          }
+        }
+      }
+
+      const results: Record<string, unknown>[] = [];
+      const liveChanges: Array<{
+        table: string;
+        type: 'added' | 'modified' | 'removed';
+        docId: string;
+        data: Record<string, unknown> | null;
+      }> = [];
+      const triggerOps: Array<{
+        table: string;
+        action: 'insert' | 'update' | 'delete';
+        payload: { before?: Record<string, unknown>; after?: Record<string, unknown> };
+      }> = [];
+
+      this.ctx.storage.transactionSync(() => {
+        const now = new Date().toISOString();
+        for (const op of operations) {
+          const name = op.table as string;
+          const { tableConfig, effective, rules } = tableCtx.get(name) as TxTableCtx;
+
+          if (op.op === 'expect') {
+            const clauses: string[] = [];
+            const params: unknown[] = [];
+            if (typeof op.id === 'string' && op.id) {
+              clauses.push('"id" = ?');
+              params.push(op.id);
+            }
+            for (const cond of (op.where as unknown[]) ?? []) {
+              if (!Array.isArray(cond) || cond.length !== 3) {
+                throw validationError('transact expect where entries must be [field, "==", value].');
+              }
+              const [field, cmp, value] = cond as [unknown, unknown, unknown];
+              if (typeof field !== 'string' || !field) {
+                throw validationError('transact expect where field must be a string.');
+              }
+              if (cmp !== '==') {
+                throw validationError(
+                  `transact expect only supports '==' conditions (got '${String(cmp)}').`,
+                );
+              }
+              if (value === null) {
+                clauses.push(`"${field.replace(/"/g, '""')}" IS NULL`);
+                continue;
+              }
+              if (typeof value === 'object') {
+                throw validationError('transact expect cannot compare object values.');
+              }
+              clauses.push(`"${field.replace(/"/g, '""')}" = ?`);
+              params.push(
+                effective[field]?.type === 'boolean'
+                  ? (value === true || value === 'true' || value === 1 || value === '1' ? 1 : 0)
+                  : value,
+              );
+            }
+            const rows = [
+              ...this.sql(
+                `SELECT * FROM "${name}" WHERE ${clauses.join(' AND ')} LIMIT 1`,
+                ...params,
+              ),
+            ];
+            // Read rule guards expect probes so they cannot leak row existence.
+            if (!isSK && rows.length > 0 && rules?.read && typeof rules.read === 'function') {
+              let canRead = false;
+              try {
+                canRead = (
+                  rules.read as (a: AuthContext | null, row: Record<string, unknown>) => boolean
+                )(auth, rows[0] as Record<string, unknown>);
+              } catch {
+                canRead = false;
+              }
+              if (!canRead) {
+                throw new EdgeBaseError(
+                  403,
+                  `Access denied: 'read' rule blocked transact expect on table "${name}".`,
+                );
+              }
+            }
+            if (op.exists === true && rows.length === 0) {
+              throw new EdgeBaseError(
+                409,
+                `Transaction expectation failed: expected a matching row in "${name}".`,
+              );
+            }
+            if (op.exists === false && rows.length > 0) {
+              throw new EdgeBaseError(
+                409,
+                `Transaction expectation failed: expected no matching row in "${name}".`,
+              );
+            }
+            results.push({ expected: true });
+            continue;
+          }
+
+          if (op.op === 'insert') {
+            const item = op.data as Record<string, unknown>;
+            const validation = validateInsert(item, tableConfig.schema);
+            if (!validation.valid) {
+              throw validationError(
+                `Transact insert on "${name}" failed validation. See data for field-level errors.`,
+                Object.fromEntries(
+                  Object.entries(validation.errors).map(([k, v]) => [
+                    k,
+                    { code: 'invalid', message: v },
+                  ]),
+                ),
+              );
+            }
+            const id = (item.id as string) || generateId();
+            const record: Record<string, unknown> = { ...item, id };
+            if ('createdAt' in effective) record.createdAt = now;
+            if ('updatedAt' in effective) record.updatedAt = now;
+            for (const [fname, field] of Object.entries(effective)) {
+              if (record[fname] === undefined && field.default !== undefined) {
+                record[fname] = field.default;
+              }
+            }
+            let columns: string[];
+            if (!tableConfig.schema) {
+              columns = Object.keys(record);
+              this.ensureSchemalessColumns(
+                name,
+                columns.filter((k) => !(k in effective)),
+              );
+            } else {
+              columns = Object.keys(record).filter((k) => k in effective);
+            }
+            const values = columns.map((k) => {
+              const v = record[k];
+              if (
+                effective[k]?.type === 'json' &&
+                v !== null &&
+                v !== undefined &&
+                typeof v === 'object'
+              ) {
+                return JSON.stringify(v);
+              }
+              if (effective[k]?.type === 'boolean' && v !== null && v !== undefined) {
+                return v === true || v === 'true' || v === 1 || v === '1' ? 1 : 0;
+              }
+              return v;
+            });
+            const placeholders = columns.map(() => '?').join(', ');
+            const colStr = columns.map((col) => `"${col}"`).join(', ');
+            this.sql(`INSERT INTO "${name}" (${colStr}) VALUES (${placeholders})`, ...values);
+            results.push({ inserted: record });
+            liveChanges.push({ table: name, type: 'added', docId: id, data: record });
+            triggerOps.push({ table: name, action: 'insert', payload: { after: record } });
+            continue;
+          }
+
+          if (op.op === 'update') {
+            const id = op.id as string;
+            const data = op.data as Record<string, unknown>;
+            const validation = validateUpdate(data, tableConfig.schema);
+            if (!validation.valid) {
+              throw validationError(
+                `Transact update on "${name}" failed validation. See data for field-level errors.`,
+                Object.fromEntries(
+                  Object.entries(validation.errors).map(([k, v]) => [
+                    k,
+                    { code: 'invalid', message: v },
+                  ]),
+                ),
+              );
+            }
+            const beforeRows = [...this.sql(`SELECT * FROM "${name}" WHERE "id" = ?`, id)];
+            const beforeRow = beforeRows[0] as Record<string, unknown> | undefined;
+            if (!isSK && beforeRow && rules?.update && typeof rules.update === 'function') {
+              let canUpdate = false;
+              try {
+                canUpdate = (
+                  rules.update as (a: AuthContext | null, row: Record<string, unknown>) => boolean
+                )(auth, beforeRow);
+              } catch {
+                canUpdate = false;
+              }
+              if (!canUpdate) {
+                throw new EdgeBaseError(
+                  403,
+                  `Access denied: 'update' rule blocked record "${id}" in table "${name}".`,
+                );
+              }
+            }
+            const updateData = { ...data };
+            delete updateData.id;
+            delete updateData.createdAt;
+            if ('updatedAt' in effective && effective.updatedAt?.onUpdate === 'now') {
+              updateData.updatedAt = now;
+            }
+            if (!tableConfig.schema) {
+              this.ensureSchemalessColumns(
+                name,
+                Object.keys(updateData).filter((k) => !(k in effective)),
+              );
+            }
+            for (const [key, value] of Object.entries(updateData)) {
+              if (
+                effective[key]?.type === 'json' &&
+                value !== null &&
+                value !== undefined &&
+                typeof value === 'object' &&
+                !('$op' in value)
+              ) {
+                updateData[key] = JSON.stringify(value);
+              } else if (
+                effective[key]?.type === 'boolean' &&
+                value !== null &&
+                value !== undefined &&
+                (typeof value !== 'object' || !('$op' in value))
+              ) {
+                updateData[key] =
+                  value === true || value === 'true' || value === 1 || value === '1' ? 1 : 0;
+              }
+            }
+            const { setClauses, params } = parseUpdateBody(updateData);
+            if (setClauses.length > 0) {
+              params.push(id);
+              this.sql(`UPDATE "${name}" SET ${setClauses.join(', ')} WHERE "id" = ?`, ...params);
+            }
+            const afterRows = [...this.sql(`SELECT * FROM "${name}" WHERE "id" = ?`, id)];
+            const afterRow =
+              afterRows.length > 0
+                ? (afterRows[0] as Record<string, unknown>)
+                : { id, ...data };
+            results.push({ updated: afterRow });
+            if (beforeRow) {
+              liveChanges.push({ table: name, type: 'modified', docId: id, data: afterRow });
+              triggerOps.push({
+                table: name,
+                action: 'update',
+                payload: { before: beforeRow, after: afterRow },
+              });
+            }
+            continue;
+          }
+
+          // delete
+          const id = op.id as string;
+          const existing = [...this.sql(`SELECT * FROM "${name}" WHERE "id" = ?`, id)];
+          if (existing.length > 0) {
+            if (!isSK && rules?.delete && typeof rules.delete === 'function') {
+              let canDelete = false;
+              try {
+                canDelete = (
+                  rules.delete as (a: AuthContext | null, row: Record<string, unknown>) => boolean
+                )(auth, existing[0] as Record<string, unknown>);
+              } catch {
+                canDelete = false;
+              }
+              if (!canDelete) {
+                throw new EdgeBaseError(
+                  403,
+                  `Access denied: 'delete' rule blocked record "${id}" in table "${name}".`,
+                );
+              }
+            }
+            liveChanges.push({ table: name, type: 'removed', docId: id, data: null });
+            triggerOps.push({
+              table: name,
+              action: 'delete',
+              payload: { before: existing[0] as Record<string, unknown> },
+            });
+          }
+          this.sql(`DELETE FROM "${name}" WHERE "id" = ?`, id);
+          results.push({ deleted: true, id });
+        }
+      });
+
+      // Post-commit: database-live events grouped per table (same thresholds as /batch).
+      const changesByTable = new Map<string, typeof liveChanges>();
+      for (const change of liveChanges) {
+        const list = changesByTable.get(change.table) ?? [];
+        list.push(change);
+        changesByTable.set(change.table, list);
+      }
+      const transactBatchThreshold = resolveDbLiveBatchThreshold(this.config);
+      for (const [tableName, changes] of changesByTable) {
+        if (changes.length >= transactBatchThreshold) {
+          this.ctx.waitUntil(
+            this.emitDbLiveBatchEvent(
+              tableName,
+              changes.map(({ type, docId, data }) => ({ type, docId, data })),
+            ),
+          );
+        } else {
+          for (const change of changes) {
+            this.ctx.waitUntil(
+              this.emitDbLiveEvent(tableName, change.type, change.docId, change.data),
+            );
+          }
+        }
+      }
+
+      // Post-commit: DB triggers per operation (same shape as /batch).
+      const doOriginTransact = this.doName ? parseDbDoName(this.doName) : { namespace: 'shared' };
+      const transactTriggerContext = {
+        databaseNamespace: this.env.DATABASE,
+        authNamespace: this.env.AUTH,
+        kvNamespace: this.env.KV,
+        config: this.config,
+        serviceKey: this.getServiceKey(),
+      };
+      for (const trig of triggerOps) {
+        this.ctx.waitUntil(
+          executeDbTriggers(
+            trig.table,
+            trig.action,
+            trig.payload,
+            transactTriggerContext,
+            doOriginTransact,
+          ),
+        );
+      }
+
+      return c.json({ results });
+    });
+
     // INTERNAL: POST /internal/sql — raw SQL execution for server SDK
     // Only accessible via Worker-level /api/sql route which validates Service Key.
     // Parameterized queries enforced: query + params are separate.

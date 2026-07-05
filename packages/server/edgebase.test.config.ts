@@ -857,5 +857,37 @@ export default defineConfig({
                 },
             },
         },
+
+        // Durable Object provider coverage for multi-table transact (transact.test.ts).
+        // 'shared' defaults to D1 routing, so this block pins provider: 'do'.
+        txdo: {
+            provider: 'do',
+            tables: {
+                tx_posts: {
+                    schema: {
+                        title: { type: 'string', required: true },
+                        status: { type: 'string' },
+                        tag: { type: 'string' },
+                    },
+                    access: {
+                        read: () => true,
+                        insert: () => true,
+                        update: () => true,
+                        delete: (auth) => auth !== null,
+                    },
+                },
+                tx_audit: {
+                    schema: {
+                        action: { type: 'string', required: true },
+                    },
+                    access: {
+                        read: () => true,
+                        insert: () => true,
+                        update: () => false,
+                        delete: () => false,
+                    },
+                },
+            },
+        },
     },
 });

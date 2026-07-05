@@ -115,6 +115,8 @@ export interface GeneratedDbApi {
   dbSingleBatchRecords(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter */
   dbSingleBatchByFilter(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
+  /** Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact */
+  dbSingleTransact(namespace: string, body: unknown): Promise<unknown>;
   /** Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count */
   dbCountRecords(namespace: string, instanceId: string, table: string, query: Record<string, string>): Promise<unknown>;
   /** Search records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/search */
@@ -133,6 +135,8 @@ export interface GeneratedDbApi {
   dbBatchRecords(namespace: string, instanceId: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter */
   dbBatchByFilter(namespace: string, instanceId: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
+  /** Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact */
+  dbTransact(namespace: string, instanceId: string, body: unknown): Promise<unknown>;
   /** Check database live subscription WebSocket prerequisites — GET /api/db/connect-check */
   checkDatabaseSubscriptionConnection(query: Record<string, string>): Promise<unknown>;
   /** Connect to database live subscriptions WebSocket — GET /api/db/subscribe */
@@ -421,6 +425,10 @@ export class DefaultDbApi implements GeneratedDbApi {
     return this.transport.request('POST', `/api/db/${namespace}/tables/${table}/batch-by-filter`, { body, query });
   }
 
+  async dbSingleTransact(namespace: string, body: unknown): Promise<unknown> {
+    return this.transport.request('POST', `/api/db/${namespace}/transact`, { body });
+  }
+
   async dbCountRecords(namespace: string, instanceId: string, table: string, query: Record<string, string>): Promise<unknown> {
     return this.transport.request('GET', `/api/db/${namespace}/${instanceId}/tables/${table}/count`, { query });
   }
@@ -455,6 +463,10 @@ export class DefaultDbApi implements GeneratedDbApi {
 
   async dbBatchByFilter(namespace: string, instanceId: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown> {
     return this.transport.request('POST', `/api/db/${namespace}/${instanceId}/tables/${table}/batch-by-filter`, { body, query });
+  }
+
+  async dbTransact(namespace: string, instanceId: string, body: unknown): Promise<unknown> {
+    return this.transport.request('POST', `/api/db/${namespace}/${instanceId}/transact`, { body });
   }
 
   async checkDatabaseSubscriptionConnection(query: Record<string, string>): Promise<unknown> {
@@ -717,6 +729,7 @@ export class ApiPaths {
   static dbBatchByFilter(namespace: string, instanceId: string, table: string) { return `/api/db/${namespace}/${instanceId}/tables/${table}/batch-by-filter`; }
   static dbCountRecords(namespace: string, instanceId: string, table: string) { return `/api/db/${namespace}/${instanceId}/tables/${table}/count`; }
   static dbSearchRecords(namespace: string, instanceId: string, table: string) { return `/api/db/${namespace}/${instanceId}/tables/${table}/search`; }
+  static dbTransact(namespace: string, instanceId: string) { return `/api/db/${namespace}/${instanceId}/transact`; }
   static dbSingleListRecords(namespace: string, table: string) { return `/api/db/${namespace}/tables/${table}`; }
   static dbSingleInsertRecord(namespace: string, table: string) { return `/api/db/${namespace}/tables/${table}`; }
   static dbSingleGetRecord(namespace: string, table: string, id: string) { return `/api/db/${namespace}/tables/${table}/${id}`; }
@@ -726,6 +739,7 @@ export class ApiPaths {
   static dbSingleBatchByFilter(namespace: string, table: string) { return `/api/db/${namespace}/tables/${table}/batch-by-filter`; }
   static dbSingleCountRecords(namespace: string, table: string) { return `/api/db/${namespace}/tables/${table}/count`; }
   static dbSingleSearchRecords(namespace: string, table: string) { return `/api/db/${namespace}/tables/${table}/search`; }
+  static dbSingleTransact(namespace: string) { return `/api/db/${namespace}/transact`; }
   static readonly DATABASE_LIVE_BROADCAST = '/api/db/broadcast';
   static readonly CHECK_DATABASE_SUBSCRIPTION_CONNECTION = '/api/db/connect-check';
   static readonly CONNECT_DATABASE_SUBSCRIPTION = '/api/db/subscribe';

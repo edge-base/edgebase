@@ -351,6 +351,12 @@ class GeneratedDbApi
         return $this->http->postWithQuery('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/batch-by-filter', $body, $query);
     }
 
+    /** Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact */
+    public function db_single_transact(string $namespace, mixed $body = null): mixed
+    {
+        return $this->http->post('/db/' . rawurlencode($namespace) . '/transact', $body);
+    }
+
     /** Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count */
     public function db_count_records(string $namespace, string $instance_id, string $table, array $query = []): mixed
     {
@@ -403,6 +409,12 @@ class GeneratedDbApi
     public function db_batch_by_filter(string $namespace, string $instance_id, string $table, mixed $body = null, array $query = []): mixed
     {
         return $this->http->postWithQuery('/db/' . rawurlencode($namespace) . '/' . rawurlencode($instance_id) . '/tables/' . rawurlencode($table) . '/batch-by-filter', $body, $query);
+    }
+
+    /** Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact */
+    public function db_transact(string $namespace, string $instance_id, mixed $body = null): mixed
+    {
+        return $this->http->post('/db/' . rawurlencode($namespace) . '/' . rawurlencode($instance_id) . '/transact', $body);
     }
 
     /** Check database live subscription WebSocket prerequisites — GET /api/db/connect-check */
@@ -907,6 +919,11 @@ final class ApiPaths
         return "/api/db/{$namespace}/{$instance_id}/tables/{$table}/search";
     }
 
+    public static function db_transact(string $namespace, string $instance_id): string
+    {
+        return "/api/db/{$namespace}/{$instance_id}/transact";
+    }
+
     public static function db_single_list_records(string $namespace, string $table): string
     {
         return "/api/db/{$namespace}/tables/{$table}";
@@ -950,6 +967,11 @@ final class ApiPaths
     public static function db_single_search_records(string $namespace, string $table): string
     {
         return "/api/db/{$namespace}/tables/{$table}/search";
+    }
+
+    public static function db_single_transact(string $namespace): string
+    {
+        return "/api/db/{$namespace}/transact";
     }
     public const DATABASE_LIVE_BROADCAST = '/api/db/broadcast';
     public const CHECK_DATABASE_SUBSCRIPTION_CONNECTION = '/api/db/connect-check';

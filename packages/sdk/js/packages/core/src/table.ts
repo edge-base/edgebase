@@ -62,6 +62,32 @@ export interface BatchByFilterResult {
   errors: Array<{ chunkIndex: number; chunkSize: number; error: EdgeBaseError }>;
 }
 
+/**
+ * One operation inside db.transact().
+ * Applied in order, atomically — if any operation fails, nothing is written.
+ * `expect` asserts current row state and aborts the transaction (HTTP 409)
+ * when unmet, closing check-then-write races without a client round-trip.
+ */
+export type TransactOperation =
+  | { table: string; op: 'insert'; data: Record<string, unknown> }
+  | { table: string; op: 'update'; id: string; data: Record<string, unknown> }
+  | { table: string; op: 'delete'; id: string }
+  | {
+      table: string;
+      op: 'expect';
+      /** Row id to match. At least one of id/where is required. */
+      id?: string;
+      /** Additional equality conditions: [field, '==', value] tuples. */
+      where?: FilterTuple[];
+      /** true: a matching row must exist; false: no matching row may exist. */
+      exists: boolean;
+    };
+
+/** Result of db.transact() — one entry per operation, in request order. */
+export interface TransactResult {
+  results: Array<Record<string, unknown>>;
+}
+
 export type TableSqlExecutor = (
   namespace: string,
   instanceId: string | undefined,
@@ -1050,6 +1076,30 @@ export class DbRef<Tables extends EdgeBaseTableMap = EdgeBaseTableMap> {
       this._httpClient,
       this._sqlExecutor,
     );
+  }
+
+  /**
+   * Apply write operations across multiple tables in one atomic transaction.
+   * All-or-nothing: if any operation fails (validation, access rule, or an
+   * unmet `expect` assertion), the whole transaction rolls back.
+   *
+   * Supported on the Durable Object (SQLite) provider. D1/PostgreSQL-backed
+   * namespaces reject the call.
+   *
+   * @example
+   * await db.transact([
+   *   { table: 'members', op: 'expect', id: 'm1', where: [['role', '==', 'admin']], exists: true },
+   *   { table: 'permissions', op: 'insert', data: { pageId: 'p1', role: 'edit' } },
+   *   { table: 'audit_events', op: 'insert', data: { action: 'grant' } },
+   * ]);
+   */
+  async transact(operations: TransactOperation[]): Promise<TransactResult> {
+    if (this.instanceId) {
+      return (await this.core.dbTransact(this.namespace, this.instanceId, {
+        operations,
+      })) as TransactResult;
+    }
+    return (await this.core.dbSingleTransact(this.namespace, { operations })) as TransactResult;
   }
 }
 

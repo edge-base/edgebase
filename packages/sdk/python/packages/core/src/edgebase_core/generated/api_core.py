@@ -236,6 +236,10 @@ class GeneratedDbApi:
         """Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter"""
         return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/batch-by-filter", body, params=query)
 
+    def db_single_transact(self, namespace: str, body: Any) -> Any:
+        """Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact"""
+        return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/transact", body)
+
     def db_count_records(self, namespace: str, instance_id: str, table: str, query: dict[str, str] | None = None) -> Any:
         """Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count"""
         return self._http.get(f"/db/{urllib.parse.quote(namespace, safe='')}/{urllib.parse.quote(instance_id, safe='')}/tables/{urllib.parse.quote(table, safe='')}/count", params=query)
@@ -271,6 +275,10 @@ class GeneratedDbApi:
     def db_batch_by_filter(self, namespace: str, instance_id: str, table: str, body: Any, query: dict[str, str] | None = None) -> Any:
         """Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter"""
         return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/{urllib.parse.quote(instance_id, safe='')}/tables/{urllib.parse.quote(table, safe='')}/batch-by-filter", body, params=query)
+
+    def db_transact(self, namespace: str, instance_id: str, body: Any) -> Any:
+        """Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact"""
+        return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/{urllib.parse.quote(instance_id, safe='')}/transact", body)
 
     def check_database_subscription_connection(self, query: dict[str, str] | None = None) -> Any:
         """Check database live subscription WebSocket prerequisites — GET /api/db/connect-check"""
@@ -693,6 +701,10 @@ class ApiPaths:
         return f"/api/db/{namespace}/{instance_id}/tables/{table}/search"
 
     @staticmethod
+    def db_transact(namespace: str, instance_id: str) -> str:
+        return f"/api/db/{namespace}/{instance_id}/transact"
+
+    @staticmethod
     def db_single_list_records(namespace: str, table: str) -> str:
         return f"/api/db/{namespace}/tables/{table}"
 
@@ -727,6 +739,10 @@ class ApiPaths:
     @staticmethod
     def db_single_search_records(namespace: str, table: str) -> str:
         return f"/api/db/{namespace}/tables/{table}/search"
+
+    @staticmethod
+    def db_single_transact(namespace: str) -> str:
+        return f"/api/db/{namespace}/transact"
 
     @staticmethod
     def kv_operation(namespace: str) -> str:

@@ -290,6 +290,11 @@ func (a *GeneratedDbApi) DbSingleBatchByFilter(ctx context.Context, namespace st
 	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/db/%s/tables/%s/batch-by-filter", url.PathEscape(namespace), url.PathEscape(table)), body, query)
 }
 
+// DbSingleTransact — Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
+func (a *GeneratedDbApi) DbSingleTransact(ctx context.Context, namespace string, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", fmt.Sprintf("/api/db/%s/transact", url.PathEscape(namespace)), body)
+}
+
 // DbCountRecords — Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
 func (a *GeneratedDbApi) DbCountRecords(ctx context.Context, namespace string, instanceId string, table string, query map[string]string) (map[string]interface{}, error) {
 	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/db/%s/%s/tables/%s/count", url.PathEscape(namespace), url.PathEscape(instanceId), url.PathEscape(table)), query)
@@ -333,6 +338,11 @@ func (a *GeneratedDbApi) DbBatchRecords(ctx context.Context, namespace string, i
 // DbBatchByFilter — Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter
 func (a *GeneratedDbApi) DbBatchByFilter(ctx context.Context, namespace string, instanceId string, table string, body interface{}, query map[string]string) (map[string]interface{}, error) {
 	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/db/%s/%s/tables/%s/batch-by-filter", url.PathEscape(namespace), url.PathEscape(instanceId), url.PathEscape(table)), body, query)
+}
+
+// DbTransact — Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact
+func (a *GeneratedDbApi) DbTransact(ctx context.Context, namespace string, instanceId string, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", fmt.Sprintf("/api/db/%s/%s/transact", url.PathEscape(namespace), url.PathEscape(instanceId)), body)
 }
 
 // CheckDatabaseSubscriptionConnection — Check database live subscription WebSocket prerequisites — GET /api/db/connect-check
@@ -829,6 +839,11 @@ func PathDbSearchRecords(namespace string, instanceId string, table string) stri
 	return "/api/db/" + namespace + "/" + instanceId + "/tables/" + table + "/search"
 }
 
+// PathDbTransact builds the path for /api/db/{namespace}/{instanceId}/transact.
+func PathDbTransact(namespace string, instanceId string) string {
+	return "/api/db/" + namespace + "/" + instanceId + "/transact"
+}
+
 // PathDbSingleListRecords builds the path for /api/db/{namespace}/tables/{table}.
 func PathDbSingleListRecords(namespace string, table string) string {
 	return "/api/db/" + namespace + "/tables/" + table
@@ -872,6 +887,11 @@ func PathDbSingleCountRecords(namespace string, table string) string {
 // PathDbSingleSearchRecords builds the path for /api/db/{namespace}/tables/{table}/search.
 func PathDbSingleSearchRecords(namespace string, table string) string {
 	return "/api/db/" + namespace + "/tables/" + table + "/search"
+}
+
+// PathDbSingleTransact builds the path for /api/db/{namespace}/transact.
+func PathDbSingleTransact(namespace string) string {
+	return "/api/db/" + namespace + "/transact"
 }
 
 // PathKvOperation builds the path for /api/kv/{namespace}.

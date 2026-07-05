@@ -285,6 +285,11 @@ open class GeneratedDbApi(protected val http: HttpClient) {
     open suspend fun dbSingleBatchByFilter(namespace: String, table: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
         http.postWithQuery("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/batch-by-filter", body, query)
 
+    /** Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact */
+    @Suppress("UNCHECKED_CAST")
+    open suspend fun dbSingleTransact(namespace: String, body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/db/${platformUrlEncode(namespace)}/transact", body)
+
     /** Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count */
     @Suppress("UNCHECKED_CAST")
     suspend fun dbCountRecords(namespace: String, instanceId: String, table: String, query: Map<String, String>? = null): Any? =
@@ -329,6 +334,11 @@ open class GeneratedDbApi(protected val http: HttpClient) {
     @Suppress("UNCHECKED_CAST")
     suspend fun dbBatchByFilter(namespace: String, instanceId: String, table: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
         http.postWithQuery("/db/${platformUrlEncode(namespace)}/${platformUrlEncode(instanceId)}/tables/${platformUrlEncode(table)}/batch-by-filter", body, query)
+
+    /** Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun dbTransact(namespace: String, instanceId: String, body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/db/${platformUrlEncode(namespace)}/${platformUrlEncode(instanceId)}/transact", body)
 
     /** Check database live subscription WebSocket prerequisites — GET /api/db/connect-check */
     @Suppress("UNCHECKED_CAST")
@@ -617,6 +627,7 @@ object ApiPaths {
     fun dbBatchByFilter(namespace: String, instanceId: String, table: String) = "/api/db/$namespace/$instanceId/tables/$table/batch-by-filter"
     fun dbCountRecords(namespace: String, instanceId: String, table: String) = "/api/db/$namespace/$instanceId/tables/$table/count"
     fun dbSearchRecords(namespace: String, instanceId: String, table: String) = "/api/db/$namespace/$instanceId/tables/$table/search"
+    fun dbTransact(namespace: String, instanceId: String) = "/api/db/$namespace/$instanceId/transact"
     fun dbSingleListRecords(namespace: String, table: String) = "/api/db/$namespace/tables/$table"
     fun dbSingleInsertRecord(namespace: String, table: String) = "/api/db/$namespace/tables/$table"
     fun dbSingleGetRecord(namespace: String, table: String, id: String) = "/api/db/$namespace/tables/$table/$id"
@@ -626,6 +637,7 @@ object ApiPaths {
     fun dbSingleBatchByFilter(namespace: String, table: String) = "/api/db/$namespace/tables/$table/batch-by-filter"
     fun dbSingleCountRecords(namespace: String, table: String) = "/api/db/$namespace/tables/$table/count"
     fun dbSingleSearchRecords(namespace: String, table: String) = "/api/db/$namespace/tables/$table/search"
+    fun dbSingleTransact(namespace: String) = "/api/db/$namespace/transact"
     const val DATABASE_LIVE_BROADCAST = "/api/db/broadcast"
     const val CHECK_DATABASE_SUBSCRIPTION_CONNECTION = "/api/db/connect-check"
     const val CONNECT_DATABASE_SUBSCRIPTION = "/api/db/subscribe"

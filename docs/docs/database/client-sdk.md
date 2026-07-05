@@ -1426,6 +1426,40 @@ await client.db('app').table('categories').upsertMany(
 - **`upsertMany` (≤ 500)** — All-or-nothing (single transaction)
 :::
 
+### transact (multi-table)
+
+Apply ordered write operations **across multiple tables** in one atomic
+transaction. If any operation fails — validation, an access rule, or an unmet
+`expect` assertion — nothing is written.
+
+```typescript
+await client.db('app').transact([
+  // Abort (HTTP 409) unless the acting member still has the admin role:
+  { table: 'members', op: 'expect', id: memberId, where: [['role', '==', 'admin']], exists: true },
+  { table: 'permissions', op: 'insert', data: { pageId, principalId, role: 'edit' } },
+  { table: 'audit_events', op: 'insert', data: { action: 'permission.grant', targetId: pageId } },
+]);
+```
+
+Operation shapes:
+
+| `op` | Fields | Result entry |
+|------|--------|--------------|
+| `insert` | `table`, `data` | `{ inserted: row }` |
+| `update` | `table`, `id`, `data` | `{ updated: row }` |
+| `delete` | `table`, `id` | `{ deleted: true, id }` |
+| `expect` | `table`, `id?`, `where?` (`[field, '==', value]` tuples), `exists` | `{ expected: true }` |
+
+`expect` asserts current row state *inside* the transaction, so a
+check-then-write race with another writer aborts the whole call with `409`
+instead of applying a stale write.
+
+:::info transact support & semantics
+- **Maximum 500 operations** per call; results return in request order.
+- **Providers**: Durable Object (via `transactionSync()`) and D1 (single `db.batch()` transaction). PostgreSQL-backed namespaces return an error.
+- **Access rules**: table-level `insert` rules run before the transaction; `update`/`delete` (and `expect` probes via the `read` rule) are evaluated per row. Service Key requests bypass rules as usual.
+- `expect.where` supports `'=='` comparisons only.
+:::
 
 ---
 

@@ -25,6 +25,8 @@ export {
   type FilterTuple,
   type UpsertResult,
   type BatchByFilterResult,
+  type TransactOperation,
+  type TransactResult,
   type TableSqlExecutor,
   type EdgeBaseTableRecord,
   type EdgeBaseTableMap,

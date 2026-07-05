@@ -283,6 +283,11 @@ class GeneratedDbApi {
     return _http.postWithQuery('/db/${Uri.encodeComponent(namespace)}/tables/${Uri.encodeComponent(table)}/batch-by-filter', body, query);
   }
 
+  /// Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
+  Future<dynamic> dbSingleTransact(String namespace, Object? body) async {
+    return _http.post('/db/${Uri.encodeComponent(namespace)}/transact', body);
+  }
+
   /// Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
   Future<dynamic> dbCountRecords(String namespace, String instanceId, String table, Map<String, String>? query) async {
     return _http.get('/db/${Uri.encodeComponent(namespace)}/${Uri.encodeComponent(instanceId)}/tables/${Uri.encodeComponent(table)}/count', query);
@@ -326,6 +331,11 @@ class GeneratedDbApi {
   /// Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter
   Future<dynamic> dbBatchByFilter(String namespace, String instanceId, String table, Object? body, Map<String, String>? query) async {
     return _http.postWithQuery('/db/${Uri.encodeComponent(namespace)}/${Uri.encodeComponent(instanceId)}/tables/${Uri.encodeComponent(table)}/batch-by-filter', body, query);
+  }
+
+  /// Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact
+  Future<dynamic> dbTransact(String namespace, String instanceId, Object? body) async {
+    return _http.post('/db/${Uri.encodeComponent(namespace)}/${Uri.encodeComponent(instanceId)}/transact', body);
   }
 
   /// Check database live subscription WebSocket prerequisites — GET /api/db/connect-check
@@ -617,6 +627,7 @@ class ApiPaths {
   static String dbBatchByFilter(String namespace, String instanceId, String table) => '/api/db/$namespace/$instanceId/tables/$table/batch-by-filter';
   static String dbCountRecords(String namespace, String instanceId, String table) => '/api/db/$namespace/$instanceId/tables/$table/count';
   static String dbSearchRecords(String namespace, String instanceId, String table) => '/api/db/$namespace/$instanceId/tables/$table/search';
+  static String dbTransact(String namespace, String instanceId) => '/api/db/$namespace/$instanceId/transact';
   static String dbSingleListRecords(String namespace, String table) => '/api/db/$namespace/tables/$table';
   static String dbSingleInsertRecord(String namespace, String table) => '/api/db/$namespace/tables/$table';
   static String dbSingleGetRecord(String namespace, String table, String id) => '/api/db/$namespace/tables/$table/$id';
@@ -626,6 +637,7 @@ class ApiPaths {
   static String dbSingleBatchByFilter(String namespace, String table) => '/api/db/$namespace/tables/$table/batch-by-filter';
   static String dbSingleCountRecords(String namespace, String table) => '/api/db/$namespace/tables/$table/count';
   static String dbSingleSearchRecords(String namespace, String table) => '/api/db/$namespace/tables/$table/search';
+  static String dbSingleTransact(String namespace) => '/api/db/$namespace/transact';
   static const DATABASE_LIVE_BROADCAST = '/api/db/broadcast';
   static const CHECK_DATABASE_SUBSCRIPTION_CONNECTION = '/api/db/connect-check';
   static const CONNECT_DATABASE_SUBSCRIPTION = '/api/db/subscribe';

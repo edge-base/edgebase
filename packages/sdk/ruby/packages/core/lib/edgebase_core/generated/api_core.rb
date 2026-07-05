@@ -287,6 +287,11 @@ module EdgebaseCore
       @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/batch-by-filter", body, params: query)
     end
 
+    # Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
+    def db_single_transact(namespace, body = nil)
+      @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/transact", body)
+    end
+
     # Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
     def db_count_records(namespace, instance_id, table, query: nil)
       @http.get("/db/#{CGI.escape(namespace).gsub('+', '%20')}/#{CGI.escape(instance_id).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/count", params: query)
@@ -330,6 +335,11 @@ module EdgebaseCore
     # Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter
     def db_batch_by_filter(namespace, instance_id, table, body = nil, query: nil)
       @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/#{CGI.escape(instance_id).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/batch-by-filter", body, params: query)
+    end
+
+    # Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact
+    def db_transact(namespace, instance_id, body = nil)
+      @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/#{CGI.escape(instance_id).gsub('+', '%20')}/transact", body)
     end
 
     # Check database live subscription WebSocket prerequisites — GET /api/db/connect-check
@@ -780,6 +790,10 @@ module EdgebaseCore
       "/api/db/#{namespace}/#{instance_id}/tables/#{table}/search"
     end
 
+    def self.db_transact(namespace, instance_id)
+      "/api/db/#{namespace}/#{instance_id}/transact"
+    end
+
     def self.db_single_list_records(namespace, table)
       "/api/db/#{namespace}/tables/#{table}"
     end
@@ -814,6 +828,10 @@ module EdgebaseCore
 
     def self.db_single_search_records(namespace, table)
       "/api/db/#{namespace}/tables/#{table}/search"
+    end
+
+    def self.db_single_transact(namespace)
+      "/api/db/#{namespace}/transact"
     end
 
     def self.kv_operation(namespace)

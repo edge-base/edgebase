@@ -35,8 +35,16 @@ import {
   jsonResponseSchema, errorResponseSchema, zodDefaultHook,
 } from '../lib/schemas.js';
 import type { AuthContext } from '@edge-base/shared';
+import { EdgeBaseError } from '@edge-base/shared';
 import { handlePgRequest } from '../lib/postgres-handler.js';
 import { handleD1Request } from '../lib/d1-handler.js';
+import {
+  buildKeymap,
+  resolveServiceKeyCandidate,
+  validateKey,
+  type ConstraintContext,
+} from '../lib/service-key.js';
+import { getTrustedClientIp } from '../lib/client-ip.js';
 
 
 export const tablesRoute = new OpenAPIHono<HonoEnv>({ defaultHook: zodDefaultHook });
@@ -557,6 +565,144 @@ tablesRoute.openapi(dbDeleteRecord, async (c) => {
   const table = c.req.param('table')!;
   const id = c.req.param('id')!;
   return routeToDO(c as unknown as Context<HonoEnv>, namespace, instanceId, table, `/tables/${table}/${id}`);
+});
+
+// ─── POST /{namespace}/transact and /{namespace}/{instanceId}/transact ─
+// Multi-table atomic writes. The rules middleware skips non-/tables/ paths,
+// so Service Keys are validated here (per write-op table scope) and access
+// rules are enforced per operation inside the DO. DO/SQLite provider only.
+
+const transactBodySchema = z.object({
+  operations: z.array(z.record(z.string(), z.unknown())).openapi({
+    description: 'Ordered insert | update | delete | expect operations applied atomically.',
+  }),
+});
+
+const dbSingleTransact = createRoute({
+  operationId: 'dbSingleTransact',
+  method: 'post',
+  path: '/{namespace}/transact',
+  tags: ['client'],
+  summary: 'Apply multi-table write operations atomically in a single-instance database',
+  request: {
+    params: z.object({
+      namespace: z.string().openapi({ description: 'Database namespace', example: 'app' }),
+    }),
+    body: { content: { 'application/json': { schema: transactBodySchema } }, required: true },
+  },
+  responses: {
+    200: { description: 'Ordered per-operation results', content: { 'application/json': { schema: jsonResponseSchema } } },
+    400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
+    403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
+    409: { description: 'Expectation failed', content: { 'application/json': { schema: errorResponseSchema } } },
+    501: { description: 'Provider unsupported', content: { 'application/json': { schema: errorResponseSchema } } },
+  },
+});
+
+const dbTransact = createRoute({
+  operationId: 'dbTransact',
+  method: 'post',
+  path: '/{namespace}/{instanceId}/transact',
+  tags: ['client'],
+  summary: 'Apply multi-table write operations atomically in a dynamic database instance',
+  request: {
+    params: z.object({
+      namespace: z.string().openapi({ description: 'Database namespace', example: 'workspace' }),
+      instanceId: z.string().openapi({ description: 'Instance ID', example: 'ws-456' }),
+    }),
+    body: { content: { 'application/json': { schema: transactBodySchema } }, required: true },
+  },
+  responses: {
+    200: { description: 'Ordered per-operation results', content: { 'application/json': { schema: jsonResponseSchema } } },
+    400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
+    403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
+    409: { description: 'Expectation failed', content: { 'application/json': { schema: errorResponseSchema } } },
+    501: { description: 'Provider unsupported', content: { 'application/json': { schema: errorResponseSchema } } },
+  },
+});
+
+async function handleTransactRoute(
+  c: Context<HonoEnv>,
+  namespace: string,
+  instanceId: string | undefined,
+): Promise<Response> {
+  const config = parseConfig(c.env);
+  const target = resolveDbTarget(config, namespace, instanceId);
+  if (!target.ok) {
+    return c.json({
+      code: target.status,
+      message: formatDbTargetValidationIssue(target.issue, namespace),
+    }, target.status);
+  }
+  const provider = target.value.dbBlock.provider;
+  if (provider === 'neon' || provider === 'postgres') {
+    return c.json({
+      code: 501,
+      message:
+        `transact is not supported for namespace '${namespace}' (provider '${provider}'). `
+        + 'Multi-table transactions require the Durable Object or D1 provider.',
+    }, 501);
+  }
+
+  // Service Key validation per write-op table (rules middleware skipped this path).
+  const provided = resolveServiceKeyCandidate(
+    c.req,
+    c.get('serviceKeyToken') as string | null | undefined,
+  );
+  if (provided) {
+    let body: { operations?: Array<Record<string, unknown>> } = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      body = {};
+    }
+    const writeTables = new Set<string>();
+    for (const op of body.operations ?? []) {
+      if (typeof op.table === 'string' && op.table) writeTables.add(op.table);
+    }
+    const constraintCtx: ConstraintContext = {
+      env: c.env.ENVIRONMENT,
+      ip: getTrustedClientIp(c.env, c.req),
+    };
+    if (target.value.instanceId) constraintCtx.tenantId = target.value.instanceId;
+    const keymap = buildKeymap(config, c.env);
+    let validCount = 0;
+    for (const tableName of writeTables) {
+      const { result } = validateKey(
+        provided,
+        `db:table:${tableName}:write`,
+        config,
+        c.env,
+        keymap,
+        constraintCtx,
+      );
+      if (result === 'invalid') {
+        throw new EdgeBaseError(
+          401,
+          `Invalid X-EdgeBase-Service-Key for scope 'db:table:${tableName}:write'.`,
+        );
+      }
+      if (result === 'missing') break; // not a recognized key — fall through to user auth
+      validCount += 1;
+    }
+    // Every named table's write scope validated → trusted bypass, like rules middleware.
+    if (writeTables.size > 0 && validCount === writeTables.size) {
+      c.set('isServiceKey' as never, true);
+    }
+  }
+
+  return routeToDO(c, namespace, instanceId, '', '/transact');
+}
+
+tablesRoute.openapi(dbSingleTransact, async (c) => {
+  const namespace = c.req.param('namespace')!;
+  return handleTransactRoute(c as unknown as Context<HonoEnv>, namespace, undefined);
+});
+
+tablesRoute.openapi(dbTransact, async (c) => {
+  const namespace = c.req.param('namespace')!;
+  const instanceId = c.req.param('instanceId')!;
+  return handleTransactRoute(c as unknown as Context<HonoEnv>, namespace, instanceId);
 });
 
 // ======================================================================

@@ -290,6 +290,11 @@ impl<'a> GeneratedDbApi<'a> {
         self.http.post_with_query(&format!("/api/db/{}/tables/{}/batch-by-filter", encode_path_param(namespace), encode_path_param(table)), body, query).await
     }
 
+    /// Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
+    pub async fn db_single_transact(&self, namespace: &str, body: &Value) -> Result<Value, Error> {
+        self.http.post(&format!("/api/db/{}/transact", encode_path_param(namespace)), body).await
+    }
+
     /// Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
     pub async fn db_count_records(&self, namespace: &str, instance_id: &str, table: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
         self.http.get_with_query(&format!("/api/db/{}/{}/tables/{}/count", encode_path_param(namespace), encode_path_param(instance_id), encode_path_param(table)), query).await
@@ -333,6 +338,11 @@ impl<'a> GeneratedDbApi<'a> {
     /// Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter
     pub async fn db_batch_by_filter(&self, namespace: &str, instance_id: &str, table: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
         self.http.post_with_query(&format!("/api/db/{}/{}/tables/{}/batch-by-filter", encode_path_param(namespace), encode_path_param(instance_id), encode_path_param(table)), body, query).await
+    }
+
+    /// Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact
+    pub async fn db_transact(&self, namespace: &str, instance_id: &str, body: &Value) -> Result<Value, Error> {
+        self.http.post(&format!("/api/db/{}/{}/transact", encode_path_param(namespace), encode_path_param(instance_id)), body).await
     }
 
     /// Check database live subscription WebSocket prerequisites — GET /api/db/connect-check
@@ -716,6 +726,9 @@ impl ApiPaths {
     pub fn db_search_records(namespace: &str, instance_id: &str, table: &str) -> String {
         format!("/api/db/{}/{}/tables/{}/search", namespace, instance_id, table)
     }
+    pub fn db_transact(namespace: &str, instance_id: &str) -> String {
+        format!("/api/db/{}/{}/transact", namespace, instance_id)
+    }
     pub fn db_single_list_records(namespace: &str, table: &str) -> String {
         format!("/api/db/{}/tables/{}", namespace, table)
     }
@@ -742,6 +755,9 @@ impl ApiPaths {
     }
     pub fn db_single_search_records(namespace: &str, table: &str) -> String {
         format!("/api/db/{}/tables/{}/search", namespace, table)
+    }
+    pub fn db_single_transact(namespace: &str) -> String {
+        format!("/api/db/{}/transact", namespace)
     }
     pub const DATABASE_LIVE_BROADCAST: &'static str = "/api/db/broadcast";
     pub const CHECK_DATABASE_SUBSCRIPTION_CONNECTION: &'static str = "/api/db/connect-check";
