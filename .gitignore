@@ -47,6 +47,10 @@ __pycache__/
 *.hprof
 .phpunit.result.cache
 bin/
+# create-edgebase ships a hand-written bin entrypoint — keep it tracked
+# (the blanket bin/ rule above is for build artifacts).
+!packages/create-edgebase/bin/
+!packages/create-edgebase/bin/create-edgebase.js
 obj/
 vendor/
 composer.lock
