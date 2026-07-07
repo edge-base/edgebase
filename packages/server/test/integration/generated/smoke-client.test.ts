@@ -832,6 +832,23 @@ describe('Smoke: client', () => {
     expect(status).toBeLessThan(500);
   });
 
+  it('dbSingleTransact: POST /api/db/{namespace}/transact → not 5xx', async () => {
+    const { status, data } = await api('POST', '/api/db/test/transact', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleTransact: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/db/test/transact', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
   it('dbCountRecords: GET /api/db/{namespace}/{instanceId}/tables/{table}/count → not 5xx', async () => {
     const { status, data } = await api('GET', '/api/db/test/default/tables/posts/count', {
       headers: { 'X-EdgeBase-Service-Key': SK },
@@ -919,6 +936,23 @@ describe('Smoke: client', () => {
 
   it('dbBatchByFilter: bad input → 400', async () => {
     const { status } = await api('POST', '/api/db/test/default/tables/posts/batch-by-filter', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbTransact: POST /api/db/{namespace}/{instanceId}/transact → not 5xx', async () => {
+    const { status, data } = await api('POST', '/api/db/test/default/transact', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbTransact: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/db/test/default/transact', {
       headers: { 'X-EdgeBase-Service-Key': SK },
       body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
     });
