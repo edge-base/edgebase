@@ -203,7 +203,8 @@ describe('postgres field operator compatibility', () => {
 
     const selectSql = executePostgresQuery.mock.calls[0][1] as string;
     const selectParams = executePostgresQuery.mock.calls[0][2] as unknown[];
-    expect(selectSql).toContain('SELECT "posts"."id" FROM "posts"');
+    // Full rows are selected so per-row access rules can be evaluated.
+    expect(selectSql).toContain('SELECT "posts".* FROM "posts"');
     expect(selectSql).toContain('WHERE "id" = $1');
     expect(selectSql).toContain('LIMIT $2');
     expect(selectSql).toContain('OFFSET $3');

@@ -66,7 +66,9 @@ function postgresInvalidJsonMessage(context: string, tableName: string): string 
 }
 
 function postgresRuleRejectedMessage(tableName: string, action: 'read' | 'insert' | 'update' | 'delete'): string {
-  return `Access denied by access rules for ${action} on table '${tableName}'.`;
+  // Wording kept in lockstep with the D1 handler's d1RuleRejectedMessage so the
+  // two SQL-dialect providers surface identical 403 messages.
+  return `Access denied. The '${action}' access rule for table '${tableName}' rejected this request.`;
 }
 
 function postgresValidationMessage(context: string, tableName: string): string {
@@ -466,7 +468,9 @@ async function handleSearch(
   const queryOpts = parseQueryParams(Object.fromEntries(new URL(c.req.url).searchParams));
   const searchTerm = queryOpts.search || '';
   if (!searchTerm) {
-    return c.json({ code: 400, message: 'Search term is required (use ?search=)' }, 400);
+    // Missing/empty search term — return empty result (same as D1/DO handler;
+    // the ?search= query param is optional per openapi.json).
+    return c.json({ items: [] });
   }
 
   // Use FTS fields from config, or fallback to text columns from schema
@@ -586,7 +590,6 @@ async function handleInsert(
       code: 400,
       message: summarizeValidationErrors(validation.errors),
       data: toFieldErrorData(validation.errors),
-      errors: validation.errors,
     }, 400);
   }
 
@@ -714,7 +717,6 @@ async function handleUpdate(
       code: 400,
       message: postgresValidationMessage(`update record '${id}'`, tableName),
       data: toFieldErrorData(validation.errors),
-      errors: validation.errors,
     }, 400);
   }
 
@@ -752,7 +754,9 @@ async function handleUpdate(
   const { data } = preparePgUpdateData(body, tableConfig);
 
   if (Object.keys(data).length === 0) {
-    return c.json({ code: 400, message: 'No valid fields to update.' }, 400);
+    // Empty update body — return the existing record as-is (same as D1/DO
+    // handler); a no-op update is not an error per openapi.json.
+    return c.json(stripInternalPgFields(existingRow));
   }
 
   const { setClauses, params, nextParamIndex } = parseUpdateBody(
@@ -888,7 +892,7 @@ async function handleDelete(
     ),
   );
 
-  return c.json({ success: true, deleted: stripInternalPgFields(existingRow) });
+  return c.json({ deleted: true });
 }
 
 // ─── BATCH ───
@@ -903,6 +907,7 @@ async function handleBatch(
   query: PostgresExecutor,
 ): Promise<Response> {
   let body: {
+    /** DEPRECATED: legacy alias for `inserts` (pinned by src/__tests__/postgres-batch-compat.test.ts). */
     items?: Record<string, unknown>[];
     inserts?: Record<string, unknown>[];
     updates?: { id: string; data: Record<string, unknown> }[];
@@ -911,34 +916,73 @@ async function handleBatch(
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ code: 400, message: postgresInvalidJsonMessage('batch insert', tableName) }, 400);
+    return c.json({ code: 400, message: postgresInvalidJsonMessage('batch operations', tableName) }, 400);
   }
 
+  // DEPRECATED: the `items` request alias (for `inserts`) and the `items`
+  // response echo are kept for backwards compatibility with early PG-only
+  // clients. New clients should send the D1/DO-aligned
+  // { inserts, updates, deletes } shape.
+  const hasInserts = Array.isArray(body.inserts) || Array.isArray(body.items);
   const inserts = Array.isArray(body.inserts)
     ? body.inserts
     : Array.isArray(body.items)
       ? body.items
       : [];
-  const updates = Array.isArray(body.updates) ? body.updates : [];
-  const deletes = Array.isArray(body.deletes) ? body.deletes : [];
+  const hasUpdates = Array.isArray(body.updates);
+  const updates = hasUpdates ? body.updates! : [];
+  const hasDeletes = Array.isArray(body.deletes);
+  const deletes = hasDeletes ? body.deletes! : [];
 
+  // Batch size limit: 500 total ops (D1/DO parity)
+  const MAX_BATCH_SIZE = 500;
   const totalOps = inserts.length + updates.length + deletes.length;
-  if (totalOps === 0) {
-    return c.json({ code: 400, message: 'items array is required and must not be empty' }, 400);
+  if (totalOps > MAX_BATCH_SIZE) {
+    return c.json({ code: 400, message: `Batch limit exceeded: ${totalOps} operations (max ${MAX_BATCH_SIZE}).` }, 400);
   }
 
-  if (totalOps > 500) {
-    return c.json({ code: 400, message: 'Batch size cannot exceed 500 items.' }, 400);
+  // Response keys mirror the request keys (D1/DO parity); {} → {} with 200.
+  const results: Record<string, unknown> = {};
+  if (hasInserts) {
+    results.inserted = [];
+    // DEPRECATED response echo: `items` mirrors `inserted` for legacy clients.
+    results.items = [];
+  }
+  if (hasUpdates) results.updated = [];
+  if (hasDeletes) results.deleted = 0;
+
+  const upsertMode = c.req.query('upsert') === 'true';
+  const conflictTarget = c.req.query('conflictTarget') || 'id';
+
+  // ── Pre-validate ALL operations before executing any (D1 parity) ──
+  for (const item of inserts) {
+    const validation = validateInsert(item, tableConfig.schema);
+    if (!validation.valid) {
+      return c.json({
+        code: 400,
+        message: postgresValidationMessage('batch insert', tableName),
+        data: toFieldErrorData(validation.errors),
+      }, 400);
+    }
+  }
+  for (const entry of updates) {
+    if (!entry || typeof entry !== 'object' || typeof entry.id !== 'string' || !entry.id) {
+      return c.json({ code: 400, message: `Each batch update entry for table '${tableName}' must include an id.` }, 400);
+    }
+    if (!entry.data || typeof entry.data !== 'object') {
+      return c.json({ code: 400, message: `Each batch update entry for table '${tableName}' must include a data object.` }, 400);
+    }
+    const validation = validateUpdate(entry.data, tableConfig.schema);
+    if (!validation.valid) {
+      return c.json({
+        code: 400,
+        message: postgresValidationMessage('batch update', tableName),
+        data: toFieldErrorData(validation.errors),
+      }, 400);
+    }
   }
 
-  if (updates.length > 0 || deletes.length > 0) {
-    return c.json({
-      code: 400,
-      message: 'PostgreSQL batch currently supports inserts/upserts only. Use batch-by-filter for updates/deletes.',
-    }, 400);
-  }
-
-  // Check insert rule (table-level, once)
+  // Check insert rule (table-level, once — D1/DO batch parity)
   const tableAccess = getTableAccess(tableConfig);
   if (!isServiceKey && inserts.length > 0 && tableAccess?.insert !== undefined) {
     if (!(await evalInsertRule(tableAccess.insert, auth))) {
@@ -946,77 +990,177 @@ async function handleBatch(
     }
   }
 
-  const upsertMode = c.req.query('upsert') === 'true';
-  const conflictTarget = c.req.query('conflictTarget') || 'id';
-  const results: Record<string, unknown>[] = [];
-
-  for (const item of inserts) {
-    // Validate
-    const validation = validateInsert(item, tableConfig.schema);
-    if (!validation.valid) {
-      return c.json({
-        code: 400,
-        message: postgresValidationMessage('batch insert', tableName),
-        data: toFieldErrorData(validation.errors),
-        errors: validation.errors,
-      }, 400);
-    }
-
-    const { data } = preparePgInsertData(item, tableConfig);
-
-    const columns = Object.keys(data);
-    const values = columns.map(col => data[col] ?? null);
-    const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
-    let sql = `INSERT INTO ${escapePgIdentifier(tableName)} (${columns.map(escapePgIdentifier).join(', ')}) VALUES (${placeholders})`;
-    if (upsertMode) {
-      const updateCols = columns.filter((col) => col !== 'id' && col !== 'createdAt' && col !== conflictTarget);
-      if (updateCols.length > 0) {
-        const updateSet = updateCols
-          .map((col) => `${escapePgIdentifier(col)} = EXCLUDED.${escapePgIdentifier(col)}`)
-          .join(', ');
-        sql += ` ON CONFLICT (${escapePgIdentifier(conflictTarget)}) DO UPDATE SET ${updateSet}`;
-      } else {
-        sql += ` ON CONFLICT (${escapePgIdentifier(conflictTarget)}) DO NOTHING`;
-      }
-    }
-    sql += ' RETURNING *';
-
-    const result = await query(sql, values);
-    if (result.rows.length > 0) {
-      results.push(stripInternalPgFields(result.rows[0] as Record<string, unknown>));
-    }
+  if (totalOps === 0) {
+    return c.json(results);
   }
 
+  // Batch is documented as all-or-nothing, which requires BEGIN/COMMIT on a
+  // session-scoped connection. The local dev sidecar executes statements on
+  // independent connections, so it cannot honor that promise — reject like
+  // the /transact guard does.
+  const localDevBatch = getLocalDevPostgresExecOptions(
+    c.env as unknown as Record<string, unknown>,
+    resolved.namespace,
+  );
+  if (localDevBatch) {
+    return c.json({
+      code: 501,
+      message:
+        'batch is not supported through the local dev PostgreSQL sidecar: '
+        + 'statements execute on independent connections, so BEGIN/COMMIT cannot span them.',
+    }, 501);
+  }
+
+  const insertedRows: Record<string, unknown>[] = [];
+  const updatedRows: Record<string, unknown>[] = [];
+  const liveChanges: Array<{
+    type: 'added' | 'modified' | 'removed';
+    docId: string;
+    data: Record<string, unknown> | null;
+  }> = [];
+
+  // All-or-nothing: run every operation inside one transaction. Per-row
+  // update/delete rules are evaluated on rows pre-read inside the transaction
+  // (accepted parity with the DO reference — JS rules cannot run inside SQL).
+  await query('BEGIN');
+  try {
+    // ── Inserts (or upserts when ?upsert=true) ──
+    for (const item of inserts) {
+      const { data } = preparePgInsertData(item, tableConfig);
+
+      const columns = Object.keys(data);
+      const values = columns.map(col => data[col] ?? null);
+      const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+      let sql = `INSERT INTO ${escapePgIdentifier(tableName)} (${columns.map(escapePgIdentifier).join(', ')}) VALUES (${placeholders})`;
+      if (upsertMode) {
+        const updateCols = columns.filter((col) => col !== 'id' && col !== 'createdAt' && col !== conflictTarget);
+        if (updateCols.length > 0) {
+          const updateSet = updateCols
+            .map((col) => `${escapePgIdentifier(col)} = EXCLUDED.${escapePgIdentifier(col)}`)
+            .join(', ');
+          sql += ` ON CONFLICT (${escapePgIdentifier(conflictTarget)}) DO UPDATE SET ${updateSet}`;
+        } else {
+          sql += ` ON CONFLICT (${escapePgIdentifier(conflictTarget)}) DO NOTHING`;
+        }
+      }
+      sql += ' RETURNING *';
+
+      const result = await query(sql, values);
+      if (result.rows.length > 0) {
+        const row = stripInternalPgFields(result.rows[0] as Record<string, unknown>);
+        insertedRows.push(row);
+        liveChanges.push({ type: 'added', docId: String(row.id ?? ''), data: row });
+      }
+    }
+
+    // ── Updates (per-row rule on the current row, read inside the transaction) ──
+    for (const entry of updates) {
+      if (!isServiceKey && tableAccess?.update !== undefined) {
+        const { sql: getSql, params: getParams } = buildGetQuery(tableName, entry.id, undefined, 'postgres');
+        const current = await query(getSql, getParams);
+        // Missing rows are no-ops (DO parity) — only evaluate rules on real rows.
+        if (
+          current.rows.length > 0
+          && !(await evalRowRule(tableAccess.update, auth, current.rows[0] as Record<string, unknown>))
+        ) {
+          throw new EdgeBaseError(403, postgresRuleRejectedMessage(tableName, 'update'));
+        }
+      }
+
+      const { data } = preparePgUpdateData(entry.data, tableConfig);
+      if (Object.keys(data).length === 0) {
+        // Nothing to set — echo the current row (D1 parity on empty set clauses).
+        const { sql: getSql, params: getParams } = buildGetQuery(tableName, entry.id, undefined, 'postgres');
+        const current = await query(getSql, getParams);
+        updatedRows.push(current.rows.length > 0
+          ? stripInternalPgFields(current.rows[0] as Record<string, unknown>)
+          : { id: entry.id, ...entry.data });
+        continue;
+      }
+
+      const { setClauses, params, nextParamIndex } = parseUpdateBody(
+        data,
+        ['id'],
+        { dialect: 'postgres', startIndex: 1 },
+      );
+      const sql = `UPDATE ${escapePgIdentifier(tableName)} SET ${setClauses.join(', ')} WHERE "id" = $${nextParamIndex} RETURNING *`;
+      const updated = await query(sql, [...params, entry.id]);
+      const row = updated.rows.length > 0
+        ? stripInternalPgFields(updated.rows[0] as Record<string, unknown>)
+        : { id: entry.id, ...entry.data };
+      updatedRows.push(row);
+      if (updated.rows.length > 0) {
+        liveChanges.push({ type: 'modified', docId: String(row.id ?? entry.id), data: row });
+      }
+    }
+
+    // ── Deletes (per-row rule on the current row, read inside the transaction) ──
+    for (const id of deletes) {
+      if (!isServiceKey && tableAccess?.delete !== undefined) {
+        const { sql: getSql, params: getParams } = buildGetQuery(tableName, id, undefined, 'postgres');
+        const current = await query(getSql, getParams);
+        // Missing rows are no-ops (DO parity) — only evaluate rules on real rows.
+        if (
+          current.rows.length > 0
+          && !(await evalRowRule(tableAccess.delete, auth, current.rows[0] as Record<string, unknown>))
+        ) {
+          throw new EdgeBaseError(403, postgresRuleRejectedMessage(tableName, 'delete'));
+        }
+      }
+      const deleted = await query(
+        `DELETE FROM ${escapePgIdentifier(tableName)} WHERE "id" = $1 RETURNING "id"`,
+        [id],
+      );
+      if (deleted.rows.length > 0) {
+        liveChanges.push({ type: 'removed', docId: id, data: null });
+      }
+    }
+
+    await query('COMMIT');
+  } catch (error) {
+    try {
+      await query('ROLLBACK');
+    } catch {
+      // connection-level failure — the transaction dies with the session
+    }
+    if (error instanceof EdgeBaseError) {
+      return c.json(error.toJSON(), error.status as 400);
+    }
+    throw error;
+  }
+
+  if (hasInserts) {
+    results.inserted = insertedRows;
+    // DEPRECATED response echo: `items` mirrors `inserted` for legacy clients
+    // (pinned by src/__tests__/postgres-batch-compat.test.ts).
+    results.items = insertedRows;
+  }
+  if (hasUpdates) results.updated = updatedRows;
+  // D1 parity: `deleted` echoes the number of requested ids, not affected rows.
+  if (hasDeletes) results.deleted = deletes.length;
+
   // Emit batch database-live events
-  if (results.length > 0) {
-    const changes = results.map(r => ({
-      type: 'added' as const,
-      docId: String((r as Record<string, unknown>).id ?? ''),
-      data: r as Record<string, unknown>,
-    }));
-    if (changes.length >= 10) {
+  if (liveChanges.length > 0) {
+    if (liveChanges.length >= 10) {
       scheduleDbLive(
         c.executionCtx,
-        emitDbLiveBatchEvent(c.env, resolved.namespace, tableName, changes),
-        `emit batch ${resolved.namespace}.${tableName} (${changes.length} changes)`,
+        emitDbLiveBatchEvent(c.env, resolved.namespace, tableName, liveChanges),
+        `emit batch ${resolved.namespace}.${tableName} (${liveChanges.length} changes)`,
       );
     } else {
       scheduleDbLive(
         c.executionCtx,
         Promise.all(
-          changes.map((ch) =>
+          liveChanges.map((ch) =>
             emitDbLiveEvent(c.env, resolved.namespace, tableName, ch.type, ch.docId, ch.data),
           ),
         ).then(() => undefined),
-        `emit fan-out ${resolved.namespace}.${tableName} (${changes.length} changes)`,
+        `emit fan-out ${resolved.namespace}.${tableName} (${liveChanges.length} changes)`,
       );
     }
   }
 
-  return c.json({
-    inserted: results,
-    items: results,
-  });
+  return c.json(results);
 }
 
 // ─── TRANSACT (multi-table atomic writes) ───
@@ -1320,7 +1464,7 @@ async function handleBatchByFilter(
   resolved: PgResolvedDb,
   tableName: string,
   tableConfig: TableConfig,
-  _auth: AuthContext | null,
+  auth: AuthContext | null,
   isServiceKey: boolean,
   query: PostgresExecutor,
 ): Promise<Response> {
@@ -1349,12 +1493,24 @@ async function handleBatchByFilter(
     return c.json({ code: 400, message: "batch-by-filter with action 'update' requires 'update' data." }, 400);
   }
 
+  // Row-level access rules (DO parity, database-do.ts batch-by-filter):
+  // table-level pre-check with an empty row (sufficient for boolean/auth-only
+  // rules), then per-row function-rule filtering of the matched rows below.
+  // Service keys bypass rules, matching the single-record paths.
+  const tableAccess = getTableAccess(tableConfig);
+  const bfAction = body.action as 'delete' | 'update';
+  const bfRule = bfAction === 'delete' ? tableAccess?.delete : tableAccess?.update;
+  if (!isServiceKey && bfRule !== undefined) {
+    if (!(await evalRowRule(bfRule, auth, {}))) {
+      return c.json({ code: 403, message: postgresRuleRejectedMessage(tableName, bfAction) }, 403);
+    }
+  }
+
   const limit = Math.min(body.limit ?? 500, 500);
   const { sql: selectSql, params: selectParams } = buildListQuery(tableName, {
     filters: body.filter,
     orFilters: body.orFilter,
     pagination: { limit },
-    fields: ['id'],
   }, 'postgres');
   const selectResult = await query(selectSql, selectParams);
   const allRows = selectResult.rows;
@@ -1364,19 +1520,26 @@ async function handleBatchByFilter(
     return c.json({ processed: 0, succeeded: 0 });
   }
 
-  const ids = allRows.map((row) => String((row as Record<string, unknown>).id));
+  // Per-row rule evaluation: keep only rows the rule allows (DO parity).
+  let rows = allRows as Record<string, unknown>[];
+  if (!isServiceKey && typeof bfRule === 'function') {
+    const allowed: Record<string, unknown>[] = [];
+    for (const row of rows) {
+      if (await evalRowRule(bfRule, auth, row)) {
+        allowed.push(row);
+      }
+    }
+    if (allowed.length === 0) {
+      return c.json({ code: 403, message: postgresRuleRejectedMessage(tableName, bfAction) }, 403);
+    }
+    rows = allowed;
+  }
+
+  const ids = rows.map((row) => String(row.id));
   const idPlaceholders = ids.map((_, index) => `$${index + 1}`).join(', ');
   let succeeded = 0;
 
   if (body.action === 'delete') {
-    // Check delete rule at table level
-    const tableAccess = getTableAccess(tableConfig);
-    if (!isServiceKey && tableAccess?.delete !== undefined) {
-      if (typeof tableAccess.delete === 'boolean' && !tableAccess.delete) {
-        return c.json({ code: 403, message: postgresRuleRejectedMessage(tableName, 'delete') }, 403);
-      }
-    }
-
     const sql = `DELETE FROM ${escapePgIdentifier(tableName)} WHERE "id" IN (${idPlaceholders}) RETURNING *`;
     const result = await query(sql, ids);
     succeeded = result.rowCount;
@@ -1400,14 +1563,6 @@ async function handleBatchByFilter(
   // action === 'update'
   if (!updateData || Object.keys(updateData).length === 0) {
     return c.json({ code: 400, message: 'data is required for update action.' }, 400);
-  }
-
-  // Check update rule at table level
-  const tableAccess = getTableAccess(tableConfig);
-  if (!isServiceKey && tableAccess?.update !== undefined) {
-    if (typeof tableAccess.update === 'boolean' && !tableAccess.update) {
-      return c.json({ code: 403, message: postgresRuleRejectedMessage(tableName, 'update') }, 403);
-    }
   }
 
   const prepared = preparePgUpdateData(updateData, tableConfig).data;

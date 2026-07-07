@@ -118,6 +118,31 @@ const refreshClaimPluginB = definePlugin<Record<string, never>>({
     },
 });
 
+// beforeSignUp gate for auth-hooks-signup.test.ts.
+// Emails containing 'gate-reject-always' are always rejected.
+// Emails containing 'gate-reject-once' (and phones starting with '+1999999')
+// are rejected on their FIRST attempt only — the retry with the same
+// email/phone passes, letting tests verify that a hook rejection leaves no
+// stale pending email/phone index entry behind.
+// All other signups pass through untouched.
+const signUpGateSeen = new Set<string>();
+const signUpGatePlugin = definePlugin<Record<string, never>>({
+    name: 'test-signup-gate',
+    hooks: {
+        async beforeSignUp(ctx) {
+            const after = (ctx.data?.after ?? {}) as { email?: string | null; phone?: string | null };
+            const key = String(after.email ?? after.phone ?? '');
+            if (key.includes('gate-reject-always')) {
+                throw new Error('Blocked by test beforeSignUp (always)');
+            }
+            if ((key.includes('gate-reject-once') || key.startsWith('+1999999')) && !signUpGateSeen.has(key)) {
+                signUpGateSeen.add(key);
+                throw new Error('Blocked by test beforeSignUp (first attempt)');
+            }
+        },
+    },
+});
+
 export default defineConfig({
     release: true,
     api: { schemaEndpoint: 'authenticated' },
@@ -272,6 +297,7 @@ export default defineConfig({
     plugins: [
         refreshClaimPluginA({}),
         refreshClaimPluginB({}),
+        signUpGatePlugin({}),
     ],
 
     // ─── Rooms v2 ────────────────────────────────────────
@@ -855,6 +881,23 @@ export default defineConfig({
                         delete: (auth) => auth !== null,
                     },
                 },
+
+                // Batch rules parity coverage (batch-rules.test.ts): row-dependent
+                // update/delete rules that pass on an empty row but deny rows with
+                // status 'locked', exercising per-row batch and batch-by-filter
+                // rule evaluation on the D1 path.
+                batch_rule_rows: {
+                    schema: {
+                        title: { type: 'string', required: true },
+                        status: { type: 'string', default: 'open' },
+                    },
+                    access: {
+                        read: () => true,
+                        insert: () => true,
+                        update: (_auth, row) => row?.status !== 'locked',
+                        delete: (_auth, row) => row?.status !== 'locked',
+                    },
+                },
             },
         },
 
@@ -921,6 +964,22 @@ export default defineConfig({
                         insert: () => true,
                         update: () => false,
                         delete: () => false,
+                    },
+                },
+
+                // Batch rules parity coverage (batch-rules.test.ts): same rules as
+                // shared.batch_rule_rows so DO-vs-D1 batch semantics can be pinned
+                // side by side (table names must be unique across DB blocks).
+                tx_rule_rows: {
+                    schema: {
+                        title: { type: 'string', required: true },
+                        status: { type: 'string', default: 'open' },
+                    },
+                    access: {
+                        read: () => true,
+                        insert: () => true,
+                        update: (_auth, row) => row?.status !== 'locked',
+                        delete: (_auth, row) => row?.status !== 'locked',
                     },
                 },
             },

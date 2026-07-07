@@ -263,6 +263,27 @@ describe('normalizeDatabaseError', () => {
     expect(err?.slug).toBe('constraint-failed');
   });
 
+  // PostgreSQL uses different constraint phrasings than SQLite/D1; the same
+  // normalizer must map them to the same slugs/status codes for provider parity.
+  it('maps PostgreSQL foreign key violations to the same 400 slug', () => {
+    const err = normalizeDatabaseError(
+      new Error('insert or update on table "posts" violates foreign key constraint "posts_author_id_fkey"'),
+    );
+    expect(err).toBeInstanceOf(EdgeBaseError);
+    expect(err?.code).toBe(400);
+    expect(err?.slug).toBe('foreign-key-failed');
+  });
+
+  it('maps PostgreSQL not-null violations to the constraint slug and extracts the column', () => {
+    const err = normalizeDatabaseError(
+      new Error('null value in column "email" of relation "users" violates not-null constraint'),
+    );
+    expect(err).toBeInstanceOf(EdgeBaseError);
+    expect(err?.code).toBe(400);
+    expect(err?.message).toContain("'email'");
+    expect(err?.slug).toBe('constraint-failed');
+  });
+
   it('returns null for blank string inputs', () => {
     expect(normalizeDatabaseError('   ')).toBeNull();
   });

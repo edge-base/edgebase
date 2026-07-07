@@ -11,31 +11,33 @@ describe('postgres batch compatibility', () => {
   });
 
   it('accepts D1-style batch inserts for upsertMany and returns inserted rows', async () => {
-    const executePostgresQuery = vi.fn()
-      .mockResolvedValueOnce({
-        rows: [{
-          id: 'probe-1',
-          probeKey: 'probe-a',
-          phase: 'batch',
-          sourceProvider: 'neon',
-          targetProvider: 'neon',
-          checksum: 'checksum-a',
-          verified: false,
-        }],
-        rowCount: 1,
-      })
-      .mockResolvedValueOnce({
-        rows: [{
-          id: 'probe-2',
-          probeKey: 'probe-b',
-          phase: 'batch',
-          sourceProvider: 'neon',
-          targetProvider: 'neon',
-          checksum: 'checksum-b',
-          verified: false,
-        }],
-        rowCount: 1,
-      });
+    let insertCount = 0;
+    const insertRows = [
+      {
+        id: 'probe-1',
+        probeKey: 'probe-a',
+        phase: 'batch',
+        sourceProvider: 'neon',
+        targetProvider: 'neon',
+        checksum: 'checksum-a',
+        verified: false,
+      },
+      {
+        id: 'probe-2',
+        probeKey: 'probe-b',
+        phase: 'batch',
+        sourceProvider: 'neon',
+        targetProvider: 'neon',
+        checksum: 'checksum-b',
+        verified: false,
+      },
+    ];
+    const executePostgresQuery = vi.fn(async (_cs: string, sql: string, _params?: unknown[]) => {
+      if (sql.startsWith('INSERT INTO')) {
+        return { rows: [insertRows[insertCount++]], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
 
     vi.doMock('../lib/postgres-executor.js', () => ({
       executePostgresQuery,
@@ -126,8 +128,12 @@ describe('postgres batch compatibility', () => {
     expect(response.status).toBe(200);
     expect(json.inserted).toHaveLength(2);
     expect(json.items).toHaveLength(2);
-    expect(executePostgresQuery).toHaveBeenCalledTimes(2);
-    const firstSql = executePostgresQuery.mock.calls[0][1] as string;
+    // Batch inserts are wrapped in a single BEGIN/COMMIT transaction.
+    const sqls = executePostgresQuery.mock.calls.map((call) => call[1] as string);
+    expect(sqls[0]).toBe('BEGIN');
+    expect(sqls[sqls.length - 1]).toBe('COMMIT');
+    expect(sqls.filter((sql) => sql.startsWith('INSERT INTO'))).toHaveLength(2);
+    const firstSql = sqls.find((sql) => sql.startsWith('INSERT INTO'))!;
     expect(firstSql).toContain('ON CONFLICT ("probeKey") DO UPDATE');
   });
 });

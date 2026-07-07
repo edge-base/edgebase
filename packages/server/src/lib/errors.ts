@@ -119,8 +119,9 @@ export function normalizeDatabaseError(error: unknown): EdgeBaseError | null {
 
   const haystack = `${message}\n${causeMessage}`.trim();
 
-  if (/foreign key constraint failed/i.test(haystack)) {
-    // Try to extract column name from D1/SQLite error: "FOREIGN KEY constraint failed: tableName.columnName"
+  // Matches both SQLite/D1 ("FOREIGN KEY constraint failed: table.column") and
+  // PostgreSQL ('... violates foreign key constraint "table_col_fkey"') phrasings.
+  if (/foreign key constraint failed|violates foreign key constraint/i.test(haystack)) {
     const colMatch = haystack.match(/foreign key constraint failed[:\s]*(?:\w+\.)?(\w+)/i);
     const detail = colMatch?.[1]
       ? `Referenced record does not exist (column: '${colMatch[1]}').`
@@ -137,8 +138,11 @@ export function normalizeDatabaseError(error: unknown): EdgeBaseError | null {
     return new EdgeBaseError(409, detail, undefined, 'record-already-exists');
   }
 
-  if (/not null constraint failed|check constraint failed/i.test(haystack)) {
-    const colMatch = haystack.match(/(?:not null|check) constraint failed[:\s]*(?:\w+\.)?(\w+)/i);
+  // Matches SQLite/D1 ("NOT NULL constraint failed: table.column") and
+  // PostgreSQL ('null value in column "col" ... violates not-null constraint').
+  if (/not null constraint failed|check constraint failed|null value in column .* violates not-null constraint/i.test(haystack)) {
+    const colMatch = haystack.match(/(?:not null|check) constraint failed[:\s]*(?:\w+\.)?(\w+)/i)
+      ?? haystack.match(/null value in column "?(\w+)"?/i);
     const detail = colMatch?.[1]
       ? `Database constraint violated (column: '${colMatch[1]}'). Ensure all required fields are provided.`
       : 'Request violates a database constraint. Ensure all required fields are provided.';

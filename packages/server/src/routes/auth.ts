@@ -999,15 +999,8 @@ authRoute.openapi(signup, async (c) => {
 
   const userId = generateId();
   const db = getAuthDb(c);
-
-  // Register pending in D1 email index
-  try {
-    await registerEmailPending(db, body.email, userId);
-  } catch (err) {
-    if ((err as Error).message === 'EMAIL_ALREADY_REGISTERED') {
-      throw new EdgeBaseError(409, 'Email already registered.', undefined, 'email-already-exists');
-    }
-    throw new EdgeBaseError(500, 'Signup failed. Please try again.', undefined, 'internal-error');
+  if (await lookupEmail(db, body.email)) {
+    throw new EdgeBaseError(409, 'Email already registered.', undefined, 'email-already-exists');
   }
 
   // Create user directly in D1
@@ -1015,8 +1008,25 @@ authRoute.openapi(signup, async (c) => {
     // Password policy validation
     const policyResult = await validatePassword(body.password, getPasswordPolicyConfig(c.env));
     if (!policyResult.valid) {
-      await deleteEmailPending(db, body.email).catch(() => {});
       throw new EdgeBaseError(400, policyResult.errors[0], { password: { code: 'password_policy', message: policyResult.errors.join('; ') } }, 'password-policy');
+    }
+
+    // beforeSignUp hook — blocking, can cancel signup
+    await executeAuthHook(c.env, c.executionCtx, 'beforeSignUp', {
+      id: userId,
+      email: body.email,
+      displayName,
+      avatarUrl,
+    }, { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
+
+    // Register pending in D1 email index
+    try {
+      await registerEmailPending(db, body.email, userId);
+    } catch (err) {
+      if ((err as Error).message === 'EMAIL_ALREADY_REGISTERED') {
+        throw new EdgeBaseError(409, 'Email already registered.', undefined, 'email-already-exists');
+      }
+      throw new EdgeBaseError(500, 'Signup failed. Please try again.', undefined, 'internal-error');
     }
 
     const passwordHash = await hashPassword(body.password);
@@ -1032,14 +1042,6 @@ authRoute.openapi(signup, async (c) => {
       verified: false,
       locale,
     });
-
-    // beforeSignUp hook — blocking, can cancel signup
-    await executeAuthHook(c.env, c.executionCtx, 'beforeSignUp', {
-      id: userId,
-      email: body.email,
-      displayName,
-      avatarUrl,
-    }, { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
 
     // Create session + tokens
     const session = await createSessionAndTokens(c.env, userId, ip, c.req.header('user-agent') || '');
@@ -1382,19 +1384,24 @@ authRoute.openapi(signinMagicLink, async (c) => {
   } else if (autoCreate) {
     // Auto-create user + send magic link
     const userId = generateId();
+    const reqLocale = parseAcceptLanguage(c.req.header('accept-language'));
 
     try {
-      await registerEmailPending(db, body.email, userId);
-    } catch (err) {
-      if ((err as Error).message === 'EMAIL_ALREADY_REGISTERED') {
-        return c.json({ ok: true });
+      // beforeSignUp hook
+      await executeAuthHook(c.env, c.executionCtx, 'beforeSignUp', {
+        id: userId, email: body.email, displayName: null, avatarUrl: null,
+      }, { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
+
+      try {
+        await registerEmailPending(db, body.email, userId);
+      } catch (err) {
+        if ((err as Error).message === 'EMAIL_ALREADY_REGISTERED') {
+          return c.json({ ok: true });
+        }
+        throw new EdgeBaseError(500, 'Magic link request failed.', undefined, 'internal-error');
       }
-      throw new EdgeBaseError(500, 'Magic link request failed.', undefined, 'internal-error');
-    }
 
-    try {
       // Create user with no password, verified = 1
-      const reqLocale = parseAcceptLanguage(c.req.header('accept-language'));
       await authService.createUser(db, {
         userId,
         email: body.email,
@@ -1404,11 +1411,6 @@ authRoute.openapi(signinMagicLink, async (c) => {
         verified: true,
         locale: reqLocale ?? 'en',
       });
-
-      // beforeSignUp hook
-      await executeAuthHook(c.env, c.executionCtx, 'beforeSignUp', {
-        id: userId, email: body.email, displayName: null, avatarUrl: null,
-      }, { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
 
       // Sync to _users_public
       const user = await authService.getUserById(db, userId);
@@ -1671,15 +1673,20 @@ authRoute.openapi(signinPhone, async (c) => {
     const userId = generateId();
 
     try {
-      await registerPhonePending(db, phone, userId);
-    } catch (err) {
-      if ((err as Error).message === 'PHONE_ALREADY_REGISTERED') {
-        return c.json({ ok: true });
-      }
-      throw new EdgeBaseError(500, 'Phone OTP request failed.', undefined, 'internal-error');
-    }
+      // beforeSignUp hook
+      await executeAuthHook(c.env, c.executionCtx, 'beforeSignUp', {
+        id: userId, email: null, phone, displayName: null, avatarUrl: null,
+      }, { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
 
-    try {
+      try {
+        await registerPhonePending(db, phone, userId);
+      } catch (err) {
+        if ((err as Error).message === 'PHONE_ALREADY_REGISTERED') {
+          return c.json({ ok: true });
+        }
+        throw new EdgeBaseError(500, 'Phone OTP request failed.', undefined, 'internal-error');
+      }
+
       // Create user with phone in D1
       await authService.createUser(db, {
         userId,
@@ -2143,19 +2150,24 @@ authRoute.openapi(signinEmailOtp, async (c) => {
     }
 
     const userId = generateId();
+    const otpReqLocale = parseAcceptLanguage(c.req.header('accept-language'));
 
     try {
-      await registerEmailPending(db, email, userId);
-    } catch (err) {
-      if ((err as Error).message === 'EMAIL_ALREADY_REGISTERED') {
-        return c.json({ ok: true });
+      // beforeSignUp hook
+      await executeAuthHook(c.env, c.executionCtx, 'beforeSignUp', {
+        id: userId, email, displayName: null, avatarUrl: null,
+      }, { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
+
+      try {
+        await registerEmailPending(db, email, userId);
+      } catch (err) {
+        if ((err as Error).message === 'EMAIL_ALREADY_REGISTERED') {
+          return c.json({ ok: true });
+        }
+        throw new EdgeBaseError(500, 'Email OTP request failed.', undefined, 'internal-error');
       }
-      throw new EdgeBaseError(500, 'Email OTP request failed.', undefined, 'internal-error');
-    }
 
-    try {
       // Create user with email, verified = 1
-      const otpReqLocale = parseAcceptLanguage(c.req.header('accept-language'));
       await authService.createUser(db, {
         userId,
         email,

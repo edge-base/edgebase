@@ -474,9 +474,10 @@ async function handleList(
     }
   }
 
-  // Get total count
+  // Get total count — skip the COUNT query when ?includeTotal=0/false (total stays null)
   let total: number | null = null;
-  if (countSql && countParams) {
+  const includeTotal = !['0', 'false'].includes((c.req.query('includeTotal') ?? '').toLowerCase());
+  if (includeTotal && countSql && countParams) {
     const countResult = await executeD1Query(resolved.db, countSql, countParams);
     total = Number(countResult.rows[0]?.total ?? 0);
   }
@@ -655,7 +656,6 @@ async function handleInsert(
   } catch {
     return c.json({ code: 400, message: invalidD1BodyMessage(`inserting into table '${tableName}'`) }, 400);
   }
-  body = applySchemaFieldAliases(body, tableConfig.schema);
 
   // Check insert rule
   const tableAccess = getTableAccess(tableConfig);
@@ -826,7 +826,6 @@ async function handleUpdate(
   } catch {
     return c.json({ code: 400, message: invalidD1BodyMessage(`updating table '${tableName}'`) }, 400);
   }
-  body = applySchemaFieldAliases(body, tableConfig.schema);
 
   // Validate against schema
   const validation = validateUpdate(body, tableConfig.schema);
@@ -847,7 +846,7 @@ async function handleUpdate(
   const tableHooks = getTableHooks(tableConfig);
   if (!isServiceKey && tableAccess?.update !== undefined) {
     if (!(await evalRowRule(tableAccess.update, auth, existingRow))) {
-      return c.json({ code: 403, message: `Access denied: 'update' rule blocked record "${id}" in table "${tableName}".` }, 403);
+      return c.json({ code: 403, message: d1RuleRejectedMessage(tableName, 'update', id) }, 403);
     }
   }
 
@@ -1081,7 +1080,6 @@ async function handleBatch(
 
   // Validate all inserts
   if (body.inserts?.length) {
-    body.inserts = body.inserts.map((item) => applySchemaFieldAliases(item, tableConfig.schema));
     for (const item of body.inserts) {
       const validation = validateInsert(item, tableConfig.schema);
       if (!validation.valid) {
@@ -1092,10 +1090,6 @@ async function handleBatch(
 
   // Validate all updates
   if (body.updates?.length) {
-    body.updates = body.updates.map((entry) => ({
-      ...entry,
-      data: applySchemaFieldAliases(entry.data, tableConfig.schema),
-    }));
     for (const entry of body.updates) {
       if (!entry.id) {
         return c.json({ code: 400, message: `Each batch update entry for table '${tableName}' must include an id.` }, 400);
@@ -1110,10 +1104,31 @@ async function handleBatch(
     }
   }
 
-  // Check delete rules (table-level)
+  // Per-row update rule evaluation on pre-read rows (mirrors this file's
+  // transact path and DO's canonical batch behavior, database-do.ts).
+  // D1 cannot evaluate JS rules inside the SQL batch, so rules run on the
+  // pre-read row state before any operation executes — all-or-nothing.
+  if (!isServiceKey && body.updates?.length && tableAccess?.update !== undefined) {
+    for (const entry of body.updates) {
+      const current = await executeD1Query(resolved.db, `SELECT * FROM ${esc(tableName)} WHERE "id" = ?`, [entry.id]);
+      if (current.rows.length === 0) continue; // missing rows are no-ops (DO parity)
+      const row = normalizeRow(stripInternalFields(current.rows[0]), tableConfig);
+      if (!(await evalRowRule(tableAccess.update, auth, row))) {
+        return c.json({ code: 403, message: d1RuleRejectedMessage(tableName, 'update', entry.id) }, 403);
+      }
+    }
+  }
+
+  // Per-row delete rule evaluation on pre-read rows (DO parity; previously
+  // evaluated once against an empty row, which broke row-dependent rules).
   if (!isServiceKey && body.deletes?.length && tableAccess?.delete !== undefined) {
-    if (!(await evalRowRule(tableAccess.delete, auth, {}))) {
-      return c.json({ code: 403, message: d1RuleRejectedMessage(tableName, 'delete') }, 403);
+    for (const id of body.deletes) {
+      const current = await executeD1Query(resolved.db, `SELECT * FROM ${esc(tableName)} WHERE "id" = ?`, [id]);
+      if (current.rows.length === 0) continue; // missing rows are no-ops (DO parity)
+      const row = normalizeRow(stripInternalFields(current.rows[0]), tableConfig);
+      if (!(await evalRowRule(tableAccess.delete, auth, row))) {
+        return c.json({ code: 403, message: d1RuleRejectedMessage(tableName, 'delete', id) }, 403);
+      }
     }
   }
 
@@ -1431,7 +1446,7 @@ async function handleTransact(
     }
 
     if (op.op === 'insert') {
-      const item = applySchemaFieldAliases(op.data as Record<string, unknown>, tableConfig.schema);
+      const item = op.data as Record<string, unknown>;
       const validation = validateInsert(item, tableConfig.schema);
       if (!validation.valid) {
         return c.json({
@@ -1470,8 +1485,8 @@ async function handleTransact(
 
     if (op.op === 'update') {
       const id = op.id as string;
-      const aliased = applySchemaFieldAliases(op.data as Record<string, unknown>, tableConfig.schema);
-      const validation = validateUpdate(aliased, tableConfig.schema);
+      const input = op.data as Record<string, unknown>;
+      const validation = validateUpdate(input, tableConfig.schema);
       if (!validation.valid) {
         return c.json({
           code: 400,
@@ -1493,7 +1508,7 @@ async function handleTransact(
           }
         }
       }
-      const updateData = { ...aliased };
+      const updateData = { ...input };
       delete updateData.id;
       delete updateData.createdAt;
       if (effective.updatedAt?.onUpdate === 'now') {
@@ -1607,8 +1622,8 @@ async function handleBatchByFilter(
   resolved: D1ResolvedDb,
   tableName: string,
   tableConfig: TableConfig,
-  _auth: AuthContext | null,
-  _isServiceKey: boolean,
+  auth: AuthContext | null,
+  isServiceKey: boolean,
 ): Promise<Response> {
   let body: {
     action?: string;
@@ -1633,6 +1648,18 @@ async function handleBatchByFilter(
     return c.json({ code: 400, message: "batch-by-filter with action 'update' requires 'update' data." }, 400);
   }
 
+  // Row-level access rules (DO parity, database-do.ts batch-by-filter):
+  // table-level pre-check with an empty row (sufficient for boolean/auth-only
+  // rules), then per-row function-rule filtering of matched rows below.
+  // Service keys bypass rules, matching the single-record paths.
+  const tableAccess = getTableAccess(tableConfig);
+  const bfRule = body.action === 'delete' ? tableAccess?.delete : tableAccess?.update;
+  if (!isServiceKey && bfRule !== undefined) {
+    if (!(await evalRowRule(bfRule, auth, {}))) {
+      return c.json({ code: 403, message: d1RuleRejectedMessage(tableName, body.action as 'update' | 'delete') }, 403);
+    }
+  }
+
   const limit = Math.min(body.limit ?? 500, 500);
 
   // Find matching records using buildListQuery
@@ -1649,7 +1676,22 @@ async function handleBatchByFilter(
     return c.json({ processed: 0, succeeded: 0 });
   }
 
-  const ids = allRows.map(r => r.id as string);
+  // Per-row rule evaluation: keep only rows the rule allows (DO parity).
+  let rows = allRows;
+  if (!isServiceKey && typeof bfRule === 'function') {
+    const allowed: Record<string, unknown>[] = [];
+    for (const row of rows) {
+      if (await evalRowRule(bfRule, auth, normalizeRow(stripInternalFields(row), tableConfig))) {
+        allowed.push(row);
+      }
+    }
+    if (allowed.length === 0) {
+      return c.json({ code: 403, message: d1RuleRejectedMessage(tableName, body.action as 'update' | 'delete') }, 403);
+    }
+    rows = allowed;
+  }
+
+  const ids = rows.map(r => r.id as string);
   const placeholders = ids.map(() => '?').join(', ');
   let succeeded = 0;
 
@@ -1719,38 +1761,6 @@ function getTextFields(config: TableConfig): string[] {
   return fields.length > 0 ? fields : ['id'];
 }
 
-function toSnakeCase(value: string): string {
-  return value.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
-}
-
-function toCamelCase(value: string): string {
-  return value.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase());
-}
-
-function applySchemaFieldAliases<T extends Record<string, unknown> | null | undefined>(
-  record: T,
-  schema?: Record<string, SchemaField | false>,
-): T {
-  if (!schema || !record || typeof record !== 'object' || Array.isArray(record)) return record;
-
-  const effectiveSchema = buildEffectiveSchema(schema);
-  const normalized: Record<string, unknown> = { ...record };
-
-  for (const key of Object.keys(effectiveSchema)) {
-    const snake = toSnakeCase(key);
-    const camel = toCamelCase(key);
-
-    if (effectiveSchema[snake] && normalized[snake] === undefined && normalized[key] !== undefined) {
-      normalized[snake] = normalized[key];
-    }
-    if (effectiveSchema[camel] && normalized[camel] === undefined && normalized[key] !== undefined) {
-      normalized[camel] = normalized[key];
-    }
-  }
-
-  return normalized as T;
-}
-
 // ─── Exported batch import for admin routes ───
 
 /**
@@ -1781,7 +1791,7 @@ export async function d1BatchImport(
   const errors: Array<{ row: number; message: string }> = [];
 
   for (let i = 0; i < records.length; i++) {
-    const item = applySchemaFieldAliases(records[i], tableConfig.schema);
+    const item = records[i];
     const validation = validateInsert(item, tableConfig.schema);
     if (!validation.valid) {
       errors.push({ row: i, message: Object.values(validation.errors).join('; ') });

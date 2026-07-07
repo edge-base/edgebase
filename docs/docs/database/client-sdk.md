@@ -1104,6 +1104,17 @@ const prevPage = await client.db('app').table('posts')
 // { items: [...], cursor: "last-item-id", hasMore: true }
 ```
 
+#### Skipping the total count
+
+Every list request runs a separate `COUNT` query to populate `total`. On large tables you can skip it by adding the `includeTotal=0` query parameter (also accepts `false`). `total` then comes back as `null`, while `hasMore` and `cursor` continue to drive pagination:
+
+```typescript
+// GET /api/db/app/tables/posts?limit=20&includeTotal=0
+// Response: { items: [...], total: null, hasMore: true, cursor: "last-item-id" }
+```
+
+This behaves identically across all storage providers (Durable Objects, D1, and PostgreSQL).
+
 ### Count
 
 Get the count of records without fetching them:

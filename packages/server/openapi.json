@@ -6027,6 +6027,17 @@
             "description": "Full-text search query",
             "name": "search",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Set to '0' or 'false' to skip the COUNT query. total is returned as null and hasMore still drives cursor pagination.",
+              "example": "0"
+            },
+            "required": false,
+            "description": "Set to '0' or 'false' to skip the COUNT query. total is returned as null and hasMore still drives cursor pagination.",
+            "name": "includeTotal",
+            "in": "query"
           }
         ],
         "responses": {
@@ -7663,6 +7674,17 @@
             "required": false,
             "description": "Full-text search query",
             "name": "search",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Set to '0' or 'false' to skip the COUNT query. total is returned as null and hasMore still drives cursor pagination.",
+              "example": "0"
+            },
+            "required": false,
+            "description": "Set to '0' or 'false' to skip the COUNT query. total is returned as null and hasMore still drives cursor pagination.",
+            "name": "includeTotal",
             "in": "query"
           }
         ],

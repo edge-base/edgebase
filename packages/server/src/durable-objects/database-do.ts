@@ -74,6 +74,21 @@ interface DOEnv {
   SERVICE_KEY?: string;
 }
 
+// ─── Rule-rejection wording ───
+
+/**
+ * Canonical rule-rejection message, byte-for-byte identical to the D1 handler's
+ * d1RuleRejectedMessage (and the PostgreSQL handler, aligned in Phase 2) so all
+ * three storage providers emit the same string. Do NOT import from d1-handler.ts
+ * to avoid a Worker/DO ↔ handler dependency; the format is replicated here.
+ */
+function doRuleRejectedMessage(tableName: string, action: string, id?: string): string {
+  if (id) {
+    return `Access denied. The '${action}' access rule for table '${tableName}' rejected record '${id}'.`;
+  }
+  return `Access denied. The '${action}' access rule for table '${tableName}' rejected this request.`;
+}
+
 // ─── DatabaseDO Class ───
 
 export class DatabaseDO extends DurableObject<DOEnv> {
@@ -447,7 +462,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
           if (!canRead) {
             throw new EdgeBaseError(
               403,
-              `Access denied: 'read' rule blocked row "${row.id}" in table "${name}".`,
+              doRuleRejectedMessage(name, 'read', String(row.id)),
             );
           }
         }
@@ -460,10 +475,13 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       // Build response
       const response: Record<string, unknown> = { items: enrichedRows };
 
-      // Offset pagination: include total, page, perPage
+      // Offset pagination: include total, page, perPage.
+      // ?includeTotal=0/false skips the COUNT query — total comes back null.
       if (countSql && countParams) {
-        const countResult = [...this.sql(countSql, ...countParams)];
-        const total = (countResult[0]?.total as number) ?? 0;
+        const includeTotal = !['0', 'false'].includes((c.req.query('includeTotal') ?? '').toLowerCase());
+        const total = includeTotal
+          ? ((([...this.sql(countSql, ...countParams)])[0]?.total as number) ?? 0)
+          : null;
         const perPage = options.pagination?.perPage ?? options.pagination?.limit ?? 100;
         response.total = total;
         response.page = options.pagination?.page ?? 1;
@@ -563,7 +581,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
             if (!canRead) {
               throw new EdgeBaseError(
                 403,
-                `Access denied: 'read' rule blocked row "${row.id}" in table "${name}".`,
+                doRuleRejectedMessage(name, 'read', String(row.id)),
               );
             }
           }
@@ -606,7 +624,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         if (!canRead)
           throw new EdgeBaseError(
             403,
-            `Access denied: 'read' rule blocked record "${id}" in table "${name}".`,
+            doRuleRejectedMessage(name, 'read', id),
           );
       }
 
@@ -876,7 +894,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         if (!canUpdate)
           throw new EdgeBaseError(
             403,
-            `Access denied: 'update' rule blocked record "${id}" in table "${name}".`,
+            doRuleRejectedMessage(name, 'update', id),
           );
       }
 
@@ -1037,7 +1055,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         if (!canDelete)
           throw new EdgeBaseError(
             403,
-            `Access denied: 'delete' rule blocked record "${id}" in table "${name}".`,
+            doRuleRejectedMessage(name, 'delete', id),
           );
       }
 
@@ -1150,7 +1168,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
           if (!canInsert)
             throw new EdgeBaseError(
               403,
-              `Access denied: 'insert' rule blocked batch insert on table "${name}".`,
+              doRuleRejectedMessage(name, 'insert'),
             );
         }
         // update/delete rules are evaluated per-row inside the transaction below
@@ -1282,13 +1300,13 @@ export class DatabaseDO extends DurableObject<DOEnv> {
                   if (!canUpdate)
                     throw new EdgeBaseError(
                       403,
-                      `Access denied: 'update' rule blocked record "${id}" in table "${name}".`,
+                      doRuleRejectedMessage(name, 'update', id),
                     );
                 } catch (e) {
                   if (e instanceof EdgeBaseError) throw e;
                   throw new EdgeBaseError(
                     403,
-                    `Access denied: 'update' rule blocked record "${id}" in table "${name}".`,
+                    doRuleRejectedMessage(name, 'update', id),
                   );
                 }
               }
@@ -1368,13 +1386,13 @@ export class DatabaseDO extends DurableObject<DOEnv> {
                   if (!canDelete)
                     throw new EdgeBaseError(
                       403,
-                      `Access denied: 'delete' rule blocked record "${id}" in table "${name}".`,
+                      doRuleRejectedMessage(name, 'delete', id),
                     );
                 } catch (e) {
                   if (e instanceof EdgeBaseError) throw e;
                   throw new EdgeBaseError(
                     403,
-                    `Access denied: 'delete' rule blocked record "${id}" in table "${name}".`,
+                    doRuleRejectedMessage(name, 'delete', id),
                   );
                 }
               }
@@ -1508,7 +1526,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
           if (!preCheck)
             throw new EdgeBaseError(
               403,
-              `Access denied: '${body.action}' rule blocked batch-by-filter on table "${name}".`,
+              doRuleRejectedMessage(name, body.action),
             );
         } else if (this.config.release) {
           // Release mode: no rule defined → deny
@@ -1560,7 +1578,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
           if (rows.length === 0) {
             throw new EdgeBaseError(
               403,
-              `Access denied: '${body.action}' rule blocked all matched rows in table "${name}".`,
+              doRuleRejectedMessage(name, body.action),
             );
           }
         }
@@ -1748,7 +1766,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
             if (!canInsert) {
               throw new EdgeBaseError(
                 403,
-                `Access denied: 'insert' rule blocked transact insert on table "${op.table}".`,
+                doRuleRejectedMessage(String(op.table), 'insert'),
               );
             }
           }
@@ -1827,7 +1845,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
               if (!canRead) {
                 throw new EdgeBaseError(
                   403,
-                  `Access denied: 'read' rule blocked transact expect on table "${name}".`,
+                  doRuleRejectedMessage(name, 'read'),
                 );
               }
             }
@@ -1933,7 +1951,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
               if (!canUpdate) {
                 throw new EdgeBaseError(
                   403,
-                  `Access denied: 'update' rule blocked record "${id}" in table "${name}".`,
+                  doRuleRejectedMessage(name, 'update', id),
                 );
               }
             }
@@ -2006,7 +2024,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
               if (!canDelete) {
                 throw new EdgeBaseError(
                   403,
-                  `Access denied: 'delete' rule blocked record "${id}" in table "${name}".`,
+                  doRuleRejectedMessage(name, 'delete', id),
                 );
               }
             }
