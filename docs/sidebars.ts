@@ -374,6 +374,7 @@ const sidebars = {
               items: [
                 'sdks/client-vs-server',
                 'sdks/layer-matrix',
+                'sdks/support-tiers',
                 'sdks/architecture',
               ],
             },

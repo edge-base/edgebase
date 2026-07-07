@@ -443,25 +443,25 @@ Deep dives: [Database](https://edgebase.fun/docs/database) · [Authentication](h
 <details>
 <summary><b>SDKs — 30+ packages across 14 languages</b></summary>
 
-| Language / Platform         | Client | Admin |
-| --------------------------- | :----: | :---: |
-| **JavaScript / TypeScript** |  Yes   |  Yes  |
-| **React Native**            |  Yes   |   —   |
-| **Dart / Flutter**          |  Yes   |  Yes  |
-| **Swift (iOS)**             |  Yes   |   —   |
-| **Kotlin (KMP / Android)**  |  Yes   |  Yes  |
-| **Java (Android)**          |  Yes   |  Yes  |
-| **C# / Unity**              |  Yes   |  Yes  |
-| **C++ / Unreal**            |  Yes   |   —   |
-| **Python**                  |   —    |  Yes  |
-| **Go**                      |   —    |  Yes  |
-| **PHP**                     |   —    |  Yes  |
-| **Rust**                    |   —    |  Yes  |
-| **Ruby**                    |   —    |  Yes  |
-| **Scala**                   |   —    |  Yes  |
-| **Elixir**                  |   —    |  Yes  |
+| Language / Platform         | Client | Admin |     Support      |
+| --------------------------- | :----: | :---: | :--------------: |
+| **JavaScript / TypeScript** |  Yes   |  Yes  |    **Tier 1**    |
+| **React Native**            |  Yes   |   —   |      Tier 2      |
+| **Dart / Flutter**          |  Yes   |  Yes  |    **Tier 1**    |
+| **Swift (iOS)**             |  Yes   |   —   |      Tier 2      |
+| **Kotlin (KMP / Android)**  |  Yes   |  Yes  |    **Tier 1**    |
+| **Java (Android)**          |  Yes   |  Yes  |    **Tier 1**    |
+| **C# / Unity**              |  Yes   |  Yes  |      Tier 2      |
+| **C++ / Unreal**            |  Yes   |   —   |   Experimental   |
+| **Python**                  |   —    |  Yes  |    **Tier 1**    |
+| **Go**                      |   —    |  Yes  |      Tier 2      |
+| **PHP**                     |   —    |  Yes  |      Tier 2      |
+| **Rust**                    |   —    |  Yes  |    **Tier 1**    |
+| **Ruby**                    |   —    |  Yes  |      Tier 2      |
+| **Scala**                   |   —    |  Yes  |   Experimental   |
+| **Elixir**                  |   —    |  Yes  |   Experimental   |
 
-All SDKs are auto-generated from the same OpenAPI spec. [Browse all SDKs](https://edgebase.fun/docs/sdks) · [Architecture](https://edgebase.fun/docs/sdks/architecture)
+All SDKs are auto-generated from the same OpenAPI spec. [Browse all SDKs](https://edgebase.fun/docs/sdks) · [Architecture](https://edgebase.fun/docs/sdks/architecture) · [Support tiers](https://edgebase.fun/docs/sdks/support-tiers)
 
 </details>
 
