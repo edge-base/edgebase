@@ -344,4 +344,51 @@ describe('postgres batch', () => {
     expect(response.status).toBe(403);
     expect(calls.some((call) => call.sql.startsWith('DELETE FROM'))).toBe(false);
   });
+
+  it('batch-by-filter delete removes matched rows (service key bypasses rules)', async () => {
+    const calls = mockExecutorModule((sql) => {
+      if (sql.startsWith('SELECT "batch_docs".*')) {
+        return {
+          rows: [
+            { id: 'r1', title: 'A', status: 'open' },
+            { id: 'r2', title: 'B', status: 'locked' },
+          ],
+          rowCount: 2,
+        };
+      }
+      if (sql.startsWith('DELETE FROM "batch_docs"')) {
+        return { rows: [{ id: 'r1' }, { id: 'r2' }], rowCount: 2 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+
+    const response = await callBatch(
+      { action: 'delete', filter: [['title', '!=', '']] },
+      { serviceKey: true, path: '/tables/batch_docs/batch-by-filter' },
+    );
+    expect(response.status).toBe(200);
+    const json = (await response.json()) as {
+      processed: number; succeeded: number; deleted: number; items: unknown[];
+    };
+    expect(json.processed).toBe(2);
+    expect(json.succeeded).toBe(2);
+    expect(json.deleted).toBe(2);
+    expect(json.items).toHaveLength(2);
+    expect(calls.some((call) => call.sql.startsWith('DELETE FROM "batch_docs"'))).toBe(true);
+  });
+
+  it('batch-by-filter update with an empty update object → 400', async () => {
+    mockExecutorModule((sql) => {
+      if (sql.startsWith('SELECT "batch_docs".*')) {
+        return { rows: [{ id: 'r1', title: 'A', status: 'open' }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+
+    const response = await callBatch(
+      { action: 'update', filter: [['title', '!=', '']], update: {} },
+      { serviceKey: true, path: '/tables/batch_docs/batch-by-filter' },
+    );
+    expect(response.status).toBe(400);
+  });
 });

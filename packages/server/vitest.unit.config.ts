@@ -16,6 +16,12 @@ export default defineConfig({
         'src/lib/auth-d1.ts',
         'src/lib/cron.ts',
         'src/lib/db-sql.ts',
+        // Provider request handlers — validated by the integration suite (the
+        // `shared` namespace routes to D1) plus mocked-executor unit tests, the
+        // same way the canonical database-do.ts handler sits outside src/lib/.
+        // Both are already classified integration-only in UNTESTED_LIBS.
+        'src/lib/d1-handler.ts',
+        'src/lib/postgres-handler.ts',
         'src/lib/email-provider.ts',
         'src/lib/email-templates.ts',
         'src/lib/functions.ts',
