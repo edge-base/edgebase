@@ -85,6 +85,8 @@ export function appendRedirectParams(
   return url.toString();
 }
 
+const redirectAllowlistWarned = new Set<string>();
+
 export function parseClientRedirectUrl(env: Env, value: string | null | undefined): string | null {
   if (!value) return null;
   const normalized = normalizeUrl(value);
@@ -97,20 +99,21 @@ export function parseClientRedirectUrl(env: Env, value: string | null | undefine
   }
   // No allowlist configured. OAuth and email flows append access/refresh tokens
   // to this redirect, so accepting an arbitrary URL is a token-exfiltration
-  // vector. In release mode we fail closed and require an explicit allowlist;
-  // local dev stays permissive for convenience.
+  // vector. For backward compatibility the redirect is still honored when no
+  // allowlist is set, but in release mode we warn (once) so operators know to
+  // lock this down with auth.allowedRedirectUrls.
   let release = false;
   try {
     release = !!parseConfig(env)?.release;
   } catch {
     release = false;
   }
-  if (release) {
-    throw new EdgeBaseError(
-      400,
-      'redirect_url requires auth.allowedRedirectUrls to be configured in release mode.',
-      undefined,
-      'redirect-not-allowed',
+  if (release && !redirectAllowlistWarned.has('missing-redirect-allowlist')) {
+    redirectAllowlistWarned.add('missing-redirect-allowlist');
+    console.warn(
+      '[Auth] A redirect_url was accepted without auth.allowedRedirectUrls configured. '
+      + 'OAuth/email flows append access & refresh tokens to the redirect target, so set '
+      + 'auth.allowedRedirectUrls to restrict where tokens can be sent.',
     );
   }
   return normalized;

@@ -492,9 +492,10 @@ export interface AuthConfig {
   oauth?: OAuthProvidersConfig;
   /**
    * Optional client redirect URL allowlist for OAuth and email-based auth actions.
-   * When unset, redirect URLs are accepted as-is in local dev only; in release
-   * mode a redirect_url is rejected unless it matches this allowlist, because
-   * these flows append access/refresh tokens to the redirect target.
+   * When unset, redirect URLs are accepted as-is for backward compatibility
+   * (release mode logs a one-time warning). Strongly recommended in production:
+   * these flows append access/refresh tokens to the redirect target, so an
+   * unrestricted redirect is a token-exfiltration vector.
    *
    * Supported forms:
    * - exact URL: 'https://app.example.com/auth/callback'

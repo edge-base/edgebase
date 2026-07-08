@@ -2459,7 +2459,7 @@ authRoute.openapi(mfaTotpVerify, async (c) => {
   const secret = await decryptSecret(factor.secret as string, getUserSecret(c.env));
   const { valid, counter } = await verifyTOTPWithCounter(secret, body.code);
   if (!valid) throw new EdgeBaseError(400, 'Invalid TOTP code. Please try again.', undefined, 'invalid-totp');
-  await assertTotpNotReplayed(c.env, `${userId}:${body.factorId}`, counter);
+  await assertTotpNotReplayed(c.env, `enroll:${userId}:${body.factorId}`, counter);
 
   // Mark factor as verified
   await authService.verifyMfaFactor(db, body.factorId);
@@ -2539,7 +2539,7 @@ authRoute.openapi(mfaVerify, async (c) => {
     }
     throw new EdgeBaseError(401, 'Invalid TOTP code.', undefined, 'invalid-totp');
   }
-  await assertTotpNotReplayed(c.env, `${userId}:${String(factor.id)}`, counter);
+  await assertTotpNotReplayed(c.env, `login:${userId}:${String(factor.id)}`, counter);
 
   // Delete mfaTicket (single-use) and its failure counter
   await Promise.all([
