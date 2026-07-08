@@ -55,6 +55,14 @@ export {
   type OutboxLockManager,
 } from './durable-outbox.js';
 
+// Secret box (optional value-at-rest sealing for local caches)
+export {
+  createSecretBox,
+  encryptOutboxAdapter,
+  encryptRecordCacheAdapter,
+  type SecretBox,
+} from './crypto-box.js';
+
 // Record cache (stale-while-revalidate local record hydration)
 export {
   RecordCache,
