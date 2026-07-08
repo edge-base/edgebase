@@ -5,3 +5,11 @@ packages:
   - 'packages/sdk/react-native'
   - 'packages/plugins/*'
   - 'docs'
+
+# Supply-chain hardening (effective on pnpm >= 10.16; inert on the pinned
+# pnpm 9.15.0 today). Wait 7 days before installing newly published versions,
+# block transitive installs from untrusted sources, and never let a package
+# update downgrade security settings.
+minimumReleaseAge: 10080
+blockExoticSubdeps: true
+trustPolicy: no-downgrade

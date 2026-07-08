@@ -20,19 +20,18 @@ jobs:
   ci:
     name: CI
     uses: ./.github/workflows/ci.yml
-    secrets: inherit
 
   test:
     name: Test Suite — Server + SDK E2E
     uses: ./.github/workflows/test.yml
-    secrets: inherit
 
   semgrep:
     name: Semgrep
     uses: ./.github/workflows/semgrep.yml
-    secrets: inherit
+    # Pass only the one secret Semgrep needs instead of inheriting all secrets.
+    secrets:
+      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
   codeql:
     name: CodeQL
     uses: ./.github/workflows/codeql.yml
-    secrets: inherit
