@@ -255,11 +255,27 @@ final class EdgeBaseClientIosUnitTests: XCTestCase {
     }
 }
 
+private enum FakeSocketError: Error {
+    case messageTimeout(index: Int)
+}
+
 private final class FakeRoomWebSocketTask: RoomWebSocketTask {
+    private let lock = NSLock()
     private let onSend: (() -> Void)?
     private let onCancel: (() -> Void)?
-    private(set) var events: [String] = []
-    private(set) var messages: [[String: Any]] = []
+    private var _events: [String] = []
+    private var _messages: [[String: Any]] = []
+
+    // send() runs on a different executor than the test, so all access to the
+    // backing arrays is serialized through a lock to avoid a data race.
+    var events: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return _events
+    }
+    var messages: [[String: Any]] {
+        lock.lock(); defer { lock.unlock() }
+        return _messages
+    }
 
     init(onSend: (() -> Void)? = nil, onCancel: (() -> Void)? = nil) {
         self.onSend = onSend
@@ -273,10 +289,14 @@ private final class FakeRoomWebSocketTask: RoomWebSocketTask {
            let data = text.data(using: .utf8),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let type = json["type"] as? String {
-            messages.append(json)
-            events.append("send:\(type)")
+            lock.lock()
+            _messages.append(json)
+            _events.append("send:\(type)")
+            lock.unlock()
         } else {
-            events.append("send:unknown")
+            lock.lock()
+            _events.append("send:unknown")
+            lock.unlock()
         }
         onSend?()
     }
@@ -287,8 +307,30 @@ private final class FakeRoomWebSocketTask: RoomWebSocketTask {
 
     func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         let reasonString = reason.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        events.append("close:\(reasonString)")
+        lock.lock()
+        _events.append("close:\(reasonString)")
+        lock.unlock()
         onCancel?()
+    }
+
+    /// Deterministically wait for the message at `index`. `send()` is async, so
+    /// a fixed sleep can read the backing array before the append lands and crash
+    /// with "Index out of range" on a slow/loaded runner; this polls until the
+    /// message exists (or times out) instead.
+    func waitForMessage(at index: Int, timeout: TimeInterval = 2.0) async throws -> [String: Any] {
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            lock.lock()
+            let message = index < _messages.count ? _messages[index] : nil
+            lock.unlock()
+            if let message {
+                return message
+            }
+            if Date() >= deadline {
+                throw FakeSocketError.messageTimeout(index: index)
+            }
+            try await Task.sleep(nanoseconds: 2_000_000) // 2ms
+        }
     }
 }
 
@@ -765,8 +807,7 @@ final class RoomClientIosUnitTests: XCTestCase {
         let signalTask = Task {
             try await room.signals.send("cursor.move", payload: ["x": 10], options: ["includeSelf": true])
         }
-        try await Task.sleep(nanoseconds: 20_000_000)
-        let signalMessage = fakeSocket.messages[0]
+        let signalMessage = try await fakeSocket.waitForMessage(at: 0)
         XCTAssertEqual(signalMessage["type"] as? String, "signal")
         XCTAssertEqual(signalMessage["event"] as? String, "cursor.move")
         XCTAssertEqual(signalMessage["includeSelf"] as? Bool, true)
@@ -777,8 +818,7 @@ final class RoomClientIosUnitTests: XCTestCase {
         let memberTask = Task {
             try await room.members.setState(["typing": true])
         }
-        try await Task.sleep(nanoseconds: 20_000_000)
-        let memberMessage = fakeSocket.messages[1]
+        let memberMessage = try await fakeSocket.waitForMessage(at: 1)
         XCTAssertEqual(memberMessage["type"] as? String, "member_state")
         let memberState = try XCTUnwrap(memberMessage["state"] as? [String: Any])
         XCTAssertEqual(memberState["typing"] as? Bool, true)
@@ -787,8 +827,7 @@ final class RoomClientIosUnitTests: XCTestCase {
         try await memberTask.value
 
         let adminTask = Task { try await room.admin.block("user-2") }
-        try await Task.sleep(nanoseconds: 20_000_000)
-        let adminMessage = fakeSocket.messages[2]
+        let adminMessage = try await fakeSocket.waitForMessage(at: 2)
         XCTAssertEqual(adminMessage["type"] as? String, "admin")
         XCTAssertEqual(adminMessage["operation"] as? String, "block")
         XCTAssertEqual(adminMessage["memberId"] as? String, "user-2")
