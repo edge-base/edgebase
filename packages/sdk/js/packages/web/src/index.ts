@@ -44,6 +44,27 @@ export {
   type RoomSummary,
 } from './room.js';
 
+// Durable outbox (offline-safe mutation queue persistence)
+export {
+  DurableOutbox,
+  createIndexedDbOutboxAdapter,
+  createMemoryOutboxAdapter,
+  type DurableOutboxAdapter,
+  type DurableOutboxEntry,
+  type DurableOutboxOptions,
+  type OutboxLockManager,
+} from './durable-outbox.js';
+
+// Record cache (stale-while-revalidate local record hydration)
+export {
+  RecordCache,
+  createIndexedDbRecordCacheAdapter,
+  createMemoryRecordCacheAdapter,
+  type RecordCacheAdapter,
+  type RecordCacheOptions,
+  type RecordCacheRecord,
+} from './record-cache.js';
+
 // Analytics
 export { ClientAnalytics } from './analytics.js';
 
