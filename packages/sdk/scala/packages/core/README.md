@@ -20,7 +20,7 @@ This package is one part of the wider EdgeBase platform. For the full platform, 
 ```scala
 resolvers += "jitpack" at "https://jitpack.io"
 
-libraryDependencies += "com.github.edge-base.edgebase" % "edgebase-core-scala" % "v0.3.2"
+libraryDependencies += "com.github.edge-base.edgebase" % "edgebase-core-scala" % "v0.3.3"
 ```
 
 If you are building from the monorepo directly, depend on `:packages:core`.
