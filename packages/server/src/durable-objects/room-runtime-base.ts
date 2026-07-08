@@ -763,6 +763,11 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       if (this.dirty) {
         await this.persistState();
       }
+      // Persist the cleared _stateSaveAt (mirrors steps 1/3/4/6). Without this,
+      // a re-recovered isolate reloads the stale past-due value from storage
+      // every pass and re-arms the alarm forever (the clamp keeps it from
+      // wedging, but only persisting the cleared scalar makes the loop settle).
+      this.syncEphemeralTimersToStorage();
     }
 
     // 6. State TTL safety net
@@ -796,6 +801,10 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         }
       }
       this.ensureSocketHeartbeatCheckScheduled();
+      // Persist the cleared/rescheduled _socketHeartbeatCheckAt (mirrors steps
+      // 1/3/4/6) so a re-recovered isolate cannot reload a stale past-due value
+      // and re-fire the alarm forever.
+      this.syncEphemeralTimersToStorage();
     }
 
     // 8. Reschedule for next pending event
