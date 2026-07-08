@@ -662,7 +662,7 @@ describe('External: Adapter Interface Compliance', () => {
 
     expect(typeof _test.resolveCaptchaConfig).toBe('function');
     expect(typeof _test.extractCaptchaToken).toBe('function');
-    expect(typeof _test.hasServiceKey).toBe('function');
+    expect(typeof _test.hasValidServiceKey).toBe('function');
     expect(typeof _test.siteverify).toBe('function');
   });
 

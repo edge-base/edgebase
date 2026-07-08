@@ -60,12 +60,10 @@ export interface RoomWSMeta {
 //     that access rules evaluate; accepting them verbatim would let any client
 //     send `role: "admin"` and bypass every join/action/admin rule.
 //   - `isAnonymous` is forced true — a client cannot claim to be a real,
-//     non-anonymous account.
-//   - the subject is namespaced under `anon:` so it cannot collide with a real
-//     user id and receive another user's targeted (`sendMessageTo`) signals.
+//     non-anonymous account. Access rules that must exclude anonymous actors
+//     should check `auth.isAnonymous` (a client-supplied `subject` is still
+//     free-form, so do not treat `auth.id` alone as proof of identity here).
 // `custom`/`meta` are preserved only as non-authoritative display metadata.
-const ANON_ROOM_SUBJECT_PREFIX = 'anon:';
-
 function normalizeAnonymousRoomAuthPayload(value: unknown): SharedAuthContext | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -76,10 +74,7 @@ function normalizeAnonymousRoomAuthPayload(value: unknown): SharedAuthContext | 
     return null;
   }
 
-  const rawSubject = typed.subject.trim();
-  const subject = rawSubject.startsWith(ANON_ROOM_SUBJECT_PREFIX)
-    ? rawSubject
-    : `${ANON_ROOM_SUBJECT_PREFIX}${rawSubject}`;
+  const subject = typed.subject.trim();
   return {
     id: subject,
     role: undefined,
