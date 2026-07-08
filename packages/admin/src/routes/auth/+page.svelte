@@ -68,6 +68,11 @@
 		return true;
 	}));
 
+	// Status/role filtering happens client-side over the currently loaded page only
+	// (the server list endpoint supports email/cursor/limit, not status/role). Make
+	// that scope explicit so "select all" is never read as "all matching users".
+	const hasClientFilter = $derived(statusFilter !== 'all' || roleFilter !== 'all');
+
 	// Bulk selection state
 	let selectedUsers = $state(new Set<string>());
 	let bulkAction = $state<'delete' | 'ban' | null>(null);
@@ -257,6 +262,14 @@
 		</div>
 	</div>
 
+	{#if hasClientFilter}
+		<div class="filter-notice">
+			Status and role filters apply only to the {users.length} user{users.length !== 1 ? 's' : ''} loaded on this page.
+			{#if cursor}Load more pages to filter additional users.{/if}
+			Selection and bulk actions affect only the rows shown below.
+		</div>
+	{/if}
+
 	{#if selectedUsers.size > 0}
 		<div class="bulk-bar">
 			<span class="bulk-bar__count">{selectedUsers.size} selected</span>
@@ -357,7 +370,11 @@
 
 		{#if cursor || totalUsers != null}
 			<div class="pagination">
-				{#if totalUsers != null}
+				{#if hasClientFilter}
+					<span class="pagination__info">
+						Showing {filteredUsers.length} of {users.length} loaded{#if totalUsers != null} ({totalUsers} total){/if}
+					</span>
+				{:else if totalUsers != null}
 					<span class="pagination__info">Showing {filteredUsers.length} of {totalUsers} users</span>
 				{/if}
 				{#if cursor}
@@ -487,6 +504,17 @@
 
 	.table__row--selected:hover {
 		background-color: color-mix(in srgb, var(--color-primary) 10%, transparent);
+	}
+
+	.filter-notice {
+		padding: var(--space-2) var(--space-4);
+		margin-bottom: var(--space-3);
+		font-size: 12px;
+		line-height: 1.5;
+		color: var(--color-text-secondary);
+		background: color-mix(in srgb, var(--color-warning, #f59e0b) 8%, transparent);
+		border: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 24%, transparent);
+		border-radius: var(--radius-md);
 	}
 
 	.bulk-bar {

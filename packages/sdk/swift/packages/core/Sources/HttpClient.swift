@@ -202,6 +202,20 @@ public actor HttpClient {
             msg.contains("refused") || msg.contains("network")
     }
 
+    /// Whether an HTTP method is safe to auto-retry after an ambiguous transport
+    /// error. GET/PUT/DELETE/HEAD are idempotent, so a retry cannot double-execute.
+    /// POST/PATCH are NOT idempotent: a "reset"/"eof"/"connection" error after the
+    /// server has already committed could double-execute the request, so they are
+    /// not retried on ambiguous post-send failures.
+    private func isIdempotentMethod(_ method: String) -> Bool {
+        switch method.uppercased() {
+        case "GET", "PUT", "DELETE", "HEAD", "OPTIONS":
+            return true
+        default:
+            return false
+        }
+    }
+
     // MARK: - Private
 
     private func request(
@@ -233,7 +247,9 @@ public actor HttpClient {
         do {
             (data, response) = try await session.data(for: req)
         } catch {
-            if rateLimitAttempt < 2 && isRetryableTransportError(error) {
+            // Only auto-retry idempotent methods on ambiguous transport errors. A
+            // POST/PATCH that failed after the server committed would double-execute.
+            if rateLimitAttempt < 2 && isIdempotentMethod(method) && isRetryableTransportError(error) {
                 try await Task.sleep(nanoseconds: UInt64(50_000_000 * (rateLimitAttempt + 1)))
                 return try await request(method: method, path: path, body: body, queryParams: queryParams, skipAuth: skipAuth, isRetry: isRetry, rateLimitAttempt: rateLimitAttempt + 1)
             }
@@ -252,9 +268,13 @@ public actor HttpClient {
             return try await request(method: method, path: path, body: body, queryParams: queryParams, skipAuth: skipAuth, isRetry: isRetry, rateLimitAttempt: rateLimitAttempt + 1)
         }
 
-        // 401 auto-retry with token refresh
+        // 401 auto-retry with token refresh.
+        // Force a refresh (bypass the local-expiry short-circuit) so the retry uses a
+        // freshly minted token instead of re-sending the token the server just rejected
+        // (server-side revocation / clock skew). Swallow refresh errors here: if the
+        // refresh fails the retry proceeds unauthenticated and surfaces the real 401.
         if httpResponse.statusCode == 401 && !isRetry && !skipAuth {
-            _ = try await tokenManager.getAccessToken()
+            _ = try? await tokenManager.getAccessToken(forceRefresh: true)
             return try await request(
                 method: method, path: path, body: body,
                 queryParams: queryParams, skipAuth: skipAuth, isRetry: true

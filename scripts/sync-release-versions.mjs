@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RELEASE_TARGETS, RELEASE_VERSION_REFERENCES } from './release-targets.mjs';
-import { getSourceVersion, isValidSemver, updateTargetVersion, updateVersionReference, summarizeTargets } from './release-version-utils.mjs';
+import { assertStableReleaseVersion, getSourceVersion, updateTargetVersion, updateVersionReference, summarizeTargets } from './release-version-utils.mjs';
 
 const REPO_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -31,9 +31,7 @@ function regenerateGeneratedSkillReferences() {
 }
 
 export function syncReleaseVersions(version = getSourceVersion()) {
-  if (!isValidSemver(version)) {
-    throw new Error(`Root version "${version}" is not a valid semver string.`);
-  }
+  assertStableReleaseVersion(version);
 
   const summary = summarizeTargets();
   console.log(`Syncing ${summary.fileBacked} file-backed release targets to ${version}...`);

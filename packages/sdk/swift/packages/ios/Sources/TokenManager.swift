@@ -121,6 +121,10 @@ public actor TokenManager: TokenManageable {
     private var currentTokens: TokenPair?
     private var refreshCallback: RefreshTokenCallback?
     private var refreshTask: Task<TokenPair, Error>?
+    /// Bumped on every logout (clearTokens). An in-flight refresh compares the
+    /// generation it started with against the current one; if they differ, a logout
+    /// happened mid-refresh and the refreshed tokens must NOT resurrect the session.
+    private var sessionGeneration = 0
 
     // Auth state change stream
     private var authStateHandlers: [(([String: Any]?) -> Void)] = []
@@ -143,9 +147,15 @@ public actor TokenManager: TokenManageable {
     }
 
     /// Clear tokens (logout).
+    ///
+    /// Cancels any in-flight refresh and bumps the session generation so a refresh
+    /// that is already awaiting the network cannot re-persist tokens or emit a
+    /// signed-in event after logout.
     public func clearTokens() async {
-        currentTokens = nil
+        sessionGeneration &+= 1
+        refreshTask?.cancel()
         refreshTask = nil
+        currentTokens = nil
         await storage.clearTokens()
         notifyAuthStateChange(nil)
     }
@@ -176,10 +186,18 @@ public actor TokenManager: TokenManageable {
         return decodeJWTPayload(token)
     }
     public func getAccessToken() async throws -> String? {
+        return try await getAccessToken(forceRefresh: false)
+    }
+
+    /// Get valid access token, refreshing if needed.
+    /// When `forceRefresh` is true, skip the local-expiry short-circuit and refresh
+    /// unconditionally (used on a server 401 so the retry uses a freshly minted token
+    /// instead of re-sending one the server already rejected).
+    public func getAccessToken(forceRefresh: Bool) async throws -> String? {
         guard let tokens = currentTokens else { return nil }
 
         // Check if token is expired or will expire within 30s
-        if !isTokenExpired(tokens.accessToken) {
+        if !forceRefresh && !isTokenExpired(tokens.accessToken) {
             return tokens.accessToken
         }
 
@@ -193,16 +211,50 @@ public actor TokenManager: TokenManageable {
             return tokens.accessToken
         }
 
-        let task = Task<TokenPair, Error> {
-            let newTokens = try await refreshCb(tokens.refreshToken)
-            await setTokens(newTokens)
+        let generation = sessionGeneration
+        let refreshToken = tokens.refreshToken
+        let task = Task<TokenPair, Error> { [weak self] in
+            guard let self else {
+                throw EdgeBaseError(statusCode: 401, message: "Token manager was released during refresh.")
+            }
+            let newTokens = try await refreshCb(refreshToken)
+            // If a logout happened while we were awaiting the network, do NOT
+            // resurrect the session by persisting tokens or firing signed-in events.
+            let committed = await self.commitRefreshedTokens(newTokens, generation: generation)
+            guard committed else {
+                throw EdgeBaseError(statusCode: 401, message: "Session was cleared during token refresh.")
+            }
             return newTokens
         }
         refreshTask = task
 
         defer { refreshTask = nil }
-        let newTokens = try await task.value
-        return newTokens.accessToken
+        do {
+            let newTokens = try await task.value
+            return newTokens.accessToken
+        } catch {
+            await handleRefreshFailure(error, generation: generation)
+            throw error
+        }
+    }
+
+    /// Persist refreshed tokens and emit a signed-in event, unless a logout has
+    /// occurred since the refresh started. Returns false when the refresh is stale.
+    private func commitRefreshedTokens(_ newTokens: TokenPair, generation: Int) async -> Bool {
+        guard generation == sessionGeneration else { return false }
+        currentTokens = newTokens
+        await storage.saveTokens(newTokens)
+        notifyAuthStateChange(decodeJWTPayload(newTokens.accessToken))
+        return true
+    }
+
+    /// On a refresh failure with 401, clear the session (token revoked/expired),
+    /// matching the JS reference. Other errors (network, 5xx) keep the session for
+    /// retry. Skipped if a logout already advanced the generation.
+    private func handleRefreshFailure(_ error: Error, generation: Int) async {
+        guard (error as? EdgeBaseError)?.statusCode == 401 else { return }
+        guard generation == sessionGeneration else { return }
+        await clearTokens()
     }
 
     /// Check if token is expired (with 30s buffer).

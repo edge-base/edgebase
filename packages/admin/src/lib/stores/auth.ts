@@ -147,8 +147,21 @@ async function setup(email: string, password: string): Promise<void> {
  * Attempt to refresh the access token using the refresh token.
  * POST {apiOrigin}/admin/api/auth/refresh
  * Returns true if refresh succeeded, false otherwise.
+ *
+ * Single-flighted: concurrent callers (e.g. several requests that all 401 at once)
+ * share one in-flight refresh so only a single POST auth/refresh is ever sent.
  */
-async function refresh(): Promise<boolean> {
+let refreshInFlight: Promise<boolean> | null = null;
+
+function refresh(): Promise<boolean> {
+	if (refreshInFlight) return refreshInFlight;
+	refreshInFlight = performRefresh().finally(() => {
+		refreshInFlight = null;
+	});
+	return refreshInFlight;
+}
+
+async function performRefresh(): Promise<boolean> {
 	const state = get(store);
 	if (!state.refreshToken) return false;
 

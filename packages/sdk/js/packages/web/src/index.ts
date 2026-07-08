@@ -64,8 +64,10 @@ export {
   encryptRecordCacheAdapter,
   passphraseBoxConfigured,
   removePassphraseKey,
+  type CreateSecretBoxOptions,
   type PassphraseBoxResult,
   type SecretBox,
+  type SecretBoxOptions,
 } from './crypto-box.js';
 
 // Record cache (stale-while-revalidate local record hydration)

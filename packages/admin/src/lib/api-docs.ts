@@ -2,7 +2,29 @@ function escapeInlineJson(value: string): string {
 	return value.replace(/<\/script/gi, '<\\/script');
 }
 
-export function buildScalarHtml(specJson: string, origin: string, authStorageKey: string): string {
+/**
+ * Pinned Scalar API Reference release.
+ *
+ * Never reference a floating "latest" build from a third-party CDN: that would let
+ * the CDN ship arbitrary new code into the docs iframe on every deploy. Pin to an
+ * exact version tag so the served bytes are stable and auditable.
+ */
+export const SCALAR_API_REFERENCE_VERSION = '1.25.0';
+export const SCALAR_API_REFERENCE_SRC =
+	`https://cdn.jsdelivr.net/npm/@scalar/api-reference@${SCALAR_API_REFERENCE_VERSION}`;
+
+/**
+ * Build the standalone HTML document rendered inside the docs iframe.
+ *
+ * Security model:
+ * - The iframe is sandboxed WITHOUT `allow-same-origin`, so it runs on an opaque
+ *   origin and cannot read the admin session (`localStorage`) even though the
+ *   third-party Scalar bundle executes inside it.
+ * - The short-lived admin access token is delivered on demand via `postMessage`
+ *   from the parent window and kept in memory only. The long-lived refresh token
+ *   never enters the iframe; refreshes are performed by the parent.
+ */
+export function buildScalarHtml(specJson: string, origin: string): string {
 	const escapedSpecJson = escapeInlineJson(specJson);
 
 	return `<!DOCTYPE html>
@@ -15,7 +37,6 @@ export function buildScalarHtml(specJson: string, origin: string, authStorageKey
 <body>
 <script>
 const EDGEBASE_ORIGIN = ${JSON.stringify(origin)};
-const ADMIN_AUTH_STORAGE_KEY = ${JSON.stringify(authStorageKey)};
 const ADMIN_API_PREFIX = '/admin/api/';
 const ADMIN_AUTH_SKIP_PATHS = new Set([
 \t'/admin/api/auth/login',
@@ -24,21 +45,40 @@ const ADMIN_AUTH_SKIP_PATHS = new Set([
 \t'/admin/api/setup/status'
 ]);
 
-function readAdminAuth() {
-\ttry {
-\t\tconst raw = localStorage.getItem(ADMIN_AUTH_STORAGE_KEY);
-\t\treturn raw ? JSON.parse(raw) : null;
-\t} catch {
-\t\treturn null;
-\t}
-}
+const MSG_READY = 'edgebase-docs-ready';
+const MSG_REQUEST_TOKEN = 'edgebase-docs-request-token';
+const MSG_TOKEN = 'edgebase-admin-token';
 
-function writeAdminAuth(state) {
-\ttry {
-\t\tlocalStorage.setItem(ADMIN_AUTH_STORAGE_KEY, JSON.stringify(state));
-\t} catch {
-\t\t// Ignore storage sync failures inside the docs iframe.
+// In-memory only. The iframe never touches localStorage, so a compromised Scalar
+// bundle cannot exfiltrate the admin session.
+let adminAccessToken = null;
+let pendingTokenRequest = null;
+
+window.addEventListener('message', (event) => {
+\tif (event.source !== window.parent) return;
+\tconst data = event.data;
+\tif (!data || data.type !== MSG_TOKEN) return;
+\tadminAccessToken = typeof data.accessToken === 'string' ? data.accessToken : null;
+\tif (pendingTokenRequest) {
+\t\tpendingTokenRequest.resolve(adminAccessToken);
+\t\tpendingTokenRequest = null;
 \t}
+});
+
+function requestAdminToken(refresh) {
+\tif (pendingTokenRequest) return pendingTokenRequest.promise;
+\tlet resolve;
+\tconst promise = new Promise((r) => { resolve = r; });
+\tpendingTokenRequest = { resolve, promise };
+\twindow.parent.postMessage({ type: MSG_REQUEST_TOKEN, refresh: Boolean(refresh) }, '*');
+\t// Fail open after a short wait so a silent parent cannot hang every request.
+\tsetTimeout(() => {
+\t\tif (pendingTokenRequest) {
+\t\t\tpendingTokenRequest.resolve(adminAccessToken);
+\t\t\tpendingTokenRequest = null;
+\t\t}
+\t}, 5000);
+\treturn promise;
 }
 
 function hasExplicitAuthorization(headers) {
@@ -68,30 +108,6 @@ function withAdminToken(request, accessToken) {
 
 const originalFetch = window.fetch.bind(window);
 
-async function refreshAdminAccessToken() {
-\tconst state = readAdminAuth();
-\tif (!state?.refreshToken) return null;
-
-\tconst refreshRequest = new Request(\`\${EDGEBASE_ORIGIN}/admin/api/auth/refresh\`, {
-\t\tmethod: 'POST',
-\t\theaders: { 'Content-Type': 'application/json' },
-\t\tbody: JSON.stringify({ refreshToken: state.refreshToken })
-\t});
-\tconst refreshResponse = await originalFetch(refreshRequest);
-\tif (!refreshResponse.ok) return null;
-
-\tconst refreshed = await refreshResponse.json().catch(() => null);
-\tif (!refreshed?.accessToken || !refreshed?.refreshToken) return null;
-
-\twriteAdminAuth({
-\t\t...state,
-\t\taccessToken: refreshed.accessToken,
-\t\trefreshToken: refreshed.refreshToken,
-\t\tadmin: refreshed.admin ?? state.admin ?? null
-\t});
-\treturn refreshed.accessToken;
-}
-
 window.fetch = async (input, init) => {
 \tconst baseRequest = input instanceof Request ? input : new Request(input, init);
 \tconst requestUrl = new URL(baseRequest.url, EDGEBASE_ORIGIN);
@@ -99,22 +115,22 @@ window.fetch = async (input, init) => {
 \t\treturn originalFetch(baseRequest);
 \t}
 
-\tconst state = readAdminAuth();
-\tif (!state?.accessToken) {
-\t\treturn originalFetch(baseRequest);
-\t}
+\tlet token = adminAccessToken ?? (await requestAdminToken(false));
+\tif (!token) return originalFetch(baseRequest);
 
-\tconst send = (token) => originalFetch(withAdminToken(baseRequest.clone(), token));
-\tlet response = await send(state.accessToken);
+\tlet response = await originalFetch(withAdminToken(baseRequest.clone(), token));
 \tif (response.status !== 401) return response;
 
-\tconst refreshedToken = await refreshAdminAccessToken();
+\tconst refreshedToken = await requestAdminToken(true);
 \tif (!refreshedToken) return response;
-\treturn send(refreshedToken);
+\treturn originalFetch(withAdminToken(baseRequest.clone(), refreshedToken));
 };
+
+// Let the parent know the iframe is ready to receive the initial access token.
+window.parent.postMessage({ type: MSG_READY }, '*');
 </script>
 <script id="api-reference" data-proxy-url="https://proxy.scalar.com" type="application/json">${escapedSpecJson}<\/script>
-<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"><\/script>
+<script src=${JSON.stringify(SCALAR_API_REFERENCE_SRC)}><\/script>
 </body>
 </html>`;
 }

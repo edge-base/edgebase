@@ -52,6 +52,20 @@ export interface RoomWSMeta {
   lastSeenAt?: number;
 }
 
+// Anonymous room actors (e.g. share-link viewers) authenticate without a signed
+// token, so the payload is fully client-controlled and MUST be treated as
+// untrusted. The client may pick a display subject, but it may NOT choose its
+// own privilege level or impersonate an authenticated user:
+//   - `role` and `email` are dropped — they are authoritative identity claims
+//     that access rules evaluate; accepting them verbatim would let any client
+//     send `role: "admin"` and bypass every join/action/admin rule.
+//   - `isAnonymous` is forced true — a client cannot claim to be a real,
+//     non-anonymous account.
+//   - the subject is namespaced under `anon:` so it cannot collide with a real
+//     user id and receive another user's targeted (`sendMessageTo`) signals.
+// `custom`/`meta` are preserved only as non-authoritative display metadata.
+const ANON_ROOM_SUBJECT_PREFIX = 'anon:';
+
 function normalizeAnonymousRoomAuthPayload(value: unknown): SharedAuthContext | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -62,12 +76,15 @@ function normalizeAnonymousRoomAuthPayload(value: unknown): SharedAuthContext | 
     return null;
   }
 
-  const subject = typed.subject.trim();
+  const rawSubject = typed.subject.trim();
+  const subject = rawSubject.startsWith(ANON_ROOM_SUBJECT_PREFIX)
+    ? rawSubject
+    : `${ANON_ROOM_SUBJECT_PREFIX}${rawSubject}`;
   return {
     id: subject,
-    role: typeof typed.role === 'string' && typed.role.trim().length > 0 ? typed.role.trim() : undefined,
-    email: typeof typed.email === 'string' && typed.email.trim().length > 0 ? typed.email.trim() : undefined,
-    isAnonymous: typed.isAnonymous !== false,
+    role: undefined,
+    email: undefined,
+    isAnonymous: true,
     custom:
       typed.custom && typeof typed.custom === 'object' && !Array.isArray(typed.custom)
         ? (typed.custom as Record<string, unknown>)
@@ -570,6 +587,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       this.handleDisconnect(meta, kicked, explicitLeave);
       this._metaCache.delete(ws);
       this._attachmentExtraCache.delete(ws);
+      this.clearRateBuckets(meta.connectionId);
       if (this.pendingAuth.delete(meta.connectionId)) {
         this.syncEphemeralTimersToStorage();
         this._scheduleNextAlarm();
@@ -585,6 +603,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       this.handleDisconnect(meta);
       this._metaCache.delete(ws);
       this._attachmentExtraCache.delete(ws);
+      this.clearRateBuckets(meta.connectionId);
       if (this.pendingAuth.delete(meta.connectionId)) {
         this.syncEphemeralTimersToStorage();
         this._scheduleNextAlarm();
@@ -824,6 +843,20 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     const anonymousAuth = !token ? normalizeAnonymousRoomAuthPayload(authPayload) : null;
     if (!token && !anonymousAuth) {
       this.safeSend(ws, { type: 'error', code: 'AUTH_FAILED', message: 'Token required' });
+      ws.close(4002, 'Authentication failed');
+      return;
+    }
+
+    // Tokenless anonymous room auth is only honored when anonymous auth is
+    // explicitly enabled, mirroring the HTTP `/signin/anonymous` gate. Without
+    // this the payload — which is entirely client-supplied — would be trusted on
+    // every deployment, even ones that never opted into anonymous access.
+    if (anonymousAuth && !this.config.auth?.anonymousAuth) {
+      this.safeSend(ws, {
+        type: 'error',
+        code: 'AUTH_FAILED',
+        message: 'Anonymous room access is not enabled',
+      });
       ws.close(4002, 'Authentication failed');
       return;
     }
@@ -1959,6 +1992,20 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Drop all rate-limit buckets for a connection once it closes. Buckets are
+   * keyed by `${connectionId}:${scope}`; without this a busy, never-empty room
+   * accumulates one entry per (connection, scope) forever (slow memory leak).
+   */
+  private clearRateBuckets(connectionId: string): void {
+    const prefix = `${connectionId}:`;
+    for (const key of this.rateBuckets.keys()) {
+      if (key.startsWith(prefix)) {
+        this.rateBuckets.delete(key);
+      }
+    }
   }
 
   // ─── Empty Room Cleanup ───

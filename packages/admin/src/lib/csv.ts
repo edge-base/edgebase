@@ -84,20 +84,40 @@ export function generateCSV(columns: string[], rows: Record<string, unknown>[]):
 	const lines: string[] = [];
 
 	// Header
-	lines.push(columns.map(escapeField).join(','));
+	lines.push(columns.map(serializeField).join(','));
 
 	// Rows
 	for (const row of rows) {
 		const fields = columns.map((col) => {
 			const val = row[col];
 			if (val === null || val === undefined) return '';
-			if (typeof val === 'object') return escapeField(JSON.stringify(val));
-			return escapeField(String(val));
+			if (typeof val === 'object') return serializeField(JSON.stringify(val));
+			return serializeField(String(val));
 		});
 		lines.push(fields.join(','));
 	}
 
 	return lines.join('\r\n');
+}
+
+/** Neutralize + quote a single field for safe CSV output. */
+function serializeField(val: string): string {
+	return escapeField(neutralizeFormula(val));
+}
+
+/**
+ * Defend against CSV/spreadsheet formula injection (OWASP): a cell whose first
+ * character is one of = + - @ (or a leading tab/carriage return) can be executed
+ * as a formula when the file is opened in Excel/Sheets. Prefix such cells with a
+ * single quote so the spreadsheet treats them as literal text.
+ */
+function neutralizeFormula(val: string): string {
+	if (val.length === 0) return val;
+	const first = val[0];
+	if (first === '=' || first === '+' || first === '-' || first === '@' || first === '\t' || first === '\r') {
+		return `'${val}`;
+	}
+	return val;
 }
 
 function escapeField(val: string): string {

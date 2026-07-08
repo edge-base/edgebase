@@ -3,8 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   DurableOutbox,
   createMemoryOutboxAdapter,
+  createIndexedDbOutboxAdapter,
+  type DurableOutboxAdapter,
   type OutboxLockManager,
 } from '../../src/durable-outbox.js';
+
+import 'fake-indexeddb/auto';
 
 /**
  * Fake Web Locks manager: locks in `held` behave as owned by a live tab
@@ -90,4 +94,71 @@ describe('DurableOutbox', () => {
 
     expect(await outbox.entries()).toHaveLength(0);
   });
+
+  it('holdTab resolves once the liveness lock is acquired and is awaited by set()', async () => {
+    let callbackRan = false;
+    const locks: OutboxLockManager = {
+      async request(_name, options, callback) {
+        if (options.ifAvailable) return callback({});
+        callbackRan = true;
+        return callback({}); // exclusive hold — callback grants immediately
+      },
+    };
+    const outbox = new DurableOutbox<string>({
+      adapter: createMemoryOutboxAdapter<string>(),
+      locks,
+      name: 'test',
+      tabId: 'a',
+    });
+
+    await outbox.holdTab();
+    expect(callbackRan).toBe(true);
+
+    // set() must have the lock held first; it awaits holdTab internally.
+    await outbox.set('k', 'v');
+    expect((await outbox.entries())[0]?.value).toBe('v');
+  });
+});
+
+// Finding 9: a claim must not clobber a newer entry the destination tab already
+// enqueued for the same deterministic key (resurrected-older-vs-live-newer).
+function claimClobberSuite(
+  label: string,
+  makeAdapter: () => DurableOutboxAdapter<string>,
+) {
+  describe(`DurableOutbox claim (no clobber) — ${label}`, () => {
+    it('keeps the destination tab\'s NEWER entry instead of the resurrected older one', async () => {
+      const adapter = makeAdapter();
+      await adapter.put({ entryKey: 'k', tabId: 'dead', updatedAt: 1000, value: 'stale-from-dead' });
+      await adapter.put({ entryKey: 'k', tabId: 'fresh', updatedAt: 2000, value: 'newer-from-fresh' });
+
+      const claimed = await adapter.claimTab('dead', 'fresh');
+
+      // The older resurrected entry is dropped (not claimed, not replayed).
+      expect(claimed).toHaveLength(0);
+      const fresh = await adapter.listEntries('fresh');
+      expect(fresh).toHaveLength(1);
+      expect(fresh[0]?.value).toBe('newer-from-fresh');
+    });
+
+    it('claims the dead entry when it is NEWER than the destination entry', async () => {
+      const adapter = makeAdapter();
+      await adapter.put({ entryKey: 'k', tabId: 'fresh', updatedAt: 1000, value: 'older-from-fresh' });
+      await adapter.put({ entryKey: 'k', tabId: 'dead', updatedAt: 2000, value: 'newer-from-dead' });
+
+      const claimed = await adapter.claimTab('dead', 'fresh');
+
+      expect(claimed.map((entry) => entry.value)).toEqual(['newer-from-dead']);
+      const fresh = await adapter.listEntries('fresh');
+      expect(fresh).toHaveLength(1);
+      expect(fresh[0]?.value).toBe('newer-from-dead');
+    });
+  });
+}
+
+claimClobberSuite('memory adapter', () => createMemoryOutboxAdapter<string>());
+claimClobberSuite('indexeddb adapter', () => {
+  const adapter = createIndexedDbOutboxAdapter<string>(`outbox-${Math.random().toString(36).slice(2)}`);
+  if (!adapter) throw new Error('IndexedDB adapter unavailable');
+  return adapter;
 });

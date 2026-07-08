@@ -33,7 +33,7 @@ test('walks database tools and ops pages while exercising core controls', async 
 		});
 	});
 
-	await page.route('https://cdn.jsdelivr.net/npm/@scalar/api-reference', async (route) => {
+	await page.route('https://cdn.jsdelivr.net/npm/@scalar/api-reference*', async (route) => {
 		await route.fulfill({
 			status: 200,
 			contentType: 'application/javascript',

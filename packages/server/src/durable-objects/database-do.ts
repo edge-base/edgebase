@@ -37,7 +37,7 @@ import {
 } from '../lib/schema.js';
 
 import { generateId } from '../lib/uuid.js';
-import { parseUpdateBody } from '../lib/op-parser.js';
+import { parseUpdateBody, escapeIdentifier } from '../lib/op-parser.js';
 import {
   buildListQuery,
   buildGetQuery,
@@ -393,12 +393,14 @@ export class DatabaseDO extends DurableObject<DOEnv> {
    */
   private ensureSchemalessColumns(tableName: string, fields: string[]): void {
     const existingCols = new Set<string>();
-    for (const row of this.sql(`PRAGMA table_info("${tableName}")`)) {
+    for (const row of this.sql(`PRAGMA table_info(${escapeIdentifier(tableName)})`)) {
       existingCols.add(row.name as string);
     }
     for (const field of fields) {
       if (!existingCols.has(field)) {
-        this.sql(`ALTER TABLE "${tableName}" ADD COLUMN "${field}" TEXT`);
+        // `field` is a raw user-supplied JSON key in schemaless mode; escape it
+        // as a quoted identifier so an embedded `"` cannot break out of the DDL.
+        this.sql(`ALTER TABLE ${escapeIdentifier(tableName)} ADD COLUMN ${escapeIdentifier(field)} TEXT`);
       }
     }
   }
@@ -734,7 +736,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         return v;
       });
       const placeholders = columns.map(() => '?').join(', ');
-      const colStr = columns.map((c) => `"${c}"`).join(', ');
+      const colStr = columns.map((c) => escapeIdentifier(c)).join(', ');
 
       // Track whether this is an update (for database-live/response,)
       let isUpdate = false;
@@ -765,7 +767,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         const updateCols = columns.filter(
           (k) => k !== 'id' && k !== 'createdAt' && k !== conflictTarget,
         );
-        const updateSet = updateCols.map((k) => `"${k}" = excluded."${k}"`).join(', ');
+        const updateSet = updateCols.map((k) => `${escapeIdentifier(k)} = excluded.${escapeIdentifier(k)}`).join(', ');
         const sql = updateSet
           ? `INSERT INTO "${name}" (${colStr}) VALUES (${placeholders}) ON CONFLICT("${conflictTarget}") DO UPDATE SET ${updateSet}`
           : `INSERT INTO "${name}" (${colStr}) VALUES (${placeholders}) ON CONFLICT("${conflictTarget}") DO NOTHING`;
@@ -1242,14 +1244,14 @@ export class DatabaseDO extends DurableObject<DOEnv> {
               return v;
             });
             const placeholders = columns.map(() => '?').join(', ');
-            const colStr = columns.map((c) => `"${c}"`).join(', ');
+            const colStr = columns.map((c) => escapeIdentifier(c)).join(', ');
 
             if (upsertMode) {
               // ON CONFLICT DO UPDATE
               const updateCols = columns.filter(
                 (k) => k !== 'id' && k !== 'createdAt' && k !== conflictTarget,
               );
-              const updateSet = updateCols.map((k) => `"${k}" = excluded."${k}"`).join(', ');
+              const updateSet = updateCols.map((k) => `${escapeIdentifier(k)} = excluded.${escapeIdentifier(k)}`).join(', ');
               const sql = updateSet
                 ? `INSERT INTO "${name}" (${colStr}) VALUES (${placeholders}) ON CONFLICT("${conflictTarget}") DO UPDATE SET ${updateSet}`
                 : `INSERT INTO "${name}" (${colStr}) VALUES (${placeholders}) ON CONFLICT("${conflictTarget}") DO NOTHING`;
@@ -1914,7 +1916,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
               return v;
             });
             const placeholders = columns.map(() => '?').join(', ');
-            const colStr = columns.map((col) => `"${col}"`).join(', ');
+            const colStr = columns.map((col) => escapeIdentifier(col)).join(', ');
             this.sql(`INSERT INTO "${name}" (${colStr}) VALUES (${placeholders})`, ...values);
             results.push({ inserted: record });
             liveChanges.push({ table: name, type: 'added', docId: id, data: record });
@@ -2343,7 +2345,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
             const columns = Object.keys(decoded);
             const values = columns.map((col) => decoded[col]);
             const placeholders = columns.map(() => '?').join(', ');
-            const colStr = columns.map((col) => `"${col}"`).join(', ');
+            const colStr = columns.map((col) => escapeIdentifier(col)).join(', ');
             this.sql(
               `INSERT OR REPLACE INTO "${tableName}" (${colStr}) VALUES (${placeholders})`,
               ...values,

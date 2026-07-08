@@ -157,7 +157,11 @@ export function createIndexedDbRecordCacheAdapter(
     return dbPromise;
   };
 
-  const keyOf = (table: string, id: string) => `${table} ${id}`;
+  // Escape each component (a space becomes %20) so a space inside a table name
+  // or record id cannot collide with the join separator and forge a different
+  // (table, id) key.
+  const keyOf = (table: string, id: string) =>
+    `${encodeURIComponent(table)} ${encodeURIComponent(id)}`;
 
   return {
     async clear() {
@@ -267,7 +271,13 @@ export class RecordCache {
         await this.adapter.clear();
         await this.adapter.setMeta(SCHEMA_META_KEY, this.schemaVersion);
       }
-    })();
+    })().catch((err) => {
+      // A transient IndexedDB error must not permanently wedge the cache for
+      // the session. Drop the cached promise (like the adapters' open() does
+      // with dbPromise) so the next call can retry.
+      this.ready = null;
+      throw err;
+    });
     return this.ready;
   }
 

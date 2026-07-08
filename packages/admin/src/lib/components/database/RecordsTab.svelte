@@ -4,7 +4,7 @@
 	import { api } from '$lib/api';
 	import { describeActionError } from '$lib/error-messages';
 	import { schemaStore } from '$lib/stores/schema';
-	import { toastSuccess, toastError } from '$lib/stores/toast.svelte';
+	import { toastSuccess, toastError, toastWarning } from '$lib/stores/toast.svelte';
 	import { downloadBlob } from '$lib/download';
 	import type { SchemaField, FkReference } from '$lib/constants';
 	import { AUTO_FIELDS } from '$lib/constants';
@@ -14,7 +14,7 @@
 	import DataGrid, { type GridColumn } from '$lib/components/ui/DataGrid.svelte';
 	import { buildRecordsQuery } from '$lib/components/database/records-query';
 	import RowDetailPanel from '$lib/components/ui/RowDetailPanel.svelte';
-	import { parseCSV, generateCSV, inferTypes } from '$lib/csv';
+	import { parseCSV, generateCSV } from '$lib/csv';
 
 	let {
 		tableName,
@@ -105,6 +105,13 @@
 		return `${basePath}?${params.toString()}`;
 	}
 
+	function buildImportPath(): string {
+		const basePath = `data/tables/${encodeURIComponent(tableName)}/import`;
+		if (!instanceId) return basePath;
+		const params = new URLSearchParams({ instanceId });
+		return `${basePath}?${params.toString()}`;
+	}
+
 	function isPostgresTable(): boolean {
 		return provider === 'postgres' || provider === 'neon';
 	}
@@ -131,7 +138,10 @@
 		}
 	}
 
+	let latestLoadRequest = 0;
+
 	async function loadRecords(options: { refreshTotal?: boolean } = {}) {
+		const requestId = ++latestLoadRequest;
 		loading = true;
 		try {
 			const offset = (pageNum - 1) * pageSize;
@@ -150,6 +160,8 @@
 					params: new URLSearchParams(query),
 				})
 			);
+			// A newer load has superseded this one — drop the stale response.
+			if (requestId !== latestLoadRequest) return;
 			const nextRecords = res.items ?? res.data ?? res.rows ?? [];
 			records = nextRecords;
 			totalCount = typeof res.total === 'number' ? res.total : records.length;
@@ -163,10 +175,13 @@
 				void loadTotalCount();
 			}
 		} catch (err) {
+			if (requestId !== latestLoadRequest) return;
 			toastError(describeActionError(err, 'Failed to load records.'));
 			records = [];
 		} finally {
-			loading = false;
+			if (requestId === latestLoadRequest) {
+				loading = false;
+			}
 		}
 	}
 
@@ -263,13 +278,24 @@
 		detailOpen = true;
 	}
 
+	// Hard cap on how many rows a single export request pulls back.
+	const EXPORT_LIMIT = 10000;
+
+	function warnIfTruncated(count: number) {
+		if (count >= EXPORT_LIMIT) {
+			toastWarning(
+				`Export truncated to the first ${EXPORT_LIMIT.toLocaleString()} rows. Narrow your data with a search to export the rest.`,
+			);
+		}
+	}
+
 	// ── CSV Export ────────────────────────────────────────
 	async function exportCSV() {
 		try {
 			const res = await api.fetch<{ items?: Record<string, unknown>[]; data?: Record<string, unknown>[]; rows?: Record<string, unknown>[]; total?: number }>(
 				buildAdminRecordsPath(tableName, {
 					instanceId,
-					params: { limit: 10000, includeTotal: 0 },
+					params: { limit: EXPORT_LIMIT, includeTotal: 0 },
 				})
 			);
 			const allRecords = res.items ?? res.data ?? res.rows ?? [];
@@ -282,6 +308,7 @@
 			const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
 			downloadBlob(blob, `${tableName}.csv`);
 			toastSuccess('CSV exported');
+			warnIfTruncated(allRecords.length);
 		} catch (err) {
 			toastError(describeActionError(err, 'CSV export failed.'));
 		}
@@ -293,7 +320,7 @@
 			const res = await api.fetch<{ items?: Record<string, unknown>[]; data?: Record<string, unknown>[]; rows?: Record<string, unknown>[]; total?: number }>(
 				buildAdminRecordsPath(tableName, {
 					instanceId,
-					params: { limit: 10000, includeTotal: 0 },
+					params: { limit: EXPORT_LIMIT, includeTotal: 0 },
 				})
 			);
 			const allRecords = res.items ?? res.data ?? res.rows ?? [];
@@ -305,6 +332,7 @@
 			const blob = new Blob([JSON.stringify(allRecords, null, 2)], { type: 'application/json' });
 			downloadBlob(blob, `${tableName}.json`);
 			toastSuccess('JSON exported');
+			warnIfTruncated(allRecords.length);
 		} catch (err) {
 			toastError(describeActionError(err, 'JSON export failed.'));
 		}
@@ -392,7 +420,7 @@
 			}
 
 			const res = await api.fetch<{ imported: number; errors: { row: number; message: string }[] }>(
-				`data/tables/${encodeURIComponent(tableName)}/import`, {
+				buildImportPath(), {
 				method: 'POST',
 				body: { records: importRecords, mode: 'create' },
 			});

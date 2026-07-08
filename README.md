@@ -13,7 +13,7 @@
   <a href="https://github.com/edge-base/edgebase/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>&nbsp;
   <a href="https://www.npmjs.com/package/create-edgebase"><img src="https://img.shields.io/npm/v/create-edgebase.svg?color=brightgreen" alt="npm"></a>&nbsp;
   <a href="https://github.com/edge-base/edgebase/stargazers"><img src="https://img.shields.io/github/stars/edge-base/edgebase?style=social" alt="GitHub Stars"></a>&nbsp;
-  <a href="https://github.com/edge-base/edgebase/actions"><img src="https://img.shields.io/github/actions/workflow/status/edge-base/edgebase/ci.yml?branch=main&label=CI" alt="CI"></a>
+  <a href="https://github.com/edge-base/edgebase/actions"><img src="https://img.shields.io/github/actions/workflow/status/edge-base/edgebase/pipeline.yml?branch=main&label=CI" alt="CI"></a>
 </p>
 
 <p align="center">
@@ -443,23 +443,23 @@ Deep dives: [Database](https://edgebase.fun/docs/database) · [Authentication](h
 <details>
 <summary><b>SDKs — 30+ packages across 14 languages</b></summary>
 
-| Language / Platform         | Client | Admin |     Support      |
-| --------------------------- | :----: | :---: | :--------------: |
-| **JavaScript / TypeScript** |  Yes   |  Yes  |    **Tier 1**    |
-| **React Native**            |  Yes   |   —   |      Tier 2      |
-| **Dart / Flutter**          |  Yes   |  Yes  |    **Tier 1**    |
-| **Swift (iOS)**             |  Yes   |   —   |      Tier 2      |
-| **Kotlin (KMP / Android)**  |  Yes   |  Yes  |    **Tier 1**    |
-| **Java (Android)**          |  Yes   |  Yes  |    **Tier 1**    |
-| **C# / Unity**              |  Yes   |  Yes  |      Tier 2      |
-| **C++ / Unreal**            |  Yes   |   —   |   Experimental   |
-| **Python**                  |   —    |  Yes  |    **Tier 1**    |
-| **Go**                      |   —    |  Yes  |      Tier 2      |
-| **PHP**                     |   —    |  Yes  |      Tier 2      |
-| **Rust**                    |   —    |  Yes  |    **Tier 1**    |
-| **Ruby**                    |   —    |  Yes  |      Tier 2      |
-| **Scala**                   |   —    |  Yes  |   Experimental   |
-| **Elixir**                  |   —    |  Yes  |   Experimental   |
+| Language / Platform         | Client | Admin |   Support    |
+| --------------------------- | :----: | :---: | :----------: |
+| **JavaScript / TypeScript** |  Yes   |  Yes  |  **Tier 1**  |
+| **React Native**            |  Yes   |   —   |    Tier 2    |
+| **Dart / Flutter**          |  Yes   |  Yes  |  **Tier 1**  |
+| **Swift (iOS)**             |  Yes   |   —   |    Tier 2    |
+| **Kotlin (KMP / Android)**  |  Yes   |  Yes  |  **Tier 1**  |
+| **Java (Android)**          |  Yes   |  Yes  |  **Tier 1**  |
+| **C# / Unity**              |  Yes   |  Yes  |    Tier 2    |
+| **C++ / Unreal**            |  Yes   |   —   | Experimental |
+| **Python**                  |   —    |  Yes  |  **Tier 1**  |
+| **Go**                      |   —    |  Yes  |    Tier 2    |
+| **PHP**                     |   —    |  Yes  |    Tier 2    |
+| **Rust**                    |   —    |  Yes  |  **Tier 1**  |
+| **Ruby**                    |   —    |  Yes  |    Tier 2    |
+| **Scala**                   |   —    |  Yes  | Experimental |
+| **Elixir**                  |   —    |  Yes  | Experimental |
 
 All SDKs are auto-generated from the same OpenAPI spec. [Browse all SDKs](https://edgebase.fun/docs/sdks) · [Architecture](https://edgebase.fun/docs/sdks/architecture) · [Support tiers](https://edgebase.fun/docs/sdks/support-tiers)
 

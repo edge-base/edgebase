@@ -101,20 +101,80 @@ public final class RoomClient: @unchecked Sendable {
     private let tokenManager: any TokenManageable
     private let options: RoomOptions
 
-    private var webSocketTask: (any RoomWebSocketTask)?
     private let urlSession: URLSession
-    private var isConnected = false
-    private var isAuthenticated = false
-    private var isJoined = false
-    private var intentionallyLeft = false
-    private var reconnectAttempts = 0
     private var heartbeatTimer: Timer?
-    private var waitingForAuth = false
-    private var joinRequested = false
-    private var currentUserId: String?
-    private var currentConnectionId: String?
     private var currentConnectionState = "idle"
-    private var reconnectInfo: [String: Any]?
+
+    // MARK: - Connection flags (guarded by connectionLock)
+    //
+    // These are mutated from multiple concurrent tasks (join(), receiveMessages(),
+    // auth-state changes, heartbeat). All access goes through `connectionLock` via
+    // the accessors below to eliminate data races. A dedicated lock (not the message
+    // `queue`) is used so reads/writes never risk reentrant deadlock with the queue
+    // blocks that dispatch user callbacks.
+    private let connectionLock = NSLock()
+    private var _webSocketTask: (any RoomWebSocketTask)?
+    private var _isConnected = false
+    private var _isAuthenticated = false
+    private var _isJoined = false
+    private var _intentionallyLeft = false
+    private var _reconnectAttempts = 0
+    private var _waitingForAuth = false
+    private var _joinRequested = false
+    private var _currentUserId: String?
+    private var _currentConnectionId: String?
+    private var _reconnectInfo: [String: Any]?
+
+    private func withConnectionLock<T>(_ body: () -> T) -> T {
+        connectionLock.lock()
+        defer { connectionLock.unlock() }
+        return body()
+    }
+
+    private var webSocketTask: (any RoomWebSocketTask)? {
+        get { withConnectionLock { _webSocketTask } }
+        set { withConnectionLock { _webSocketTask = newValue } }
+    }
+    private var isConnected: Bool {
+        get { withConnectionLock { _isConnected } }
+        set { withConnectionLock { _isConnected = newValue } }
+    }
+    private var isAuthenticated: Bool {
+        get { withConnectionLock { _isAuthenticated } }
+        set { withConnectionLock { _isAuthenticated = newValue } }
+    }
+    private var isJoined: Bool {
+        get { withConnectionLock { _isJoined } }
+        set { withConnectionLock { _isJoined = newValue } }
+    }
+    private var intentionallyLeft: Bool {
+        get { withConnectionLock { _intentionallyLeft } }
+        set { withConnectionLock { _intentionallyLeft = newValue } }
+    }
+    private var reconnectAttempts: Int {
+        get { withConnectionLock { _reconnectAttempts } }
+        set { withConnectionLock { _reconnectAttempts = newValue } }
+    }
+    private var waitingForAuth: Bool {
+        get { withConnectionLock { _waitingForAuth } }
+        set { withConnectionLock { _waitingForAuth = newValue } }
+    }
+    private var joinRequested: Bool {
+        get { withConnectionLock { _joinRequested } }
+        set { withConnectionLock { _joinRequested = newValue } }
+    }
+    private var currentUserId: String? {
+        get { withConnectionLock { _currentUserId } }
+        set { withConnectionLock { _currentUserId = newValue } }
+    }
+    private var currentConnectionId: String? {
+        get { withConnectionLock { _currentConnectionId } }
+        set { withConnectionLock { _currentConnectionId = newValue } }
+    }
+    private var reconnectInfo: [String: Any]? {
+        get { withConnectionLock { _reconnectInfo } }
+        set { withConnectionLock { _reconnectInfo = newValue } }
+    }
 
     // MARK: - Thread safety
 
@@ -629,13 +689,16 @@ public final class RoomClient: @unchecked Sendable {
         webSocketTask = socket
         socket.resume()
         isConnected = true
-        reconnectAttempts = 0
 
         do {
             try await withConnectionTimeout {
                 try await self.authenticate()
             }
             waitingForAuth = false
+            // Reset the backoff only AFTER a successful open + authentication (matches
+            // the JS reference, which resets in ws.onopen). Resetting at entry would let
+            // a server that accepts-then-drops reconnect forever at the base delay.
+            reconnectAttempts = 0
         } catch {
             handleAuthenticationFailure(error)
             throw error
@@ -738,19 +801,53 @@ public final class RoomClient: @unchecked Sendable {
                    currentConnectionState != "kicked" {
                     handleKicked()
                 }
-                if !intentionallyLeft && !waitingForAuth && options.autoReconnect && reconnectAttempts < options.maxReconnectAttempts {
-                    reconnectInfo = ["attempt": reconnectAttempts + 1]
-                    setConnectionState("reconnecting")
-                    let baseDelay = min(options.reconnectBaseDelay * pow(2.0, Double(reconnectAttempts)), 30.0)
-                    let jitter = Double.random(in: 0...(baseDelay * 0.25))
-                    let delay = baseDelay + jitter
-                    reconnectAttempts += 1
-                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                    try? await establishConnection()
-                } else if !intentionallyLeft && currentConnectionState != "kicked" && currentConnectionState != "auth_lost" {
+                await scheduleReconnect()
+                return
+            }
+        }
+    }
+
+    /// Reconnect loop honoring maxReconnectAttempts with exponential backoff + jitter,
+    /// matching the JS reference's scheduleReconnect. Each failed attempt schedules the
+    /// next one with increased backoff until the attempt budget is exhausted, then a
+    /// terminal "disconnected" state is surfaced. A successful establishConnection()
+    /// starts a fresh receive loop (which will call back here on the next drop) and
+    /// resets the backoff, so we simply return on success.
+    private func scheduleReconnect() async {
+        while true {
+            let attempts = reconnectAttempts
+            let shouldReconnect =
+                !intentionallyLeft
+                && !waitingForAuth
+                && options.autoReconnect
+                && attempts < options.maxReconnectAttempts
+
+            guard shouldReconnect else {
+                if !intentionallyLeft
+                    && currentConnectionState != "kicked"
+                    && currentConnectionState != "auth_lost" {
                     setConnectionState("disconnected")
                 }
                 return
+            }
+
+            reconnectInfo = ["attempt": attempts + 1]
+            setConnectionState("reconnecting")
+            let baseDelay = min(options.reconnectBaseDelay * pow(2.0, Double(attempts)), 30.0)
+            let jitter = Double.random(in: 0...(baseDelay * 0.25))
+            let delay = baseDelay + jitter
+            reconnectAttempts = attempts + 1
+
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            if intentionallyLeft { return }
+
+            do {
+                try await establishConnection()
+                return
+            } catch {
+                // Attempt failed — loop to schedule the next one with larger backoff
+                // until maxReconnectAttempts is exhausted.
+                continue
             }
         }
     }
@@ -813,18 +910,25 @@ public final class RoomClient: @unchecked Sendable {
             _playerVersion = json["playerVersion"] as? Int ?? 0
         }
 
-        let sharedState = queue.sync { _sharedState }
-        let playerState = queue.sync { _playerState }
         reconnectInfo = nil
         setConnectionState("connected")
 
-        // Notify handlers with full state as changes (same as JS SDK)
-        queue.sync {
-            for handler in sharedStateHandlers.values { handler(sharedState, sharedState) }
-            for handler in playerStateHandlers.values { handler(playerState, playerState) }
-            if let pendingReconnect {
-                for handler in reconnectHandlers.values { handler(pendingReconnect) }
-            }
+        // Snapshot state + handlers under the lock, then invoke callbacks OUTSIDE the
+        // queue so a handler that re-enters the SDK (e.g. members.list()/unsubscribe())
+        // does not deadlock on the queue.
+        let (sharedState, playerState, sharedHandlers, playerHandlers, reconnectHandlerList) = queue.sync {
+            (
+                _sharedState,
+                _playerState,
+                Array(sharedStateHandlers.values),
+                Array(playerStateHandlers.values),
+                Array(reconnectHandlers.values)
+            )
+        }
+        for handler in sharedHandlers { handler(sharedState, sharedState) }
+        for handler in playerHandlers { handler(playerState, playerState) }
+        if let pendingReconnect {
+            for handler in reconnectHandlerList { handler(pendingReconnect) }
         }
     }
 
@@ -838,10 +942,8 @@ public final class RoomClient: @unchecked Sendable {
             }
         }
 
-        let state = queue.sync { _sharedState }
-        queue.sync {
-            for handler in sharedStateHandlers.values { handler(state, delta) }
-        }
+        let (state, handlers) = queue.sync { (_sharedState, Array(sharedStateHandlers.values)) }
+        for handler in handlers { handler(state, delta) }
     }
 
     private func handlePlayerDelta(_ json: [String: Any]) {
@@ -854,10 +956,8 @@ public final class RoomClient: @unchecked Sendable {
             }
         }
 
-        let state = queue.sync { _playerState }
-        queue.sync {
-            for handler in playerStateHandlers.values { handler(state, delta) }
-        }
+        let (state, handlers) = queue.sync { (_playerState, Array(playerStateHandlers.values)) }
+        for handler in handlers { handler(state, delta) }
     }
 
     private func handleActionResult(_ json: [String: Any]) {
@@ -885,14 +985,11 @@ public final class RoomClient: @unchecked Sendable {
         let messageType = json["messageType"] as? String ?? ""
         let data = json["data"]
 
-        queue.sync {
-            // Type-specific handlers
-            if let handlers = messageHandlers[messageType] {
-                for handler in handlers.values { handler(data) }
-            }
-            // All-message handlers
-            for handler in allMessageHandlers.values { handler(messageType, data) }
+        let (typedHandlers, anyHandlers) = queue.sync {
+            (Array((messageHandlers[messageType] ?? [:]).values), Array(allMessageHandlers.values))
         }
+        for handler in typedHandlers { handler(data) }
+        for handler in anyHandlers { handler(messageType, data) }
     }
 
     private func handleAuthAck(_ json: [String: Any]) {
@@ -902,7 +999,8 @@ public final class RoomClient: @unchecked Sendable {
     }
 
     private func handleKicked() {
-        queue.sync { for handler in kickedHandlers.values { handler() } }
+        let handlers = queue.sync { Array(kickedHandlers.values) }
+        for handler in handlers { handler() }
         // Don't auto-reconnect after being kicked
         intentionallyLeft = true
         joinRequested = false
@@ -912,37 +1010,41 @@ public final class RoomClient: @unchecked Sendable {
     private func handleError(_ json: [String: Any]) {
         let code = json["code"] as? String ?? ""
         let message = json["message"] as? String ?? ""
-        queue.sync { for handler in errorHandlers.values { handler(code, message) } }
+        let handlers = queue.sync { Array(errorHandlers.values) }
+        for handler in handlers { handler(code, message) }
     }
 
     private func handleMembersSync(_ json: [String: Any]) {
         let members = (json["members"] as? [[String: Any]] ?? []).map(cloneRecord)
-        queue.sync(flags: .barrier) {
+        let handlers = queue.sync(flags: .barrier) { () -> [([[String: Any]]) -> Void] in
             _members = members
-            for handler in membersSyncHandlers.values { handler(members) }
+            return Array(membersSyncHandlers.values)
         }
+        for handler in handlers { handler(members) }
     }
 
     private func handleMemberJoin(_ json: [String: Any]) {
         guard let member = json["member"] as? [String: Any] else { return }
         let memberCopy = cloneRecord(member)
-        queue.sync(flags: .barrier) {
+        let handlers = queue.sync(flags: .barrier) { () -> [([String: Any]) -> Void] in
             upsertMember(memberCopy)
-            for handler in memberJoinHandlers.values { handler(memberCopy) }
+            return Array(memberJoinHandlers.values)
         }
+        for handler in handlers { handler(memberCopy) }
     }
 
     private func handleMemberLeave(_ json: [String: Any]) {
         guard let member = json["member"] as? [String: Any] else { return }
         let memberCopy = cloneRecord(member)
         let reason = json["reason"] as? String ?? ""
-        queue.sync(flags: .barrier) {
+        let handlers = queue.sync(flags: .barrier) { () -> [([String: Any], String) -> Void] in
             let memberId = memberCopy["memberId"] as? String ?? memberCopy["userId"] as? String
             if let memberId {
                 _members.removeAll { ($0["memberId"] as? String ?? $0["userId"] as? String) == memberId }
             }
-            for handler in memberLeaveHandlers.values { handler(memberCopy, reason) }
+            return Array(memberLeaveHandlers.values)
         }
+        for handler in handlers { handler(memberCopy, reason) }
     }
 
     private func handleMemberState(_ json: [String: Any]) {
@@ -951,22 +1053,22 @@ public final class RoomClient: @unchecked Sendable {
         if let requestId = json["requestId"] as? String {
             resolvePendingVoid(\.pendingMemberStateRequests, requestId: requestId)
         }
-        queue.sync(flags: .barrier) {
+        let handlers = queue.sync(flags: .barrier) { () -> [([String: Any], [String: Any]) -> Void] in
             if !member.isEmpty { upsertMember(member) }
-            for handler in memberStateHandlers.values { handler(member, state) }
+            return Array(memberStateHandlers.values)
         }
+        for handler in handlers { handler(member, state) }
     }
 
     private func handleSignalFrame(_ json: [String: Any]) {
         let event = json["event"] as? String ?? ""
         let payload = json["payload"]
         let meta = cloneRecord(json["meta"] as? [String: Any] ?? [:])
-        queue.sync {
-            if let handlers = signalHandlers[event] {
-                for handler in handlers.values { handler(payload, meta) }
-            }
-            for handler in anySignalHandlers.values { handler(event, payload, meta) }
+        let (eventHandlers, anyHandlers) = queue.sync {
+            (Array((signalHandlers[event] ?? [:]).values), Array(anySignalHandlers.values))
         }
+        for handler in eventHandlers { handler(payload, meta) }
+        for handler in anyHandlers { handler(event, payload, meta) }
     }
 
     // MARK: - Private: Helpers
@@ -1059,9 +1161,8 @@ public final class RoomClient: @unchecked Sendable {
     private func setConnectionState(_ nextState: String) {
         guard currentConnectionState != nextState else { return }
         currentConnectionState = nextState
-        queue.sync {
-            for handler in connectionStateHandlers.values { handler(nextState) }
-        }
+        let handlers = queue.sync { Array(connectionStateHandlers.values) }
+        for handler in handlers { handler(nextState) }
     }
 
     private func sendRaw(_ msg: [String: Any]) async throws {

@@ -619,7 +619,7 @@ describe('validateScopedKey', () => {
 // ─── buildConstraintCtx ───
 
 describe('buildConstraintCtx', () => {
-  it('getTrustedClientIp prefers cf-connecting-ip even when trustSelfHostedProxy is enabled', () => {
+  it('ignores cf-connecting-ip when trustSelfHostedProxy is enabled (it is spoofable off-Cloudflare)', () => {
     const req = {
       header: (name: string) => {
         if (name === 'cf-connecting-ip') return '1.1.1.1';
@@ -627,7 +627,20 @@ describe('buildConstraintCtx', () => {
         return undefined;
       },
     };
-    expect(getTrustedClientIp({ EDGEBASE_CONFIG: JSON.stringify({ trustSelfHostedProxy: true }) }, req)).toBe('1.1.1.1');
+    // With a self-hosted proxy declared, the proxy's X-Forwarded-For is
+    // authoritative and a client-forged cf-connecting-ip must not win.
+    expect(getTrustedClientIp({ EDGEBASE_CONFIG: JSON.stringify({ trustSelfHostedProxy: true }) }, req)).toBe('10.0.0.1');
+  });
+
+  it('prefers cf-connecting-ip on the Cloudflare edge default (no self-hosted proxy)', () => {
+    const req = {
+      header: (name: string) => {
+        if (name === 'cf-connecting-ip') return '1.1.1.1';
+        if (name === 'x-forwarded-for') return '10.0.0.1';
+        return undefined;
+      },
+    };
+    expect(getTrustedClientIp({ EDGEBASE_CONFIG: '{}' }, req)).toBe('1.1.1.1');
   });
 
   it('sets env from ENVIRONMENT', () => {

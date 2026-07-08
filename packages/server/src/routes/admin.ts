@@ -74,7 +74,8 @@ import { resolveAuthDb, type AuthDb } from '../lib/auth-db-adapter.js';
 import { getPublicProfileWithCache } from './users.js';
 import { createSignedToken, parseDuration } from './storage.js';
 import { getDevicesForUser, getPushLogs } from '../lib/push-token.js';
-import { RATE_LIMIT_DEFAULTS } from '../middleware/rate-limit.js';
+import { RATE_LIMIT_DEFAULTS, counter, getLimit } from '../middleware/rate-limit.js';
+import { getTrustedClientIp } from '../lib/client-ip.js';
 import {
   createManagedAdminUser,
   deleteManagedAdminUser,
@@ -465,6 +466,11 @@ adminRoute.openapi(adminSetup, async (c) => {
   }, 201);
 });
 
+// A syntactically valid PBKDF2 hash used only to spend the same verification
+// cost when an admin email is not found, equalizing login response timing.
+const ADMIN_LOGIN_DUMMY_HASH =
+  'pbkdf2:sha256:100000:BwcHBwcHBwcHBwcHBwcHBw==:CwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCws=';
+
 // POST /admin/api/auth/login — admin login
 const adminLogin = createRoute({
   operationId: 'adminLogin',
@@ -498,11 +504,27 @@ adminRoute.openapi(adminLogin, async (c) => {
   body.email = body.email.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) throw new EdgeBaseError(400, 'Invalid email format.', undefined, 'invalid-email');
 
-  const admin = await getAdminByEmail(getAuthDb(c), body.email);
-  if (!admin) throw new EdgeBaseError(401, 'Invalid credentials.', undefined, 'invalid-credentials');
+  // Rate-limit admin login. The admin surface is mapped to the unlimited
+  // `global` group by the rate-limit middleware, so without this the most
+  // sensitive credential in the system could be brute-forced unthrottled.
+  // Limit per source IP and per target email using the strict signin bucket.
+  const config = c.env ? parseConfig(c.env) : undefined;
+  const { requests, windowSec } = getLimit(config, 'authSignin');
+  const ip = getTrustedClientIp(c.env, c.req) ?? 'unknown';
+  for (const key of [`admin-login-ip:${ip}`, `admin-login-email:${body.email}`]) {
+    if (!counter.check(key, requests, windowSec)) {
+      throw new EdgeBaseError(429, 'Too many login attempts. Try again later.', undefined, 'rate-limited');
+    }
+  }
 
-  const valid = await verifyPassword(body.password, admin.passwordHash);
-  if (!valid) throw new EdgeBaseError(401, 'Invalid credentials.', undefined, 'invalid-credentials');
+  const admin = await getAdminByEmail(getAuthDb(c), body.email);
+  // Always run a password verification — against a dummy hash when the admin
+  // does not exist — so the response time does not reveal whether an email is
+  // registered (login email enumeration).
+  const valid = admin
+    ? await verifyPassword(body.password, admin.passwordHash)
+    : (await verifyPassword(body.password, ADMIN_LOGIN_DUMMY_HASH), false);
+  if (!admin || !valid) throw new EdgeBaseError(401, 'Invalid credentials.', undefined, 'invalid-credentials');
 
   const adminSecret = c.env.JWT_ADMIN_SECRET;
   if (!adminSecret) throw new EdgeBaseError(500, 'JWT_ADMIN_SECRET not configured.', undefined, 'internal-error');
@@ -2013,8 +2035,12 @@ api.openapi(adminExecuteSql, async (c) => {
     throw new EdgeBaseError(400, 'namespace and sql are required.', undefined, 'validation-failed');
   }
 
-  // ── Block destructive DDL statements in admin SQL Console ──
-  const sqlUpper = body.sql.trim().replace(/\s+/g, ' ').toUpperCase();
+  // ── Block obviously destructive statements in the admin SQL Console ──
+  // Best-effort foot-gun guard, NOT a security boundary: this endpoint is
+  // admin-authenticated and runs arbitrary SQL, so a determined admin can always
+  // run destructive queries. The guard exists to catch *accidents*. Comments are
+  // stripped and each `;`-separated statement is checked so a leading comment or
+  // a benign leading statement can't smuggle a blocked one past the `^` anchors.
   const destructivePatterns = [
     /^DROP\s+TABLE/,
     /^DROP\s+INDEX/,
@@ -2022,12 +2048,20 @@ api.openapi(adminExecuteSql, async (c) => {
     /^DROP\s+VIEW/,
     /^ALTER\s+TABLE\s+\S+\s+DROP/,
     /^TRUNCATE/,
-    /^DELETE\s+FROM\s+\S+\s*$/,       // DELETE without WHERE clause
-    /^DELETE\s+FROM\s+\S+\s*;?\s*$/,  // DELETE without WHERE (with optional semicolon)
+    /^DELETE\s+FROM\s+\S+\s*$/, // DELETE without WHERE clause
   ];
-  for (const pat of destructivePatterns) {
-    if (pat.test(sqlUpper)) {
-      throw new EdgeBaseError(400, `Destructive SQL blocked: "${body.sql.trim().split(/\s+/).slice(0, 3).join(' ')}..." is not allowed in the admin SQL Console. Use the Schema editor or CLI for DDL operations.`, undefined, 'forbidden');
+  const withoutComments = body.sql
+    .replace(/\/\*[\s\S]*?\*\//g, ' ') // block comments
+    .replace(/--[^\n]*/g, ' '); // line comments
+  const statements = withoutComments
+    .split(';')
+    .map((s) => s.trim().replace(/\s+/g, ' ').toUpperCase())
+    .filter((s) => s.length > 0);
+  for (const stmt of statements) {
+    for (const pat of destructivePatterns) {
+      if (pat.test(stmt)) {
+        throw new EdgeBaseError(400, `Destructive SQL blocked: "${stmt.split(' ').slice(0, 3).join(' ')}..." is not allowed in the admin SQL Console. Use the Schema editor or CLI for DDL operations.`, undefined, 'forbidden');
+      }
     }
   }
 
@@ -2691,7 +2725,16 @@ api.openapi(adminSendPasswordReset, async (c) => {
     expiresAt,
   });
 
-  return c.json({ ok: true, token, message: 'Password reset token created.' });
+  // Do not echo the raw reset token in release mode — returning it puts a live
+  // 1-hour credential into access logs / request history. Only expose it in
+  // local dev/test (matching the client-facing verify-email/password-reset
+  // routes), where there may be no email provider configured.
+  const release = parseConfig(c.env).release === true;
+  return c.json(
+    release
+      ? { ok: true, message: 'Password reset token created.' }
+      : { ok: true, token, message: 'Password reset token created.' },
+  );
 });
 
 // ─── Storage Upload (Admin JWT) ───

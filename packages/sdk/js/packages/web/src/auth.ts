@@ -281,15 +281,36 @@ export class AuthClient {
     this.tokenManager.clearTokens();
   }
 
-  /** Refresh the current session using the stored refresh token. */
+  /**
+   * Refresh the current session using the stored refresh token.
+   *
+   * Routed through TokenManager's leader-elected/deduped refresh so it cannot
+   * double-spend the rotating refresh token concurrently with a background
+   * refresh (or another tab): concurrent callers join the single in-flight
+   * refresh instead of each POSTing /auth/refresh with the same token.
+   */
   async refreshSession(): Promise<AuthResult> {
     const refreshToken = this.tokenManager.getRefreshToken();
     if (!refreshToken) {
       throw new Error('No refresh token available.');
     }
-    const result = await this.corePublic.authRefresh({ refreshToken }) as AuthResult;
-    this.syncAuthResult(result);
-    return result;
+    let serverResult: AuthResult | null = null;
+    const pair = await this.tokenManager.forceRefresh(async (token) => {
+      serverResult = await this.corePublic.authRefresh({ refreshToken: token }) as AuthResult;
+      return { accessToken: serverResult.accessToken, refreshToken: serverResult.refreshToken };
+    });
+    // If THIS call performed the refresh we have the full server payload (incl.
+    // the user object); sync + return it. Otherwise a concurrent refresh
+    // produced the tokens — return them with the cached user.
+    if (serverResult) {
+      const user = this.syncAuthResult(serverResult);
+      return { user: user as TokenUser, accessToken: pair.accessToken, refreshToken: pair.refreshToken };
+    }
+    const user = this.tokenManager.getCurrentUser();
+    if (!user) {
+      throw new EdgeBaseError(401, 'Not authenticated after refresh.');
+    }
+    return { user, accessToken: pair.accessToken, refreshToken: pair.refreshToken };
   }
 
   /**

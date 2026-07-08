@@ -67,7 +67,10 @@
 		{ value: 'health', label: 'Health' },
 	];
 
+	let latestLogRequest = 0;
+
 	async function fetchLogs(append = false) {
+		const requestId = ++latestLogRequest;
 		if (append) {
 			loadingMore = true;
 		} else {
@@ -95,6 +98,10 @@
 
 			const res = await api.fetch<{ logs: LogEntry[]; cursor: string | null }>(url);
 
+			// A newer fetch (e.g. a live-refresh tick or a new search) has superseded
+			// this one — discard the stale response so it can't overwrite fresher data.
+			if (requestId !== latestLogRequest) return;
+
 			if (append) {
 				logs = [...logs, ...res.logs];
 			} else {
@@ -109,10 +116,13 @@
 				return l === 'error' || l === 'fatal' || l === 'critical';
 			}).length;
 		} catch (err) {
+			if (requestId !== latestLogRequest) return;
 			toastError(describeActionError(err, 'Failed to load logs.'));
 		} finally {
-			loading = false;
-			loadingMore = false;
+			if (requestId === latestLogRequest) {
+				loading = false;
+				loadingMore = false;
+			}
 		}
 	}
 

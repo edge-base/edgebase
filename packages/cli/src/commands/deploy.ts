@@ -191,6 +191,22 @@ export function validateConfig(
     );
   }
 
+  // ─── Check 0b: Wildcard CORS in release mode ───
+  // A wildcard origin lets any site call the API; unsafe for authenticated
+  // production apps. Warn (don't hard-fail) when deploying a release build.
+  if (config.release === true) {
+    const cors = config.cors as { origin?: unknown } | undefined;
+    const origin = cors?.origin;
+    const hasWildcard = origin === '*'
+      || (Array.isArray(origin) && origin.some((entry) => entry === '*'));
+    if (hasWildcard) {
+      warnings.push(
+        "cors.origin is '*' with release: true — any website can call your API. " +
+          'Set cors.origin to your production frontend origin(s) before deploying to production.',
+      );
+    }
+  }
+
   // ─── Check 1: Inline Service Key warning ───
   // Production deploys should use secretSource: 'dashboard' (Workers Secrets).
   // Inline secrets risk leaking via git commits.
@@ -482,6 +498,101 @@ function listHyperdriveConfigs(projectDir: string): Array<{ id: string; name: st
 
 function isHyperdriveAlreadyExistsError(message: string): boolean {
   return /already exists\s*\[code:\s*2017\]/i.test(message);
+}
+
+interface HyperdriveOrigin {
+  scheme: string;
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
+}
+
+/**
+ * Parse a Postgres connection string into Hyperdrive origin fields so the
+ * password can be sent in a request body instead of on the command line.
+ */
+function parsePostgresConnectionString(connectionString: string): HyperdriveOrigin | null {
+  try {
+    const url = new URL(connectionString);
+    const scheme = url.protocol.replace(/:$/, '');
+    if (scheme !== 'postgres' && scheme !== 'postgresql') return null;
+    const database = decodeURIComponent(url.pathname.replace(/^\//, ''));
+    if (!url.hostname || !database) return null;
+    return {
+      scheme: 'postgres',
+      host: url.hostname,
+      port: url.port ? Number(url.port) : 5432,
+      database,
+      user: decodeURIComponent(url.username),
+      password: decodeURIComponent(url.password),
+    };
+  } catch {
+    return null;
+  }
+}
+
+type HyperdriveCreateResult =
+  | { status: 'created'; id: string }
+  | { status: 'exists'; message: string }
+  | { status: 'error'; message: string };
+
+/**
+ * Create a Hyperdrive config via the Cloudflare REST API. The connection string
+ * (which contains the database password) is sent in the JSON request body, not
+ * as a `wrangler hyperdrive create --connection-string=…` CLI argument that
+ * would be visible to other users via `ps`/`/proc`.
+ */
+async function createHyperdriveConfigViaApi(
+  hdName: string,
+  connectionString: string,
+  accountId: string,
+): Promise<HyperdriveCreateResult> {
+  const origin = parsePostgresConnectionString(connectionString);
+  if (!origin) {
+    return { status: 'error', message: 'Could not parse the Postgres connection string (expected postgres://…).' };
+  }
+
+  let apiToken: string;
+  try {
+    apiToken = resolveApiToken().token;
+  } catch (err) {
+    return { status: 'error', message: err instanceof Error ? err.message : String(err) };
+  }
+
+  try {
+    const resp = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/hyperdrive/configs`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: hdName, origin }),
+      },
+    );
+    const json = (await resp.json()) as {
+      success?: boolean;
+      result?: { id?: string };
+      errors?: Array<{ code?: number; message?: string }>;
+    };
+
+    if (json.success && json.result?.id) {
+      return { status: 'created', id: json.result.id };
+    }
+
+    const errors = json.errors ?? [];
+    const message = errors.map((e) => e.message).filter(Boolean).join('; ')
+      || `Hyperdrive API returned HTTP ${resp.status}`;
+    if (errors.some((e) => e.code === 2017) || isHyperdriveAlreadyExistsError(message)) {
+      return { status: 'exists', message };
+    }
+    return { status: 'error', message };
+  } catch (err) {
+    return { status: 'error', message: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 function isR2BucketAlreadyExistsError(message: string): boolean {
@@ -1060,10 +1171,11 @@ function runProjectPostScaffoldHook(projectDir: string): void {
  * Binding convention: DB_POSTGRES_{NAMESPACE_UPPER}
  * Hyperdrive name: edgebase-db-{namespace}
  */
-function provisionProviderHyperdrives(
+async function provisionProviderHyperdrives(
   databases: Record<string, DeployDbBlockMeta>,
   projectDir: string,
-): ProvisionedBinding[] {
+  accountId: string,
+): Promise<ProvisionedBinding[]> {
   const bindings: ProvisionedBinding[] = [];
 
   // Filter to PostgreSQL-backed DB blocks
@@ -1116,65 +1228,54 @@ function provisionProviderHyperdrives(
       continue;
     }
 
-    // Create Hyperdrive config
-    try {
-      const output = execFileSync(
-        wranglerCommand(),
-        wranglerArgs(['wrangler', 'hyperdrive', 'create', hdName, `--connection-string=${connectionString}`]),
-        { cwd: projectDir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
-      );
+    // Create Hyperdrive config (connection string sent in the API request
+    // body, never on argv).
+    const result = await createHyperdriveConfigViaApi(hdName, connectionString, accountId);
 
-      // Parse ID from output
-      const idMatch = output.match(/id\s*=\s*"?([a-f0-9-]+)"?/i);
-      if (idMatch) {
+    if (result.status === 'created') {
+      bindings.push({
+        type: 'hyperdrive',
+        name: namespace,
+        binding: bindingName,
+        id: result.id,
+        managed: true,
+        source: 'created',
+      });
+      console.log(
+        chalk.green('✓'),
+        `Hyperdrive '${namespace}' (provider): created → ${result.id.slice(0, 8)}…`,
+      );
+      continue;
+    }
+
+    if (result.status === 'exists') {
+      const existingConfig = listHyperdriveConfigs(projectDir).find((config) => config.name === hdName);
+      if (existingConfig) {
+        console.log(
+          chalk.dim(
+            `  Hyperdrive '${namespace}' (provider): already exists → ${existingConfig.id.slice(0, 8)}…`,
+          ),
+        );
         bindings.push({
           type: 'hyperdrive',
           name: namespace,
           binding: bindingName,
-          id: idMatch[1],
+          id: existingConfig.id,
           managed: true,
-          source: 'created',
+          source: 'existing',
         });
-        console.log(
-          chalk.green('✓'),
-          `Hyperdrive '${namespace}' (provider): created → ${idMatch[1].slice(0, 8)}…`,
-        );
-      } else {
-        console.log(
-          chalk.yellow('⚠'),
-          `Hyperdrive '${namespace}' (provider): created but could not parse ID. Skipping managed binding registration.`,
-        );
+        existingConfigs = [...existingConfigs, existingConfig];
+        continue;
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (isHyperdriveAlreadyExistsError(msg)) {
-        const existingConfig = listHyperdriveConfigs(projectDir).find((config) => config.name === hdName);
-        if (existingConfig) {
-          console.log(
-            chalk.dim(
-              `  Hyperdrive '${namespace}' (provider): already exists → ${existingConfig.id.slice(0, 8)}…`,
-            ),
-          );
-          bindings.push({
-            type: 'hyperdrive',
-            name: namespace,
-            binding: bindingName,
-            id: existingConfig.id,
-            managed: true,
-            source: 'existing',
-          });
-          existingConfigs = [...existingConfigs, existingConfig];
-          continue;
-        }
-      }
-      console.log(
-        chalk.yellow('⚠'),
-        `Hyperdrive '${namespace}' (provider): provisioning failed — ${msg}`,
-      );
-      const hints = diagnoseProvisioningError('Hyperdrive', msg);
-      for (const hint of hints) {
-        console.log(chalk.dim(`    ${hint}`));
-      }
+    }
+
+    console.log(
+      chalk.yellow('⚠'),
+      `Hyperdrive '${namespace}' (provider): provisioning failed — ${result.message}`,
+    );
+    const hints = diagnoseProvisioningError('Hyperdrive', result.message);
+    for (const hint of hints) {
+      console.log(chalk.dim(`    ${hint}`));
     }
   }
 
@@ -1189,10 +1290,11 @@ function provisionProviderHyperdrives(
  * Hyperdrive name: edgebase-auth
  * Connection string: read from .env.release AUTH_POSTGRES_URL (or config.auth.connectionString)
  */
-function provisionAuthPostgresHyperdrive(
+async function provisionAuthPostgresHyperdrive(
   authConfig: { provider?: string; connectionString?: string },
   projectDir: string,
-): ProvisionedBinding[] {
+  accountId: string,
+): Promise<ProvisionedBinding[]> {
   const bindings: ProvisionedBinding[] = [];
   const provider = authConfig.provider;
 
@@ -1238,59 +1340,48 @@ function provisionAuthPostgresHyperdrive(
     return bindings;
   }
 
-  // Create Hyperdrive config
-  try {
-    const output = execFileSync(
-      wranglerCommand(),
-      wranglerArgs(['wrangler', 'hyperdrive', 'create', hdName, `--connection-string=${connectionString}`]),
-      { cwd: projectDir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
-    );
+  // Create Hyperdrive config (connection string sent in the API request body,
+  // never on argv).
+  const result = await createHyperdriveConfigViaApi(hdName, connectionString, accountId);
 
-    // Parse ID from output
-    const idMatch = output.match(/id\s*=\s*"?([a-f0-9-]+)"?/i);
-    if (idMatch) {
+  if (result.status === 'created') {
+    bindings.push({
+      type: 'hyperdrive',
+      name: 'auth',
+      binding: bindingName,
+      id: result.id,
+      managed: true,
+      source: 'created',
+    });
+    console.log(
+      chalk.green('✓'),
+      `Hyperdrive 'auth' (${provider}): created → ${result.id.slice(0, 8)}…`,
+    );
+    return bindings;
+  }
+
+  if (result.status === 'exists') {
+    const existingConfig = listHyperdriveConfigs(projectDir).find((config) => config.name === hdName);
+    if (existingConfig) {
+      console.log(
+        chalk.dim(`  Hyperdrive 'auth' (${provider}): already exists → ${existingConfig.id.slice(0, 8)}…`),
+      );
       bindings.push({
         type: 'hyperdrive',
         name: 'auth',
         binding: bindingName,
-        id: idMatch[1],
+        id: existingConfig.id,
         managed: true,
-        source: 'created',
+        source: 'existing',
       });
-      console.log(
-        chalk.green('✓'),
-        `Hyperdrive 'auth' (${provider}): created → ${idMatch[1].slice(0, 8)}…`,
-      );
-    } else {
-      console.log(
-        chalk.yellow('⚠'),
-        `Hyperdrive 'auth' (${provider}): created but could not parse ID. Skipping managed binding registration.`,
-      );
+      return bindings;
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (isHyperdriveAlreadyExistsError(msg)) {
-      const existingConfig = listHyperdriveConfigs(projectDir).find((config) => config.name === hdName);
-      if (existingConfig) {
-        console.log(
-          chalk.dim(`  Hyperdrive 'auth' (${provider}): already exists → ${existingConfig.id.slice(0, 8)}…`),
-        );
-        bindings.push({
-          type: 'hyperdrive',
-          name: 'auth',
-          binding: bindingName,
-          id: existingConfig.id,
-          managed: true,
-          source: 'existing',
-        });
-        return bindings;
-      }
-    }
-    console.log(chalk.yellow('⚠'), `Hyperdrive 'auth' (${provider}): provisioning failed — ${msg}`);
-    const hints = diagnoseProvisioningError('Hyperdrive', msg);
-    for (const hint of hints) {
-      console.log(chalk.dim(`    ${hint}`));
-    }
+  }
+
+  console.log(chalk.yellow('⚠'), `Hyperdrive 'auth' (${provider}): provisioning failed — ${result.message}`);
+  const hints = diagnoseProvisioningError('Hyperdrive', result.message);
+  for (const hint of hints) {
+    console.log(chalk.dim(`    ${hint}`));
   }
 
   return bindings;
@@ -1577,6 +1668,7 @@ export const deployCommand = new Command('deploy')
     // TODO(future): Additional validations
     // - references validation against defined tables
     // - origin: '*' + credentials: true conflict (M10)
+    // Note: wildcard CORS in release mode is warned about in validateConfig().
 
     if (options.dryRun) {
       const dryRunBundle = createAppBundle(projectDir, {
@@ -1707,10 +1799,10 @@ export const deployCommand = new Command('deploy')
         provisionedBindings.push(...provisionVectorizeIndexes(vecCfg, projectDir));
       }
       if (dbsCfg && hasProviderDbs) {
-        provisionedBindings.push(...provisionProviderHyperdrives(dbsCfg, projectDir));
+        provisionedBindings.push(...await provisionProviderHyperdrives(dbsCfg, projectDir, cfAuth.accountId));
       }
       if (authCfg && hasAuthPostgres) {
-        provisionedBindings.push(...provisionAuthPostgresHyperdrive(authCfg, projectDir));
+        provisionedBindings.push(...await provisionAuthPostgresHyperdrive(authCfg, projectDir, cfAuth.accountId));
       }
     } else {
       provisionedBindings.push(...provisionInternalD1Databases(projectDir, { previousManifest }));
@@ -1821,6 +1913,34 @@ export const deployCommand = new Command('deploy')
       }
     }
 
+    // Opt-in (default OFF) for uploading a Cloudflare API token as a Worker
+    // secret to power dashboard self-destruct ("Delete App").
+    const selfDestructCfg = configJson?.selfDestruct as { enabled?: boolean } | undefined;
+    const storeCfCredentials = selfDestructCfg?.enabled === true
+      || process.env.EDGEBASE_STORE_CF_TOKEN === '1';
+
+    // ─── Pre-deploy secret sync (re-deploys only) ───
+    // wrangler secret put/bulk require an already-deployed Worker, so this is
+    // only possible when the Worker already exists. Doing it BEFORE `wrangler
+    // deploy` means a re-deploy never goes live with missing/rotated auth
+    // secrets, and a secret-sync failure aborts before the new version is
+    // published (the previous live version stays intact). First-ever deploys
+    // must set secrets after the Worker exists (handled post-deploy).
+    const workerAlreadyDeployed = !!previousManifest?.worker;
+    if (workerAlreadyDeployed) {
+      try {
+        syncEnvSecrets(projectDir, { failOnError: true });
+        ensureManagedWorkerSecrets(projectDir, cfAuth.accountId, { failOnError: true, storeCfCredentials });
+      } catch (err) {
+        raiseCliError({
+          code: 'deploy_secret_presync_failed',
+          message: `Secret synchronization failed before deploy: ${(err as Error).message}`,
+          hint: 'Aborted before publishing — the previous live version is unchanged. '
+            + 'Fix Cloudflare auth/secrets and re-run `npx edgebase deploy`.',
+        });
+      }
+    }
+
     // ─── Deploy ───
     const deployArgs = ['wrangler', 'deploy'];
     if (tempWranglerPath) {
@@ -1927,14 +2047,19 @@ export const deployCommand = new Command('deploy')
       console.log(chalk.dim(`  Saved deploy manifest: ${deployManifestPath}`));
     }
 
+    // Post-deploy secret sync. Required for first deploys (secrets can only be
+    // set once the Worker exists); a no-op for re-deploys where secrets were
+    // already synced pre-deploy above.
     try {
       syncEnvSecrets(projectDir, { failOnError: true });
-      ensureManagedWorkerSecrets(projectDir, cfAuth.accountId, { failOnError: true });
+      ensureManagedWorkerSecrets(projectDir, cfAuth.accountId, { failOnError: true, storeCfCredentials });
     } catch (err) {
       raiseCliError({
         code: 'deploy_secret_sync_failed',
         message: `Deploy completed but secret synchronization failed: ${(err as Error).message}`,
-        hint: 'The Worker was deployed, but required runtime secrets were not fully applied.',
+        hint: 'The Worker was deployed but required runtime secrets were not fully applied. '
+          + `Re-run \`${wranglerHint(['wrangler', 'secret', 'put', 'SERVICE_KEY'])}\` (and JWT_USER_SECRET / JWT_ADMIN_SECRET), `
+          + 'or re-run `npx edgebase deploy` to complete secret setup before serving production traffic.',
       });
     }
 
@@ -2381,7 +2506,7 @@ async function promptToSyncAuthReleaseEnv(projectDir: string): Promise<void> {
 function ensureManagedWorkerSecrets(
   projectDir: string,
   accountId: string,
-  options?: { failOnError?: boolean },
+  options?: { failOnError?: boolean; storeCfCredentials?: boolean },
 ): void {
   try {
     const secretNames = listWranglerSecretNames(projectDir);
@@ -2423,27 +2548,36 @@ function ensureManagedWorkerSecrets(
       });
     }
 
-    // Store CF credentials for self-destruct capability (dashboard "Delete App")
-    try {
-      const { token: apiToken } = resolveApiToken();
-      if (!secretNames.has('CF_API_TOKEN')) {
-        generatedSecrets.push({
-          name: 'CF_API_TOKEN',
-          value: apiToken,
-          spinnerLabel: 'Storing CF API token for self-management...',
-        });
-      }
-      if (!secretNames.has('CF_ACCOUNT_ID')) {
-        generatedSecrets.push({
-          name: 'CF_ACCOUNT_ID',
-          value: accountId,
-          spinnerLabel: 'Storing CF account ID...',
-        });
-      }
-    } catch {
-      // Non-fatal: self-destruct won't be available from dashboard
-      if (!isQuiet()) {
-        console.log(chalk.dim('  ⚠ Could not resolve CF API token — dashboard "Delete App" will be unavailable'));
+    // Store CF credentials for self-destruct capability (dashboard "Delete App").
+    // OFF by default: uploading a Cloudflare token as a Worker secret makes it
+    // readable at runtime and, previously, persisted it in plaintext locally.
+    // Only do this when explicitly opted in, and only with a user-supplied
+    // scoped token — never the broad wrangler OAuth token.
+    if (options?.storeCfCredentials) {
+      const explicitToken = process.env.EDGEBASE_SELF_DESTRUCT_CF_TOKEN
+        || process.env.CLOUDFLARE_API_TOKEN;
+      if (explicitToken) {
+        if (!isQuiet()) {
+          console.log(chalk.yellow('  ⚠ Self-management enabled: storing a Cloudflare API token as Worker secret CF_API_TOKEN.'));
+          console.log(chalk.dim('    The token is readable by the Worker at runtime. Use a token scoped to only this app\'s resources.'));
+        }
+        if (!secretNames.has('CF_API_TOKEN')) {
+          generatedSecrets.push({
+            name: 'CF_API_TOKEN',
+            value: explicitToken,
+            spinnerLabel: 'Storing scoped CF API token for self-management...',
+          });
+        }
+        if (!secretNames.has('CF_ACCOUNT_ID')) {
+          generatedSecrets.push({
+            name: 'CF_ACCOUNT_ID',
+            value: accountId,
+            spinnerLabel: 'Storing CF account ID...',
+          });
+        }
+      } else if (!isQuiet()) {
+        console.log(chalk.yellow('  ⚠ Self-management enabled but no explicit Cloudflare token provided.'));
+        console.log(chalk.dim('    Set EDGEBASE_SELF_DESTRUCT_CF_TOKEN (or CLOUDFLARE_API_TOKEN) to a scoped token to enable dashboard "Delete App".'));
       }
     }
 
@@ -2462,6 +2596,11 @@ function ensureManagedWorkerSecrets(
         console.log(chalk.dim('  Key: sk_' + '*'.repeat(12) + secret.value.slice(-4)));
       }
     }
+
+    // Never persist the Cloudflare API token in plaintext .edgebase/secrets.json.
+    // When self-management is enabled it lives only as a Worker secret; also
+    // strip any legacy plaintext copy left by older CLI versions.
+    delete existingSecrets['CF_API_TOKEN'];
 
     if (generatedSecrets.length > 0) {
       console.log();

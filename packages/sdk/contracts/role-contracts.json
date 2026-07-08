@@ -88,6 +88,19 @@
         { "sdk": "dart", "job": "sdk-dart-e2e", "mode": "native", "sources": ["packages/sdk/dart/packages/flutter/test/flutter_e2e_test.dart"] },
         { "sdk": "swift", "job": "sdk-swift-e2e", "mode": "native", "sources": ["packages/sdk/swift/packages/ios/Tests/IosE2ETests.swift"] }
       ]
+    },
+    "realtime": {
+      "description": "Realtime room contract: reconnect-under-outage behavior for the Room client",
+      "checkpoints": [
+        "room-join",
+        "room-reconnect-under-outage"
+      ],
+      "targets": [
+        { "sdk": "js", "job": "sdk-js-e2e", "mode": "native", "sources": ["packages/sdk/js/packages/web/test/unit/web.unit.test.ts"] },
+        { "sdk": "swift", "job": "sdk-swift-e2e", "mode": "native", "sources": ["packages/sdk/swift/packages/ios/Tests/IosUnitTests.swift"] },
+        { "sdk": "kotlin", "job": "sdk-kotlin-e2e", "mode": "native", "sources": ["packages/sdk/kotlin/client/src/jvmTest/kotlin/dev/edgebase/sdk/client/RoomClientJvmTest.kt"] },
+        { "sdk": "python", "job": "sdk-python-e2e", "mode": "native", "sources": ["packages/sdk/python/tests/test_sdk.py"] }
+      ]
     }
   }
 }

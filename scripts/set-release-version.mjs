@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getSourceVersion, isValidSemver, readJson, writeJson } from './release-version-utils.mjs';
+import { assertStableReleaseVersion, getSourceVersion, readJson, writeJson } from './release-version-utils.mjs';
 import { syncReleaseVersions } from './sync-release-versions.mjs';
 
 export function setReleaseVersion(nextVersion) {
@@ -8,9 +8,7 @@ export function setReleaseVersion(nextVersion) {
     throw new Error('Usage: node ./scripts/set-release-version.mjs <version>');
   }
 
-  if (!isValidSemver(nextVersion)) {
-    throw new Error(`Invalid semver version: ${nextVersion}`);
-  }
+  assertStableReleaseVersion(nextVersion);
 
   const rootPackage = readJson('package.json');
   const previousVersion = getSourceVersion();

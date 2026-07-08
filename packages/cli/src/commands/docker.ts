@@ -51,6 +51,17 @@ function extractCommandFailure(error: unknown): { message: string; stdout?: stri
   };
 }
 
+function dockerContainerExists(name: string): boolean {
+  try {
+    // `docker container inspect` matches by exact name or id and exits
+    // non-zero when the container does not exist.
+    execFileSync('docker', ['container', 'inspect', name], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function runDockerProcess(
   args: string[],
   options: { cwd?: string; inheritOutput?: boolean },
@@ -503,6 +514,7 @@ dockerCommand
   .option('-v, --volume <name>', 'Data volume name', 'edgebase-data')
   .option('-d, --detach', 'Run in background')
   .option('--name <name>', 'Container name', 'edgebase')
+  .option('--replace', 'Replace an existing container with the same name (removes it first)')
   .option('--env-file <path>', 'Path to environment variables file (e.g. .env)')
   .option('--bootstrap-admin-email <email>', 'Bootstrap admin email to ensure for this container')
   .option('--bootstrap-admin-password-file <path>', 'Read the bootstrap admin password from a file')
@@ -513,6 +525,7 @@ dockerCommand
     volume: string;
     detach: boolean;
     name: string;
+    replace?: boolean;
     envFile?: string;
     bootstrapAdminEmail?: string;
     bootstrapAdminPasswordFile?: string;
@@ -546,10 +559,25 @@ dockerCommand
     ensureDockerAvailable();
     assertImageExists(options.tag);
 
-    try {
-      execFileSync('docker', ['rm', '-f', options.name], { stdio: 'ignore' });
-    } catch {
-      // container missing is fine
+    if (dockerContainerExists(options.name)) {
+      if (options.replace) {
+        try {
+          execFileSync('docker', ['rm', '-f', options.name], { stdio: 'ignore' });
+        } catch (error) {
+          const failure = extractCommandFailure(error);
+          raiseCliError({
+            code: 'docker_container_replace_failed',
+            message: `Failed to remove existing container "${options.name}": ${failure.message}`,
+            hint: 'Remove it manually with `docker rm -f` and retry.',
+          });
+        }
+      } else {
+        raiseCliError({
+          code: 'docker_container_exists',
+          message: `A container named "${options.name}" already exists.`,
+          hint: 'Stop and remove it, choose a different --name, or pass --replace to recreate it (this deletes the existing container).',
+        });
+      }
     }
 
     const envVars = options.envFile ? parseEnvFile(options.envFile) : {};
@@ -648,7 +676,10 @@ dockerCommand
       console.log(JSON.stringify({
         status: 'success',
         operation: 'run',
-        detached: true,
+        // The container is always started with `docker run -d`, but the CLI
+        // only returns immediately (vs. streaming logs) when the user passed
+        // -d, so report that user-facing choice.
+        detached: !!options.detach,
         name: options.name,
         tag: options.tag,
         port: options.port,

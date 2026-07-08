@@ -38,7 +38,8 @@ describe('SecretBox', () => {
     const { createPassphraseSecretBox, changePassphraseSecretBox, passphraseBoxConfigured } =
       await import('../../src/crypto-box.js');
     const name = `lock-${Math.random().toString(36).slice(2)}`;
-    const fast = { iterations: 1_000 }; // keep PBKDF2 cheap in tests
+    // Keep PBKDF2 cheap in tests via the explicit test-only escape hatch.
+    const fast = { iterations: 1_000, __unsafeAllowLowIterations: true };
 
     expect(await passphraseBoxConfigured(name)).toBe(false);
     const created = await createPassphraseSecretBox(name, 'correct horse', fast);
@@ -76,5 +77,144 @@ describe('SecretBox', () => {
     const sealed = await a.seal('shared');
     expect(await b.open(sealed)).toBe('shared');
     expect(await other.open(sealed)).toBeUndefined();
+  });
+
+  it('AAD binds a value to its slot: round-trips with the right context, rejects a mismatch (cut-and-paste)', async () => {
+    const box = await createSecretBox(`box-${Math.random().toString(36).slice(2)}`);
+
+    const sealed = await box.seal({ balance: 100 }, 'record:accounts:alice');
+    // v2 envelope carries an explicit version + algorithm.
+    expect((sealed as { v?: number; alg?: string }).v).toBe(2);
+    expect((sealed as { alg?: string }).alg).toBe('AES-GCM');
+
+    // Correct slot decrypts.
+    expect(await box.open(sealed, 'record:accounts:alice')).toEqual({ balance: 100 });
+    // Cut-and-paste into another record's slot fails the authenticated decrypt.
+    expect(await box.open(sealed, 'record:accounts:bob')).toBeUndefined();
+    // Missing context is also a mismatch.
+    expect(await box.open(sealed)).toBeUndefined();
+  });
+
+  it('strict rejectUnsealed mode treats non-sealed (injected plaintext) values as a miss', async () => {
+    const name = `box-${Math.random().toString(36).slice(2)}`;
+    const lax = await createSecretBox(name);
+    const strict = await createSecretBox(name, { rejectUnsealed: true });
+
+    // Legacy / attacker-injected plaintext: lax passes it through, strict drops it.
+    expect(await lax.open({ injected: true })).toEqual({ injected: true });
+    expect(await strict.open({ injected: true })).toBeUndefined();
+
+    // Genuinely sealed values still read in strict mode.
+    const sealed = await strict.seal({ ok: 1 }, 'ctx');
+    expect(await strict.open(sealed, 'ctx')).toEqual({ ok: 1 });
+  });
+
+  it('rejects an unknown future envelope version', async () => {
+    const box = await createSecretBox(`box-${Math.random().toString(36).slice(2)}`);
+    const sealed = (await box.seal('v', 'ctx')) as { v: number };
+    sealed.v = 999; // pretend a newer format we do not understand
+    expect(await box.open(sealed, 'ctx')).toBeUndefined();
+  });
+
+  it('createSecretBox throws instead of silently degrading to plaintext without opt-in', async () => {
+    // No IndexedDB factory + node has no global indexedDB via a bare name here?
+    // Force the missing-crypto path by passing a bogus factory-less options and
+    // stubbing resolve by using a name that still has fake-indexeddb; instead we
+    // assert the opt-in path returns a plaintext box while the default throws.
+    const badFactory = { open: undefined } as unknown as IDBFactory;
+    await expect(
+      createSecretBox(`box-${Math.random().toString(36).slice(2)}`, { factory: badFactory }),
+    ).rejects.toThrow(/allowInsecureFallback/);
+
+    const box = await createSecretBox(`box-${Math.random().toString(36).slice(2)}`, {
+      factory: badFactory,
+      allowInsecureFallback: true,
+    });
+    expect(box.mode).toBe('plaintext');
+  });
+
+  it('enforces a PBKDF2 iteration floor unless the test escape hatch is set', async () => {
+    const { createPassphraseSecretBox } = await import('../../src/crypto-box.js');
+    const name = `lock-${Math.random().toString(36).slice(2)}`;
+    await expect(
+      createPassphraseSecretBox(name, 'pw', { iterations: 1_000 }),
+    ).rejects.toThrow(/below the minimum/);
+    // With the escape hatch it succeeds.
+    const ok = await createPassphraseSecretBox(name, 'pw', {
+      iterations: 1_000,
+      __unsafeAllowLowIterations: true,
+    });
+    expect('error' in ok).toBe(false);
+  });
+
+  it('concurrent first-runs converge on ONE key (atomic create, no data loss)', async () => {
+    const name = `box-${Math.random().toString(36).slice(2)}`;
+    // Race several first-run box creations against the same store.
+    const boxes = await Promise.all(
+      Array.from({ length: 5 }, () => createSecretBox(name)),
+    );
+    // A value sealed by the first box must be readable by ALL of them — which
+    // only holds if every concurrent creation converged on the same key.
+    const sealed = await boxes[0].seal({ v: 'converge' }, 'ctx');
+    for (const box of boxes) {
+      expect(await box.open(sealed, 'ctx')).toEqual({ v: 'converge' });
+    }
+  });
+
+  it('passphrase concurrent first-runs converge on one wrapped key', async () => {
+    const { createPassphraseSecretBox } = await import('../../src/crypto-box.js');
+    const name = `lock-${Math.random().toString(36).slice(2)}`;
+    const opts = { iterations: 1_000, __unsafeAllowLowIterations: true };
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () => createPassphraseSecretBox(name, 'same-pass', opts)),
+    );
+    const boxes = results.map((r) => {
+      if ('error' in r) throw new Error(`unexpected: ${r.error}`);
+      return r.box;
+    });
+    const sealed = await boxes[0].seal({ v: 'shared-dek' }, 'ctx');
+    for (const box of boxes) {
+      expect(await box.open(sealed, 'ctx')).toEqual({ v: 'shared-dek' });
+    }
+  });
+
+  it('encryptRecordCacheAdapter binds records to their (table,id) slot', async () => {
+    const { encryptRecordCacheAdapter } = await import('../../src/crypto-box.js');
+    const { createMemoryRecordCacheAdapter } = await import('../../src/record-cache.js');
+    const box = await createSecretBox(`box-${Math.random().toString(36).slice(2)}`);
+    const inner = createMemoryRecordCacheAdapter();
+    const enc = encryptRecordCacheAdapter(inner, box);
+
+    await enc.putRecords('accounts', [{ id: 'alice', value: { balance: 1 } }]);
+    expect(await enc.listTable('accounts')).toEqual([{ id: 'alice', value: { balance: 1 } }]);
+
+    // Cut-and-paste alice's sealed blob into bob's slot at the raw storage layer.
+    const rawAlice = (await inner.listTable('accounts'))[0];
+    await inner.putRecords('accounts', [{ id: 'bob', value: rawAlice.value }]);
+
+    // bob's forged entry fails its AAD-bound decrypt and is dropped; alice stays.
+    const opened = await enc.listTable('accounts');
+    expect(opened.map((r) => r.id)).toEqual(['alice']);
+  });
+
+  it('encryptOutboxAdapter: claimed entries survive (bound to entryKey, not tabId); cross-key paste is rejected', async () => {
+    const { encryptOutboxAdapter } = await import('../../src/crypto-box.js');
+    const { createMemoryOutboxAdapter } = await import('../../src/durable-outbox.js');
+    const box = await createSecretBox(`box-${Math.random().toString(36).slice(2)}`);
+    const inner = createMemoryOutboxAdapter();
+    const enc = encryptOutboxAdapter<{ op: string }>(inner, box);
+
+    await enc.put({ entryKey: 'create:1', tabId: 'dead', updatedAt: 1, value: { op: 'x' } });
+
+    // A claim re-homes the entry under a new tabId WITHOUT re-sealing — it must
+    // still decrypt (entryKey, the logical slot, is unchanged).
+    const claimed = await enc.claimTab('dead', 'fresh');
+    expect(claimed.map((entry) => entry.value)).toEqual([{ op: 'x' }]);
+
+    // But the same blob pasted under a DIFFERENT entryKey must not decrypt.
+    const rawInner = (await inner.listEntries('fresh'))[0];
+    await inner.put({ entryKey: 'create:2', tabId: 'fresh', updatedAt: 2, value: rawInner.value });
+    const listed = await enc.listEntries('fresh');
+    expect(listed.map((entry) => entry.entryKey)).toEqual(['create:1']);
   });
 });

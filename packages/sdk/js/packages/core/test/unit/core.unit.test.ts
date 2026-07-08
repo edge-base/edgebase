@@ -473,7 +473,15 @@ describe('HttpClient — 401 retry', () => {
     let refreshToken = 'refresh-token';
 
     const tokenManager: ITokenManager = {
-      getAccessToken: vi.fn(async () => accessToken || null),
+      // The 401 handler routes its forced refresh through getAccessToken's
+      // refreshFn (the deduped/leader-elected path), so the fake honours it.
+      getAccessToken: vi.fn(async (refreshFn?: (refreshToken: string) => Promise<ITokenPair>) => {
+        if (accessToken) return accessToken;
+        if (!refreshFn || !refreshToken) return null;
+        const tokens = await refreshFn(refreshToken);
+        tokenManager.setTokens(tokens);
+        return tokens.accessToken;
+      }),
       getRefreshToken: vi.fn(() => refreshToken),
       invalidateAccessToken: vi.fn(() => {
         accessToken = '';

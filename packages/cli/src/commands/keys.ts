@@ -163,7 +163,10 @@ keysCommand
 keysCommand
   .command('rotate')
   .description('Rotate Service Key immediately')
-  .action(async () => {
+  .option('--reveal', 'Print the full Service Key instead of a masked value')
+  .option('--show', 'Alias for --reveal')
+  .action(async (options: { reveal?: boolean; show?: boolean }) => {
+    const reveal = !!(options.reveal || options.show);
     const projectDir = process.cwd();
     const newKey = generateServiceKey();
     const rotatedAt = new Date().toISOString();
@@ -223,7 +226,8 @@ keysCommand
         status: 'success',
         serviceKey: {
           masked: maskKey(newKey),
-          value: newKey,
+          // Only include the raw secret when explicitly requested.
+          ...(reveal ? { value: newKey } : {}),
           rotatedAt,
           localSecretsUpdated: warnings.length === 0,
         },
@@ -235,7 +239,12 @@ keysCommand
     console.log();
     console.log(chalk.green('✅ Service Key rotated.'));
     console.log(chalk.dim('  New key:'), maskKey(newKey));
-    console.log(chalk.dim('  Full key (save securely):'), newKey);
+    if (reveal) {
+      console.log(chalk.dim('  Full key (save securely):'), newKey);
+    } else {
+      console.log(chalk.dim('  Re-run with --reveal to print the full key.'));
+    }
+    console.log(chalk.dim('  The full key is stored in .edgebase/secrets.json.'));
   });
 
 keysCommand

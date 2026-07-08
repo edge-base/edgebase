@@ -460,6 +460,63 @@ describe('TokenManager — cross-tab refresh coordination', () => {
   });
 });
 
+describe('TokenManager — no-BroadcastChannel fallback refresh-result', () => {
+  function installFallbackMocks() {
+    const store = new Map<string, string>();
+    let storageListener: ((event: { key: string; newValue: string | null }) => void) | null = null;
+    vi.stubGlobal('window', {
+      addEventListener: (type: string, fn: (event: unknown) => void) => {
+        if (type === 'storage') storageListener = fn as typeof storageListener;
+      },
+      removeEventListener: vi.fn(),
+    });
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value);
+      },
+      removeItem: (key: string) => {
+        store.delete(key);
+      },
+    });
+    // No BroadcastChannel → the fallback (storage-event) path is exercised.
+    vi.stubGlobal('BroadcastChannel', undefined);
+    return {
+      store,
+      dispatch: (key: string, newValue: string | null) => storageListener?.({ key, newValue }),
+    };
+  }
+
+  it('rejects a STALE parked result and consumes a FRESH one, clearing it immediately', () => {
+    const { store, dispatch } = installFallbackMocks();
+    const refreshToken = makeValidJwt('u-fallback', {
+      exp: Math.floor(Date.now() / 1000) + 7200,
+    });
+    const tm = new TokenManager('http://localhost:8688');
+    // Canonical refresh token is present (leader wrote it before signalling).
+    store.set('edgebase:refresh-token', refreshToken);
+
+    // A stale result (older than the validity window) must NOT be trusted.
+    const staleAccess = makeValidJwt('u-stale-access');
+    const staleEntry = JSON.stringify({ accessToken: staleAccess, timestamp: Date.now() - 60_000 });
+    store.set('edgebase:refresh-result', staleEntry);
+    dispatch('edgebase:refresh-result', staleEntry);
+    expect(tm.currentAccessToken).toBeNull();
+    // Stale entry is left as-is (not consumed).
+    expect(store.get('edgebase:refresh-result')).toBe(staleEntry);
+
+    // A fresh result IS consumed and cleared from storage immediately.
+    const freshAccess = makeValidJwt('u-fresh-access');
+    const freshEntry = JSON.stringify({ accessToken: freshAccess, timestamp: Date.now() });
+    store.set('edgebase:refresh-result', freshEntry);
+    dispatch('edgebase:refresh-result', freshEntry);
+    expect(tm.currentAccessToken).toBe(freshAccess);
+    expect(store.get('edgebase:refresh-result')).toBeUndefined();
+
+    tm.destroy();
+  });
+});
+
 // ─── E. TokenManager — expired token handling ────────────────────────────────
 
 describe('TokenManager — expired token', () => {

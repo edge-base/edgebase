@@ -25,7 +25,22 @@ function isAllowedRedirect(candidate: string, pattern: string): boolean {
   if (!trimmed) return false;
 
   if (trimmed.endsWith('*')) {
-    return candidate.startsWith(trimmed.slice(0, -1));
+    // Compare origin + path-prefix instead of a raw string startsWith so that a
+    // wildcard can only match within the same origin. A naive prefix match lets
+    // 'https://app.example.com*' match 'https://app.example.com.evil.com'.
+    const prefix = trimmed.slice(0, -1);
+    let prefixUrl: URL;
+    let candidateUrl: URL;
+    try {
+      prefixUrl = new URL(prefix);
+      candidateUrl = new URL(candidate);
+    } catch {
+      return false;
+    }
+    if (prefixUrl.origin !== candidateUrl.origin) return false;
+    const prefixPath = prefixUrl.pathname + prefixUrl.search;
+    const candidatePath = candidateUrl.pathname + candidateUrl.search;
+    return candidatePath.startsWith(prefixPath);
   }
 
   let allowedUrl: URL;
@@ -74,8 +89,29 @@ export function parseClientRedirectUrl(env: Env, value: string | null | undefine
   if (!value) return null;
   const normalized = normalizeUrl(value);
   const allowed = getAllowedRedirectUrls(env);
-  if (allowed.length > 0 && !allowed.some((pattern) => isAllowedRedirect(normalized, pattern))) {
-    throw new EdgeBaseError(400, 'redirect_url is not allowed.');
+  if (allowed.length > 0) {
+    if (!allowed.some((pattern) => isAllowedRedirect(normalized, pattern))) {
+      throw new EdgeBaseError(400, 'redirect_url is not allowed.');
+    }
+    return normalized;
+  }
+  // No allowlist configured. OAuth and email flows append access/refresh tokens
+  // to this redirect, so accepting an arbitrary URL is a token-exfiltration
+  // vector. In release mode we fail closed and require an explicit allowlist;
+  // local dev stays permissive for convenience.
+  let release = false;
+  try {
+    release = !!parseConfig(env)?.release;
+  } catch {
+    release = false;
+  }
+  if (release) {
+    throw new EdgeBaseError(
+      400,
+      'redirect_url requires auth.allowedRedirectUrls to be configured in release mode.',
+      undefined,
+      'redirect-not-allowed',
+    );
   }
   return normalized;
 }

@@ -229,16 +229,20 @@ describe('Dockerfile detection', () => {
     expect(existsSync(join(tmpDir, 'Dockerfile'))).toBe(false);
   });
 
-  it('bootstraps writable persistence before dropping to the edgebase user', () => {
+  it('runs the entrypoint and server as the non-root edgebase user', () => {
     const dockerfile = readFileSync(dockerfilePath, 'utf-8');
 
     expect(dockerfile).toContain('edgebase-entrypoint.sh');
-    expect(dockerfile).toContain('chown -R edgebase:edgebase "${PERSIST_DIR}" /home/edgebase/.config');
-    expect(dockerfile).toContain('exec su -s /bin/sh edgebase -c');
+    // Ownership is set at image-build time so the container can run entirely as
+    // the non-root user (entrypoint, healthcheck, and server all drop root).
+    expect(dockerfile).toContain('chown -R edgebase:edgebase /app /data /home/edgebase');
     expect(dockerfile).toContain('exec wrangler dev --config "$WRANGLER_CONFIG"');
     expect(dockerfile).toContain('--show-interactive-dev-session=false');
     expect(dockerfile).toContain('> /usr/local/bin/edgebase-entrypoint.sh && chmod +x');
-    expect(dockerfile).toContain('USER root');
+    expect(dockerfile).toContain('USER edgebase');
+    // The old design started as root and dropped privileges per-process via `su`.
+    expect(dockerfile).not.toContain('exec su -s /bin/sh edgebase -c');
+    expect(dockerfile).not.toContain('USER root');
   });
 
   it('detects edgebase.config.ts as a project root marker', () => {

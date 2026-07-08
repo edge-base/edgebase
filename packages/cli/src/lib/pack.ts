@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
   createAppBundle,
@@ -76,6 +76,43 @@ export type CreateDirPackArtifactOptions = CreateAppBundleOptions;
 
 export interface CreatePortablePackArtifactOptions extends CreateAppBundleOptions {
   appName?: string;
+  /**
+   * Overwrite the resolved output path even when it is a non-empty directory
+   * that is not a previously generated EdgeBase pack artifact.
+   */
+  force?: boolean;
+}
+
+// Marker files that a prior EdgeBase pack artifact leaves at (or under) its
+// output path. Used to decide whether an existing directory is safe to
+// recursively overwrite.
+const PACK_ARTIFACT_MARKERS = [
+  'edgebase-portable.json',
+  join('Contents', 'Resources', 'edgebase-portable.json'),
+  'edgebase-pack.json',
+];
+
+function isPriorPackArtifactDir(dir: string): boolean {
+  return PACK_ARTIFACT_MARKERS.some((marker) => existsSync(join(dir, marker)));
+}
+
+/**
+ * Refuse to recursively delete an arbitrary non-empty directory before writing
+ * a pack artifact. A target is safe to overwrite when it does not exist, is a
+ * file, is an empty directory, is a previously generated pack artifact, or when
+ * the caller explicitly opts in with `force`.
+ */
+function assertSafePackOutputPath(outputPath: string, force = false): void {
+  if (!existsSync(outputPath)) return;
+  if (!statSync(outputPath).isDirectory()) return;
+  if (readdirSync(outputPath).length === 0) return;
+  if (isPriorPackArtifactDir(outputPath)) return;
+  if (force) return;
+
+  throw new Error(
+    `Refusing to overwrite non-empty directory that is not a prior EdgeBase pack artifact: ${outputPath}. `
+      + 'Re-run with --force to overwrite it, or choose an empty --output path.',
+  );
 }
 
 export interface CreateDirPackArtifactResult {
@@ -1064,6 +1101,7 @@ function createMacPortableArtifact(
   outputPath: string,
   appName: string,
   dirArtifact: CreateDirPackArtifactResult,
+  force = false,
 ): CreatePortablePackArtifactResult {
   const executableName = sanitizeExecutableName(appName);
   const contentsDir = join(outputPath, 'Contents');
@@ -1074,6 +1112,7 @@ function createMacPortableArtifact(
   const embeddedNodePath = join(macOsDir, 'node');
   const launcherPath = join(macOsDir, executableName);
 
+  assertSafePackOutputPath(outputPath, force);
   rmSync(outputPath, { recursive: true, force: true });
   mkdirSync(macOsDir, { recursive: true });
   mkdirSync(frameworksDir, { recursive: true });
@@ -1160,6 +1199,7 @@ exec "$SCRIPT_DIR/node" "$APP_DIR/launcher.mjs" "$@"
 function createPortableDirectoryArtifact(
   outputPath: string,
   dirArtifact: CreateDirPackArtifactResult,
+  force = false,
 ): CreatePortablePackArtifactResult {
   const bundledAppDir = join(outputPath, 'app');
   const binDir = join(outputPath, 'bin');
@@ -1168,6 +1208,7 @@ function createPortableDirectoryArtifact(
   const launcherName = process.platform === 'win32' ? 'run.cmd' : 'run.sh';
   const launcherPath = join(outputPath, launcherName);
 
+  assertSafePackOutputPath(outputPath, force);
   rmSync(outputPath, { recursive: true, force: true });
   mkdirSync(binDir, { recursive: true });
   cpSync(dirArtifact.outputDir, bundledAppDir, {
@@ -1276,10 +1317,10 @@ export function createPortablePackArtifact(
   const appName = options.appName ?? basename(outputPath);
 
   if (process.platform === 'darwin') {
-    return createMacPortableArtifact(outputPath, appName, dirArtifact);
+    return createMacPortableArtifact(outputPath, appName, dirArtifact, options.force);
   }
 
-  return createPortableDirectoryArtifact(outputPath, dirArtifact);
+  return createPortableDirectoryArtifact(outputPath, dirArtifact, options.force);
 }
 
 export function createArchivePackArtifact(
@@ -1297,12 +1338,16 @@ export function createArchivePackArtifact(
   const portableArtifact = createPortablePackArtifact(projectDir, {
     outputDir: sourcePortablePath,
     appName: options.appName,
+    force: options.force,
   });
   const outputPath = resolveArchiveOutputPath(
     projectDir,
     portableArtifact.packManifest.projectName,
     options.outputDir,
   );
+  // The archive output is normally a single file, but a user-supplied
+  // -o <path> could point at a directory; guard before the recursive rm.
+  assertSafePackOutputPath(outputPath, options.force);
   const archiveType = createArchiveFromPortableArtifact(portableArtifact.outputPath, outputPath);
   const manifest = buildArchiveManifest({
     outputPath,

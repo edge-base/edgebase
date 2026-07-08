@@ -10,25 +10,25 @@ Self-host EdgeBase using Docker containers or direct Node.js execution.
 
 EdgeBase runs on [workerd](https://github.com/cloudflare/workerd), an open-source JavaScript runtime built on the V8 engine. The **exact same code** that runs on the cloud edge also runs in Docker/Node.js.
 
-| | Traditional BaaS | EdgeBase (Self-Hosted) |
-|---|---|---|
-| **DB Access** | Network round-trip (ms) | In-process SQLite (μs) |
-| **JS Performance** | Node.js (V8) | workerd (V8) — same engine |
-| **Cold Start** | Container boot (seconds) | Always running (0ms) |
-| **WebSocket** | Per-connection memory | Hibernation API — $0 idle memory |
+|                    | Traditional BaaS         | EdgeBase (Self-Hosted)           |
+| ------------------ | ------------------------ | -------------------------------- |
+| **DB Access**      | Network round-trip (ms)  | In-process SQLite (μs)           |
+| **JS Performance** | Node.js (V8)             | workerd (V8) — same engine       |
+| **Cold Start**     | Container boot (seconds) | Always running (0ms)             |
+| **WebSocket**      | Per-connection memory    | Hibernation API — $0 idle memory |
 
 SQLite runs in the same thread as the application, so single-query latency is significantly lower than BaaS platforms using network databases. Self-hosting doesn't come with a performance penalty — it can even be faster due to zero network hops.
 
 ## Deployment Methods
 
-| | **Cloud Edge** | **Docker** | **Direct** |
-|---|---|---|---|
-| **Command** | `npx edgebase deploy` | `npx edgebase docker run` | `npx edgebase dev` |
-| **Requires** | Cloudflare account | Docker | Node.js 20.19+ (24.x recommended) |
-| **Pros** | Global edge, auto-scale, no server management | Single container, data sovereignty | Simplest, run on any VPS |
-| **Cons** | Cloud account required | Docker required | Process management needed for production |
-| **Cost** | ~$5/mo | VPS only (~$5/mo) | VPS only |
-| **Data Location** | Edge data centers | Local server | Local server |
+|                   | **Cloud Edge**                                | **Docker**                         | **Direct**                               |
+| ----------------- | --------------------------------------------- | ---------------------------------- | ---------------------------------------- |
+| **Command**       | `npx edgebase deploy`                         | `npx edgebase docker run`          | `npx edgebase dev`                       |
+| **Requires**      | Cloudflare account                            | Docker                             | Node.js 20.19+ (24.x recommended)        |
+| **Pros**          | Global edge, auto-scale, no server management | Single container, data sovereignty | Simplest, run on any VPS                 |
+| **Cons**          | Cloud account required                        | Docker required                    | Process management needed for production |
+| **Cost**          | ~$5/mo                                        | VPS only (~$5/mo)                  | VPS only                                 |
+| **Data Location** | Edge data centers                             | Local server                       | Local server                             |
 
 ---
 
@@ -54,7 +54,15 @@ If your project defines `frontend.directory` in `edgebase.config.ts`, `npx edgeb
 
 ### Docker Compose
 
+The Compose file uses `build: .`, and the `Dockerfile` copies the portable app
+bundle from `.edgebase/targets/docker-app/`. That directory only exists after you
+run `npx edgebase docker build`, so build the bundle first or `docker compose up`
+will fail with a `COPY` error.
+
 ```bash
+# Prerequisite: generate the portable app bundle the Dockerfile copies from
+npx edgebase docker build
+
 # Start
 docker compose up -d
 
@@ -96,22 +104,24 @@ That `SERVICE_KEY` is the same credential consumed by all Admin SDKs.
 
 :::tip
 For local Docker development, use `.env.development` instead:
+
 ```bash
 docker run --env-file .env.development -p 8787:8787 -v edgebase-data:/data edgebase
 ```
+
 :::
 
 ### Data Persistence
 
 All data is stored in the `/data` volume:
 
-| Data | Path | Description |
-|---|---|---|
-| DO SQLite | `/data/v3/do/` | Database DO state (isolated namespaces, Room/DatabaseLive support data) |
-| D1 Auth (`AUTH_DB`) | `/data/v3/d1/` | Auth control plane (users, sessions, OAuth, MFA, admin data) |
+| Data                      | Path           | Description                                                              |
+| ------------------------- | -------------- | ------------------------------------------------------------------------ |
+| DO SQLite                 | `/data/v3/do/` | Database DO state (isolated namespaces, Room/DatabaseLive support data)  |
+| D1 Auth (`AUTH_DB`)       | `/data/v3/d1/` | Auth control plane (users, sessions, OAuth, MFA, admin data)             |
 | D1 Control (`CONTROL_DB`) | `/data/v3/d1/` | Internal operational metadata (plugin versions, cleanup/backup metadata) |
-| R2 Files | `/data/v3/r2/` | Uploaded files |
-| KV Data | `/data/v3/kv/` | OAuth state, membership cache |
+| R2 Files                  | `/data/v3/r2/` | Uploaded files                                                           |
+| KV Data                   | `/data/v3/kv/` | OAuth state, membership cache                                            |
 
 `AUTH_DB` and `CONTROL_DB` are separate internal D1 databases that share the same persisted base directory. Keeping plugin/control-plane metadata in `CONTROL_DB` avoids mixing operational state into the auth hot path.
 
@@ -249,10 +259,10 @@ If you enable Service Key `ipCidr` constraints or rely on per-client rate limiti
 
 EdgeBase provides two backup methods:
 
-| Method | Use Case | Speed |
-|------|------|------|
-| **Volume Copy** | Restore within the same environment (Docker→Docker, Direct→Direct) | Fast |
-| **CLI Portable Backup** | Cross-environment migration (Edge↔Docker↔Direct) | Moderate |
+| Method                  | Use Case                                                           | Speed    |
+| ----------------------- | ------------------------------------------------------------------ | -------- |
+| **Volume Copy**         | Restore within the same environment (Docker→Docker, Direct→Direct) | Fast     |
+| **CLI Portable Backup** | Cross-environment migration (Edge↔Docker↔Direct)                   | Moderate |
 
 ### 4.1 Volume Backup (Same Environment)
 
@@ -365,10 +375,10 @@ npx edgebase admin bootstrap --url http://localhost:8787 --service-key <service-
 
 ## 6. Troubleshooting
 
-| Problem | Solution |
-|------|------|
-| Port conflict | Use `--port` to specify a different port |
-| Data loss | Verify volume mount: `-v edgebase-data:/data` |
-| WebSocket disconnects | Check reverse proxy Upgrade header configuration |
-| Container not auto-restarting | Verify `--restart unless-stopped` flag |
-| Out of memory | Set memory limit with `--memory 512m` |
+| Problem                       | Solution                                         |
+| ----------------------------- | ------------------------------------------------ |
+| Port conflict                 | Use `--port` to specify a different port         |
+| Data loss                     | Verify volume mount: `-v edgebase-data:/data`    |
+| WebSocket disconnects         | Check reverse proxy Upgrade header configuration |
+| Container not auto-restarting | Verify `--restart unless-stopped` flag           |
+| Out of memory                 | Set memory limit with `--memory 512m`            |

@@ -90,19 +90,18 @@ export class HttpClient {
       headers['X-EdgeBase-Service-Key'] = this.serviceKey;
     }
 
-    // Auth token — if refresh fails, proceed without auth (graceful degradation)
+    // Auth token. A refresh FAILURE (as opposed to "no session") must NOT be
+    // swallowed into an anonymous request — silently downgrading an
+    // authenticated call to anonymous can return the wrong data or perform an
+    // action as the wrong principal. getAccessToken returns null when there is
+    // genuinely no session (proceed anonymously); it throws when a refresh was
+    // required and failed — we surface that.
     if (!skipAuth && this.tokenManager) {
-      try {
-        const token = await this.tokenManager.getAccessToken((refreshToken) =>
-          this.refreshToken(refreshToken),
-        );
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-      } catch {
-        // Token refresh failed — proceed as unauthenticated.
-        // In release: false mode the server allows anonymous access.
-        // In release: true mode, downstream will return 401 as expected.
+      const token = await this.tokenManager.getAccessToken((refreshToken) =>
+        this.refreshToken(refreshToken),
+      );
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
     }
 
@@ -185,14 +184,19 @@ export class HttpClient {
 
       // Handle 401 with one forced token refresh retry.
       if (response.status === 401 && !options.skipAuth && !this.serviceKey) {
+        // Route the refresh through the token manager's SAME deduped /
+        // leader-elected path (via getAccessToken) rather than calling
+        // refreshToken() directly. Otherwise concurrent 401s — and multiple
+        // tabs — each fire POST /auth/refresh with the same rotating token,
+        // and all but one lose the rotation race.
+        let refreshedAccessToken: string | null = null;
+        this.tokenManager?.invalidateAccessToken();
         try {
-          this.tokenManager?.invalidateAccessToken();
-          const nextRefreshToken = this.tokenManager?.getRefreshToken();
-          if (!nextRefreshToken) {
+          refreshedAccessToken = (await this.tokenManager?.getAccessToken((refreshToken) =>
+            this.refreshToken(refreshToken),
+          )) ?? null;
+          if (!refreshedAccessToken) {
             refreshFailure = new Error('No refresh token was available.');
-          } else {
-            const refreshedTokens = await this.refreshToken(nextRefreshToken);
-            this.tokenManager?.setTokens(refreshedTokens);
           }
         } catch (error) {
           refreshFailure = error instanceof Error
@@ -202,9 +206,10 @@ export class HttpClient {
 
         try {
           const newHeaders = await this.buildHeaders(true);
-          const nextAccessToken = await this.tokenManager?.getAccessToken();
-          if (nextAccessToken) {
-            newHeaders['Authorization'] = `Bearer ${nextAccessToken}`;
+          // Reuse the token from the single refresh above — do NOT call
+          // getAccessToken again here (that could trigger a second refresh).
+          if (refreshedAccessToken) {
+            newHeaders['Authorization'] = `Bearer ${refreshedAccessToken}`;
           }
           if (body === undefined) {
             delete newHeaders['Content-Type'];

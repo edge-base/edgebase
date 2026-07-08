@@ -36,16 +36,19 @@ export function getTrustedClientIp(
 ): string | undefined {
   if (!reader) return undefined;
 
-  const cfIp = parseForwardedIp(
-    readHeader(reader, 'cf-connecting-ip') ?? readHeader(reader, 'CF-Connecting-IP'),
-  );
-  if (cfIp) return cfIp;
-
-  if (!isTrustSelfHostedProxyEnabled(env)) {
-    return undefined;
+  // Self-hosted behind a trusted reverse proxy: the authoritative client IP is
+  // the one the proxy writes to X-Forwarded-For. `cf-connecting-ip` must NOT be
+  // trusted in this mode — Cloudflare is not the one setting it, so a client can
+  // forge it to spoof rate-limit keys and service-key IP/CIDR constraints.
+  if (isTrustSelfHostedProxyEnabled(env)) {
+    return parseForwardedIp(
+      readHeader(reader, 'x-forwarded-for') ?? readHeader(reader, 'X-Forwarded-For'),
+    );
   }
 
+  // Default (Cloudflare edge): `cf-connecting-ip` is set by Cloudflare and
+  // cannot be spoofed by clients. X-Forwarded-For is deliberately ignored here.
   return parseForwardedIp(
-    readHeader(reader, 'x-forwarded-for') ?? readHeader(reader, 'X-Forwarded-For'),
+    readHeader(reader, 'cf-connecting-ip') ?? readHeader(reader, 'CF-Connecting-IP'),
   );
 }

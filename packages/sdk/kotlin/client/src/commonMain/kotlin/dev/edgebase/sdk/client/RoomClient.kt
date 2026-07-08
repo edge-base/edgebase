@@ -194,13 +194,21 @@ class RoomClient(
         }
     }
 
-    fun join() {
+    /**
+     * Connect to the room, authenticate, and join.
+     *
+     * Suspends until the connect + auth + join handshake completes, and propagates any
+     * connect/auth error to the caller (matching Swift/Python/JS where join() throws).
+     * The background receive/reconnect loop keeps running after this returns.
+     */
+    suspend fun join() {
         intentionallyLeft = false
         joinRequested = true
         setConnectionState(if (_reconnectInfo != null) "reconnecting" else "connecting")
-        if (!isConnected) {
-            scope.launch { establish() }
-        }
+        if (isConnected) return
+        val ready = CompletableDeferred<Unit>()
+        scope.launch { establish(ready) }
+        ready.await()
     }
 
     fun leave() {
@@ -438,7 +446,7 @@ class RoomClient(
         return "$u/api/room?namespace=${platformUrlEncode(namespace)}&id=${platformUrlEncode(roomId)}"
     }
 
-    private suspend fun establish() {
+    private suspend fun establish(ready: CompletableDeferred<Unit>? = null) {
         setConnectionState(if (_reconnectInfo != null) "reconnecting" else "connecting")
 
         try {
@@ -488,6 +496,8 @@ class RoomClient(
                         ),
                     )
                     isJoined = true
+                    // Handshake complete — let an awaiting join() caller return.
+                    ready?.complete(Unit)
                 }
 
                 val hbJob = launch { heartbeat() }
@@ -511,6 +521,9 @@ class RoomClient(
             }
         } catch (e: Exception) {
             handleAuthenticationFailure(e)
+            // Surface connect/auth failure to an awaiting join() caller. No-op if the
+            // handshake already completed (a later drop must not fail a resolved join).
+            ready?.completeExceptionally(e)
         }
 
         isConnected = false

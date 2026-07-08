@@ -44,7 +44,7 @@ import type { SmsProvider } from '../lib/sms-provider.js';
 import { renderVerifyEmail, renderPasswordReset, renderMagicLink, renderEmailOtp, renderEmailChange } from '../lib/email-templates.js';
 import { getDefaultSubject } from '../lib/email-translations.js';
 import {
-  generateTOTPSecret, generateTOTPUri, verifyTOTP,
+  generateTOTPSecret, generateTOTPUri, verifyTOTP, verifyTOTPWithCounter,
   generateRecoveryCodes, encryptSecret, decryptSecret,
 } from '../lib/totp.js';
 import {
@@ -2402,6 +2402,22 @@ authRoute.openapi(mfaTotpEnroll, async (c) => {
   });
 });
 
+// Maximum wrong TOTP codes tolerated per signin MFA ticket before the ticket is
+// burned (bounds brute-force within a ticket's 5-minute lifetime).
+const MFA_MAX_TICKET_ATTEMPTS = 5;
+
+// Reject a TOTP code whose time-step was already consumed for this scope, then
+// record it. Prevents replay of a still-in-window code (the ±1 step ≈ 90s).
+async function assertTotpNotReplayed(env: Env, scopeKey: string, counter: number): Promise<void> {
+  const key = `totp-used:${scopeKey}`;
+  const last = await env.KV.get(key);
+  if (last !== null && counter <= Number(last)) {
+    throw new EdgeBaseError(401, 'This code was already used. Wait for the next code.', undefined, 'invalid-totp');
+  }
+  // TTL only needs to outlive the verification window; the code is worthless after that.
+  await env.KV.put(key, String(counter), { expirationTtl: 120 });
+}
+
 // POST /mfa/totp/verify — confirm TOTP enrollment (authenticated)
 const mfaTotpVerify = createRoute({
   operationId: 'authMfaTotpVerify',
@@ -2441,8 +2457,9 @@ authRoute.openapi(mfaTotpVerify, async (c) => {
 
   // Decrypt and verify TOTP code
   const secret = await decryptSecret(factor.secret as string, getUserSecret(c.env));
-  const valid = await verifyTOTP(secret, body.code);
+  const { valid, counter } = await verifyTOTPWithCounter(secret, body.code);
   if (!valid) throw new EdgeBaseError(400, 'Invalid TOTP code. Please try again.', undefined, 'invalid-totp');
+  await assertTotpNotReplayed(c.env, `${userId}:${body.factorId}`, counter);
 
   // Mark factor as verified
   await authService.verifyMfaFactor(db, body.factorId);
@@ -2506,11 +2523,29 @@ authRoute.openapi(mfaVerify, async (c) => {
 
   // Decrypt and verify
   const secret = await decryptSecret(factor.secret as string, getUserSecret(c.env));
-  const valid = await verifyTOTP(secret, body.code);
-  if (!valid) throw new EdgeBaseError(401, 'Invalid TOTP code.', undefined, 'invalid-totp');
+  const { valid, counter } = await verifyTOTPWithCounter(secret, body.code);
+  if (!valid) {
+    // Burn the ticket after too many wrong codes so a stolen ticket can't be
+    // used to brute-force TOTP for its full 5-minute lifetime.
+    const failKey = `mfa-ticket-fails:${body.mfaTicket}`;
+    const fails = Number((await c.env.KV.get(failKey)) ?? '0') + 1;
+    if (fails >= MFA_MAX_TICKET_ATTEMPTS) {
+      await Promise.all([
+        c.env.KV.delete(`mfa-ticket:${body.mfaTicket}`).catch(() => {}),
+        c.env.KV.delete(failKey).catch(() => {}),
+      ]);
+    } else {
+      await c.env.KV.put(failKey, String(fails), { expirationTtl: 300 }).catch(() => {});
+    }
+    throw new EdgeBaseError(401, 'Invalid TOTP code.', undefined, 'invalid-totp');
+  }
+  await assertTotpNotReplayed(c.env, `${userId}:${String(factor.id)}`, counter);
 
-  // Delete mfaTicket (single-use)
-  await c.env.KV.delete(`mfa-ticket:${body.mfaTicket}`).catch(() => {});
+  // Delete mfaTicket (single-use) and its failure counter
+  await Promise.all([
+    c.env.KV.delete(`mfa-ticket:${body.mfaTicket}`).catch(() => {}),
+    c.env.KV.delete(`mfa-ticket-fails:${body.mfaTicket}`).catch(() => {}),
+  ]);
 
   // MFA passed — create session
   await authService.cleanExpiredSessionsForUser(db, userId);

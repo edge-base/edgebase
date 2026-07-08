@@ -279,8 +279,12 @@ export default defineConfig({
 
   rateLimiting,
 
+  // CORS: replace with your production frontend origin(s) before deploying.
+  // '*' allows requests from any origin and is unsafe for authenticated apps
+  // in production. Use an array for multiple origins, e.g.
+  //   origin: ['https://app.example.com', 'http://localhost:5173']
   cors: {
-    origin: '*',
+    origin: 'http://localhost:5173',
   },
 });
 `;
