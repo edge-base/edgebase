@@ -57,9 +57,14 @@ export {
 
 // Secret box (optional value-at-rest sealing for local caches)
 export {
+  changePassphraseSecretBox,
+  createPassphraseSecretBox,
   createSecretBox,
   encryptOutboxAdapter,
   encryptRecordCacheAdapter,
+  passphraseBoxConfigured,
+  removePassphraseKey,
+  type PassphraseBoxResult,
   type SecretBox,
 } from './crypto-box.js';
 
