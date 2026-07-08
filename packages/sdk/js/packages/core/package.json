@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/core",
-    "version": "0.3.3",
+    "version": "0.3.5",
     "description": "EdgeBase core SDK — platform-agnostic client for auth, database, storage, and functions",
     "license": "MIT",
     "repository": {
