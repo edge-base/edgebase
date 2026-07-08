@@ -626,7 +626,14 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     }
 
     if (earliest < Infinity) {
-      this.ctx.storage.setAlarm(earliest);
+      // Never schedule at or before now. workerd re-fires a past-due alarm
+      // immediately without yielding the DO input gate, which spins into a
+      // tight loop ("Alarm exceeded its allowed execution time" →
+      // broken.dropped) and wedges the object so queued fetches hang forever.
+      // A due timer (fireAt <= now, e.g. restored from storage after
+      // hibernation) is still handled on the very next tick, just with a gap
+      // that lets pending requests interleave.
+      this.ctx.storage.setAlarm(Math.max(earliest, Date.now() + 1));
     }
   }
 
