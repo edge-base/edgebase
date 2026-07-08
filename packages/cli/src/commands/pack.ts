@@ -10,7 +10,8 @@ export const packCommand = new Command('pack')
   .option('--format <format>', 'Artifact format (dir, portable, or archive)', 'dir')
   .option('-o, --output <path>', 'Output directory or file path for the packed artifact')
   .option('--app-name <name>', 'Portable app name override')
-  .action(async (options: { format: string; output?: string; appName?: string }) => {
+  .option('--force', 'Overwrite a non-empty output directory that is not a prior pack artifact')
+  .action(async (options: { format: string; output?: string; appName?: string; force?: boolean }) => {
     if (!['dir', 'portable', 'archive'].includes(options.format)) {
       raiseCliError({
         code: 'unsupported_pack_format',
@@ -28,11 +29,13 @@ export const packCommand = new Command('pack')
         ? createArchivePackArtifact(projectDir, {
           outputDir: options.output,
           appName: options.appName,
+          force: options.force,
         })
         : options.format === 'portable'
           ? createPortablePackArtifact(projectDir, {
           outputDir: options.output,
           appName: options.appName,
+          force: options.force,
         })
           : createDirPackArtifact(projectDir, {
           outputDir: options.output,

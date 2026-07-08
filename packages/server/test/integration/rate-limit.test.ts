@@ -333,8 +333,12 @@ describe('1-20 rate-limit — getGroup', () => {
     expect(getGroup('/api/health')).toBe('global');
   });
 
-  it('/api/db/subscribe → global', () => {
-    expect(getGroup('/api/db/subscribe')).toBe('global');
+  it('/api/db/subscribe → realtime', () => {
+    expect(getGroup('/api/db/subscribe')).toBe('realtime');
+  });
+
+  it('/api/db/broadcast → realtime', () => {
+    expect(getGroup('/api/db/broadcast')).toBe('realtime');
   });
 
   it('/admin/api/data/tables → global', () => {
@@ -425,8 +429,8 @@ describe('1-20 rate-limit — RATE_LIMIT_DEFAULTS 확장', () => {
     }
   });
 
-  it('총 8개 group 정의', () => {
-    expect(Object.keys(RATE_LIMIT_DEFAULTS).length).toBe(8);
+  it('총 9개 group 정의', () => {
+    expect(Object.keys(RATE_LIMIT_DEFAULTS).length).toBe(9);
   });
 
   it('global windowSec === 60', () => {

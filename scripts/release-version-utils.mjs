@@ -39,6 +39,26 @@ export function isValidSemver(version) {
   return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version);
 }
 
+// The doc/dependency reference patterns in release-targets.mjs only match
+// bare MAJOR.MINOR.PATCH, so prerelease/build-metadata versions cannot be
+// synced or checked. Reject them explicitly instead of failing later with a
+// confusing "No version reference found" error.
+export function isStableReleaseVersion(version) {
+  return /^\d+\.\d+\.\d+$/.test(version);
+}
+
+export function assertStableReleaseVersion(version) {
+  if (!isValidSemver(version)) {
+    throw new Error(`Invalid semver version: ${version}`);
+  }
+  if (!isStableReleaseVersion(version)) {
+    throw new Error(
+      `Prerelease and build-metadata versions are not supported by the release machinery: "${version}". `
+        + 'Use a stable MAJOR.MINOR.PATCH version (the versioned doc/dependency references only match stable versions).',
+    );
+  }
+}
+
 export function updateTargetVersion(target, nextVersion) {
   switch (target.strategy) {
     case 'json-version':

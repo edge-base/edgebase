@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseUpdateBody } from '../lib/op-parser.js';
+import { parseUpdateBody, escapeIdentifier } from '../lib/op-parser.js';
 import {
   validationError,
   unauthorizedError,
@@ -25,6 +25,19 @@ import {
 import { EdgeBaseError } from '@edge-base/shared';
 
 // ─── A. op-parser.ts ──────────────────────────────────────────────────────────
+
+describe('escapeIdentifier', () => {
+  it('wraps a plain identifier in double quotes', () => {
+    expect(escapeIdentifier('title')).toBe('"title"');
+  });
+
+  it('doubles embedded double-quotes to prevent identifier injection', () => {
+    // A schemaless column key like `evil" TEXT); DROP TABLE t;--` must not be
+    // able to break out of the quoted identifier.
+    expect(escapeIdentifier('a"b')).toBe('"a""b"');
+    expect(escapeIdentifier('x") TEXT); DROP TABLE t;--')).toBe('"x"") TEXT); DROP TABLE t;--"');
+  });
+});
 
 describe('parseUpdateBody', () => {
   it('plain field → SET clause with ?', () => {

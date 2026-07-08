@@ -31,22 +31,39 @@ export function wildcardToRegex(pattern: string): RegExp {
 }
 
 /**
- * Check if origin matches allowed origins list.
+ * Match an origin against the allowed-origins config, distinguishing an exact
+ * match from a wildcard (`*` / `*.example.com`) match.
+ *
+ * The distinction is security-critical: browsers forbid credentialed CORS with a
+ * wildcard, and reflecting the requester's origin *with* credentials whenever a
+ * wildcard matched would let any site read authenticated cross-origin responses.
+ * Credentials are therefore only ever emitted for an exact-origin match.
  */
-export function isOriginAllowed(origin: string, allowedOrigins: string | string[]): boolean {
-  if (allowedOrigins === '*') return true;
+export function matchOrigin(
+  origin: string,
+  allowedOrigins: string | string[],
+): { allowed: boolean; viaWildcard: boolean } {
+  if (allowedOrigins === '*') return { allowed: true, viaWildcard: true };
 
   const origins = Array.isArray(allowedOrigins) ? allowedOrigins : [allowedOrigins];
 
   for (const pattern of origins) {
-    // Exact match
-    if (pattern === origin) return true;
-    // Wildcard match
-    if (pattern.includes('*')) {
-      if (wildcardToRegex(pattern).test(origin)) return true;
+    if (pattern === '*') return { allowed: true, viaWildcard: true };
+    // Exact match — the only case where credentials are safe to send.
+    if (pattern === origin) return { allowed: true, viaWildcard: false };
+    // Wildcard match — allowed, but never with credentials.
+    if (pattern.includes('*') && wildcardToRegex(pattern).test(origin)) {
+      return { allowed: true, viaWildcard: true };
     }
   }
-  return false;
+  return { allowed: false, viaWildcard: false };
+}
+
+/**
+ * Check if origin matches allowed origins list.
+ */
+export function isOriginAllowed(origin: string, allowedOrigins: string | string[]): boolean {
+  return matchOrigin(origin, allowedOrigins).allowed;
 }
 
 function resolveCorsHeaders(
@@ -58,22 +75,30 @@ function resolveCorsHeaders(
 ): ResolvedCorsHeaders | null {
   if (!origin) return null;
 
-  const isWildcardOrigin = configuredOrigins === '*';
-  const effectiveCredentials = isWildcardOrigin ? false : credentials;
-
-  let isAllowed = false;
+  let allowed = false;
+  let viaWildcard = false;
   if (configuredOrigins) {
-    isAllowed = isOriginAllowed(origin, configuredOrigins);
+    const match = matchOrigin(origin, configuredOrigins);
+    allowed = match.allowed;
+    viaWildcard = match.viaWildcard;
   } else {
-    isAllowed =
+    // Default dev behavior: allow localhost loopback origins (treated as exact).
+    allowed =
       /^http:\/\/localhost(:[0-9]+)?(\/|$)/.test(origin) ||
       /^http:\/\/127\.0\.0\.1(:[0-9]+)?(\/|$)/.test(origin);
   }
 
-  if (!isAllowed) return null;
+  if (!allowed) return null;
+
+  // Credentials are only safe for an exact-origin match. Any wildcard match
+  // (bare '*', array containing '*', or 'https://*.example.com') drops
+  // credentials regardless of the configured `credentials` flag.
+  const effectiveCredentials = credentials && !viaWildcard;
 
   return {
-    allowOrigin: effectiveCredentials ? origin : (isWildcardOrigin ? '*' : origin),
+    // A credentialed response must echo the specific origin (never '*'); a
+    // non-credentialed wildcard match may safely return '*'.
+    allowOrigin: viaWildcard && !effectiveCredentials ? '*' : origin,
     allowMethods: methods.join(', '),
     allowHeaders: 'Content-Type, Authorization, X-EdgeBase-Service-Key',
     allowCredentials: effectiveCredentials,

@@ -1,2 +1,8 @@
 packages:
   - 'packages/*'
+
+# Supply-chain hardening (effective on pnpm >= 10.16; inert on the pinned
+# pnpm 9.15.0 today). Mirrors the root workspace policy.
+minimumReleaseAge: 10080
+blockExoticSubdeps: true
+trustPolicy: no-downgrade

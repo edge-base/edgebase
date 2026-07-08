@@ -33,6 +33,9 @@
 	}
 
 	let bucket = $derived($page.params.bucket ?? '');
+	// The bucket comes straight from the route param, so encode it before it goes
+	// into any API path (object keys are encoded separately at their call sites).
+	let encodedBucket = $derived(encodeURIComponent(bucket));
 
 	let loading = $state(true);
 	let objects = $state<StorageObject[]>([]);
@@ -80,7 +83,7 @@
 		const keys = [...selectedFiles];
 		const results = await Promise.allSettled(
 			keys.map(async (key) => {
-				await api.fetch(`data/storage/buckets/${bucket}/objects/${encodeURIComponent(key)}`, { method: 'DELETE' });
+				await api.fetch(`data/storage/buckets/${encodedBucket}/objects/${encodeURIComponent(key)}`, { method: 'DELETE' });
 			}),
 		);
 		const succeeded = results.filter((r) => r.status === 'fulfilled').length;
@@ -122,7 +125,10 @@
 		history.replaceState(history.state, '', url.toString());
 	}
 
+	let latestLoadRequest = 0;
+
 	async function loadObjects(append = false) {
+		const requestId = ++latestLoadRequest;
 		if (append) {
 			loadingMore = true;
 		} else {
@@ -130,7 +136,7 @@
 		}
 
 		try {
-			let url = `data/storage/buckets/${bucket}/objects?limit=50&delimiter=/`;
+			let url = `data/storage/buckets/${encodedBucket}/objects?limit=50&delimiter=/`;
 			if (currentPrefix) {
 				url += `&prefix=${encodeURIComponent(currentPrefix)}`;
 			}
@@ -139,6 +145,9 @@
 			}
 
 			const res = await api.fetch<{ objects: StorageObject[]; folders?: string[]; cursor: string | null }>(url);
+
+			// A newer listing (folder navigation or refresh) has superseded this one.
+			if (requestId !== latestLoadRequest) return;
 
 			// Filter objects to only show files (not the prefix itself)
 			const files = (res.objects || []).filter(o => {
@@ -155,10 +164,13 @@
 			}
 			cursor = res.cursor;
 		} catch (err) {
+			if (requestId !== latestLoadRequest) return;
 			toastError(describeActionError(err, 'Failed to load storage objects.'));
 		} finally {
-			loading = false;
-			loadingMore = false;
+			if (requestId === latestLoadRequest) {
+				loading = false;
+				loadingMore = false;
+			}
 		}
 	}
 
@@ -202,7 +214,7 @@
 
 		try {
 			await api.fetch<{ ok: true; deleted: string }>(
-				`data/storage/buckets/${bucket}/objects/${encodeURIComponent(deleteTarget)}`,
+				`data/storage/buckets/${encodedBucket}/objects/${encodeURIComponent(deleteTarget)}`,
 				{ method: 'DELETE' }
 			);
 			objects = objects.filter((o) => o.key !== deleteTarget);
@@ -218,16 +230,7 @@
 	}
 
 	function getObjectUrl(key: string): string {
-		return getAdminApiUrl(`data/storage/buckets/${bucket}/objects/${encodeURIComponent(key)}`);
-	}
-
-	async function copyUrl(key: string) {
-		try {
-			await navigator.clipboard.writeText(getObjectUrl(key));
-			toastSuccess('URL copied to clipboard');
-		} catch {
-			toastError('Failed to copy URL');
-		}
+		return getAdminApiUrl(`data/storage/buckets/${encodedBucket}/objects/${encodeURIComponent(key)}`);
 	}
 
 	async function downloadFile(key: string) {

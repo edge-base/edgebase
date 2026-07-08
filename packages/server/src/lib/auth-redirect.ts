@@ -25,7 +25,22 @@ function isAllowedRedirect(candidate: string, pattern: string): boolean {
   if (!trimmed) return false;
 
   if (trimmed.endsWith('*')) {
-    return candidate.startsWith(trimmed.slice(0, -1));
+    // Compare origin + path-prefix instead of a raw string startsWith so that a
+    // wildcard can only match within the same origin. A naive prefix match lets
+    // 'https://app.example.com*' match 'https://app.example.com.evil.com'.
+    const prefix = trimmed.slice(0, -1);
+    let prefixUrl: URL;
+    let candidateUrl: URL;
+    try {
+      prefixUrl = new URL(prefix);
+      candidateUrl = new URL(candidate);
+    } catch {
+      return false;
+    }
+    if (prefixUrl.origin !== candidateUrl.origin) return false;
+    const prefixPath = prefixUrl.pathname + prefixUrl.search;
+    const candidatePath = candidateUrl.pathname + candidateUrl.search;
+    return candidatePath.startsWith(prefixPath);
   }
 
   let allowedUrl: URL;
@@ -70,12 +85,36 @@ export function appendRedirectParams(
   return url.toString();
 }
 
+const redirectAllowlistWarned = new Set<string>();
+
 export function parseClientRedirectUrl(env: Env, value: string | null | undefined): string | null {
   if (!value) return null;
   const normalized = normalizeUrl(value);
   const allowed = getAllowedRedirectUrls(env);
-  if (allowed.length > 0 && !allowed.some((pattern) => isAllowedRedirect(normalized, pattern))) {
-    throw new EdgeBaseError(400, 'redirect_url is not allowed.');
+  if (allowed.length > 0) {
+    if (!allowed.some((pattern) => isAllowedRedirect(normalized, pattern))) {
+      throw new EdgeBaseError(400, 'redirect_url is not allowed.');
+    }
+    return normalized;
+  }
+  // No allowlist configured. OAuth and email flows append access/refresh tokens
+  // to this redirect, so accepting an arbitrary URL is a token-exfiltration
+  // vector. For backward compatibility the redirect is still honored when no
+  // allowlist is set, but in release mode we warn (once) so operators know to
+  // lock this down with auth.allowedRedirectUrls.
+  let release = false;
+  try {
+    release = !!parseConfig(env)?.release;
+  } catch {
+    release = false;
+  }
+  if (release && !redirectAllowlistWarned.has('missing-redirect-allowlist')) {
+    redirectAllowlistWarned.add('missing-redirect-allowlist');
+    console.warn(
+      '[Auth] A redirect_url was accepted without auth.allowedRedirectUrls configured. '
+      + 'OAuth/email flows append access & refresh tokens to the redirect target, so set '
+      + 'auth.allowedRedirectUrls to restrict where tokens can be sent.',
+    );
   }
   return normalized;
 }

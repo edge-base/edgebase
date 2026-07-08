@@ -13,6 +13,7 @@ import {
   generateTOTPSecret,
   generateTOTPUri,
   verifyTOTP,
+  verifyTOTPWithCounter,
   generateRecoveryCodes,
   encryptSecret,
   decryptSecret,
@@ -320,6 +321,40 @@ describe('verifyTOTP round-trip (generate → verify)', () => {
       .padStart(6, '0');
     expect(wrong).not.toBe(valid);
     expect(await verifyTOTP(secret, wrong)).toBe(false);
+  });
+});
+
+describe('verifyTOTPWithCounter (replay-protection support)', () => {
+  it('returns the matched step counter on success for replay tracking', async () => {
+    const secret = generateTOTPSecret();
+    freezeAt(1_700_000_000);
+    const counter = Math.floor(1_700_000_000 / STEP);
+    const code = await hotp(base32Decode(secret), counter);
+    const result = await verifyTOTPWithCounter(secret, code);
+    expect(result.valid).toBe(true);
+    expect(result.counter).toBe(counter);
+  });
+
+  it('reports the neighboring step counter when a ±1 code is accepted', async () => {
+    const key = base32Decode(RFC_SECRET);
+    freezeAt(60); // counter = 2
+    const prevCode = await hotp(key, 1); // counter − 1
+    const result = await verifyTOTPWithCounter(RFC_SECRET, prevCode);
+    expect(result.valid).toBe(true);
+    expect(result.counter).toBe(1);
+  });
+
+  it('returns valid:false and counter -1 for a wrong code', async () => {
+    const secret = generateTOTPSecret();
+    freezeAt(1_700_000_000);
+    const result = await verifyTOTPWithCounter(secret, '000000');
+    // A wrong code yields no matched step.
+    if (result.valid) {
+      // Extremely unlikely coincidence; skip if the random secret matched.
+      expect(result.counter).toBeGreaterThanOrEqual(0);
+    } else {
+      expect(result.counter).toBe(-1);
+    }
   });
 });
 

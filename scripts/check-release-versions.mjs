@@ -1,12 +1,10 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RELEASE_TARGETS, RELEASE_VERSION_REFERENCES } from './release-targets.mjs';
-import { checkVersionReference, getSourceVersion, isValidSemver, readTargetVersion, summarizeTargets } from './release-version-utils.mjs';
+import { assertStableReleaseVersion, checkVersionReference, getSourceVersion, readTargetVersion, summarizeTargets } from './release-version-utils.mjs';
 
 export function checkReleaseVersions(version = getSourceVersion()) {
-  if (!isValidSemver(version)) {
-    throw new Error(`Root version "${version}" is not a valid semver string.`);
-  }
+  assertStableReleaseVersion(version);
 
   const summary = summarizeTargets();
   console.log(`Checking ${summary.fileBacked} file-backed release targets against root version ${version}...`);
@@ -54,13 +52,16 @@ export function checkReleaseVersions(version = getSourceVersion()) {
   }
 
   if (mismatches.length > 0) {
-    console.error();
-    console.error(`Found ${mismatches.length} release target version mismatch(es).`);
-    for (const mismatch of mismatches) {
-      console.error(`  - ${mismatch.name} at ${mismatch.path}: ${mismatch.currentVersion}`);
-    }
-    console.error('Run `pnpm release:sync` to align file-backed targets to the root version.');
-    process.exit(1);
+    const lines = [
+      '',
+      `Found ${mismatches.length} release target version mismatch(es).`,
+      ...mismatches.map((mismatch) => `  - ${mismatch.name} at ${mismatch.path}: ${mismatch.currentVersion}`),
+      'Run `pnpm release:sync` to align file-backed targets to the root version.',
+    ];
+    // Throw instead of process.exit so callers' finally/cleanup (e.g. temp
+    // .npmrc containing NPM_TOKEN) always runs. The CLI entry below converts
+    // this into an exit code.
+    throw new Error(lines.join('\n'));
   }
 
   console.log();
@@ -70,5 +71,10 @@ export function checkReleaseVersions(version = getSourceVersion()) {
 const isDirectRun = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isDirectRun) {
-  checkReleaseVersions();
+  try {
+    checkReleaseVersions();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
 }

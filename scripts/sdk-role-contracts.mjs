@@ -54,6 +54,12 @@ const discovery = {
     { sdk: 'kotlin', sources: ['packages/sdk/kotlin/client/src/jvmTest/kotlin/dev/edgebase/sdk/client/ClientEdgeBaseJvmAuthE2ETest.kt'] },
     { sdk: 'dart', sources: ['packages/sdk/dart/packages/flutter/test/flutter_e2e_test.dart'] },
     { sdk: 'swift', sources: ['packages/sdk/swift/packages/ios/Tests/IosE2ETests.swift'] }
+  ],
+  realtime: [
+    { sdk: 'js', sources: ['packages/sdk/js/packages/web/test/unit/web.unit.test.ts'] },
+    { sdk: 'swift', sources: ['packages/sdk/swift/packages/ios/Tests/IosUnitTests.swift'] },
+    { sdk: 'kotlin', sources: ['packages/sdk/kotlin/client/src/jvmTest/kotlin/dev/edgebase/sdk/client/RoomClientJvmTest.kt'] },
+    { sdk: 'python', sources: ['packages/sdk/python/tests/test_sdk.py'] }
   ]
 };
 

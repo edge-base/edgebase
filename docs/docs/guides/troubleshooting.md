@@ -166,8 +166,8 @@ client.db('app').table('posts').insert(/* ... */);
 3. Verify you are using the correct `context.data` shape. For `afterInsert` and `afterUpdate`, the new record is in `context.data.after`. For `afterDelete`, the deleted record is in `context.data.before`:
    ```typescript
    export default async function onTodoCreated(doc, context) {
-     const newRecord = context.data.after;   // after insert/update
-     const oldRecord = context.data.before;  // before update, or the deleted record
+     const newRecord = context.data.after; // after insert/update
+     const oldRecord = context.data.before; // before update, or the deleted record
    }
    ```
 
@@ -238,6 +238,7 @@ Check the plugin's documentation for its exact table names.
 **Symptom:** `R2 'STORAGE': provisioning failed` with `Please enable R2` or `code: 10042`.
 
 **Fix:** R2 must be enabled in the Cloudflare Dashboard before first deploy:
+
 <div className="docs-badge-row">
   <span className="docs-badge docs-badge--free">Free Plan</span>
   <span className="docs-badge docs-badge--setup">Billing Setup</span>
@@ -283,6 +284,7 @@ EdgeBase CLI v0.1.3+ generates the correct migration format automatically. If yo
 **Symptom:** Realtime app or TURN key creation fails during deploy.
 
 **Fix:**
+
 1. Cloudflare Calls may need to be enabled: **Dashboard → Calls → Get Started**.
 2. If using wrangler OAuth, create a dedicated API token with Calls Write permissions and export as `CLOUDFLARE_API_TOKEN`.
 3. If your app doesn't use realtime features, remove `realtime` from `edgebase.config.ts`.
@@ -295,7 +297,8 @@ EdgeBase CLI v0.1.3+ generates the correct migration format automatically. If yo
 
 1. Check if your production environment variables are set. The deploy does not copy `.env.development` to production. Set secrets via the Cloudflare dashboard or Wrangler:
    ```bash
-   npx wrangler secret put JWT_SECRET
+   npx wrangler secret put JWT_USER_SECRET
+   npx wrangler secret put JWT_ADMIN_SECRET
    ```
 2. If using OAuth, set provider credentials as secrets as well.
 3. Check Cloudflare Worker logs for the actual error:

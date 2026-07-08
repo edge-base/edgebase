@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
 		apiFetch: vi.fn(),
 		toastError: vi.fn(),
 		toastSuccess: vi.fn(),
+		toastWarning: vi.fn(),
 		downloadBlob: vi.fn(),
 		schemaStore: {
 			subscribe(run: (value: typeof schemaState) => void) {
@@ -44,6 +45,7 @@ vi.mock('$lib/stores/schema', () => ({
 vi.mock('$lib/stores/toast.svelte', () => ({
 	toastError: mocks.toastError,
 	toastSuccess: mocks.toastSuccess,
+	toastWarning: mocks.toastWarning,
 }));
 
 vi.mock('$lib/download', () => ({

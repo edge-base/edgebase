@@ -43,6 +43,56 @@ interface WSMeta {
   supportsBatch: boolean;
 }
 
+// JSON-safe projection of WSMeta persisted on the socket so it survives DO
+// hibernation (Maps become entry arrays).
+interface PersistedWSMeta {
+  authenticated: boolean;
+  userId?: string;
+  role?: string;
+  connectionId: string;
+  subscribedChannels: string[];
+  channelFilters: [string, FilterCondition[]][];
+  channelOrFilters: [string, FilterCondition[]][];
+  sdkVersion?: string;
+  supportsBatch: boolean;
+}
+
+type HibernatingWebSocket = WebSocket & {
+  serializeAttachment?: (value: unknown) => void;
+  deserializeAttachment?: () => unknown;
+};
+
+function serializeWSMeta(meta: WSMeta): PersistedWSMeta {
+  return {
+    authenticated: meta.authenticated,
+    userId: meta.userId,
+    role: meta.role,
+    connectionId: meta.connectionId,
+    subscribedChannels: meta.subscribedChannels,
+    channelFilters: Array.from(meta.channelFilters.entries()),
+    channelOrFilters: Array.from(meta.channelOrFilters.entries()),
+    sdkVersion: meta.sdkVersion,
+    supportsBatch: meta.supportsBatch,
+  };
+}
+
+function deserializeWSMeta(value: unknown): WSMeta | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Partial<PersistedWSMeta>;
+  if (typeof v.connectionId !== 'string') return null;
+  return {
+    authenticated: !!v.authenticated,
+    userId: v.userId,
+    role: v.role,
+    connectionId: v.connectionId,
+    subscribedChannels: Array.isArray(v.subscribedChannels) ? v.subscribedChannels : [],
+    channelFilters: new Map(Array.isArray(v.channelFilters) ? v.channelFilters : []),
+    channelOrFilters: new Map(Array.isArray(v.channelOrFilters) ? v.channelOrFilters : []),
+    sdkVersion: v.sdkVersion,
+    supportsBatch: !!v.supportsBatch,
+  };
+}
+
 const MAX_FILTER_CONDITIONS = 5;
 const RECENT_DELIVERY_TTL_MS = 60_000;
 const MAX_RECENT_DELIVERIES = 2048;
@@ -789,6 +839,20 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
     const cached = this.metaCache.get(ws);
     if (cached) return cached;
 
+    // After the DO hibernates and wakes, the in-memory cache is empty. Restore
+    // the persisted attachment first so a still-open socket keeps its
+    // authenticated state and subscriptions — otherwise it would be rebuilt as
+    // unauthenticated with no channels and its events would be silently dropped.
+    try {
+      const restored = deserializeWSMeta((ws as HibernatingWebSocket).deserializeAttachment?.());
+      if (restored) {
+        this.metaCache.set(ws, restored);
+        return restored;
+      }
+    } catch {
+      // Fall through to a tags-based default.
+    }
+
     try {
       const tags = this.ctx.getTags(ws);
       if (tags.length === 0) return null;
@@ -810,6 +874,13 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
 
   private setWSMeta(ws: WebSocket, meta: WSMeta): void {
     this.metaCache.set(ws, meta);
+    // Persist to the socket so the meta survives hibernation (see getWSMeta).
+    try {
+      (ws as HibernatingWebSocket).serializeAttachment?.(serializeWSMeta(meta));
+    } catch {
+      // serializeAttachment is unavailable outside the hibernation API; the
+      // in-memory cache remains authoritative in that case.
+    }
   }
 
   private isDuplicateDelivery(deliveryId?: string): boolean {

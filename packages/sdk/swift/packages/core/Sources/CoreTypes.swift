@@ -51,8 +51,20 @@ public typealias DatabaseLiveClient = any DatabaseLiveSubscribable
 /// Minimal protocol for token management.
 public protocol TokenManageable: Sendable {
     func getAccessToken() async throws -> String?
+    /// Get a valid access token. When `forceRefresh` is true, bypass the local
+    /// expiry short-circuit and refresh unconditionally (used on a server 401 so a
+    /// retry does not re-send a token the server has already rejected).
+    func getAccessToken(forceRefresh: Bool) async throws -> String?
     func getRefreshToken() async -> String?
     func clearTokens() async
+}
+
+public extension TokenManageable {
+    /// Default: fall back to the cached-token path. Conformers that support refresh
+    /// (e.g. the client TokenManager) override this to actually force a refresh.
+    func getAccessToken(forceRefresh: Bool) async throws -> String? {
+        try await getAccessToken()
+    }
 }
 
 /// Type alias for backward compatibility with existing Core code.

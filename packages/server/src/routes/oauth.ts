@@ -18,6 +18,7 @@ import {
   parseClientRedirectUrl,
 } from '../lib/auth-redirect.js';
 import { zodDefaultHook, jsonResponseSchema, errorResponseSchema } from '../lib/schemas.js';
+import { resolveServiceKeyCandidate, validateKey, buildConstraintCtx } from '../lib/service-key.js';
 import {
   isSupportedProvider,
   createOAuthProvider,
@@ -377,15 +378,29 @@ oauthRoute.openapi(oauthCallback, async (c) => {
   // Delete state immediately after policy check (single-use)
   await c.env.KV.delete(`oauth:state:${state}`);
 
-  // Verify captcha was passed during OAuth initiation
-  try {
-    if (getOAuthRuntimeConfig(c.env).captcha && !captcha_passed) {
-      if (!c.req.header('X-EdgeBase-Service-Key')) {
-        throw new EdgeBaseError(403, 'Captcha verification required for OAuth.', undefined, 'forbidden');
+  // Verify captcha was passed during OAuth initiation. A valid Service Key
+  // bypasses captcha, but mere presence of the header must not — validate it.
+  if (getOAuthRuntimeConfig(c.env).captcha && !captcha_passed) {
+    let bypass = false;
+    const provided = resolveServiceKeyCandidate(c.req, c.get('serviceKeyToken') as string | null | undefined);
+    if (provided) {
+      try {
+        const { result } = validateKey(
+          provided,
+          'auth:*:*:bypass',
+          parseConfig(c.env),
+          c.env as never,
+          undefined,
+          buildConstraintCtx((c.env ?? {}) as { ENVIRONMENT?: string }, c.req),
+        );
+        bypass = result === 'valid';
+      } catch {
+        bypass = false;
       }
     }
-  } catch (e) {
-    if (e instanceof EdgeBaseError) throw e;
+    if (!bypass) {
+      throw new EdgeBaseError(403, 'Captcha verification required for OAuth.', undefined, 'forbidden');
+    }
   }
 
   const configObj = getOAuthRuntimeConfig(c.env);

@@ -94,6 +94,10 @@ function isOpObject(value: unknown): boolean {
   );
 }
 
-function esc(name: string): string {
+export function escapeIdentifier(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
+}
+
+function esc(name: string): string {
+  return escapeIdentifier(name);
 }

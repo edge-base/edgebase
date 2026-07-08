@@ -845,6 +845,21 @@ function resolveStorageKey(
   bucketName: string,
   options?: { suffix?: string },
 ): string {
+  const key = resolveStorageKeyRaw(c, bucketName, options);
+  // Every caller of resolveStorageKey targets a single object (download, delete,
+  // HEAD, metadata get/update), so an empty key or a path-traversal segment is
+  // always invalid here. Validating centrally closes the gap where the read/
+  // delete/HEAD/metadata paths reached R2 without the checks the upload and
+  // signed-URL paths already run.
+  validateStorageKey(key);
+  return key;
+}
+
+function resolveStorageKeyRaw(
+  c: Context<HonoEnv>,
+  bucketName: string,
+  options?: { suffix?: string },
+): string {
   const directKey = c.req.param('key');
   if (directKey) {
     return directKey;

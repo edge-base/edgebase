@@ -48,6 +48,7 @@ export const RATE_LIMIT_DEFAULTS: Record<string, { requests: number; windowSec: 
   authSignin:  { requests: 10,         windowSec: 60 },
   authSignup:  { requests: 10,         windowSec: 60 },
   events:      { requests: 100,        windowSec: 60 },
+  realtime:    { requests: 120,        windowSec: 60 },
 };
 
 // Dev mode defaults: significantly higher to accommodate React strict mode double-rendering,
@@ -61,6 +62,7 @@ export const RATE_LIMIT_DEV_DEFAULTS: Record<string, { requests: number; windowS
   authSignin:  { requests: 100,        windowSec: 60 },
   authSignup:  { requests: 100,        windowSec: 60 },
   events:      { requests: 5000,       windowSec: 60 },
+  realtime:    { requests: 5000,       windowSec: 60 },
 };
 
 // ─── Window parser ───
@@ -195,9 +197,12 @@ function getBinding(env: Env, group: string): RateLimit | undefined {
 /** Determine the rate limit group for a request path */
 export function getGroup(path: string): string {
   if (path.startsWith('/api/db/')) {
-    // Database-live endpoints live under /api/db/ but are not database CRUD operations
+    // Database-live endpoints live under /api/db/ but are not database CRUD
+    // operations. They still need a finite limit — `broadcast` in particular
+    // fans out to every subscriber, so leaving it in the unlimited `global`
+    // bucket is a DoS/amplification vector.
     if (path === '/api/db/subscribe' || path === '/api/db/connect-check' || path === '/api/db/broadcast') {
-      return 'global';
+      return 'realtime';
     }
     return 'db';
   }

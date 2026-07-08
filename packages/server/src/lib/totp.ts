@@ -42,7 +42,23 @@ export async function verifyTOTP(
   code: string,
   window: number = WINDOW,
 ): Promise<boolean> {
-  if (!code || code.length !== DIGITS) return false;
+  return (await verifyTOTPWithCounter(secret, code, window)).valid;
+}
+
+/**
+ * Verify a TOTP code and, on success, return the matched time-step counter.
+ *
+ * The counter lets the caller enforce single-use (replay) protection by
+ * persisting the last consumed step and rejecting any code whose step has
+ * already been used — without it, a valid 6-digit code stays replayable for the
+ * whole ±window (~90s).
+ */
+export async function verifyTOTPWithCounter(
+  secret: string,
+  code: string,
+  window: number = WINDOW,
+): Promise<{ valid: boolean; counter: number }> {
+  if (!code || code.length !== DIGITS) return { valid: false, counter: -1 };
 
   const now = Math.floor(Date.now() / 1000);
   const counter = Math.floor(now / STEP);
@@ -50,10 +66,10 @@ export async function verifyTOTP(
   for (let i = -window; i <= window; i++) {
     const expected = await generateTOTPCode(secret, counter + i);
     if (timingSafeEqual(code, expected)) {
-      return true;
+      return { valid: true, counter: counter + i };
     }
   }
-  return false;
+  return { valid: false, counter: -1 };
 }
 
 /** Generate a TOTP code for a given counter value. */

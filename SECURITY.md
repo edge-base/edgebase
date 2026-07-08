@@ -4,7 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.2.x   | :white_check_mark: |
+| 0.3.x   | :white_check_mark: |
+| 0.2.x   | :x:                |
 | 0.1.x   | :x:                |
 
 We currently provide security fixes for the latest `0.x` minor release line only unless stated otherwise.
@@ -33,6 +34,6 @@ We will acknowledge receipt within 48 hours and aim to provide an initial assess
 
 - Always set `release: true` in your `edgebase.config.ts` for production deployments. This disables dev-mode conveniences such as debug token exposure and permissive access rules.
 - Configure a proper email/SMS provider in production. Without one, authentication flows may silently skip sending verification emails or SMS.
-- Use strong, unique values for `JWT_SECRET` and other secret environment variables.
+- Use strong, unique values for `JWT_USER_SECRET`, `JWT_ADMIN_SECRET`, and other secret environment variables.
 - Enable access rules to restrict database operations to authorized users.
 - Review and restrict CORS origins in your configuration before deploying publicly.

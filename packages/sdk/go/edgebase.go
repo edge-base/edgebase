@@ -176,6 +176,55 @@ func isRetryableTransportError(err error) bool {
 	return false
 }
 
+// isIdempotentMethod reports whether an HTTP method is safe to auto-retry after an
+// ambiguous transport error. GET/PUT/DELETE/HEAD are idempotent, so a retry cannot
+// double-execute. POST/PATCH are NOT idempotent: a "reset"/"eof"/"connection" error
+// after the server has already committed could double-execute the request, so they are
+// not retried on ambiguous post-send failures.
+func isIdempotentMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodHead, http.MethodOptions:
+		return true
+	default:
+		return false
+	}
+}
+
+// EdgeBaseError is a typed error returned from EdgeBase HTTP failures. It implements
+// the error interface (so existing callers keep working) while also exposing the HTTP
+// status code, a machine-readable code, and a message so consumers can branch on status
+// without string-parsing.
+type EdgeBaseError struct {
+	StatusCode int
+	Message    string
+	Code       string
+}
+
+func (e *EdgeBaseError) Error() string {
+	if e.Code != "" {
+		return fmt.Sprintf("HTTP %d (%s): %s", e.StatusCode, e.Code, e.Message)
+	}
+	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Message)
+}
+
+// newHTTPError builds an *EdgeBaseError from a status code and raw response body,
+// extracting `code` / `message` (or `error`) fields from a JSON error body when present.
+func newHTTPError(statusCode int, body []byte) *EdgeBaseError {
+	httpErr := &EdgeBaseError{StatusCode: statusCode, Message: string(body)}
+	var parsed map[string]interface{}
+	if json.Unmarshal(body, &parsed) == nil {
+		if code, ok := parsed["code"].(string); ok {
+			httpErr.Code = code
+		}
+		if msg, ok := parsed["message"].(string); ok && msg != "" {
+			httpErr.Message = msg
+		} else if msg, ok := parsed["error"].(string); ok && msg != "" {
+			httpErr.Message = msg
+		}
+	}
+	return httpErr
+}
+
 // sleepWithContext delays for the given duration but returns early if ctx is cancelled.
 func sleepWithContext(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
@@ -214,7 +263,9 @@ func (c *HTTPClient) do(ctx context.Context, method, path string, body interface
 		resp, err := c.client.Do(req)
 		if err != nil {
 			lastErr = err
-			if attempt < 2 && isRetryableTransportError(err) {
+			// Only auto-retry idempotent methods on ambiguous transport errors. A
+			// POST/PATCH that failed after the server committed would double-execute.
+			if attempt < 2 && isIdempotentMethod(method) && isRetryableTransportError(err) {
 				if err := sleepWithContext(ctx, time.Duration(50*(attempt+1))*time.Millisecond); err != nil {
 					return nil, err
 				}
@@ -239,7 +290,7 @@ func (c *HTTPClient) do(ctx context.Context, method, path string, body interface
 		}
 
 		if resp.StatusCode >= 400 {
-			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+			return nil, newHTTPError(resp.StatusCode, respBody)
 		}
 
 		if len(respBody) == 0 || resp.StatusCode == 204 {
@@ -334,7 +385,7 @@ func (c *HTTPClient) PostMultipart(
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+		return nil, newHTTPError(resp.StatusCode, respBody)
 	}
 	if len(respBody) == 0 || resp.StatusCode == 204 {
 		return nil, nil
@@ -369,7 +420,7 @@ func (c *HTTPClient) GetRaw(ctx context.Context, path string) ([]byte, error) {
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return nil, newHTTPError(resp.StatusCode, body)
 	}
 	return body, nil
 }

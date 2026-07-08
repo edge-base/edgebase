@@ -76,6 +76,12 @@
 		return localDate.toISOString().slice(0, 16);
 	}
 
+	/** Convert a `datetime-local` input value back to an ISO/UTC string. */
+	function fromDateTimeLocalValue(value: string): string | null {
+		const date = new Date(value);
+		return Number.isNaN(date.getTime()) ? null : date.toISOString();
+	}
+
 	function handleWindowKeydown(event: KeyboardEvent) {
 		if (!open) return;
 		if (event.key === 'Escape' && !saving) {
@@ -117,6 +123,10 @@
 				return INVALID_VALUE;
 			}
 		}
+		if (col.type === 'datetime') {
+			const iso = fromDateTimeLocalValue(rawValue);
+			return iso === null ? INVALID_VALUE : iso;
+		}
 		return rawValue;
 	}
 
@@ -128,7 +138,15 @@
 		return typeof val === 'object' && val !== null;
 	}
 
-	function valuesEqual(a: unknown, b: unknown): boolean {
+	function valuesEqual(col: GridColumn, a: unknown, b: unknown): boolean {
+		if (col.type === 'datetime') {
+			// Compare at the precision the editor exposes so that opening a row
+			// (baseline ISO -> datetime-local -> ISO) does not register as a change.
+			if (a === null || a === undefined || b === null || b === undefined) {
+				return (a ?? null) === (b ?? null);
+			}
+			return toDateTimeLocalValue(String(a)) === toDateTimeLocalValue(String(b));
+		}
 		return JSON.stringify(a) === JSON.stringify(b);
 	}
 
@@ -140,7 +158,7 @@
 		for (const col of editableColumns) {
 			const parsedValue = parseDraftValue(col, draftValues[col.key] ?? '');
 			if (parsedValue === INVALID_VALUE) return null;
-			if (!valuesEqual(parsedValue, baselineRow[col.key])) {
+			if (!valuesEqual(col, parsedValue, baselineRow[col.key])) {
 				changes[col.key] = parsedValue;
 			}
 		}

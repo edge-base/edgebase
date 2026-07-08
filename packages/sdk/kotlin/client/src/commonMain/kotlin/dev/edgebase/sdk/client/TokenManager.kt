@@ -221,13 +221,18 @@ class ClientTokenManager(private val storage: TokenStorage) : TokenManager {
 
     /**
      * Try to restore session from persistent storage.
+     *
+     * On success, fires auth-state listeners with the restored user (matches the JS
+     * reference and the Swift SDK), so subscribers observe the restored session.
      */
     suspend fun tryRestoreSession(): Boolean {
-        mutex.withLock {
-            val stored = storage.getTokens() ?: return false
-            currentTokens = stored
-            return true
+        val stored = mutex.withLock {
+            val s = storage.getTokens() ?: return false
+            currentTokens = s
+            s
         }
+        notifyAuthStateChange(decodeJwtPayload(stored.accessToken))
+        return true
     }
 
     /**
@@ -247,15 +252,19 @@ class ClientTokenManager(private val storage: TokenStorage) : TokenManager {
 
     /**
      * Check if JWT token is expiring within buffer period.
+     *
+     * An undecodable token, a token without an `exp` claim, or a decode error is
+     * treated as expired (returns true), matching the JS reference — safer than the
+     * previous behavior of treating such tokens as never-expiring.
      */
     private fun isTokenExpiringSoon(token: String): Boolean {
         return try {
-            val payload = decodeJwtPayload(token) ?: return false
-            val exp = (payload["exp"] as? Number)?.toLong() ?: return false
+            val payload = decodeJwtPayload(token) ?: return true
+            val exp = (payload["exp"] as? Number)?.toLong() ?: return true
             val now = currentTimeMillis() / 1000
             exp - now < REFRESH_BUFFER_SECONDS
         } catch (_: Exception) {
-            false
+            true
         }
     }
 }

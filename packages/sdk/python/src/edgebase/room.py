@@ -560,10 +560,12 @@ class RoomClient:
     def _build_ws_url(self) -> str:
         http_url = self._base_url.rstrip("/")
         ws_url = http_url.replace("http://", "ws://").replace("https://", "wss://")
+        namespace = urllib.parse.quote(self.namespace, safe="")
+        room_id = urllib.parse.quote(self.room_id, safe="")
         return (
             f"{ws_url}/api/room"
-            f"?namespace={self.namespace}"
-            f"&id={self.room_id}"
+            f"?namespace={namespace}"
+            f"&id={room_id}"
         )
 
     async def _heartbeat_loop(self) -> None:
@@ -576,15 +578,33 @@ class RoomClient:
                     break
 
     async def _schedule_reconnect(self) -> None:
-        if self._reconnect_attempts >= self._max_reconnect_attempts:
-            return
-        delay = min(self._reconnect_base_delay * (2 ** self._reconnect_attempts), 30.0)
-        self._reconnect_attempts += 1
-        await asyncio.sleep(delay)
-        try:
-            await self._establish_connection()
-        except Exception as exc:
-            logger.debug("Room reconnect failed: %s", exc)
+        """Reconnect loop with exponential backoff, honoring max_reconnect_attempts.
+
+        Matches the JS reference: each failed attempt schedules the next one with
+        increased backoff until the attempt budget is exhausted. A successful
+        _establish_connection() resets the attempt counter and starts a fresh receive
+        loop (which reschedules on the next drop), so we return on success.
+        """
+        while (
+            not self._intentionally_left
+            and self._reconnect_attempts < self._max_reconnect_attempts
+        ):
+            delay = min(self._reconnect_base_delay * (2 ** self._reconnect_attempts), 30.0)
+            self._reconnect_attempts += 1
+            await asyncio.sleep(delay)
+            if self._intentionally_left:
+                return
+            try:
+                await self._establish_connection()
+                return
+            except Exception as exc:
+                logger.debug(
+                    "Room reconnect attempt %d/%d failed: %s",
+                    self._reconnect_attempts,
+                    self._max_reconnect_attempts,
+                    exc,
+                )
+                continue
 
     async def _close_ws(self, *, send_leave: bool = False) -> None:
         recv_task = self._recv_task

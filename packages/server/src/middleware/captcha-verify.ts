@@ -9,6 +9,7 @@
 import type { Context, Next } from 'hono';
 import type { Env } from '../types.js';
 import { parseConfig } from '../lib/do-router.js';
+import { resolveServiceKeyCandidate, validateKey, buildConstraintCtx } from '../lib/service-key.js';
 
 interface CaptchaConfig {
   siteKey: string;
@@ -117,13 +118,33 @@ async function siteverify(
 }
 
 /**
- * Check if request has a Service Key (bypass captcha per).
+ * Check if the request carries a VALID Service Key (which bypasses captcha).
+ *
+ * Presence of the header is not sufficient — a bot could send an arbitrary
+ * `X-EdgeBase-Service-Key` value to skip Turnstile. The candidate is validated
+ * against the configured keys with the same `auth:*:*:bypass` scope the auth
+ * rate limiter uses, so only a genuine server-to-server key bypasses captcha.
  */
-function hasServiceKey(c: HonoContext): boolean {
-  return !!(
-    c.req.header('X-EdgeBase-Service-Key') ||
-    c.req.header('Authorization')?.startsWith('ServiceKey ')
+function hasValidServiceKey(c: HonoContext): boolean {
+  const provided = resolveServiceKeyCandidate(
+    c.req,
+    c.get('serviceKeyToken') as string | null | undefined,
   );
+  if (!provided) return false;
+  try {
+    const config = parseConfig(c.env);
+    const { result } = validateKey(
+      provided,
+      'auth:*:*:bypass',
+      config,
+      c.env as never,
+      undefined,
+      buildConstraintCtx((c.env ?? {}) as { ENVIRONMENT?: string }, c.req),
+    );
+    return result === 'valid';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -154,8 +175,8 @@ export function captchaMiddleware(expectedAction: string) {
       return;
     }
 
-    // Step 3: Service Key → bypass
-    if (hasServiceKey(c)) {
+    // Step 3: Valid Service Key → bypass
+    if (hasValidServiceKey(c)) {
       await next();
       return;
     }
@@ -225,6 +246,6 @@ export function functionCaptchaMiddleware(functionName: string, captchaEnabled: 
 export const _test = {
   resolveCaptchaConfig,
   extractCaptchaToken,
-  hasServiceKey,
+  hasValidServiceKey,
   siteverify,
 };

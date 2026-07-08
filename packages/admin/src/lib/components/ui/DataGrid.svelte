@@ -4,6 +4,7 @@
 	import { validateCustomRecordId } from '$lib/record-id';
 	import { toastError, toastSuccess } from '$lib/stores/toast.svelte';
 	import CreateRowPanel from '$lib/components/ui/CreateRowPanel.svelte';
+	import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
 
 	// ── Types ──────────────────────────────────────────
 	export interface GridColumn {
@@ -207,6 +208,29 @@
 		}
 	}
 
+	// ── Datetime conversion ─────────────────────────────
+	function toDateTimeLocalValue(value: string): string {
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime())) return '';
+		const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+		return localDate.toISOString().slice(0, 16);
+	}
+
+	function fromDateTimeLocalValue(value: string): string | null {
+		const date = new Date(value);
+		return Number.isNaN(date.getTime()) ? null : date.toISOString();
+	}
+
+	function sameValue(col: GridColumn, a: unknown, b: unknown): boolean {
+		if (col.type === 'datetime') {
+			if (a === null || a === undefined || b === null || b === undefined) {
+				return (a ?? null) === (b ?? null);
+			}
+			return toDateTimeLocalValue(String(a)) === toDateTimeLocalValue(String(b));
+		}
+		return JSON.stringify(a) === JSON.stringify(b);
+	}
+
 	// ── Editing ─────────────────────────────────────────
 	function startEdit(rowId: string, colKey: string, currentVal: unknown) {
 		if (readonly) return;
@@ -217,6 +241,8 @@
 		editingCell = { rowId, colKey };
 		if (currentVal === null || currentVal === undefined) {
 			editValue = '';
+		} else if (col.type === 'datetime' && typeof currentVal === 'string') {
+			editValue = toDateTimeLocalValue(currentVal);
 		} else if (typeof currentVal === 'object') {
 			editValue = JSON.stringify(currentVal, null, 2);
 		} else {
@@ -244,6 +270,9 @@
 			if (parsedValue !== null && isNaN(parsedValue as number)) { cancelEdit(); return; }
 		} else if (col.type === 'boolean') {
 			parsedValue = editValue === 'true' || editValue === '1';
+		} else if (col.type === 'datetime') {
+			parsedValue = fromDateTimeLocalValue(editValue);
+			if (parsedValue === null) { toastError('Invalid date'); return; }
 		} else if (col.type === 'json') {
 			try {
 				parsedValue = editValue ? JSON.parse(editValue) : null;
@@ -258,7 +287,7 @@
 		// Check if value actually changed
 		const row = rows.find((r) => String(r.id) === rowId);
 		const originalVal = row?.[colKey];
-		if (JSON.stringify(parsedValue) === JSON.stringify(originalVal)) {
+		if (sameValue(col, parsedValue, originalVal)) {
 			// No change — remove from dirty if present
 			const dirty = dirtyRows.get(rowId);
 			if (dirty) {
@@ -317,14 +346,25 @@
 	}
 
 	// ── Bulk Delete ─────────────────────────────────────
-	async function bulkDelete() {
+	let confirmDeleteOpen = $state(false);
+	let deleting = $state(false);
+
+	function requestBulkDelete() {
+		if (selectedRows.size === 0 || !onDelete || readonly) return;
+		confirmDeleteOpen = true;
+	}
+
+	async function performBulkDelete() {
 		if (selectedRows.size === 0 || !onDelete) return;
 		const ids = [...selectedRows];
+		deleting = true;
 		try {
 			await onDelete(ids);
 			selectedRows = new Set();
 		} catch (err) {
 			toastError(describeActionError(err, 'Delete failed.'));
+		} finally {
+			deleting = false;
 		}
 	}
 
@@ -477,7 +517,7 @@
 			copyCell(val);
 			e.preventDefault();
 		} else if (e.key === 'Delete' && someSelected && !readonly) {
-			bulkDelete();
+			requestBulkDelete();
 			e.preventDefault();
 		}
 	}
@@ -497,7 +537,7 @@
 		<div class="dg-toolbar">
 			<div class="dg-toolbar__left">
 				{#if someSelected}
-					<button class="dg-btn dg-btn--danger" onclick={bulkDelete}>
+					<button class="dg-btn dg-btn--danger" disabled={deleting} onclick={requestBulkDelete}>
 						Delete {selectedRows.size} row{selectedRows.size > 1 ? 's' : ''}
 					</button>
 					{#if onBulkEdit}
@@ -768,6 +808,15 @@
 		saving={newRowSaving}
 		onClose={cancelNewRow}
 		onSubmit={saveNewRow}
+	/>
+
+	<ConfirmDialog
+		bind:open={confirmDeleteOpen}
+		title="Delete {selectedRows.size} row{selectedRows.size !== 1 ? 's' : ''}"
+		message={`Are you sure you want to delete ${selectedRows.size} selected row${selectedRows.size !== 1 ? 's' : ''}? This action cannot be undone.`}
+		confirmLabel="Delete"
+		confirmVariant="danger"
+		onconfirm={performBulkDelete}
 	/>
 {/if}
 

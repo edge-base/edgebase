@@ -94,6 +94,36 @@ function extractSessionId(token: string): string | null {
 type StorageAdapter = ReturnType<typeof createBrowserStorage>;
 const LOCK_TIMEOUT_MS = 10_000;
 const LOCK_VERIFY_DELAY_MS = 16;
+/**
+ * How long a fallback (no-BroadcastChannel) refresh-result stays valid for a
+ * waiting tab to consume. Kept short: the result parks a bearer access token in
+ * localStorage, so a stale entry a waiter blindly trusted would be a
+ * token-at-rest hazard. Waiters reject entries older than this.
+ */
+const REFRESH_RESULT_TTL_MS = 5_000;
+
+/**
+ * Minimal cross-tab refresh signal for the no-BroadcastChannel fallback. Only
+ * the (short-lived) access token is parked here; the rotating refresh token is
+ * NOT — waiters re-read it from the canonical `refresh-token` store. Timestamped
+ * so waiters can reject stale entries.
+ */
+interface StoredRefreshResult {
+  accessToken: string;
+  timestamp: number;
+}
+
+function parseRefreshResult(value: string | null): StoredRefreshResult | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as { accessToken?: unknown; timestamp?: unknown };
+    if (typeof parsed.accessToken !== 'string' || typeof parsed.timestamp !== 'number') return null;
+    if (Date.now() - parsed.timestamp > REFRESH_RESULT_TTL_MS) return null; // stale — reject
+    return { accessToken: parsed.accessToken, timestamp: parsed.timestamp };
+  } catch {
+    return null;
+  }
+}
 
 interface RefreshLock {
   ownerId: string;
@@ -233,16 +263,9 @@ export class TokenManager {
             // Access token will be refreshed on next request
           }
         }
-        // BroadcastChannel fallback: result delivered via storage event
+        // BroadcastChannel fallback: result delivered via storage event.
         if (e.key === this.keys.refreshResultKey && e.newValue) {
-          try {
-            const result = JSON.parse(e.newValue) as TokenPair;
-            this.accessToken = result.accessToken;
-            this.storage.setItem(this.keys.refreshTokenKey, result.refreshToken);
-            this.updateUser(result.accessToken);
-          } catch {
-            // ignore parse errors
-          }
+          this.consumeFallbackRefreshResult(e.newValue);
         }
       };
       window.addEventListener('storage', this.storageListener);
@@ -263,6 +286,21 @@ export class TokenManager {
     if (!refreshToken) return null;
 
     return this.refreshWithLeaderElection(refreshToken, doRefresh);
+  }
+
+  /**
+   * Force a refresh right now, routed through the SAME leader-elected/deduped
+   * path as {@link getAccessToken}. Used by explicit `refreshSession()` calls so
+   * they cannot double-spend the rotating refresh token concurrently with a
+   * background refresh (they join the in-flight refresh instead). Returns the
+   * resulting token pair.
+   */
+  async forceRefresh(doRefresh: (refreshToken: string) => Promise<TokenPair>): Promise<TokenPair> {
+    const refreshToken = this.storage.getItem(this.keys.refreshTokenKey);
+    if (!refreshToken) throw new EdgeBaseError(401, 'No refresh token available.');
+    const accessToken = await this.refreshWithLeaderElection(refreshToken, doRefresh);
+    const currentRefreshToken = this.storage.getItem(this.keys.refreshTokenKey) ?? refreshToken;
+    return { accessToken, refreshToken: currentRefreshToken };
   }
 
   /**
@@ -299,7 +337,17 @@ export class TokenManager {
       ? storedRefreshToken
       : refreshToken;
 
-    this.refreshPromise = doRefresh(tokenForRefresh)
+    // Invoke doRefresh inside a promise chain so that even a MISSING doRefresh
+    // or a SYNCHRONOUS throw surfaces as a rejection routed through .catch and
+    // .finally — otherwise the lock acquired above would leak until its TTL and
+    // the failure would look like a raw TypeError rather than an auth error.
+    this.refreshPromise = Promise.resolve()
+      .then(() => {
+        if (typeof doRefresh !== 'function') {
+          throw new EdgeBaseError(0, 'No token refresh function was provided.');
+        }
+        return doRefresh(tokenForRefresh);
+      })
       .then((tokens) => {
         this.setTokens(tokens);
         this.broadcastTokenRefreshed(tokens);
@@ -333,7 +381,11 @@ export class TokenManager {
     }
   }
 
-  /** Wait for another tab's refresh result (max 10s) */
+  /**
+   * Wait (up to {@link LOCK_TIMEOUT_MS}) for another tab to publish a refresh
+   * result. On timeout this does NOT refresh here — it clears the (presumed
+   * stale) leader lock and rejects so the CALLER can retry and become leader.
+   */
   private waitForRefreshResult(): Promise<string> {
     if (!this.storage.getItem(this.keys.refreshTokenKey)) {
       return Promise.reject(new EdgeBaseError(401, 'Not authenticated'));
@@ -345,7 +397,8 @@ export class TokenManager {
         if (settled) return;
         settled = true;
         cleanup();
-        // Leader tab died, try refreshing ourselves
+        // The leader never published a result (likely died). Clear the stale
+        // lock so a follow-up attempt can acquire it and refresh; reject here.
         this.storage.removeItem(this.keys.refreshLockKey);
         const rt = this.storage.getItem(this.keys.refreshTokenKey);
         if (rt) {
@@ -384,32 +437,21 @@ export class TokenManager {
         this.broadcastChannel.addEventListener('message', handler);
         cleanup = () => this.broadcastChannel?.removeEventListener('message', handler);
       } else {
-        // Fallback: poll storage for result
+        // Fallback: poll storage for a fresh, valid result.
         const interval = setInterval(() => {
           if (!this.storage.getItem(this.keys.refreshTokenKey)) {
             rejectSignedOut();
             return;
           }
-          const result = this.storage.getItem(this.keys.refreshResultKey);
-          if (result) {
+          const accessToken = this.consumeFallbackRefreshResult(
+            this.storage.getItem(this.keys.refreshResultKey),
+          );
+          if (accessToken) {
             if (settled) return;
             settled = true;
             clearTimeout(timeout);
             clearInterval(interval);
-            try {
-              const tokens = JSON.parse(result) as TokenPair;
-              this.accessToken = tokens.accessToken;
-              this.storage.setItem(this.keys.refreshTokenKey, tokens.refreshToken);
-              this.updateUser(tokens.accessToken);
-              resolve(tokens.accessToken);
-            } catch {
-              reject(
-                new EdgeBaseError(
-                  0,
-                  'Failed to parse the cross-tab auth refresh result. Clear local EdgeBase auth state and sign in again.',
-                ),
-              );
-            }
+            resolve(accessToken);
           }
         }, 100);
         cleanup = () => clearInterval(interval);
@@ -426,11 +468,33 @@ export class TokenManager {
         refreshToken: tokens.refreshToken,
       });
     } else if (typeof window !== 'undefined') {
-      // Fallback: use storage event
-      this.storage.setItem(this.keys.refreshResultKey, JSON.stringify(tokens));
-      // Clean up after other tabs have time to read
-      setTimeout(() => this.storage.removeItem(this.keys.refreshResultKey), 2000);
+      // Fallback: signal via a storage event. Park ONLY the short-lived access
+      // token plus a timestamp — the refresh token is already in the canonical
+      // store, so waiters re-read it there rather than us duplicating it. The
+      // timer is a backstop; waiters clear the entry the moment they consume it.
+      const result: StoredRefreshResult = { accessToken: tokens.accessToken, timestamp: Date.now() };
+      this.storage.setItem(this.keys.refreshResultKey, JSON.stringify(result));
+      setTimeout(() => this.storage.removeItem(this.keys.refreshResultKey), REFRESH_RESULT_TTL_MS);
     }
+  }
+
+  /**
+   * Consume a fallback (no-BroadcastChannel) refresh-result. Rejects stale or
+   * malformed entries, re-reads the rotating refresh token from the canonical
+   * store, applies the access token, and CLEARS the entry immediately to
+   * minimise token-at-rest. Returns the applied access token, or null.
+   */
+  private consumeFallbackRefreshResult(raw: string | null): string | null {
+    const parsed = parseRefreshResult(raw);
+    if (!parsed) return null;
+    // The refresh token lives in the canonical store (the leader wrote it via
+    // setTokens before signalling). A signed-out tab has none — treat as miss.
+    if (!this.storage.getItem(this.keys.refreshTokenKey)) return null;
+    // Clear ASAP so the bearer token does not linger in localStorage.
+    this.storage.removeItem(this.keys.refreshResultKey);
+    this.accessToken = parsed.accessToken;
+    this.updateUser(parsed.accessToken);
+    return parsed.accessToken;
   }
 
   /** Set tokens after successful auth */

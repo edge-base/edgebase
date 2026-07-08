@@ -239,7 +239,7 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
       );
     }
 
-    this.sendRaw({ type: 'auth', token, sdkVersion: '0.3.3' });
+    this.sendRaw({ type: 'auth', token, sdkVersion: '0.3.5' });
 
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -443,7 +443,7 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
   private refreshAuth(): void {
     const token = this.tokenManager.currentAccessToken;
     if (!token || !this.ws || !this.connected) return;
-    this.sendRaw({ type: 'auth', token, sdkVersion: '0.3.3' });
+    this.sendRaw({ type: 'auth', token, sdkVersion: '0.3.5' });
   }
 
   private handleAuthStateChange(user: TokenUser | null): void {

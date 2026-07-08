@@ -139,6 +139,16 @@ class HttpClient:
         msg = str(error).lower()
         return any(k in msg for k in ["timeout", "connection", "reset", "refused", "network", "eof"])
 
+    @staticmethod
+    def _is_idempotent_method(method: str) -> bool:
+        """Whether a method is safe to auto-retry after an ambiguous transport error.
+
+        GET/PUT/DELETE/HEAD are idempotent, so a retry cannot double-execute. POST/PATCH
+        are NOT idempotent: a "reset"/"eof"/"connection" error after the server committed
+        could double-execute the request, so they are not retried on ambiguous failures.
+        """
+        return method.upper() in ("GET", "PUT", "DELETE", "HEAD", "OPTIONS")
+
     def _request(self, method: str, path: str, params: dict[str, str] | None = None, json_body: Any = None) -> Any:
         url = self._build_url(path)
         headers = self._auth_headers()
@@ -147,7 +157,13 @@ class HttpClient:
             try:
                 response = self._client.request(method, url, params=params, json=json_body, headers=headers)
             except Exception as exc:
-                if attempt < 2 and self._is_retryable_transport_error(exc):
+                # Only auto-retry idempotent methods on ambiguous transport errors. A
+                # POST/PATCH that failed after the server committed would double-execute.
+                if (
+                    attempt < 2
+                    and self._is_idempotent_method(method)
+                    and self._is_retryable_transport_error(exc)
+                ):
                     time.sleep(0.05 * (attempt + 1))
                     continue
                 raise

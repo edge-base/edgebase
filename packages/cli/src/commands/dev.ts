@@ -19,7 +19,7 @@ import { loadConfigSafe } from '../lib/load-config.js';
 import { resolveRateLimitBindings } from '../lib/rate-limit-bindings.js';
 import { checkWranglerAuth } from '../lib/cf-auth.js';
 import { parseDevVars } from '../lib/dev-sidecar.js';
-import { writeLocalSecrets } from '../lib/local-secrets.js';
+import { upsertEnvFile, writeLocalSecrets } from '../lib/local-secrets.js';
 import {
   resolveWranglerCommand,
 } from '../lib/runtime-scaffold.js';
@@ -702,13 +702,52 @@ function resolveWorkerVarBindings(sidecarPort?: number): string[] {
   return vars;
 }
 
+function parseEnvFileContent(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx <= 0) continue;
+    result[trimmed.slice(0, eqIdx).trim()] = trimmed.slice(eqIdx + 1).trim();
+  }
+  return result;
+}
+
 function syncEnvDevelopmentToDevVars(projectDir: string, log = false): boolean {
   const envDevPath = join(projectDir, '.env.development');
+  const devVarsPath = join(projectDir, '.dev.vars');
   if (!existsSync(envDevPath)) return false;
 
-  copyFileSync(envDevPath, join(projectDir, '.dev.vars'));
+  // No hand-maintained .dev.vars yet — safe to create a fresh copy.
+  if (!existsSync(devVarsPath)) {
+    copyFileSync(envDevPath, devVarsPath);
+    if (log) {
+      console.log(chalk.green('✓'), '.env.development → .dev.vars synced');
+      console.log();
+    }
+    return true;
+  }
+
+  // .dev.vars exists: merge in .env.development values without clobbering the
+  // user's file (preserve their comments, ordering, and extra keys).
+  const envDevValues = parseEnvFileContent(readFileSync(envDevPath, 'utf-8'));
+  const devVarsValues = parseEnvFileContent(readFileSync(devVarsPath, 'utf-8'));
+
+  const changedKeys = Object.keys(envDevValues).filter(
+    (key) => devVarsValues[key] !== envDevValues[key],
+  );
+  if (changedKeys.length === 0) {
+    return true; // Already in sync.
+  }
+
+  upsertEnvFile(devVarsPath, envDevValues, '# EdgeBase local development secrets (synced)');
   if (log) {
-    console.log(chalk.green('✓'), '.env.development → .dev.vars synced');
+    console.log(
+      chalk.yellow('⚠'),
+      `.dev.vars already existed — merged ${changedKeys.length} value(s) from .env.development instead of overwriting.`,
+    );
+    console.log(chalk.dim(`  Updated keys: ${changedKeys.join(', ')}`));
     console.log();
   }
   return true;

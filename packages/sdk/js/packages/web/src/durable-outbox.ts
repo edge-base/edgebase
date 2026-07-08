@@ -1,0 +1,439 @@
+/**
+ * Durable outbox — a small, generic browser-side persistence primitive for
+ * offline-safe mutation queues.
+ *
+ * Apps keep their in-memory pending/retry queues; this module durably mirrors
+ * those queues so that queued-but-unsent mutations survive tab close, crash,
+ * and reload. Entries are scoped per tab; on startup a fresh tab atomically
+ * claims the entries of tabs that are no longer alive (detected via the Web
+ * Locks API) and replays them through the app's own flush paths.
+ *
+ * Design:
+ * - `DurableOutboxAdapter` is the storage contract; `createIndexedDbOutboxAdapter`
+ *   is the production implementation and `createMemoryOutboxAdapter` the
+ *   non-durable fallback (SSR, tests, storage-denied browsers) — mirroring the
+ *   adapter pattern in `browser-storage.ts`.
+ * - Entries are keyed by (tabId, entryKey). Re-`set()`ing an existing key keeps
+ *   the entry's original monotonic `seq`, so replay order preserves the enqueue
+ *   order of the first write per key (a create enqueued before its updates
+ *   replays first even when the update was merged later).
+ * - Liveness: each tab holds a Web Lock for its lifetime. `claimAbandoned()`
+ *   treats a tab whose lock is acquirable as dead and reassigns its entries to
+ *   the claiming tab in one adapter transaction, so a crash mid-claim cannot
+ *   drop entries. Without a Lock manager (older engines, jsdom) every foreign
+ *   tab is treated as dead — single-tab correctness is unaffected.
+ */
+
+export interface DurableOutboxEntry<V = unknown> {
+  entryKey: string;
+  seq: number;
+  tabId: string;
+  updatedAt: number;
+  value: V;
+}
+
+export interface DurableOutboxAdapter<V = unknown> {
+  /** Atomically reassign every entry of `fromTabId` to `toTabId`, preserving seq. */
+  claimTab(fromTabId: string, toTabId: string): Promise<DurableOutboxEntry<V>[]>;
+  clear(): Promise<void>;
+  /** Entries for one tab (or all tabs when omitted), ordered by seq ascending. */
+  listEntries(tabId?: string): Promise<DurableOutboxEntry<V>[]>;
+  listTabIds(): Promise<string[]>;
+  /** Upsert by (tabId, entryKey); an existing key keeps its original seq. */
+  put(entry: { entryKey: string; tabId: string; updatedAt: number; value: V }): Promise<void>;
+  remove(tabId: string, entryKey: string): Promise<void>;
+}
+
+// ── memory adapter ──────────────────────────────────────────────────────────
+
+// Composite store key. Each component is escaped (a space becomes %20) so a
+// space inside a tabId or entryKey can never collide with the join separator
+// and forge a different (tabId, entryKey) pair.
+function compositeKey(tabId: string, entryKey: string): string {
+  return `${encodeURIComponent(tabId)} ${encodeURIComponent(entryKey)}`;
+}
+
+/** True when `a` is strictly older than `b` (compare update time, then seq). */
+function isOlderThan<V>(a: DurableOutboxEntry<V>, b: DurableOutboxEntry<V>): boolean {
+  if (a.updatedAt !== b.updatedAt) return a.updatedAt < b.updatedAt;
+  return a.seq < b.seq;
+}
+
+export function createMemoryOutboxAdapter<V = unknown>(): DurableOutboxAdapter<V> {
+  const entries = new Map<string, DurableOutboxEntry<V>>();
+  let seq = 0;
+  const keyOf = compositeKey;
+  const sorted = (list: DurableOutboxEntry<V>[]) => [...list].sort((a, b) => a.seq - b.seq);
+  return {
+    async claimTab(fromTabId, toTabId) {
+      const claimed: DurableOutboxEntry<V>[] = [];
+      for (const [key, entry] of [...entries]) {
+        if (entry.tabId !== fromTabId) continue;
+        entries.delete(key);
+        const destKey = keyOf(toTabId, entry.entryKey);
+        const existing = entries.get(destKey);
+        // Do NOT clobber a newer live entry the claiming tab already enqueued
+        // for the same key — a resurrected older mutation must not overwrite it.
+        if (existing && !isOlderThan(existing, entry)) continue;
+        const moved = { ...entry, tabId: toTabId };
+        entries.set(destKey, moved);
+        claimed.push(moved);
+      }
+      return sorted(claimed);
+    },
+    async clear() {
+      entries.clear();
+    },
+    async listEntries(tabId) {
+      const list = [...entries.values()].filter((entry) => tabId === undefined || entry.tabId === tabId);
+      return sorted(list);
+    },
+    async listTabIds() {
+      return [...new Set([...entries.values()].map((entry) => entry.tabId))];
+    },
+    async put(entry) {
+      const key = keyOf(entry.tabId, entry.entryKey);
+      const existing = entries.get(key);
+      entries.set(key, { ...entry, seq: existing ? existing.seq : ++seq });
+    },
+    async remove(tabId, entryKey) {
+      entries.delete(keyOf(tabId, entryKey));
+    },
+  };
+}
+
+// ── IndexedDB adapter ───────────────────────────────────────────────────────
+
+const ENTRY_STORE = 'entries';
+const META_STORE = 'meta';
+const SEQ_KEY = 'seq';
+const TAB_INDEX = 'byTab';
+
+interface StoredEntry<V> extends DurableOutboxEntry<V> {
+  key: string;
+}
+
+function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed.'));
+  });
+}
+
+function transactionDone(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error('IndexedDB transaction aborted.'));
+    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed.'));
+  });
+}
+
+function resolveIndexedDb(factory?: IDBFactory): IDBFactory | null {
+  if (factory) return factory;
+  try {
+    const candidate = (globalThis as { indexedDB?: unknown }).indexedDB;
+    return candidate && typeof (candidate as IDBFactory).open === 'function'
+      ? (candidate as IDBFactory)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * IndexedDB-backed adapter. Returns `null` when no IndexedDB is available so
+ * callers can fall back (memory adapter or no mirroring) without try/catch.
+ */
+export function createIndexedDbOutboxAdapter<V = unknown>(
+  dbName: string,
+  factory?: IDBFactory,
+): DurableOutboxAdapter<V> | null {
+  const idb = resolveIndexedDb(factory);
+  if (!idb) return null;
+
+  let dbPromise: Promise<IDBDatabase> | null = null;
+  const open = () => {
+    dbPromise ??= new Promise<IDBDatabase>((resolve, reject) => {
+      const request = idb.open(dbName, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(ENTRY_STORE)) {
+          const store = db.createObjectStore(ENTRY_STORE, { keyPath: 'key' });
+          store.createIndex(TAB_INDEX, 'tabId', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(META_STORE)) {
+          db.createObjectStore(META_STORE);
+        }
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        // If another tab upgrades the schema later, drop our handle so the
+        // upgrade can proceed; the next call reopens at the new version.
+        db.onversionchange = () => {
+          db.close();
+          dbPromise = null;
+        };
+        resolve(db);
+      };
+      request.onerror = () => reject(request.error ?? new Error(`Failed to open IndexedDB '${dbName}'.`));
+      request.onblocked = () => reject(new Error(`IndexedDB '${dbName}' open was blocked.`));
+    });
+    dbPromise.catch(() => {
+      dbPromise = null; // allow retry after a failed open
+    });
+    return dbPromise;
+  };
+
+  const keyOf = compositeKey;
+  const sorted = (list: DurableOutboxEntry<V>[]) => [...list].sort((a, b) => a.seq - b.seq);
+  const toEntry = (stored: StoredEntry<V>): DurableOutboxEntry<V> => ({
+    entryKey: stored.entryKey,
+    seq: stored.seq,
+    tabId: stored.tabId,
+    updatedAt: stored.updatedAt,
+    value: stored.value,
+  });
+
+  return {
+    async claimTab(fromTabId, toTabId) {
+      const db = await open();
+      const tx = db.transaction([ENTRY_STORE], 'readwrite');
+      const store = tx.objectStore(ENTRY_STORE);
+      // Read the source AND destination entries up front (all reads before any
+      // write) so the claim can avoid clobbering a newer entry the destination
+      // tab already enqueued under the same key.
+      const stored = (await requestToPromise(
+        store.index(TAB_INDEX).getAll(fromTabId),
+      )) as StoredEntry<V>[];
+      const destExisting = (await requestToPromise(
+        store.index(TAB_INDEX).getAll(toTabId),
+      )) as StoredEntry<V>[];
+      const destByEntryKey = new Map(destExisting.map((entry) => [entry.entryKey, entry]));
+      const claimed: StoredEntry<V>[] = [];
+      for (const entry of stored) {
+        store.delete(entry.key);
+        const existing = destByEntryKey.get(entry.entryKey);
+        // Keep the newer destination entry; drop the resurrected older one.
+        if (existing && !isOlderThan(existing, entry)) continue;
+        const moved: StoredEntry<V> = { ...entry, tabId: toTabId, key: keyOf(toTabId, entry.entryKey) };
+        store.put(moved);
+        claimed.push(moved);
+      }
+      await transactionDone(tx);
+      return sorted(claimed.map(toEntry));
+    },
+    async clear() {
+      const db = await open();
+      const tx = db.transaction([ENTRY_STORE, META_STORE], 'readwrite');
+      tx.objectStore(ENTRY_STORE).clear();
+      tx.objectStore(META_STORE).clear();
+      await transactionDone(tx);
+    },
+    async listEntries(tabId) {
+      const db = await open();
+      const tx = db.transaction([ENTRY_STORE], 'readonly');
+      const store = tx.objectStore(ENTRY_STORE);
+      const stored = (await requestToPromise(
+        tabId === undefined ? store.getAll() : store.index(TAB_INDEX).getAll(tabId),
+      )) as StoredEntry<V>[];
+      return sorted(stored.map(toEntry));
+    },
+    async listTabIds() {
+      const db = await open();
+      const tx = db.transaction([ENTRY_STORE], 'readonly');
+      const stored = (await requestToPromise(
+        tx.objectStore(ENTRY_STORE).getAll(),
+      )) as StoredEntry<V>[];
+      return [...new Set(stored.map((entry) => entry.tabId))];
+    },
+    async put(entry) {
+      const db = await open();
+      const tx = db.transaction([ENTRY_STORE, META_STORE], 'readwrite');
+      const store = tx.objectStore(ENTRY_STORE);
+      const meta = tx.objectStore(META_STORE);
+      const key = keyOf(entry.tabId, entry.entryKey);
+      const existing = (await requestToPromise(store.get(key))) as StoredEntry<V> | undefined;
+      let seq = existing?.seq;
+      if (seq === undefined) {
+        const current = ((await requestToPromise(meta.get(SEQ_KEY))) as number | undefined) ?? 0;
+        seq = current + 1;
+        meta.put(seq, SEQ_KEY);
+      }
+      const stored: StoredEntry<V> = { ...entry, key, seq };
+      store.put(stored);
+      await transactionDone(tx);
+    },
+    async remove(tabId, entryKey) {
+      const db = await open();
+      const tx = db.transaction([ENTRY_STORE], 'readwrite');
+      tx.objectStore(ENTRY_STORE).delete(keyOf(tabId, entryKey));
+      await transactionDone(tx);
+    },
+  };
+}
+
+// ── outbox ──────────────────────────────────────────────────────────────────
+
+/** Structural subset of `navigator.locks` so tests can inject a fake. */
+export interface OutboxLockManager {
+  request(
+    name: string,
+    options: { ifAvailable?: boolean; mode?: 'exclusive' | 'shared' },
+    callback: (lock: unknown) => unknown,
+  ): Promise<unknown>;
+}
+
+export interface DurableOutboxOptions<V = unknown> {
+  adapter?: DurableOutboxAdapter<V>;
+  /** Pass `null` to disable lock-based liveness (all foreign tabs treated dead). */
+  locks?: OutboxLockManager | null;
+  /** Namespace for storage and lock names, e.g. `myapp-outbox:{userId}`. */
+  name: string;
+  tabId?: string;
+}
+
+function resolveLocks(): OutboxLockManager | null {
+  try {
+    const candidate = (globalThis as { navigator?: { locks?: unknown } }).navigator?.locks;
+    return candidate && typeof (candidate as OutboxLockManager).request === 'function'
+      ? (candidate as OutboxLockManager)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function randomTabId(): string {
+  try {
+    const cryptoApi = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+    if (cryptoApi?.randomUUID) return cryptoApi.randomUUID();
+  } catch {
+    // fall through
+  }
+  return `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export class DurableOutbox<V = unknown> {
+  readonly tabId: string;
+
+  private readonly adapter: DurableOutboxAdapter<V>;
+  private readonly locks: OutboxLockManager | null;
+  private readonly name: string;
+  private holdPromise: Promise<void> | null = null;
+
+  constructor(options: DurableOutboxOptions<V>) {
+    this.name = options.name;
+    this.adapter = options.adapter ?? createMemoryOutboxAdapter<V>();
+    this.locks = options.locks === undefined ? resolveLocks() : options.locks;
+    this.tabId = options.tabId ?? randomTabId();
+  }
+
+  /**
+   * Hold this tab's liveness lock until the tab closes. Idempotent, and returns
+   * a promise that resolves once the lock is ACQUIRED (not when it is released —
+   * it is held for the tab's lifetime). `set()` awaits this so a tab's live
+   * entries can never be seen as abandoned by a racing `claimAbandoned()`
+   * before the liveness lock is in place. Without a lock manager it resolves
+   * immediately (documented no-liveness fallback).
+   */
+  holdTab(): Promise<void> {
+    if (this.holdPromise) return this.holdPromise;
+    const locks = this.locks;
+    if (!locks) {
+      this.holdPromise = Promise.resolve();
+      return this.holdPromise;
+    }
+    this.holdPromise = new Promise<void>((acquired) => {
+      let settled = false;
+      const signalAcquired = () => {
+        if (!settled) {
+          settled = true;
+          acquired();
+        }
+      };
+      locks
+        .request(this.tabLockName(this.tabId), { mode: 'exclusive' }, () => {
+          // The callback runs only once the lock is granted.
+          signalAcquired();
+          return new Promise<never>(() => {
+            // Held forever; released implicitly when the tab/agent goes away.
+          });
+        })
+        .catch(() => {
+          // Lock manager refused (e.g. shutting down) — degrade to no liveness
+          // signal, but don't block set() forever.
+          signalAcquired();
+        });
+    });
+    return this.holdPromise;
+  }
+
+  async set(entryKey: string, value: V): Promise<void> {
+    // Ensure the liveness lock is held before this tab persists an entry, so
+    // another tab cannot claim it as abandoned in the gap before holdTab ran.
+    await this.holdTab();
+    await this.adapter.put({ entryKey, tabId: this.tabId, updatedAt: Date.now(), value });
+  }
+
+  async ack(entryKey: string): Promise<void> {
+    await this.adapter.remove(this.tabId, entryKey);
+  }
+
+  /**
+   * Claim every entry belonging to a tab that is no longer alive, reassigning
+   * them to this tab, and return them ordered by seq. Runs under a sweep lock
+   * so two fresh tabs cannot claim the same entries concurrently.
+   */
+  async claimAbandoned(): Promise<DurableOutboxEntry<V>[]> {
+    const run = async () => {
+      const claimed: DurableOutboxEntry<V>[] = [];
+      for (const tabId of await this.adapter.listTabIds()) {
+        if (tabId === this.tabId) continue;
+        if (!(await this.isTabDead(tabId))) continue;
+        claimed.push(...(await this.adapter.claimTab(tabId, this.tabId)));
+      }
+      return claimed.sort((a, b) => a.seq - b.seq);
+    };
+    if (!this.locks) return run();
+    return (await this.locks.request(`${this.name}::sweep`, { mode: 'exclusive' }, run)) as
+      DurableOutboxEntry<V>[];
+  }
+
+  /** Entries currently owned by this tab (e.g. re-listing after a claim). */
+  async entries(): Promise<DurableOutboxEntry<V>[]> {
+    return this.adapter.listEntries(this.tabId);
+  }
+
+  /**
+   * Every entry regardless of owning tab, ordered by seq — a read-only view
+   * for overlaying still-queued mutations onto cached records without racing
+   * the claim/sweep machinery.
+   */
+  async allEntries(): Promise<DurableOutboxEntry<V>[]> {
+    return this.adapter.listEntries();
+  }
+
+  /** Remove everything — the "reset local data" / logout escape hatch. */
+  async clear(): Promise<void> {
+    await this.adapter.clear();
+  }
+
+  private tabLockName(tabId: string): string {
+    return `${this.name}::tab::${tabId}`;
+  }
+
+  private async isTabDead(tabId: string): Promise<boolean> {
+    if (!this.locks) return true;
+    try {
+      // A live tab holds its lock, so ifAvailable hands us null. If we can take
+      // the lock, the owning tab is gone.
+      return (await this.locks.request(
+        this.tabLockName(tabId),
+        { ifAvailable: true, mode: 'exclusive' },
+        (lock) => lock !== null,
+      )) === true;
+    } catch {
+      return false;
+    }
+  }
+}
