@@ -25,6 +25,20 @@ DEV_VARS_BACKUP_PATH=""
 
 TOTAL_SHARDS="${TOTAL_SHARDS:-16}"
 
+# Per-invocation wall-clock cap so a wedged workerd/vitest can never hang the
+# whole run. Without it, a single process that fails to exit blocks the `wait`
+# loops below until GitHub's 6h job cap (observed in CI under memory pressure).
+# Uses coreutils `timeout` (Linux/CI) or `gtimeout` (macOS/brew) when present;
+# falls back to no cap on dev machines where the hang does not occur.
+SHARD_TIMEOUT="${SHARD_TIMEOUT:-420}"
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="timeout -k 30 ${SHARD_TIMEOUT}"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="gtimeout -k 30 ${SHARD_TIMEOUT}"
+else
+  TIMEOUT_CMD=""
+fi
+
 RST='\033[0m'; BOLD='\033[1m'; GRN='\033[0;32m'; RED='\033[0;31m'; CYN='\033[0;36m'; YLW='\033[0;33m'
 
 kill_workerd() {
@@ -94,7 +108,7 @@ export default {
 };
 EOF
       trap 'rm -f "$retry_config"' EXIT
-      TMPDIR=/tmp pnpm exec vitest run --passWithNoTests \
+      TMPDIR=/tmp ${TIMEOUT_CMD} pnpm exec vitest run --passWithNoTests \
         --config "$retry_config"
     ) > "$retry_log" 2>&1 &
     pids+=($!)
@@ -143,18 +157,20 @@ for i in $(seq 1 "$TOTAL_SHARDS"); do
   log_file="$LOG_DIR/${safe_label}.log"
   (
     cd "$SERVER_DIR"
-    TMPDIR=/tmp pnpm exec vitest run --passWithNoTests \
+    TMPDIR=/tmp ${TIMEOUT_CMD} pnpm exec vitest run --passWithNoTests \
       --config vitest.integration.config.ts \
       "--shard=${i}/${TOTAL_SHARDS}"
   ) > "$log_file" 2>&1 &
   SHARD_PIDS+=($!)
 done
 
+FAILED_SHARD_IDX=()
 for i in $(seq 0 $((TOTAL_SHARDS - 1))); do
   if wait "${SHARD_PIDS[$i]}"; then
     PASS_COUNT=$((PASS_COUNT + 1))
   else
     FAIL_COUNT=$((FAIL_COUNT + 1))
+    FAILED_SHARD_IDX+=("$((i + 1))")  # 1-based shard number
   fi
 done
 
@@ -180,6 +196,23 @@ if [ "$FAIL_COUNT" -gt 0 ]; then
       | perl -ne 'print "$1\n" if /FAIL\s+(test\/integration\/\S+\.test\.ts)/' \
       | sort -u)
   done
+
+  # A shard killed by the timeout leaves no "FAIL" summary, so also pull the
+  # in-progress (❯) file(s) from every shard that exited non-zero — that is the
+  # test that hung. Without this, a timed-out hang would be silently dropped
+  # from the retry set (and could even false-pass below).
+  for sidx in "${FAILED_SHARD_IDX[@]}"; do
+    log_file="$LOG_DIR/shard-${sidx}-${TOTAL_SHARDS}.log"
+    while IFS= read -r file; do
+      [ -n "$file" ] && FAILED_FILES+=("$file")
+    done < <(perl -pe 's/\x1b\[[0-9;]*[mK]//g' "$log_file" 2>/dev/null \
+      | perl -ne 'print "$1\n" if /❯\s+(test\/integration\/\S+\.test\.ts)/' \
+      | sort -u)
+  done
+
+  if [ ${#FAILED_FILES[@]} -gt 0 ]; then
+    FAILED_FILES=($(printf '%s\n' "${FAILED_FILES[@]}" | sort -u))
+  fi
 fi
 
 # ─── 2차 + 3차 재시도 ────────────────────────────────────────────────────────
@@ -210,6 +243,12 @@ if [ ${#FAILED_FILES[@]} -gt 0 ]; then
   else
     echo -e "  ${GRN}✅ 2차에서 전부 통과 → 최종 PASS${RST}"
   fi
+elif [ "$FAIL_COUNT" -gt 0 ]; then
+  # Shard(s) exited non-zero but no test file could be identified (e.g. a
+  # timeout kill with no ❯ line). Never treat this as a pass.
+  echo ""
+  echo -e "  ${RED}⚠ ${FAIL_COUNT}개 shard가 실패/타임아웃했으나 재시도할 파일을 식별하지 못함 — 최종 FAIL${RST}"
+  FINAL_FAIL=$FAIL_COUNT
 else
   echo ""
   echo -e "  ${GRN}✅ 1차에서 전부 통과 — 재시도 불필요${RST}"
