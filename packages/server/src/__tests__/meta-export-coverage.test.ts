@@ -25,7 +25,6 @@ const UNTESTED_LIBS = new Set([
   'control-db.ts',
   'd1-handler.ts',       // tested via integration tests only
   'do-retry.ts',
-  'email-provider.ts',
   'email-translations.ts', // email i18n strings — used by auth email flows, tested via integration
   'functions.ts',
   'internal-transport.ts', // internal transport adapter — tested indirectly via functions-context tests
@@ -36,7 +35,6 @@ const UNTESTED_LIBS = new Set([
   'postgres-schema-init.ts',
   'push-provider.ts',
   'database-live-emitter.ts', // internal helpers tested via integration tests only
-  'sms-provider.ts',
   'version.ts',
 ]);
 

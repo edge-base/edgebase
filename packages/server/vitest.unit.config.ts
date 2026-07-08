@@ -22,7 +22,6 @@ export default defineConfig({
         // Both are already classified integration-only in UNTESTED_LIBS.
         'src/lib/d1-handler.ts',
         'src/lib/postgres-handler.ts',
-        'src/lib/email-provider.ts',
         'src/lib/email-templates.ts',
         'src/lib/functions.ts',
         'src/lib/log-writer.ts',
@@ -30,8 +29,6 @@ export default defineConfig({
         'src/lib/push-provider.ts',
         'src/lib/push-token.ts',
         'src/lib/route-parser.ts',
-        'src/lib/sms-provider.ts',
-        'src/lib/totp.ts',
       ],
       thresholds: {
         // Baseline: enforce that coverage does not regress.
