@@ -4,8 +4,10 @@ Repository-wide instructions for coding agents and AI collaborators.
 
 ## Purpose
 
-Use this file as the primary agent guide for this repository.
-If a tool looks for `CLAUDE.md`, `CLAUDE.md` should point here instead of duplicating rules.
+Use [`AGENTS.md`](./AGENTS.md) as the repository entrypoint. This file contains
+the shared repository guide referenced from that entrypoint. If a tool looks
+for `CLAUDE.md`, it should follow `CLAUDE.md` → `AGENTS.md` → this file instead
+of duplicating rules.
 
 ## Reference Documentation
 

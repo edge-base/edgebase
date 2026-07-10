@@ -1,3 +1,4 @@
 # CLAUDE.md
 
-See [AGENT.md](./AGENT.md) for repository agent instructions.
+See [AGENTS.md](./AGENTS.md) for the repository agent instructions. Keep the
+rules there instead of duplicating them in this file.
