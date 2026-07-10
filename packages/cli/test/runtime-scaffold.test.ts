@@ -17,6 +17,23 @@ function normalizePath(value: string): string {
 }
 
 describe('runtime scaffold path utilities', () => {
+  it('fails closed when a copied runtime has no dependency source', () => {
+    const missingCandidates = ['/missing/consumer/node_modules', '/missing/cli/node_modules'];
+
+    expect(() => (
+      __runtimeScaffoldTestUtils.resolveRuntimeNodeModulesSourceForModeFromCandidates(
+        missingCandidates,
+        'copy',
+      )
+    )).toThrow(`Runtime dependency source is missing. Checked: ${missingCandidates.join(', ')}`);
+    expect(
+      __runtimeScaffoldTestUtils.resolveRuntimeNodeModulesSourceForModeFromCandidates(
+        missingCandidates,
+        'symlink',
+      ),
+    ).toBeNull();
+  });
+
   it('detects Windows-style nested pnpm paths inside a candidate root', () => {
     const candidateRoot = 'C:\\repo\\packages\\server\\node_modules';
     const packagePath = 'C:\\repo\\packages\\server\\node_modules\\.pnpm\\wrangler@4.40.2\\node_modules\\wrangler';

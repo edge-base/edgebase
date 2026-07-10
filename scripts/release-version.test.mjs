@@ -3,13 +3,16 @@ import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { checkReleaseVersions } from './check-release-versions.mjs';
 import {
@@ -229,6 +232,11 @@ test('all generated SDK headers match the versioned OpenAPI source', () => {
     readFileSync(resolve(REPO_ROOT, 'packages/server/openapi.json'), 'utf8'),
   );
   assert.equal(spec.info?.version, version);
+  assert.equal(
+    spec.paths?.['/api/health']?.get?.responses?.['200']?.content?.['application/json']?.schema?.properties?.version?.example,
+    version,
+    'OpenAPI health response example must match the release version',
+  );
 
   const codegenConfig = JSON.parse(
     readFileSync(resolve(REPO_ROOT, 'tools/sdk-codegen/config.json'), 'utf8'),
@@ -422,6 +430,129 @@ test('isolated server pack excludes tests and credential fixtures', () => {
   } finally {
     stage.cleanup();
     rmSync(packDir, { recursive: true, force: true });
+  }
+});
+
+test('packed npm CLI materializes portable and Docker dependencies from a clean consumer install', { timeout: 240_000 }, async () => {
+  const stage = createNpmReleaseWorkspace();
+  const tempRoot = mkdtempSync(resolve(tmpdir(), 'edgebase-cli-consumer-contract-'));
+  const packDir = join(tempRoot, 'tarballs');
+  const consumerDir = join(tempRoot, 'consumer');
+  mkdirSync(packDir, { recursive: true });
+  mkdirSync(join(consumerDir, 'functions'), { recursive: true });
+
+  try {
+    const packageDirs = [
+      'packages/shared',
+      'packages/sdk/js/packages/core',
+      'packages/server',
+      'packages/cli',
+    ];
+    const tarballs = [];
+
+    for (const packageDir of packageDirs) {
+      const before = new Set(readdirSync(packDir));
+      const packed = spawnSync(
+        'pnpm',
+        ['--dir', resolve(stage.root, packageDir), 'pack', '--pack-destination', packDir],
+        {
+          cwd: stage.root,
+          encoding: 'utf8',
+          env: { ...process.env, npm_config_ignore_scripts: 'false' },
+          timeout: 120_000,
+        },
+      );
+      assert.equal(packed.status, 0, `${packed.stdout ?? ''}${packed.stderr ?? ''}`);
+      const created = readdirSync(packDir).filter((name) => !before.has(name) && name.endsWith('.tgz'));
+      assert.equal(created.length, 1, `${packageDir} must produce exactly one npm tarball`);
+      tarballs.push(resolve(packDir, created[0]));
+    }
+
+    writeFileSync(
+      join(consumerDir, 'package.json'),
+      `${JSON.stringify({ name: 'edgebase-clean-consumer-contract', private: true, type: 'module' }, null, 2)}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      join(consumerDir, 'edgebase.config.ts'),
+      'export default { databases: { app: { tables: {} } } };\n',
+      'utf8',
+    );
+    writeFileSync(
+      join(consumerDir, 'functions', 'health.ts'),
+      "export async function GET() { return Response.json({ status: 'ok' }); }\n",
+      'utf8',
+    );
+
+    const installed = spawnSync(
+      'npm',
+      ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...tarballs],
+      {
+        cwd: consumerDir,
+        encoding: 'utf8',
+        timeout: 120_000,
+      },
+    );
+    assert.equal(installed.status, 0, `${installed.stdout ?? ''}${installed.stderr ?? ''}`);
+
+    const version = getSourceVersion();
+    for (const packageName of ['@edge-base/shared', '@edge-base/core', '@edge-base/server', '@edge-base/cli']) {
+      const manifestPath = join(consumerDir, 'node_modules', ...packageName.split('/'), 'package.json');
+      assert.equal(JSON.parse(readFileSync(manifestPath, 'utf8')).version, version, packageName);
+    }
+
+    const cliEntry = join(consumerDir, 'node_modules', '@edge-base', 'cli', 'dist', 'index.js');
+    const portable = spawnSync(
+      process.execPath,
+      [cliEntry, '--json', 'pack', '--format', 'dir', '--output', 'portable-bundle'],
+      {
+        cwd: consumerDir,
+        encoding: 'utf8',
+        env: { ...process.env, NO_COLOR: '1' },
+        timeout: 120_000,
+      },
+    );
+    assert.equal(portable.status, 0, `${portable.stdout ?? ''}${portable.stderr ?? ''}`);
+
+    const appBundleModule = await import(
+      `${pathToFileURL(join(consumerDir, 'node_modules', '@edge-base', 'cli', 'dist', 'lib', 'app-bundle.js')).href}?contract=${Date.now()}`
+    );
+    appBundleModule.createAppBundle(consumerDir, {
+      outputDir: 'docker-bundle',
+      overwrite: true,
+      portableDependencies: true,
+      dependencyProfile: 'docker',
+    });
+
+    const requiredRuntimePackages = [
+      '@edge-base/core',
+      '@edge-base/shared',
+      '@hono/zod-openapi',
+      '@simplewebauthn/server',
+      'bcryptjs',
+      'hono',
+      'jose',
+      'pg',
+      'zod',
+    ];
+    for (const bundleName of ['portable-bundle', 'docker-bundle']) {
+      const runtimeNodeModules = join(
+        consumerDir,
+        bundleName,
+        '.edgebase',
+        'runtime',
+        'server',
+        'node_modules',
+      );
+      for (const packageName of requiredRuntimePackages) {
+        const packageDir = join(runtimeNodeModules, ...packageName.split('/'));
+        assert.ok(existsSync(join(packageDir, 'package.json')), `${bundleName} missing ${packageName}`);
+        assert.equal(lstatSync(packageDir).isSymbolicLink(), false, `${bundleName} linked ${packageName}`);
+      }
+    }
+  } finally {
+    stage.cleanup();
+    rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 

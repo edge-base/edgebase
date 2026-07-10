@@ -3,7 +3,7 @@
 # Auto-generated admin API Core — DO NOT EDIT.
 #
 # Regenerate: npx tsx tools/sdk-codegen/generate.ts
-# Source: openapi.json (0.3.6)
+# Source: openapi.json (0.3.7)
 
 require "cgi"
 

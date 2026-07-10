@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.7 — 2026-07-10
+
+### Fixed
+
+- Fixed Docker and portable runtime bundles created by a clean npm-installed
+  CLI so they materialize the consumer project's server dependency graph
+  instead of silently omitting `node_modules`.
+- Made copied runtime scaffolds fail closed when no dependency source can be
+  found, while preserving install-before-dev scaffolding behavior.
+
+### Release engineering
+
+- Added a clean-consumer contract that packs the npm CLI and its first-party
+  runtime packages, installs the tarballs without workspace links, and checks
+  both portable and Docker dependency profiles.
+- Kept the OpenAPI health response example synchronized with the root release
+  version alongside the existing runtime and schema version references.
+
+### Compatibility
+
+- No SDK or HTTP API compatibility break is introduced. Consumers using
+  Docker or portable packaging must upgrade from 0.3.6 to 0.3.7 or later.
+
 ## 0.3.6 — 2026-07-10
 
 ### Breaking changes

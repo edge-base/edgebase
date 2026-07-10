@@ -341,6 +341,7 @@ export function syncAppBundle(
   ensureRuntimeScaffold(outputDir, {
     frontend: config.frontend ?? undefined,
     frontendProjectDir: projectDir,
+    dependencyProjectDir: projectDir,
     configImportPath: '../bundle/config/edgebase.config.bundle.js',
     testConfigImportPath: hasTestConfigModule
       ? './bundle/config/edgebase.test.config.bundle.js'

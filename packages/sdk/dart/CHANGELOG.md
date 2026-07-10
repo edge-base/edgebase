@@ -1,3 +1,8 @@
+## 0.3.7
+
+- Synchronized the Dart workspace with the EdgeBase 0.3.7 patch release
+- No Dart API compatibility break is introduced
+
 ## 0.3.6
 
 - Synchronized the Dart workspace with the EdgeBase 0.3.6 release line

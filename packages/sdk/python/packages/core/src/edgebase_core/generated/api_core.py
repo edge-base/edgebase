@@ -1,7 +1,7 @@
 """Auto-generated core API Core — DO NOT EDIT.
 
 Regenerate: npx tsx tools/sdk-codegen/generate.ts
-Source: openapi.json (0.3.6)
+Source: openapi.json (0.3.7)
 """
 
 from __future__ import annotations

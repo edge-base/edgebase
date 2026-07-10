@@ -51,6 +51,7 @@ interface RuntimePackageSelection {
 interface RuntimeScaffoldOptions {
   frontend?: FrontendConfigLike | null;
   frontendProjectDir?: string;
+  dependencyProjectDir?: string;
   configImportPath?: string;
   testConfigImportPath?: string;
   dependencyMode?: 'symlink' | 'copy';
@@ -75,11 +76,12 @@ export function getRuntimeAssetsDir(projectDir: string): string {
 
 export function ensureRuntimeScaffold(projectDir: string, options: RuntimeScaffoldOptions = {}): void {
   const runtimeRoot = getRuntimeRoot(projectDir);
+  const dependencyProjectDir = options.dependencyProjectDir ?? projectDir;
   mkdirSync(runtimeRoot, { recursive: true });
 
-  copyRuntimeDir(resolveServerRuntimeSource(projectDir), getRuntimeServerSrcDir(projectDir));
+  copyRuntimeDir(resolveServerRuntimeSource(dependencyProjectDir), getRuntimeServerSrcDir(projectDir));
   const adminBuildDir = getRuntimeAdminBuildDir(projectDir);
-  copyRuntimeDir(resolveAdminBuildSource(projectDir), adminBuildDir);
+  copyRuntimeDir(resolveAdminBuildSource(dependencyProjectDir), adminBuildDir);
   normalizeAdminBuildBase(adminBuildDir);
   prepareRuntimeAssets(
     projectDir,
@@ -88,12 +90,16 @@ export function ensureRuntimeScaffold(projectDir: string, options: RuntimeScaffo
     options.frontend ?? undefined,
   );
   ensureRuntimeNodeModules(
-    projectDir,
+    dependencyProjectDir,
     runtimeRoot,
     options.dependencyMode ?? 'symlink',
     options.dependencyProfile ?? 'portable',
   );
-  ensureProjectSharedPackageLink(projectDir, options.dependencyMode ?? 'symlink');
+  ensureProjectSharedPackageLink(
+    projectDir,
+    options.dependencyMode ?? 'symlink',
+    dependencyProjectDir,
+  );
   writeRuntimeConfigShim(projectDir, undefined, { importPath: options.configImportPath });
   writeRuntimeTestConfigShim(projectDir, { importPath: options.testConfigImportPath });
 }
@@ -179,8 +185,8 @@ function copyRuntimeDir(source: string, target: string): void {
 
 function resolveServerRuntimeSource(projectDir: string): string {
   const candidates = dedupeCandidates([
-    MONOREPO_SERVER_RUNTIME_SOURCE,
     join(projectDir, 'node_modules', '@edge-base', 'server', 'src'),
+    MONOREPO_SERVER_RUNTIME_SOURCE,
     resolve(CLI_NODE_MODULES_SOURCE, '@edge-base/server', 'src'),
     resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edge-base/server', 'src'),
   ]);
@@ -196,8 +202,8 @@ function resolveServerRuntimeSource(projectDir: string): string {
 
 function resolveAdminBuildSource(projectDir: string): string {
   const candidates = dedupeCandidates([
-    ...MONOREPO_ADMIN_BUILD_SOURCES,
     join(projectDir, 'node_modules', '@edge-base', 'server', 'admin-build'),
+    ...MONOREPO_ADMIN_BUILD_SOURCES,
     resolve(CLI_NODE_MODULES_SOURCE, '@edge-base/server', 'admin-build'),
     resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edge-base/server', 'admin-build'),
   ]);
@@ -274,7 +280,8 @@ function ensureRuntimeNodeModules(
   mode: 'symlink' | 'copy',
   profile: RuntimeDependencyProfile,
 ): void {
-  const source = resolveRuntimeNodeModulesSource(projectDir, mode);
+  const candidates = getRuntimeNodeModulesCandidates(projectDir, mode);
+  const source = resolveRuntimeNodeModulesSourceForModeFromCandidates(candidates, mode);
   if (!source) return;
 
   const target = join(runtimeRoot, 'node_modules');
@@ -282,7 +289,7 @@ function ensureRuntimeNodeModules(
     materializeNodeModulesTree(
       source,
       target,
-      getRuntimeNodeModulesCandidates(projectDir, mode),
+      candidates,
       resolveRuntimeDependencySelection(projectDir, profile),
     );
     return;
@@ -299,8 +306,9 @@ function ensureRuntimeNodeModules(
 export function ensureProjectSharedPackageLink(
   projectDir: string,
   mode: 'symlink' | 'copy' = 'symlink',
+  sourceProjectDir = projectDir,
 ): void {
-  const source = resolveSharedPackageSource(projectDir);
+  const source = resolveSharedPackageSource(sourceProjectDir);
   if (!source) return;
 
   for (const root of resolveSharedPackageLinkRoots(projectDir)) {
@@ -308,8 +316,15 @@ export function ensureProjectSharedPackageLink(
   }
 }
 
-function resolveRuntimeNodeModulesSource(projectDir: string, mode: 'symlink' | 'copy' = 'symlink'): string | null {
-  return resolveRuntimeNodeModulesSourceFromCandidates(getRuntimeNodeModulesCandidates(projectDir, mode));
+function resolveRuntimeNodeModulesSourceForModeFromCandidates(
+  candidates: string[],
+  mode: 'symlink' | 'copy',
+): string | null {
+  const source = resolveRuntimeNodeModulesSourceFromCandidates(candidates);
+  if (!source && mode === 'copy') {
+    throw new Error(`Runtime dependency source is missing. Checked: ${candidates.join(', ')}`);
+  }
+  return source;
 }
 
 export function resolveRuntimeNodeModulesSourceFromCandidates(candidates: string[]): string | null {
@@ -339,9 +354,9 @@ export function resolveSharedPackageSourceFromCandidates(candidates: string[]): 
 function getRuntimeNodeModulesCandidates(projectDir: string, mode: 'symlink' | 'copy' = 'symlink'): string[] {
   if (mode === 'copy') {
     return dedupeCandidates([
+      join(projectDir, 'node_modules'),
       SERVER_NODE_MODULES_SOURCE,
       CLI_NODE_MODULES_SOURCE,
-      join(projectDir, 'node_modules'),
       WORKSPACE_NODE_MODULES_SOURCE,
     ]);
   }
@@ -608,6 +623,7 @@ export const __runtimeScaffoldTestUtils = {
   resolvePackageDirectoryPath,
   resolveRuntimePackageSelections,
   resolveRuntimePackageSelectionsFromInitialSelections,
+  resolveRuntimeNodeModulesSourceForModeFromCandidates,
 };
 
 function getSharedPackageSourceCandidates(projectDir: string): string[] {
@@ -665,8 +681,8 @@ function getPortableWranglerManifestCandidates(projectDir: string): string[] {
 
 function getServerPackageManifestCandidates(projectDir: string): string[] {
   return dedupeCandidates([
-    MONOREPO_SERVER_PACKAGE_MANIFEST_SOURCE,
     join(projectDir, 'node_modules', '@edge-base', 'server', 'package.json'),
+    MONOREPO_SERVER_PACKAGE_MANIFEST_SOURCE,
     resolve(CLI_NODE_MODULES_SOURCE, '@edge-base', 'server', 'package.json'),
     resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edge-base', 'server', 'package.json'),
   ]);

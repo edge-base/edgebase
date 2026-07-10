@@ -473,6 +473,12 @@ export const RELEASE_VERSION_REFERENCES = [
     replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
   },
   {
+    path: 'packages/server/openapi.json',
+    label: 'OpenAPI health response version example',
+    pattern: /("version":\s*\{\s*"type":\s*"string",\s*"example":\s*")(\d+\.\d+\.\d+)(")/m,
+    replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
+  },
+  {
     path: 'packages/server/src/lib/schemas.ts',
     label: 'Health schema release version example',
     pattern: /(version: z\.string\(\)\.optional\(\)\.openapi\(\{ example: ')(\d+\.\d+\.\d+)(' \}\),)/m,

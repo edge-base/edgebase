@@ -1,3 +1,9 @@
+## 0.3.7
+
+- Synchronized package metadata and the `edgebase_core` dependency range with
+  EdgeBase 0.3.7
+- No public Dart API compatibility break is introduced
+
 ## 0.3.6
 
 - Synchronized package metadata and the `edgebase_core` dependency range with

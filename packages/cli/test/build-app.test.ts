@@ -440,4 +440,56 @@ export default defineConfig({
       resolveInstalledPackageVersion('hono'),
     );
   });
+
+  it('materializes docker runtime dependencies from the consumer project install', () => {
+    const projectDir = createTempProject('consumer-dependency-root');
+    const serverDir = join(projectDir, 'node_modules', '@edge-base', 'server');
+    const fixtureDependencyDir = join(projectDir, 'node_modules', 'fixture-runtime-dependency');
+
+    mkdirSync(join(projectDir, 'functions'), { recursive: true });
+    mkdirSync(join(serverDir, 'src'), { recursive: true });
+    mkdirSync(join(serverDir, 'admin-build'), { recursive: true });
+    mkdirSync(fixtureDependencyDir, { recursive: true });
+
+    writeFileSync(
+      join(projectDir, 'edgebase.config.ts'),
+      'export default { databases: { shared: { tables: {} } } };\n',
+    );
+    writeFileSync(
+      join(projectDir, 'functions', 'health.ts'),
+      "export async function GET() { return new Response('ok'); }\n",
+    );
+    writeFileSync(join(serverDir, 'src', 'index.ts'), 'export const consumerRuntime = true;\n');
+    writeFileSync(
+      join(serverDir, 'admin-build', 'index.html'),
+      '<!doctype html><title>consumer admin</title>\n',
+    );
+    writeFileSync(
+      join(serverDir, 'package.json'),
+      JSON.stringify({
+        name: '@edge-base/server',
+        version: '9.9.9-consumer-fixture',
+        dependencies: { 'fixture-runtime-dependency': '1.2.3' },
+      }),
+    );
+    writeFileSync(
+      join(fixtureDependencyDir, 'package.json'),
+      JSON.stringify({ name: 'fixture-runtime-dependency', version: '1.2.3' }),
+    );
+    writeFileSync(join(fixtureDependencyDir, 'index.js'), 'export const fixture = true;\n');
+
+    const bundle = createAppBundle(projectDir, {
+      outputDir: 'docker-bundle',
+      overwrite: true,
+      portableDependencies: true,
+      dependencyProfile: 'docker',
+    });
+    const runtimeRoot = join(bundle.outputDir, '.edgebase', 'runtime', 'server');
+
+    expect(
+      readBundledPackageVersion(join(runtimeRoot, 'node_modules'), 'fixture-runtime-dependency'),
+    ).toBe('1.2.3');
+    expect(readFileSync(join(runtimeRoot, 'src', 'index.ts'), 'utf-8')).toContain('consumerRuntime');
+    expect(readFileSync(join(runtimeRoot, 'admin-build', 'index.html'), 'utf-8')).toContain('consumer admin');
+  });
 });
