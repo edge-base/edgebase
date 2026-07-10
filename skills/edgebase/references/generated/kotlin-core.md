@@ -20,7 +20,7 @@ entrypoints.
 
 ## Public Artifact
 
-- `com.github.edge-base.edgebase:edgebase-core:v0.3.7`
+- `com.github.edge-base.edgebase:edgebase-core:v0.3.8`
 - this is the current JitPack JVM publication for the shared `:core` module
 
 ## Canonical Examples

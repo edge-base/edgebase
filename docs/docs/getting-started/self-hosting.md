@@ -346,7 +346,7 @@ echo "0 3 * * * docker run --rm -v edgebase-data:/data -v /backups:/backup alpin
 
 ```bash
 curl http://localhost:8787/api/health
-# → {"status":"ok","version":"0.3.7","timestamp":"2026-03-17T12:00:00.000Z"}
+# → {"status":"ok","version":"0.3.8","timestamp":"2026-03-17T12:00:00.000Z"}
 ```
 
 ### Docker Logs

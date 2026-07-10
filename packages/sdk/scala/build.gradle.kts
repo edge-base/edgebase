@@ -1,4 +1,4 @@
-val edgebaseReleaseVersion = "0.3.7"
+val edgebaseReleaseVersion = "0.3.8"
 val edgebaseGroup = if (System.getenv("JITPACK").isNullOrBlank()) {
     "dev.edgebase"
 } else {

@@ -7,7 +7,6 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -133,37 +132,66 @@ function shouldCopyToStage(sourcePath) {
   return true;
 }
 
-function linkInstalledDependencies(sourceDir, stagedDir) {
-  const sourceNodeModules = join(sourceDir, 'node_modules');
-  if (!existsSync(sourceNodeModules)) return;
-  const stagedNodeModules = join(stagedDir, 'node_modules');
-  mkdirSync(dirname(stagedNodeModules), { recursive: true });
-  symlinkSync(sourceNodeModules, stagedNodeModules, 'dir');
+function spawnCommandSync(command, args, options = {}) {
+  const resolvedCommand = process.platform === 'win32'
+    && ['npm', 'npx', 'pnpm', 'pnpx', 'yarn'].includes(command)
+    ? `${command}.cmd`
+    : command;
+  return spawnSync(resolvedCommand, args, {
+    ...options,
+    shell: options.shell
+      ?? (process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(resolvedCommand)),
+  });
 }
 
-export function createNpmReleaseWorkspace() {
-  const stageRoot = mkdtempSync(join(tmpdir(), 'edgebase-npm-release-'));
-  for (const relativePath of NPM_STAGE_PATHS) {
-    const sourcePath = resolve(REPO_ROOT, relativePath);
-    if (!existsSync(sourcePath)) continue;
-    const destinationPath = resolve(stageRoot, relativePath);
-    mkdirSync(dirname(destinationPath), { recursive: true });
-    cpSync(sourcePath, destinationPath, {
-      recursive: lstatSync(sourcePath).isDirectory(),
-      filter: shouldCopyToStage,
-      preserveTimestamps: true,
-    });
+function installStagedDependencies(stageRoot) {
+  const installed = spawnCommandSync(
+    'pnpm',
+    ['install', '--offline', '--frozen-lockfile', '--ignore-scripts'],
+    {
+      cwd: stageRoot,
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+      timeout: 180_000,
+    },
+  );
+  const output = `${installed.stdout ?? ''}${installed.stderr ?? ''}`;
+  if (installed.error) {
+    throw installed.error;
   }
+  if (installed.status !== 0) {
+    throw new Error(
+      `Could not install the isolated npm release workspace from the local pnpm store.\n${output}`,
+    );
+  }
+}
 
-  linkInstalledDependencies(REPO_ROOT, stageRoot);
-  const packageDirs = new Set([
-    'packages/admin',
-    ...RELEASE_TARGETS
-      .filter((target) => target.ecosystem === 'npm')
-      .map((target) => dirname(target.path)),
-  ]);
-  for (const relativeDir of packageDirs) {
-    linkInstalledDependencies(resolve(REPO_ROOT, relativeDir), resolve(stageRoot, relativeDir));
+export function createNpmReleaseWorkspace({
+  copyPath = cpSync,
+  installDependencies = installStagedDependencies,
+  makeStageRoot = () => mkdtempSync(join(tmpdir(), 'edgebase-npm-release-')),
+} = {}) {
+  const stageRoot = makeStageRoot();
+  try {
+    for (const relativePath of NPM_STAGE_PATHS) {
+      const sourcePath = resolve(REPO_ROOT, relativePath);
+      if (!existsSync(sourcePath)) continue;
+      const destinationPath = resolve(stageRoot, relativePath);
+      mkdirSync(dirname(destinationPath), { recursive: true });
+      copyPath(sourcePath, destinationPath, {
+        recursive: lstatSync(sourcePath).isDirectory(),
+        filter: shouldCopyToStage,
+        preserveTimestamps: true,
+      });
+    }
+
+    // Install a real workspace graph inside the stage. Linking source
+    // node_modules made staged prepack builds depend on dist files left in the
+    // checkout and pointed first-party dependencies outside the release tree.
+    installDependencies(stageRoot);
+  } catch (error) {
+    rmSync(stageRoot, { recursive: true, force: true });
+    throw error;
   }
 
   return {
@@ -176,7 +204,7 @@ export function createNpmReleaseWorkspace() {
 
 function runCommand(command, args, label, env = process.env, options = {}) {
   const { cwd = REPO_ROOT, interactive = false } = options;
-  const result = spawnSync(command, args, {
+  const result = spawnCommandSync(command, args, {
     cwd,
     encoding: 'utf8',
     env,
@@ -250,24 +278,65 @@ function createAuthEnv() {
 
   const authDir = mkdtempSync(join(tmpdir(), 'edgebase-npm-auth-'));
   const userConfigPath = join(authDir, '.npmrc');
-  writeFileSync(
-    userConfigPath,
-    `//registry.npmjs.org/:_authToken=${token}\nregistry=https://registry.npmjs.org/\n`,
-    'utf8',
-  );
+  try {
+    writeFileSync(
+      userConfigPath,
+      `//registry.npmjs.org/:_authToken=${token}\nregistry=https://registry.npmjs.org/\n`,
+      'utf8',
+    );
 
-  return {
-    env: {
-      ...merged,
-      NPM_TOKEN: token,
-      NODE_AUTH_TOKEN: token,
-      npm_config_userconfig: userConfigPath,
-    },
-    mode: 'token',
-    cleanup() {
-      rmSync(authDir, { recursive: true, force: true });
-    },
-  };
+    return {
+      env: {
+        ...merged,
+        NPM_TOKEN: token,
+        NODE_AUTH_TOKEN: token,
+        npm_config_userconfig: userConfigPath,
+      },
+      mode: 'token',
+      cleanup() {
+        rmSync(authDir, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
+    // Never retain a partially-created credential directory.
+    rmSync(authDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+export function createNpmReleaseResources({
+  dryRun = false,
+  createAuthentication = createAuthEnv,
+  createWorkspace = createNpmReleaseWorkspace,
+} = {}) {
+  let auth = null;
+  let releaseWorkspace = null;
+
+  try {
+    auth = dryRun
+      ? { env: process.env, mode: 'dry-run', cleanup() {} }
+      : createAuthentication();
+    releaseWorkspace = createWorkspace();
+
+    return {
+      auth,
+      releaseWorkspace,
+      cleanup() {
+        try {
+          releaseWorkspace.cleanup();
+        } finally {
+          auth.cleanup();
+        }
+      },
+    };
+  } catch (error) {
+    try {
+      releaseWorkspace?.cleanup();
+    } finally {
+      auth?.cleanup();
+    }
+    throw error;
+  }
 }
 
 function ensureNpmLogin(env, mode) {
@@ -286,6 +355,27 @@ function getNpmPublishTargets() {
     }
     return target;
   });
+}
+
+export function buildNpmReleaseWorkspace(releaseRoot, {
+  env = process.env,
+  targets = getNpmPublishTargets(),
+} = {}) {
+  console.log('Building isolated npm release workspace...');
+
+  for (const target of targets) {
+    const manifest = JSON.parse(
+      readFileSync(resolve(releaseRoot, target.path), 'utf8'),
+    );
+    if (typeof manifest.scripts?.build !== 'string') continue;
+
+    console.log(`Building ${target.name}...`);
+    runCommand('pnpm', ['run', 'build'], `build ${target.name}`, env, {
+      cwd: resolve(releaseRoot, dirname(target.path)),
+    });
+  }
+
+  console.log();
 }
 
 async function publishTarget(target, {
@@ -352,10 +442,8 @@ export async function publishNpmRelease(version, options = {}) {
   assertPreparedRelease(version, { dryRun });
   console.log();
 
-  const auth = dryRun
-    ? { env: process.env, mode: 'dry-run', cleanup() {} }
-    : createAuthEnv();
-  const releaseWorkspace = createNpmReleaseWorkspace();
+  const resources = createNpmReleaseResources({ dryRun });
+  const { auth, releaseWorkspace } = resources;
 
   try {
     if (!dryRun) {
@@ -363,6 +451,14 @@ export async function publishNpmRelease(version, options = {}) {
     }
 
     const targets = getNpmPublishTargets();
+    // Build the complete first-party graph before consulting registry state.
+    // On a resumed release, already-published prerequisites are skipped and
+    // therefore do not run prepack again; downstream workspace builds still
+    // need those prerequisites' generated declarations and JavaScript.
+    buildNpmReleaseWorkspace(releaseWorkspace.root, {
+      env: auth.env,
+      targets,
+    });
     const results = [];
 
     for (const target of targets) {
@@ -384,8 +480,7 @@ export async function publishNpmRelease(version, options = {}) {
     console.log(`Published or confirmed ${results.length} package(s).`);
     return results;
   } finally {
-    releaseWorkspace.cleanup();
-    auth.cleanup();
+    resources.cleanup();
   }
 }
 

@@ -50,7 +50,7 @@ npm install @edge-base/react-native
 ```yaml
 # pubspec.yaml
 dependencies:
-  edgebase_flutter: ^0.3.7
+  edgebase_flutter: ^0.3.8
 ```
 
 ```bash
@@ -63,7 +63,7 @@ flutter pub get
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.3.7")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.3.8")
 ]
 ```
 
@@ -79,7 +79,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-client:v0.3.7")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.3.8")
 }
 ```
 
@@ -95,7 +95,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.3.7'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.3.8'
 }
 ```
 
@@ -119,7 +119,7 @@ include(FetchContent)
 FetchContent_Declare(
   edgebase
   GIT_REPOSITORY https://github.com/edge-base/edgebase.git
-  GIT_TAG v0.3.7
+  GIT_TAG v0.3.8
   SOURCE_SUBDIR packages/sdk/cpp/packages/core
 )
 FetchContent_MakeAvailable(edgebase)

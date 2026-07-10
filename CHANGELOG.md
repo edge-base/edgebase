@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.3.8 — 2026-07-10
+
+### Fixed
+
+- Replaced the development runtime's single `node_modules` link with an exact
+  package link farm so npm nested dependencies, pnpm virtual stores, and
+  workspace installs resolve the server dependency graph consistently.
+- Prevented copied pnpm/workspace package shims from being rewritten as
+  self-referential links such as `src -> src` in portable and Docker bundles.
+- Kept runtime source, admin assets, and dependencies on the CLI's exact
+  `@edge-base/server` graph even when a consumer installs conflicting top-level
+  package versions.
+
+### Release engineering
+
+- Made the isolated npm release workspace install its own frozen dependency
+  graph from the local pnpm store instead of depending on source-tree build
+  leftovers.
+- Prebuilt the complete npm target graph before registry skip checks so a
+  partially completed publish can be resumed without missing prerequisite
+  artifacts.
+- Made release staging and token-auth temporary directories clean up on copy,
+  install, or setup failures.
+- Expanded clean packed-tarball contracts across npm and pnpm consumers,
+  including nested-version conflicts and development-runtime dependency links.
+- Made npm/pnpm release subprocesses resolve Windows command shims safely and
+  replaced the Auth UI package's POSIX-only stylesheet copy command.
+
+### Compatibility
+
+- No SDK or HTTP API compatibility break is introduced. CLI users on 0.3.7,
+  especially pnpm and source-workspace users, should upgrade to 0.3.8 or later.
+
 ## 0.3.7 — 2026-07-10
 
 ### Fixed

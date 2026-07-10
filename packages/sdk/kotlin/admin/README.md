@@ -59,7 +59,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.3.7")
+    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.3.8")
 }
 ```
 

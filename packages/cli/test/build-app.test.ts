@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -439,10 +439,16 @@ export default defineConfig({
     expect(readBundledPackageVersion(dockerNodeModules, 'hono')).toBe(
       resolveInstalledPackageVersion('hono'),
     );
+    for (const runtimeNodeModules of [portableNodeModules, dockerNodeModules]) {
+      const sharedSourceDir = join(runtimeNodeModules, '@edge-base', 'shared', 'src');
+      expect(lstatSync(sharedSourceDir).isDirectory()).toBe(true);
+      expect(lstatSync(sharedSourceDir).isSymbolicLink()).toBe(false);
+      expect(existsSync(join(sharedSourceDir, 'index.ts'))).toBe(true);
+    }
   });
 
-  it('materializes docker runtime dependencies from the consumer project install', () => {
-    const projectDir = createTempProject('consumer-dependency-root');
+  it('keeps runtime source and dependencies aligned with the CLI server graph', () => {
+    const projectDir = createTempProject('conflicting-consumer-server');
     const serverDir = join(projectDir, 'node_modules', '@edge-base', 'server');
     const fixtureDependencyDir = join(projectDir, 'node_modules', 'fixture-runtime-dependency');
 
@@ -488,8 +494,11 @@ export default defineConfig({
 
     expect(
       readBundledPackageVersion(join(runtimeRoot, 'node_modules'), 'fixture-runtime-dependency'),
-    ).toBe('1.2.3');
-    expect(readFileSync(join(runtimeRoot, 'src', 'index.ts'), 'utf-8')).toContain('consumerRuntime');
-    expect(readFileSync(join(runtimeRoot, 'admin-build', 'index.html'), 'utf-8')).toContain('consumer admin');
+    ).toBeNull();
+    expect(readFileSync(join(runtimeRoot, 'src', 'index.ts'), 'utf-8')).not.toContain('consumerRuntime');
+    expect(readFileSync(join(runtimeRoot, 'admin-build', 'index.html'), 'utf-8')).not.toContain('consumer admin');
+    expect(readBundledPackageVersion(join(runtimeRoot, 'node_modules'), 'hono')).toBe(
+      resolveInstalledPackageVersion('hono'),
+    );
   });
 });

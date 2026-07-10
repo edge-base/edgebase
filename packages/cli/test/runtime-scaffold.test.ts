@@ -170,7 +170,7 @@ describe('runtime scaffold path utilities', () => {
     );
     const miniflareSelection = selections.find((selection) => selection.packageName === 'miniflare');
 
-    expect(miniflareSelection?.packageDir).toBe(realpathSync(miniflarePreferredDir));
+    expect(realpathSync(miniflareSelection!.packageDir)).toBe(realpathSync(miniflarePreferredDir));
   });
 
   it('preserves the CLI wrangler dependency graph when an older server wrangler also exists', () => {

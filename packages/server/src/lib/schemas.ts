@@ -60,7 +60,7 @@ export const successResponseSchema = z.object({
 export const healthResponseSchema = z.object({
   status: z.string().openapi({ example: 'ok' }),
   timestamp: z.string().openapi({ example: '2026-01-01T00:00:00.000Z' }),
-  version: z.string().optional().openapi({ example: '0.3.7' }),
+  version: z.string().optional().openapi({ example: '0.3.8' }),
 });
 
 // ─── Shared Parameter Schemas ─────────────────────────────────────────────

@@ -22,7 +22,7 @@ Add the public client package repository to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.3.7")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.3.8")
 ]
 ```
 

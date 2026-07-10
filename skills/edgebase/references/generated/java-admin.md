@@ -23,7 +23,7 @@ Do not ship this package to Android apps, browser bundles, or untrusted clients.
 
 ## Public Artifact
 
-- `com.github.edge-base.edgebase:edgebase-admin-java:v0.3.7`
+- `com.github.edge-base.edgebase:edgebase-admin-java:v0.3.8`
 
 ## Canonical Examples
 

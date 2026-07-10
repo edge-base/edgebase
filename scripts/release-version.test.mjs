@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -42,11 +43,25 @@ import { syncPhpSplitRelease } from '../dev/release/sync-php-split-release.mjs';
 import { syncSwiftSplitRelease } from '../dev/release/sync-swift-split-release.mjs';
 import { syncGoSplitRelease } from '../dev/release/sync-go-split-release.mjs';
 import { verifyGoSplitRelease } from '../dev/release/verify-go-split-release.mjs';
-import { createNpmReleaseWorkspace } from '../dev/release/publish-npm-release.mjs';
+import {
+  buildNpmReleaseWorkspace,
+  createNpmReleaseResources,
+  createNpmReleaseWorkspace,
+} from '../dev/release/publish-npm-release.mjs';
 import {
   buildJitpackArtifactUrl,
   verifyJitpackRelease,
 } from '../dev/release/verify-jitpack-release.mjs';
+import { resolveCommand } from './ci-utils.mjs';
+
+function spawnToolSync(command, args, options = {}) {
+  const resolvedCommand = resolveCommand(command);
+  return spawnSync(resolvedCommand, args, {
+    ...options,
+    shell: options.shell
+      ?? (process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(resolvedCommand)),
+  });
+}
 
 function withoutConsoleLogs(callback) {
   const originalLog = console.log;
@@ -202,6 +217,24 @@ test('release security audit covers development tooling and keeps patched floors
     const manifest = JSON.parse(readFileSync(resolve(REPO_ROOT, path), 'utf8'));
     assert.equal(manifest.devDependencies?.vitest, '^3.2.6', `${path} must use patched Vitest`);
   }
+});
+
+test('npm package builds avoid platform-specific shell copy commands', () => {
+  const authUiManifest = JSON.parse(readFileSync(
+    resolve(REPO_ROOT, 'packages/sdk/js/packages/auth-ui-react/package.json'),
+    'utf8',
+  ));
+  assert.equal(
+    authUiManifest.scripts?.build,
+    'tsc && node ./scripts/copy-styles.mjs',
+  );
+
+  const copyScript = readFileSync(
+    resolve(REPO_ROOT, 'packages/sdk/js/packages/auth-ui-react/scripts/copy-styles.mjs'),
+    'utf8',
+  );
+  assert.match(copyScript, /copyFileSync/);
+  assert.doesNotMatch(copyScript, /(?:^|\s)(?:cp|copy|xcopy)(?:\s|$)/m);
 });
 
 test('C++ CMake project versions are first-class release targets', () => {
@@ -361,6 +394,40 @@ test('explicit registry credentials override ignored release env files', () => {
   }
 });
 
+test('npm auth resources are cleaned when isolated stage creation fails', () => {
+  let authCleanupCount = 0;
+  assert.throws(
+    () => createNpmReleaseResources({
+      createAuthentication: () => ({
+        env: {},
+        mode: 'token',
+        cleanup() {
+          authCleanupCount += 1;
+        },
+      }),
+      createWorkspace: () => {
+        throw new Error('simulated isolated install failure');
+      },
+    }),
+    /simulated isolated install failure/,
+  );
+  assert.equal(authCleanupCount, 1);
+});
+
+test('isolated npm stage is removed when source copying fails', () => {
+  const stageRoot = mkdtempSync(resolve(tmpdir(), 'edgebase-copy-failure-contract-'));
+  assert.throws(
+    () => createNpmReleaseWorkspace({
+      copyPath: () => {
+        throw new Error('simulated source copy failure');
+      },
+      makeStageRoot: () => stageRoot,
+    }),
+    /simulated source copy failure/,
+  );
+  assert.equal(existsSync(stageRoot), false);
+});
+
 test('npm prepack and publish run from an isolated temporary workspace', () => {
   const source = readFileSync(
     resolve(REPO_ROOT, 'dev/release/publish-npm-release.mjs'),
@@ -376,8 +443,12 @@ test('npm prepack and publish run from an isolated temporary workspace', () => {
     assert.ok(existsSync(resolve(stage.root, 'packages/admin/src')));
     assert.equal(existsSync(resolve(stage.root, 'packages/server/admin-build')), false);
     assert.equal(existsSync(resolve(stage.root, 'packages/admin/build')), false);
-    assert.ok(lstatSync(resolve(stage.root, 'node_modules')).isSymbolicLink());
-    assert.ok(lstatSync(resolve(stage.root, 'packages/server/node_modules')).isSymbolicLink());
+    assert.ok(lstatSync(resolve(stage.root, 'node_modules')).isDirectory());
+    assert.ok(lstatSync(resolve(stage.root, 'packages/server/node_modules')).isDirectory());
+    assert.equal(
+      realpathSync(resolve(stage.root, 'packages/sdk/js/packages/core/node_modules/@edge-base/shared')),
+      realpathSync(resolve(stage.root, 'packages/shared')),
+    );
   } finally {
     stage.cleanup();
   }
@@ -391,11 +462,50 @@ test('npm prepack and publish run from an isolated temporary workspace', () => {
   assert.match(serverNpmIgnore, /^\*\*\/\*\.test\.ts$/m);
 });
 
+test('isolated npm release prebuild makes partial publish retries resumable', () => {
+  const stage = createNpmReleaseWorkspace();
+  try {
+    const sharedDist = resolve(stage.root, 'packages/shared/dist');
+    const coreDist = resolve(stage.root, 'packages/sdk/js/packages/core/dist');
+    assert.equal(existsSync(sharedDist), false);
+    assert.equal(existsSync(coreDist), false);
+
+    withoutConsoleLogs(() => buildNpmReleaseWorkspace(stage.root));
+
+    assert.ok(existsSync(resolve(sharedDist, 'index.js')));
+    assert.ok(existsSync(resolve(coreDist, 'index.js')));
+    assert.ok(existsSync(resolve(
+      stage.root,
+      'packages/sdk/js/packages/auth-ui-react/dist/styles.css',
+    )));
+
+    // Simulate a retry after shared was published in an earlier attempt and
+    // would now be skipped. Rebuilding the next package must not depend on a
+    // skipped prerequisite's prepack lifecycle running again.
+    rmSync(coreDist, { recursive: true, force: true });
+    const downstreamBuild = spawnToolSync(
+      'pnpm',
+      ['run', 'build'],
+      {
+        cwd: resolve(stage.root, 'packages/sdk/js/packages/core'),
+        encoding: 'utf8',
+      },
+    );
+    assert.equal(
+      downstreamBuild.status,
+      0,
+      `${downstreamBuild.stdout ?? ''}${downstreamBuild.stderr ?? ''}`,
+    );
+  } finally {
+    stage.cleanup();
+  }
+});
+
 test('isolated server pack excludes tests and credential fixtures', () => {
   const stage = createNpmReleaseWorkspace();
   const packDir = mkdtempSync(resolve(tmpdir(), 'edgebase-server-pack-contract-'));
   try {
-    const pack = spawnSync(
+    const pack = spawnToolSync(
       'pnpm',
       [
         '--dir',
@@ -433,28 +543,30 @@ test('isolated server pack excludes tests and credential fixtures', () => {
   }
 });
 
-test('packed npm CLI materializes portable and Docker dependencies from a clean consumer install', { timeout: 240_000 }, async () => {
+test('packed npm CLI resolves runtime dependencies across clean npm and pnpm consumers', { timeout: 240_000 }, async () => {
   const stage = createNpmReleaseWorkspace();
   const tempRoot = mkdtempSync(resolve(tmpdir(), 'edgebase-cli-consumer-contract-'));
   const packDir = join(tempRoot, 'tarballs');
   const consumerDir = join(tempRoot, 'consumer');
+  const pnpmConsumerDir = join(tempRoot, 'pnpm-consumer');
   mkdirSync(packDir, { recursive: true });
   mkdirSync(join(consumerDir, 'functions'), { recursive: true });
+  mkdirSync(join(pnpmConsumerDir, 'functions'), { recursive: true });
 
   try {
-    const packageDirs = [
-      'packages/shared',
-      'packages/sdk/js/packages/core',
-      'packages/server',
-      'packages/cli',
+    const packages = [
+      { name: '@edge-base/shared', dir: 'packages/shared' },
+      { name: '@edge-base/core', dir: 'packages/sdk/js/packages/core' },
+      { name: '@edge-base/server', dir: 'packages/server' },
+      { name: '@edge-base/cli', dir: 'packages/cli' },
     ];
-    const tarballs = [];
+    const tarballs = new Map();
 
-    for (const packageDir of packageDirs) {
+    for (const packageInfo of packages) {
       const before = new Set(readdirSync(packDir));
-      const packed = spawnSync(
+      const packed = spawnToolSync(
         'pnpm',
-        ['--dir', resolve(stage.root, packageDir), 'pack', '--pack-destination', packDir],
+        ['--dir', resolve(stage.root, packageInfo.dir), 'pack', '--pack-destination', packDir],
         {
           cwd: stage.root,
           encoding: 'utf8',
@@ -464,8 +576,8 @@ test('packed npm CLI materializes portable and Docker dependencies from a clean 
       );
       assert.equal(packed.status, 0, `${packed.stdout ?? ''}${packed.stderr ?? ''}`);
       const created = readdirSync(packDir).filter((name) => !before.has(name) && name.endsWith('.tgz'));
-      assert.equal(created.length, 1, `${packageDir} must produce exactly one npm tarball`);
-      tarballs.push(resolve(packDir, created[0]));
+      assert.equal(created.length, 1, `${packageInfo.dir} must produce exactly one npm tarball`);
+      tarballs.set(packageInfo.name, resolve(packDir, created[0]));
     }
 
     writeFileSync(
@@ -484,9 +596,16 @@ test('packed npm CLI materializes portable and Docker dependencies from a clean 
       'utf8',
     );
 
-    const installed = spawnSync(
+    const installed = spawnToolSync(
       'npm',
-      ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...tarballs],
+      [
+        'install',
+        '--ignore-scripts',
+        '--no-audit',
+        '--no-fund',
+        ...tarballs.values(),
+        'zod@3.25.76',
+      ],
       {
         cwd: consumerDir,
         encoding: 'utf8',
@@ -502,6 +621,30 @@ test('packed npm CLI materializes portable and Docker dependencies from a clean 
     }
 
     const cliEntry = join(consumerDir, 'node_modules', '@edge-base', 'cli', 'dist', 'index.js');
+    assert.equal(
+      JSON.parse(readFileSync(join(consumerDir, 'node_modules', 'zod', 'package.json'), 'utf8')).version,
+      '3.25.76',
+    );
+    assert.match(
+      JSON.parse(readFileSync(
+        join(consumerDir, 'node_modules', '@edge-base', 'server', 'node_modules', 'zod', 'package.json'),
+        'utf8',
+      )).version,
+      /^4\./,
+    );
+
+    const npmDevBundle = spawnSync(
+      process.execPath,
+      [cliEntry, '--json', 'build-app', '--output', 'dev-bundle'],
+      {
+        cwd: consumerDir,
+        encoding: 'utf8',
+        env: { ...process.env, NO_COLOR: '1' },
+        timeout: 120_000,
+      },
+    );
+    assert.equal(npmDevBundle.status, 0, `${npmDevBundle.stdout ?? ''}${npmDevBundle.stderr ?? ''}`);
+
     const portable = spawnSync(
       process.execPath,
       [cliEntry, '--json', 'pack', '--format', 'dir', '--output', 'portable-bundle'],
@@ -535,7 +678,7 @@ test('packed npm CLI materializes portable and Docker dependencies from a clean 
       'pg',
       'zod',
     ];
-    for (const bundleName of ['portable-bundle', 'docker-bundle']) {
+    for (const bundleName of ['dev-bundle', 'portable-bundle', 'docker-bundle']) {
       const runtimeNodeModules = join(
         consumerDir,
         bundleName,
@@ -547,8 +690,101 @@ test('packed npm CLI materializes portable and Docker dependencies from a clean 
       for (const packageName of requiredRuntimePackages) {
         const packageDir = join(runtimeNodeModules, ...packageName.split('/'));
         assert.ok(existsSync(join(packageDir, 'package.json')), `${bundleName} missing ${packageName}`);
-        assert.equal(lstatSync(packageDir).isSymbolicLink(), false, `${bundleName} linked ${packageName}`);
+        assert.equal(
+          lstatSync(packageDir).isSymbolicLink(),
+          bundleName === 'dev-bundle',
+          `${bundleName} dependency-link mode mismatch for ${packageName}`,
+        );
       }
+      assert.match(
+        JSON.parse(readFileSync(join(runtimeNodeModules, 'zod', 'package.json'), 'utf8')).version,
+        /^4\./,
+        `${bundleName} selected the consumer's incompatible top-level zod`,
+      );
+    }
+
+    const fileSpec = (packageName) => `file:${tarballs.get(packageName)}`;
+    writeFileSync(
+      join(pnpmConsumerDir, 'package.json'),
+      `${JSON.stringify({
+        name: 'edgebase-clean-pnpm-consumer-contract',
+        private: true,
+        type: 'module',
+        devDependencies: {
+          '@edge-base/cli': fileSpec('@edge-base/cli'),
+        },
+        pnpm: {
+          overrides: Object.fromEntries(packages.map(({ name }) => [name, fileSpec(name)])),
+        },
+      }, null, 2)}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      join(pnpmConsumerDir, 'edgebase.config.ts'),
+      'export default { databases: { app: { tables: {} } } };\n',
+      'utf8',
+    );
+    writeFileSync(
+      join(pnpmConsumerDir, 'functions', 'health.ts'),
+      "export async function GET() { return Response.json({ status: 'ok' }); }\n",
+      'utf8',
+    );
+
+    const pnpmInstalled = spawnToolSync(
+      'pnpm',
+      ['install', '--offline', '--ignore-scripts', '--no-frozen-lockfile'],
+      {
+        cwd: pnpmConsumerDir,
+        encoding: 'utf8',
+        timeout: 120_000,
+      },
+    );
+    assert.equal(
+      pnpmInstalled.status,
+      0,
+      `${pnpmInstalled.stdout ?? ''}${pnpmInstalled.stderr ?? ''}`,
+    );
+
+    const pnpmCliEntry = join(
+      pnpmConsumerDir,
+      'node_modules',
+      '@edge-base',
+      'cli',
+      'dist',
+      'index.js',
+    );
+    const pnpmDevBundle = spawnSync(
+      process.execPath,
+      [pnpmCliEntry, '--json', 'build-app', '--output', 'dev-bundle'],
+      {
+        cwd: pnpmConsumerDir,
+        encoding: 'utf8',
+        env: { ...process.env, NO_COLOR: '1' },
+        timeout: 120_000,
+      },
+    );
+    assert.equal(
+      pnpmDevBundle.status,
+      0,
+      `${pnpmDevBundle.stdout ?? ''}${pnpmDevBundle.stderr ?? ''}`,
+    );
+
+    const pnpmRuntimeNodeModules = join(
+      pnpmConsumerDir,
+      'dev-bundle',
+      '.edgebase',
+      'runtime',
+      'server',
+      'node_modules',
+    );
+    assert.equal(lstatSync(pnpmRuntimeNodeModules).isDirectory(), true);
+    for (const packageName of requiredRuntimePackages) {
+      const packageDir = join(pnpmRuntimeNodeModules, ...packageName.split('/'));
+      assert.ok(
+        existsSync(join(packageDir, 'package.json')),
+        `pnpm dev runtime missing ${packageName}`,
+      );
+      assert.equal(lstatSync(packageDir).isSymbolicLink(), true, packageName);
     }
   } finally {
     stage.cleanup();

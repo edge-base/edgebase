@@ -32,6 +32,8 @@ const MONOREPO_ADMIN_BUILD_SOURCES = [
   resolve(__dirname, '../../../admin/build'),
   resolve(__dirname, '../../../server/admin-build'),
 ];
+const CLI_PACKAGE_MANIFEST_SOURCE = resolve(__dirname, '../../package.json');
+const CLI_PACKAGE_REQUIRE = createRequire(CLI_PACKAGE_MANIFEST_SOURCE);
 const CLI_NODE_MODULES_SOURCE = resolve(__dirname, '../../node_modules');
 const WORKSPACE_NODE_MODULES_SOURCE = resolve(WORKSPACE_ROOT, 'node_modules');
 const SERVER_NODE_MODULES_SOURCE = resolve(__dirname, '../../../server/node_modules');
@@ -184,7 +186,9 @@ function copyRuntimeDir(source: string, target: string): void {
 }
 
 function resolveServerRuntimeSource(projectDir: string): string {
+  const cliServer = resolveCliServerPackageSelection(projectDir);
   const candidates = dedupeCandidates([
+    ...(cliServer ? [join(cliServer.packageDir, 'src')] : []),
     join(projectDir, 'node_modules', '@edge-base', 'server', 'src'),
     MONOREPO_SERVER_RUNTIME_SOURCE,
     resolve(CLI_NODE_MODULES_SOURCE, '@edge-base/server', 'src'),
@@ -201,7 +205,9 @@ function resolveServerRuntimeSource(projectDir: string): string {
 }
 
 function resolveAdminBuildSource(projectDir: string): string {
+  const cliServer = resolveCliServerPackageSelection(projectDir);
   const candidates = dedupeCandidates([
+    ...(cliServer ? [join(cliServer.packageDir, 'admin-build')] : []),
     join(projectDir, 'node_modules', '@edge-base', 'server', 'admin-build'),
     ...MONOREPO_ADMIN_BUILD_SOURCES,
     resolve(CLI_NODE_MODULES_SOURCE, '@edge-base/server', 'admin-build'),
@@ -282,10 +288,9 @@ function ensureRuntimeNodeModules(
 ): void {
   const candidates = getRuntimeNodeModulesCandidates(projectDir, mode);
   const source = resolveRuntimeNodeModulesSourceForModeFromCandidates(candidates, mode);
-  if (!source) return;
-
   const target = join(runtimeRoot, 'node_modules');
   if (mode === 'copy') {
+    if (!source) return;
     materializeNodeModulesTree(
       source,
       target,
@@ -294,6 +299,14 @@ function ensureRuntimeNodeModules(
     );
     return;
   }
+
+  const selectedPackages = resolveRuntimeDependencySelection(projectDir, 'docker');
+  if (selectedPackages && selectedPackages.length > 0) {
+    linkRuntimePackageSelections(target, selectedPackages);
+    return;
+  }
+  if (!source) return;
+
   const currentLink = readExistingSymlinkTarget(target);
   if (currentLink === source) return;
   if (currentLink !== null || existsSync(target)) {
@@ -301,6 +314,24 @@ function ensureRuntimeNodeModules(
   }
 
   symlinkSync(source, target, process.platform === 'win32' ? 'junction' : 'dir');
+}
+
+function linkRuntimePackageSelections(
+  targetRoot: string,
+  selectedPackages: RuntimePackageSelection[],
+): void {
+  rmSync(targetRoot, { recursive: true, force: true });
+  mkdirSync(targetRoot, { recursive: true });
+
+  for (const selection of selectedPackages) {
+    const target = join(targetRoot, ...selection.packageName.split('/'));
+    mkdirSync(dirname(target), { recursive: true });
+    symlinkSync(
+      realpathSync(selection.packageDir),
+      target,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+  }
 }
 
 export function ensureProjectSharedPackageLink(
@@ -498,6 +529,15 @@ function materializeNodeModulesEntry(
       );
     }
 
+    // A generated project shim can point back into one of the candidate
+    // node_modules roots at the exact path where it is being materialized.
+    // The package contents have already been copied above; replacing that
+    // directory with a link to itself would create `src -> src` and make the
+    // portable/Docker tree impossible to traverse.
+    if (resolve(targetEntry) === resolve(materialization.targetPath)) {
+      return;
+    }
+
     rmSync(targetEntry, { recursive: true, force: true });
     mkdirSync(dirname(targetEntry), { recursive: true });
     symlinkSync(
@@ -641,16 +681,36 @@ function resolveRuntimeDependencySelection(
   profile: RuntimeDependencyProfile,
 ): RuntimePackageSelection[] | null {
   const candidateRoots = getRuntimeNodeModulesCandidates(projectDir, 'copy');
-  const serverDependencies = readPackageDependencyNamesFromCandidates(
+  const serverSelection = resolvePackageSelectionFromManifestCandidates(
+    '@edge-base/server',
     getServerPackageManifestCandidates(projectDir),
   );
-  if (!serverDependencies) {
+  if (!serverSelection) {
     return null;
   }
+  const serverDependencies = readPackageDependencyGroups(serverSelection.manifestPath);
+  const serverRequire = createRequire(serverSelection.manifestPath);
 
   const initialSelections: RuntimePackageSelection[] = [];
-  for (const packageName of dedupeCandidates(serverDependencies)) {
-    const selection = resolveRuntimePackageSelection(packageName, candidateRoots);
+  for (const packageName of dedupeCandidates(serverDependencies.required)) {
+    const selection = resolveRuntimePackageSelection(
+      packageName,
+      candidateRoots,
+      serverRequire,
+    );
+    if (!selection) {
+      throw new Error(
+        `Runtime dependency '${packageName}' required by @edge-base/server could not be resolved.`,
+      );
+    }
+    initialSelections.push(selection);
+  }
+  for (const packageName of dedupeCandidates(serverDependencies.optional)) {
+    const selection = resolveRuntimePackageSelection(
+      packageName,
+      candidateRoots,
+      serverRequire,
+    );
     if (selection) {
       initialSelections.push(selection);
     }
@@ -680,7 +740,9 @@ function getPortableWranglerManifestCandidates(projectDir: string): string[] {
 }
 
 function getServerPackageManifestCandidates(projectDir: string): string[] {
+  const cliServer = resolveCliServerPackageSelection(projectDir);
   return dedupeCandidates([
+    ...(cliServer ? [cliServer.manifestPath] : []),
     join(projectDir, 'node_modules', '@edge-base', 'server', 'package.json'),
     MONOREPO_SERVER_PACKAGE_MANIFEST_SOURCE,
     resolve(CLI_NODE_MODULES_SOURCE, '@edge-base', 'server', 'package.json'),
@@ -688,18 +750,14 @@ function getServerPackageManifestCandidates(projectDir: string): string[] {
   ]);
 }
 
-function readPackageDependencyNamesFromCandidates(candidates: string[]): string[] | null {
-  for (const candidate of dedupeCandidates(candidates)) {
-    if (!existsSync(candidate)) continue;
-
-    try {
-      return readPackageDependencyNames(candidate);
-    } catch {
-      continue;
-    }
-  }
-
-  return null;
+function resolveCliServerPackageSelection(
+  projectDir: string,
+): RuntimePackageSelection | null {
+  return resolveRuntimePackageSelection(
+    '@edge-base/server',
+    getRuntimeNodeModulesCandidates(projectDir, 'copy'),
+    CLI_PACKAGE_REQUIRE,
+  );
 }
 
 function resolveRuntimePackageSelections(
@@ -818,6 +876,29 @@ function resolvePackageManifestLocation(
   packageRequire?: NodeJS.Require,
 ): { packageDir: string; manifestPath: string } | null {
   if (packageRequire) {
+    const requirePaths = packageRequire.resolve.paths(packageName) ?? [];
+    for (const requirePath of requirePaths) {
+      const rawManifestPath = join(requirePath, ...packageName.split('/'), 'package.json');
+      if (!existsSync(rawManifestPath)) {
+        continue;
+      }
+
+      try {
+        const resolvedManifestPath = realpathSync(rawManifestPath);
+        const packageJson = JSON.parse(readFileSync(resolvedManifestPath, 'utf-8')) as {
+          name?: string;
+        };
+        if (packageJson.name === packageName) {
+          return {
+            packageDir: dirname(resolve(rawManifestPath)),
+            manifestPath: resolvedManifestPath,
+          };
+        }
+      } catch {
+        // Keep walking the exact Node resolution roots before falling back.
+      }
+    }
+
     try {
       const rawManifestPath = packageRequire.resolve(`${packageName}/package.json`);
       if (existsSync(rawManifestPath)) {
@@ -849,14 +930,25 @@ function resolvePackageManifestLocation(
 }
 
 function readPackageDependencyNames(packageJsonPath: string): string[] {
+  const dependencies = readPackageDependencyGroups(packageJsonPath);
+  return [...dependencies.required, ...dependencies.optional];
+}
+
+function readPackageDependencyGroups(
+  packageJsonPath: string,
+): { required: string[]; optional: string[] } {
   const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as {
     dependencies?: Record<string, string>;
     optionalDependencies?: Record<string, string>;
   };
-  return [
-    ...Object.keys(packageJson.dependencies ?? {}),
-    ...Object.keys(packageJson.optionalDependencies ?? {}),
-  ];
+  const optional = Object.keys(packageJson.optionalDependencies ?? {});
+  const optionalSet = new Set(optional);
+  return {
+    required: Object.keys(packageJson.dependencies ?? {}).filter(
+      (packageName) => !optionalSet.has(packageName),
+    ),
+    optional,
+  };
 }
 
 function dedupeCandidates(candidates: string[]): string[] {

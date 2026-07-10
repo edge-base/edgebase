@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/auth-ui-react",
-    "version": "0.3.7",
+    "version": "0.3.8",
     "description": "EdgeBase Auth UI for React — pre-built authentication components",
     "license": "MIT",
     "repository": {
@@ -38,7 +38,7 @@
         "access": "public"
     },
     "scripts": {
-        "build": "tsc && cp src/styles.css dist/styles.css",
+        "build": "tsc && node ./scripts/copy-styles.mjs",
         "dev": "tsc --watch",
         "test": "vitest run",
         "test:watch": "vitest",
