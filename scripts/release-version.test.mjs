@@ -732,7 +732,7 @@ test('packed npm CLI resolves runtime dependencies across clean npm and pnpm con
 
     const pnpmInstalled = spawnToolSync(
       'pnpm',
-      ['install', '--offline', '--ignore-scripts', '--no-frozen-lockfile'],
+      ['install', '--ignore-scripts', '--no-frozen-lockfile'],
       {
         cwd: pnpmConsumerDir,
         encoding: 'utf8',

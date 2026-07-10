@@ -208,10 +208,10 @@ function resolveAdminBuildSource(projectDir: string): string {
   const cliServer = resolveCliServerPackageSelection(projectDir);
   const candidates = dedupeCandidates([
     ...(cliServer ? [join(cliServer.packageDir, 'admin-build')] : []),
-    join(projectDir, 'node_modules', '@edge-base', 'server', 'admin-build'),
     ...MONOREPO_ADMIN_BUILD_SOURCES,
     resolve(CLI_NODE_MODULES_SOURCE, '@edge-base/server', 'admin-build'),
     resolve(WORKSPACE_NODE_MODULES_SOURCE, '@edge-base/server', 'admin-build'),
+    join(projectDir, 'node_modules', '@edge-base', 'server', 'admin-build'),
   ]);
 
   for (const candidate of candidates) {
