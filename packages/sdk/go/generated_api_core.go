@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 package edgebase
 
@@ -489,6 +489,7 @@ func (a *GeneratedDbApi) TrackEvents(ctx context.Context, body interface{}) (map
 
 const (
 	PathAdminLogin = "/admin/api/auth/login"
+	PathAdminLogout = "/admin/api/auth/logout"
 	PathAdminRefresh = "/admin/api/auth/refresh"
 	PathBackupCleanupPlugin = "/admin/api/backup/cleanup-plugin"
 	PathBackupGetConfig = "/admin/api/backup/config"

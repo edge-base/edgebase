@@ -32,6 +32,7 @@ export interface MockAdminApiOptions {
 
 interface MockAdminState {
 	needsSetup: boolean;
+	hasAdminSession: boolean;
 	admin: { id: string; email: string };
 	users: MockUser[];
 	failDeleteUserIds: Set<string>;
@@ -89,6 +90,7 @@ function defaultUsers(): MockUser[] {
 function defaultState(options: MockAdminApiOptions = {}): MockAdminState {
 	return {
 		needsSetup: options.needsSetup ?? false,
+		hasAdminSession: false,
 		admin: {
 			id: 'admin_1',
 			email: 'admin@example.com',
@@ -408,28 +410,40 @@ export async function installMockAdminApi(
 		}
 
 		if (path === 'auth/login' && method === 'POST') {
+			state.hasAdminSession = true;
 			await route.fulfill(jsonResponse(200, {
 				accessToken: 'access-token',
-				refreshToken: 'refresh-token',
+				sessionTransport: 'cookie',
 				admin: state.admin,
 			}));
 			return;
 		}
 
 		if (path === 'auth/refresh' && method === 'POST') {
+			if (!state.hasAdminSession) {
+				await route.fulfill(jsonResponse(401, { message: 'Admin session is not authenticated' }));
+				return;
+			}
 			await route.fulfill(jsonResponse(200, {
 				accessToken: 'access-token-refreshed',
-				refreshToken: 'refresh-token-refreshed',
+				sessionTransport: 'cookie',
 				admin: state.admin,
 			}));
 			return;
 		}
 
+		if (path === 'auth/logout' && method === 'POST') {
+			state.hasAdminSession = false;
+			await route.fulfill(jsonResponse(200, { ok: true }));
+			return;
+		}
+
 		if (path === 'setup' && method === 'POST') {
 			state.needsSetup = false;
+			state.hasAdminSession = true;
 			await route.fulfill(jsonResponse(200, {
 				accessToken: 'access-token',
-				refreshToken: 'refresh-token',
+				sessionTransport: 'cookie',
 				admin: state.admin,
 			}));
 			return;

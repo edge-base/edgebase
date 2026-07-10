@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.6
+
+- Synchronized Swift split-package install guidance and realtime wire-version
+  reporting with EdgeBase 0.3.6
+- No public Swift API compatibility break is introduced
+
 ## 0.1.0
 
 Initial release — feature parity with Dart SDK (M20).

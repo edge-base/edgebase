@@ -109,18 +109,27 @@ function getFrontendCacheControl(pathname: string): string | null {
   return null;
 }
 
-export function applyFrontendAssetHeaders(response: Response, pathname: string): Response {
+export function applyFrontendAssetHeaders(
+  response: Response,
+  pathname: string,
+  configuredHeaders: Record<string, string> | undefined = undefined,
+): Response {
   if (!response.ok) {
     return response;
   }
 
   const cacheControl = getFrontendCacheControl(pathname);
-  if (!cacheControl) {
+  if (!cacheControl && !configuredHeaders) {
     return response;
   }
 
   const headers = new Headers(response.headers);
-  headers.set('Cache-Control', cacheControl);
+  if (cacheControl) {
+    headers.set('Cache-Control', cacheControl);
+  }
+  for (const [name, value] of Object.entries(configuredHeaders ?? {})) {
+    headers.set(name, value);
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,

@@ -374,6 +374,10 @@ export default defineConfig({
     directory: './web/dist',
     mountPath: '/app',
     spaFallback: true,
+    headers: {
+      'Content-Security-Policy': "default-src 'self'",
+      'X-Frame-Options': 'DENY',
+    },
   },
 });
 `,
@@ -394,6 +398,7 @@ export default defineConfig({
           enabled: boolean;
           mountPath?: string;
           spaFallback?: boolean;
+          headers?: Record<string, string>;
         };
       };
     };
@@ -405,6 +410,10 @@ export default defineConfig({
           enabled: true,
           mountPath: '/app',
           spaFallback: true,
+          headers: {
+            'Content-Security-Policy': "default-src 'self'",
+            'X-Frame-Options': 'DENY',
+          },
         },
       },
     });

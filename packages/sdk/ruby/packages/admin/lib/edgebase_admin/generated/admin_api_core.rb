@@ -3,7 +3,7 @@
 # Auto-generated admin API Core — DO NOT EDIT.
 #
 # Regenerate: npx tsx tools/sdk-codegen/generate.ts
-# Source: openapi.json (0.1.0)
+# Source: openapi.json (0.3.6)
 
 require "cgi"
 
@@ -158,6 +158,11 @@ module EdgebaseAdmin
     # Rotate admin token — POST /admin/api/auth/refresh
     def admin_refresh(body = nil)
       @http.post("/admin/api/auth/refresh", body)
+    end
+
+    # End the current admin session — POST /admin/api/auth/logout
+    def admin_logout(body = nil)
+      @http.post("/admin/api/auth/logout", body)
     end
 
     # Reset admin password (Service Key required) — POST /admin/api/internal/reset-password

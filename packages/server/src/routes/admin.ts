@@ -18,7 +18,6 @@ import {
   TokenExpiredError,
   TokenInvalidError,
   verifyAdminRefreshTokenWithFallback,
-  verifyAdminTokenWithFallback,
 } from '../lib/jwt.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { generateId } from '../lib/uuid.js';
@@ -59,7 +58,9 @@ import {
   getAdminByEmail,
   getAdminById,
   getAdminSession,
+  getAdminSessionById,
   createAdminSession,
+  rotateAdminSession,
   deleteAdminSession,
   listAdmins,
   deleteAdmin,
@@ -89,6 +90,15 @@ import {
   resolveAdminInstanceOptions,
   serializeAdminInstanceDiscovery,
 } from '../lib/admin-db-target.js';
+import {
+  adminSessionResponse,
+  applyAdminAuthNoStore,
+  assertAdminAuthTransportAllowed,
+  clearAdminRefreshCookie,
+  isAdminCookieAuthTransport,
+  readAdminRefreshCookie,
+} from '../lib/admin-session-cookie.js';
+import { resolveAdminJwtAuthority } from '../lib/admin-auth-authority.js';
 
 const BUILT_IN_RATE_LIMIT_GROUPS = [
   'global',
@@ -121,6 +131,8 @@ const AUTH_BACKUP_TABLES = [
 ] as const;
 
 const AUTH_BACKUP_TABLE_SET = new Set<string>(AUTH_BACKUP_TABLES);
+const ADMIN_ACCESS_TOKEN_TTL = '15m';
+const ADMIN_REFRESH_TOKEN_TTL = '28d';
 
 function quoteSqlIdentifier(identifier: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
@@ -426,6 +438,7 @@ const adminSetup = createRoute({
 });
 
 adminRoute.openapi(adminSetup, async (c) => {
+  assertAdminAuthTransportAllowed(c);
   await ensureAuthSchema(getAuthDb(c));
   const exists = await adminExists(getAuthDb(c));
   if (exists) throw new EdgeBaseError(400, 'Admin account already exists. Use login instead.', undefined, 'already-exists');
@@ -452,14 +465,21 @@ adminRoute.openapi(adminSetup, async (c) => {
   const passwordHash = await hashPassword(body.password);
   await createAdmin(getAuthDb(c), adminId, body.email, passwordHash);
 
-  const accessToken = await signAdminAccessToken({ sub: adminId }, adminSecret, '1h');
-  const refreshToken = await signAdminRefreshToken({ sub: adminId }, adminSecret, '28d');
-
   const sessionId = generateId();
+  const accessToken = await signAdminAccessToken(
+    { sub: adminId, sid: sessionId },
+    adminSecret,
+    ADMIN_ACCESS_TOKEN_TTL,
+  );
+  const refreshToken = await signAdminRefreshToken(
+    { sub: adminId, sid: sessionId },
+    adminSecret,
+    ADMIN_REFRESH_TOKEN_TTL,
+  );
   const expiresAt = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString();
   await createAdminSession(getAuthDb(c), sessionId, adminId, refreshToken, expiresAt);
 
-  return c.json({
+  return adminSessionResponse(c, {
     accessToken,
     refreshToken,
     admin: { id: adminId, email: body.email },
@@ -498,6 +518,7 @@ const adminLogin = createRoute({
 });
 
 adminRoute.openapi(adminLogin, async (c) => {
+  assertAdminAuthTransportAllowed(c);
   await ensureAuthSchema(getAuthDb(c));
   const body = await c.req.json<{ email: string; password: string }>();
   if (!body.email || !body.password) throw new EdgeBaseError(400, 'Email and password are required.', undefined, 'validation-failed');
@@ -529,14 +550,21 @@ adminRoute.openapi(adminLogin, async (c) => {
   const adminSecret = c.env.JWT_ADMIN_SECRET;
   if (!adminSecret) throw new EdgeBaseError(500, 'JWT_ADMIN_SECRET not configured.', undefined, 'internal-error');
 
-  const accessToken = await signAdminAccessToken({ sub: admin.id }, adminSecret, '1h');
-  const refreshToken = await signAdminRefreshToken({ sub: admin.id }, adminSecret, '28d');
-
   const sessionId = generateId();
+  const accessToken = await signAdminAccessToken(
+    { sub: admin.id, sid: sessionId },
+    adminSecret,
+    ADMIN_ACCESS_TOKEN_TTL,
+  );
+  const refreshToken = await signAdminRefreshToken(
+    { sub: admin.id, sid: sessionId },
+    adminSecret,
+    ADMIN_REFRESH_TOKEN_TTL,
+  );
   const expiresAt = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString();
   await createAdminSession(getAuthDb(c), sessionId, admin.id, refreshToken, expiresAt);
 
-  return c.json({
+  return adminSessionResponse(c, {
     accessToken,
     refreshToken,
     admin: { id: admin.id, email: admin.email },
@@ -555,62 +583,202 @@ const adminRefresh = createRoute({
       content: {
         'application/json': {
           schema: z.object({
-            refreshToken: z.string(),
+            refreshToken: z.string().optional(),
           }).passthrough(),
         },
       },
-      required: true,
+      required: false,
     },
   },
   responses: {
     200: { description: 'Token rotated', content: { 'application/json': { schema: jsonResponseSchema } } },
     401: { description: 'Invalid token', content: { 'application/json': { schema: errorResponseSchema } } },
+    409: { description: 'Token was already rotated by another request', content: { 'application/json': { schema: errorResponseSchema } } },
   },
 });
 
 adminRoute.openapi(adminRefresh, async (c) => {
+  assertAdminAuthTransportAllowed(c);
+  applyAdminAuthNoStore(c);
   await ensureAuthSchema(getAuthDb(c));
-  const body = await c.req.json<{ refreshToken: string }>();
-  if (!body.refreshToken) throw new EdgeBaseError(400, 'Refresh token is required.', undefined, 'validation-failed');
+  const body = await c.req.json<{ refreshToken?: string }>()
+    .catch((): { refreshToken?: string } => ({}));
+  const refreshToken = isAdminCookieAuthTransport(c)
+    ? (readAdminRefreshCookie(c) ?? body.refreshToken)
+    : body.refreshToken;
+  if (!refreshToken) {
+    if (isAdminCookieAuthTransport(c)) clearAdminRefreshCookie(c);
+    throw new EdgeBaseError(400, 'Refresh token is required.', undefined, 'validation-failed');
+  }
 
   const adminSecret = c.env.JWT_ADMIN_SECRET;
   if (!adminSecret) throw new EdgeBaseError(500, 'JWT_ADMIN_SECRET not configured.', undefined, 'internal-error');
 
-  let tokenPayload: { sub: string };
+  let tokenPayload: { sub: string; sid?: unknown };
   try {
     tokenPayload = await verifyAdminRefreshTokenWithFallback(
-      body.refreshToken,
+      refreshToken,
       adminSecret,
       c.env.JWT_ADMIN_SECRET_OLD,
       c.env.JWT_ADMIN_SECRET_OLD_AT,
-    ) as { sub: string };
+    ) as { sub: string; sid?: unknown };
   } catch (err) {
     if (err instanceof TokenExpiredError || err instanceof TokenInvalidError) {
+      if (isAdminCookieAuthTransport(c)) clearAdminRefreshCookie(c);
       throw new EdgeBaseError(401, 'Invalid or expired refresh token.', undefined, 'invalid-refresh-token');
     }
     throw err;
   }
 
-  const session = await getAdminSession(getAuthDb(c), body.refreshToken);
-  if (!session) throw new EdgeBaseError(401, 'Invalid or expired refresh token.', undefined, 'invalid-refresh-token');
-  if (session.adminId !== tokenPayload.sub) {
+  const session = await getAdminSession(getAuthDb(c), refreshToken);
+  if (!session) {
+    const activeSession = typeof tokenPayload.sid === 'string'
+      ? await getAdminSessionById(getAuthDb(c), tokenPayload.sid)
+      : null;
+    if (activeSession?.adminId === tokenPayload.sub) {
+      // A concurrent request already rotated this valid session. Do not emit
+      // an expiring Set-Cookie that could arrive after the winner's cookie.
+      throw new EdgeBaseError(
+        409,
+        'Admin refresh token was already rotated by another request.',
+        undefined,
+        'refresh-token-reused',
+      );
+    }
+    if (isAdminCookieAuthTransport(c)) clearAdminRefreshCookie(c);
     throw new EdgeBaseError(401, 'Invalid or expired refresh token.', undefined, 'invalid-refresh-token');
+  }
+  if (session.adminId !== tokenPayload.sub) {
+    if (isAdminCookieAuthTransport(c)) clearAdminRefreshCookie(c);
+    throw new EdgeBaseError(401, 'Invalid or expired refresh token.', undefined, 'invalid-refresh-token');
+  }
+  if (tokenPayload.sid !== undefined && tokenPayload.sid !== session.id) {
+    if (isAdminCookieAuthTransport(c)) clearAdminRefreshCookie(c);
+    throw new EdgeBaseError(401, 'Refresh token session binding is invalid.', undefined, 'invalid-refresh-token');
   }
 
   const admin = await getAdminById(getAuthDb(c), session.adminId);
-  if (!admin) throw new EdgeBaseError(401, 'Admin not found.', undefined, 'user-not-found');
+  if (!admin) {
+    if (isAdminCookieAuthTransport(c)) clearAdminRefreshCookie(c);
+    throw new EdgeBaseError(401, 'Admin not found.', undefined, 'user-not-found');
+  }
 
-  // Rotate: delete old session, create new
-  await deleteAdminSession(getAuthDb(c), session.id);
+  // Keep the stable session ID and atomically compare-and-swap the rotating
+  // credential. Exactly one concurrent refresh can consume the current token.
+  const newAccessToken = await signAdminAccessToken(
+    { sub: admin.id, sid: session.id },
+    adminSecret,
+    ADMIN_ACCESS_TOKEN_TTL,
+  );
+  const newRefreshToken = await signAdminRefreshToken(
+    { sub: admin.id, sid: session.id },
+    adminSecret,
+    ADMIN_REFRESH_TOKEN_TTL,
+  );
+  const rotated = await rotateAdminSession(
+    getAuthDb(c),
+    session.id,
+    refreshToken,
+    newRefreshToken,
+    new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString(),
+  );
+  if (!rotated) {
+    const activeSession = await getAdminSessionById(getAuthDb(c), session.id);
+    if (activeSession?.adminId === session.adminId) {
+      // The backing session remains authoritative and another refresh won.
+      // Preserve its cookie regardless of response arrival order.
+      throw new EdgeBaseError(
+        409,
+        'Admin refresh token was already rotated by another request.',
+        undefined,
+        'refresh-token-reused',
+      );
+    }
+    if (isAdminCookieAuthTransport(c)) clearAdminRefreshCookie(c);
+    throw new EdgeBaseError(
+      401,
+      'Admin refresh session was revoked.',
+      undefined,
+      'refresh-token-reused',
+    );
+  }
 
-  const newAccessToken = await signAdminAccessToken({ sub: admin.id }, adminSecret, '1h');
-  const newRefreshToken = await signAdminRefreshToken({ sub: admin.id }, adminSecret, '28d');
+  return adminSessionResponse(c, {
+    accessToken: newAccessToken,
+    refreshToken: newRefreshToken,
+    admin: { id: admin.id, email: admin.email },
+  });
+});
 
-  const newSessionId = generateId();
-  const expiresAt = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString();
-  await createAdminSession(getAuthDb(c), newSessionId, admin.id, newRefreshToken, expiresAt);
+// POST /admin/api/auth/logout — revoke the current admin refresh session
+const adminLogout = createRoute({
+  operationId: 'adminLogout',
+  method: 'post',
+  path: '/auth/logout',
+  tags: ['admin'],
+  summary: 'End the current admin session',
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: z.object({
+            refreshToken: z.string().optional(),
+          }).passthrough(),
+        },
+      },
+      required: false,
+    },
+  },
+  responses: {
+    200: { description: 'Session ended', content: { 'application/json': { schema: jsonResponseSchema } } },
+    400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
+  },
+});
 
-  return c.json({ accessToken: newAccessToken, refreshToken: newRefreshToken });
+adminRoute.openapi(adminLogout, async (c) => {
+  assertAdminAuthTransportAllowed(c);
+  applyAdminAuthNoStore(c);
+  const body = await c.req.json<{ refreshToken?: string }>()
+    .catch((): { refreshToken?: string } => ({}));
+  const cookieTransport = isAdminCookieAuthTransport(c);
+  const refreshToken = cookieTransport
+    ? (readAdminRefreshCookie(c) ?? body.refreshToken)
+    : body.refreshToken;
+  if (!refreshToken && !cookieTransport) {
+    throw new EdgeBaseError(400, 'Refresh token is required.', undefined, 'validation-failed');
+  }
+
+  try {
+    if (refreshToken) {
+      let boundSessionId: string | null = null;
+      try {
+        const payload = await verifyAdminRefreshTokenWithFallback(
+          refreshToken,
+          c.env.JWT_ADMIN_SECRET ?? '',
+          c.env.JWT_ADMIN_SECRET_OLD,
+          c.env.JWT_ADMIN_SECRET_OLD_AT,
+        );
+        boundSessionId = typeof payload.sid === 'string' ? payload.sid : null;
+      } catch {
+        // Invalid credentials are treated as an already-ended idempotent
+        // logout. The negotiated browser cookie is still expired below.
+      }
+
+      if (boundSessionId) {
+        // Delete by the signed stable session ID. If a concurrent refresh won
+        // first, this removes its rotated row; if logout won first, the CAS
+        // refresh fails and cannot resurrect the session.
+        await deleteAdminSession(getAuthDb(c), boundSessionId);
+      } else {
+        const session = await getAdminSession(getAuthDb(c), refreshToken);
+        if (session) await deleteAdminSession(getAuthDb(c), session.id);
+      }
+    }
+  } finally {
+    if (cookieTransport) clearAdminRefreshCookie(c);
+  }
+
+  return c.json({ ok: true });
 });
 
 // ─────────────────────────────────────────────
@@ -707,18 +875,16 @@ api.use('*', async (c, next) => {
       const token = authHeader.slice(7);
       const secret = c.env.JWT_ADMIN_SECRET;
       if (secret) {
-        try {
-          const payload = await verifyAdminTokenWithFallback(
-            token,
-            secret,
-            c.env.JWT_ADMIN_SECRET_OLD,
-            c.env.JWT_ADMIN_SECRET_OLD_AT,
-          );
-          c.set('adminId' as never, payload.sub);
+        const adminId = await resolveAdminJwtAuthority(getAuthDb(c), {
+          token,
+          secret,
+          oldSecret: c.env.JWT_ADMIN_SECRET_OLD,
+          oldSecretRotatedAt: c.env.JWT_ADMIN_SECRET_OLD_AT,
+        });
+        if (adminId) {
+          c.set('adminId' as never, adminId);
           await next();
           return;
-        } catch {
-          // fall through to 401
         }
       }
     }
@@ -2485,6 +2651,11 @@ api.openapi(adminGetAuthSettings, (c) => {
         maxActiveSessions: typeof authConfig.session?.maxActiveSessions === 'number'
           ? authConfig.session.maxActiveSessions
           : null,
+        cookie: {
+          enabled: authConfig.session?.cookie?.enabled === true,
+          name: authConfig.session?.cookie?.name ?? null,
+          sameSite: authConfig.session?.cookie?.sameSite ?? 'strict',
+        },
       },
       magicLink: {
         enabled: !!authConfig.magicLink?.enabled,
@@ -2516,6 +2687,11 @@ api.openapi(adminGetAuthSettings, (c) => {
         accessTokenTTL: null,
         refreshTokenTTL: null,
         maxActiveSessions: null,
+        cookie: {
+          enabled: false,
+          name: null,
+          sameSite: 'strict',
+        },
       },
       magicLink: {
         enabled: false,

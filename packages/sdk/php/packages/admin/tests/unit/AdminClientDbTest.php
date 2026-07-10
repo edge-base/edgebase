@@ -90,7 +90,6 @@ class AdminClientDbTest extends TestCase
         };
 
         $property = new \ReflectionProperty($admin, 'adminCore');
-        $property->setAccessible(true);
         $property->setValue($admin, $fake);
 
         $result = $admin->sql('shared', null, 'SELECT 1', []);

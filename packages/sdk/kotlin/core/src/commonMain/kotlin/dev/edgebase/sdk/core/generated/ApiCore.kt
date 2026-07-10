@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 package dev.edgebase.sdk.core.generated
 
@@ -485,6 +485,7 @@ open class GeneratedDbApi(protected val http: HttpClient) {
  */
 object ApiPaths {
     const val ADMIN_LOGIN = "/admin/api/auth/login"
+    const val ADMIN_LOGOUT = "/admin/api/auth/logout"
     const val ADMIN_REFRESH = "/admin/api/auth/refresh"
     const val BACKUP_CLEANUP_PLUGIN = "/admin/api/backup/cleanup-plugin"
     const val BACKUP_GET_CONFIG = "/admin/api/backup/config"

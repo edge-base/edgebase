@@ -86,6 +86,11 @@ Inside authentication triggers, `ctx.admin.auth.createUser()` and `ctx.admin.aut
 
 Blocking triggers can reject the operation by throwing. Non-blocking triggers run via `waitUntil()` semantics and do not affect the client response once the main auth action succeeds.
 
+A rejected `beforeSignOut` keeps the server session and refresh cookie valid.
+Cookie-mode Web clients clear private local state but surface the `403` and keep
+a non-secret pending-revocation tombstone, so applications can distinguish a
+policy-denied revoke from a durable server logout.
+
 ## Common Patterns
 
 ### Reject a Signup

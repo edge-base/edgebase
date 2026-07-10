@@ -76,7 +76,6 @@ class HttpClientTest extends TestCase
         putenv('EDGEBASE_HTTP_TIMEOUT_MS=12000');
         $client = new HttpClient('https://dummy.edgebase.fun', 'sk-test');
         $property = new \ReflectionProperty(HttpClient::class, 'timeoutMs');
-        $property->setAccessible(true);
         $this->assertSame(12000, $property->getValue($client));
     }
 
@@ -85,7 +84,6 @@ class HttpClientTest extends TestCase
         putenv('EDGEBASE_HTTP_TIMEOUT_MS=invalid');
         $client = new HttpClient('https://dummy.edgebase.fun', 'sk-test');
         $property = new \ReflectionProperty(HttpClient::class, 'timeoutMs');
-        $property->setAccessible(true);
         $this->assertSame(0, $property->getValue($client));
     }
 
@@ -93,7 +91,6 @@ class HttpClientTest extends TestCase
     {
         $client = new HttpClient('https://dummy.edgebase.fun', 'sk-test');
         $method = new \ReflectionMethod(HttpClient::class, 'authHeaders');
-        $method->setAccessible(true);
         $headers = $method->invoke($client, true);
 
         $this->assertContains('Connection: close', $headers);

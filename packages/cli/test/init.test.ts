@@ -51,6 +51,10 @@ describe('CLI: init command', () => {
     expect(existsSync(join(testDir, 'AGENTS.md'))).toBe(true);
     expect(existsSync(join(testDir, '.github', 'copilot-instructions.md'))).toBe(true);
     expect(existsSync(join(testDir, 'package.json'))).toBe(true);
+    const generatedPackage = JSON.parse(readFileSync(join(testDir, 'package.json'), 'utf-8')) as {
+      engines?: { node?: string };
+    };
+    expect(generatedPackage.engines?.node).toBe('>=22.0.0');
     expect(existsSync(join(testDir, 'wrangler.toml'))).toBe(true);
     expect(existsSync(join(testDir, 'node_modules', '@edge-base', 'shared', 'package.json'))).toBe(true);
     expect(existsSync(join(testDir, '.edgebase', 'runtime', 'server', 'src', 'index.ts'))).toBe(true);

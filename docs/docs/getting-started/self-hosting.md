@@ -24,7 +24,7 @@ SQLite runs in the same thread as the application, so single-query latency is si
 |                   | **Cloud Edge**                                | **Docker**                         | **Direct**                               |
 | ----------------- | --------------------------------------------- | ---------------------------------- | ---------------------------------------- |
 | **Command**       | `npx edgebase deploy`                         | `npx edgebase docker run`          | `npx edgebase dev`                       |
-| **Requires**      | Cloudflare account                            | Docker                             | Node.js 20.19+ (24.x recommended)        |
+| **Requires**      | Cloudflare account                            | Docker                             | Node.js 22+ (24.x recommended)           |
 | **Pros**          | Global edge, auto-scale, no server management | Single container, data sovereignty | Simplest, run on any VPS                 |
 | **Cons**          | Cloud account required                        | Docker required                    | Process management needed for production |
 | **Cost**          | ~$5/mo                                        | VPS only (~$5/mo)                  | VPS only                                 |
@@ -101,6 +101,10 @@ docker run --env-file .env.release -p 8787:8787 -v edgebase-data:/data edgebase
 ```
 
 That `SERVICE_KEY` is the same credential consumed by all Admin SDKs.
+The container forwards the complete process environment to Wrangler, so custom
+application variables in the same env file are available to functions and
+runtime config as well. The entrypoint removes any bundled `.dev.vars` file;
+otherwise Wrangler would ignore the container process environment.
 
 :::tip
 For local Docker development, use `.env.development` instead:
@@ -342,7 +346,7 @@ echo "0 3 * * * docker run --rm -v edgebase-data:/data -v /backups:/backup alpin
 
 ```bash
 curl http://localhost:8787/api/health
-# → {"status":"ok","version":"0.1.0","timestamp":"2026-03-17T12:00:00.000Z"}
+# → {"status":"ok","version":"0.3.6","timestamp":"2026-03-17T12:00:00.000Z"}
 ```
 
 ### Docker Logs

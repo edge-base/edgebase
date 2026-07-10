@@ -258,6 +258,7 @@ const EXCLUDED_OPS: Record<string, string> = {
   dbSingleInsertRecord: 'TableRef API',
   dbSingleBatchRecords: 'TableRef API',
   dbSingleBatchByFilter: 'TableRef API',
+  dbSingleTransact: 'DbRef.transact() for single-instance databases',
   dbCountRecords: 'TableRef API',
   dbSearchRecords: 'TableRef API',
   dbGetRecord: 'TableRef API',
@@ -267,6 +268,7 @@ const EXCLUDED_OPS: Record<string, string> = {
   dbInsertRecord: 'TableRef API',
   dbBatchRecords: 'TableRef API',
   dbBatchByFilter: 'TableRef API',
+  dbTransact: 'DbRef.transact() for dynamic database instances',
   // ── Client: Storage — binary or dedicated StorageClient ──
   uploadFile: 'binary upload via StorageClient',
   downloadFile: 'binary download via StorageClient',
@@ -336,6 +338,7 @@ const EXCLUDED_OPS: Record<string, string> = {
   adminSetup: 'admin dashboard',
   adminLogin: 'admin dashboard',
   adminRefresh: 'admin dashboard',
+  adminLogout: 'admin dashboard',
   adminResetPassword: 'admin dashboard',
   adminListTables: 'admin dashboard',
   adminGetTableRecords: 'admin dashboard',

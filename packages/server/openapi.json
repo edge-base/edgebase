@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgeBase API",
-    "version": "0.1.0"
+    "version": "0.3.6"
   },
   "components": {
     "schemas": {},
@@ -54,7 +54,7 @@
                     },
                     "version": {
                       "type": "string",
-                      "example": "0.1.0"
+                      "example": "0.3.6"
                     }
                   },
                   "required": [
@@ -2075,7 +2075,7 @@
         ],
         "summary": "Refresh access token",
         "requestBody": {
-          "required": true,
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
@@ -2085,9 +2085,6 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "refreshToken"
-                ],
                 "additionalProperties": {}
               }
             }
@@ -2169,7 +2166,7 @@
         ],
         "summary": "Sign out and revoke refresh token",
         "requestBody": {
-          "required": true,
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
@@ -2179,9 +2176,6 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "refreshToken"
-                ],
                 "additionalProperties": {}
               }
             }
@@ -4862,7 +4856,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Auth tokens",
+            "description": "Authentication result",
             "content": {
               "application/json": {
                 "schema": {
@@ -4874,7 +4868,7 @@
             }
           },
           "302": {
-            "description": "Redirect with tokens"
+            "description": "Redirect to the client application"
           },
           "400": {
             "description": "Bad request",
@@ -14269,7 +14263,7 @@
         ],
         "summary": "Rotate admin token",
         "requestBody": {
-          "required": true,
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
@@ -14279,9 +14273,6 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "refreshToken"
-                ],
                 "additionalProperties": {}
               }
             }
@@ -14302,6 +14293,97 @@
           },
           "401": {
             "description": "Invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Token was already rotated by another request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/api/auth/logout": {
+      "post": {
+        "operationId": "adminLogout",
+        "tags": [
+          "admin"
+        ],
+        "summary": "End the current admin session",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refreshToken": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
             "content": {
               "application/json": {
                 "schema": {

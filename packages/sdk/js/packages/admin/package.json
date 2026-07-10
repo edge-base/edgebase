@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/admin",
-    "version": "0.3.5",
+    "version": "0.3.6",
     "description": "EdgeBase admin SDK — server-side client for user management, database admin, and analytics",
     "license": "MIT",
     "repository": {
@@ -47,6 +47,6 @@
     "devDependencies": {
         "fast-check": "^4.5.3",
         "typescript": "^5.7.0",
-        "vitest": "^3.0.0"
+        "vitest": "^3.2.6"
     }
 }

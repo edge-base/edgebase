@@ -24,10 +24,14 @@ interface ResolvedCorsHeaders {
  * e.g. '*.example.com' → /^https?:\/\/.*\.example\.com$/
  */
 export function wildcardToRegex(pattern: string): RegExp {
+  const explicitScheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(pattern)?.[0].toLowerCase();
+  if (explicitScheme && explicitScheme !== 'http://' && explicitScheme !== 'https://') {
+    return /$a/;
+  }
   const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
     .replace(/\*/g, '.*');
-  return new RegExp(`^https?:\\/\\/${escaped}$`);
+  return new RegExp(explicitScheme ? `^${escaped}$` : `^https?:\\/\\/${escaped}$`);
 }
 
 /**
@@ -47,10 +51,12 @@ export function matchOrigin(
 
   const origins = Array.isArray(allowedOrigins) ? allowedOrigins : [allowedOrigins];
 
+  // Exact entries always win, independent of array order. This preserves
+  // credentialed access when a broader wildcard is also configured.
+  if (origins.includes(origin)) return { allowed: true, viaWildcard: false };
+
   for (const pattern of origins) {
     if (pattern === '*') return { allowed: true, viaWildcard: true };
-    // Exact match — the only case where credentials are safe to send.
-    if (pattern === origin) return { allowed: true, viaWildcard: false };
     // Wildcard match — allowed, but never with credentials.
     if (pattern.includes('*') && wildcardToRegex(pattern).test(origin)) {
       return { allowed: true, viaWildcard: true };
@@ -100,7 +106,7 @@ function resolveCorsHeaders(
     // non-credentialed wildcard match may safely return '*'.
     allowOrigin: viaWildcard && !effectiveCredentials ? '*' : origin,
     allowMethods: methods.join(', '),
-    allowHeaders: 'Content-Type, Authorization, X-EdgeBase-Service-Key',
+    allowHeaders: 'Content-Type, Authorization, X-EdgeBase-Service-Key, X-EdgeBase-Auth-Transport',
     allowCredentials: effectiveCredentials,
     maxAge: String(maxAge),
   };

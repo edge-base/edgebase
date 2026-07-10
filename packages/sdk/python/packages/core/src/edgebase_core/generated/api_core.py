@@ -1,7 +1,7 @@
 """Auto-generated core API Core — DO NOT EDIT.
 
 Regenerate: npx tsx tools/sdk-codegen/generate.ts
-Source: openapi.json (0.1.0)
+Source: openapi.json (0.3.6)
 """
 
 from __future__ import annotations
@@ -397,6 +397,7 @@ class ApiPaths:
     """Auto-generated path constants — DO NOT EDIT."""
 
     ADMIN_LOGIN = "/admin/api/auth/login"
+    ADMIN_LOGOUT = "/admin/api/auth/logout"
     ADMIN_REFRESH = "/admin/api/auth/refresh"
     BACKUP_CLEANUP_PLUGIN = "/admin/api/backup/cleanup-plugin"
     BACKUP_GET_CONFIG = "/admin/api/backup/config"

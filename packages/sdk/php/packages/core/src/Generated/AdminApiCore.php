@@ -2,7 +2,7 @@
 
 // Auto-generated admin API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 declare(strict_types=1);
 
@@ -194,6 +194,12 @@ class GeneratedAdminApi
     public function admin_refresh(mixed $body = null): mixed
     {
         return $this->http->post('/admin/api/auth/refresh', $body);
+    }
+
+    /** End the current admin session — POST /admin/api/auth/logout */
+    public function admin_logout(mixed $body = null): mixed
+    {
+        return $this->http->post('/admin/api/auth/logout', $body);
     }
 
     /** Reset admin password (Service Key required) — POST /admin/api/internal/reset-password */

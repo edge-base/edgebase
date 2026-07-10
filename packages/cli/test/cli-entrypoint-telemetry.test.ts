@@ -130,7 +130,7 @@ describe('CLI entrypoint telemetry', () => {
           HOME: homeDir,
           USERPROFILE: homeDir,
           NO_COLOR: '1',
-          EDGEBASE_NODE_VERSION_OVERRIDE: '18.20.0',
+          EDGEBASE_NODE_VERSION_OVERRIDE: '21.99.0',
         },
         stdio: 'pipe',
         ...tsxExecOptions,
@@ -138,7 +138,7 @@ describe('CLI entrypoint telemetry', () => {
     );
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('Node.js >= 20.19.0');
-    expect(result.stderr).toContain('Install Node.js 20.19.0 or newer');
+    expect(result.stderr).toContain('Node.js >= 22.0.0');
+    expect(result.stderr).toContain('Install Node.js 22.0.0 or newer');
   });
 });

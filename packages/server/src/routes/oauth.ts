@@ -53,6 +53,16 @@ import { signAccessToken, signRefreshToken, parseDuration } from '../lib/jwt.js'
 import { generateId } from '../lib/uuid.js';
 import { resolveAuthDb, type AuthDb } from '../lib/auth-db-adapter.js';
 import { getTrustedClientIp } from '../lib/client-ip.js';
+import {
+  applyAuthNoStore,
+  assertAuthTransportAllowed,
+  assertCookieAuthEnabled,
+  cookieSessionResponse,
+  isCookieAuthTransport,
+  setOAuthStateCookie,
+  setRefreshCookie,
+  verifyAndClearOAuthStateCookie,
+} from '../lib/auth-session-cookie.js';
 
 /** Resolve AuthDb from Hono context. Defaults to D1 (AUTH_DB binding). */
 function getAuthDb(c: { env: unknown }): AuthDb {
@@ -83,6 +93,7 @@ export const oauthRoute = new OpenAPIHono<HonoEnv>({ defaultHook: zodDefaultHook
 
 // Error handler for OAuth sub-app
 oauthRoute.onError((err, c) => {
+  applyAuthNoStore(c);
   if (err instanceof EdgeBaseError) {
     return c.json(err.toJSON(), err.code as 400);
   }
@@ -165,7 +176,7 @@ async function ensureAuthActionAllowed(
 async function createOAuthSessionAndTokens(
   env: Env,
   user: Record<string, unknown>,
-): Promise<{ accessToken: string; refreshToken: string }> {
+): Promise<{ accessToken: string; refreshToken: string; sessionId: string }> {
   const userId = user.id as string;
   const secret = env.JWT_USER_SECRET;
   if (!secret) throw new EdgeBaseError(500, 'JWT_USER_SECRET is not configured.', undefined, 'internal-error');
@@ -178,9 +189,11 @@ async function createOAuthSessionAndTokens(
     ? (typeof user.customClaims === 'string' ? JSON.parse(user.customClaims as string) : user.customClaims)
     : undefined;
 
+  const sessionId = generateId();
   const accessToken = await signAccessToken(
     {
       sub: userId,
+      sid: sessionId,
       email: user.email as string | null,
       displayName: (user.displayName as string | null) ?? undefined,
       role: user.role as string,
@@ -191,7 +204,6 @@ async function createOAuthSessionAndTokens(
     accessTTL,
   );
 
-  const sessionId = generateId();
   const refreshToken = await signRefreshToken(
     { sub: userId, type: 'refresh', jti: sessionId },
     secret,
@@ -210,10 +222,16 @@ async function createOAuthSessionAndTokens(
     metadata: JSON.stringify({ ip: '0.0.0.0', userAgent: 'OAuth', lastActiveAt: now }),
   });
 
-  return { accessToken, refreshToken };
+  return { accessToken, refreshToken, sessionId };
 }
 
 // ─── D1 Schema Middleware ───
+
+oauthRoute.use('*', async (c, next) => {
+  assertAuthTransportAllowed(c);
+  applyAuthNoStore(c);
+  await next();
+});
 
 oauthRoute.use('*', async (c, next) => {
   await ensureAuthSchema(getAuthDb(c));
@@ -241,6 +259,12 @@ const oauthRedirect = createRoute({
 
 oauthRoute.openapi(oauthRedirect, async (c) => {
   const providerName = c.req.param('provider')!;
+  const authTransport = c.req.query('auth_transport')?.trim().toLowerCase();
+  if (authTransport && authTransport !== 'cookie') {
+    throw new EdgeBaseError(400, `Unsupported auth transport '${authTransport}'.`, undefined, 'invalid-input');
+  }
+  const cookieTransport = authTransport === 'cookie';
+  if (cookieTransport) assertCookieAuthEnabled(c);
   const appRedirectUrl = parseClientRedirectUrl(
     c.env,
     c.req.query('redirect_url') ?? c.req.query('redirectUrl'),
@@ -297,10 +321,13 @@ oauthRoute.openapi(oauthRedirect, async (c) => {
       redirectUri,
       codeVerifier: codeVerifier || null,
       appRedirectUrl,
+      authTransport: cookieTransport ? 'cookie' : 'body',
       ...(captchaPassed ? { captcha_passed: true } : {}),
     }),
     { expirationTtl: 300 },
   );
+
+  if (cookieTransport) setOAuthStateCookie(c, state);
 
   const authUrl = provider.getAuthorizationUrl(state, redirectUri, codeChallenge);
   return c.redirect(authUrl);
@@ -316,8 +343,8 @@ const oauthCallback = createRoute({
   summary: 'OAuth callback',
   request: { params: z.object({ provider: z.string() }) },
   responses: {
-    200: { description: 'Auth tokens', content: { 'application/json': { schema: jsonResponseSchema } } },
-    302: { description: 'Redirect with tokens' },
+    200: { description: 'Authentication result', content: { 'application/json': { schema: jsonResponseSchema } } },
+    302: { description: 'Redirect to the client application' },
     400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
   },
 });
@@ -332,20 +359,21 @@ oauthRoute.openapi(oauthCallback, async (c) => {
     if (state) {
       const stateData = await c.env.KV.get(`oauth:state:${state}`);
       if (stateData) {
-        try {
-          const stored = JSON.parse(stateData) as {
-            provider: string;
-            appRedirectUrl?: string | null;
-          };
-          if (stored.provider === providerName && stored.appRedirectUrl) {
-            await c.env.KV.delete(`oauth:state:${state}`);
-            return c.redirect(appendRedirectParams(stored.appRedirectUrl, {
-              error,
-              error_description: c.req.query('error_description') || error,
-            }));
-          }
-        } catch {
-          // Fall through to JSON error response.
+        const stored = JSON.parse(stateData) as {
+          provider: string;
+          appRedirectUrl?: string | null;
+          authTransport?: 'body' | 'cookie';
+        };
+        if (stored.authTransport === 'cookie' && !verifyAndClearOAuthStateCookie(c, state)) {
+          await c.env.KV.delete(`oauth:state:${state}`);
+          throw new EdgeBaseError(400, 'OAuth state is not bound to this browser.', undefined, 'invalid-token');
+        }
+        if (stored.provider === providerName && stored.appRedirectUrl) {
+          await c.env.KV.delete(`oauth:state:${state}`);
+          return c.redirect(appendRedirectParams(stored.appRedirectUrl, {
+            error,
+            error_description: c.req.query('error_description') || error,
+          }));
         }
       }
     }
@@ -364,17 +392,22 @@ oauthRoute.openapi(oauthCallback, async (c) => {
     throw new EdgeBaseError(400, 'Invalid or expired OAuth state.', undefined, 'invalid-token');
   }
 
-  const { provider: storedProvider, redirectUri, codeVerifier, captcha_passed, appRedirectUrl } = JSON.parse(stateData) as {
+  const { provider: storedProvider, redirectUri, codeVerifier, captcha_passed, appRedirectUrl, authTransport } = JSON.parse(stateData) as {
     provider: string;
     redirectUri: string;
     codeVerifier: string | null;
     captcha_passed?: boolean;
     appRedirectUrl?: string | null;
+    authTransport?: 'body' | 'cookie';
   };
   if (storedProvider !== providerName) {
     throw new EdgeBaseError(400, 'OAuth state provider mismatch.', undefined, 'validation-failed');
   }
   await ensureAuthActionAllowed(c, 'oauthCallback', { provider: providerName, state });
+  if (authTransport === 'cookie' && !verifyAndClearOAuthStateCookie(c, state)) {
+    await c.env.KV.delete(`oauth:state:${state}`);
+    throw new EdgeBaseError(400, 'OAuth state is not bound to this browser.', undefined, 'invalid-token');
+  }
   // Delete state immediately after policy check (single-use)
   await c.env.KV.delete(`oauth:state:${state}`);
 
@@ -433,12 +466,20 @@ oauthRoute.openapi(oauthCallback, async (c) => {
   // Process OAuth callback — this is the core logic
   const result = await processOAuthCallback(c.env, providerName, userInfo);
   if (appRedirectUrl) {
+    if (authTransport === 'cookie') {
+      setRefreshCookie(c, result.refreshToken);
+      return c.redirect(appendRedirectParams(appRedirectUrl, {
+        auth_transport: 'cookie',
+      }));
+    }
     return c.redirect(appendRedirectParams(appRedirectUrl, {
       access_token: result.accessToken,
       refresh_token: result.refreshToken,
     }));
   }
-  return c.json(result, result.created ? 201 : 200);
+  return authTransport === 'cookie'
+    ? cookieSessionResponse(c, result, result.created ? 201 : 200)
+    : c.json(result, result.created ? 201 : 200);
 });
 
 // ─── POST /api/auth/oauth/link/:provider — Start anonymous→OAuth linking ───
@@ -459,6 +500,7 @@ const oauthLinkStart = createRoute({
 
 oauthRoute.openapi(oauthLinkStart, async (c) => {
   const providerName = c.req.param('provider')!;
+  const cookieTransport = isCookieAuthTransport(c);
   const body = await c.req.json<{ redirectUrl?: string; state?: string }>().catch(() => null);
   const redirect = parseClientRedirectInput(c.env, body);
   const appRedirectUrl = redirect.redirectUrl;
@@ -521,9 +563,12 @@ oauthRoute.openapi(oauthLinkStart, async (c) => {
       linkUserId: userId,
       linkMode,
       appState: redirect.state,
+      authTransport: cookieTransport ? 'cookie' : 'body',
     }),
     { expirationTtl: 300 },
   );
+
+  if (cookieTransport) setOAuthStateCookie(c, state);
 
   const authUrl = provider.getAuthorizationUrl(state, redirectUri, codeChallenge);
   return c.json({ redirectUrl: authUrl });
@@ -555,22 +600,23 @@ oauthRoute.openapi(oauthLinkCallback, async (c) => {
     if (state) {
       const stateData = await c.env.KV.get(`oauth:link-state:${state}`);
       if (stateData) {
-        try {
-          const stored = JSON.parse(stateData) as {
-            provider: string;
-            appState?: string | null;
-            appRedirectUrl?: string | null;
-          };
-          if (stored.provider === providerName && stored.appRedirectUrl) {
-            await c.env.KV.delete(`oauth:link-state:${state}`);
-            return c.redirect(appendRedirectParams(stored.appRedirectUrl, {
-              error,
-              error_description: c.req.query('error_description') || error,
-              state: stored.appState ?? undefined,
-            }));
-          }
-        } catch {
-          // Fall through to JSON error response.
+        const stored = JSON.parse(stateData) as {
+          provider: string;
+          appState?: string | null;
+          appRedirectUrl?: string | null;
+          authTransport?: 'body' | 'cookie';
+        };
+        if (stored.authTransport === 'cookie' && !verifyAndClearOAuthStateCookie(c, state)) {
+          await c.env.KV.delete(`oauth:link-state:${state}`);
+          throw new EdgeBaseError(400, 'OAuth state is not bound to this browser.', undefined, 'invalid-token');
+        }
+        if (stored.provider === providerName && stored.appRedirectUrl) {
+          await c.env.KV.delete(`oauth:link-state:${state}`);
+          return c.redirect(appendRedirectParams(stored.appRedirectUrl, {
+            error,
+            error_description: c.req.query('error_description') || error,
+            state: stored.appState ?? undefined,
+          }));
         }
       }
     }
@@ -589,7 +635,7 @@ oauthRoute.openapi(oauthLinkCallback, async (c) => {
     throw new EdgeBaseError(400, 'Invalid or expired OAuth link state.', undefined, 'invalid-token');
   }
 
-  const { provider: storedProvider, redirectUri, codeVerifier, linkUserId, appRedirectUrl, linkMode, appState } = JSON.parse(stateData) as {
+  const { provider: storedProvider, redirectUri, codeVerifier, linkUserId, appRedirectUrl, linkMode, appState, authTransport } = JSON.parse(stateData) as {
     provider: string;
     redirectUri: string;
     codeVerifier: string | null;
@@ -597,6 +643,7 @@ oauthRoute.openapi(oauthLinkCallback, async (c) => {
     linkMode?: 'anonymous-upgrade' | 'attach-oauth';
     appState?: string | null;
     appRedirectUrl?: string | null;
+    authTransport?: 'body' | 'cookie';
   };
   if (storedProvider !== providerName) {
     throw new EdgeBaseError(400, 'OAuth state provider mismatch.', undefined, 'validation-failed');
@@ -606,6 +653,10 @@ oauthRoute.openapi(oauthLinkCallback, async (c) => {
     state,
     linkUserId,
   });
+  if (authTransport === 'cookie' && !verifyAndClearOAuthStateCookie(c, state)) {
+    await c.env.KV.delete(`oauth:link-state:${state}`);
+    throw new EdgeBaseError(400, 'OAuth state is not bound to this browser.', undefined, 'invalid-token');
+  }
   await c.env.KV.delete(`oauth:link-state:${state}`);
 
   const configObj = getOAuthRuntimeConfig(c.env);
@@ -637,13 +688,22 @@ oauthRoute.openapi(oauthLinkCallback, async (c) => {
     ? await processAttachOAuthCallback(c.env, providerName, userInfo, linkUserId)
     : await processLinkOAuthCallback(c.env, providerName, userInfo, linkUserId);
   if (appRedirectUrl) {
+    if (authTransport === 'cookie') {
+      setRefreshCookie(c, result.refreshToken);
+      return c.redirect(appendRedirectParams(appRedirectUrl, {
+        auth_transport: 'cookie',
+        state: appState ?? undefined,
+      }));
+    }
     return c.redirect(appendRedirectParams(appRedirectUrl, {
       access_token: result.accessToken,
       refresh_token: result.refreshToken,
       state: appState ?? undefined,
     }));
   }
-  return c.json(result);
+  return authTransport === 'cookie'
+    ? cookieSessionResponse(c, result)
+    : c.json(result);
 });
 
 // ─── Core OAuth callback processing (D1-based,) ───
@@ -652,6 +712,7 @@ interface OAuthResult {
   user: Record<string, unknown>;
   accessToken: string;
   refreshToken: string;
+  sessionId: string;
   created: boolean;
 }
 
@@ -669,8 +730,8 @@ async function processOAuthCallback(
     const { userId } = oauthRecord;
     const user = await authService.getUserById(db, userId);
     if (!user) throw new EdgeBaseError(500, 'User not found for OAuth account.', undefined, 'internal-error');
-    const { accessToken, refreshToken } = await createOAuthSessionAndTokens(env, user);
-    return { user: authService.sanitizeUser(user), accessToken, refreshToken, created: false };
+    const { accessToken, refreshToken, sessionId } = await createOAuthSessionAndTokens(env, user);
+    return { user: authService.sanitizeUser(user), accessToken, refreshToken, sessionId, created: false };
   }
 
   // Step 2: Check _email_index in D1 for auto-linking
@@ -797,14 +858,14 @@ async function processLinkOAuthCallback(
   // Get updated user and create session
   const user = await authService.getUserById(getAuthDbFromEnv(env), linkUserId);
   if (!user) throw new EdgeBaseError(500, 'User not found after link.', undefined, 'internal-error');
-  const { accessToken, refreshToken } = await createOAuthSessionAndTokens(env, user);
+  const { accessToken, refreshToken, sessionId } = await createOAuthSessionAndTokens(env, user);
 
   // Sync _users_public
   try {
     await upsertUserPublic(getAuthDbFromEnv(env), linkUserId, authService.buildPublicUserData(user) as unknown as UserPublicData);
   } catch { /* best-effort */ }
 
-  return { user: authService.sanitizeUser(user), accessToken, refreshToken, created: false };
+  return { user: authService.sanitizeUser(user), accessToken, refreshToken, sessionId, created: false };
 }
 
 /**
@@ -885,13 +946,13 @@ async function processAttachOAuthCallback(
 
   const user = await authService.getUserById(db, linkUserId);
   if (!user) throw new EdgeBaseError(500, 'User not found after link.', undefined, 'internal-error');
-  const { accessToken, refreshToken } = await createOAuthSessionAndTokens(env, user);
+  const { accessToken, refreshToken, sessionId } = await createOAuthSessionAndTokens(env, user);
 
   try {
     await upsertUserPublic(db, linkUserId, authService.buildPublicUserData(user) as unknown as UserPublicData);
   } catch { /* best-effort */ }
 
-  return { user: authService.sanitizeUser(user), accessToken, refreshToken, created: false };
+  return { user: authService.sanitizeUser(user), accessToken, refreshToken, sessionId, created: false };
 }
 
 /**
@@ -955,9 +1016,9 @@ async function autoLinkOAuth(
   // Get user and create session
   const user = await authService.getUserById(db, userId);
   if (!user) throw new EdgeBaseError(500, 'User not found.', undefined, 'internal-error');
-  const { accessToken, refreshToken } = await createOAuthSessionAndTokens(env, user);
+  const { accessToken, refreshToken, sessionId } = await createOAuthSessionAndTokens(env, user);
 
-  return { user: authService.sanitizeUser(user), accessToken, refreshToken, created: false };
+  return { user: authService.sanitizeUser(user), accessToken, refreshToken, sessionId, created: false };
 }
 
 /**
@@ -1023,14 +1084,14 @@ async function createOAuthUser(
     }
 
     // Create session
-    const { accessToken, refreshToken } = await createOAuthSessionAndTokens(env, user);
+    const { accessToken, refreshToken, sessionId } = await createOAuthSessionAndTokens(env, user);
 
     // Sync to _users_public
     try {
       await upsertUserPublic(db, userId, authService.buildPublicUserData(user) as unknown as UserPublicData);
     } catch { /* best-effort */ }
 
-    return { user: authService.sanitizeUser(user), accessToken, refreshToken, created: true };
+    return { user: authService.sanitizeUser(user), accessToken, refreshToken, sessionId, created: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (!userCreated && reservedEmail && userInfo.emailVerified && /_users\.email|idx_users_email/i.test(message)) {

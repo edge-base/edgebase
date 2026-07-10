@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`OpenAPI spec stability > operation list matches snapshot 1`] = `195`;
+exports[`OpenAPI spec stability > operation list matches snapshot 1`] = `196`;
 
 exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
 [
@@ -91,6 +91,7 @@ exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
   "PATCH /api/push/tokens",
   "PATCH /api/storage/{bucket}/{key}/metadata",
   "POST /admin/api/auth/login",
+  "POST /admin/api/auth/logout",
   "POST /admin/api/auth/refresh",
   "POST /admin/api/backup/cleanup-plugin",
   "POST /admin/api/backup/dump-control-d1",

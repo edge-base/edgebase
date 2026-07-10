@@ -20,6 +20,25 @@ Endpoints marked with **Auth: Bearer Token** require a valid access token:
 Authorization: Bearer <accessToken>
 ```
 
+## Optional Browser Cookie Transport
+
+When `auth.session.cookie.enabled` is enabled, the Web SDK can negotiate an
+HttpOnly refresh cookie by sending:
+
+```http
+X-EdgeBase-Auth-Transport: cookie
+Origin: https://app.example.com
+```
+
+Use `createClient(url, { refreshTokenTransport: 'httpOnlyCookie' })` rather
+than setting this header manually. Cookie-mode auth responses omit
+`refreshToken`; they return `accessToken`, `sessionId`, and
+`sessionTransport: "cookie"`. `POST /api/auth/refresh` and
+`POST /api/auth/signout` then accept an empty body and use the cookie.
+
+Cookie transport requires same-origin requests or an exact `cors.origin` entry
+with `credentials: true`. Wildcard origins do not qualify.
+
 ---
 
 ## Sign Up
@@ -141,7 +160,7 @@ End the current session. Only the session associated with the provided refresh t
 
 | Request Body    | Type   | Required | Description                          |
 | --------------- | ------ | -------- | ------------------------------------ |
-| `refreshToken`  | string | Yes      | The refresh token of the session to end |
+| `refreshToken`  | string | Body mode only | The refresh token of the session to end |
 
 ```bash
 curl -X POST https://your-project.edgebase.fun/api/auth/signout \
@@ -167,7 +186,7 @@ Refresh an expired access token. Uses token rotation with a 30-second grace peri
 
 | Request Body    | Type   | Required | Description            |
 | --------------- | ------ | -------- | ---------------------- |
-| `refreshToken`  | string | Yes      | Current refresh token  |
+| `refreshToken`  | string | Body mode only | Current refresh token  |
 
 ```bash
 curl -X POST https://your-project.edgebase.fun/api/auth/refresh \

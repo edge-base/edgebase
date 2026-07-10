@@ -1,6 +1,6 @@
 //! Auto-generated admin API Core — DO NOT EDIT.
 //! Regenerate: npx tsx tools/sdk-codegen/generate.ts
-//! Source: openapi.json (0.1.0)
+//! Source: openapi.json (0.3.6)
 
 use crate::Error;
 use crate::HttpClient;
@@ -163,6 +163,11 @@ impl<'a> GeneratedAdminApi<'a> {
     /// Rotate admin token — POST /admin/api/auth/refresh
     pub async fn admin_refresh(&self, body: &Value) -> Result<Value, Error> {
         self.http.post("/admin/api/auth/refresh", body).await
+    }
+
+    /// End the current admin session — POST /admin/api/auth/logout
+    pub async fn admin_logout(&self, body: &Value) -> Result<Value, Error> {
+        self.http.post("/admin/api/auth/logout", body).await
     }
 
     /// Reset admin password (Service Key required) — POST /admin/api/internal/reset-password

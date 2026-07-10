@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 import Foundation
 
@@ -488,6 +488,7 @@ public struct GeneratedDbApi {
 
 public enum ApiPaths {
     public static let ADMIN_LOGIN = "/admin/api/auth/login"
+    public static let ADMIN_LOGOUT = "/admin/api/auth/logout"
     public static let ADMIN_REFRESH = "/admin/api/auth/refresh"
     public static let BACKUP_CLEANUP_PLUGIN = "/admin/api/backup/cleanup-plugin"
     public static let BACKUP_GET_CONFIG = "/admin/api/backup/config"

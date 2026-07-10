@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 #include "edgebase/generated/api_core.h"
 #include "edgebase/edgebase.h"

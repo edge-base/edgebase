@@ -23,6 +23,7 @@ import {
   clearMiddlewareRegistry,
   getMiddlewareChain,
   wrapMethodExport,
+  usesCustomBearerAuth,
 } from '../../src/lib/functions.js';
 
 // Helper: create a minimal HTTP FunctionDefinition
@@ -326,6 +327,33 @@ describe('matchRoute — method filtering', () => {
     registerFunction('reports/a', httpDef('GET', undefined, '/reports'));
     registerFunction('reports/b', httpDef('GET', undefined, '/reports/'));
     expect(() => rebuildCompiledRoutes()).toThrow(/HTTP route collision/);
+  });
+
+  it('recognizes custom Bearer auth only on the matching function and method', () => {
+    registerFunction('oauth-resource', {
+      ...httpDef('POST'),
+      customBearerAuth: true,
+    });
+    registerFunction('ordinary', httpDef('POST'));
+    rebuildCompiledRoutes();
+
+    expect(usesCustomBearerAuth('/api/functions/oauth-resource', 'POST')).toBe(true);
+    expect(usesCustomBearerAuth('/api/functions/oauth-resource', 'GET')).toBe(false);
+    expect(usesCustomBearerAuth('/api/functions/ordinary', 'POST')).toBe(false);
+    expect(usesCustomBearerAuth('/api/health', 'POST')).toBe(false);
+  });
+
+  it('decodes the function path before selecting the authentication contract', () => {
+    registerFunction('[id]', {
+      ...httpDef('POST'),
+      customBearerAuth: true,
+    });
+    registerFunction('ordinary/secret', httpDef('POST'));
+    rebuildCompiledRoutes();
+
+    expect(usesCustomBearerAuth('/api/functions/opaque-token', 'POST')).toBe(true);
+    expect(usesCustomBearerAuth('/api/functions/ordinary%2Fsecret', 'POST')).toBe(false);
+    expect(usesCustomBearerAuth('/api/functions/%E0%A4%A', 'POST')).toBe(false);
   });
 });
 

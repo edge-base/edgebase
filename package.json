@@ -1,6 +1,6 @@
 {
     "name": "edgebase",
-    "version": "0.3.5",
+    "version": "0.3.6",
     "type": "module",
     "private": true,
     "scripts": {
@@ -22,6 +22,8 @@
         "skills:verify-export": "node ./tools/agent-skill-gen/verify-export.mjs",
         "release:sync": "node ./scripts/sync-release-versions.mjs",
         "release:check": "node ./scripts/check-release-versions.mjs",
+        "release:test": "node --test ./scripts/release-version.test.mjs",
+        "release:preflight": "pnpm release:test && pnpm release:check && pnpm security:audit",
         "release:set": "node ./scripts/set-release-version.mjs",
         "release:npm": "node ./dev/release/publish-npm-release.mjs",
         "release:pub": "node ./dev/release/publish-pub-release.mjs",
@@ -32,35 +34,73 @@
         "release:hex": "node ./dev/release/publish-hex-release.mjs",
         "release:php-sync": "node ./dev/release/sync-php-split-release.mjs",
         "release:swift-sync": "node ./dev/release/sync-swift-split-release.mjs",
-        "release:jitpack": "node ./dev/release/verify-jitpack-release.mjs"
+        "release:go-sync": "node ./dev/release/sync-go-split-release.mjs",
+        "release:go-verify": "node ./dev/release/verify-go-split-release.mjs",
+        "release:jitpack": "node ./dev/release/verify-jitpack-release.mjs",
+        "security:audit": "pnpm audit --audit-level high"
     },
     "devDependencies": {
         "@eslint/js": "^9.39.2",
         "@types/ws": "^8.18.1",
         "eslint": "^9.20.0",
         "prettier": "^3.5.0",
-        "turbo": "^2.4.0",
+        "turbo": "^2.9.14",
         "typescript": "^5.7.0",
         "typescript-eslint": "^8.55.0",
-        "ws": "^8.19.0"
+        "ws": "^8.21.0"
     },
     "engines": {
-        "node": ">=20.19.0"
+        "node": ">=22.0.0"
     },
     "packageManager": "pnpm@9.15.0",
     "pnpm": {
+        "peerDependencyRules": {
+            "allowedVersions": {
+                "@cloudflare/workers-types": "4.20260305.1"
+            }
+        },
         "overrides": {
+            "@babel/core@<=7.29.0": "7.29.6",
+            "@babel/plugin-transform-modules-systemjs@>=7.12.0 <=7.29.3": "7.29.4",
             "ajv@>=6.0.0 <6.14.0": "6.14.0",
             "ajv@>=8.0.0 <8.18.0": "8.18.0",
-            "fast-xml-parser@>=4.0.0 <5.5.6": "5.5.6",
+            "brace-expansion@>=4.0.0 <5.0.6": "5.0.6",
+            "cookie@<0.7.0": "0.7.0",
+            "devalue@<5.8.1": "5.8.1",
+            "esbuild@>=0.27.3 <0.28.1": "0.28.1",
+            "fast-uri@<=3.1.1": "3.1.2",
+            "fast-xml-builder@<=1.1.6": "1.1.7",
+            "fast-xml-parser@<5.7.0": "5.7.0",
+            "flatted@<3.4.2": "3.4.2",
+            "follow-redirects@<=1.15.11": "1.16.0",
+            "form-data@>=4.0.0 <4.0.6": "4.0.6",
+            "http-proxy-middleware@>=0.16.0 <2.0.10": "2.0.10",
+            "joi@<17.13.4": "17.13.4",
+            "js-yaml@<3.15.0": "3.15.0",
+            "js-yaml@>=4.0.0 <=4.1.1": "4.2.0",
+            "launch-editor@<=2.14.0": "2.14.1",
             "minimatch@<3.1.4": ">=3.1.4",
             "minimatch@>=9.0.0 <9.0.6": ">=9.0.6",
-            "serialize-javascript@<=7.0.2": ">=7.0.3",
-            "happy-dom@<20.0.0": ">=20.0.0",
+            "hono@<4.12.25": "4.12.25",
+            "lodash@>=4.0.0 <=4.17.23": "4.18.1",
+            "path-to-regexp@<0.1.13": "0.1.13",
+            "picomatch@<2.3.2": "2.3.2",
+            "picomatch@>=4.0.0 <4.0.4": "4.0.4",
+            "postcss@<8.5.10": "8.5.10",
+            "qs@>=6.11.1 <=6.15.1": "6.15.2",
+            "serialize-javascript@>=5.0.0 <7.0.5": "7.0.5",
+            "shell-quote@>=1.1.0 <=1.8.3": "1.8.4",
             "svgo@>=3.0.0 <3.3.3": ">=3.3.3",
             "rollup@>=4.0.0 <4.59.0": ">=4.59.0",
-            "undici@>=7.0.0 <7.24.4": "7.24.4",
-            "wrangler@>=4.0.0 <4.59.1": ">=4.59.1"
+            "tmp@<0.2.7": "0.2.7",
+            "undici@>=7.0.0 <7.28.0": "7.28.0",
+            "uuid@<11.1.1": "11.1.1",
+            "webpack-dev-server@<5.2.5": "5.2.5",
+            "wrangler@>=4.0.0 <4.59.1": ">=4.59.1",
+            "ws@>=6.0.0 <6.2.4": "6.2.4",
+            "ws@>=7.0.0 <7.5.11": "7.5.11",
+            "ws@>=8.0.0 <8.21.0": "8.21.0",
+            "yaml@>=2.0.0 <2.8.3": "2.8.3"
         }
     }
 }

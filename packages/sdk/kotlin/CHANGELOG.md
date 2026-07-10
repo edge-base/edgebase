@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.6 (2026-07-10)
+
+### Changed
+
+- Synchronized Kotlin/JitPack artifact guidance and realtime wire-version
+  reporting with EdgeBase 0.3.6.
+- No public Kotlin API compatibility break is introduced.
+
 ## 0.2.0 (2026-02-21)
 
 ### KMP Migration

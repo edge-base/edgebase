@@ -15,7 +15,8 @@
 
 	// The docs iframe runs on an opaque origin (no `allow-same-origin`) and cannot
 	// read the admin session. It requests the short-lived access token over
-	// postMessage; the long-lived refresh token stays in the parent window.
+	// postMessage; the long-lived refresh token stays in the server-issued
+	// HttpOnly cookie and is never readable by either frame.
 	async function respondWithToken(target: Window, refresh: boolean) {
 		if (refresh) {
 			await authStore.refresh();

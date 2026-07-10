@@ -125,8 +125,7 @@ jobs:
             "${{ needs.resolve.outputs.core_repo }}" \
             "${{ needs.resolve.outputs.core_repo }}" \
             "${{ needs.resolve.outputs.sync_mode }}" \
-            "${{ needs.resolve.outputs.ref_name }}" \
-            "${EDGEBASE_SPLIT_PUSH_TOKEN}"
+            "${{ needs.resolve.outputs.ref_name }}"
 
   sync-client:
     name: Sync Swift client split repo
@@ -158,5 +157,4 @@ jobs:
             "${{ needs.resolve.outputs.client_repo }}" \
             "${{ needs.resolve.outputs.core_repo }}" \
             "${{ needs.resolve.outputs.sync_mode }}" \
-            "${{ needs.resolve.outputs.ref_name }}" \
-            "${EDGEBASE_SPLIT_PUSH_TOKEN}"
+            "${{ needs.resolve.outputs.ref_name }}"

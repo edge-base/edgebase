@@ -72,4 +72,19 @@ describe('frontend cache headers', () => {
     const plain = applyFrontendAssetHeaders(new Response('ok'), '/favicon.ico');
     expect(plain.headers.get('Cache-Control')).toBe('public, max-age=300');
   });
+
+  it('applies configured security headers without dropping cache policy', () => {
+    const response = applyFrontendAssetHeaders(
+      new Response('ok'),
+      '/index.html',
+      {
+        'Content-Security-Policy': "default-src 'self'",
+        'X-Frame-Options': 'DENY',
+      },
+    );
+
+    expect(response.headers.get('Cache-Control')).toBe('no-cache');
+    expect(response.headers.get('Content-Security-Policy')).toBe("default-src 'self'");
+    expect(response.headers.get('X-Frame-Options')).toBe('DENY');
+  });
 });

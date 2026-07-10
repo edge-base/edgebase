@@ -46,6 +46,14 @@ class MemoryAuthDb implements AuthDb {
   }
 
   async batch(): Promise<void> {}
+
+  async compareAndSwapAdminSession(): Promise<boolean> {
+    return false;
+  }
+
+  async compareAndSwapUserSession(): Promise<boolean> {
+    return false;
+  }
 }
 
 describe('auth-token helpers', () => {

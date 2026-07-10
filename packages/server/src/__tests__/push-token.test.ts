@@ -79,6 +79,12 @@ function createMockAuthDb(): AuthDb & { _pushDevices: Map<string, Array<Record<s
       return null;
     },
     async run(): Promise<void> {},
+    async compareAndSwapAdminSession(): Promise<boolean> {
+      return false;
+    },
+    async compareAndSwapUserSession(): Promise<boolean> {
+      return false;
+    },
     async batch(statements: { sql: string; params?: unknown[] }[]): Promise<void> {
       for (const statement of statements) {
         if (statement.sql.startsWith('DELETE FROM _push_devices WHERE userId = ?')) {

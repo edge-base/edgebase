@@ -25,6 +25,14 @@ afterEach(() => {
 // ======================================================================
 
 describe('Docker build argument construction', () => {
+  it('forwards arbitrary container environment variables to Wrangler', () => {
+    const dockerfile = readFileSync(dockerfilePath, 'utf-8');
+
+    expect(dockerfile).toContain('ENV CLOUDFLARE_INCLUDE_PROCESS_ENV=true');
+    expect(dockerfile).toContain('rm -f /app/.dev.vars');
+    expect(dockerfile).not.toContain('echo "JWT_USER_SECRET=${JWT_USER_SECRET}"');
+  });
+
   it('builds basic docker build command', () => {
     const tag = 'edgebase:latest';
     const args = ['build', '-t', tag];
@@ -64,7 +72,7 @@ describe('Docker build argument construction', () => {
   });
 
   it('creates a minimal docker build context with the bundled app payload', () => {
-    writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:20\nCOPY .edgebase/targets/docker-app/ ./\n');
+    writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:22\nCOPY .edgebase/targets/docker-app/ ./\n');
     writeFileSync(join(tmpDir, '.dockerignore'), 'node_modules\n.edgebase\n');
     const bundleDir = join(tmpDir, '.edgebase', 'targets', 'docker-app');
     mkdirSync(join(bundleDir, '.edgebase', 'runtime', 'server', 'node_modules', '.pnpm', 'hono@1.0.0', 'node_modules'), {
@@ -221,7 +229,7 @@ describe('Docker run argument construction', () => {
 
 describe('Dockerfile detection', () => {
   it('detects Dockerfile in project directory', () => {
-    writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:20');
+    writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:22');
     expect(existsSync(join(tmpDir, 'Dockerfile'))).toBe(true);
   });
 
@@ -253,7 +261,7 @@ describe('Dockerfile detection', () => {
 
 describe('findProjectRoot traversal logic', () => {
   it('finds Dockerfile in current directory', () => {
-    writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:20');
+    writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:22');
     expect(_internals.findProjectRoot(tmpDir)).toBe(tmpDir);
   });
 
@@ -263,7 +271,7 @@ describe('findProjectRoot traversal logic', () => {
   });
 
   it('finds Dockerfile in parent directory', () => {
-    writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:20');
+    writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:22');
     const childDir = join(tmpDir, 'src', 'commands');
     mkdirSync(childDir, { recursive: true });
 
@@ -289,7 +297,7 @@ describe('findProjectRoot traversal logic', () => {
   });
 
   it('Dockerfile takes precedence over other EdgeBase project markers at same level', () => {
-    writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:20');
+    writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:22');
     writeFileSync(join(tmpDir, 'edgebase.config.ts'), 'export default {};');
 
     const result = _internals.findProjectRoot(tmpDir);

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.6 — 2026-07-10
+
+### Changed
+
+- Synchronized Java/JitPack artifact guidance and realtime wire-version
+  reporting with EdgeBase 0.3.6.
+- No public Java API compatibility break is introduced.
+
 ## 0.1.0 — 2026-02-20
 
 ### Added

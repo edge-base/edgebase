@@ -1,7 +1,12 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RELEASE_TARGETS, RELEASE_VERSION_REFERENCES, RELEASE_VERSION_SOURCE } from './release-targets.mjs';
+import {
+  RELEASE_CHANGELOGS,
+  RELEASE_TARGETS,
+  RELEASE_VERSION_REFERENCES,
+  RELEASE_VERSION_SOURCE,
+} from './release-targets.mjs';
 
 const SCRIPT_DIR = fileURLToPath(new URL('.', import.meta.url));
 export const REPO_ROOT = resolve(SCRIPT_DIR, '..');
@@ -65,6 +70,8 @@ export function updateTargetVersion(target, nextVersion) {
       return updateJsonVersion(target, nextVersion);
     case 'uplugin-version':
       return updateTextVersion(target, nextVersion, /(^\s*"VersionName":\s*")([^"]+)(",?$)/m);
+    case 'cmake-project-version':
+      return updateTextVersion(target, nextVersion, /(^project\([^\n]*\sVERSION\s+)(\d+\.\d+\.\d+)(\s+LANGUAGES\b)/m);
     case 'toml-version':
       return updateTextVersion(target, nextVersion, /(^version\s*=\s*")([^"]+)(")/m);
     case 'yaml-version':
@@ -100,6 +107,8 @@ export function readTargetVersion(target) {
       return readJson(target.path).version;
     case 'uplugin-version':
       return readTextVersion(target, /(^\s*"VersionName":\s*")([^"]+)(",?$)/m);
+    case 'cmake-project-version':
+      return readTextVersion(target, /(^project\([^\n]*\sVERSION\s+)(\d+\.\d+\.\d+)(\s+LANGUAGES\b)/m);
     case 'toml-version':
       return readTextVersion(target, /(^version\s*=\s*")([^"]+)(")/m);
     case 'yaml-version':
@@ -138,10 +147,12 @@ export function getCompatibleUpperBound(version) {
 function applyVersionReference(contents, reference, nextVersion) {
   let matched = false;
   const upperBound = getCompatibleUpperBound(nextVersion);
+  const [major, minor] = nextVersion.split('.');
+  const minorLine = `${major}.${minor}.x`;
   const tagVersion = `v${nextVersion}`;
   const nextContents = contents.replace(reference.pattern, (fullMatch, ...captures) => {
     matched = true;
-    return reference.replace({ version: nextVersion, upperBound, tagVersion }, ...captures);
+    return reference.replace({ version: nextVersion, upperBound, minorLine, tagVersion }, ...captures);
   });
   if (!matched) {
     throw new Error(`No version reference found for ${reference.label} in ${reference.path}`);
@@ -167,6 +178,15 @@ export function checkVersionReference(reference, version) {
   return {
     ...reference,
     ok: currentContents === expectedContents,
+  };
+}
+
+export function checkReleaseChangelog(changelog, version) {
+  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const heading = new RegExp(`^##\\s+(?:\\[)?${escapedVersion}(?:\\])?(?:\\s|$)`, 'm');
+  return {
+    ...changelog,
+    ok: heading.test(readRepoFile(changelog.path)),
   };
 }
 
@@ -247,5 +267,6 @@ export function summarizeTargets() {
     fileBacked: fileBacked.length,
     tagOnly: tagOnly.length,
     versionReferences: RELEASE_VERSION_REFERENCES.length,
+    changelogs: RELEASE_CHANGELOGS.length,
   };
 }

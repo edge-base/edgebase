@@ -10,7 +10,7 @@ Docusaurus-based docs site for EdgeBase.
 
 ## Prerequisites
 
-- Node.js 20.19+ (Node.js 24.x recommended)
+- Node.js 22+ (Node.js 24.x recommended)
 - pnpm 9+
 
 ## Install

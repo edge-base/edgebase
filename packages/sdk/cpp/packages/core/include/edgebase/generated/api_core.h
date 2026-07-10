@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 #pragma once
 
@@ -214,6 +214,7 @@ protected:
 /// Auto-generated path constants.
 namespace ApiPaths {
   constexpr const char* ADMIN_LOGIN = "/admin/api/auth/login";
+  constexpr const char* ADMIN_LOGOUT = "/admin/api/auth/logout";
   constexpr const char* ADMIN_REFRESH = "/admin/api/auth/refresh";
   constexpr const char* BACKUP_CLEANUP_PLUGIN = "/admin/api/backup/cleanup-plugin";
   constexpr const char* BACKUP_GET_CONFIG = "/admin/api/backup/config";

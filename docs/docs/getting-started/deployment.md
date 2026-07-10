@@ -126,7 +126,7 @@ npx edgebase dev
 |---------|--------|
 | Best for | Development, testing, lightweight production |
 | Data | Local filesystem |
-| Requirements | Node.js 20.19+ (24.x recommended) |
+| Requirements | Node.js 22+ (24.x recommended) |
 
 ## Packed Local Distribution
 

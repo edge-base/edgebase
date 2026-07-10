@@ -35,6 +35,7 @@ export interface EdgeBaseAppManifest {
     directory?: string;
     mountPath?: string;
     spaFallback?: boolean;
+    headers?: Record<string, string>;
   };
   runtime: {
     root: '.edgebase/runtime/server';
@@ -287,6 +288,7 @@ function buildAppManifest(
         directory: frontend.directory,
         ...(frontend.mountPath ? { mountPath: frontend.mountPath } : {}),
         ...(typeof frontend.spaFallback === 'boolean' ? { spaFallback: frontend.spaFallback } : {}),
+        ...(frontend.headers ? { headers: frontend.headers } : {}),
       }
       : { enabled: false },
     runtime: {

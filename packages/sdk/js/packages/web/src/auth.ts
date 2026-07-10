@@ -34,7 +34,12 @@ export interface SignInOptions {
 export interface AuthResult {
   user: TokenUser;
   accessToken: string;
+  /** Rotating credential in body mode; the compatibility-safe empty string in cookie mode. */
   refreshToken: string;
+  /** Identifies a response backed by the server-managed HttpOnly refresh cookie. */
+  sessionTransport?: 'cookie';
+  /** Stable server session identifier (also carried as the access-token `sid`). */
+  sessionId?: string;
 }
 
 /** Returned when MFA is required during sign-in */
@@ -179,8 +184,19 @@ function toTokenUser(user: unknown): TokenUser | null {
   };
 }
 
+const PENDING_SIGN_OUT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
+
 export class AuthClient {
   private baseUrl: string;
+  private pendingSignOutRetry: Promise<void> | null = null;
+  private pendingSignOutRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingSignOutRetryAttempt = 0;
+  private lastPendingSignOutError: unknown = null;
+  private pendingLegacyRevocationToken: string | null = null;
+  private readonly onlineHandler = () => {
+    this.cancelScheduledSignOutRetry();
+    void this.retryPendingSignOut();
+  };
 
   constructor(
     private client: HttpClient,
@@ -189,9 +205,30 @@ export class AuthClient {
     private corePublic: GeneratedDbApi,
   ) {
     this.baseUrl = client.getBaseUrl();
+    if (this.tokenManager.usesHttpOnlyCookie && typeof window !== 'undefined') {
+      this.tokenManager.setCookieRevalidationHandler(async () => {
+        const result = await this.corePublic.authRefresh({}) as AuthResult;
+        if (!result.accessToken) {
+          throw new EdgeBaseError(500, 'Cookie session refresh did not return an access token.');
+        }
+        return { accessToken: result.accessToken, refreshToken: '' };
+      });
+      window.addEventListener('online', this.onlineHandler);
+      if (this.tokenManager.hasPendingSignOut()) {
+        void this.retryPendingSignOut();
+      }
+    }
   }
 
   private syncAuthResult(result: Partial<AuthResult>): TokenUser | null {
+    if (this.tokenManager.usesHttpOnlyCookie && result.accessToken) {
+      // Fail safe if an older/misconfigured server includes the credential:
+      // cookie-mode callers receive the required compatibility property, but
+      // never the credential. Keeping the field required avoids a patch-level
+      // TypeScript API break for strict consumers.
+      result.refreshToken = '';
+      result.sessionTransport = 'cookie';
+    }
     const normalizedUser = result.user ? toTokenUser(result.user) : null;
     const mergedUser = normalizedUser
       ? {
@@ -200,10 +237,10 @@ export class AuthClient {
         }
       : undefined;
 
-    if (result.accessToken && result.refreshToken) {
+    if (result.accessToken && (result.refreshToken || this.tokenManager.usesHttpOnlyCookie)) {
       this.tokenManager.setTokens({
         accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
+        refreshToken: result.refreshToken ?? '',
       }, mergedUser);
       return this.tokenManager.getCurrentUser();
     }
@@ -227,6 +264,7 @@ export class AuthClient {
    *
    */
   async signUp(options: SignUpOptions): Promise<AuthResult> {
+    await this.ensurePendingSignOutResolved();
     const body: Record<string, unknown> = {
       email: options.email,
       password: options.password,
@@ -250,6 +288,7 @@ export class AuthClient {
 
   /** Sign in with email and password. Returns MfaRequiredResult if MFA is enabled. */
   async signIn(options: SignInOptions): Promise<SignInResult> {
+    await this.ensurePendingSignOutResolved();
     const body: Record<string, unknown> = {
       email: options.email,
       password: options.password,
@@ -270,6 +309,47 @@ export class AuthClient {
 
   /** Sign out (revokes current session) */
   async signOut(): Promise<void> {
+    if (this.tokenManager.usesHttpOnlyCookie) {
+      const legacyRefreshToken = this.tokenManager.getRefreshToken();
+      this.pendingLegacyRevocationToken = legacyRefreshToken
+        ?? this.pendingLegacyRevocationToken;
+      // Write the crash/offline-safe intent before the request and clear the
+      // visible session and persistent JavaScript credentials immediately. A
+      // pre-migration token is held only in this AuthClient instance long enough
+      // to attempt server revocation; it is never retained in localStorage.
+      this.tokenManager.markPendingSignOut();
+      this.tokenManager.clearSessionForPendingSignOut();
+      const refreshSettled = await this.tokenManager.waitForRefreshIdle();
+      // An in-flight pre-signout refresh may have updated local state while it
+      // settled. Reassert the tombstone state before sending the final revoke.
+      this.tokenManager.clearSessionForPendingSignOut(false);
+      try {
+        await this.client.postPublic('/api/auth/signout', this.pendingLegacyRevocationToken
+          ? { refreshToken: this.pendingLegacyRevocationToken }
+          : {});
+        this.completeOrRetryPendingSignOut(refreshSettled);
+      } catch (error) {
+        if (error instanceof EdgeBaseError && error.code === 401) {
+          // The old credential is already invalid, which is equivalent to a
+          // completed server-side revoke for this browser.
+          this.completeOrRetryPendingSignOut(refreshSettled);
+          return;
+        }
+        this.lastPendingSignOutError = error;
+        if (error instanceof EdgeBaseError && error.code === 403) {
+          // A blocking access rule or beforeSignOut hook intentionally denied
+          // revocation. Keep local UI signed out, retain the tombstone, and
+          // surface the policy result instead of claiming a durable logout.
+          throw error;
+        }
+        // A transport/5xx failure cannot prove the HttpOnly cookie was cleared.
+        // Retry with bounded backoff even if the browser never transitions
+        // through an `online` event.
+        this.schedulePendingSignOutRetry();
+      }
+      return;
+    }
+
     try {
       const refreshToken = this.tokenManager.getRefreshToken();
       if (refreshToken) {
@@ -290,27 +370,83 @@ export class AuthClient {
    * refresh instead of each POSTing /auth/refresh with the same token.
    */
   async refreshSession(): Promise<AuthResult> {
+    const refreshEpoch = this.tokenManager.captureAuthEpoch();
     const refreshToken = this.tokenManager.getRefreshToken();
-    if (!refreshToken) {
+    if (!refreshToken && !this.tokenManager.usesHttpOnlyCookie) {
       throw new Error('No refresh token available.');
     }
     let serverResult: AuthResult | null = null;
     const pair = await this.tokenManager.forceRefresh(async (token) => {
-      serverResult = await this.corePublic.authRefresh({ refreshToken: token }) as AuthResult;
-      return { accessToken: serverResult.accessToken, refreshToken: serverResult.refreshToken };
+      serverResult = await this.corePublic.authRefresh(token ? { refreshToken: token } : {}) as AuthResult;
+      if (!this.tokenManager.usesHttpOnlyCookie && !serverResult.refreshToken) {
+        throw new EdgeBaseError(
+          500,
+          'Auth refresh succeeded but did not return a refreshToken for body transport.',
+        );
+      }
+      return {
+        accessToken: serverResult.accessToken,
+        refreshToken: serverResult.refreshToken ?? '',
+      };
     });
+    if (!this.tokenManager.isAuthEpochCurrent(refreshEpoch)) {
+      throw new EdgeBaseError(
+        401,
+        'Session refresh was superseded by a newer auth state.',
+        undefined,
+        'auth-state-changed',
+      );
+    }
     // If THIS call performed the refresh we have the full server payload (incl.
     // the user object); sync + return it. Otherwise a concurrent refresh
     // produced the tokens — return them with the cached user.
     if (serverResult) {
-      const user = this.syncAuthResult(serverResult);
-      return { user: user as TokenUser, accessToken: pair.accessToken, refreshToken: pair.refreshToken };
+      // The assignment happens inside the forceRefresh callback; retain the
+      // narrowed value explicitly because TypeScript does not model that
+      // callback's synchronous completion through the awaited call.
+      const refreshedResult = serverResult as AuthResult;
+      const user = this.syncAuthResult(refreshedResult);
+      if (!user) {
+        throw new EdgeBaseError(
+          401,
+          this.tokenManager.hasPendingSignOut()
+            ? 'Session refresh was superseded by sign-out.'
+            : 'Not authenticated after refresh.',
+        );
+      }
+      return this.tokenManager.usesHttpOnlyCookie
+        ? {
+            user,
+            accessToken: pair.accessToken,
+            refreshToken: '',
+            sessionTransport: 'cookie',
+            sessionId: refreshedResult.sessionId ?? this.tokenManager.getCurrentSessionId() ?? undefined,
+          }
+        : {
+            user,
+            accessToken: pair.accessToken,
+            refreshToken: pair.refreshToken,
+            sessionId: refreshedResult.sessionId,
+          };
     }
     const user = this.tokenManager.getCurrentUser();
     if (!user) {
       throw new EdgeBaseError(401, 'Not authenticated after refresh.');
     }
-    return { user, accessToken: pair.accessToken, refreshToken: pair.refreshToken };
+    return this.tokenManager.usesHttpOnlyCookie
+      ? {
+          user,
+          accessToken: pair.accessToken,
+          refreshToken: '',
+          sessionTransport: 'cookie',
+          sessionId: this.tokenManager.getCurrentSessionId() ?? undefined,
+        }
+      : {
+          user,
+          accessToken: pair.accessToken,
+          refreshToken: pair.refreshToken,
+          sessionId: this.tokenManager.getCurrentSessionId() ?? undefined,
+        };
   }
 
   /**
@@ -325,6 +461,14 @@ export class AuthClient {
     providerOrOptions: string | OAuthStartOptions,
     options?: OAuthRedirectOptions & { captchaToken?: string },
   ): { url: string } {
+    if (this.tokenManager.hasPendingSignOut()) {
+      throw new EdgeBaseError(
+        409,
+        'A previous sign-out is still pending server revocation.',
+        undefined,
+        'signout-pending',
+      );
+    }
     const provider = typeof providerOrOptions === 'string'
       ? providerOrOptions
       : providerOrOptions.provider;
@@ -337,6 +481,10 @@ export class AuthClient {
     // Append captcha token as query parameter
     if (resolvedOptions?.captchaToken) {
       url += `?captcha_token=${encodeURIComponent(resolvedOptions.captchaToken)}`;
+    }
+    if (this.tokenManager.usesHttpOnlyCookie) {
+      const sep = url.includes('?') ? '&' : '?';
+      url += `${sep}auth_transport=cookie`;
     }
     if (redirectUrl) {
       const sep = url.includes('?') ? '&' : '?';
@@ -365,21 +513,83 @@ export class AuthClient {
         callbackUrl,
         typeof window !== 'undefined' ? window.location.origin : 'http://localhost',
       );
-      const accessToken = parsed.searchParams.get('access_token');
-      const refreshToken = parsed.searchParams.get('refresh_token');
-      if (!accessToken || !refreshToken) return null;
+      const fragmentParams = new URLSearchParams(parsed.hash.startsWith('#') ? parsed.hash.slice(1) : parsed.hash);
+      const authCallbackKeys = [
+        'access_token',
+        'refresh_token',
+        'auth_transport',
+        'error',
+        'error_description',
+      ] as const;
+      const getCallbackParam = (key: typeof authCallbackKeys[number]): string | null =>
+        fragmentParams.get(key) ?? parsed.searchParams.get(key);
+      const hasCallbackParam = (key: typeof authCallbackKeys[number]): boolean =>
+        fragmentParams.has(key) || parsed.searchParams.has(key);
+      const hasAnyCallbackParam = authCallbackKeys.some((key) => hasCallbackParam(key));
+      const scrubBrowserCallbackParams = (): void => {
+        if (url || typeof window === 'undefined' || typeof window.history?.replaceState !== 'function') {
+          return;
+        }
+        const fragmentHasAuthParams = authCallbackKeys.some((key) => fragmentParams.has(key));
+        for (const key of authCallbackKeys) {
+          parsed.searchParams.delete(key);
+          fragmentParams.delete(key);
+        }
+        if (fragmentHasAuthParams) {
+          const remainingFragment = fragmentParams.toString();
+          parsed.hash = remainingFragment ? `#${remainingFragment}` : '';
+        }
+        const nextUrl = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+        window.history.replaceState({}, document.title, nextUrl);
+      };
+
+      if (hasCallbackParam('error')) {
+        this.tokenManager.clearPendingOAuthRecovery();
+        scrubBrowserCallbackParams();
+        return null;
+      }
+
+      if (this.tokenManager.usesHttpOnlyCookie) {
+        const isCookieCallback = getCallbackParam('auth_transport') === 'cookie';
+        const isTransientRecovery = !hasAnyCallbackParam
+          && this.tokenManager.hasPendingOAuthRecovery();
+        // The server marks only a successful cookie OAuth redirect this way.
+        // Never turn an unrelated URL (or provider error callback) into a
+        // successful login merely because an older refresh cookie exists.
+        if (!isCookieCallback && !isTransientRecovery) {
+          // A rolling upgrade can land an older body-token callback in a new
+          // cookie-mode bundle. Fail closed, but remove every recognized auth
+          // field from browser history before returning.
+          scrubBrowserCallbackParams();
+          return null;
+        }
+        if (isCookieCallback) {
+          // The callback marker is scrubbed before network I/O. Persist only a
+          // short-lived, non-secret recovery intent so a transient first refresh
+          // can be retried after reload without probing cookies on unrelated URLs.
+          this.tokenManager.markPendingOAuthRecovery();
+        }
+        // The marker itself is not secret, but clear all callback auth fields
+        // before a slow or failed refresh so no legacy token can remain in the
+        // address bar during mixed-version deployments.
+        scrubBrowserCallbackParams();
+        return await this.refreshSession();
+      }
+      const accessToken = getCallbackParam('access_token');
+      const refreshToken = getCallbackParam('refresh_token');
+      if (!accessToken || !refreshToken) {
+        if (authCallbackKeys.some((key) => hasCallbackParam(key))) {
+          scrubBrowserCallbackParams();
+        }
+        return null;
+      }
+
+      // Bearer credentials must leave the browser URL before parsing or state
+      // adoption, including invalid-token failure paths.
+      scrubBrowserCallbackParams();
 
       const user = this.syncAuthResult({ accessToken, refreshToken });
       if (!user) return null;
-
-      if (!url && typeof window !== 'undefined' && typeof window.history?.replaceState === 'function') {
-        parsed.searchParams.delete('access_token');
-        parsed.searchParams.delete('refresh_token');
-        parsed.searchParams.delete('error');
-        parsed.searchParams.delete('error_description');
-        const nextUrl = `${parsed.pathname}${parsed.search}${parsed.hash}`;
-        window.history.replaceState({}, document.title, nextUrl);
-      }
 
       return { user, accessToken, refreshToken };
     } catch {
@@ -389,6 +599,7 @@ export class AuthClient {
 
   /** Sign in anonymously */
   async signInAnonymously(options?: { captchaToken?: string }): Promise<AuthResult> {
+    await this.ensurePendingSignOutResolved();
     //: auto-acquire captcha token if not manually provided
     const captchaToken = await resolveCaptchaToken(this.baseUrl, 'anonymous', options?.captchaToken);
     const body: Record<string, unknown> | undefined = captchaToken
@@ -424,6 +635,7 @@ export class AuthClient {
    * Called after user clicks the link from their email.
    */
   async verifyMagicLink(token: string): Promise<AuthResult> {
+    await this.ensurePendingSignOutResolved();
     const result = await this.corePublic.authVerifyMagicLink({ token }) as AuthResult;
     this.syncAuthResult(result);
     return result;
@@ -449,6 +661,7 @@ export class AuthClient {
    * Called after user receives the code from signInWithPhone.
    */
   async verifyPhone(options: { phone: string; code: string }): Promise<AuthResult> {
+    await this.ensurePendingSignOutResolved();
     const result = await this.corePublic.authVerifyPhone({
       phone: options.phone,
       code: options.code,
@@ -530,12 +743,23 @@ export class AuthClient {
     const currentSessionId = this.tokenManager.getCurrentSessionId();
     return (result.sessions ?? []).map((session) => ({
       ...session,
-      current: Boolean(currentSessionId && session.id === currentSessionId),
+      current: session.current
+        ?? Boolean(currentSessionId && session.id === currentSessionId),
     }));
   }
 
   /** Revoke a specific session */
   async revokeSession(sessionId: string): Promise<void> {
+    if (
+      this.tokenManager.usesHttpOnlyCookie
+      && sessionId === this.tokenManager.getCurrentSessionId()
+    ) {
+      // Revoking the active cookie-backed session must also expire the HttpOnly
+      // cookie and use the crash/offline-safe sign-out tombstone path. A bearer
+      // DELETE can revoke the row but cannot clear that browser cookie.
+      await this.signOut();
+      return;
+    }
     await this.core.authDeleteSession(sessionId);
   }
 
@@ -643,6 +867,7 @@ export class AuthClient {
    * Called after user receives the code from signInWithEmailOtp.
    */
   async verifyEmailOtp(options: { email: string; code: string }): Promise<AuthResult> {
+    await this.ensurePendingSignOutResolved();
     const result = await this.corePublic.authVerifyEmailOtp({
       email: options.email,
       code: options.code,
@@ -695,6 +920,7 @@ export class AuthClient {
 
   /** Verify a WebAuthn assertion and establish a session. */
   async passkeysAuthenticate(response: unknown): Promise<AuthResult> {
+    await this.ensurePendingSignOutResolved();
     const result = await this.corePublic.authPasskeysAuthenticate({ response }) as AuthResult;
     this.syncAuthResult(result);
     return result;
@@ -718,6 +944,7 @@ export class AuthClient {
     const core = this.core;
     const corePublic = this.corePublic;
     const syncAuthResult = this.syncAuthResult.bind(this);
+    const ensurePendingSignOutResolved = this.ensurePendingSignOutResolved.bind(this);
     return {
       /** Enroll TOTP — returns secret, QR code URI, and recovery codes. */
       async enrollTotp(): Promise<TotpEnrollResult> {
@@ -731,6 +958,7 @@ export class AuthClient {
 
       /** Verify TOTP code during MFA challenge (after signIn returns mfaRequired). */
       async verifyTotp(mfaTicket: string, code: string): Promise<AuthResult> {
+        await ensurePendingSignOutResolved();
         const result = await corePublic.authMfaVerify({
           mfaTicket,
           code,
@@ -741,6 +969,7 @@ export class AuthClient {
 
       /** Use a recovery code during MFA challenge. */
       async useRecoveryCode(mfaTicket: string, recoveryCode: string): Promise<AuthResult> {
+        await ensurePendingSignOutResolved();
         const result = await corePublic.authMfaRecovery({
           mfaTicket,
           recoveryCode,
@@ -764,6 +993,121 @@ export class AuthClient {
         return core.authMfaFactors() as Promise<{ factors: MfaFactor[] }>;
       },
     };
+  }
+
+  private retryPendingSignOut(): Promise<void> {
+    if (!this.tokenManager.usesHttpOnlyCookie || !this.tokenManager.hasPendingSignOut()) {
+      return Promise.resolve();
+    }
+    if (this.pendingSignOutRetry) return this.pendingSignOutRetry;
+
+    let refreshSettled = false;
+    const retry = (async () => {
+      refreshSettled = await this.tokenManager.waitForRefreshIdle();
+      this.tokenManager.clearSessionForPendingSignOut(false);
+      return this.client.postPublic(
+        '/api/auth/signout',
+        this.pendingLegacyRevocationToken
+          ? { refreshToken: this.pendingLegacyRevocationToken }
+          : {},
+      );
+    })()
+      .then(() => {
+        this.completeOrRetryPendingSignOut(refreshSettled);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof EdgeBaseError && error.code === 401) {
+          this.completeOrRetryPendingSignOut(refreshSettled);
+          return;
+        }
+        this.lastPendingSignOutError = error;
+        if (!(error instanceof EdgeBaseError && error.code === 403)) {
+          this.schedulePendingSignOutRetry();
+        }
+        // Policy, network, and server failures intentionally retain the
+        // tombstone. Background retries never become unhandled rejections or
+        // restore local authenticated state.
+      })
+      .finally(() => {
+        if (this.pendingSignOutRetry === retry) {
+          this.pendingSignOutRetry = null;
+        }
+      });
+    this.pendingSignOutRetry = retry;
+    this.tokenManager.setPendingSignOutRetry(retry);
+    return retry;
+  }
+
+  private schedulePendingSignOutRetry(): void {
+    if (
+      !this.tokenManager.hasPendingSignOut()
+      || this.pendingSignOutRetryTimer
+      || this.pendingSignOutRetryAttempt >= PENDING_SIGN_OUT_RETRY_DELAYS_MS.length
+    ) {
+      return;
+    }
+    const delay = PENDING_SIGN_OUT_RETRY_DELAYS_MS[this.pendingSignOutRetryAttempt];
+    this.pendingSignOutRetryAttempt += 1;
+    this.pendingSignOutRetryTimer = setTimeout(() => {
+      this.pendingSignOutRetryTimer = null;
+      void this.retryPendingSignOut();
+    }, delay);
+  }
+
+  private cancelScheduledSignOutRetry(): void {
+    if (!this.pendingSignOutRetryTimer) return;
+    clearTimeout(this.pendingSignOutRetryTimer);
+    this.pendingSignOutRetryTimer = null;
+  }
+
+  private completePendingSignOut(): void {
+    this.cancelScheduledSignOutRetry();
+    this.pendingSignOutRetryAttempt = 0;
+    this.lastPendingSignOutError = null;
+    this.pendingLegacyRevocationToken = null;
+    this.tokenManager.completePendingSignOut();
+  }
+
+  private completeOrRetryPendingSignOut(refreshSettled: boolean): void {
+    if (refreshSettled) {
+      this.completePendingSignOut();
+      return;
+    }
+    this.lastPendingSignOutError = new EdgeBaseError(
+      503,
+      'A previous session refresh is still settling; sign-out will be confirmed again.',
+      undefined,
+      'signout-pending',
+    );
+    this.schedulePendingSignOutRetry();
+  }
+
+  private async ensurePendingSignOutResolved(): Promise<void> {
+    if (!this.tokenManager.usesHttpOnlyCookie || !this.tokenManager.hasPendingSignOut()) {
+      return;
+    }
+    this.cancelScheduledSignOutRetry();
+    await this.retryPendingSignOut();
+    if (!this.tokenManager.hasPendingSignOut()) return;
+
+    if (this.lastPendingSignOutError instanceof EdgeBaseError) {
+      throw this.lastPendingSignOutError;
+    }
+    throw new EdgeBaseError(
+      503,
+      'The previous session could not be revoked yet; retry sign-in after connectivity recovers.',
+      undefined,
+      'signout-pending',
+    );
+  }
+
+  destroy(): void {
+    this.cancelScheduledSignOutRetry();
+    this.pendingLegacyRevocationToken = null;
+    this.tokenManager.setCookieRevalidationHandler(null);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', this.onlineHandler);
+    }
   }
 
 }

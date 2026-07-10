@@ -38,7 +38,7 @@ describe('smoke skip report', () => {
       {
         "skippedRouteCount": 0,
         "summaryByReason": {},
-        "totalRoutes": 193,
+        "totalRoutes": 194,
       }
     `);
   });

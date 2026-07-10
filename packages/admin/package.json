@@ -4,7 +4,7 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "build": "vite build",
+        "build": "svelte-kit sync && vite build",
         "dev": "vite dev",
         "preview": "vite preview",
         "lint": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
@@ -27,15 +27,15 @@
         "@codemirror/view": "^6.39.16",
         "@playwright/test": "^1.49.0",
         "@sveltejs/adapter-static": "^3.0.8",
-        "@sveltejs/kit": "^2.16.0",
+        "@sveltejs/kit": "^2.60.1",
         "@sveltejs/vite-plugin-svelte": "^5.0.0",
         "@testing-library/jest-dom": "^6.0.0",
         "@testing-library/svelte": "^5.3.1",
         "jsdom": "^24.0.0",
-        "svelte": "^5.0.0",
+        "svelte": "^5.55.7",
         "svelte-check": "^4.0.0",
         "typescript": "^5.7.0",
-        "vite": "^6.0.0",
-        "vitest": "^3.2.4"
+        "vite": "^6.4.3",
+        "vitest": "^3.2.6"
     }
 }

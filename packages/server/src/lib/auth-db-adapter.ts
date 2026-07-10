@@ -17,6 +17,21 @@ import { parseConfig } from './do-router.js';
 
 export type AuthDbDialect = 'sqlite' | 'postgres';
 
+export interface AdminSessionRotation {
+  sessionId: string;
+  currentRefreshTokens: string[];
+  nextRefreshToken: string;
+  expiresAt: string;
+}
+
+export interface UserSessionRotation {
+  sessionId: string;
+  currentRefreshToken: string;
+  nextRefreshToken: string;
+  expiresAt: string;
+  rotatedAt: string;
+}
+
 export interface AuthDb {
   /** The SQL dialect (sqlite for D1, postgres for Neon/PostgreSQL). */
   readonly dialect: AuthDbDialect;
@@ -43,6 +58,12 @@ export interface AuthDb {
    * PostgreSQL: BEGIN; ...; COMMIT;
    */
   batch(statements: { sql: string; params?: unknown[] }[]): Promise<void>;
+
+  /** Atomically replace one admin session credential if it is still current. */
+  compareAndSwapAdminSession(rotation: AdminSessionRotation): Promise<boolean>;
+
+  /** Atomically rotate one user session credential if it is still current. */
+  compareAndSwapUserSession(rotation: UserSessionRotation): Promise<boolean>;
 }
 
 // ─── D1 Implementation ───
@@ -84,6 +105,42 @@ export class D1AuthDb implements AuthDb {
           : this.db.prepare(s.sql),
       ),
     );
+  }
+
+  async compareAndSwapAdminSession(rotation: AdminSessionRotation): Promise<boolean> {
+    if (rotation.currentRefreshTokens.length === 0) return false;
+    const placeholders = rotation.currentRefreshTokens.map(() => '?').join(', ');
+    const result = await this.db.prepare(
+      `UPDATE _admin_sessions
+       SET refreshToken = ?, expiresAt = ?
+       WHERE id = ? AND refreshToken IN (${placeholders}) AND expiresAt > ?`,
+    ).bind(
+      rotation.nextRefreshToken,
+      rotation.expiresAt,
+      rotation.sessionId,
+      ...rotation.currentRefreshTokens,
+      new Date().toISOString(),
+    ).run();
+    return (result.meta?.changes ?? 0) === 1;
+  }
+
+  async compareAndSwapUserSession(rotation: UserSessionRotation): Promise<boolean> {
+    const result = await this.db.prepare(
+      `UPDATE _sessions
+       SET refreshToken = ?, previousRefreshToken = ?, rotatedAt = ?, expiresAt = ?,
+           metadata = json_set(COALESCE(metadata, '{}'), '$.lastActiveAt', ?)
+       WHERE id = ? AND refreshToken = ? AND expiresAt > ?`,
+    ).bind(
+      rotation.nextRefreshToken,
+      rotation.currentRefreshToken,
+      rotation.rotatedAt,
+      rotation.expiresAt,
+      rotation.rotatedAt,
+      rotation.sessionId,
+      rotation.currentRefreshToken,
+      new Date().toISOString(),
+    ).run();
+    return (result.meta?.changes ?? 0) === 1;
   }
 }
 
@@ -227,6 +284,48 @@ export class PgAuthDb implements AuthDb {
         await client.query('ROLLBACK');
         throw err;
       }
+    });
+  }
+
+  async compareAndSwapAdminSession(rotation: AdminSessionRotation): Promise<boolean> {
+    if (rotation.currentRefreshTokens.length === 0) return false;
+    const placeholders = rotation.currentRefreshTokens.map(() => '?').join(', ');
+    return this.withClient(async (client) => {
+      const result = await client.query(this.adaptSql(
+        `UPDATE _admin_sessions
+         SET refreshToken = ?, expiresAt = ?
+         WHERE id = ? AND refreshToken IN (${placeholders}) AND expiresAt > ?
+         RETURNING id`,
+      ), [
+        rotation.nextRefreshToken,
+        rotation.expiresAt,
+        rotation.sessionId,
+        ...rotation.currentRefreshTokens,
+        new Date().toISOString(),
+      ]);
+      return result.rowCount === 1;
+    });
+  }
+
+  async compareAndSwapUserSession(rotation: UserSessionRotation): Promise<boolean> {
+    return this.withClient(async (client) => {
+      const result = await client.query(this.adaptSql(
+        `UPDATE _sessions
+         SET "refreshToken" = ?, "previousRefreshToken" = ?, "rotatedAt" = ?, "expiresAt" = ?,
+             metadata = jsonb_set(COALESCE(metadata::jsonb, '{}'), '{lastActiveAt}', to_jsonb(?::text))::text
+         WHERE id = ? AND "refreshToken" = ? AND "expiresAt" > ?
+         RETURNING id`,
+      ), [
+        rotation.nextRefreshToken,
+        rotation.currentRefreshToken,
+        rotation.rotatedAt,
+        rotation.expiresAt,
+        rotation.rotatedAt,
+        rotation.sessionId,
+        rotation.currentRefreshToken,
+        new Date().toISOString(),
+      ]);
+      return result.rowCount === 1;
     });
   }
 }

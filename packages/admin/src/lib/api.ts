@@ -84,7 +84,7 @@ async function rawFetch<T>(url: string, opts: RequestOpts = {}): Promise<T> {
 		if (refreshed) {
 			return rawFetch<T>(url, { ...opts, _skipRefresh: true });
 		}
-		authStore.logout();
+		void authStore.logout();
 		throw new ApiError(401, 'UNAUTHORIZED', 'Session expired. Sign in again to continue.');
 	}
 

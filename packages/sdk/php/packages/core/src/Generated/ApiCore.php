@@ -2,7 +2,7 @@
 
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 declare(strict_types=1);
 
@@ -592,6 +592,7 @@ class GeneratedDbApi
 final class ApiPaths
 {
     public const ADMIN_LOGIN = '/admin/api/auth/login';
+    public const ADMIN_LOGOUT = '/admin/api/auth/logout';
     public const ADMIN_REFRESH = '/admin/api/auth/refresh';
     public const BACKUP_CLEANUP_PLUGIN = '/admin/api/backup/cleanup-plugin';
     public const BACKUP_GET_CONFIG = '/admin/api/backup/config';

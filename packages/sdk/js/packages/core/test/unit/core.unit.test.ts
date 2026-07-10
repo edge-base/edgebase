@@ -1056,6 +1056,32 @@ describe('DbRef — table reference creation', () => {
     const t2 = db.table('comments');
     expect(t1).not.toBe(t2);
   });
+
+  it('transact delegates single-instance DBs to dbSingleTransact', async () => {
+    const result = { results: [{ id: 'post-1' }] };
+    const core = {
+      dbSingleTransact: vi.fn().mockResolvedValue(result),
+      dbTransact: vi.fn(),
+    } as unknown as GeneratedDbApi;
+    const operations = [{ table: 'posts', op: 'delete' as const, id: 'post-1' }];
+
+    await expect(new DbRef(core, 'shared').transact(operations)).resolves.toEqual(result);
+    expect(core.dbSingleTransact).toHaveBeenCalledWith('shared', { operations });
+    expect(core.dbTransact).not.toHaveBeenCalled();
+  });
+
+  it('transact delegates dynamic DBs to dbTransact with the instance ID', async () => {
+    const result = { results: [{ id: 'doc-1' }] };
+    const core = {
+      dbSingleTransact: vi.fn(),
+      dbTransact: vi.fn().mockResolvedValue(result),
+    } as unknown as GeneratedDbApi;
+    const operations = [{ table: 'docs', op: 'delete' as const, id: 'doc-1' }];
+
+    await expect(new DbRef(core, 'workspace', 'ws-1').transact(operations)).resolves.toEqual(result);
+    expect(core.dbTransact).toHaveBeenCalledWith('workspace', 'ws-1', { operations });
+    expect(core.dbSingleTransact).not.toHaveBeenCalled();
+  });
 });
 
 // ─── Q. networkError ────────────────────────────────────────────────────────

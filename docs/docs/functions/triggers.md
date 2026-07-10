@@ -128,6 +128,29 @@ export const DELETE = defineFunction(async ({ params, admin, auth }) => {
 });
 ```
 
+### Custom Bearer authentication
+
+EdgeBase normally treats every `Authorization: Bearer` value as an EdgeBase
+user access token and rejects invalid tokens before the function runs. Protocol
+endpoints that issue and validate their own Bearer tokens can explicitly
+delegate that header to the function:
+
+```typescript
+export const POST = defineFunction({
+  trigger: { type: 'http' },
+  customBearerAuth: true,
+  handler: async ({ request, auth }) => {
+    // auth is null. Validate request.headers.get('Authorization') here and
+    // reject missing, invalid, expired, or insufficiently scoped tokens.
+  },
+});
+```
+
+This option applies only to the matching function and HTTP method. All other
+API routes keep EdgeBase's existing token-validation behavior; release mode
+remains fail-closed. Do not enable it unless the handler performs complete
+authentication and authorization itself.
+
 Dynamic route parameters (`[param]` segments) are available via `context.params`. See [Context API](/docs/functions/context-api#contextparams) for details.
 
 :::tip

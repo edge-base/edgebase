@@ -51,6 +51,12 @@ function createMockAuthDb(
         profiles.delete(String(params?.[0] ?? ''));
       }
     },
+    async compareAndSwapAdminSession(): Promise<boolean> {
+      return false;
+    },
+    async compareAndSwapUserSession(): Promise<boolean> {
+      return false;
+    },
     async batch(statements: { sql: string; params?: unknown[] }[]): Promise<void> {
       for (const statement of statements) {
         if (statement.sql.includes('DELETE FROM _users_public WHERE id = ?')) {

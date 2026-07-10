@@ -417,22 +417,15 @@ export async function rotateRefreshToken(
   newRefreshToken: string,
   oldRefreshToken: string,
   newExpiresAt: string,
-): Promise<void> {
+): Promise<boolean> {
   const now = new Date().toISOString();
-
-  if (db.dialect === 'postgres') {
-    // PostgreSQL: use jsonb_set + to_jsonb for JSONB column
-    await db.run(
-      `UPDATE _sessions SET "refreshToken" = ?, "previousRefreshToken" = ?, "rotatedAt" = ?, "expiresAt" = ?, metadata = jsonb_set(COALESCE(metadata::jsonb, '{}'), '{lastActiveAt}', to_jsonb(?::text))::text WHERE id = ?`,
-      [newRefreshToken, oldRefreshToken, now, newExpiresAt, now, sessionId],
-    );
-  } else {
-    // SQLite (D1): use json_set
-    await db.run(
-      `UPDATE _sessions SET refreshToken = ?, previousRefreshToken = ?, rotatedAt = ?, expiresAt = ?, metadata = json_set(COALESCE(metadata, '{}'), '$.lastActiveAt', ?) WHERE id = ?`,
-      [newRefreshToken, oldRefreshToken, now, newExpiresAt, now, sessionId],
-    );
-  }
+  return db.compareAndSwapUserSession({
+    sessionId,
+    currentRefreshToken: oldRefreshToken,
+    nextRefreshToken: newRefreshToken,
+    expiresAt: newExpiresAt,
+    rotatedAt: now,
+  });
 }
 
 /**

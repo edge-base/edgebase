@@ -62,7 +62,7 @@ function main() {
 
   if (!target || !packageDir) {
     throw new Error(
-      'Usage: node ./scripts/prepare-swift-split-package.mjs --target=core|client --package-dir=/tmp/worktree [--core-repo=edge-base/edgebase-swift-core] [--sync-mode=branch|tag] [--display-version=0.1.4]',
+      'Usage: node ./scripts/prepare-swift-split-package.mjs --target=core|client --package-dir=/tmp/worktree [--core-repo=edge-base/edgebase-swift-core] [--sync-mode=branch|tag] [--display-version=1.2.3]',
     );
   }
 

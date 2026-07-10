@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.6 (2026-07-10)
+
+### Changed
+
+- Synchronized `edgebase-core`, `edgebase-admin`, and the umbrella SDK package
+  metadata and compatible dependency bounds with EdgeBase 0.3.6.
+- No public Python API compatibility break is introduced.
+
 ## 0.1.0 (2026-02-13)
 
 ### Features (Dart/Swift/Kotlin SDK 완전 패리티)

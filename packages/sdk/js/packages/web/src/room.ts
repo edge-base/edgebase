@@ -1124,7 +1124,11 @@ export class RoomClient {
 
   private async authenticate(): Promise<void> {
     const token = await this.tokenManager.getAccessToken((refreshToken) =>
-      refreshAccessToken(this.baseUrl, refreshToken),
+      refreshAccessToken(
+        this.baseUrl,
+        refreshToken,
+        this.tokenManager.refreshTokenTransport,
+      ),
     );
     const authPayload = this.authPayload;
     if (!token && !authPayload) {

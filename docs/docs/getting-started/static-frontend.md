@@ -17,6 +17,10 @@ export default defineConfig({
     directory: './web/dist',
     mountPath: '/',
     spaFallback: true,
+    headers: {
+      'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'",
+      'X-Content-Type-Options': 'nosniff',
+    },
   },
 });
 ```
@@ -26,6 +30,11 @@ export default defineConfig({
 | `directory` | Required build output directory to serve |
 | `mountPath` | Optional URL prefix for the bundle, default `/` |
 | `spaFallback` | Optional SPA navigation fallback to `index.html` for HTML requests |
+| `headers` | Optional string response headers applied to successfully served frontend assets |
+
+`headers` is useful for product-specific security policies such as CSP,
+`Referrer-Policy`, and `Permissions-Policy`. EdgeBase rejects response-framing
+overrides such as `Content-Length`, `Transfer-Encoding`, and `Set-Cookie`.
 
 ## Build Responsibility
 

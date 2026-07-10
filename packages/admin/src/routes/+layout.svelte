@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import type { Snippet } from 'svelte';
+	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
@@ -18,6 +19,7 @@
 
 	let sidebarCollapsed = $state(false);
 	let isMobile = $state(false);
+	let authReady = $state(false);
 	let setupChecked = $state(false);
 	let cmdPaletteOpen = $state(false);
 
@@ -46,9 +48,20 @@
 	// Determine if we're on the login page
 	let isLoginPage = $derived($page.url.pathname === `${base}/login` || $page.url.pathname === `${base}/login/`);
 
+	onMount(() => {
+		let active = true;
+		void authStore.initialize().finally(() => {
+			if (active) authReady = true;
+		});
+		return () => {
+			active = false;
+		};
+	});
+
 	// On app start, verify session is still valid against server setup state.
 	// If the server was reset (needsSetup=true) but we have a stale token, clear it.
 	$effect(() => {
+		if (!authReady) return;
 		if (!isLoginPage && $authStore.accessToken && !setupChecked) {
 			checkSetupState();
 		} else if (!$authStore.accessToken) {
@@ -65,7 +78,7 @@
 				// react to the token becoming null and redirect to login.
 				// Calling goto() alongside the reactive redirect causes
 				// competing navigations that trigger an infinite reload loop.
-				authStore.logout();
+				void authStore.logout();
 				return;
 			}
 		} catch {
@@ -76,7 +89,7 @@
 
 	// Auth gate: redirect to login if not authenticated (except on login page)
 	$effect(() => {
-		if (!isLoginPage && !$authStore.accessToken) {
+		if (authReady && !isLoginPage && !$authStore.accessToken) {
 			const loginPath = consumeManualLogout() ? `${base}/login` : buildLoginPath($page.url);
 			goto(loginPath, { replaceState: true });
 		}
@@ -84,13 +97,17 @@
 
 	// Load dev info on mount (one-shot)
 	$effect(() => {
-		if ($authStore.accessToken && setupChecked) {
+		if (authReady && $authStore.accessToken && setupChecked) {
 			loadDevInfo();
 		}
 	});
 </script>
 
-{#if isLoginPage}
+{#if !authReady}
+	<div class="app-loading">
+		<span>Loading...</span>
+	</div>
+{:else if isLoginPage}
 	<!-- Login page renders without layout chrome -->
 	{@render children()}
 {:else if $authStore.accessToken}

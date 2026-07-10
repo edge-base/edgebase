@@ -14,7 +14,7 @@ export { ClientEdgeBase, createClient, type JuneClientOptions } from './client.j
 
 // Auth
 export { AuthClient, isAuthResult, isMfaRequired, type AuthResult, type SignInResult, type MfaRequiredResult, type MfaFactor, type SignUpOptions, type SignInOptions, type Session } from './auth.js';
-export { TokenManager, type TokenPair, type TokenUser, type AuthStateChangeHandler, type TokenManagerOptions } from './token-manager.js';
+export { TokenManager, type TokenPair, type TokenUser, type AuthStateChangeHandler, type TokenManagerOptions, type RefreshTokenTransport } from './token-manager.js';
 
 // Database Live
 export { DatabaseLiveClient, type DatabaseLiveOptions } from './database-live.js';

@@ -20,7 +20,7 @@ Thank you for your interest in contributing to EdgeBase! This guide will help yo
    ```bash
    nvm use
    ```
-   If you do not use `nvm`, install Node 20.19+; Node 24.x remains the default version used by `.nvmrc` and `.node-version`, while CI verifies both the minimum supported Node 20.19 runtime and the default Node 24 runtime.
+   If you do not use `nvm`, install Node 22+; Node 24.x remains the default version used by `.nvmrc` and `.node-version`, while CI verifies both the minimum supported Node 22 runtime and the default Node 24 runtime.
 4. **Install dependencies**:
    ```bash
    pnpm install

@@ -1,5 +1,5 @@
-const MIN_NODE_MAJOR = 20;
-const MIN_NODE_MINOR = 19;
+const MIN_NODE_MAJOR = 22;
+const MIN_NODE_MINOR = 0;
 const MIN_NODE_PATCH = 0;
 
 interface ParsedNodeVersion {

@@ -218,6 +218,27 @@ describe('signAdminRefreshToken + verifyAdminRefreshToken', () => {
     expect(payload.type).toBe('refresh');
   });
 
+  it('issues distinct refresh tokens within the same second', async () => {
+    const first = await signAdminRefreshToken({ sub: 'admin-1' }, SECRET);
+    const second = await signAdminRefreshToken({ sub: 'admin-1' }, SECRET);
+
+    expect(second).not.toBe(first);
+    await expect(verifyAdminRefreshToken(first, SECRET)).resolves.toMatchObject({ sub: 'admin-1' });
+    await expect(verifyAdminRefreshToken(second, SECRET)).resolves.toMatchObject({ sub: 'admin-1' });
+  });
+
+  it('binds access and refresh tokens to one session while keeping unique nonces', async () => {
+    const access = await signAdminAccessToken({ sub: 'admin-1', sid: 'session-1' }, SECRET, '15m');
+    const refresh = await signAdminRefreshToken({ sub: 'admin-1', sid: 'session-1' }, SECRET);
+    const accessPayload = await verifyAdminToken(access, SECRET);
+    const refreshPayload = await verifyAdminRefreshToken(refresh, SECRET);
+
+    expect(accessPayload).toMatchObject({ sub: 'admin-1', sid: 'session-1', jti: 'session-1' });
+    expect(refreshPayload).toMatchObject({ sub: 'admin-1', sid: 'session-1', jti: 'session-1' });
+    expect(accessPayload.nonce).not.toBe(refreshPayload.nonce);
+    expect(accessPayload.exp - accessPayload.iat).toBe(15 * 60);
+  });
+
   it('rejects admin access token', async () => {
     const token = await signAdminAccessToken({ sub: 'admin-1' }, SECRET);
     await expect(verifyAdminRefreshToken(token, SECRET)).rejects.toThrow(TokenInvalidError);

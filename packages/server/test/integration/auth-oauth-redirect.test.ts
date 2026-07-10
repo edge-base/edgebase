@@ -147,12 +147,68 @@ describe('auth-oauth redirect flow', () => {
     );
 
     expect(callback.status).toBe(302);
+    expect(callback.headers.get('Cache-Control')).toBe('no-store');
     const appUrl = new URL(callback.headers.get('location')!);
     const redirectParams = getRedirectFragmentParams(appUrl);
     expect(appUrl.origin).toBe('http://localhost:4173');
     expect(appUrl.pathname).toBe('/auth/callback');
     expect(redirectParams.get('access_token')).toBeTruthy();
     expect(redirectParams.get('refresh_token')).toBeTruthy();
+  });
+
+  it('cookie OAuth binds state to the browser and redirects without URL tokens', async () => {
+    const start = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/auth/oauth/google?redirect_url=${encodeURIComponent('http://localhost:4173/auth/callback')}&auth_transport=cookie`,
+      { redirect: 'manual' },
+    );
+
+    expect(start.status).toBe(302);
+    const providerUrl = new URL(start.headers.get('location')!);
+    const state = providerUrl.searchParams.get('state');
+    expect(state).toBeTruthy();
+    const stateCookie = (start.headers.get('set-cookie') ?? '').split(';', 1)[0];
+    expect(stateCookie).toContain('-oauth-');
+    expect(start.headers.get('set-cookie')).toContain('HttpOnly');
+    expect(start.headers.get('set-cookie')).toContain('SameSite=Lax');
+
+    mockGoogleExchange('google-user-cookie-redirect', 'oauth-cookie-redirect@test.com');
+    const callback = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/auth/oauth/google/callback?code=fake-cookie-code&state=${state}`,
+      {
+        redirect: 'manual',
+        headers: { Cookie: stateCookie },
+      },
+    );
+
+    expect(callback.status).toBe(302);
+    const appUrl = new URL(callback.headers.get('location')!);
+    const redirectParams = getRedirectFragmentParams(appUrl);
+    expect(redirectParams.get('auth_transport')).toBe('cookie');
+    expect(redirectParams.get('access_token')).toBeNull();
+    expect(redirectParams.get('refresh_token')).toBeNull();
+    const setCookie = callback.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('edgebase-test-refresh=');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('Path=/api/auth');
+  });
+
+  it('rejects a cookie OAuth callback that lacks its browser-bound state cookie', async () => {
+    const start = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/auth/oauth/google?redirect_url=${encodeURIComponent('http://localhost:4173/auth/callback')}&auth_transport=cookie`,
+      { redirect: 'manual' },
+    );
+    const state = new URL(start.headers.get('location')!).searchParams.get('state');
+    expect(state).toBeTruthy();
+
+    const callback = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/auth/oauth/google/callback?code=must-not-exchange&state=${state}`,
+      { redirect: 'manual' },
+    );
+
+    expect(callback.status).toBe(400);
+    expect(await callback.json()).toMatchObject({
+      slug: 'invalid-token',
+    });
   });
 
   it('retries OAuth signup when a pending oauth index row was left behind', async () => {

@@ -16,7 +16,7 @@
  *   Passkey index — lookup, register, delete, deleteByUser
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   ensureAuthSchema,
   resetSchemaInit,
@@ -38,7 +38,10 @@ import {
   adminExists,
   createAdmin,
   getAdminSession,
+  getAdminSessionById,
+  hashAdminRefreshToken,
   createAdminSession,
+  rotateAdminSession,
   deleteAdminSession,
   updateAdminPassword,
   listUserMappings,
@@ -103,6 +106,14 @@ function createMockAuthDb(options: {
       for (const s of statements) {
         calls.push({ sql: s.sql, bindings: s.params ?? [], method: 'run' });
       }
+    },
+
+    async compareAndSwapAdminSession() {
+      return true;
+    },
+
+    async compareAndSwapUserSession() {
+      return true;
     },
 
     _calls: calls,
@@ -501,11 +512,39 @@ describe('getAdminSession', () => {
     expect(result).toBeNull();
   });
 
-  it('returns session when valid', async () => {
+  it('migrates a valid legacy plaintext token to a one-way hash', async () => {
     const session = { id: 's1', adminId: 'a1', refreshToken: 'rt-1', expiresAt: '2099-01-01', createdAt: '2024-01-01' };
     const db = createMockAuthDb({ firstResult: session });
     const result = await getAdminSession(db, 'rt-1');
-    expect(result).toEqual(session);
+    const hashed = await hashAdminRefreshToken('rt-1');
+
+    expect(result).toEqual({ ...session, refreshToken: hashed });
+    expect(db._calls[0].sql).toContain('refreshToken IN (?, ?)');
+    expect(db._calls[0].bindings.slice(0, 2)).toEqual([hashed, 'rt-1']);
+    expect(db._calls[1].sql).toContain('DELETE FROM _admin_sessions');
+    expect(db._calls[1].bindings).toEqual(['rt-1', 's1']);
+    expect(db._calls[2].sql).toContain('UPDATE _admin_sessions SET refreshToken = ?');
+    expect(db._calls[2].bindings).toEqual([hashed, 's1', 'rt-1']);
+  });
+
+  it('does not rewrite a session that is already hashed', async () => {
+    const hashed = await hashAdminRefreshToken('rt-1');
+    const session = { id: 's1', adminId: 'a1', refreshToken: hashed, expiresAt: '2099-01-01', createdAt: '2024-01-01' };
+    const db = createMockAuthDb({ firstResult: session });
+
+    await expect(getAdminSession(db, 'rt-1')).resolves.toEqual(session);
+    expect(db._calls).toHaveLength(1);
+  });
+});
+
+describe('getAdminSessionById', () => {
+  it('looks up only a non-expired server-side session', async () => {
+    const session = { id: 's1', adminId: 'a1', refreshToken: 'sha256:digest', expiresAt: '2099-01-01', createdAt: '2024-01-01' };
+    const db = createMockAuthDb({ firstResult: session });
+
+    await expect(getAdminSessionById(db, 's1')).resolves.toEqual(session);
+    expect(db._calls[0].sql).toContain('id = ? AND expiresAt > ?');
+    expect(db._calls[0].bindings[0]).toBe('s1');
   });
 });
 
@@ -513,11 +552,37 @@ describe('createAdminSession', () => {
   it('inserts session record', async () => {
     const db = createMockAuthDb();
     await createAdminSession(db, 's1', 'a1', 'rt-1', '2099-01-01');
+    const hashed = await hashAdminRefreshToken('rt-1');
     expect(db._calls[0].sql).toContain('INSERT INTO _admin_sessions');
     expect(db._calls[0].bindings[0]).toBe('s1');
     expect(db._calls[0].bindings[1]).toBe('a1');
-    expect(db._calls[0].bindings[2]).toBe('rt-1');
+    expect(db._calls[0].bindings[2]).toBe(hashed);
+    expect(db._calls[0].bindings[2]).not.toContain('rt-1');
     expect(db._calls[0].bindings[3]).toBe('2099-01-01');
+  });
+});
+
+describe('rotateAdminSession', () => {
+  it('passes only hashed next credentials to the atomic adapter CAS', async () => {
+    const db = createMockAuthDb();
+    const compare = vi.spyOn(db, 'compareAndSwapAdminSession').mockResolvedValue(true);
+
+    await expect(rotateAdminSession(
+      db,
+      's1',
+      'current-token',
+      'next-token',
+      '2099-01-01',
+    )).resolves.toBe(true);
+    const currentHash = await hashAdminRefreshToken('current-token');
+    const nextHash = await hashAdminRefreshToken('next-token');
+    expect(compare).toHaveBeenCalledWith({
+      sessionId: 's1',
+      currentRefreshTokens: [currentHash, 'current-token'],
+      nextRefreshToken: nextHash,
+      expiresAt: '2099-01-01',
+    });
+    expect(JSON.stringify(compare.mock.calls[0])).not.toContain('next-token');
   });
 });
 

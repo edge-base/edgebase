@@ -11,6 +11,7 @@ import {
   wrapMethodExport,
 } from '../lib/functions.js';
 import { functionsRoute } from '../routes/functions.js';
+import { authMiddleware } from '../middleware/auth.js';
 import type { Env } from '../types.js';
 
 class ForeignFunctionError extends Error {
@@ -67,6 +68,22 @@ function createApp() {
   return app;
 }
 
+function createAuthenticatedApp() {
+  const app = new OpenAPIHono();
+  app.use('/api/*', authMiddleware);
+  app.route('/api/functions', functionsRoute);
+  return app;
+}
+
+function createAuthProbeApp() {
+  const app = new OpenAPIHono();
+  app.use('/api/*', authMiddleware);
+  app.all('/api/functions/protocol', (c) => c.json({
+    serviceKeyToken: c.get('serviceKeyToken'),
+  }));
+  return app;
+}
+
 function createExecutionContext(): ExecutionContext {
   return {
     waitUntil() {},
@@ -116,6 +133,92 @@ describe('function registry wrapping', () => {
 
     expect(wrapped).toBe(scheduleFunction);
     expect(wrapped.trigger).toEqual({ type: 'schedule', cron: '*/15 * * * *' });
+  });
+
+  it('preserves custom Bearer auth on method exports', () => {
+    const wrapped = wrapMethodExport({
+      trigger: { type: 'http' },
+      customBearerAuth: true,
+      handler: async () => ({ ok: true }),
+    }, 'POST');
+
+    expect(wrapped.customBearerAuth).toBe(true);
+    expect(wrapped.trigger).toMatchObject({ type: 'http', method: 'POST' });
+  });
+});
+
+describe('functionsRoute custom Bearer authentication', () => {
+  it('delegates an opaque Bearer token only for an opted-in function', async () => {
+    setConfig({ release: true });
+    registerFunction('protocol', {
+      trigger: { type: 'http', method: 'POST' },
+      customBearerAuth: true,
+      handler: async (context) => ({
+        auth: (context as Record<string, unknown>).auth,
+        authorization: ((context as Record<string, any>).request as Request).headers.get('Authorization'),
+      }),
+    });
+    registerFunction('ordinary', httpFunction('POST', async () => ({ ok: true })));
+    rebuildCompiledRoutes();
+
+    const env = createEnv({ JWT_USER_SECRET: 'test-user-secret-with-at-least-32-characters' });
+    const customResponse = await createAuthenticatedApp().fetch(
+      new Request('http://localhost/api/functions/protocol', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer opaque-protocol-token' },
+      }),
+      env,
+      createExecutionContext(),
+    );
+    const customBody = await customResponse.json() as Record<string, unknown>;
+
+    expect(customResponse.status).toBe(200);
+    expect(customBody.auth).toBeNull();
+    expect(customBody.authorization).toBe('Bearer opaque-protocol-token');
+
+    const ordinaryResponse = await createAuthenticatedApp().fetch(
+      new Request('http://localhost/api/functions/ordinary', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer opaque-protocol-token' },
+      }),
+      env,
+      createExecutionContext(),
+    );
+    expect(ordinaryResponse.status).toBe(401);
+    expect(await ordinaryResponse.json()).toMatchObject({ error: 'TOKEN_INVALID' });
+  });
+
+  it('keeps configured Bearer Service Keys ahead of custom delegation', async () => {
+    setConfig({
+      release: true,
+      serviceKeys: {
+        keys: [{
+          kid: 'protocol',
+          tier: 'root',
+          scopes: ['*'],
+          secretSource: 'inline',
+          inlineSecret: 'protocol-service-key',
+        }],
+      },
+    });
+    registerFunction('protocol', {
+      trigger: { type: 'http', method: 'POST' },
+      customBearerAuth: true,
+      handler: async () => ({ ok: true }),
+    });
+    rebuildCompiledRoutes();
+
+    const response = await createAuthProbeApp().fetch(
+      new Request('http://localhost/api/functions/protocol', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer protocol-service-key' },
+      }),
+      createEnv(),
+      createExecutionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ serviceKeyToken: 'protocol-service-key' });
   });
 });
 

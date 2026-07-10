@@ -55,6 +55,46 @@ function runBuildApp(projectDir: string, outputDirName: string) {
   );
 }
 
+function inspectBundledModules(configPath: string, functionPath: string): {
+  metaTag?: string;
+  hasGet: boolean;
+  responseText?: string;
+} {
+  // Vite's SSR loader only resolves modules inside its configured filesystem
+  // roots. App-bundle fixtures intentionally live in the OS temp directory,
+  // so probe their generated ESM in a plain Node child process.
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      [
+        'const [configUrl, functionUrl] = process.argv.slice(1);',
+        'const configModule = await import(configUrl);',
+        'const functionModule = await import(functionUrl);',
+        'const config = configModule.default ?? configModule;',
+        'const response = typeof functionModule.GET === "function" ? await functionModule.GET() : null;',
+        'console.log(JSON.stringify({',
+        '  metaTag: config.metaTag,',
+        '  hasGet: typeof functionModule.GET === "function",',
+        '  responseText: response ? await response.text() : undefined,',
+        '}));',
+      ].join('\n'),
+      pathToFileURL(configPath).href,
+      pathToFileURL(functionPath).href,
+    ],
+    { encoding: 'utf-8', stdio: 'pipe' },
+  );
+  if (result.status !== 0) {
+    throw new Error(`Native app-bundle probe failed: ${result.stderr || result.stdout}`);
+  }
+  return JSON.parse(result.stdout) as {
+    metaTag?: string;
+    hasGet: boolean;
+    responseText?: string;
+  };
+}
+
 function hasBundledPnpmPackage(runtimeNodeModulesDir: string, entryPrefix: string, packagePath: string[]): boolean {
   const pnpmDir = join(runtimeNodeModulesDir, '.pnpm');
   if (!existsSync(pnpmDir)) return false;
@@ -222,22 +262,31 @@ export async function GET() {
     rmSync(join(projectDir, 'config'), { recursive: true, force: true });
     rmSync(join(projectDir, 'lib'), { recursive: true, force: true });
 
-    const bundledConfigModule = await import(
-      pathToFileURL(
-        join(outputDir, '.edgebase', 'runtime', 'server', 'bundle', 'config', 'edgebase.config.bundle.js'),
-      ).href
-    ) as { default?: { metaTag?: string } };
-    const bundledFunctionModule = await import(
-      pathToFileURL(
-        join(outputDir, '.edgebase', 'runtime', 'server', 'bundle', 'functions', 'health.js'),
-      ).href
-    ) as { GET?: () => Promise<Response> };
+    const bundledConfigPath = join(
+      outputDir,
+      '.edgebase',
+      'runtime',
+      'server',
+      'bundle',
+      'config',
+      'edgebase.config.bundle.js',
+    );
+    const bundledFunctionPath = join(
+      outputDir,
+      '.edgebase',
+      'runtime',
+      'server',
+      'bundle',
+      'functions',
+      'health.js',
+    );
+    expect(existsSync(bundledConfigPath)).toBe(true);
+    expect(existsSync(bundledFunctionPath)).toBe(true);
 
-    expect((bundledConfigModule.default ?? bundledConfigModule).metaTag).toBe('bundle-ok');
-    expect(typeof bundledFunctionModule.GET).toBe('function');
-
-    const response = await bundledFunctionModule.GET?.();
-    expect(await response?.text()).toBe('hello bundle');
+    const moduleProbe = inspectBundledModules(bundledConfigPath, bundledFunctionPath);
+    expect(moduleProbe.metaTag).toBe('bundle-ok');
+    expect(moduleProbe.hasGet).toBe(true);
+    expect(moduleProbe.responseText).toBe('hello bundle');
     expect(existsSync(join(outputDir, 'edgebase-app.json'))).toBe(true);
     expect(existsSync(join(outputDir, 'wrangler.toml'))).toBe(true);
     expect(readFileSync(join(outputDir, 'wrangler.toml'), 'utf-8')).toContain('name = "bundle-worker"');

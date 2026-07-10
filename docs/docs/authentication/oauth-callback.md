@@ -28,16 +28,15 @@ Client App                EdgeBase Server              OAuth Provider
     |                           |                           |
     |                           |<-- Access Token -----------|
     |                           |                           |
-    |<-- Redirect with tokens --|                           |
-    |   ?access_token=...       |                           |
-    |   &refresh_token=...      |                           |
-    |   (or JSON fallback)      |                           |
+    |<-- Redirect to app -------|                           |
+    |   body mode: tokens       |                           |
+    |   cookie mode: marker only|                           |
 ```
 
 1. Your app calls `signInWithOAuth()` — the browser redirects to the provider's authorization page.
 2. The user authorizes your app. The provider redirects back to EdgeBase's callback URL with an authorization code.
 3. EdgeBase exchanges the code for an access token (server-to-server), creates or links the user, and issues EdgeBase session tokens.
-4. If you passed `redirectUrl`, EdgeBase redirects the user back to your app with `access_token` and `refresh_token` as URL parameters.
+4. If you passed `redirectUrl`, body transport redirects with session tokens. The opt-in Web HttpOnly-cookie transport sets the refresh cookie at EdgeBase and redirects with only `auth_transport=cookie`; the SDK then obtains an access token from `/api/auth/refresh`.
 5. If you did not pass `redirectUrl`, EdgeBase finishes on its own callback route and returns JSON instead.
 
 ## Security Features
@@ -48,6 +47,9 @@ Client App                EdgeBase Server              OAuth Provider
 - Stored in Cloudflare KV with a 5-minute TTL
 - Validated on callback to prevent CSRF attacks
 - Single-use — deleted immediately after validation
+- Cookie transport additionally binds each state to a short-lived, HttpOnly,
+  `SameSite=Lax` browser cookie. A callback copied from another browser is
+  rejected before the provider code is exchanged.
 
 ### PKCE (Proof Key for Code Exchange)
 
@@ -67,7 +69,17 @@ The provider must redirect back to the EdgeBase server callback first. EdgeBase 
 
 ## SPA (Single Page Application)
 
-A typical React SPA should pass an app callback route and then let the web SDK persist the callback tokens:
+A React SPA can keep its refresh credential and OAuth tokens out of the callback
+URL by enabling server cookie sessions and creating the client with
+`refreshTokenTransport: 'httpOnlyCookie'`:
+
+```typescript
+const client = createClient(edgeBaseUrl, {
+  refreshTokenTransport: 'httpOnlyCookie',
+});
+```
+
+Pass an app callback route and let the Web SDK finish the exchange:
 
 ```typescript
 // 1. Initiate OAuth
@@ -113,7 +125,10 @@ function AuthCallback() {
 }
 ```
 
-`handleOAuthCallback()` stores the tokens, updates `currentUser`, fires `onAuthStateChange`, and removes `access_token` / `refresh_token` from the browser URL.
+In cookie mode, `handleOAuthCallback()` sees the transport marker, refreshes
+through the HttpOnly cookie, updates `currentUser`, fires `onAuthStateChange`,
+and removes the marker from the browser URL. Body mode retains the existing
+token callback behavior for mobile and legacy clients.
 
 If you see a provider-side `redirect_uri_mismatch` error, compare the provider callback registered in the provider console with the server callback EdgeBase is actually sending. Do not compare it against your SPA callback route.
 

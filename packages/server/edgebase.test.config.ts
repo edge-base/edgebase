@@ -143,6 +143,54 @@ const signUpGatePlugin = definePlugin<Record<string, never>>({
     },
 });
 
+const gatedSignOutUserIds = new Set<string>();
+const gatedSignOutRefreshCounts = new Map<string, number>();
+const gatedSignOutReleases = new Map<string, () => void>();
+const signOutRotationGatePlugin = definePlugin<Record<string, never>>({
+    name: 'test-signout-rotation-gate',
+    hooks: {
+        async afterSignUp(ctx) {
+            const user = (ctx.data?.after ?? {}) as { id?: string; email?: string | null };
+            if (user.id && user.email?.includes('signout-rotation-race')) {
+                gatedSignOutUserIds.add(user.id);
+            }
+        },
+        async beforeSignOut(ctx) {
+            const userId = String(((ctx.data?.after ?? {}) as { userId?: string }).userId ?? '');
+            if (!gatedSignOutUserIds.has(userId)) return;
+            await new Promise<void>((resolve) => {
+                let settled = false;
+                const finish = () => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timeout);
+                    gatedSignOutReleases.delete(userId);
+                    gatedSignOutRefreshCounts.delete(userId);
+                    gatedSignOutUserIds.delete(userId);
+                    resolve();
+                };
+                const timeout = setTimeout(finish, 5_000);
+                gatedSignOutReleases.set(userId, finish);
+            });
+        },
+        async onTokenRefresh(ctx) {
+            const userId = String(((ctx.data?.after ?? {}) as { id?: string }).id ?? '');
+            if (!gatedSignOutUserIds.has(userId)) return;
+            const refreshCount = (gatedSignOutRefreshCounts.get(userId) ?? 0) + 1;
+            gatedSignOutRefreshCounts.set(userId, refreshCount);
+            if (refreshCount === 1) {
+                const deadline = Date.now() + 2_000;
+                while (!gatedSignOutReleases.has(userId) && Date.now() < deadline) {
+                    await new Promise((resolve) => setTimeout(resolve, 5));
+                }
+            }
+            if (refreshCount >= 2) {
+                gatedSignOutReleases.get(userId)?.();
+            }
+        },
+    },
+});
+
 export default defineConfig({
     release: true,
     api: { schemaEndpoint: 'authenticated' },
@@ -161,7 +209,21 @@ export default defineConfig({
         emailAuth: true,
         anonymousAuth: true,
         cleanupOrphanData: true,
-        session: { accessTokenTTL: '15m', refreshTokenTTL: '28d', maxActiveSessions: 3 },
+        session: {
+          accessTokenTTL: '15m',
+          refreshTokenTTL: '28d',
+          maxActiveSessions: 3,
+          cookie: { enabled: true, name: 'edgebase-test-refresh', sameSite: 'strict' },
+        },
+        access: {
+          signOut: (_input, ctx) => {
+            if (ctx.request.headers.get('x-edgebase-test-error-signout') === '1') {
+              throw new Error('transient signout failure');
+            }
+            return ctx.request.headers.get('x-edgebase-test-deny-signout') !== '1';
+          },
+          refresh: (_input, ctx) => ctx.request.headers.get('x-edgebase-test-deny-refresh') !== '1',
+        },
         magicLink: { enabled: true, autoCreate: true, tokenTTL: '15m' },
         mfa: { totp: true },
         phoneAuth: true,
@@ -176,6 +238,16 @@ export default defineConfig({
         storage: { requests: 10000, window: '60s' },
         functions: { requests: 10000, window: '60s' },
         db: { requests: 10000, window: '60s' },
+    },
+    cors: {
+        // Preserve the existing integration/dev origins while explicitly
+        // adding the cookie-transport browser fixture.
+        origin: [
+            'http://localhost:3000',
+            'http://localhost:4173',
+            'http://localhost:5180',
+        ],
+        credentials: true,
     },
 
     // ─── Storage ───────────────────────────────────────────────────────────
@@ -298,6 +370,7 @@ export default defineConfig({
         refreshClaimPluginA({}),
         refreshClaimPluginB({}),
         signUpGatePlugin({}),
+        signOutRotationGatePlugin({}),
     ],
 
     // ─── Rooms v2 ────────────────────────────────────────

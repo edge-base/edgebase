@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 import '../http_client.dart';
 
@@ -485,6 +485,7 @@ class ApiPaths {
   ApiPaths._();
 
   static const ADMIN_LOGIN = '/admin/api/auth/login';
+  static const ADMIN_LOGOUT = '/admin/api/auth/logout';
   static const ADMIN_REFRESH = '/admin/api/auth/refresh';
   static const BACKUP_CLEANUP_PLUGIN = '/admin/api/backup/cleanup-plugin';
   static const BACKUP_GET_CONFIG = '/admin/api/backup/config';

@@ -230,7 +230,11 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
 
   private async authenticate(): Promise<void> {
     const token = await this.tokenManager.getAccessToken((refreshToken) =>
-      refreshAccessToken(this.baseUrl, refreshToken),
+      refreshAccessToken(
+        this.baseUrl,
+        refreshToken,
+        this.tokenManager.refreshTokenTransport,
+      ),
     );
     if (!token) {
       throw new EdgeBaseError(
@@ -239,7 +243,7 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
       );
     }
 
-    this.sendRaw({ type: 'auth', token, sdkVersion: '0.3.5' });
+    this.sendRaw({ type: 'auth', token, sdkVersion: '0.3.6' });
 
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -443,7 +447,7 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
   private refreshAuth(): void {
     const token = this.tokenManager.currentAccessToken;
     if (!token || !this.ws || !this.connected) return;
-    this.sendRaw({ type: 'auth', token, sdkVersion: '0.3.5' });
+    this.sendRaw({ type: 'auth', token, sdkVersion: '0.3.6' });
   }
 
   private handleAuthStateChange(user: TokenUser | null): void {
@@ -546,7 +550,7 @@ export class DatabaseLiveClient implements IDatabaseLiveSubscriber {
   }
 
   private hasAuthContext(): boolean {
-    return Boolean(this.tokenManager.getCurrentUser() || this.tokenManager.getRefreshToken());
+    return Boolean(this.tokenManager.getCurrentUser() || this.tokenManager.hasRefreshSession());
   }
 
   private recoverAuthentication(): void {

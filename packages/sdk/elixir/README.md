@@ -22,8 +22,8 @@ This package is one part of the wider EdgeBase platform. For the full platform, 
 Add the package that matches your use case to `deps/0`:
 
 ```elixir
-{:edgebase_core, "~> 0.1.4"}
-{:edgebase_admin, "~> 0.1.4"}
+{:edgebase_core, "~> 0.3.6"}
+{:edgebase_admin, "~> 0.3.6"}
 ```
 
 Then fetch dependencies:

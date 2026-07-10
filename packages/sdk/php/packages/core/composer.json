@@ -17,9 +17,7 @@
         "classmap": ["src/"]
     },
     "autoload-dev": {
-        "psr-4": {
-            "EdgeBase\\Core\\Tests\\": "tests/"
-        }
+        "classmap": ["tests/"]
     },
     "require": {
         "php": ">=8.1"

@@ -73,7 +73,14 @@ packages/sdk/cpp/packages/core/tests/build-storage-suite*/
 # Generated test/runtime output
 artifacts/
 .release-artifacts/
-/dev/
+# Local development output stays ignored, but the audited release drivers are
+# source files. Credential files under dev/release remain ignored by the
+# earlier .env/.env.* rules and by the allowlist below.
+/dev/*
+!/dev/release/
+/dev/release/*
+!/dev/release/*.mjs
+!/dev/release/README.md
 /functions/
 /runtime/
 *.log

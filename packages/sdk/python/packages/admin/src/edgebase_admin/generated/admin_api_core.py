@@ -1,7 +1,7 @@
 """Auto-generated admin API Core — DO NOT EDIT.
 
 Regenerate: npx tsx tools/sdk-codegen/generate.ts
-Source: openapi.json (0.1.0)
+Source: openapi.json (0.3.6)
 """
 
 from __future__ import annotations
@@ -135,6 +135,10 @@ class GeneratedAdminApi:
     def admin_refresh(self, body: Any) -> Any:
         """Rotate admin token — POST /admin/api/auth/refresh"""
         return self._http.post("/admin/api/auth/refresh", body)
+
+    def admin_logout(self, body: Any) -> Any:
+        """End the current admin session — POST /admin/api/auth/logout"""
+        return self._http.post("/admin/api/auth/logout", body)
 
     def admin_reset_password(self, body: Any) -> Any:
         """Reset admin password (Service Key required) — POST /admin/api/internal/reset-password"""

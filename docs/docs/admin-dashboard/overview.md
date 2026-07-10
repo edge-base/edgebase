@@ -77,11 +77,79 @@ For the current page-by-page route map, see [Navigation Map](/docs/admin-dashboa
 - **Backup**: Create and restore project backups from the dashboard.
 - **Settings**: Environment overview showing dev/production mode, release status, database configurations, auth settings, storage buckets, and native resource bindings (KV, D1, Vectorize).
 
+## Dashboard Sessions
+
+Starting with EdgeBase 0.3.6, the browser dashboard never persists admin
+access or refresh tokens in `localStorage` or `sessionStorage`. The short-lived
+15-minute admin access token exists only in page memory. The rotating refresh token is a
+host-only `HttpOnly` cookie scoped to `/admin/api/auth`; it is `Secure` on
+HTTPS, and same-origin deployments use `SameSite=Strict`.
+
+The dashboard explicitly negotiates this transport with
+`X-EdgeBase-Auth-Transport: cookie` and credentialed requests. The server does
+not treat the ambient cookie alone as authorization. Login, refresh, setup, and
+logout also require a verifiable browser `Origin`, and logout revokes the
+backing `_admin_sessions` row before expiring the cookie.
+
+New access and refresh JWTs carry the same server-side session ID and distinct
+nonces. Protected admin routes verify that session row on every admin access,
+so logout and password reset invalidate the in-memory access token immediately
+instead of waiting for its expiry. Pre-0.3.6 access JWTs without a session ID
+remain accepted only for their original lifetime during a rolling upgrade.
+
+If a pre-0.3.6 dashboard session is found during upgrade, the old browser
+storage entry is removed immediately and its refresh token may be exchanged
+once for the HttpOnly cookie. New `_admin_sessions` rows store only a prefixed
+SHA-256 token digest. A valid legacy plaintext row is rewritten to the digest
+during its next refresh, so existing sessions migrate without a forced global
+sign-out.
+
+Refresh and logout operations are serialized across tabs with the browser Web
+Locks API, with a token-free localStorage lease as the compatibility fallback.
+Each cookie-mutating session request has a bounded timeout and is aborted on a
+same-tab logout, so an unresponsive login, setup, or refresh cannot retain the
+lock indefinitely. Refresh rotation itself is an atomic compare-and-swap on
+the current session credential; concurrent refresh and logout requests cannot
+resurrect a revoked admin session.
+The dashboard also shares only a non-secret admin-ID marker across tabs. If one
+tab changes the shared cookie to a different admin, other tabs immediately
+discard their old in-memory access state and verify the new principal with the
+server; bearer tokens are never copied through browser storage.
+If logout cannot reach the server, the dashboard persists only a non-secret
+pending-logout marker. Reload then stays signed out and retries revocation
+before any cookie restore or new login, so an offline logout cannot silently
+reopen the old admin session.
+
+Non-browser and generated SDK clients keep the legacy body transport for
+compatibility: login and refresh continue to return a refresh token unless the
+cookie transport header was explicitly supplied.
+
+### Separately hosted dashboards
+
+Prefer serving `/admin` and the Worker from the same origin. If the dashboard
+must use a different site, all of the following are required:
+
+- HTTPS for both dashboard and API (or an explicitly trusted TLS proxy)
+- the dashboard's exact origin in `cors.origin`
+- `cors.credentials: true`
+- browser requests with credentials and the custom transport header
+
+Cross-site admin cookies use `SameSite=None; Secure`. Wildcard CORS origins,
+missing origins, disabled CORS credentials, and cross-site plain HTTP are
+rejected. Browser third-party-cookie policies can still block this topology,
+so a same-origin dashboard remains the reliable deployment model.
+
+Development mode does not trust every localhost port. If the standalone Vite
+dashboard is run on a different port from the Worker, add that exact
+`http://localhost:<port>` origin to `cors.origin`; an arbitrary loopback page
+cannot use the ambient admin cookie.
+
 ## Security Notes
 
 - Do not expose `SERVICE_KEY` in browser code.
 - Restrict admin access behind HTTPS and IP/network controls when self-hosting.
 - Rotate `JWT_ADMIN_SECRET` and `SERVICE_KEY` periodically.
+- Confirm browser storage contains no `edgebase_admin_auth` token payload after upgrading.
 - For reverse proxies, keep WebSocket upgrade headers enabled.
 
 ## Operational Checklist

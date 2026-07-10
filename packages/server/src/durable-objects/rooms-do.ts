@@ -222,7 +222,10 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     });
   }
 
-  override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+  protected override async processWebSocketMessage(
+    ws: WebSocket,
+    message: string | ArrayBuffer,
+  ): Promise<void> {
     await this.ensureRuntimeReady();
     await this.recoverStateIfNeeded();
 
@@ -315,7 +318,9 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       return;
     }
 
-    await super.webSocketMessage(ws, message);
+    // Bypass the base entry point's per-socket chain (we are already inside
+    // this socket's chained turn) — go straight to the base processor.
+    await super.processWebSocketMessage(ws, message);
   }
 
   protected override async handleJoin(

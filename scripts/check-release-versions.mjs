@@ -1,7 +1,18 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RELEASE_TARGETS, RELEASE_VERSION_REFERENCES } from './release-targets.mjs';
-import { assertStableReleaseVersion, checkVersionReference, getSourceVersion, readTargetVersion, summarizeTargets } from './release-version-utils.mjs';
+import {
+  RELEASE_CHANGELOGS,
+  RELEASE_TARGETS,
+  RELEASE_VERSION_REFERENCES,
+} from './release-targets.mjs';
+import {
+  assertStableReleaseVersion,
+  checkReleaseChangelog,
+  checkVersionReference,
+  getSourceVersion,
+  readTargetVersion,
+  summarizeTargets,
+} from './release-version-utils.mjs';
 
 export function checkReleaseVersions(version = getSourceVersion()) {
   assertStableReleaseVersion(version);
@@ -13,6 +24,9 @@ export function checkReleaseVersions(version = getSourceVersion()) {
   }
   if (summary.versionReferences > 0) {
     console.log(`Checking ${summary.versionReferences} versioned dependency/doc references as well.`);
+  }
+  if (summary.changelogs > 0) {
+    console.log(`Checking ${summary.changelogs} release changelogs for a ${version} entry.`);
   }
   console.log();
 
@@ -51,6 +65,20 @@ export function checkReleaseVersions(version = getSourceVersion()) {
     }
   }
 
+  for (const changelog of RELEASE_CHANGELOGS) {
+    const result = checkReleaseChangelog(changelog, version);
+    if (!result.ok) {
+      mismatches.push({
+        name: changelog.label,
+        path: changelog.path,
+        currentVersion: `missing ${version} heading`,
+      });
+      console.log(`- ${changelog.label}: missing ${version} entry (${changelog.path})`);
+    } else {
+      console.log(`- ${changelog.label}: ok`);
+    }
+  }
+
   if (mismatches.length > 0) {
     const lines = [
       '',
@@ -65,7 +93,7 @@ export function checkReleaseVersions(version = getSourceVersion()) {
   }
 
   console.log();
-  console.log('All file-backed release targets and versioned references are aligned.');
+  console.log('All file-backed release targets, versioned references, and changelogs are aligned.');
 }
 
 const isDirectRun = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);

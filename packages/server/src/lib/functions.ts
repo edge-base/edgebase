@@ -642,6 +642,31 @@ export function matchRoute(
 }
 
 /**
+ * Whether the matched App Function owns Bearer-token validation for this
+ * request. Only the canonical /api/functions route can opt into this behavior;
+ * malformed paths and unmatched methods remain under EdgeBase auth handling.
+ */
+export function usesCustomBearerAuth(pathname: string, method: string): boolean {
+  const prefix = '/api/functions/';
+  if (!pathname.startsWith(prefix)) return false;
+
+  const encodedFunctionPath = pathname.slice(prefix.length);
+  if (!encodedFunctionPath) return false;
+
+  let functionPath: string;
+  try {
+    // Hono decodes the catch-all route parameter before functionsRoute calls
+    // matchRoute. Mirror that behavior here so encoded separators cannot make
+    // auth inspect one definition while dispatch executes another.
+    functionPath = decodeURIComponent(encodedFunctionPath);
+  } catch {
+    return false;
+  }
+
+  return matchRoute(functionPath, method)?.route.definition.customBearerAuth === true;
+}
+
+/**
  * Check if a route exists for a given path (any method).
  * Used for 405 detection.
  */
@@ -720,6 +745,7 @@ export function wrapMethodExport(
     | {
         handler?: (ctx: unknown) => Promise<unknown>;
         captcha?: boolean;
+        customBearerAuth?: boolean;
         trigger?: { path?: string };
       }
     | ((ctx: unknown) => Promise<unknown>),
@@ -742,6 +768,7 @@ export function wrapMethodExport(
   // handler can be: raw function, or { handler, captcha? } from defineFunction()
   let fn: (ctx: unknown) => Promise<unknown>;
   let captcha: boolean | undefined;
+  let customBearerAuth: boolean | undefined;
   let path: string | undefined;
 
   if (typeof handler === 'function') {
@@ -749,6 +776,7 @@ export function wrapMethodExport(
   } else if (handler && typeof handler === 'object') {
     fn = (handler.handler ?? handler) as unknown as (ctx: unknown) => Promise<unknown>;
     captcha = handler.captcha;
+    customBearerAuth = handler.customBearerAuth;
     if (
       'trigger' in handler &&
       handler.trigger &&
@@ -769,6 +797,7 @@ export function wrapMethodExport(
       ...(runtimeTrigger?.path ? { path: runtimeTrigger.path } : path ? { path } : {}),
     },
     captcha,
+    customBearerAuth,
     handler: fn,
   };
 }

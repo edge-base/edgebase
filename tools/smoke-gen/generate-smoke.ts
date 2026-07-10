@@ -231,6 +231,7 @@ function sampleBody(operationId: string): string {
     // Admin panel auth
     adminLogin: '{ email: "admin@test.com", password: "Admin1234!" }',
     adminRefresh: '{ refreshToken: "smoke-refresh" }',
+    adminLogout: '{ refreshToken: "smoke-refresh" }',
     adminSetup: '{ email: "admin@test.com", password: "Admin1234!" }',
     adminResetPassword: '{ token: "smoke-token", password: "Reset1234!" }',
 

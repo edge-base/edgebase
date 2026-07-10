@@ -18,11 +18,11 @@ export const SCALAR_API_REFERENCE_SRC =
  *
  * Security model:
  * - The iframe is sandboxed WITHOUT `allow-same-origin`, so it runs on an opaque
- *   origin and cannot read the admin session (`localStorage`) even though the
+ *   origin and cannot read the admin session even though the
  *   third-party Scalar bundle executes inside it.
  * - The short-lived admin access token is delivered on demand via `postMessage`
  *   from the parent window and kept in memory only. The long-lived refresh token
- *   never enters the iframe; refreshes are performed by the parent.
+ *   stays in an HttpOnly cookie; refreshes are performed by the parent.
  */
 export function buildScalarHtml(specJson: string, origin: string): string {
 	const escapedSpecJson = escapeInlineJson(specJson);

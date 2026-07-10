@@ -10,6 +10,7 @@ import { SignJWT, jwtVerify } from 'jose';
 
 export interface AccessTokenPayload {
   sub: string;          // userId
+  sid?: string;         // current refresh-session ID
   email?: string | null;
   displayName?: string | null;
   role?: string;
@@ -27,6 +28,8 @@ export interface RefreshTokenPayload {
 
 export interface AdminTokenPayload {
   sub: string;          // adminId
+  sid?: string;         // current admin refresh-session ID
+  nonce?: string;       // per-token uniqueness within the session
 }
 
 export interface VerifiedToken {
@@ -130,12 +133,17 @@ export async function signAdminAccessToken(
   secret: string,
   ttl: string = '1h',
 ): Promise<string> {
-  const jwt = new SignJWT({ type: 'access' })
+  const jwt = new SignJWT({
+    type: 'access',
+    ...(payload.sid ? { sid: payload.sid } : {}),
+    nonce: payload.nonce ?? crypto.randomUUID(),
+  })
     .setProtectedHeader({ alg: ALGORITHM })
     .setIssuedAt()
     .setIssuer(ADMIN_ISSUER)
     .setSubject(payload.sub)
-    .setExpirationTime(ttl);
+    .setExpirationTime(ttl)
+    .setJti(payload.sid ?? crypto.randomUUID());
 
   return jwt.sign(textToKey(secret));
 }
@@ -148,11 +156,18 @@ export async function signAdminRefreshToken(
   secret: string,
   ttl: string = '28d',
 ): Promise<string> {
-  const jwt = new SignJWT({ type: 'refresh' })
+  const jwt = new SignJWT({
+    type: 'refresh',
+    ...(payload.sid ? { sid: payload.sid } : {}),
+    nonce: payload.nonce ?? crypto.randomUUID(),
+  })
     .setProtectedHeader({ alg: ALGORITHM })
     .setIssuedAt()
     .setIssuer(ADMIN_ISSUER)
     .setSubject(payload.sub)
+    // Rotation can happen inside the same second. Bind the JWT ID to the
+    // backing session and keep a per-token nonce so access/refresh differ.
+    .setJti(payload.sid ?? crypto.randomUUID())
     .setExpirationTime(ttl);
 
   return jwt.sign(textToKey(secret));

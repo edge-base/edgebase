@@ -79,6 +79,14 @@ import {
 import { zodDefaultHook, jsonResponseSchema, errorResponseSchema } from '../lib/schemas.js';
 import { resolveAuthDb, type AuthDb } from '../lib/auth-db-adapter.js';
 import { queuePublicUserProjectionSync, syncPublicUserProjection } from '../lib/public-user-profile.js';
+import {
+  applyAuthNoStore,
+  assertAuthTransportAllowed,
+  clearRefreshCookie,
+  isCookieAuthTransport,
+  readRefreshCookie,
+  sessionResponse,
+} from '../lib/auth-session-cookie.js';
 
 
 /** Resolve AuthDb from Hono context or raw env. Defaults to D1 (AUTH_DB binding). */
@@ -95,6 +103,7 @@ export const authRoute = new OpenAPIHono<HonoEnv>({ defaultHook: zodDefaultHook 
 
 // Ensure errors propagate to parent app's error handler
 authRoute.onError((err, c) => {
+  applyAuthNoStore(c);
   if (err instanceof EdgeBaseError) {
     return c.json(err.toJSON(), err.code as 400);
   }
@@ -450,6 +459,7 @@ async function generateAccessToken(
   env: Env,
   user: Record<string, unknown>,
   hookClaimsOverride?: Record<string, unknown>,
+  sessionId?: string,
 ): Promise<string> {
   const dbClaims = user.customClaims
     ? (typeof user.customClaims === 'string' ? JSON.parse(user.customClaims as string) : user.customClaims)
@@ -458,7 +468,7 @@ async function generateAccessToken(
   let finalClaims = dbClaims;
   if (hookClaimsOverride) {
     finalClaims = { ...(dbClaims || {}), ...hookClaimsOverride };
-    const SYSTEM_CLAIMS = ['sub', 'iss', 'exp', 'iat', 'isAnonymous', 'displayName'];
+    const SYSTEM_CLAIMS = ['sub', 'iss', 'exp', 'iat', 'isAnonymous', 'displayName', 'sid'];
     for (const key of SYSTEM_CLAIMS) {
       if (key in finalClaims) delete finalClaims[key];
     }
@@ -467,6 +477,7 @@ async function generateAccessToken(
   return signAccessToken(
     {
       sub: user.id as string,
+      sid: sessionId,
       email: user.email as string | null,
       displayName: (user.displayName as string | null) ?? undefined,
       role: user.role as string,
@@ -497,8 +508,8 @@ async function createSessionAndTokens(
     await authService.evictOldestSessions(db, userId, maxSessions);
   }
 
-  const accessToken = await generateAccessToken(env, user);
   const sessionId = generateId();
+  const accessToken = await generateAccessToken(env, user, undefined, sessionId);
   const refreshToken = await signRefreshToken(
     { sub: userId, type: 'refresh', jti: sessionId },
     getUserSecret(env),
@@ -531,13 +542,21 @@ async function createSessionAndTokens(
 /**
  * Rotate refresh token — D1-based.
  */
+const REFRESH_TOKEN_GRACE_PERIOD_MS = 30_000;
+
+function isWithinRefreshTokenGrace(session: Record<string, unknown>): boolean {
+  const rotatedTime = new Date(String(session.rotatedAt ?? '')).getTime();
+  return Number.isFinite(rotatedTime)
+    && Date.now() - rotatedTime <= REFRESH_TOKEN_GRACE_PERIOD_MS;
+}
+
 async function rotateRefreshTokenFlow(
   env: Env,
   ctx: ExecutionContext,
   session: Record<string, unknown>,
   userId: string,
   workerUrl?: string,
-): Promise<{ user: Record<string, unknown>; accessToken: string; refreshToken: string }> {
+): Promise<{ user: Record<string, unknown>; accessToken: string; refreshToken: string; sessionId: string }> {
   const db = envAuthDb(env);
   const user = await authService.getUserById(db, userId);
   if (!user) throw new EdgeBaseError(401, 'User not found.', undefined, 'invalid-credentials');
@@ -554,13 +573,34 @@ async function rotateRefreshTokenFlow(
   const refreshTTLSeconds = parseDuration(getRefreshTokenTTL(env));
   const expiresAt = new Date(Date.now() + refreshTTLSeconds * 1000).toISOString();
 
-  await authService.rotateRefreshToken(
+  const rotated = await authService.rotateRefreshToken(
     db,
     session.id as string,
     newRefreshToken,
     session.refreshToken as string,
     expiresAt,
   );
+
+  if (!rotated) {
+    // Another request won the same-token rotation. Preserve the documented
+    // grace behavior by returning that winner's token, never our uncommitted
+    // token. A deleted/expired/re-rotated session fails closed.
+    const winner = await authService.getSessionByRefreshToken(
+      db,
+      session.refreshToken as string,
+      userId,
+    );
+    if (winner?.matchType !== 'previous' || !isWithinRefreshTokenGrace(winner.session)) {
+      throw new EdgeBaseError(401, 'Refresh token is no longer current.', undefined, 'invalid-refresh-token');
+    }
+    const sessionId = winner.session.id as string;
+    return {
+      user: authService.sanitizeUser(user),
+      accessToken: await generateAccessToken(env, user, undefined, sessionId),
+      refreshToken: winner.session.refreshToken as string,
+      sessionId,
+    };
+  }
 
   // onTokenRefresh hook — blocking, returns custom claims
   let hookClaims: Record<string, unknown> | undefined;
@@ -573,12 +613,14 @@ async function rotateRefreshTokenFlow(
     console.error('[EdgeBase] onTokenRefresh hook failed, proceeding without hook claims');
   }
 
-  const accessToken = await generateAccessToken(env, user, hookClaims);
+  const sessionId = session.id as string;
+  const accessToken = await generateAccessToken(env, user, hookClaims, sessionId);
 
   return {
     user: authService.sanitizeUser(user),
     accessToken,
     refreshToken: newRefreshToken,
+    sessionId,
   };
 }
 
@@ -859,6 +901,12 @@ function getAnonymousAuthEnabled(env: Env): boolean {
 // ─── D1 Schema Middleware ───
 
 authRoute.use('*', async (c, next) => {
+  assertAuthTransportAllowed(c);
+  applyAuthNoStore(c);
+  await next();
+});
+
+authRoute.use('*', async (c, next) => {
   await ensureAuthSchema(getAuthDb(c));
   await next();
 });
@@ -1059,14 +1107,19 @@ authRoute.openapi(signup, async (c) => {
         executeAuthHook(c.env, c.executionCtx, 'afterSignUp', authService.sanitizeUser(user), { workerUrl: getWorkerUrl(c.req.url, c.env) }).catch(() => {}),
       );
 
-      return c.json({
+      return sessionResponse(c, {
         user: authService.sanitizeUser(user),
         accessToken: session.accessToken,
         refreshToken: session.refreshToken,
+        sessionId: session.sessionId,
       }, 201);
     }
 
-    return c.json({ accessToken: session.accessToken, refreshToken: session.refreshToken }, 201);
+    return sessionResponse(c, {
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      sessionId: session.sessionId,
+    }, 201);
   } catch (err) {
     if (err instanceof EdgeBaseError) throw err;
     // Compensating transaction
@@ -1199,10 +1252,11 @@ authRoute.openapi(signin, async (c) => {
     executeAuthHook(c.env, c.executionCtx, 'afterSignIn', authService.sanitizeUser(user), { workerUrl: getWorkerUrl(c.req.url, c.env) }).catch(() => {}),
   );
 
-  return c.json({
+  return sessionResponse(c, {
     user: authService.sanitizeUser(user),
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
+    sessionId: session.sessionId,
   });
 });
 
@@ -1254,14 +1308,19 @@ authRoute.openapi(signinAnonymous, async (c) => {
     if (user) {
       await syncUserPublic(c.env, c.executionCtx, userId, authService.buildPublicUserData(user), true);
 
-      return c.json({
+      return sessionResponse(c, {
         user: authService.sanitizeUser(user),
         accessToken: session.accessToken,
         refreshToken: session.refreshToken,
+        sessionId: session.sessionId,
       }, 201);
     }
 
-    return c.json({ accessToken: session.accessToken, refreshToken: session.refreshToken }, 201);
+    return sessionResponse(c, {
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      sessionId: session.sessionId,
+    }, 201);
   } catch (err) {
     if (err instanceof EdgeBaseError) throw err;
     await deleteAnon(db, userId).catch(() => {});
@@ -1557,10 +1616,11 @@ authRoute.openapi(verifyMagicLink, async (c) => {
     executeAuthHook(c.env, c.executionCtx, 'afterSignIn', authService.sanitizeUser(updatedUser), { workerUrl: getWorkerUrl(c.req.url, c.env) }).catch(() => {}),
   );
 
-  return c.json({
+  return sessionResponse(c, {
     user: authService.sanitizeUser(updatedUser),
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
+    sessionId: session.sessionId,
   });
 });
 
@@ -1858,10 +1918,11 @@ authRoute.openapi(verifyPhone, async (c) => {
     executeAuthHook(c.env, c.executionCtx, 'afterSignIn', authService.sanitizeUser(updatedUser), { workerUrl: getWorkerUrl(c.req.url, c.env) }).catch(() => {}),
   );
 
-  return c.json({
+  return sessionResponse(c, {
     user: authService.sanitizeUser(updatedUser),
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
+    sessionId: session.sessionId,
   });
 });
 
@@ -2327,10 +2388,11 @@ authRoute.openapi(verifyEmailOtp, async (c) => {
     executeAuthHook(c.env, c.executionCtx, 'afterSignIn', authService.sanitizeUser(user), { workerUrl: getWorkerUrl(c.req.url, c.env) }).catch(() => {}),
   );
 
-  return c.json({
+  return sessionResponse(c, {
     user: authService.sanitizeUser(user),
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
+    sessionId: session.sessionId,
   });
 });
 
@@ -2556,10 +2618,11 @@ authRoute.openapi(mfaVerify, async (c) => {
     executeAuthHook(c.env, c.executionCtx, 'afterSignIn', authService.sanitizeUser(user), { workerUrl: getWorkerUrl(c.req.url, c.env) }).catch(() => {}),
   );
 
-  return c.json({
+  return sessionResponse(c, {
     user: authService.sanitizeUser(user),
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
+    sessionId: session.sessionId,
   });
 });
 
@@ -2648,10 +2711,11 @@ authRoute.openapi(mfaRecovery, async (c) => {
     executeAuthHook(c.env, c.executionCtx, 'afterSignIn', authService.sanitizeUser(user), { workerUrl: getWorkerUrl(c.req.url, c.env) }).catch(() => {}),
   );
 
-  return c.json({
+  return sessionResponse(c, {
     user: authService.sanitizeUser(user),
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
+    sessionId: session.sessionId,
   });
 });
 
@@ -2811,8 +2875,8 @@ const refresh = createRoute({
   summary: 'Refresh access token',
   request: {
     body: { content: { 'application/json': { schema: z.object({
-      refreshToken: z.string(),
-    }).passthrough() } }, required: true },
+      refreshToken: z.string().optional(),
+    }).passthrough() } }, required: false },
   },
   responses: {
     200: { description: 'Success', content: { 'application/json': { schema: jsonResponseSchema } } },
@@ -2824,67 +2888,89 @@ const refresh = createRoute({
 authRoute.openapi(refresh, async (c) => {
   const bodyText = await c.req.text();
   let body: { refreshToken?: string };
-  try { body = JSON.parse(bodyText); } catch { throw new EdgeBaseError(400, 'Invalid JSON.', undefined, 'invalid-json'); }
-  if (!body.refreshToken) throw new EdgeBaseError(400, 'Refresh token is required.', undefined, 'invalid-input');
-
-  await ensureAuthActionAllowed(c, 'refresh', {
-    refreshToken: body.refreshToken,
-  });
+  try { body = bodyText.trim() ? JSON.parse(bodyText) : {}; } catch { throw new EdgeBaseError(400, 'Invalid JSON.', undefined, 'invalid-json'); }
+  const cookieTransport = isCookieAuthTransport(c);
+  // Cookie wins when present. The body is accepted only when there is no
+  // cookie, allowing a new SDK to exchange one legacy localStorage token once.
+  const refreshToken = cookieTransport
+    ? (readRefreshCookie(c) ?? body.refreshToken)
+    : body.refreshToken;
+  if (!refreshToken) {
+    if (cookieTransport) {
+      clearRefreshCookie(c);
+      throw new EdgeBaseError(401, 'Refresh session is not available.', undefined, 'invalid-refresh-token');
+    }
+    throw new EdgeBaseError(400, 'Refresh token is required.', undefined, 'invalid-input');
+  }
 
   const db = getAuthDb(c);
-  const GRACE_PERIOD_SECONDS = 30;
-
-  // Verify the refresh token signature
-  let tokenPayload;
   try {
-    tokenPayload = await verifyRefreshTokenWithFallback(
-      body.refreshToken,
-      getUserSecret(c.env),
-      c.env.JWT_USER_SECRET_OLD,
-      c.env.JWT_USER_SECRET_OLD_AT,
-    );
-  } catch (err) {
-    if (err instanceof TokenExpiredError) {
-      throw new EdgeBaseError(401, 'Refresh token expired.', undefined, 'refresh-token-expired');
-    }
-    throw new EdgeBaseError(401, 'Invalid refresh token.', undefined, 'invalid-refresh-token');
-  }
-
-  const userId = tokenPayload.sub;
-
-  // Use getSessionByRefreshToken which checks both current and previous tokens
-  const result = await authService.getSessionByRefreshToken(db, body.refreshToken, userId);
-
-  if (!result) {
-    throw new EdgeBaseError(401, 'Invalid refresh token.', undefined, 'invalid-refresh-token');
-  }
-
-  const { session, matchType } = result;
-
-  if (matchType === 'current') {
-    // Normal rotation
-    return c.json(await rotateRefreshTokenFlow(c.env, c.executionCtx, session, userId, getWorkerUrl(c.req.url, c.env)));
-  }
-
-  // matchType === 'previous' — Grace Period check
-  const rotatedAt = session.rotatedAt as string;
-  const rotatedTime = new Date(rotatedAt).getTime();
-  const gracePeriodMs = GRACE_PERIOD_SECONDS * 1000;
-
-  if (Date.now() - rotatedTime <= gracePeriodMs) {
-    // Within grace period — return current tokens without re-rotation
-    const user = await authService.getUserById(db, userId);
-    if (!user) throw new EdgeBaseError(401, 'User not found.', undefined, 'invalid-credentials');
-    return c.json({
-      user: authService.sanitizeUser(user),
-      accessToken: await generateAccessToken(c.env, user),
-      refreshToken: session.refreshToken as string,
+    await ensureAuthActionAllowed(c, 'refresh', {
+      refreshToken,
     });
-  }
 
-  // Beyond grace period — token theft suspected! Revoke session
-  await authService.deleteSession(db, session.id as string);
-  throw new EdgeBaseError(401, 'Refresh token reuse detected. Session revoked.', undefined, 'refresh-token-reused');
+    // Verify the refresh token signature
+    let tokenPayload;
+    try {
+      tokenPayload = await verifyRefreshTokenWithFallback(
+        refreshToken,
+        getUserSecret(c.env),
+        c.env.JWT_USER_SECRET_OLD,
+        c.env.JWT_USER_SECRET_OLD_AT,
+      );
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        throw new EdgeBaseError(401, 'Refresh token expired.', undefined, 'refresh-token-expired');
+      }
+      throw new EdgeBaseError(401, 'Invalid refresh token.', undefined, 'invalid-refresh-token');
+    }
+
+    const userId = tokenPayload.sub;
+
+    // Use getSessionByRefreshToken which checks both current and previous tokens
+    const result = await authService.getSessionByRefreshToken(db, refreshToken, userId);
+
+    if (!result) {
+      throw new EdgeBaseError(401, 'Invalid refresh token.', undefined, 'invalid-refresh-token');
+    }
+
+    const { session, matchType } = result;
+
+    if (matchType === 'current') {
+      // Normal rotation
+      return sessionResponse(
+        c,
+        await rotateRefreshTokenFlow(c.env, c.executionCtx, session, userId, getWorkerUrl(c.req.url, c.env)),
+      );
+    }
+
+    // matchType === 'previous' — Grace Period check
+    if (isWithinRefreshTokenGrace(session)) {
+      // Within grace period — return current tokens without re-rotation
+      const user = await authService.getUserById(db, userId);
+      if (!user) throw new EdgeBaseError(401, 'User not found.', undefined, 'invalid-credentials');
+      const sessionId = session.id as string;
+      return sessionResponse(c, {
+        user: authService.sanitizeUser(user),
+        accessToken: await generateAccessToken(c.env, user, undefined, sessionId),
+        refreshToken: session.refreshToken as string,
+        sessionId,
+      });
+    }
+
+    // Beyond grace period — token theft suspected! Revoke session
+    await authService.deleteSession(db, session.id as string);
+    throw new EdgeBaseError(401, 'Refresh token reuse detected. Session revoked.', undefined, 'refresh-token-reused');
+  } catch (err) {
+    if (
+      cookieTransport
+      && err instanceof EdgeBaseError
+      && (err.code === 401 || err.code === 403)
+    ) {
+      clearRefreshCookie(c);
+    }
+    throw err;
+  }
 });
 
 const signout = createRoute({
@@ -2895,8 +2981,8 @@ const signout = createRoute({
   summary: 'Sign out and revoke refresh token',
   request: {
     body: { content: { 'application/json': { schema: z.object({
-      refreshToken: z.string(),
-    }).passthrough() } }, required: true },
+      refreshToken: z.string().optional(),
+    }).passthrough() } }, required: false },
   },
   responses: {
     200: { description: 'Success', content: { 'application/json': { schema: jsonResponseSchema } } },
@@ -2906,49 +2992,78 @@ const signout = createRoute({
 });
 
 authRoute.openapi(signout, async (c) => {
-  const bodyText = await c.req.text();
-  let body: { refreshToken?: string };
-  try { body = JSON.parse(bodyText); } catch { throw new EdgeBaseError(400, 'Invalid JSON.', undefined, 'invalid-json'); }
-  if (!body.refreshToken) throw new EdgeBaseError(400, 'Refresh token is required.', undefined, 'invalid-input');
-
-  await ensureAuthActionAllowed(c, 'signOut', {
-    refreshToken: body.refreshToken,
-  });
-
-  const db = getAuthDb(c);
-  let tokenPayload;
+  const cookieTransport = isCookieAuthTransport(c);
   try {
-    tokenPayload = await verifyRefreshTokenWithFallback(
-      body.refreshToken,
-      getUserSecret(c.env),
-      c.env.JWT_USER_SECRET_OLD,
-      c.env.JWT_USER_SECRET_OLD_AT,
-    );
-  } catch (err) {
-    if (err instanceof TokenExpiredError) {
-      throw new EdgeBaseError(401, 'Refresh token expired.', undefined, 'refresh-token-expired');
+    const bodyText = await c.req.text();
+    let body: { refreshToken?: string };
+    try { body = bodyText.trim() ? JSON.parse(bodyText) : {}; } catch { throw new EdgeBaseError(400, 'Invalid JSON.', undefined, 'invalid-json'); }
+    const refreshToken = cookieTransport
+      ? (readRefreshCookie(c) ?? body.refreshToken)
+      : body.refreshToken;
+    if (!refreshToken) {
+      if (cookieTransport) {
+        clearRefreshCookie(c);
+        return c.json({ ok: true });
+      }
+      throw new EdgeBaseError(400, 'Refresh token is required.', undefined, 'invalid-input');
     }
-    throw new EdgeBaseError(401, 'Invalid refresh token.', undefined, 'invalid-refresh-token');
+
+    await ensureAuthActionAllowed(c, 'signOut', {
+      refreshToken,
+    });
+
+    const db = getAuthDb(c);
+    let tokenPayload;
+    try {
+      tokenPayload = await verifyRefreshTokenWithFallback(
+        refreshToken,
+        getUserSecret(c.env),
+        c.env.JWT_USER_SECRET_OLD,
+        c.env.JWT_USER_SECRET_OLD_AT,
+      );
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        throw new EdgeBaseError(401, 'Refresh token expired.', undefined, 'refresh-token-expired');
+      }
+      throw new EdgeBaseError(401, 'Invalid refresh token.', undefined, 'invalid-refresh-token');
+    }
+
+    const userId = tokenPayload.sub;
+    const sessionResult = await authService.getSessionByRefreshToken(db, refreshToken, userId);
+    if (!sessionResult) {
+      throw new EdgeBaseError(401, 'Invalid refresh token.', undefined, 'invalid-refresh-token');
+    }
+
+    // beforeSignOut hook — blocking
+    await executeAuthHook(c.env, c.executionCtx, 'beforeSignOut', { userId }, { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
+
+    // Revoke the exact session already verified before the blocking hook. The
+    // refresh token may rotate more than once while that hook is awaiting.
+    await authService.deleteSession(db, sessionResult.session.id as string);
+
+    // afterSignOut hook — non-blocking
+    c.executionCtx.waitUntil(
+      executeAuthHook(c.env, c.executionCtx, 'afterSignOut', { userId }, { workerUrl: getWorkerUrl(c.req.url, c.env) }).catch(() => {}),
+    );
+
+    if (cookieTransport) {
+      clearRefreshCookie(c);
+    }
+    return c.json({ ok: true });
+  } catch (err) {
+    // Only an invalid/expired session makes the refresh cookie unusable. A 403
+    // from an access rule or blocking beforeSignOut hook intentionally leaves
+    // both the cookie and server session valid, so the SDK can surface the
+    // denied revocation instead of claiming a durable sign-out.
+    if (
+      cookieTransport
+      && err instanceof EdgeBaseError
+      && err.code === 401
+    ) {
+      clearRefreshCookie(c);
+    }
+    throw err;
   }
-
-  const userId = tokenPayload.sub;
-  const sessionResult = await authService.getSessionByRefreshToken(db, body.refreshToken, userId);
-  if (!sessionResult) {
-    throw new EdgeBaseError(401, 'Invalid refresh token.', undefined, 'invalid-refresh-token');
-  }
-
-  // beforeSignOut hook — blocking
-  await executeAuthHook(c.env, c.executionCtx, 'beforeSignOut', { userId }, { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
-
-  // Delete session by refreshToken
-  await authService.deleteSessionByRefreshToken(db, body.refreshToken);
-
-  // afterSignOut hook — non-blocking
-  c.executionCtx.waitUntil(
-    executeAuthHook(c.env, c.executionCtx, 'afterSignOut', { userId }, { workerUrl: getWorkerUrl(c.req.url, c.env) }).catch(() => {}),
-  );
-
-  return c.json({ ok: true });
 });
 
 // ─── Shard-routed routes (Access Token in header) ───
@@ -3039,10 +3154,11 @@ authRoute.openapi(changePassword, async (c) => {
     syncUserPublic(c.env, c.executionCtx, userId, authService.buildPublicUserData(updatedUser));
   }
 
-  return c.json({
+  return sessionResponse(c, {
     user: updatedUser ? authService.sanitizeUser(updatedUser) : null,
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
+    sessionId: session.sessionId,
   });
 });
 
@@ -3627,10 +3743,11 @@ authRoute.openapi(passkeysAuthenticate, async (c) => {
     executeAuthHook(c.env, c.executionCtx, 'afterSignIn', sanitizedUser, { ip, userAgent, workerUrl: getWorkerUrl(c.req.url, c.env) }).catch(() => {}),
   );
 
-  return c.json({
+  return sessionResponse(c, {
     user: sanitizedUser,
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
+    sessionId: session.sessionId,
   });
 });
 
@@ -3750,7 +3867,8 @@ const updateProfile = createRoute({
 });
 
 authRoute.openapi(updateProfile, async (c) => {
-  const userId = requireAuth(c.get('auth'));
+  const auth = c.get('auth');
+  const userId = requireAuth(auth);
   const db = getAuthDb(c);
 
   const body = c.req.valid('json') as {
@@ -3843,7 +3961,7 @@ authRoute.openapi(updateProfile, async (c) => {
 
   // displayName is included in JWT, so issue fresh tokens when it changes
   if (body.displayName !== undefined) {
-    const accessToken = await generateAccessToken(c.env, user);
+    const accessToken = await generateAccessToken(c.env, user, undefined, auth?.sessionId);
     return c.json({ user: authService.sanitizeUser(user), accessToken });
   }
 
@@ -3863,13 +3981,19 @@ const getSessions = createRoute({
 });
 
 authRoute.openapi(getSessions, async (c) => {
-  const userId = requireAuth(c.get('auth'));
+  const auth = c.get('auth');
+  const userId = requireAuth(auth);
   await ensureAuthActionAllowed(c, 'getSessions', { userId });
   const db = getAuthDb(c);
 
   const sessions = await authService.listUserSessions(db, userId);
 
-  return c.json({ sessions });
+  return c.json({
+    sessions: sessions.map((session) => ({
+      ...session,
+      current: Boolean(auth?.sessionId && session.id === auth.sessionId),
+    })),
+  });
 });
 
 const deleteSession = createRoute({
@@ -3889,12 +4013,17 @@ const deleteSession = createRoute({
 });
 
 authRoute.openapi(deleteSession, async (c) => {
-  const userId = requireAuth(c.get('auth'));
+  const auth = c.get('auth');
+  const userId = requireAuth(auth);
   const db = getAuthDb(c);
   const sessionId = c.req.param('id')!;
   await ensureAuthActionAllowed(c, 'deleteSession', { userId, sessionId });
 
   await authService.deleteSessionForUser(db, sessionId, userId);
+
+  if (isCookieAuthTransport(c) && auth?.sessionId === sessionId) {
+    clearRefreshCookie(c);
+  }
 
   return c.json({ ok: true });
 });
@@ -4070,10 +4199,11 @@ authRoute.openapi(linkEmail, async (c) => {
   // Generate new tokens (isAnonymous = false now)
   const session = await createSessionAndTokens(c.env, userId, '0.0.0.0', 'link');
 
-  return c.json({
+  return sessionResponse(c, {
     user: authService.sanitizeUser(updatedUser || user),
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
+    sessionId: session.sessionId,
   });
 });
 

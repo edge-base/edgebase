@@ -1,3 +1,9 @@
+## 0.3.6
+
+- Synchronized package metadata, `edgebase_core`, and realtime SDK version
+  reporting with EdgeBase 0.3.6
+- No public Flutter API compatibility break is introduced
+
 ## 0.1.4
 
 - Synced package metadata and install guidance for the 0.1.4 release

@@ -1200,11 +1200,6 @@ Map<String, dynamic> _asMap(dynamic value) {
   return <String, dynamic>{};
 }
 
-List<Map<String, dynamic>> _asListOfMaps(dynamic value) {
-  if (value is! List) return <Map<String, dynamic>>[];
-  return value.map((entry) => _asMap(entry)).toList();
-}
-
 Map<String, dynamic>? _normalizeMember(dynamic value) {
   final member = _asMap(value);
   final memberId = member['memberId'] as String?;

@@ -6,6 +6,15 @@ import type { ContextManager } from './context.js';
 import { parseErrorResponse, networkError } from './errors.js';
 import type { ITokenManager, ITokenPair } from './types.js';
 
+const COOKIE_AUTH_REQUEST_TIMEOUT_MS = 15_000;
+
+class CookieAuthRequestTimeoutError extends Error {
+  constructor() {
+    super(`Cookie auth request timed out after ${COOKIE_AUTH_REQUEST_TIMEOUT_MS}ms.`);
+    this.name = 'CookieAuthRequestTimeoutError';
+  }
+}
+
 /** Parse Retry-After header and calculate delay with exponential backoff + jitter */
 function parseRetryAfter(header: string | null, attempt: number): number {
   let baseDelay = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
@@ -39,6 +48,13 @@ export interface HttpClientOptions {
   serviceKey?: string;
   tokenManager?: ITokenManager;  // Optional: AdminEdgeBase doesn't use ITokenManager
   contextManager: ContextManager;
+  /**
+   * Transport used for browser refresh sessions. The default `body` mode keeps
+   * the existing SDK contract. `httpOnlyCookie` opts auth endpoints into the
+   * server-managed refresh cookie protocol without changing bearer access-token
+   * authentication for the rest of the API.
+   */
+  refreshTokenTransport?: 'body' | 'httpOnlyCookie';
 }
 
 export class HttpClient {
@@ -46,6 +62,7 @@ export class HttpClient {
   private serviceKey?: string;
   private tokenManager?: ITokenManager;
   private locale?: string;
+  private refreshTokenTransport: 'body' | 'httpOnlyCookie';
 
   constructor(options: HttpClientOptions) {
     if (!options.baseUrl || typeof options.baseUrl !== 'string') {
@@ -54,6 +71,7 @@ export class HttpClient {
     this.baseUrl = options.baseUrl.replace(/\/$/, ''); // strip trailing slash
     this.serviceKey = options.serviceKey;
     this.tokenManager = options.tokenManager;
+    this.refreshTokenTransport = options.refreshTokenTransport ?? 'body';
 
     // — warn if Service Key is used in a browser context
     if (this.serviceKey && typeof window !== 'undefined') {
@@ -115,19 +133,111 @@ export class HttpClient {
 
   /** Perform token refresh */
   private async refreshToken(refreshToken: string): Promise<ITokenPair> {
-    const response = await fetch(`${this.baseUrl}/api/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
-    });
+    const useCookie = this.refreshTokenTransport === 'httpOnlyCookie';
+    const refreshUrl = `${this.baseUrl}/api/auth/refresh`;
+    let response: Response;
+    try {
+      response = await this.fetchWithCookieAuthTimeout(refreshUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(useCookie ? { 'X-EdgeBase-Auth-Transport': 'cookie' } : {}),
+        },
+        ...(useCookie ? { credentials: 'include' as const } : {}),
+        body: JSON.stringify(refreshToken ? { refreshToken } : {}),
+      });
+    } catch (error) {
+      throw networkError(
+        `Auth session refresh could not reach ${refreshUrl}. Make sure the EdgeBase server is running and reachable.`,
+        { cause: error },
+      );
+    }
 
     if (!response.ok) {
       const body = await response.json().catch(() => null);
       throw parseErrorResponse(response.status, body);
     }
 
-    const data = (await response.json()) as ITokenPair;
-    return data;
+    const data = (await response.json()) as Partial<ITokenPair>;
+    if (!data.accessToken || (!useCookie && !data.refreshToken)) {
+      throw parseErrorResponse(500, {
+        message: useCookie
+          ? 'Auth refresh succeeded but did not return an accessToken.'
+          : 'Auth refresh succeeded but did not return both accessToken and refreshToken.',
+      });
+    }
+    return {
+      accessToken: data.accessToken,
+      // Cookie mode deliberately has no JavaScript-readable refresh token. The
+      // empty value is an internal compatibility sentinel for ITokenPair; the
+      // cookie-aware TokenManager never persists or broadcasts it.
+      refreshToken: data.refreshToken ?? '',
+    };
+  }
+
+  /**
+   * Bound cookie-mutating auth requests so an unresponsive connection cannot
+   * retain the cross-tab refresh lock forever. Aborting also prevents a late
+   * Set-Cookie response from racing a subsequent sign-out.
+   */
+  private async fetchWithCookieAuthTimeout(
+    input: string,
+    init: RequestInit,
+  ): Promise<Response> {
+    const url = new URL(input, this.baseUrl);
+    const shouldBound = this.refreshTokenTransport === 'httpOnlyCookie'
+      && /(?:^|\/)api\/auth(?:\/|$)/.test(url.pathname)
+      && String(init.method ?? 'GET').toUpperCase() === 'POST';
+    if (!shouldBound) return fetch(input, init);
+
+    const controller = new AbortController();
+    let timedOut = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<Response>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        reject(new CookieAuthRequestTimeoutError());
+      }, COOKIE_AUTH_REQUEST_TIMEOUT_MS);
+    });
+
+    try {
+      return await Promise.race([
+        (async () => {
+          const response = await fetch(input, { ...init, signal: controller.signal });
+          // Keep the timeout alive through body consumption. Some proxies can
+          // deliver 200 headers and then stall the JSON stream indefinitely.
+          const bytes = await response.arrayBuffer();
+          return new Response(bytes.byteLength > 0 ? bytes : null, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+          });
+        })(),
+        timeoutPromise,
+      ]);
+    } catch (error) {
+      if (timedOut) throw new CookieAuthRequestTimeoutError();
+      throw error;
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
+  }
+
+  private applyAuthTransport(
+    url: URL,
+    headers: Record<string, string>,
+    fetchOptions: RequestInit,
+  ): void {
+    if (
+      this.refreshTokenTransport !== 'httpOnlyCookie'
+      || !/(?:^|\/)api\/auth(?:\/|$)/.test(url.pathname)
+      || String(fetchOptions.method ?? 'GET').toUpperCase() !== 'POST'
+    ) {
+      return;
+    }
+    headers['X-EdgeBase-Auth-Transport'] = 'cookie';
+    fetchOptions.credentials = 'include';
   }
 
   /** Core request method with 429 retry, transport retry, and 401 token refresh */
@@ -156,16 +266,21 @@ export class HttpClient {
         delete headers['Content-Type'];
       }
       const fetchOptions: RequestInit = { method, headers };
+      this.applyAuthTransport(url, headers, fetchOptions);
       if (body !== undefined) {
         fetchOptions.body = JSON.stringify(body);
       }
 
       let response: Response;
       try {
-        response = await fetch(url.toString(), fetchOptions);
+        response = await this.fetchWithCookieAuthTimeout(url.toString(), fetchOptions);
       } catch (err) {
         // Transport retry: retry on network errors (max 2 transport retries)
-        if (attempt < 2 && isRetryableNetworkError(err)) {
+        if (
+          attempt < 2
+          && !(err instanceof CookieAuthRequestTimeoutError)
+          && isRetryableNetworkError(err)
+        ) {
           await sleep(50 * (attempt + 1));
           continue;
         }
@@ -215,10 +330,11 @@ export class HttpClient {
             delete newHeaders['Content-Type'];
           }
           const retryOptions: RequestInit = { method, headers: newHeaders };
+          this.applyAuthTransport(url, newHeaders, retryOptions);
           if (body !== undefined) {
             retryOptions.body = JSON.stringify(body);
           }
-          const retryResponse = await fetch(url.toString(), retryOptions);
+          const retryResponse = await this.fetchWithCookieAuthTimeout(url.toString(), retryOptions);
           if (retryResponse.ok) {
             if (retryResponse.status === 204) return undefined as T;
             return (await retryResponse.json()) as T;

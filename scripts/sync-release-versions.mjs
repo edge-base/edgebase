@@ -30,6 +30,33 @@ function regenerateGeneratedSkillReferences() {
   }
 }
 
+function regenerateGeneratedSdkReferences() {
+  const result = spawnSync(
+    process.execPath,
+    ['--experimental-strip-types', 'tools/sdk-codegen/generate.ts'],
+    {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    },
+  );
+
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  if (output.trim().length > 0) {
+    process.stdout.write(output);
+    if (!output.endsWith('\n')) {
+      process.stdout.write('\n');
+    }
+  }
+
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(`Failed to regenerate SDK references (exit ${result.status ?? 1}).`);
+  }
+}
+
 export function syncReleaseVersions(version = getSourceVersion()) {
   assertStableReleaseVersion(version);
 
@@ -61,6 +88,9 @@ export function syncReleaseVersions(version = getSourceVersion()) {
     console.log(`- ${result.label}: ${status} (${result.path})`);
   }
 
+  console.log();
+  console.log('Regenerating SDKs from the versioned OpenAPI contract...');
+  regenerateGeneratedSdkReferences();
   console.log();
   console.log('Regenerating generated skill references...');
   regenerateGeneratedSkillReferences();

@@ -2,6 +2,7 @@ export interface FrontendConfigLike {
   directory: string;
   mountPath?: string;
   spaFallback?: boolean;
+  headers?: Record<string, string>;
 }
 
 export function normalizeFrontendMountPath(mountPath: string | undefined): string {

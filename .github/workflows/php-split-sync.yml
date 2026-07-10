@@ -143,5 +143,4 @@ jobs:
             "${{ matrix.prefix }}" \
             "${{ steps.config.outputs.destination_repo }}" \
             "${{ steps.config.outputs.sync_mode }}" \
-            "${{ steps.config.outputs.ref_name }}" \
-            "${EDGEBASE_SPLIT_PUSH_TOKEN}"
+            "${{ steps.config.outputs.ref_name }}"

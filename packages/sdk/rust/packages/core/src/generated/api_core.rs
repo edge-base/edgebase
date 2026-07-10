@@ -1,6 +1,6 @@
 //! Auto-generated core API Core — DO NOT EDIT.
 //! Regenerate: npx tsx tools/sdk-codegen/generate.ts
-//! Source: openapi.json (0.1.0)
+//! Source: openapi.json (0.3.6)
 
 use crate::Error;
 use crate::HttpClient;
@@ -492,6 +492,7 @@ pub struct ApiPaths;
 
 impl ApiPaths {
     pub const ADMIN_LOGIN: &'static str = "/admin/api/auth/login";
+    pub const ADMIN_LOGOUT: &'static str = "/admin/api/auth/logout";
     pub const ADMIN_REFRESH: &'static str = "/admin/api/auth/refresh";
     pub const BACKUP_CLEANUP_PLUGIN: &'static str = "/admin/api/backup/cleanup-plugin";
     pub const BACKUP_GET_CONFIG: &'static str = "/admin/api/backup/config";

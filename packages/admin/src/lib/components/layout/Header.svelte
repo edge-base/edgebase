@@ -16,7 +16,7 @@
 
 	function handleLogout() {
 		markManualLogout();
-		authStore.logout();
+		void authStore.logout();
 	}
 
 	function computeBreadcrumbs(pathname: string): Array<{ label: string; href: string }> {

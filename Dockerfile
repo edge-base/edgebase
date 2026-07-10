@@ -1,9 +1,9 @@
-FROM node:20-slim
+FROM node:22-slim
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
 # Install wrangler globally (workerd requires glibc — Alpine not supported)
-RUN npm install -g wrangler@4
+RUN npm install -g wrangler@4.103.0
 
 WORKDIR /app
 
@@ -27,7 +27,6 @@ RUN { \
     echo 'PORT="${PORT:-8787}"'; \
     echo 'WRANGLER_CONFIG="${WRANGLER_CONFIG:-wrangler.toml}"'; \
     echo 'GENERATED_CONFIG_PATH="/app/.edgebase/runtime/server/src/generated-config.ts"'; \
-    echo 'ENV_FILE_PATH="/app/.dev.vars"'; \
     echo ''; \
     echo 'mkdir -p "${PERSIST_DIR}" /home/edgebase/.config'; \
     echo 'chown -R edgebase:edgebase "${PERSIST_DIR}" /home/edgebase/.config'; \
@@ -37,13 +36,11 @@ RUN { \
     echo '  chown edgebase:edgebase "${GENERATED_CONFIG_PATH}"'; \
     echo 'fi'; \
     echo ''; \
-    echo 'echo "# Auto-generated from Docker env vars" > "${ENV_FILE_PATH}"'; \
-    echo '[ -n "${JWT_USER_SECRET:-}" ] && echo "JWT_USER_SECRET=${JWT_USER_SECRET}" >> "${ENV_FILE_PATH}"'; \
-    echo '[ -n "${JWT_ADMIN_SECRET:-}" ] && echo "JWT_ADMIN_SECRET=${JWT_ADMIN_SECRET}" >> "${ENV_FILE_PATH}"'; \
-    echo '[ -n "${SERVICE_KEY:-}" ] && echo "SERVICE_KEY=${SERVICE_KEY}" >> "${ENV_FILE_PATH}"'; \
-    echo '[ -n "${MOCK_FCM_BASE_URL:-}" ] && echo "MOCK_FCM_BASE_URL=${MOCK_FCM_BASE_URL}" >> "${ENV_FILE_PATH}"'; \
-    echo '[ -n "${EDGEBASE_CONFIG:-}" ] && echo "EDGEBASE_CONFIG=${EDGEBASE_CONFIG}" >> "${ENV_FILE_PATH}"'; \
-    echo 'chown edgebase:edgebase "${ENV_FILE_PATH}"'; \
+    echo '# A .dev.vars file makes Wrangler ignore the container process environment.'; \
+    echo '# Remove any bundled copy and opt in to process-env bindings so application-'; \
+    echo '# specific variables are not silently dropped by the generic EdgeBase image.'; \
+    echo 'rm -f /app/.dev.vars'; \
+    echo 'export CLOUDFLARE_INCLUDE_PROCESS_ENV="${CLOUDFLARE_INCLUDE_PROCESS_ENV:-true}"'; \
     echo ''; \
     echo 'cd /app'; \
     echo 'exec su -s /bin/sh edgebase -c '\''exec wrangler dev --config "$WRANGLER_CONFIG" --port "$PORT" --ip "$HOST" --persist-to "$PERSIST_DIR" --show-interactive-dev-session=false'\'''; \
@@ -54,6 +51,7 @@ ENV PORT=8787
 ENV HOST=0.0.0.0
 ENV PERSIST_DIR=/data
 ENV WRANGLER_CONFIG=wrangler.toml
+ENV CLOUDFLARE_INCLUDE_PROCESS_ENV=true
 
 EXPOSE 8787
 

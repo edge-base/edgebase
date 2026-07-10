@@ -65,6 +65,10 @@ describe('frontend routing', () => {
           frontend: {
             directory: './web/dist',
             spaFallback: true,
+            headers: {
+              'Content-Security-Policy': "default-src 'self'",
+              'X-Frame-Options': 'DENY',
+            },
           },
         },
         ASSETS: { fetch: assetsFetch },
@@ -75,6 +79,8 @@ describe('frontend routing', () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toBe('asset:/index.html');
     expect(response.headers.get('Cache-Control')).toBe('no-cache');
+    expect(response.headers.get('Content-Security-Policy')).toBe("default-src 'self'");
+    expect(response.headers.get('X-Frame-Options')).toBe('DENY');
     expect(assetsFetch).toHaveBeenCalledTimes(1);
   });
 

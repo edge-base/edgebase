@@ -572,9 +572,19 @@ auth: {
     accessTokenTTL: '15m',
     refreshTokenTTL: '7d',
     maxActiveSessions: 5,  // 0 or omit = unlimited
+    cookie: {
+      enabled: true,
+      name: 'my-app-refresh',
+      sameSite: 'strict',
+    },
   },
 }
 ```
+
+`cookie.sameSite` defaults to `'strict'`. The `'none'` option is accepted only
+for HTTPS requests (or a trusted TLS-terminating proxy); cookie-auth requests
+over insecure HTTP are rejected because browsers would discard the required
+`Secure` cookie.
 
 ### Magic Link
 

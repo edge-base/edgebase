@@ -231,6 +231,7 @@ describe('defineConfig', () => {
         directory: './web/dist',
         mountPath: '/app',
         spaFallback: true,
+        headers: { 'X-Frame-Options': 'DENY' },
       },
     });
 
@@ -238,6 +239,7 @@ describe('defineConfig', () => {
       directory: './web/dist',
       mountPath: '/app',
       spaFallback: true,
+      headers: { 'X-Frame-Options': 'DENY' },
     });
   });
 
@@ -269,6 +271,22 @@ describe('defineConfig', () => {
         spaFallback: 'yes' as never,
       },
     })).toThrow(/frontend\.spaFallback must be a boolean/);
+  });
+
+  it('should reject invalid or response-framing frontend headers', () => {
+    expect(() => defineConfig({
+      frontend: {
+        directory: './web/dist',
+        headers: { 'Content-Length': '10' },
+      },
+    })).toThrow(/frontend\.headers cannot override Content-Length/);
+
+    expect(() => defineConfig({
+      frontend: {
+        directory: './web/dist',
+        headers: { 'X-Test': 42 as never },
+      },
+    })).toThrow(/frontend\.headers must contain non-empty names and string values/);
   });
 
   it('should reject removed rules aliases', () => {
@@ -905,10 +923,12 @@ describe('defineFunction', () => {
   it('should accept HTTP trigger function', () => {
     const fn = defineFunction({
       trigger: { type: 'http', method: 'POST', path: '/api/webhook/stripe' },
+      customBearerAuth: true,
       handler: async () => {},
     });
 
     expect(fn.trigger.type).toBe('http');
+    expect(fn.customBearerAuth).toBe(true);
   });
 
   it('should accept schedule trigger function', () => {
@@ -1025,6 +1045,42 @@ describe('Config serialization pipeline', () => {
     expect(parsed.customHook).toBeUndefined();
     // But the rest of the config survives
     expect(parsed.databases.shared.tables.posts.schema.title.type).toBe('string');
+  });
+});
+
+describe('auth session cookie config', () => {
+  it('accepts a safe opt-in refresh cookie configuration', () => {
+    const config = defineConfig({
+      auth: {
+        session: {
+          cookie: {
+            enabled: true,
+            name: 'edgebase-test-refresh',
+            sameSite: 'strict',
+          },
+        },
+      },
+    });
+
+    expect(config.auth?.session?.cookie).toEqual({
+      enabled: true,
+      name: 'edgebase-test-refresh',
+      sameSite: 'strict',
+    });
+  });
+
+  it('rejects unsafe cookie names and invalid SameSite values', () => {
+    expect(() => defineConfig({
+      auth: { session: { cookie: { enabled: true, name: 'bad; Path=/' } } },
+    })).toThrow(/cookie-safe base name/);
+
+    expect(() => defineConfig({
+      auth: {
+        session: {
+          cookie: { enabled: true, sameSite: 'invalid' as 'strict' },
+        },
+      },
+    })).toThrow(/sameSite/);
   });
 });
 

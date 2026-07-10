@@ -494,7 +494,7 @@ function buildPackageJsonObject(
       typegen: `${scriptPrefix} typegen`,
     },
     engines: {
-      node: '>=20.19.0',
+      node: '>=22.0.0',
     },
   };
 

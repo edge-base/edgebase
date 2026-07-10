@@ -123,7 +123,19 @@ Both tokens are JWTs signed with `HS256` using the `jose` library (Web Crypto AP
 
 ### Token Delivery
 
-Tokens are delivered exclusively via `Authorization: Bearer <token>` headers. Cookies are intentionally not used — this simplifies CORS handling, eliminates CSRF attack surface, and aligns with the stateless Workers architecture.
+Access tokens are delivered to the client and used through
+`Authorization: Bearer <token>`. Refresh tokens support two transports:
+
+- **Body transport (default)** — preserves existing SDK and non-browser
+  compatibility. The client stores and submits the rotating refresh token.
+- **HttpOnly cookie transport (opt-in for Web)** — EdgeBase keeps the rotating
+  refresh token in a host-only cookie and returns only the access token to
+  JavaScript. The Web SDK opts in explicitly and keeps access tokens in memory.
+
+Cookie transport does not make access-token requests cookie-authenticated. It
+only protects the durable refresh credential. EdgeBase requires the custom
+transport header plus same-origin or an exact credentialed CORS origin, so an
+ambient cookie alone cannot authorize refresh or sign-out requests.
 
 ### Access Token Verification
 
@@ -189,7 +201,8 @@ All SDKs (JavaScript, Dart, Swift, Kotlin, Python) proactively refresh the Acces
 
 | Platform | Access Token | Refresh Token |
 |---|---|---|
-| Web (JavaScript) | Memory | localStorage (with BroadcastChannel tab sync) |
+| Web (JavaScript, default) | Memory | localStorage (with BroadcastChannel tab sync) |
+| Web (HttpOnly cookie opt-in) | Memory | Host-only HttpOnly cookie managed by EdgeBase |
 | Node.js | Memory | Memory |
 | Flutter (Dart) | Memory | `shared_preferences` by default, or custom `TokenStorage` |
 | Swift (iOS) | Memory | Keychain Services |

@@ -1,7 +1,7 @@
 /**
  * Auto-generated admin API Core — DO NOT EDIT.
  * Regenerate: npx tsx tools/sdk-codegen/generate.ts
- * Source: openapi.json (0.1.0)
+ * Source: openapi.json (0.3.6)
  */
 
 // ─── Interface ─────────────────────────────────────────────────────────────
@@ -65,6 +65,8 @@ export interface GeneratedAdminApi {
   adminLogin(body: unknown): Promise<unknown>;
   /** Rotate admin token — POST /admin/api/auth/refresh */
   adminRefresh(body: unknown): Promise<unknown>;
+  /** End the current admin session — POST /admin/api/auth/logout */
+  adminLogout(body: unknown): Promise<unknown>;
   /** Reset admin password (Service Key required) — POST /admin/api/internal/reset-password */
   adminResetPassword(body: unknown): Promise<unknown>;
   /** List all tables from config — GET /admin/api/data/tables */
@@ -337,6 +339,10 @@ export class DefaultAdminApi implements GeneratedAdminApi {
 
   async adminRefresh(body: unknown): Promise<unknown> {
     return this.transport.request('POST', '/admin/api/auth/refresh', { body });
+  }
+
+  async adminLogout(body: unknown): Promise<unknown> {
+    return this.transport.request('POST', '/admin/api/auth/logout', { body });
   }
 
   async adminResetPassword(body: unknown): Promise<unknown> {

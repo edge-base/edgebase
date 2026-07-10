@@ -593,6 +593,23 @@ describe('Smoke: admin', () => {
     expect(status).toBeLessThan(500);
   });
 
+  it('adminLogout: POST /admin/api/auth/logout → not 5xx', async () => {
+    const { status, data } = await api('POST', '/admin/api/auth/logout', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { refreshToken: "smoke-refresh" },
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('adminLogout: bad input → 400', async () => {
+    const { status } = await api('POST', '/admin/api/auth/logout', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
   it('adminResetPassword: POST /admin/api/internal/reset-password → not 5xx', async () => {
     const { status, data } = await api('POST', '/admin/api/internal/reset-password', {
       headers: { 'X-EdgeBase-Service-Key': SK },

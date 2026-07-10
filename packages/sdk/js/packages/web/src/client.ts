@@ -20,6 +20,7 @@ import type { RoomConnectDiagnostic, RoomOptions, RoomSummary, RoomSummaryCollec
 import { RoomClient } from './room.js';
 import { matchesFilter } from './match-filter.js';
 import { TokenManager } from './token-manager.js';
+import type { RefreshTokenTransport } from './token-manager.js';
 import { AuthClient } from './auth.js';
 import { ClientAnalytics } from './analytics.js';
 import { createBrowserStorage } from './browser-storage.js';
@@ -34,6 +35,11 @@ export interface JuneClientOptions<Schema extends EdgeBaseTableMap = EdgeBaseTab
   databaseLive?: DatabaseLiveOptions;
   /** Prefix auth storage keys and cross-tab channels to avoid same-origin collisions. */
   authNamespace?: string;
+  /**
+   * Store the rotating refresh credential in a server-issued HttpOnly cookie.
+   * Defaults to `body`, which preserves the legacy localStorage transport.
+   */
+  refreshTokenTransport?: RefreshTokenTransport;
 }
 
 // ─── Client SDK (browser / mobile) ───
@@ -99,12 +105,14 @@ export class ClientEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> 
     const baseUrl = url.replace(/\/$/, '');
     this.tokenManager = new TokenManager(baseUrl, {
       authNamespace: options?.authNamespace,
+      refreshTokenTransport: options?.refreshTokenTransport,
     });
     this.contextManager = new ContextManager();
     this.httpClient = new HttpClient({
       baseUrl,
       tokenManager: this.tokenManager,
       contextManager: this.contextManager,
+      refreshTokenTransport: options?.refreshTokenTransport,
     });
     this.core = new DefaultDbApi(new HttpClientAdapter(this.httpClient));
     const corePublic = new DefaultDbApi(new PublicHttpClientAdapter(this.httpClient));
@@ -382,6 +390,7 @@ export class ClientEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> 
 
   destroy(): void {
     this.analytics.destroy();
+    this.auth.destroy();
     this.tokenManager.destroy();
     this.databaseLive.disconnect();
 

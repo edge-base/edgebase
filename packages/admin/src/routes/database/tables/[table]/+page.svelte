@@ -84,7 +84,10 @@
 	let neonProjectsLoaded = $state(false);
 	let neonProjectsError = $state('');
 	let selectedNeonProjectId = $state('');
-	let tableSqlTabModulePromise = $state<Promise<TableSqlTabModule> | null>(null);
+	// Module-load promises are not UI state. Keeping this non-reactive also
+	// avoids mutating a rune while ensureTableSqlTabLoaded() is evaluated by the
+	// template's await block.
+	let tableSqlTabModulePromise: Promise<TableSqlTabModule> | null = null;
 	let isDevMode = $derived($devInfoStore.devMode);
 
 	$effect(() => {

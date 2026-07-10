@@ -18,6 +18,7 @@ const ADMIN_PUBLIC_PATHS = new Set([
   '/admin/api/setup/status',
   '/admin/api/auth/login',
   '/admin/api/auth/refresh',
+  '/admin/api/auth/logout',
 ]);
 
 const USER_BEARER_PATHS = new Set([

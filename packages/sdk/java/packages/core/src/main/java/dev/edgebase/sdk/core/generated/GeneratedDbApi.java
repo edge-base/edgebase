@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 package dev.edgebase.sdk.core.generated;
 
@@ -497,6 +497,7 @@ public class GeneratedDbApi {
         private ApiPaths() {}
 
         public static final String ADMIN_LOGIN = "/admin/api/auth/login";
+        public static final String ADMIN_LOGOUT = "/admin/api/auth/logout";
         public static final String ADMIN_REFRESH = "/admin/api/auth/refresh";
         public static final String BACKUP_CLEANUP_PLUGIN = "/admin/api/backup/cleanup-plugin";
         public static final String BACKUP_GET_CONFIG = "/admin/api/backup/config";

@@ -1,0 +1,120 @@
+name: Go Split Repo Sync
+
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      sync_mode:
+        description: Sync the main branch or an immutable release tag
+        required: false
+        default: branch
+        type: choice
+        options:
+          - branch
+          - tag
+      tag_name:
+        description: Exact vX.Y.Z tag when sync_mode=tag
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: go-split-sync-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync Go module split repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check split push token
+        env:
+          EDGEBASE_SPLIT_PUSH_TOKEN: ${{ secrets.EDGEBASE_SPLIT_PUSH_TOKEN }}
+        run: |
+          if [[ -z "${EDGEBASE_SPLIT_PUSH_TOKEN}" ]]; then
+            echo "::error::Missing secret EDGEBASE_SPLIT_PUSH_TOKEN."
+            echo "::error::Create a token with contents:write access to the Go split repository."
+            exit 1
+          fi
+
+      - name: Checkout source repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.sync_mode == 'tag' && github.event.inputs.tag_name || github.ref }}
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Resolve release synchronization
+        id: config
+        env:
+          INPUT_SYNC_MODE: ${{ github.event.inputs.sync_mode }}
+          INPUT_TAG_NAME: ${{ github.event.inputs.tag_name }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_REF_TYPE: ${{ github.ref_type }}
+          GO_SPLIT_REPO: ${{ vars.GO_SPLIT_REPO }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          destination_repo="${GO_SPLIT_REPO:-edge-base/sdk-go}"
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            sync_mode="${INPUT_SYNC_MODE:-branch}"
+            if [[ "$sync_mode" == "tag" ]]; then
+              ref_name="${INPUT_TAG_NAME:-}"
+              if [[ -z "$ref_name" ]]; then
+                echo "::error::workflow_dispatch tag sync requires tag_name."
+                exit 1
+              fi
+            else
+              ref_name="main"
+            fi
+          elif [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            sync_mode="tag"
+            ref_name="$GITHUB_REF_NAME"
+          else
+            sync_mode="branch"
+            ref_name="main"
+          fi
+
+          if [[ "$sync_mode" == "tag" && "$ref_name" != "v${version}" ]]; then
+            echo "::error::Tag ${ref_name} does not match prepared release v${version}."
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "destination_repo=$destination_repo" >> "$GITHUB_OUTPUT"
+          echo "sync_mode=$sync_mode" >> "$GITHUB_OUTPUT"
+          echo "ref_name=$ref_name" >> "$GITHUB_OUTPUT"
+
+      - name: Sync Go split repository
+        env:
+          EDGEBASE_SPLIT_PUSH_TOKEN: ${{ secrets.EDGEBASE_SPLIT_PUSH_TOKEN }}
+          GO_SPLIT_REPO: ${{ steps.config.outputs.destination_repo }}
+        run: |
+          args=(
+            "${{ steps.config.outputs.version }}"
+            "--sync-mode=${{ steps.config.outputs.sync_mode }}"
+          )
+          if [[ "${{ steps.config.outputs.sync_mode }}" == "tag" ]]; then
+            args+=("--tag=${{ steps.config.outputs.ref_name }}")
+          fi
+          node ./dev/release/sync-go-split-release.mjs "${args[@]}"
+
+      - name: Verify immutable Go release tag
+        if: steps.config.outputs.sync_mode == 'tag'
+        env:
+          EDGEBASE_SPLIT_PUSH_TOKEN: ${{ secrets.EDGEBASE_SPLIT_PUSH_TOKEN }}
+          GO_SPLIT_REPO: ${{ steps.config.outputs.destination_repo }}
+        run: node ./dev/release/verify-go-split-release.mjs "${{ steps.config.outputs.version }}"

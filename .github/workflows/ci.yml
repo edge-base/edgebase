@@ -24,13 +24,16 @@ jobs:
       - name: Check lockstep release versions
         run: node ./scripts/check-release-versions.mjs
 
+      - name: Test release contracts
+        run: node --test ./scripts/release-version.test.mjs
+
   ci-node:
     name: Core CI (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        node-version: ['20.19.0', '24']
+        node-version: ['22', '24']
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
@@ -43,6 +46,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Audit all dependencies
+        run: pnpm security:audit
 
       - name: Build
         run: pnpm build

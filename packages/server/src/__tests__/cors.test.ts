@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
 import { setConfig } from '../lib/do-router.js';
-import { corsMiddleware, decorateResponseHeaders, isOriginAllowed, wildcardToRegex } from '../middleware/cors.js';
+import { corsMiddleware, decorateResponseHeaders, isOriginAllowed, matchOrigin, wildcardToRegex } from '../middleware/cors.js';
 
 // ─── wildcardToRegex ───
 
@@ -25,6 +25,13 @@ describe('wildcardToRegex', () => {
     // Should NOT match appXexampleXcom (dots are literal)
     expect(re.test('https://appXexampleXcom')).toBe(false);
     expect(re.test('https://app.example.com')).toBe(true);
+  });
+
+  it('supports scheme-qualified wildcard patterns without duplicating the scheme', () => {
+    const https = wildcardToRegex('https://*.my-app.com');
+    expect(https.test('https://app.my-app.com')).toBe(true);
+    expect(https.test('http://app.my-app.com')).toBe(false);
+    expect(wildcardToRegex('ftp://*.my-app.com').test('ftp://app.my-app.com')).toBe(false);
   });
 });
 
@@ -51,6 +58,13 @@ describe('isOriginAllowed', () => {
     const origins = ['*.example.com'];
     expect(isOriginAllowed('https://app.example.com', origins)).toBe(true);
     expect(isOriginAllowed('https://evil.com', origins)).toBe(false);
+  });
+
+  it('prefers an exact credentialed entry over an earlier wildcard match', () => {
+    expect(matchOrigin('https://app.example.com', [
+      'https://*.example.com',
+      'https://app.example.com',
+    ])).toEqual({ allowed: true, viaWildcard: false });
   });
 
   // ── REGRESSION: localhost must NOT be allowed when not in config ──
@@ -133,6 +147,7 @@ describe('corsMiddleware', () => {
     });
 
     expect(res.headers.get('Access-Control-Allow-Headers')).toContain('X-EdgeBase-Service-Key');
+    expect(res.headers.get('Access-Control-Allow-Headers')).toContain('X-EdgeBase-Auth-Transport');
   });
 
   it('leaves websocket upgrade responses untouched', () => {

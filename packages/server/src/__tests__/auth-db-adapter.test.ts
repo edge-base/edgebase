@@ -70,4 +70,108 @@ describe('auth db adapter', () => {
       connectionString: 'postgres://edgebase:test@localhost/auth-override',
     });
   });
+
+  it('uses one conditional D1 UPDATE as the admin-session rotation CAS', async () => {
+    const run = vi.fn()
+      .mockResolvedValueOnce({ meta: { changes: 1 } })
+      .mockResolvedValueOnce({ meta: { changes: 0 } });
+    const bind = vi.fn((..._params: unknown[]) => ({ run }));
+    const prepare = vi.fn((_sql: string) => ({ bind }));
+    const { D1AuthDb } = await import('../lib/auth-db-adapter.js');
+    const db = new D1AuthDb({ prepare } as unknown as D1Database);
+
+    const rotation = {
+      sessionId: 'session-1',
+      currentRefreshTokens: ['sha256:current', 'legacy-current'],
+      nextRefreshToken: 'sha256:next',
+      expiresAt: '2099-01-01',
+    };
+    await expect(db.compareAndSwapAdminSession(rotation)).resolves.toBe(true);
+    await expect(db.compareAndSwapAdminSession(rotation)).resolves.toBe(false);
+    expect(prepare).toHaveBeenCalledTimes(2);
+    const sql = String(prepare.mock.calls[0]?.[0]);
+    expect(sql).toContain('UPDATE _admin_sessions');
+    expect(sql).toContain('refreshToken IN (?, ?)');
+    expect(bind.mock.calls[0]).toEqual([
+      'sha256:next',
+      '2099-01-01',
+      'session-1',
+      'sha256:current',
+      'legacy-current',
+      expect.any(String),
+    ]);
+    expect(bind.mock.calls[0]).toHaveLength(6);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses UPDATE ... RETURNING for PostgreSQL admin-session CAS', async () => {
+    const pg = mockPgClient();
+    pg.query.mockResolvedValueOnce({ fields: [], rows: [{ id: 'session-1' }], rowCount: 1 });
+    const { PgAuthDb } = await import('../lib/auth-db-adapter.js');
+    const db = new PgAuthDb('postgres://edgebase:test@localhost/auth');
+
+    await expect(db.compareAndSwapAdminSession({
+      sessionId: 'session-1',
+      currentRefreshTokens: ['sha256:current'],
+      nextRefreshToken: 'sha256:next',
+      expiresAt: '2099-01-01',
+    })).resolves.toBe(true);
+    expect(pg.query).toHaveBeenCalledOnce();
+    expect(pg.query.mock.calls[0][0]).toContain('UPDATE _admin_sessions');
+    expect(pg.query.mock.calls[0][0]).toContain('RETURNING id');
+    expect(pg.query.mock.calls[0][0]).toContain('refreshToken IN ($4)');
+  });
+
+  it('uses one exact-token D1 UPDATE as the user-session rotation CAS', async () => {
+    const run = vi.fn()
+      .mockResolvedValueOnce({ meta: { changes: 1 } })
+      .mockResolvedValueOnce({ meta: { changes: 0 } });
+    const bind = vi.fn((..._params: unknown[]) => ({ run }));
+    const prepare = vi.fn((_sql: string) => ({ bind }));
+    const { D1AuthDb } = await import('../lib/auth-db-adapter.js');
+    const db = new D1AuthDb({ prepare } as unknown as D1Database);
+    const rotation = {
+      sessionId: 'user-session-1',
+      currentRefreshToken: 'refresh-current',
+      nextRefreshToken: 'refresh-next',
+      expiresAt: '2099-01-01',
+      rotatedAt: '2026-07-10T00:00:00.000Z',
+    };
+
+    await expect(db.compareAndSwapUserSession(rotation)).resolves.toBe(true);
+    await expect(db.compareAndSwapUserSession(rotation)).resolves.toBe(false);
+    const sql = String(prepare.mock.calls[0]?.[0]);
+    expect(sql).toContain('UPDATE _sessions');
+    expect(sql).toContain('id = ? AND refreshToken = ? AND expiresAt > ?');
+    expect(bind.mock.calls[0]).toEqual([
+      'refresh-next',
+      'refresh-current',
+      '2026-07-10T00:00:00.000Z',
+      '2099-01-01',
+      '2026-07-10T00:00:00.000Z',
+      'user-session-1',
+      'refresh-current',
+      expect.any(String),
+    ]);
+    expect(bind.mock.calls[0]).toHaveLength(8);
+  });
+
+  it('uses exact-token UPDATE ... RETURNING for PostgreSQL user-session CAS', async () => {
+    const pg = mockPgClient();
+    pg.query.mockResolvedValueOnce({ fields: [], rows: [{ id: 'user-session-1' }], rowCount: 1 });
+    const { PgAuthDb } = await import('../lib/auth-db-adapter.js');
+    const db = new PgAuthDb('postgres://edgebase:test@localhost/auth');
+
+    await expect(db.compareAndSwapUserSession({
+      sessionId: 'user-session-1',
+      currentRefreshToken: 'refresh-current',
+      nextRefreshToken: 'refresh-next',
+      expiresAt: '2099-01-01',
+      rotatedAt: '2026-07-10T00:00:00.000Z',
+    })).resolves.toBe(true);
+    expect(pg.query).toHaveBeenCalledOnce();
+    expect(pg.query.mock.calls[0][0]).toContain('UPDATE _sessions');
+    expect(pg.query.mock.calls[0][0]).toContain('"refreshToken" = $7');
+    expect(pg.query.mock.calls[0][0]).toContain('RETURNING id');
+  });
 });

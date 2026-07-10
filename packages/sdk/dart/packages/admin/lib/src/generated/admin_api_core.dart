@@ -1,6 +1,6 @@
 // Auto-generated admin API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 import 'package:edgebase_core/src/http_client.dart';
 
@@ -156,6 +156,11 @@ class GeneratedAdminApi {
   /// Rotate admin token — POST /admin/api/auth/refresh
   Future<dynamic> adminRefresh(Object? body) async {
     return _http.post('/admin/api/auth/refresh', body);
+  }
+
+  /// End the current admin session — POST /admin/api/auth/logout
+  Future<dynamic> adminLogout(Object? body) async {
+    return _http.post('/admin/api/auth/logout', body);
   }
 
   /// Reset admin password (Service Key required) — POST /admin/api/internal/reset-password

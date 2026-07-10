@@ -1,6 +1,6 @@
 // Auto-generated admin API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 package dev.edgebase.sdk.admin.generated;
 
@@ -168,6 +168,11 @@ public class GeneratedAdminApi {
     /** Rotate admin token — POST /admin/api/auth/refresh */
     public Object adminRefresh(Map<String, ?> body) throws EdgeBaseError {
         return http.post("/admin/api/auth/refresh", body);
+    }
+
+    /** End the current admin session — POST /admin/api/auth/logout */
+    public Object adminLogout(Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/admin/api/auth/logout", body);
     }
 
     /** Reset admin password (Service Key required) — POST /admin/api/internal/reset-password */

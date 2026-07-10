@@ -181,7 +181,7 @@ The oldest session (by `createdAt`) is deleted to make room for the new session.
 | Token | Default TTL | Storage |
 |---|---|---|
 | **Access Token** | 15 minutes | Memory only |
-| **Refresh Token** | 28 days | `localStorage` / secure storage |
+| **Refresh Token** | 28 days | `localStorage` / secure storage, or an opt-in EdgeBase HttpOnly cookie on Web |
 
 Configure in `edgebase.config.ts`:
 
@@ -193,6 +193,11 @@ auth: {
   }
 }
 ```
+
+For browser applications, enable `auth.session.cookie` on the server and create
+the Web client with `refreshTokenTransport: 'httpOnlyCookie'` to keep the
+refresh credential out of JavaScript-accessible storage. Access tokens remain
+short-lived Bearer tokens held in memory.
 
 ## JWT Key Rotation
 

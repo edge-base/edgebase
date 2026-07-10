@@ -110,6 +110,10 @@ export default defineFunction({
 ## Behavior
 
 - Blocking trigger events can reject the auth operation by throwing.
+- A rejected `beforeSignOut` leaves the server session and refresh cookie valid.
+  Cookie-mode Web clients still clear private in-memory state immediately, keep
+  a non-secret pending-revocation tombstone, and surface the `403` so the app
+  does not mistake a policy-denied revoke for a durable server logout.
 - Non-blocking trigger events run via `ctx.waitUntil()` and do not affect the client response once the main auth action succeeds.
 - The timeout for blocking authentication triggers is fixed at `5s`.
 - `ctx.auth` is always `null`; use `ctx.data?.after` for user information.

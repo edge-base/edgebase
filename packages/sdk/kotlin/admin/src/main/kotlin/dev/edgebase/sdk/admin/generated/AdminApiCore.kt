@@ -1,6 +1,6 @@
 // Auto-generated admin API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 package dev.edgebase.sdk.admin.generated
 
@@ -156,6 +156,11 @@ class GeneratedAdminApi(private val http: HttpClient) {
     @Suppress("UNCHECKED_CAST")
     suspend fun adminRefresh(body: Map<String, Any?> = emptyMap()): Any? =
         http.post("/admin/api/auth/refresh", body)
+
+    /** End the current admin session — POST /admin/api/auth/logout */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun adminLogout(body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/admin/api/auth/logout", body)
 
     /** Reset admin password (Service Key required) — POST /admin/api/internal/reset-password */
     @Suppress("UNCHECKED_CAST")

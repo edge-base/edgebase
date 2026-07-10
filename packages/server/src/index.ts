@@ -229,7 +229,11 @@ async function buildApp() {
     }
 
     const assetResponse = await fetchFrontendAssetResponse(c.env.ASSETS, assetRequest);
-    return applyFrontendAssetHeaders(assetResponse, new URL(assetRequest.url).pathname);
+    return applyFrontendAssetHeaders(
+      assetResponse,
+      new URL(assetRequest.url).pathname,
+      frontend.headers,
+    );
   }
 
   app.get('/', async (c) => {

@@ -1,3 +1,9 @@
+## 0.3.6
+
+- Synchronized the Dart workspace with the EdgeBase 0.3.6 release line
+- Updated internal dependency ranges, public install examples, and realtime SDK
+  version metadata; no Dart API compatibility break is introduced
+
 ## 0.1.4
 
 - Synced SDK package versions and public install references for the 0.1.4 release

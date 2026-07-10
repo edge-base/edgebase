@@ -138,7 +138,3 @@ simple = { limit = 10000000, period = 60 }
 # instead of the generated root config at startup.
 [define]
 EDGEBASE_TEST_BUILD = "true"
-
-[[services]]
-binding = "SELF"
-service = "edgebase-test"

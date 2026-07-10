@@ -379,6 +379,10 @@ export default defineConfig({
     directory: './web/dist',
     mountPath: '/',
     spaFallback: true,
+    headers: {
+      'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'",
+      'X-Content-Type-Options': 'nosniff',
+    },
   },
 });
 ```
@@ -392,6 +396,7 @@ Build the frontend first. Commands such as `dev`, `deploy`, `docker build`, and 
 | `directory` | Required build output directory to serve |
 | `mountPath` | Optional URL prefix for the bundle, default `/` |
 | `spaFallback` | Optional SPA navigation fallback to `index.html` for HTML requests |
+| `headers` | Optional string response headers for successfully served frontend assets |
 
 EdgeBase does not run your frontend build command. Build the bundle first, then run the runtime or packaging command you want.
 

@@ -44,6 +44,22 @@ async function api(method: string, path: string, body?: unknown, token?: string)
   return { status: res.status, data };
 }
 
+async function adminCookieApi(path: string, body: unknown = {}, cookie?: string) {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Origin': BASE,
+    'X-EdgeBase-Auth-Transport': 'cookie',
+  };
+  if (cookie) headers.Cookie = cookie;
+  const res = await (globalThis as any).SELF.fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  let data: any; try { data = await res.json(); } catch { data = null; }
+  return { status: res.status, data, headers: res.headers };
+}
+
 async function apiWithEnv(method: string, path: string, envOverrides: Record<string, unknown>, body?: unknown) {
   const headers: Record<string, string> = {
     'X-EdgeBase-Service-Key': SK,
@@ -423,6 +439,143 @@ describe('1-21 admin — login / refresh', () => {
   it('refreshToken 누락 → 400', async () => {
     const { status } = await api('POST', '/admin/api/auth/refresh', {});
     expect(status).toBe(400);
+  });
+
+  it('cookie transport → refresh token 비노출, 해시 저장, 회전 및 logout 폐기', async () => {
+    const login = await adminCookieApi('/admin/api/auth/login', {
+      email: 'admin@test.com',
+      password: 'Admin1234!',
+    });
+    expect(login.status).toBe(200);
+    expect(typeof login.data.accessToken).toBe('string');
+    expect(login.data.refreshToken).toBeUndefined();
+    expect(login.data.sessionTransport).toBe('cookie');
+    const loginSetCookie = login.headers.get('set-cookie') ?? '';
+    expect(loginSetCookie).toContain('edgebase-admin-refresh=');
+    expect(loginSetCookie).toContain('HttpOnly');
+    expect(loginSetCookie).toContain('Path=/admin/api/auth');
+    const loginCookie = loginSetCookie.split(';', 1)[0];
+
+    const stored = await (globalThis as any).env.AUTH_DB
+      .prepare('SELECT refreshToken FROM _admin_sessions ORDER BY createdAt DESC LIMIT 1')
+      .first<{ refreshToken: string }>();
+    expect(stored?.refreshToken).toMatch(/^sha256:[A-Za-z0-9_-]{43}$/);
+    expect(stored?.refreshToken).not.toContain('eyJ');
+
+    const refreshed = await adminCookieApi('/admin/api/auth/refresh', {}, loginCookie);
+    expect(refreshed.status).toBe(200);
+    expect(typeof refreshed.data.accessToken).toBe('string');
+    expect(refreshed.data.admin?.email).toBe('admin@test.com');
+    expect(refreshed.data.refreshToken).toBeUndefined();
+    const refreshedCookie = (refreshed.headers.get('set-cookie') ?? '').split(';', 1)[0];
+    expect(refreshedCookie).toContain('edgebase-admin-refresh=');
+    expect(refreshedCookie).not.toBe(loginCookie);
+
+    const logout = await adminCookieApi('/admin/api/auth/logout', {}, refreshedCookie);
+    expect(logout.status).toBe(200);
+    expect(logout.data).toEqual({ ok: true });
+    expect(logout.headers.get('set-cookie')).toContain('Max-Age=0');
+
+    const rejected = await adminCookieApi('/admin/api/auth/refresh', {}, refreshedCookie);
+    expect(rejected.status).toBe(401);
+  });
+
+  it('new admin JWTs are unique, session-bound, 15m access tokens with immediate revocation', async () => {
+    const first = await api('POST', '/admin/api/auth/login', {
+      email: 'admin@test.com',
+      password: 'Admin1234!',
+    });
+    const second = await api('POST', '/admin/api/auth/login', {
+      email: 'admin@test.com',
+      password: 'Admin1234!',
+    });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(first.data.accessToken).not.toBe(second.data.accessToken);
+    expect(first.data.refreshToken).not.toBe(second.data.refreshToken);
+
+    const decode = (token: string) => JSON.parse(
+      atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')),
+    ) as { sub: string; sid: string; jti: string; nonce: string; exp: number; iat: number };
+    const firstAccess = decode(first.data.accessToken);
+    const firstRefresh = decode(first.data.refreshToken);
+    expect(firstAccess.sid).toBeTruthy();
+    expect(firstAccess.jti).toBe(firstAccess.sid);
+    expect(firstRefresh.sid).toBe(firstAccess.sid);
+    expect(firstRefresh.jti).toBe(firstAccess.sid);
+    expect(firstRefresh.nonce).not.toBe(firstAccess.nonce);
+    expect(firstAccess.exp - firstAccess.iat).toBe(15 * 60);
+
+    expect((await api('GET', '/admin/api/data/tables', undefined, first.data.accessToken)).status).toBe(200);
+    expect((await api('GET', '/admin/api/data/tables', undefined, second.data.accessToken)).status).toBe(200);
+
+    const logout = await api('POST', '/admin/api/auth/logout', {
+      refreshToken: first.data.refreshToken,
+    });
+    expect(logout.status).toBe(200);
+    expect((await api('GET', '/admin/api/data/tables', undefined, first.data.accessToken)).status).toBe(401);
+    expect((await api('GET', '/admin/api/data/tables', undefined, second.data.accessToken)).status).toBe(200);
+    expect((await api('POST', '/admin/api/auth/refresh', {
+      refreshToken: second.data.refreshToken,
+    })).status).toBe(200);
+  });
+
+  it('atomically allows exactly one winner for concurrent refresh submissions', async () => {
+    const login = await api('POST', '/admin/api/auth/login', {
+      email: 'admin@test.com',
+      password: 'Admin1234!',
+    });
+    const [first, second] = await Promise.all([
+      api('POST', '/admin/api/auth/refresh', { refreshToken: login.data.refreshToken }),
+      api('POST', '/admin/api/auth/refresh', { refreshToken: login.data.refreshToken }),
+    ]);
+
+    expect([first.status, second.status].sort()).toEqual([200, 409]);
+    const winner = first.status === 200 ? first : second;
+    expect(typeof winner.data.refreshToken).toBe('string');
+    expect((await api('POST', '/admin/api/auth/refresh', {
+      refreshToken: winner.data.refreshToken,
+    })).status).toBe(200);
+  });
+
+  it('does not let a concurrent cookie refresh loser clear the winner cookie', async () => {
+    const login = await adminCookieApi('/admin/api/auth/login', {
+      email: 'admin@test.com',
+      password: 'Admin1234!',
+    });
+    const originalCookie = (login.headers.get('set-cookie') ?? '').split(';', 1)[0];
+    const [first, second] = await Promise.all([
+      adminCookieApi('/admin/api/auth/refresh', {}, originalCookie),
+      adminCookieApi('/admin/api/auth/refresh', {}, originalCookie),
+    ]);
+
+    expect([first.status, second.status].sort()).toEqual([200, 409]);
+    const winner = first.status === 200 ? first : second;
+    const loser = first.status === 409 ? first : second;
+    expect(loser.headers.get('set-cookie')).toBeNull();
+    const winnerCookie = (winner.headers.get('set-cookie') ?? '').split(';', 1)[0];
+    expect((await adminCookieApi('/admin/api/auth/refresh', {}, winnerCookie)).status).toBe(200);
+  });
+
+  it('cannot resurrect an admin session in a logout-vs-refresh race', async () => {
+    const login = await api('POST', '/admin/api/auth/login', {
+      email: 'admin@test.com',
+      password: 'Admin1234!',
+    });
+    const [refresh, logout] = await Promise.all([
+      api('POST', '/admin/api/auth/refresh', { refreshToken: login.data.refreshToken }),
+      api('POST', '/admin/api/auth/logout', { refreshToken: login.data.refreshToken }),
+    ]);
+
+    expect(logout.status).toBe(200);
+    expect([200, 401]).toContain(refresh.status);
+    expect((await api('GET', '/admin/api/data/tables', undefined, login.data.accessToken)).status).toBe(401);
+    if (refresh.status === 200) {
+      expect((await api('GET', '/admin/api/data/tables', undefined, refresh.data.accessToken)).status).toBe(401);
+      expect((await api('POST', '/admin/api/auth/refresh', {
+        refreshToken: refresh.data.refreshToken,
+      })).status).toBe(401);
+    }
   });
 });
 

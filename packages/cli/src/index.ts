@@ -133,7 +133,7 @@ program.hook('preAction', (thisCommand, actionCommand) => {
     raiseCliError({
       code: 'unsupported_node_version',
       message: (error as Error).message,
-      hint: 'Install Node.js 20.19.0 or newer, then rerun the command.',
+      hint: 'Install Node.js 22.0.0 or newer, then rerun the command.',
     });
   }
   _startTime = Date.now();

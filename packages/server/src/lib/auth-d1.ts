@@ -696,11 +696,48 @@ export async function getAdminSession(
   refreshToken: string,
 ): Promise<{ id: string; adminId: string; refreshToken: string; expiresAt: string; createdAt: string } | null> {
   const now = new Date().toISOString();
+  const hashedRefreshToken = await hashAdminRefreshToken(refreshToken);
   const result = await db.first<{ id: string; adminId: string; refreshToken: string; expiresAt: string; createdAt: string }>(
-    `SELECT * FROM _admin_sessions WHERE refreshToken = ? AND expiresAt > ?`,
-    [refreshToken, now],
+    `SELECT * FROM _admin_sessions WHERE refreshToken IN (?, ?) AND expiresAt > ?`,
+    [hashedRefreshToken, refreshToken, now],
+  );
+  if (!result) return null;
+
+  // 0.3.5 and earlier stored the raw refresh JWT. A successful lookup is a
+  // safe point to migrate that one legacy row without invalidating sessions.
+  if (result.refreshToken === refreshToken) {
+    await db.run(
+      `DELETE FROM _admin_sessions WHERE refreshToken = ? AND id <> ?`,
+      [refreshToken, result.id],
+    );
+    await db.run(
+      `UPDATE _admin_sessions SET refreshToken = ? WHERE id = ? AND refreshToken = ?`,
+      [hashedRefreshToken, result.id, refreshToken],
+    );
+    return { ...result, refreshToken: hashedRefreshToken };
+  }
+  return result;
+}
+
+export async function getAdminSessionById(
+  db: AuthDb,
+  sessionId: string,
+): Promise<{ id: string; adminId: string; refreshToken: string; expiresAt: string; createdAt: string } | null> {
+  const now = new Date().toISOString();
+  const result = await db.first<{ id: string; adminId: string; refreshToken: string; expiresAt: string; createdAt: string }>(
+    `SELECT * FROM _admin_sessions WHERE id = ? AND expiresAt > ?`,
+    [sessionId, now],
   );
   return result || null;
+}
+
+export async function hashAdminRefreshToken(refreshToken: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(refreshToken));
+  const encoded = btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return `sha256:${encoded}`;
 }
 
 export async function createAdminSession(
@@ -711,10 +748,30 @@ export async function createAdminSession(
   expiresAt: string,
 ): Promise<void> {
   const now = new Date().toISOString();
+  const hashedRefreshToken = await hashAdminRefreshToken(refreshToken);
   await db.run(
     `INSERT INTO _admin_sessions (id, adminId, refreshToken, expiresAt, createdAt) VALUES (?, ?, ?, ?, ?)`,
-    [id, adminId, refreshToken, expiresAt, now],
+    [id, adminId, hashedRefreshToken, expiresAt, now],
   );
+}
+
+export async function rotateAdminSession(
+  db: AuthDb,
+  sessionId: string,
+  currentRefreshToken: string,
+  nextRefreshToken: string,
+  expiresAt: string,
+): Promise<boolean> {
+  const [currentHash, nextHash] = await Promise.all([
+    hashAdminRefreshToken(currentRefreshToken),
+    hashAdminRefreshToken(nextRefreshToken),
+  ]);
+  return db.compareAndSwapAdminSession({
+    sessionId,
+    currentRefreshTokens: [currentHash, currentRefreshToken],
+    nextRefreshToken: nextHash,
+    expiresAt,
+  });
 }
 
 export async function deleteAdminSession(

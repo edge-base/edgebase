@@ -1,7 +1,7 @@
 /**
  * Auto-generated core API Core — DO NOT EDIT.
  * Regenerate: npx tsx tools/sdk-codegen/generate.ts
- * Source: openapi.json (0.1.0)
+ * Source: openapi.json (0.3.6)
  */
 
 // ─── Interface ─────────────────────────────────────────────────────────────
@@ -587,6 +587,7 @@ export class DefaultDbApi implements GeneratedDbApi {
 
 export class ApiPaths {
   static readonly ADMIN_LOGIN = '/admin/api/auth/login';
+  static readonly ADMIN_LOGOUT = '/admin/api/auth/logout';
   static readonly ADMIN_REFRESH = '/admin/api/auth/refresh';
   static readonly BACKUP_CLEANUP_PLUGIN = '/admin/api/backup/cleanup-plugin';
   static readonly BACKUP_GET_CONFIG = '/admin/api/backup/config';

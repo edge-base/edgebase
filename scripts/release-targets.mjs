@@ -3,11 +3,25 @@ export const RELEASE_VERSION_SOURCE = {
   field: 'version',
 };
 
+// These changelogs are maintained by hand, but release:check requires each of
+// them to contain the prepared root version before any publisher can run.
+export const RELEASE_CHANGELOGS = [
+  { path: 'CHANGELOG.md', label: 'EdgeBase release notes' },
+  { path: 'packages/sdk/dart/CHANGELOG.md', label: 'Dart SDK changelog' },
+  { path: 'packages/sdk/dart/packages/core/CHANGELOG.md', label: 'Dart core changelog' },
+  { path: 'packages/sdk/dart/packages/admin/CHANGELOG.md', label: 'Dart admin changelog' },
+  { path: 'packages/sdk/dart/packages/flutter/CHANGELOG.md', label: 'Dart Flutter changelog' },
+  { path: 'packages/sdk/java/CHANGELOG.md', label: 'Java SDK changelog' },
+  { path: 'packages/sdk/kotlin/CHANGELOG.md', label: 'Kotlin SDK changelog' },
+  { path: 'packages/sdk/python/CHANGELOG.md', label: 'Python SDK changelog' },
+  { path: 'packages/sdk/swift/CHANGELOG.md', label: 'Swift SDK changelog' },
+];
+
 export const NPM_PUBLISH_TARGET_IDS = [
   'shared',
   'plugin-core',
-  'server',
   'core-js',
+  'server',
   'web-js',
   'admin-js',
   'ssr-js',
@@ -65,6 +79,10 @@ export const PHP_SPLIT_TARGET_IDS = [
 export const SWIFT_SPLIT_TARGET_IDS = [
   'swift-core',
   'swift-ios',
+];
+
+export const GO_SPLIT_TARGET_IDS = [
+  'go-sdk',
 ];
 
 export const JITPACK_VERIFY_TARGET_IDS = [
@@ -357,11 +375,25 @@ export const RELEASE_TARGETS = [
     strategy: 'csproj-version',
   },
   {
+    id: 'cpp-core-cmake',
+    name: 'EdgeBase C++ core CMake project',
+    ecosystem: 'cpp',
+    path: 'packages/sdk/cpp/packages/core/CMakeLists.txt',
+    strategy: 'cmake-project-version',
+  },
+  {
     id: 'cpp-unreal',
     name: 'EdgeBase Unreal plugin',
     ecosystem: 'cpp',
     path: 'packages/sdk/cpp/EdgeBase.uplugin',
     strategy: 'uplugin-version',
+  },
+  {
+    id: 'cpp-unreal-cmake',
+    name: 'EdgeBase Unreal CMake project',
+    ecosystem: 'cpp',
+    path: 'packages/sdk/cpp/packages/unreal/CMakeLists.txt',
+    strategy: 'cmake-project-version',
   },
   {
     id: 'csharp-unity',
@@ -413,7 +445,7 @@ export const RELEASE_TARGETS = [
     ecosystem: 'go',
     path: 'packages/sdk/go/go.mod',
     strategy: 'tag-only',
-    note: 'Go module versions are derived from git tags, not go.mod.',
+    note: 'Go module versions are derived from tags in the sdk-go split repository.',
   },
   {
     id: 'swift-core',
@@ -431,17 +463,27 @@ export const RELEASE_TARGETS = [
     strategy: 'tag-only',
     note: 'Swift Package Manager versions are tag-driven.',
   },
-  {
-    id: 'kotlin-swift-package',
-    name: 'EdgeBaseKotlin',
-    ecosystem: 'swift',
-    path: 'packages/sdk/kotlin/Package.swift',
-    strategy: 'tag-only',
-    note: 'Swift Package Manager versions are tag-driven.',
-  },
 ];
 
 export const RELEASE_VERSION_REFERENCES = [
+  {
+    path: 'packages/server/openapi.json',
+    label: 'OpenAPI release version',
+    pattern: /("info":\s*\{\s*"title":\s*"EdgeBase API",\s*"version":\s*")(\d+\.\d+\.\d+)(")/m,
+    replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
+  },
+  {
+    path: 'packages/server/src/lib/schemas.ts',
+    label: 'Health schema release version example',
+    pattern: /(version: z\.string\(\)\.optional\(\)\.openapi\(\{ example: ')(\d+\.\d+\.\d+)(' \}\),)/m,
+    replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
+  },
+  {
+    path: 'packages/server/src/lib/version.ts',
+    label: 'Server runtime version constant',
+    pattern: /(SERVER_VERSION = ')(\d+\.\d+\.\d+)(';)/m,
+    replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
+  },
   {
     path: 'packages/sdk/python/packages/admin/pyproject.toml',
     label: 'Python admin edgebase-core dependency',
@@ -549,6 +591,12 @@ export const RELEASE_VERSION_REFERENCES = [
     label: 'PHP admin local path version hint',
     pattern: /("edgebase\/core":\s*")(\d+\.\d+\.\d+)(")/m,
     replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
+  },
+  {
+    path: 'packages/sdk/php/composer.json',
+    label: 'PHP SDK development branch alias',
+    pattern: /("dev-main":\s*")(\d+\.\d+\.x)(-dev")/m,
+    replace: ({ minorLine }, prefix, _current, suffix) => `${prefix}${minorLine}${suffix}`,
   },
   {
     path: 'packages/sdk/ruby/packages/admin/edgebase_admin.gemspec',
@@ -773,6 +821,12 @@ export const RELEASE_VERSION_REFERENCES = [
     replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
   },
   {
+    path: 'packages/sdk/elixir/README.md',
+    label: 'Elixir workspace README install versions',
+    pattern: /(\{:edgebase_(?:core|admin), "~> )(\d+\.\d+\.\d+)("\})/g,
+    replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
+  },
+  {
     path: 'packages/sdk/elixir/packages/core/README.md',
     label: 'Elixir core README install version',
     pattern: /(\{:edgebase_core, "~> )([^"]+)("\})/m,
@@ -824,6 +878,66 @@ export const RELEASE_VERSION_REFERENCES = [
     path: 'docs/docs/push/client-sdk.md',
     label: 'Push client Dart install version',
     pattern: /(^\s*edgebase_flutter:\s*\^)(\d+\.\d+\.\d+)(\s*$)/m,
+    replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
+  },
+  {
+    path: 'docs/docs/push/client-sdk.md',
+    label: 'Push client Swift release guidance',
+    pattern: /(Use the current `)(\d+\.\d+\.\d+)(` release of the Swift package)/m,
+    replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
+  },
+  {
+    path: 'docs/docs/push/client-sdk.md',
+    label: 'Push client Java install version',
+    pattern: /(edgebase-android-java:)(v?\d+\.\d+\.\d+)/m,
+    replace: ({ tagVersion }, prefix) => `${prefix}${tagVersion}`,
+  },
+  {
+    path: 'docs/docs/room/client-sdk.md',
+    label: 'Room client Swift install version',
+    pattern: /(edgebase-swift", from: ")(\d+\.\d+\.\d+)(")/m,
+    replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
+  },
+  {
+    path: 'docs/docs/room/client-sdk.md',
+    label: 'Room client Kotlin install version',
+    pattern: /(edgebase-client:)(v?\d+\.\d+\.\d+)/m,
+    replace: ({ tagVersion }, prefix) => `${prefix}${tagVersion}`,
+  },
+  {
+    path: 'docs/docs/room/client-sdk.md',
+    label: 'Room client Java install version',
+    pattern: /(edgebase-android-java:)(v?\d+\.\d+\.\d+)/m,
+    replace: ({ tagVersion }, prefix) => `${prefix}${tagVersion}`,
+  },
+  {
+    path: 'docs/docs/room/client-sdk.md',
+    label: 'Room client C++ source tag',
+    pattern: /(GIT_TAG )(v?\d+\.\d+\.\d+)/m,
+    replace: ({ tagVersion }, prefix) => `${prefix}${tagVersion}`,
+  },
+  {
+    path: 'docs/docs/getting-started/quickstart.md',
+    label: 'Quickstart Swift install version',
+    pattern: /(edgebase-swift", from: ")(\d+\.\d+\.\d+)(")/m,
+    replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
+  },
+  {
+    path: 'docs/docs/getting-started/quickstart.md',
+    label: 'Quickstart Kotlin install version',
+    pattern: /(edgebase-client:)(v?\d+\.\d+\.\d+)/m,
+    replace: ({ tagVersion }, prefix) => `${prefix}${tagVersion}`,
+  },
+  {
+    path: 'docs/docs/getting-started/quickstart.md',
+    label: 'Quickstart Java install version',
+    pattern: /(edgebase-android-java:)(v?\d+\.\d+\.\d+)/m,
+    replace: ({ tagVersion }, prefix) => `${prefix}${tagVersion}`,
+  },
+  {
+    path: 'docs/docs/getting-started/self-hosting.md',
+    label: 'Self-hosting health response version',
+    pattern: /(\{"status":"ok","version":")(\d+\.\d+\.\d+)(")/m,
     replace: ({ version }, prefix, _current, suffix) => `${prefix}${version}${suffix}`,
   },
   {

@@ -26,16 +26,17 @@
         },
         "classmap": [
             "packages/core/src/Generated/",
+            "packages/core/src/TableRef.php",
             "packages/core/src/RoomClient.php",
             "packages/core/src/Subscription.php"
         ]
     },
     "autoload-dev": {
-        "psr-4": {
-            "EdgeBase\\Tests\\": "tests/",
-            "EdgeBase\\Tests\\Core\\": "packages/core/tests/",
-            "EdgeBase\\Tests\\Admin\\": "packages/admin/tests/"
-        }
+        "classmap": [
+            "tests/",
+            "packages/core/tests/",
+            "packages/admin/tests/"
+        ]
     },
     "scripts": {
         "test": "phpunit",
@@ -43,7 +44,7 @@
     },
     "extra": {
         "branch-alias": {
-            "dev-main": "0.1.x-dev"
+            "dev-main": "0.3.x-dev"
         }
     },
     "config": {

@@ -970,6 +970,18 @@ describe('AuthClient — OAuth flow helpers', () => {
     expect(auth.currentUser?.displayName).toBe('OAuth User');
     expect(tm.getRefreshToken()).toBe(refreshToken);
     expect(replaceState).toHaveBeenCalledWith({}, 'OAuth Callback Test', '/auth/callback');
+
+    (window as unknown as { location: { href: string } }).location.href =
+      `http://localhost:4173/auth/callback?keep=query&access_token=query-stale#access_token=${encodeURIComponent(accessToken)}&refresh_token=${encodeURIComponent(refreshToken)}&state=keep-fragment`;
+    const fragmentResult = await auth.handleOAuthCallback();
+
+    expect(fragmentResult?.accessToken).toBe(accessToken);
+    expect(fragmentResult?.refreshToken).toBe(refreshToken);
+    expect(replaceState).toHaveBeenLastCalledWith(
+      {},
+      'OAuth Callback Test',
+      '/auth/callback?keep=query#state=keep-fragment',
+    );
     tm.destroy();
   });
 });

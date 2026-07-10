@@ -59,6 +59,8 @@ export interface MigrationConfig {
 
 export interface AuthContext {
   id: string;
+  /** Current refresh-session identifier carried by access tokens when available. */
+  sessionId?: string;
   role?: string;
   isAnonymous?: boolean;
   email?: string;
@@ -508,6 +510,18 @@ export interface AuthConfig {
     refreshTokenTTL?: string;
     /** Maximum number of active sessions per user. 0 or undefined = unlimited. Oldest sessions are evicted when limit is exceeded. */
     maxActiveSessions?: number;
+    /**
+     * Opt-in browser refresh-cookie transport. Legacy SDKs continue to receive
+     * refresh tokens in JSON unless they explicitly negotiate cookie transport.
+     */
+    cookie?: {
+      /** Enable `X-EdgeBase-Auth-Transport: cookie` for browser clients. */
+      enabled: boolean;
+      /** Base cookie name. Secure requests add the `__Secure-` prefix. */
+      name?: string;
+      /** Refresh cookie SameSite policy. Default: 'strict'. */
+      sameSite?: 'strict' | 'lax' | 'none';
+    };
   };
   anonymousRetentionDays?: number;
   /** If true, deletes user DB (user:{id}) when a user is deleted. */
@@ -1251,6 +1265,8 @@ export interface FrontendConfig {
   mountPath?: string;
   /** Whether HTML navigation requests should fall back to index.html. Default: false. */
   spaFallback?: boolean;
+  /** Response headers applied to successfully served frontend assets. */
+  headers?: Record<string, string>;
 }
 
 export function normalizeFrontendMountPath(mountPath: string | undefined): string {
@@ -1808,6 +1824,14 @@ export interface FunctionContext {
 export interface FunctionDefinition {
   trigger: FunctionTrigger;
   captcha?: boolean;
+  /**
+   * Delegate the Authorization Bearer token entirely to this HTTP function.
+   *
+   * When enabled, EdgeBase does not parse the Bearer token as a user access
+   * token and exposes `context.auth` as null. The function must validate the
+   * raw token from `context.request` and reject invalid or missing credentials.
+   */
+  customBearerAuth?: boolean;
   handler: (context: unknown) => Promise<unknown>;
 }
 
@@ -1987,6 +2011,25 @@ export function defineConfig(config: EdgeBaseConfig): EdgeBaseConfig {
     if (config.frontend.spaFallback !== undefined && typeof config.frontend.spaFallback !== 'boolean') {
       throw new Error('frontend.spaFallback must be a boolean.');
     }
+    if (config.frontend.headers !== undefined) {
+      if (!config.frontend.headers || typeof config.frontend.headers !== 'object' || Array.isArray(config.frontend.headers)) {
+        throw new Error('frontend.headers must be an object of string values.');
+      }
+      const forbiddenHeaders = new Set(['content-length', 'set-cookie', 'transfer-encoding']);
+      for (const [name, value] of Object.entries(config.frontend.headers)) {
+        if (!name.trim() || typeof value !== 'string') {
+          throw new Error('frontend.headers must contain non-empty names and string values.');
+        }
+        if (forbiddenHeaders.has(name.toLowerCase())) {
+          throw new Error(`frontend.headers cannot override ${name}.`);
+        }
+        try {
+          new Headers([[name, value]]);
+        } catch {
+          throw new Error(`frontend.headers contains an invalid header: ${name}.`);
+        }
+      }
+    }
   }
 
   if (config.serviceKeys?.keys?.length) {
@@ -2011,6 +2054,36 @@ export function defineConfig(config: EdgeBaseConfig): EdgeBaseConfig {
         `auth.provider '${config.auth.provider}' requires a connectionString (env variable name). ` +
           `Example: connectionString: 'AUTH_POSTGRES_URL'`,
       );
+    }
+  }
+
+  const authCookie = config.auth?.session?.cookie;
+  if (authCookie !== undefined) {
+    if (!authCookie || typeof authCookie !== 'object' || Array.isArray(authCookie)) {
+      throw new Error('auth.session.cookie must be an object.');
+    }
+    if (typeof authCookie.enabled !== 'boolean') {
+      throw new Error('auth.session.cookie.enabled must be a boolean.');
+    }
+    if (authCookie.name !== undefined) {
+      if (
+        typeof authCookie.name !== 'string'
+        || authCookie.name.length === 0
+        || authCookie.name.length > 64
+        || !/^[A-Za-z0-9._-]+$/.test(authCookie.name)
+        || authCookie.name.startsWith('__Secure-')
+        || authCookie.name.startsWith('__Host-')
+      ) {
+        throw new Error(
+          'auth.session.cookie.name must be a 1-64 character cookie-safe base name without a reserved prefix.',
+        );
+      }
+    }
+    if (
+      authCookie.sameSite !== undefined
+      && !['strict', 'lax', 'none'].includes(authCookie.sameSite)
+    ) {
+      throw new Error("auth.session.cookie.sameSite must be 'strict', 'lax', or 'none'.");
     }
   }
 

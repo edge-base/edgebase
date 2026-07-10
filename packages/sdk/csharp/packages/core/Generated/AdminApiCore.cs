@@ -1,6 +1,6 @@
 // Auto-generated admin API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 using System;
 using System.Collections.Generic;
@@ -140,6 +140,10 @@ public class GeneratedAdminApi
     /// <summary>Rotate admin token — POST /admin/api/auth/refresh</summary>
     public Task<Dictionary<string, object?>> AdminRefreshAsync(object? body = null, CancellationToken ct = default)
         => _http.PostAsync("/admin/api/auth/refresh", body, ct);
+
+    /// <summary>End the current admin session — POST /admin/api/auth/logout</summary>
+    public Task<Dictionary<string, object?>> AdminLogoutAsync(object? body = null, CancellationToken ct = default)
+        => _http.PostAsync("/admin/api/auth/logout", body, ct);
 
     /// <summary>Reset admin password (Service Key required) — POST /admin/api/internal/reset-password</summary>
     public Task<Dictionary<string, object?>> AdminResetPasswordAsync(object? body = null, CancellationToken ct = default)

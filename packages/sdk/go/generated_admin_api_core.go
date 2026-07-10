@@ -1,6 +1,6 @@
 // Auto-generated admin API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.1.0)
+// Source: openapi.json (0.3.6)
 
 package edgebase
 
@@ -163,6 +163,11 @@ func (a *GeneratedAdminApi) AdminLogin(ctx context.Context, body interface{}) (m
 // AdminRefresh — Rotate admin token — POST /admin/api/auth/refresh
 func (a *GeneratedAdminApi) AdminRefresh(ctx context.Context, body interface{}) (map[string]interface{}, error) {
 	return a.client.do(ctx, "POST", "/admin/api/auth/refresh", body)
+}
+
+// AdminLogout — End the current admin session — POST /admin/api/auth/logout
+func (a *GeneratedAdminApi) AdminLogout(ctx context.Context, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", "/admin/api/auth/logout", body)
 }
 
 // AdminResetPassword — Reset admin password (Service Key required) — POST /admin/api/internal/reset-password

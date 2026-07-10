@@ -503,7 +503,33 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
 
   // ─── Hibernation API Callbacks ───
 
+  // Messages on one socket must APPLY in send order. The hibernation runtime
+  // delivers a new webSocketMessage event as soon as a previous handler hits
+  // an await that isn't covered by the storage input gate (e.g. an async
+  // access rule doing sub-requests), so without this chain a client that
+  // sends `join` followed by `member_state` can have the state update
+  // processed while the join access check is still in flight — rejected with
+  // "Join the room before updating member state" despite correct client
+  // ordering. The chain is per-socket (a WeakMap entry dies with the socket)
+  // and never rejects, so one failed message can't wedge the connection.
+  // (Lazily initialized: some construction paths bypass field initializers.)
+  private wsMessageChains: WeakMap<WebSocket, Promise<void>> | undefined;
+
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    const chains = (this.wsMessageChains ??= new WeakMap());
+    const previous = chains.get(ws) ?? Promise.resolve();
+    const run = previous.then(() => this.processWebSocketMessage(ws, message));
+    chains.set(
+      ws,
+      run.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return run;
+  }
+
+  protected async processWebSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     await this.ensureRuntimeReady();
     await this.recoverStateIfNeeded();
     if (typeof message !== 'string') return;

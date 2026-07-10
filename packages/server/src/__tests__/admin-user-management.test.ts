@@ -109,6 +109,12 @@ function createMockAuthDb(): AuthDb & {
       return null;
     },
     async run(): Promise<void> {},
+    async compareAndSwapAdminSession(): Promise<boolean> {
+      return false;
+    },
+    async compareAndSwapUserSession(): Promise<boolean> {
+      return false;
+    },
     async batch(statements: { sql: string; params?: unknown[] }[]): Promise<void> {
       batchStatements.push(...statements);
     },

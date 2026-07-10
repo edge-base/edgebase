@@ -1,4 +1,4 @@
-const MIN_SUPPORTED = { major: 20, minor: 19, patch: 0 };
+const MIN_SUPPORTED = { major: 22, minor: 0, patch: 0 };
 const DEFAULT_MAJOR = 24;
 const currentVersion = process.versions.node;
 const [currentMajor, currentMinor = 0, currentPatch = 0] = currentVersion

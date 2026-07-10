@@ -22,6 +22,7 @@ import {
   matchesConfiguredSecret,
 } from '../lib/service-key.js';
 import { parseConfig } from '../lib/do-router.js';
+import { usesCustomBearerAuth } from '../lib/functions.js';
 
 // Extend Hono context variables
 declare module 'hono' {
@@ -45,6 +46,7 @@ interface AuthResolutionEnv {
 export function buildAuthContextFromPayload(payload: Record<string, unknown>): AuthContext {
   return {
     id: payload.sub as string,
+    sessionId: typeof payload.sid === 'string' ? payload.sid : undefined,
     email: typeof payload.email === 'string' ? payload.email : undefined,
     role: (payload.role as string) ?? 'user',
     isAnonymous: (payload.isAnonymous as boolean) ?? false,
@@ -132,6 +134,16 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next):
   // and are validated by downstream route/rules middleware.
   if (matchesConfiguredServiceKeyCandidate(token, c)) {
     c.set('serviceKeyToken', token);
+    c.set('auth', null);
+    return next();
+  }
+
+  // Some protocol endpoints (for example OAuth-protected MCP servers) issue
+  // and validate their own Bearer tokens. This opt-in is route-specific and
+  // delegates the raw header to the matched function without weakening the
+  // fail-closed default for any other API route. Configured Service Keys keep
+  // their normal precedence above this protocol-specific delegation.
+  if (usesCustomBearerAuth(new URL(c.req.url).pathname, c.req.method)) {
     c.set('auth', null);
     return next();
   }
