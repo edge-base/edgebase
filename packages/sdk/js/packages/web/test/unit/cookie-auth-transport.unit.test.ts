@@ -446,10 +446,15 @@ describe('HttpOnly-cookie TokenManager', () => {
     manager.setTokens({ accessToken: makeJwt('account-a', { exp: 1 }), refreshToken: '' });
 
     let resolveRefresh!: (tokens: { accessToken: string; refreshToken: string }) => void;
+    let onRefreshStarted!: () => void;
+    const refreshStarted = new Promise<void>((resolve) => { onRefreshStarted = resolve; });
     const refresh = manager.getAccessToken(() => new Promise((resolve) => {
       resolveRefresh = resolve;
+      onRefreshStarted();
     }));
-    await new Promise((resolve) => setTimeout(resolve, 45));
+    // Wait for the refresh callback to actually run (resolveRefresh captured)
+    // instead of guessing a fixed delay, which flakes on slow CI runners.
+    await refreshStarted;
 
     const markerB = JSON.stringify({ version: 1, userId: 'account-b' });
     store.set('edgebase:cookie-session', markerB);
@@ -483,10 +488,13 @@ describe('HttpOnly-cookie TokenManager', () => {
     rejectedManager.setTokens({ accessToken: makeJwt('revoked-user', { exp: 1 }), refreshToken: '' });
 
     let resolveLate!: (tokens: { accessToken: string; refreshToken: string }) => void;
+    let onLateRefreshStarted!: () => void;
+    const lateRefreshStarted = new Promise<void>((resolve) => { onLateRefreshStarted = resolve; });
     const lateRefresh = lateManager.getAccessToken(() => new Promise((resolve) => {
       resolveLate = resolve;
+      onLateRefreshStarted();
     }));
-    await new Promise((resolve) => setTimeout(resolve, 45));
+    await lateRefreshStarted;
 
     // The shared auth-mutation lock prevents a second tab from racing a
     // definitive rejection against an already-sent refresh. Queue it, allow
