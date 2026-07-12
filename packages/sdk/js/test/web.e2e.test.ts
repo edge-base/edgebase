@@ -9,23 +9,6 @@ import { createClient } from '@edge-base/web';
 
 const SERVER = 'http://localhost:8688';
 
-function encodeBase64UrlJson(value: unknown): string {
-  const bytes = new TextEncoder().encode(JSON.stringify(value));
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-}
-
-function makeValidJwt(userId = 'u-oauth-web') {
-  const header = encodeBase64UrlJson({ alg: 'HS256', typ: 'JWT' });
-  const body = encodeBase64UrlJson({
-    sub: userId,
-    email: 'oauth-web@test.com',
-    exp: Math.floor(Date.now() / 1000) + 3600,
-  });
-  return `${header}.${body}.sig`;
-}
-
 // Raw fetch helper (SK)
 async function raw(method: string, path: string, body?: unknown) {
   const res = await fetch(`${SERVER}${path}`, {
@@ -120,10 +103,19 @@ describe('js-web:auth — listSessions / revokeSession', () => {
 
   it('revokeSession → 세션 삭제됨', async () => {
     if (!sessionId) return;
-    await client.auth.revokeSession(sessionId);
-    const sessions2 = await client.auth.listSessions();
-    const remaining = sessions2.find(s => s.id === sessionId);
-    expect(remaining).toBeUndefined();
+    // Create a second session for the same account and revoke THAT one; revoking
+    // the caller's own session would (correctly) invalidate this client's token.
+    const other = createClient(SERVER);
+    await other.auth.signIn({ email, password: 'Web1234!' });
+
+    const before = await client.auth.listSessions();
+    const target = before.find(s => s.id !== sessionId);
+    expect(target).toBeDefined();
+
+    await client.auth.revokeSession(target!.id);
+    const after = await client.auth.listSessions();
+    expect(after.find(s => s.id === target!.id)).toBeUndefined();
+    other.destroy();
   });
 });
 
@@ -469,13 +461,27 @@ describe('js-web:auth — requestPasswordReset', () => {
   });
 
   it('handleOAuthCallback → 토큰을 저장하고 user를 복원', async () => {
-    const at = makeValidJwt('u-web-callback');
-    const rt = makeValidJwt('u-web-callback');
-    const callbackUrl = `http://localhost:4173/auth/callback?access_token=${encodeURIComponent(at)}&refresh_token=${encodeURIComponent(rt)}`;
+    // handleOAuthCallback binds the callback to a recovery nonce from an
+    // initiated OAuth flow and exchanges the refresh token server-side, so it
+    // needs both a real session's tokens and a nonce from signInWithOAuth.
+    // (URL-injected bearer tokens without a bound flow are correctly rejected.)
+    const email = `jsweb-callback-${crypto.randomUUID().slice(0, 8)}@test.com`;
+    const source = createClient(SERVER);
+    const session = await source.auth.signUp({ email, password: 'Callback1234!' });
 
-    const result = await client.auth.handleOAuthCallback(callbackUrl);
+    const receiver = createClient(SERVER);
+    const start = await receiver.auth.signInWithOAuth('google', { navigate: false });
+    const recoveryNonce = new URL(start.url).searchParams.get('oauth_recovery_nonce')!;
+    const callbackUrl =
+      `http://localhost:4173/auth/callback#access_token=${encodeURIComponent(session.accessToken)}`
+      + `&refresh_token=${encodeURIComponent(session.refreshToken)}`
+      + `&oauth_recovery_nonce=${recoveryNonce}`;
+
+    const result = await receiver.auth.handleOAuthCallback(callbackUrl);
     expect(result).not.toBeNull();
-    expect(result!.user.id).toBe('u-web-callback');
-    expect(client.auth.currentUser?.id).toBe('u-web-callback');
+    expect(result!.user.id).toBe(session.user.id);
+    expect(receiver.auth.currentUser?.id).toBe(session.user.id);
+    source.destroy();
+    receiver.destroy();
   });
 });
