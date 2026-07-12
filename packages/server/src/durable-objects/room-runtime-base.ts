@@ -138,7 +138,16 @@ const DEFAULT_ROOM_AUTH_TIMEOUT_MS = 5000;
 const DEFAULT_STATE_SAVE_INTERVAL_MS = 60000; // 1 minute
 const DEFAULT_STATE_TTL_MS = 86400000; // 24 hours
 const DEFAULT_SOCKET_STALE_TIMEOUT_MS = 45000;
-const SOCKET_HEARTBEAT_CHECK_INTERVAL_MS = 5000;
+// How often the DO wakes (via a durable alarm) to reap sockets that stopped
+// heartbeating. Every wake re-arms the alarm, which is a storage write, so this
+// is the steady-state write cadence per connected room. It only needs to be
+// frequent enough to notice a socket that has been silent for the stale timeout
+// (default 45s); polling every 5s meant ~9 alarm writes per stale window and,
+// across many rooms in local dev, was a large share of disk I/O. 15s still
+// reaps a dead socket within ~one stale window while cutting alarm writes ~3x.
+// getSocketHeartbeatCheckIntervalMs() clamps this to staleTimeout/2, so apps
+// with a shorter configured timeout still poll proportionally more often.
+const SOCKET_HEARTBEAT_CHECK_INTERVAL_MS = 15000;
 const ROOM_EPHEMERAL_TIMERS_STORAGE_KEY = 'roomEphemeralTimers';
 const roomFallbackWarnings = new Set<string>();
 type RoomRateLimitScope = 'actions' | 'signals' | 'admin';
@@ -154,7 +163,11 @@ interface PersistedRoomEphemeralTimers {
   stateSaveAt?: number | null;
   emptyRoomCleanupAt?: number | null;
   stateTTLAlarmAt?: number | null;
-  socketHeartbeatCheckAt?: number | null;
+  // NOTE: socketHeartbeatCheckAt is deliberately no longer persisted. It
+  // advances every few seconds while sockets are connected and is reconstructed
+  // from the live socket set on recovery, so writing it produced a per-room
+  // storage write on every heartbeat. Older blobs may still contain the key;
+  // it is ignored on read.
 }
 
 function isRoomOperationPublic(
@@ -297,6 +310,13 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   private dirty = false;
   private _stateSaveAt: number | null = null;
   private stateRecoveryNeeded = false;
+  // Serialized snapshot of the last durable ephemeral-timer blob actually
+  // written. syncEphemeralTimersToStorage() is called several times per alarm
+  // pass (and the socket-heartbeat check reschedules every few seconds), so
+  // without this guard each pass re-put an identical blob — a per-room write
+  // every ~5s that dominated local dev disk I/O (SQLite/WAL churn). We now skip
+  // the write when the persisted content is unchanged.
+  private _lastPersistedEphemeralBlob: string | null | undefined = undefined;
 
   // ─── WebSocket metadata cache ───
   private _metaCache = new Map<WebSocket, RoomWSMeta>();
@@ -862,9 +882,11 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         }
       }
       this.ensureSocketHeartbeatCheckScheduled();
-      // Persist the cleared/rescheduled _socketHeartbeatCheckAt (mirrors steps
-      // 1/3/4/6) so a re-recovered isolate cannot reload a stale past-due value
-      // and re-fire the alarm forever.
+      // socketHeartbeatCheckAt is no longer persisted (it is re-armed from the
+      // live socket set on recovery), so re-arming it above needs no storage
+      // write. This flush only persists any *other* ephemeral change; the dedup
+      // guard makes it a no-op when nothing durable changed — the common case —
+      // which keeps the periodic heartbeat off the disk-write path.
       this.syncEphemeralTimersToStorage();
     }
 
@@ -1654,9 +1676,10 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     this._stateTTLAlarmAt = typeof savedEphemeral?.stateTTLAlarmAt === 'number'
       ? savedEphemeral.stateTTLAlarmAt
       : null;
-    this._socketHeartbeatCheckAt = typeof savedEphemeral?.socketHeartbeatCheckAt === 'number'
-      ? savedEphemeral.socketHeartbeatCheckAt
-      : null;
+    // socketHeartbeatCheckAt is no longer persisted; it is re-armed from the
+    // live socket set by ensureSocketHeartbeatCheckScheduled() during
+    // recoverRuntimeStateFromSockets(). Ignore any value from older blobs.
+    this._socketHeartbeatCheckAt = null;
 
     this._scheduleNextAlarm();
   }
@@ -1912,17 +1935,30 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     const stateSaveAt = this._stateSaveAt;
     const emptyRoomCleanupAt = this._emptyRoomCleanupAt;
     const stateTTLAlarmAt = this._stateTTLAlarmAt;
-    const socketHeartbeatCheckAt = this._socketHeartbeatCheckAt;
+    // socketHeartbeatCheckAt is intentionally NOT persisted: it advances every
+    // few seconds while any socket is connected, so persisting it turned a live
+    // liveness timer into a per-room storage write on every heartbeat. It is
+    // reconstructed on recovery from the live socket set by
+    // ensureSocketHeartbeatCheckScheduled() (see recoverRuntimeStateFromSockets).
+    const isEmpty =
+      Object.keys(pendingAuth).length === 0
+      && Object.keys(disconnects).length === 0
+      && stateSaveAt === null
+      && emptyRoomCleanupAt === null
+      && stateTTLAlarmAt === null;
+    const serialized = isEmpty
+      ? null
+      : JSON.stringify({ pendingAuth, disconnects, stateSaveAt, emptyRoomCleanupAt, stateTTLAlarmAt });
+    // Collapse the many redundant calls (several per alarm pass, plus every
+    // heartbeat reschedule): only touch storage when the durable content
+    // actually changed since the last write.
+    if (serialized === this._lastPersistedEphemeralBlob) {
+      return;
+    }
+    this._lastPersistedEphemeralBlob = serialized;
     this.ctx.waitUntil((async () => {
       try {
-        if (
-          Object.keys(pendingAuth).length === 0
-          && Object.keys(disconnects).length === 0
-          && stateSaveAt === null
-          && emptyRoomCleanupAt === null
-          && stateTTLAlarmAt === null
-          && socketHeartbeatCheckAt === null
-        ) {
+        if (serialized === null) {
           await this.ctx.storage.delete(ROOM_EPHEMERAL_TIMERS_STORAGE_KEY);
           return;
         }
@@ -1933,9 +1969,11 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
           stateSaveAt,
           emptyRoomCleanupAt,
           stateTTLAlarmAt,
-          socketHeartbeatCheckAt,
         } satisfies PersistedRoomEphemeralTimers);
       } catch (error) {
+        // Roll back the cache so the next call retries the failed write instead
+        // of silently skipping it as "already persisted".
+        this._lastPersistedEphemeralBlob = undefined;
         console.warn('[Room] Ephemeral timer persistence skipped', {
           room: this.namespace && this.roomId ? `${this.namespace}::${this.roomId}` : null,
           pendingAuthCount: this.pendingAuth.size,

@@ -42,7 +42,7 @@ describe('room auth-state loss recovery', () => {
     warnSpy.mockRestore();
   });
 
-  it('persists alarm-backed room deadlines alongside auth and disconnect timers', async () => {
+  it('persists alarm-backed room deadlines but NOT the socket heartbeat timer', async () => {
     const { RoomRuntimeBaseDO } = await import('../durable-objects/room-runtime-base.js');
 
     const pending: Promise<unknown>[] = [];
@@ -67,14 +67,61 @@ describe('room auth-state loss recovery', () => {
     room.syncEphemeralTimersToStorage();
     await Promise.allSettled(pending);
 
+    // socketHeartbeatCheckAt is reconstructed from live sockets on recovery, so
+    // it must not appear in the persisted blob (persisting it caused per-room
+    // heartbeat-frequency storage writes).
     expect(putSpy).toHaveBeenCalledWith('roomEphemeralTimers', {
       pendingAuth: { 'conn-1': 11_111 },
       disconnects: { 'user-1': { fireAt: 22_222, connectionId: 'conn-1' } },
       stateSaveAt: 33_333,
       emptyRoomCleanupAt: 44_444,
       stateTTLAlarmAt: 55_555,
-      socketHeartbeatCheckAt: 66_666,
     });
+    const persisted = putSpy.mock.calls[0][1];
+    expect(persisted).not.toHaveProperty('socketHeartbeatCheckAt');
+  });
+
+  it('does not re-persist ephemeral timers when only the heartbeat timer advances', async () => {
+    const { RoomRuntimeBaseDO } = await import('../durable-objects/room-runtime-base.js');
+
+    const pending: Promise<unknown>[] = [];
+    const putSpy = vi.fn().mockResolvedValue(undefined);
+    const room: any = Object.create(RoomRuntimeBaseDO.prototype);
+    room.pendingAuth = new Map([['conn-1', 11_111]]);
+    room.disconnectTimers = new Map();
+    room._stateSaveAt = 33_333;
+    room._emptyRoomCleanupAt = null;
+    room._stateTTLAlarmAt = null;
+    room._socketHeartbeatCheckAt = 1_000;
+    room.ctx = {
+      storage: {
+        put: putSpy,
+        delete: vi.fn(),
+      },
+      waitUntil: vi.fn((promise: Promise<unknown>) => {
+        pending.push(promise);
+      }),
+    };
+
+    // First sync writes once.
+    room.syncEphemeralTimersToStorage();
+    // Simulate several heartbeat reschedules: only the (non-persisted) heartbeat
+    // timer advances; the durable content is unchanged.
+    room._socketHeartbeatCheckAt = 6_000;
+    room.syncEphemeralTimersToStorage();
+    room._socketHeartbeatCheckAt = 11_000;
+    room.syncEphemeralTimersToStorage();
+    await Promise.allSettled(pending);
+
+    // The dedup guard collapses the redundant heartbeat-driven calls to a single
+    // storage write — this is what stopped the per-room ~5s write storm.
+    expect(putSpy).toHaveBeenCalledTimes(1);
+
+    // A real durable change (a new pending-auth deadline) still writes.
+    room.pendingAuth = new Map([['conn-2', 99_999]]);
+    room.syncEphemeralTimersToStorage();
+    await Promise.allSettled(pending);
+    expect(putSpy).toHaveBeenCalledTimes(2);
   });
 
   it('does not rewrite ephemeral timer storage when state is already dirty', async () => {

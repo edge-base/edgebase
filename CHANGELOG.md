@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.1 — 2026-07-12
+
+### Fixed
+
+- Realtime rooms no longer rewrite Durable Object storage on every socket
+  heartbeat. The per-room ephemeral-timer blob (`roomEphemeralTimers`) was
+  persisted unconditionally several times per alarm pass, and the socket
+  liveness check re-armed itself every ~5s while persisting an ever-advancing
+  `socketHeartbeatCheckAt`. Together these made an active room write its DO
+  SQLite every few seconds even when nothing changed — a large sustained WAL
+  write amplification (dominant disk-I/O source under `wrangler dev`). The
+  heartbeat timer is no longer persisted (it is reconstructed from the live
+  socket set on recovery), redundant ephemeral-timer writes are collapsed with
+  a content check, and the heartbeat poll interval is relaxed from 5s to 15s
+  (still clamped to half the socket stale timeout, so shorter per-app timeouts
+  keep polling proportionally more often). Steady-state per-room storage writes
+  drop from every ~5s to only when durable room state actually changes; a dead
+  socket is still reaped within roughly one stale window.
+
 ## 0.4.0 — 2026-07-11
 
 ### Security

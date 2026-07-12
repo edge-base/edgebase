@@ -1,4 +1,4 @@
-## Unreleased
+## 0.4.1
 
 - Persist access and refresh tokens as one SharedPreferences value, expose
   `tryRestoreSession()`, migrate legacy refresh-only state, and reject incomplete

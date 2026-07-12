@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
 
 - Defaulted client tokens to Keychain and made every Keychain/storage failure
   visible before in-memory adoption.

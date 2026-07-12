@@ -60,7 +60,7 @@ For published applications:
 
 ```toml
 [dependencies]
-edgebase-admin = "0.4.0"
+edgebase-admin = "0.4.1"
 ```
 
 Or:

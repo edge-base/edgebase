@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgeBase API",
-    "version": "0.4.0"
+    "version": "0.4.1"
   },
   "components": {
     "schemas": {},
@@ -54,7 +54,7 @@
                     },
                     "version": {
                       "type": "string",
-                      "example": "0.4.0"
+                      "example": "0.4.1"
                     }
                   },
                   "required": [
