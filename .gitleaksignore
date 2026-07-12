@@ -23,3 +23,8 @@ d5844cc5f94ac2a05db637a5cd6fd8e98162ca4b:packages/server/src/__tests__/totp.test
 # Deterministic fake JWT ("header.<base64 test payload>.signature") in a Swift
 # iOS token-restore unit test; not a real credential.
 b93d1781d29f1b6ef77ce447d79840e17dab60a0:packages/sdk/swift/packages/ios/Tests/IosUnitTests.swift:generic-api-key:885
+# Deterministic synthetic hex fixtures ("<16-hex>".repeat(4)) for the
+# version-bound managed-deploy-secrets CLI test; not real credentials.
+695c5be0051fe8ed58fd170dfa88214e091c30f8:packages/cli/test/deploy.test.ts:generic-api-key:237
+695c5be0051fe8ed58fd170dfa88214e091c30f8:packages/cli/test/deploy.test.ts:generic-api-key:238
+695c5be0051fe8ed58fd170dfa88214e091c30f8:packages/cli/test/deploy.test.ts:generic-api-key:239
