@@ -176,7 +176,7 @@ describe('auth-magic-link — email+password user compatibility', () => {
 
       // Try password signin — should fail (no password set)
       const { status } = await api('POST', '/signin', { email, password: 'anyPassword1!' });
-      expect(status).toBe(403); // OAuth-only user (no passwordHash)
+      expect(status).toBe(401); // Same generic response as an unknown email.
     }
   });
 });

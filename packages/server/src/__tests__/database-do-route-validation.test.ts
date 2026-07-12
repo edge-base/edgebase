@@ -55,7 +55,7 @@ describe('DatabaseDO route validation', () => {
 
     const { DatabaseDO } = await import('../durable-objects/database-do.js');
     const ctx = createCtx();
-    const databaseDo = new DatabaseDO(ctx, createEnv(config) as never);
+    const databaseDo = new DatabaseDO(ctx, createEnv() as never);
 
     const response = await databaseDo.fetch(new Request('http://do/tables/posts', {
       headers: {
@@ -89,7 +89,7 @@ describe('DatabaseDO route validation', () => {
 
     const { DatabaseDO } = await import('../durable-objects/database-do.js');
     const ctx = createCtx();
-    const databaseDo = new DatabaseDO(ctx, createEnv(config) as never);
+    const databaseDo = new DatabaseDO(ctx, createEnv() as never);
 
     const response = await databaseDo.fetch(new Request('http://do/tables/users', {
       headers: {

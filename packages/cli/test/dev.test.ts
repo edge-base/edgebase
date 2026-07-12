@@ -127,14 +127,15 @@ describe('Runtime config scaffold', () => {
       FEATURE_FLAG: '1',
     });
 
-    const shim = readFileSync(
-      join(tmpDir, '.edgebase', 'runtime', 'server', 'src', 'generated-config.ts'),
-      'utf-8',
-    );
+    const shimPath = join(tmpDir, '.edgebase', 'runtime', 'server', 'src', 'generated-config.ts');
+    const shim = readFileSync(shimPath, 'utf-8');
     expect(shim).toContain('const injectedEnv = {');
     expect(shim).toContain('"MOCK_FCM_BASE_URL": "https://mock.example.com"');
     expect(shim).toContain('process.env[key] === undefined');
     expect(shim).toContain("await import('../../../../edgebase.config.ts')");
+    if (process.platform !== 'win32') {
+      expect(statSync(shimPath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('writes only project and explicitly permitted shell env to a private dev-bundle file', () => {
@@ -146,7 +147,7 @@ describe('Runtime config scaffold', () => {
       },
       {
         NODE_ENV: 'development',
-        NOTIONLIKE_RATE_LIMIT_PROFILE: 'development',
+        HANJI_RATE_LIMIT_PROFILE: 'development',
         EDGEBASE_CONFIG_ENV_ALLOWLIST: 'CUSTOM_CONFIG_MODE, INVALID-KEY',
         CUSTOM_CONFIG_MODE: 'preview',
         UNRELATED_SHELL_SECRET: 'must-not-reach-worker',
@@ -157,7 +158,7 @@ describe('Runtime config scaffold', () => {
       JWT_USER_SECRET: 'synthetic-dev-secret',
       SERVICE_KEY: 'synthetic-service-key',
       NODE_ENV: 'development',
-      NOTIONLIKE_RATE_LIMIT_PROFILE: 'development',
+      HANJI_RATE_LIMIT_PROFILE: 'development',
       CUSTOM_CONFIG_MODE: 'preview',
     });
 
@@ -206,13 +207,30 @@ describe('Runtime config scaffold', () => {
     expect(childEnv.PATH).toBe('/synthetic/bin');
   });
 
+  it('rejects local-dev compile authority from env files, bundle vars, and ambient shell state', () => {
+    expect(() => _devInternals.collectDevRuntimeConfigEnv(
+      { EDGEBASE_LOCAL_DEV_BUILD: 'true' },
+      {},
+    )).toThrow(/EDGEBASE_LOCAL_DEV_BUILD.*compile-time selector.*\.env\.development.*\.dev\.vars/i);
+    expect(() => _devInternals.collectDevRuntimeConfigEnv(
+      {},
+      { EDGEBASE_LOCAL_DEV_BUILD: 'true' },
+    )).toThrow(/EDGEBASE_LOCAL_DEV_BUILD.*ambient shell/i);
+    expect(() => _devInternals.writeDevBundleVars(tmpDir, {
+      EDGEBASE_LOCAL_DEV_BUILD: 'true',
+    })).toThrow(/EDGEBASE_LOCAL_DEV_BUILD.*compile-time selector/i);
+    expect(() => _devInternals.resolveWranglerDevProcessEnv({
+      EDGEBASE_LOCAL_DEV_BUILD: 'true',
+    })).toThrow(/EDGEBASE_LOCAL_DEV_BUILD.*ambient shell/i);
+  });
+
   it('keeps development env-file values ahead of shell values', () => {
     const runtimeEnv = _devInternals.collectDevRuntimeConfigEnv(
-      { NOTIONLIKE_RATE_LIMIT_PROFILE: 'production' },
-      { NOTIONLIKE_RATE_LIMIT_PROFILE: 'development' },
+      { HANJI_RATE_LIMIT_PROFILE: 'production' },
+      { HANJI_RATE_LIMIT_PROFILE: 'development' },
     );
 
-    expect(runtimeEnv.NOTIONLIKE_RATE_LIMIT_PROFILE).toBe('production');
+    expect(runtimeEnv.HANJI_RATE_LIMIT_PROFILE).toBe('production');
   });
 
   it('evaluates dev config with the selected env instead of arbitrary parent-shell values', () => {
@@ -252,18 +270,18 @@ describe('Runtime config scaffold', () => {
 
   it('includes a shell-only rate-limit profile in the real dev sync path', () => {
     writeFileSync(join(tmpDir, '.env.development'), 'SYNTHETIC_FILE_VALUE=from-file\n');
-    const previousProfile = process.env.NOTIONLIKE_RATE_LIMIT_PROFILE;
+    const previousProfile = process.env.HANJI_RATE_LIMIT_PROFILE;
     const previousFileValue = process.env.SYNTHETIC_FILE_VALUE;
-    process.env.NOTIONLIKE_RATE_LIMIT_PROFILE = 'development';
+    process.env.HANJI_RATE_LIMIT_PROFILE = 'development';
 
     try {
       expect(_devInternals.syncDevEnvToProcess(tmpDir)).toMatchObject({
         SYNTHETIC_FILE_VALUE: 'from-file',
-        NOTIONLIKE_RATE_LIMIT_PROFILE: 'development',
+        HANJI_RATE_LIMIT_PROFILE: 'development',
       });
     } finally {
-      if (previousProfile === undefined) delete process.env.NOTIONLIKE_RATE_LIMIT_PROFILE;
-      else process.env.NOTIONLIKE_RATE_LIMIT_PROFILE = previousProfile;
+      if (previousProfile === undefined) delete process.env.HANJI_RATE_LIMIT_PROFILE;
+      else process.env.HANJI_RATE_LIMIT_PROFILE = previousProfile;
       if (previousFileValue === undefined) delete process.env.SYNTHETIC_FILE_VALUE;
       else process.env.SYNTHETIC_FILE_VALUE = previousFileValue;
     }
@@ -493,6 +511,15 @@ describe('Wrangler dev arguments', () => {
         process.env.EDGEBASE_INTERNAL_WORKER_URL = previous;
       }
     }
+  });
+
+  it('injects local-dev authority only as a CLI-owned compile definition', () => {
+    expect(_devInternals.resolveWorkerCompileDefinitions()).toEqual([
+      'EDGEBASE_LOCAL_DEV_BUILD:true',
+    ]);
+    expect(_devInternals.resolveWorkerVarBindings(8788)).not.toContainEqual(
+      expect.stringMatching(/^EDGEBASE_LOCAL_DEV_BUILD:/),
+    );
   });
 
   it('uses custom port', () => {

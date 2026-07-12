@@ -45,7 +45,11 @@ export function resolveServiceKey(options: { serviceKey?: string }): string {
  * 2. EDGEBASE_SERVICE_KEY environment variable
  * 3. .edgebase/secrets.json file (auto-saved after deploy)
  */
-export function resolveOptionalServiceKey(options: { serviceKey?: string }): string | undefined {
+export function resolveOptionalServiceKey(options: {
+  serviceKey?: string;
+  /** Project whose ignored .edgebase/secrets.json is authoritative. */
+  projectDir?: string;
+}): string | undefined {
   // 1. CLI flag
   if (options.serviceKey) return options.serviceKey;
 
@@ -54,7 +58,7 @@ export function resolveOptionalServiceKey(options: { serviceKey?: string }): str
   if (envKey) return envKey;
 
   // 3. .edgebase/secrets.json (auto-saved after first deploy)
-  const projectDir = process.cwd();
+  const projectDir = options.projectDir ?? process.cwd();
   const secretsPath = join(projectDir, '.edgebase', 'secrets.json');
   if (existsSync(secretsPath)) {
     try {

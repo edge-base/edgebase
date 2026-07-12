@@ -63,7 +63,7 @@ Long-running commands still treat `Ctrl+C` as an immediate cancellation. If a us
 
 | Variable | Used by |
 | --- | --- |
-| `EDGEBASE_URL` | Remote commands such as `migrate`, `backup`, `export`, `admin`, `plugins cleanup`, and `destroy` |
+| `EDGEBASE_URL` | Remote commands such as `migrate`, `backup`, `export`, `admin`, and `plugins cleanup` |
 | `EDGEBASE_SERVICE_KEY` | Remote admin commands that authenticate with the root Service Key |
 | `CLOUDFLARE_API_TOKEN` | Non-interactive Cloudflare deploy/destroy and operations that touch account-level resources |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare operations that need account scoping, especially backup and plugin cleanup flows |
@@ -108,12 +108,18 @@ If `edgebase.config.ts` defines `frontend.directory`, `dev` also serves that pre
 
 `dev` now runs from a self-contained bundle staged under `.edgebase/targets/dev-app`, so local execution no longer depends on Wrangler importing your source tree directly at runtime.
 
+If a generated config shim contains injected development values, the CLI
+writes it with owner-only (`0600`) permissions on supported platforms. Shims
+without embedded values remain ordinary generated source.
+
 ### `deploy`
 
 ```bash
 npx edgebase deploy
 npx edgebase deploy --dry-run
 npx edgebase deploy --if-destructive reject
+npx edgebase deploy --allow-worker-rename
+npx edgebase deploy --allow-account-change
 ```
 
 Validate config, upload release secrets when `.env.release` exists, provision managed Cloudflare resources, and deploy the Worker.
@@ -127,10 +133,87 @@ Legacy account-global or truncation-only names are reused only
 when the previous deploy manifest belongs to the current Cloudflare account
 and proves the same binding/resource. Keep that
 manifest when upgrading an existing legacy deployment.
+If the file exists but is malformed or structurally invalid, deploy and
+destroy stop instead of treating it as a first deployment. Restore a valid
+backup; remove it only when you intentionally accept losing all local proof of
+the prior Worker and managed-resource identities.
+
+If the manifest records a different Worker name, deploy stops before any
+remote mutation because a renamed Worker receives separate Durable Object
+storage. Migrate or intentionally retire the old Worker first. Use
+`--allow-worker-rename` only to acknowledge that the new name is a separate
+Worker identity; the flag does not move data.
+
+Deploy likewise stops when the authenticated Cloudflare account differs from
+the account recorded by the manifest. A different account has separate Worker,
+Durable Object, and managed-resource storage. Use `--allow-account-change`
+only after intentionally migrating or retiring the prior account; the flag
+does not move data or resources.
 
 Resource provisioning is fail-closed: list/auth/timeout/parse errors, missing
 PostgreSQL connection strings, create failures, and missing returned IDs abort
 before `wrangler deploy` instead of publishing an incomplete runtime.
+
+Values from `.env.release` are applied through Wrangler's temporary,
+version-bound secrets file. Deploy and deploy dry-run do not copy those
+plaintext values into `generated-config.ts`, the application bundle, or pack
+artifacts.
+
+Hosted runtime authority and local/test switches are not valid Worker secrets.
+Deploy rejects protected names such as `EDGEBASE_CONFIG`, `EDGEBASE_TEST`,
+`EDGEBASE_TEST_BUILD`, `EDGEBASE_LOCAL_DEV_BUILD`, `EDGEBASE_USE_TEST_CONFIG`, `VITEST*`, `NODE_ENV`,
+`EDGEBASE_RUNTIME_MODE`, `EDGEBASE_DEV_SIDECAR_PORT`,
+`EDGEBASE_INTERNAL_WORKER_URL`, `EDGEBASE_EMAIL_API_URL`, `EDGEBASE_SMS_API_URL`, and
+`EDGEBASE_APP_WEB_*_URL` in `.env.release` or source Wrangler `[vars]`
+(`EDGEBASE_RUNTIME_MODE` itself is normalized as a CLI-owned public var). It also inspects an existing
+Worker's secret-name list before provisioning and publishing. If a legacy
+protected secret exists, verify the Worker, inspect `npx edgebase secret list`,
+then remove only the named entry explicitly with `npx edgebase secret delete
+<name>`; deploy never deletes a live secret implicitly.
+
+Deploy and dry-run also reject active ambient test/config
+selectors in the CLI process (`EDGEBASE_CONFIG`, `EDGEBASE_TEST`, `EDGEBASE_TEST_BUILD`,
+`EDGEBASE_LOCAL_DEV_BUILD`, `EDGEBASE_DEV_SIDECAR_PORT`, `EDGEBASE_INTERNAL_WORKER_URL`, mock email/SMS URLs,
+`EDGEBASE_USE_TEST_CONFIG`, `VITEST*`, `NODE_ENV=test`, or a non-Cloudflare
+`EDGEBASE_RUNTIME_MODE`). `NODE_ENV=production` is allowed. This prevents the
+config evaluator from building a production bundle under test authority.
+
+`EDGEBASE_TEST_BUILD` and `EDGEBASE_LOCAL_DEV_BUILD` are additionally forbidden
+in source Wrangler `vars`/`define` declarations, including environment,
+quoted, dotted, and inline-table forms. Build-app, deploy dry-run, pack, and
+live deploy all apply the same check. Only EdgeBase's dedicated test config may
+compile the test selector; only `edgebase dev` may inject the local selector.
+The trusted local build permits its loopback sidecar port only when the
+CLI-owned runtime mode is `local-development`. A runtime var, secret, env file,
+or ambient shell value with either selector name never grants authority.
+
+Deployment/control credentials are not application secrets. `.env.release`
+and existing Worker-secret preflight reject Cloudflare account/API tokens,
+Neon, npm, and GitHub tokens. Supply them only to the CLI process. The sole
+exception is the explicit self-destruct opt-in, which maps the selected scoped
+token to `CF_API_TOKEN`/`CF_ACCOUNT_ID`; the original credential name is never
+uploaded.
+
+When `email.provider` is `cloudflare`, deploy validates `email.binding` as a
+Worker-safe JavaScript identifier (default `EMAIL`) and adds the required
+`[[send_email]]` binding to its generated Wrangler configuration. An existing
+matching binding and its destination restrictions are preserved.
+
+The generated hosted Wrangler config also owns
+`nodejs_compat_populate_process_env` (deduplicated with existing compatibility
+flags), so version-bound Worker secrets remain available through `process.env`
+even with compatibility dates before Cloudflare's newer default behavior.
+
+For a release deployment, Wrangler must report the concrete, name-bound
+`workers.dev` URL before EdgeBase can bootstrap the admin account and verify
+the deployed admin surface. The URL must be an HTTPS origin whose first
+hostname label exactly matches the configured Worker name; custom domains,
+other Worker names, and URL paths/queries are not accepted as publish proof.
+If the Worker publish succeeds but Wrangler does
+not report that URL, the CLI preserves the local deploy manifest with no
+unverified URL authority and exits with a partial-deploy error. Verify the
+published Worker URL, complete `npx edgebase admin bootstrap --url
+<worker-url>`, and rerun deploy instead of treating that run as release-ready.
 
 Before invoking Wrangler, `deploy` now builds a fresh app bundle under `.edgebase/targets/deploy-app` and deploys that self-contained runtime instead of reading the source project tree directly.
 
@@ -145,9 +228,36 @@ After deploy, verify both a public function route and a service-key-backed admin
 ```bash
 npx edgebase destroy --dry-run
 npx edgebase destroy --yes
+npx edgebase destroy --dry-run --allow-untracked-resources --account-id <32-hex-id>
 ```
 
-Remove project-scoped managed Cloudflare resources discovered from the deploy manifest and project config.
+Remove only project-scoped resources whose managed ownership is recorded in the
+deploy manifest. A missing, malformed, oversized, symbolic-link, directory, or
+otherwise non-regular manifest fails closed; restore the regular file instead
+of treating damaged state as a first deployment.
+
+Legacy v1 manifests prove the account and Worker identity but did not prove
+resource ownership, so their resources remain unmanaged by default. Recovery
+from a missing/v1 manifest or `wrangler.toml`-only state requires
+`--allow-untracked-resources` plus an exact 32-hex account proof from
+`--account-id` or the top-level `account_id` in `wrangler.toml`. A non-dry-run
+destroy also checks that proof against the authenticated Cloudflare account
+before deleting anything.
+
+The manifest Worker URL is authoritative for the optional pre-delete Storage
+wipe. `EDGEBASE_URL` is deliberately ignored by `destroy`. A custom or otherwise
+unproven `--url` requires `--allow-worker-url-override` after independent target
+verification; a mismatched manifest URL is rejected without that acknowledgement.
+
+| Flag | Description |
+| --- | --- |
+| `--dry-run` | Validate identity and print the plan without remote deletion |
+| `--allow-untracked-resources` | Explicitly authorize legacy recovery inferred from `wrangler.toml` |
+| `--account-id <id>` | Exact 32-hex Cloudflare account proof for untracked recovery |
+| `--url <url>` | Exact HTTPS Worker origin for the optional Storage wipe |
+| `--allow-worker-url-override` | Acknowledge an explicit URL not proven by the manifest |
+| `--service-key <key>` | Service Key for the optional Storage wipe |
+| `--yes` | Confirm the validated deletion plan non-interactively |
 
 ### `logs`
 
@@ -217,7 +327,12 @@ npx edgebase backup create --include-secrets --include-storage
 npx edgebase backup restore --from ./backup/backup.json --url https://my-worker.workers.dev --service-key <service-key> --yes
 ```
 
-Create and restore portable backups across DO, D1, R2, and secrets.
+Create and restore portable backups across DO, D1, R2, and secrets. The config
+snapshot retains namespaces, tables, schemas, and feature settings, but always
+redacts embedded provider credentials, connection strings, tokens, private
+keys, and plugin-config credentials. `--include-secrets` controls the separate
+explicit secrets payload; it never makes the config endpoint return plaintext
+credentials.
 
 `backup restore` is destructive. In `--non-interactive` mode, pass `--yes` up front or handle the returned `needs_input` response before retrying.
 
@@ -264,6 +379,10 @@ npx edgebase secret delete STRIPE_SECRET_KEY
 ```
 
 Manage Cloudflare Workers secrets used by the project.
+
+`secret set` refuses hosted runtime authority, test-selector, and mock/action
+URL names reserved by EdgeBase, as well as deploy/control credential names.
+`secret delete` remains available so legacy copies can be removed deliberately.
 
 | Subcommand | Flag | Description |
 | --- | --- | --- |

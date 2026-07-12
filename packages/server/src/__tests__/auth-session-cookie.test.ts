@@ -392,6 +392,78 @@ describe('refresh cookie session transport', () => {
     expect(await generationLegacyOnly.json()).toEqual({ value: null, valid: false });
   });
 
+  it('expires configured predecessor cookie names without ever reading them', async () => {
+    setConfig({
+      release: true,
+      auth: {
+        session: {
+          cookie: {
+            enabled: true,
+            name: 'hanji-refresh',
+            legacyNames: ['former-product-refresh'],
+            sameSite: 'strict',
+          },
+        },
+      },
+    });
+    const common = {
+      Origin: 'https://api.example.com',
+      'X-EdgeBase-Auth-Transport': 'cookie',
+    };
+    const read = await createApp().request('https://api.example.com/read', {
+      method: 'POST',
+      headers: {
+        ...common,
+        Cookie: '__Host-former-product-refresh=must-not-be-read',
+      },
+    });
+    expect(await read.json()).toEqual({ refreshToken: null });
+
+    const issued = await createApp().request('https://api.example.com/issue', {
+      method: 'POST',
+      headers: common,
+    });
+    const cookie = issued.headers.get('Set-Cookie') ?? '';
+    expect(cookie).toContain('__Host-hanji-refresh=refresh-token');
+    expect(cookie).toContain('__Host-former-product-refresh=; Max-Age=0; Path=/');
+    expect(cookie).toContain('__Secure-former-product-refresh=; Max-Age=0; Path=/api/auth');
+    expect(cookie).toContain('former-product-refresh=; Max-Age=0; Path=/api/auth');
+
+    const cleared = await createApp().request('https://api.example.com/clear', {
+      method: 'POST',
+      headers: common,
+    });
+    expect(cleared.headers.get('Set-Cookie')).toContain('__Host-former-product-refresh=; Max-Age=0');
+  });
+
+  it('expires a predecessor plain cookie during local HTTP development', async () => {
+    setConfig({
+      release: true,
+      auth: {
+        session: {
+          cookie: {
+            enabled: true,
+            name: 'hanji-refresh',
+            legacyNames: ['former-product-refresh'],
+            sameSite: 'strict',
+          },
+        },
+      },
+    });
+    const issued = await createApp().request('http://127.0.0.1:8787/issue', {
+      method: 'POST',
+      headers: {
+        Origin: 'http://127.0.0.1:8787',
+        'CF-Connecting-IP': '127.0.0.1',
+        'X-EdgeBase-Auth-Transport': 'cookie',
+      },
+    }, { EDGEBASE_RUNTIME_MODE: 'local-development' });
+    const cookie = issued.headers.get('Set-Cookie') ?? '';
+    expect(cookie).toContain('hanji-refresh=refresh-token');
+    expect(cookie).toContain('former-product-refresh=; Max-Age=0; Path=/api/auth');
+    expect(cookie).not.toContain('__Host-former-product-refresh');
+  });
+
   it('supports direct cookie responses and browser-bound OAuth state cookies', async () => {
     const forced = await createApp().request('https://api.example.com/force-cookie', {
       method: 'POST',

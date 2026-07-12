@@ -36,6 +36,10 @@ export function getLocalDevPostgresExecOptions(
   env: Record<string, unknown> | undefined,
   namespace: string,
 ): LocalDevPostgresExecOptions | undefined {
+  // The sidecar receives arbitrary SQL plus JWT_ADMIN_SECRET. A stale or
+  // attacker-controlled port must never activate it outside CLI-owned local
+  // development, even if a caller forgot to parse release config first.
+  if (env?.EDGEBASE_RUNTIME_MODE !== 'local-development') return undefined;
   const sidecarPort = typeof env?.EDGEBASE_DEV_SIDECAR_PORT === 'string'
     ? env.EDGEBASE_DEV_SIDECAR_PORT
     : undefined;

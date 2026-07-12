@@ -518,6 +518,11 @@ export interface AuthConfig {
       enabled: boolean;
       /** Base cookie name. Secure requests add the `__Host-` prefix. */
       name?: string;
+      /**
+       * Previous base names to expire during a rename. These cookies are never
+       * read or migrated; successful issue/clear responses only delete them.
+       */
+      legacyNames?: string[];
       /** Refresh cookie SameSite policy. Default: 'strict'. */
       sameSite?: 'strict' | 'lax' | 'none';
     };
@@ -1914,6 +1919,12 @@ export interface FunctionDefinition {
   trigger: FunctionTrigger;
   captcha?: boolean;
   /**
+   * Maximum HTTP request-body bytes this function may consume. Defaults to
+   * 1 MiB for HTTP functions. Use Storage for large files; raise this only
+   * for a route with a deliberately bounded parser.
+   */
+  maxRequestBodyBytes?: number;
+  /**
    * Delegate the Authorization Bearer token entirely to this HTTP function.
    *
    * When enabled, EdgeBase does not parse the Bearer token as a user access
@@ -2239,6 +2250,36 @@ export function defineConfig(config: EdgeBaseConfig): EdgeBaseConfig {
         throw new Error(
           'auth.session.cookie.name must be a 1-64 character cookie-safe base name without a reserved prefix or the reserved admin cookie name.',
         );
+      }
+    }
+    if (authCookie.legacyNames !== undefined) {
+      if (!Array.isArray(authCookie.legacyNames) || authCookie.legacyNames.length > 16) {
+        throw new Error(
+          'auth.session.cookie.legacyNames must be an array of at most 16 cookie-safe base names.',
+        );
+      }
+      const names = new Set<string>();
+      for (const name of authCookie.legacyNames) {
+        if (
+          typeof name !== 'string'
+          || name.length === 0
+          || name.length > 64
+          || !/^[A-Za-z0-9._-]+$/.test(name)
+          || name.startsWith('__Secure-')
+          || name.startsWith('__Host-')
+          || name === 'edgebase-admin-refresh'
+        ) {
+          throw new Error(
+            'auth.session.cookie.legacyNames must contain only 1-64 character cookie-safe base names without a reserved prefix or the reserved admin cookie name.',
+          );
+        }
+        if (name === (authCookie.name ?? 'edgebase-refresh')) {
+          throw new Error('auth.session.cookie.legacyNames must not contain the current cookie name.');
+        }
+        if (names.has(name)) {
+          throw new Error('auth.session.cookie.legacyNames must not contain duplicates.');
+        }
+        names.add(name);
       }
     }
     if (

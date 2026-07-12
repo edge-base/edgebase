@@ -5,6 +5,7 @@ import { setConfig } from '../lib/do-router.js';
 import {
   clearFunctionRegistry,
   clearMiddlewareRegistry,
+  DEFAULT_HTTP_FUNCTION_BODY_LIMIT_BYTES,
   rebuildCompiledRoutes,
   registerFunction,
   registerMiddleware,
@@ -146,6 +147,20 @@ describe('function registry wrapping', () => {
     expect(wrapped.customBearerAuth).toBe(true);
     expect(wrapped.trigger).toMatchObject({ type: 'http', method: 'POST' });
   });
+
+  it('preserves request body limits on method exports and rejects invalid limits at registration', () => {
+    const wrapped = wrapMethodExport({
+      trigger: { type: 'http' },
+      maxRequestBodyBytes: 4096,
+      handler: async () => ({ ok: true }),
+    }, 'POST');
+
+    expect(wrapped.maxRequestBodyBytes).toBe(4096);
+    expect(() => registerFunction('invalid-limit', {
+      ...httpFunction('POST', async () => ({ ok: true })),
+      maxRequestBodyBytes: Number.POSITIVE_INFINITY,
+    })).toThrow(/maxRequestBodyBytes must be a safe integer/);
+  });
 });
 
 describe('functionsRoute custom Bearer authentication', () => {
@@ -282,6 +297,128 @@ describe('functionsRoute FunctionError compatibility', () => {
 });
 
 describe('functionsRoute HTTP contracts', () => {
+  it('rejects a declared oversized body before the function executes', async () => {
+    const handler = vi.fn(async () => ({ shouldNotRun: true }));
+    registerFunction('bounded-default', httpFunction('POST', handler));
+    rebuildCompiledRoutes();
+
+    const response = await createApp().fetch(
+      new Request('http://localhost/api/functions/bounded-default', {
+        method: 'POST',
+        headers: {
+          'Content-Length': String(DEFAULT_HTTP_FUNCTION_BODY_LIMIT_BYTES + 1),
+          'Content-Type': 'application/json',
+        },
+        body: '{}',
+      }),
+      createEnv(),
+      createExecutionContext(),
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      code: 'payload-too-large',
+      message: `Function request body exceeds the configured limit of ${DEFAULT_HTTP_FUNCTION_BODY_LIMIT_BYTES} bytes.`,
+      status: 413,
+      details: { maxBytes: DEFAULT_HTTP_FUNCTION_BODY_LIMIT_BYTES },
+    });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('rejects the actual streamed byte count before user code can catch or mutate', async () => {
+    const committed: string[] = [];
+    const handler = vi.fn(async (ctx: Record<string, any>) => {
+      await (ctx.request as Request).text().catch(() => 'caught');
+      committed.push('must-not-commit');
+      return { caught: true };
+    });
+    registerFunction('bounded-stream', {
+      ...httpFunction('POST', handler),
+      maxRequestBodyBytes: 8,
+    });
+    rebuildCompiledRoutes();
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('12345'));
+        controller.enqueue(encoder.encode('67890'));
+        controller.close();
+      },
+    });
+
+    const response = await createApp().fetch(
+      new Request(
+        'http://localhost/api/functions/bounded-stream',
+        { method: 'POST', body, duplex: 'half' } as RequestInit & { duplex: 'half' },
+      ),
+      createEnv(),
+      createExecutionContext(),
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'payload-too-large',
+      status: 413,
+      details: { maxBytes: 8 },
+    });
+    expect(handler).not.toHaveBeenCalled();
+    expect(committed).toEqual([]);
+  });
+
+  it('accepts an exact-size body under a per-function override without changing it', async () => {
+    registerFunction('bounded-exact', {
+      ...httpFunction('POST', async (ctx) => ({
+        body: await (ctx.request as Request).text(),
+      })),
+      maxRequestBodyBytes: 8,
+    });
+    rebuildCompiledRoutes();
+
+    const response = await createApp().fetch(
+      new Request('http://localhost/api/functions/bounded-exact', {
+        method: 'POST',
+        body: '12345678',
+      }),
+      createEnv(),
+      createExecutionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ body: '12345678' });
+  });
+
+  it('coalesces many tiny stream chunks without changing the accepted body', async () => {
+    const chunkCount = 4_096;
+    registerFunction('bounded-tiny-chunks', {
+      ...httpFunction('POST', async (ctx) => ({
+        body: await (ctx.request as Request).text(),
+      })),
+      maxRequestBodyBytes: chunkCount,
+    });
+    rebuildCompiledRoutes();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let index = 0; index < chunkCount; index += 1) {
+          controller.enqueue(Uint8Array.of(97));
+        }
+        controller.close();
+      },
+    });
+
+    const response = await createApp().fetch(
+      new Request('http://localhost/api/functions/bounded-tiny-chunks', {
+        method: 'POST',
+        body,
+        duplex: 'half',
+      } as RequestInit & { duplex: 'half' }),
+      createEnv(),
+      createExecutionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ body: 'a'.repeat(chunkCount) });
+  });
+
   it('forwards CAPTCHA rejection responses and never executes a protected function', async () => {
     const handler = vi.fn(async () => ({ shouldNotRun: true }));
     setConfig({
@@ -360,6 +497,44 @@ describe('functionsRoute HTTP contracts', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ body: { value: 'preserved' } });
     expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it('applies a protected function body limit before CAPTCHA parsing or the handler', async () => {
+    const handler = vi.fn(async () => ({ shouldNotRun: true }));
+    setConfig({
+      release: true,
+      captcha: {
+        siteKey: 'synthetic-site-key',
+        secretKey: 'synthetic-secret-key',
+        hostnames: ['localhost'],
+      },
+    });
+    registerFunction('protected-bounded', {
+      ...httpFunction('POST', handler),
+      captcha: true,
+      maxRequestBodyBytes: 8,
+    });
+    rebuildCompiledRoutes();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('123456789'));
+        controller.close();
+      },
+    });
+
+    const response = await createApp().fetch(
+      new Request('http://localhost/api/functions/protected-bounded', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        duplex: 'half',
+      } as RequestInit & { duplex: 'half' }),
+      createEnv({ TURNSTILE_SECRET: 'synthetic-secret-key' }),
+      createExecutionContext(),
+    );
+
+    expect(response.status).toBe(413);
+    expect(handler).not.toHaveBeenCalled();
   });
 
   it('serializes plain objects as JSON responses', async () => {

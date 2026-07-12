@@ -1,7 +1,7 @@
 /**
  * Auto-generated client wrapper methods — DO NOT EDIT.
  * Regenerate: npx tsx tools/sdk-codegen/generate.ts
- * Source: wrapper-config.json + openapi.json (0.4.1)
+ * Source: wrapper-config.json + openapi.json (0.4.2)
  *
  * These classes provide user-friendly method names that delegate
  * to GeneratedDbApi core methods. Extend or compose in hand-written

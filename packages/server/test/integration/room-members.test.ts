@@ -67,6 +67,47 @@ function waitForFrame(
   });
 }
 
+function waitForKicked(ws: WebSocket, timeout = 1500): Promise<{ type: 'kicked'; code?: number }> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.removeEventListener('message', onMessage);
+      ws.removeEventListener('close', onClose);
+      ws.removeEventListener('error', onError);
+    };
+    const onMessage = (event: MessageEvent) => {
+      try {
+        const msg = JSON.parse(event.data as string);
+        if (msg.type === 'kicked') {
+          cleanup();
+          resolve(msg);
+        }
+      } catch {
+        // Ignore invalid frames.
+      }
+    };
+    const onClose = (event: CloseEvent) => {
+      cleanup();
+      if (event.code === 4004) {
+        resolve({ type: 'kicked', code: event.code });
+      } else {
+        reject(new Error(`WS closed with code ${event.code}`));
+      }
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error('WS error'));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('Timeout waiting for kicked signal'));
+    }, timeout);
+    ws.addEventListener('message', onMessage);
+    ws.addEventListener('close', onClose);
+    ws.addEventListener('error', onError);
+  });
+}
+
 function collectFrames(
   ws: WebSocket,
   predicate: (msg: any) => boolean,
@@ -357,11 +398,26 @@ describe('Rooms runtime — members', () => {
     const host = await connectToRoom('test-members', roomId);
     const target = await connectToRoom('test-members', roomId);
 
-    const kickedPromise = waitForFrame(target.ws, (msg) => msg.type === 'kicked', 1500);
+    // The wire contract is redundant by design: SDKs treat either the final
+    // JSON frame or the authoritative 4004 close code as the same kicked
+    // signal. The Workers test runtime may surface the close event first.
+    const kickedPromise = waitForKicked(target.ws)
+      .catch((error: unknown) => {
+        throw new Error(`target kicked signal: ${error instanceof Error ? error.message : String(error)}`);
+      });
     const leavePromise = waitForFrame(
       host.ws,
       (msg) => msg.type === 'member_leave' && msg.member.memberId === target.userId,
       1500,
+    ).catch((error: unknown) => {
+      throw new Error(`host member_leave frame: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    const finalSyncPromise = waitForFrame(
+      host.ws,
+      (msg) =>
+        msg.type === 'members_sync' &&
+        !msg.members.some((member: any) => member.memberId === target.userId),
+      1000,
     );
 
     host.ws.send(JSON.stringify({
@@ -371,7 +427,10 @@ describe('Rooms runtime — members', () => {
       requestId: 'kick-member',
     }));
 
-    const actionResult = await waitForFrame(host.ws, (msg) => msg.type === 'action_result');
+    const actionResult = await waitForFrame(host.ws, (msg) => msg.type === 'action_result')
+      .catch((error: unknown) => {
+        throw new Error(`host action_result frame: ${error instanceof Error ? error.message : String(error)}`);
+      });
     const kicked = await kickedPromise;
     const leaveEvent = await leavePromise;
 
@@ -379,13 +438,7 @@ describe('Rooms runtime — members', () => {
     expect(kicked.type).toBe('kicked');
     expect(leaveEvent.reason).toBe('kicked');
 
-    const finalSync = await waitForFrame(
-      host.ws,
-      (msg) =>
-        msg.type === 'members_sync' &&
-        !msg.members.some((member: any) => member.memberId === target.userId),
-      1000,
-    );
+    const finalSync = await finalSyncPromise;
     expect(finalSync.members).toHaveLength(1);
 
     host.ws.close();

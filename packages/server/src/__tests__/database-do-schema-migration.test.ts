@@ -43,12 +43,12 @@ function createSQLiteCtx(db: DatabaseSync, executedSQL: string[]) {
   } as unknown as DurableObjectState;
 }
 
-function createEnv(config: unknown) {
+function createEnv(config?: unknown) {
   return {
     DATABASE_LIVE: {} as DurableObjectNamespace,
     DATABASE: {} as DurableObjectNamespace,
     AUTH: {} as DurableObjectNamespace,
-    EDGEBASE_CONFIG: config,
+    ...(config === undefined ? {} : { EDGEBASE_CONFIG: config }),
   };
 }
 
@@ -95,7 +95,7 @@ describe('DatabaseDO existing-table schema migration', () => {
       setConfig(config);
 
       const { DatabaseDO } = await import('../durable-objects/database-do.js');
-      const databaseDo = new DatabaseDO(createSQLiteCtx(db, executedSQL), createEnv(config) as never);
+      const databaseDo = new DatabaseDO(createSQLiteCtx(db, executedSQL), createEnv() as never);
       const response = await databaseDo.fetch(new Request('http://do/not-a-route', {
         headers: {
           'X-DO-Name': 'workspace:existing-workspace',

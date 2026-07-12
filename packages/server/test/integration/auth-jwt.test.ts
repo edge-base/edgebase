@@ -462,11 +462,12 @@ describe('1-09 jwt — verifyRefreshTokenWithFallback 추가', () => {
     ).rejects.toBeDefined();
   });
 
-  it('oldAt 미래 날짜 → grace 기간 내로 처리 (정상 폴백)', async () => {
+  it('oldAt 미래 날짜 → 잘못된 키 회전 메타데이터로 거부', async () => {
     const token = await signRefreshToken({ sub: 'u-future-oldat', type: 'refresh' }, OLD_SECRET);
     const oldAt = new Date(Date.now() + 1000 * 60 * 60).toISOString(); // 1 hour in future
-    const p = await verifyRefreshTokenWithFallback(token, USER_SECRET, OLD_SECRET, oldAt);
-    expect(p.sub).toBe('u-future-oldat');
+    await expect(
+      verifyRefreshTokenWithFallback(token, USER_SECRET, OLD_SECRET, oldAt)
+    ).rejects.toBeInstanceOf(TokenInvalidError);
   });
 });
 

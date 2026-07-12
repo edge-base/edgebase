@@ -638,8 +638,8 @@ export default defineConfig({
             reconnectTimeout: 250,
             state: {
                 actions: {
-                    KICK_MEMBER: (payload, room) => {
-                        room.kick(payload.memberId);
+                    KICK_MEMBER: async (payload, room) => {
+                        await room.kick(payload.memberId);
                         return { ok: true };
                     },
                     SET_TOPIC: (payload, room) => {

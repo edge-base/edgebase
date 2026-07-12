@@ -1,11 +1,12 @@
 import { Command } from 'commander';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import chalk from 'chalk';
 import { ensureCloudflareAuth, ensureWranglerToml, resolveApiToken } from '../lib/cf-auth.js';
 import {
+  assertCloudflareAccountContinuity,
   getCloudflareDeployManifestPath,
   readCloudflareDeployManifest,
   type CloudflareDeployManifest,
@@ -19,7 +20,7 @@ import {
   buildLegacyManagedD1DatabaseName,
   buildManagedD1DatabaseName,
 } from '../lib/managed-resource-names.js';
-import { resolveProjectWorkerName, resolveProjectWorkerUrl } from '../lib/project-runtime.js';
+import { resolveProjectWorkerName } from '../lib/project-runtime.js';
 import { resolveOptionalServiceKey } from '../lib/resolve-options.js';
 import { wranglerArgs, wranglerCommand } from '../lib/wrangler.js';
 
@@ -31,31 +32,51 @@ interface DestroyResult {
 
 interface DestroyOptions {
   dryRun?: boolean;
+  allowUntrackedResources?: boolean;
+  allowWorkerUrlOverride?: boolean;
+  accountId?: string;
   serviceKey?: string;
   url?: string;
   yes?: boolean;
 }
 
 function resolveWorkerNameFromProject(projectDir: string): string {
-  return resolveProjectWorkerName(projectDir);
+  const workerName = resolveProjectWorkerName(projectDir);
+  if (workerName) assertSafeWranglerIdentifier(workerName, 'Worker name');
+  return workerName;
 }
 
-function resolveWorkerUrlFromProject(projectDir: string): string {
-  return resolveProjectWorkerUrl(projectDir);
+function assertSafeWranglerIdentifier(value: string, label: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)) {
+    throw new Error(`${label} in wrangler.toml contains an unsafe Cloudflare identifier.`);
+  }
+  return value;
 }
 
-function resourceKey(resource: Pick<CloudflareResourceRecord, 'type' | 'name' | 'binding' | 'id'>): string {
-  return [resource.type, resource.id ?? '', resource.binding ?? '', resource.name].join(':');
+function assertSafeWranglerBinding(value: string, label: string): string {
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(value)) {
+    throw new Error(`${label} in wrangler.toml contains an unsafe binding name.`);
+  }
+  return value;
+}
+
+function resourceKey(resource: Pick<CloudflareResourceRecord, 'type' | 'name' | 'binding'>): string {
+  return [resource.type, resource.binding ? `binding:${resource.binding}` : `name:${resource.name}`].join(':');
 }
 
 function mergeDestroyResources(
   manifest: CloudflareDeployManifest | null,
   wranglerContent: string | null,
+  allowUntrackedResources = false,
 ): CloudflareResourceRecord[] {
   const merged = new Map<string, CloudflareResourceRecord>();
 
   for (const resource of manifest?.resources ?? []) {
-    merged.set(resourceKey(resource), resource);
+    const legacyOwnershipUnverified = resource.metadata?.legacyOwnershipUnverified === true;
+    merged.set(resourceKey(resource), {
+      ...resource,
+      ...(allowUntrackedResources && legacyOwnershipUnverified ? { managed: true } : {}),
+    });
   }
 
   if (wranglerContent) {
@@ -65,21 +86,34 @@ function mergeDestroyResources(
         type: 'r2_bucket',
         name: bucket.bucketName,
         binding: bucket.binding,
-        id: bucket.bucketName,
       });
       const existing = merged.get(key);
-      merged.set(key, {
-        type: 'r2_bucket',
-        name: bucket.bucketName,
-        binding: bucket.binding,
-        id: bucket.bucketName,
-        managed: existing?.managed ?? true,
-        source: existing?.source ?? 'wrangler',
-        metadata: {
-          ...(existing?.metadata ?? {}),
-          ...(bucket.jurisdiction ? { jurisdiction: bucket.jurisdiction } : {}),
-        },
-      });
+      if (!existing && !allowUntrackedResources) continue;
+      assertSafeWranglerBinding(bucket.binding, 'R2 binding');
+      assertSafeWranglerIdentifier(bucket.bucketName, 'R2 bucket name');
+      if (bucket.jurisdiction) {
+        assertSafeWranglerIdentifier(bucket.jurisdiction, 'R2 jurisdiction');
+      }
+      if (existing && existing.name === bucket.bucketName) {
+        merged.set(key, {
+          ...existing,
+          id: existing.id ?? bucket.bucketName,
+          metadata: {
+            ...(existing.metadata ?? {}),
+            ...(bucket.jurisdiction ? { jurisdiction: bucket.jurisdiction } : {}),
+          },
+        });
+      } else if (allowUntrackedResources && !existing) {
+        merged.set(key, {
+          type: 'r2_bucket',
+          name: bucket.bucketName,
+          binding: bucket.binding,
+          id: bucket.bucketName,
+          managed: true,
+          source: 'wrangler',
+          metadata: bucket.jurisdiction ? { jurisdiction: bucket.jurisdiction } : undefined,
+        });
+      }
     }
 
     const existingBindings = new Set(
@@ -87,13 +121,14 @@ function mergeDestroyResources(
     );
 
     for (const db of wranglerConfig.d1Databases) {
-      if (existingBindings.has(`d1_database:${db.binding}`)) continue;
-      const normalizedId = normalizeWranglerResourceId(db.databaseId);
+      if (existingBindings.has(`d1_database:${db.binding}`) || !allowUntrackedResources) continue;
+      assertSafeWranglerBinding(db.binding, 'D1 binding');
+      assertSafeWranglerIdentifier(db.databaseName, 'D1 database name');
+      const normalizedId = normalizeWranglerResourceId(db.databaseId, 'D1 database id');
       const key = resourceKey({
         type: 'd1_database',
         name: deriveWranglerD1ResourceName(db.binding, db.databaseName),
         binding: db.binding,
-        id: normalizedId,
       });
       if (!merged.has(key)) {
         merged.set(key, {
@@ -108,13 +143,13 @@ function mergeDestroyResources(
     }
 
     for (const kv of wranglerConfig.kvNamespaces) {
-      if (existingBindings.has(`kv_namespace:${kv.binding}`)) continue;
-      const normalizedId = normalizeWranglerResourceId(kv.id);
+      if (existingBindings.has(`kv_namespace:${kv.binding}`) || !allowUntrackedResources) continue;
+      assertSafeWranglerBinding(kv.binding, 'KV binding');
+      const normalizedId = normalizeWranglerResourceId(kv.id, 'KV namespace id');
       const key = resourceKey({
         type: 'kv_namespace',
         name: deriveWranglerKvName(kv.binding),
         binding: kv.binding,
-        id: normalizedId,
       });
       if (!merged.has(key)) {
         merged.set(key, {
@@ -129,12 +164,13 @@ function mergeDestroyResources(
     }
 
     for (const vec of wranglerConfig.vectorizeIndexes) {
-      if (existingBindings.has(`vectorize:${vec.binding}`)) continue;
+      if (existingBindings.has(`vectorize:${vec.binding}`) || !allowUntrackedResources) continue;
+      assertSafeWranglerBinding(vec.binding, 'Vectorize binding');
+      assertSafeWranglerIdentifier(vec.indexName, 'Vectorize index name');
       const key = resourceKey({
         type: 'vectorize',
         name: vec.indexName,
         binding: vec.binding,
-        id: vec.indexName,
       });
       if (!merged.has(key)) {
         merged.set(key, {
@@ -149,12 +185,13 @@ function mergeDestroyResources(
     }
 
     for (const hd of wranglerConfig.hyperdriveConfigs) {
-      if (existingBindings.has(`hyperdrive:${hd.binding}`)) continue;
+      if (existingBindings.has(`hyperdrive:${hd.binding}`) || !allowUntrackedResources) continue;
+      assertSafeWranglerBinding(hd.binding, 'Hyperdrive binding');
+      assertSafeWranglerIdentifier(hd.id, 'Hyperdrive id');
       const key = resourceKey({
         type: 'hyperdrive',
         name: hd.binding,
         binding: hd.binding,
-        id: hd.id,
       });
       if (!merged.has(key)) {
         merged.set(key, {
@@ -196,8 +233,109 @@ function isPlaceholderCloudflareId(value: string | undefined): boolean {
   return /^(local|placeholder)$/i.test(value) || /^YOUR_[A-Z0-9_]+$/i.test(value);
 }
 
-function normalizeWranglerResourceId(value: string | undefined): string | undefined {
-  return value && !isPlaceholderCloudflareId(value) ? value : undefined;
+function isCloudflareAccountId(value: string | undefined): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{32}$/i.test(value.trim());
+}
+
+function resolveUntrackedDestroyAccountId(
+  explicitAccountId: string | undefined,
+  wranglerAccountId: string | undefined,
+): string | undefined {
+  const explicit = explicitAccountId?.trim();
+  const wrangler = wranglerAccountId?.trim();
+  if (explicit && !isCloudflareAccountId(explicit)) {
+    throw new Error('--account-id must be an exact 32-hex Cloudflare account id.');
+  }
+  const trustedWranglerAccountId = isCloudflareAccountId(wrangler)
+    ? wrangler
+    : undefined;
+  if (
+    explicit
+    && trustedWranglerAccountId
+    && explicit.toLowerCase() !== trustedWranglerAccountId.toLowerCase()
+  ) {
+    throw new Error('--account-id does not match the account_id recorded in wrangler.toml.');
+  }
+  return explicit || trustedWranglerAccountId;
+}
+
+function assertDestroyManifestAuthority(
+  manifest: CloudflareDeployManifest | null,
+  allowUntrackedResources: boolean,
+  manifestPath: string,
+): void {
+  if (manifest || allowUntrackedResources) return;
+  raiseNeedsInput({
+    code: 'destroy_manifest_required',
+    field: 'allowUntrackedResources',
+    message: 'Destroy requires a trusted Cloudflare deploy manifest.',
+    hint: `Restore ${manifestPath}, or inspect wrangler.toml and explicitly acknowledge legacy recovery with --allow-untracked-resources.`,
+    choices: [{
+      label: 'Acknowledge untracked cleanup',
+      value: 'allow-untracked-resources',
+      args: ['--allow-untracked-resources'],
+      hint: 'Deletes resources inferred from wrangler.toml without manifest ownership proof.',
+    }],
+  });
+}
+
+function normalizeDestroyWorkerUrl(value: string, label: string): string {
+  try {
+    const parsed = new URL(value);
+    if (
+      parsed.protocol !== 'https:'
+      || parsed.username
+      || parsed.password
+      || parsed.pathname !== '/'
+      || parsed.search
+      || parsed.hash
+    ) throw new Error('invalid');
+    return parsed.origin;
+  } catch {
+    throw new Error(`${label} must be an exact HTTPS origin without credentials, path, query, or fragment.`);
+  }
+}
+
+function resolveDestroyWorkerUrl(
+  manifest: CloudflareDeployManifest | null,
+  options: Pick<DestroyOptions, 'url' | 'allowWorkerUrlOverride'>,
+): string {
+  const manifestWorkerUrl = manifest?.worker.url ?? '';
+  const explicitWorkerUrl = options.url
+    ? normalizeDestroyWorkerUrl(options.url, '--url')
+    : '';
+  if (
+    manifestWorkerUrl
+    && explicitWorkerUrl
+    && explicitWorkerUrl !== manifestWorkerUrl
+    && options.allowWorkerUrlOverride !== true
+  ) {
+    throw new Error(
+      'The requested Worker URL does not match the deploy manifest. Remove --url, or use '
+      + '--allow-worker-url-override only after independently verifying the target Worker.',
+    );
+  }
+  if (
+    !manifestWorkerUrl
+    && explicitWorkerUrl
+    && options.allowWorkerUrlOverride !== true
+  ) {
+    throw new Error(
+      'The deploy manifest has no proven Worker URL. Rerun with '
+      + '--allow-worker-url-override only after independently verifying --url.',
+    );
+  }
+  return explicitWorkerUrl && options.allowWorkerUrlOverride === true
+    ? explicitWorkerUrl
+    : manifestWorkerUrl;
+}
+
+function normalizeWranglerResourceId(
+  value: string | undefined,
+  label: string,
+): string | undefined {
+  if (!value || isPlaceholderCloudflareId(value)) return undefined;
+  return assertSafeWranglerIdentifier(value, label);
 }
 
 function deriveWranglerD1ResourceName(binding: string, databaseName: string): string {
@@ -365,7 +503,7 @@ async function deleteTurnstileWidget(
   }
 
   const response = await fetchWithTimeout(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/challenges/widgets/${siteKey}`,
+    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/challenges/widgets/${encodeURIComponent(siteKey)}`,
     {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${apiToken}` },
@@ -383,7 +521,7 @@ async function deleteD1Database(
   databaseId: string,
 ): Promise<void> {
   const response = await fetchWithTimeout(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}`,
+    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/d1/database/${encodeURIComponent(databaseId)}`,
     {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${apiToken}` },
@@ -485,6 +623,12 @@ function isManagedResource(resource: CloudflareResourceRecord): boolean {
 }
 
 export const _internals = {
+  assertDestroyManifestAuthority,
+  assertCloudflareAccountContinuity,
+  deleteD1Database,
+  deleteTurnstileWidget,
+  resolveUntrackedDestroyAccountId,
+  resolveDestroyWorkerUrl,
   mergeDestroyResources,
   isAlreadyDeletedError,
   isR2BucketNotEmptyError,
@@ -492,11 +636,19 @@ export const _internals = {
 
 function resolveProjectDir(): string {
   const cwd = resolve('.');
-  if (existsSync(getCloudflareDeployManifestPath(cwd)) || existsSync(join(cwd, 'wrangler.toml'))) {
+  const pathEntryExists = (path: string) => {
+    try {
+      lstatSync(path);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code !== 'ENOENT';
+    }
+  };
+  if (pathEntryExists(getCloudflareDeployManifestPath(cwd)) || existsSync(join(cwd, 'wrangler.toml'))) {
     return cwd;
   }
   const edgebaseSubdir = join(cwd, 'edgebase');
-  if (existsSync(getCloudflareDeployManifestPath(edgebaseSubdir)) || existsSync(join(edgebaseSubdir, 'wrangler.toml'))) {
+  if (pathEntryExists(getCloudflareDeployManifestPath(edgebaseSubdir)) || existsSync(join(edgebaseSubdir, 'wrangler.toml'))) {
     return edgebaseSubdir;
   }
   return cwd;
@@ -505,6 +657,15 @@ function resolveProjectDir(): string {
 export const destroyCommand = new Command('destroy')
   .description('Destroy project-scoped Cloudflare resources for this project')
   .option('--dry-run', 'Show the deletion plan without removing resources')
+  .option(
+    '--allow-untracked-resources',
+    'Acknowledge destructive cleanup inferred only from wrangler.toml (legacy recovery)',
+  )
+  .option(
+    '--allow-worker-url-override',
+    'Acknowledge an explicit --url used instead of manifest Worker URL authority',
+  )
+  .option('--account-id <id>', 'Exact 32-hex Cloudflare account id for untracked recovery')
   .option('--service-key <key>', 'Service Key used to wipe the managed STORAGE bucket')
   .option('--url <url>', 'Worker URL used to wipe the managed STORAGE bucket')
   .option('-y, --yes', 'Skip confirmation prompt')
@@ -514,18 +675,44 @@ export const destroyCommand = new Command('destroy')
     const manifestPath = getCloudflareDeployManifestPath(projectDir);
     const manifest = readCloudflareDeployManifest(projectDir);
     const wranglerContent = existsSync(wranglerPath) ? readFileSync(wranglerPath, 'utf-8') : null;
-    const resources = mergeDestroyResources(manifest, wranglerContent).filter(isManagedResource);
-    const workerName = manifest?.worker.name || resolveWorkerNameFromProject(projectDir);
-    const workerUrl = (
-      options.url
-      || process.env.EDGEBASE_URL
-      || manifest?.worker.url
-      || resolveWorkerUrlFromProject(projectDir)
-    ).replace(/\/$/, '');
+    const allowUntrackedResources = options.allowUntrackedResources === true;
+    assertDestroyManifestAuthority(manifest, allowUntrackedResources, manifestPath);
+    const wranglerAccountId = wranglerContent
+      ? parseWranglerResourceConfig(wranglerContent).accountId?.trim()
+      : undefined;
+    const explicitAccountId = options.accountId?.trim();
+    let recoveryAccountId: string | undefined;
+    if (!manifest && allowUntrackedResources) {
+      recoveryAccountId = resolveUntrackedDestroyAccountId(explicitAccountId, wranglerAccountId);
+      if (!recoveryAccountId) {
+        raiseNeedsInput({
+          code: 'destroy_account_proof_required',
+          field: 'accountId',
+          message: 'Untracked destroy requires an exact Cloudflare account id.',
+          hint: 'Restore the deploy manifest, add a non-placeholder account_id to wrangler.toml, or pass --account-id <32-hex-id>.',
+          choices: [{
+            label: 'Provide account id',
+            value: 'account-id',
+            args: ['--account-id', '<32-hex-id>'],
+            hint: 'The value must match the authenticated Cloudflare account.',
+          }],
+        });
+      }
+    }
+    const resources = mergeDestroyResources(
+      manifest,
+      wranglerContent,
+      allowUntrackedResources,
+    ).filter(isManagedResource);
+    const workerName = manifest?.worker.name
+      || (allowUntrackedResources ? resolveWorkerNameFromProject(projectDir) : '');
+    const workerUrl = resolveDestroyWorkerUrl(manifest, options);
     const isTTY = !!process.stdin.isTTY;
 
     if (!workerName && resources.length === 0) {
-      const message = `No Cloudflare resources found for this project. (${manifestPath})`;
+      const message = manifest
+        ? `No managed Cloudflare resources found for this project. (${manifestPath})`
+        : `No trusted deploy manifest found for destructive cleanup. Restore ${manifestPath} or rerun only after review with --allow-untracked-resources.`;
       if (isJson()) {
         console.log(JSON.stringify({ status: 'noop', message }));
       } else {
@@ -569,6 +756,16 @@ export const destroyCommand = new Command('destroy')
 
     const cfAuth = options.dryRun ? null : await ensureCloudflareAuth(projectDir, isTTY);
     if (!options.dryRun && cfAuth?.accountId) {
+      if (manifest) {
+        assertCloudflareAccountContinuity(manifest, cfAuth.accountId, false, 'destroy');
+      } else {
+        if (!recoveryAccountId) throw new Error('Untracked destroy account proof was lost.');
+        if (recoveryAccountId.toLowerCase() !== cfAuth.accountId.toLowerCase()) {
+          throw new Error(
+            `Authenticated Cloudflare account '${cfAuth.accountId}' does not match the explicitly proven recovery account '${recoveryAccountId}'.`,
+          );
+        }
+      }
       ensureWranglerToml(projectDir, cfAuth.accountId);
     }
     const accountId = !isPlaceholderCloudflareId(manifest?.accountId)
@@ -583,7 +780,10 @@ export const destroyCommand = new Command('destroy')
             return process.env.CLOUDFLARE_API_TOKEN;
           }
         })();
-    const serviceKey = resolveOptionalServiceKey({ serviceKey: options.serviceKey });
+    const serviceKey = resolveOptionalServiceKey({
+      serviceKey: options.serviceKey,
+      projectDir,
+    });
     const result: DestroyResult = { deleted: [], skipped: [], failures: [] };
 
     const turnstileResources = resources.filter((resource) => resource.type === 'turnstile_widget');
@@ -642,7 +842,8 @@ export const destroyCommand = new Command('destroy')
           }
           if (resource.binding === 'STORAGE' && (!workerUrl || !serviceKey)) {
             throw new Error(
-              `${extractExecErrorMessage(error)}. Set --url/EDGEBASE_URL and --service-key/EDGEBASE_SERVICE_KEY if the bucket is not empty.`,
+              `${extractExecErrorMessage(error)}. Set --url with --allow-worker-url-override and `
+              + '--service-key/EDGEBASE_SERVICE_KEY if the bucket is not empty.',
             );
           }
           throw error;

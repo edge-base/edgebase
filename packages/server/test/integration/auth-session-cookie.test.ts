@@ -9,8 +9,13 @@ function randomEmail(prefix: string): string {
 }
 
 function responseCookie(response: Response): string {
-  const setCookie = response.headers.get('Set-Cookie') ?? '';
-  return setCookie.split(';', 1)[0] ?? '';
+  const setCookies = (response.headers as Headers & { getSetCookie?: () => string[] })
+    .getSetCookie?.() ?? [response.headers.get('Set-Cookie') ?? ''];
+  for (const setCookie of setCookies) {
+    const match = setCookie.match(/(?:^|,\s*)edgebase-test-refresh=([^;,]*)/);
+    if (match) return `edgebase-test-refresh=${match[1]}`;
+  }
+  return '';
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> {
@@ -24,8 +29,12 @@ async function request(
   path: string,
   init: RequestInit = {},
 ): Promise<{ response: Response; body: Record<string, unknown> }> {
+  const headers = new Headers(init.headers);
+  if (!headers.has('CF-Connecting-IP')) {
+    headers.set('CF-Connecting-IP', '127.0.0.1');
+  }
   const response = await (globalThis as { SELF: { fetch(input: string, init?: RequestInit): Promise<Response> } })
-    .SELF.fetch(`${BASE}/api/auth${path}`, init);
+    .SELF.fetch(`${BASE}/api/auth${path}`, { ...init, headers });
   const body = await response.json().catch(() => ({})) as Record<string, unknown>;
   return { response, body };
 }
@@ -233,7 +242,7 @@ describe('user refresh HttpOnly cookie transport', () => {
     });
 
     expect(denied.response.status).toBe(403);
-    expect(denied.response.headers.get('Set-Cookie')).toBeNull();
+    expect(responseCookie(denied.response)).toBe('');
 
     const stillValid = await request('/refresh', {
       method: 'POST',
@@ -272,7 +281,7 @@ describe('user refresh HttpOnly cookie transport', () => {
       },
     });
     expect(failed.response.status).toBe(500);
-    expect(failed.response.headers.get('Set-Cookie')).toBeNull();
+    expect(responseCookie(failed.response)).toBe('');
 
     const retried = await request('/signout', {
       method: 'POST',

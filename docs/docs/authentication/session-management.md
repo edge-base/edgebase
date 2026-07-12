@@ -26,12 +26,18 @@ export default defineConfig({
       cookie: {
         enabled: true,             // Opt in; legacy token-body SDKs still work
         name: 'my-app-refresh',    // Base name; useful on localhost
+        legacyNames: [],           // Optional deletion-only names after a rename
         sameSite: 'strict',        // Default: 'strict'
       },
     },
   },
 });
 ```
+
+When renaming a refresh cookie, list its former base names in `legacyNames` for
+one release window. EdgeBase never authenticates with those names; it only
+expires their host-only, secure, and local-development variants whenever the
+current refresh cookie is issued or cleared.
 
 ## Session Limit (maxActiveSessions)
 

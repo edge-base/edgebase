@@ -26,6 +26,8 @@ import {
   buildEmailActionUrl,
   parseClientRedirectInput,
 } from '../lib/auth-redirect.js';
+import { completePrivatePasswordResetRequest } from '../lib/password-reset-privacy.js';
+import { isTrustedEdgeBaseTestBuild } from '../lib/release-runtime-integrity.js';
 import { hashAuthSecret, hashOtpSecret, verifyOtpSecret } from '../lib/auth-token.js';
 import {
   signAccessToken, signRefreshToken, verifyRefreshTokenWithFallback,
@@ -33,7 +35,7 @@ import {
 } from '../lib/jwt.js';
 import { generateId } from '../lib/uuid.js';
 import { captchaMiddleware } from '../middleware/captcha-verify.js';
-import { hashPassword, verifyPassword, needsRehash } from '../lib/password.js';
+import { hashPassword, isPasswordHash, verifyPassword, needsRehash } from '../lib/password.js';
 import { validatePassword } from '../lib/password-policy.js';
 import { createEmailProvider } from '../lib/email-provider.js';
 import type { EmailProvider } from '../lib/email-provider.js';
@@ -126,8 +128,10 @@ function isReleaseMode(env: Env): boolean {
 }
 
 function shouldExposeAuthTestSecrets(env: Env): boolean {
-  return env.EDGEBASE_TEST === '1'
-    || env.EDGEBASE_TEST === 'true';
+  // Never trust the request binding alone. Only the dedicated Worker test
+  // bundle's compile-time boolean may unlock response-only test credentials.
+  return isTrustedEdgeBaseTestBuild()
+    && (env.EDGEBASE_TEST === '1' || env.EDGEBASE_TEST === 'true');
 }
 
 function requireAuth(auth: AuthContext | null): string {
@@ -1557,6 +1561,13 @@ authRoute.openapi(signup, async (c) => {
 
 // ─── Signin (D1 Control Plane) ───
 
+// A syntactically valid native hash used only to spend the same PBKDF2 work
+// for absent, passwordless, or malformed-password accounts. It is not a hash
+// of any accepted credential and is never persisted.
+const SIGNIN_DUMMY_PASSWORD_HASH =
+  'pbkdf2:sha256:100000:BwcHBwcHBwcHBwcHBwcHBw==:CwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCws=';
+const SIGNIN_DUMMY_USER_ID = '00000000-0000-0000-0000-000000000000';
+
 const signin = createRoute({
   operationId: 'authSignin',
   method: 'post',
@@ -1611,32 +1622,34 @@ authRoute.openapi(signin, async (c) => {
 
   // Look up email → userId in D1
   const record = await lookupEmail(getAuthDb(c), body.email);
-  if (!record) {
-    throw new EdgeBaseError(401, 'Invalid credentials.', undefined, 'invalid-credentials');
-  }
-
-  const { userId } = record;
   const ip = getClientIP(c.env, c.req.raw);
   const db = getAuthDb(c);
 
-  // Verify password directly in D1
-  const user = await authService.getUserById(db, userId);
-  if (!user) {
+  // Always perform one recognized password verification. Absent, deleted,
+  // OAuth/passwordless, and malformed-hash records use the same PBKDF2 dummy
+  // and the exact same public 401 response, preventing email enumeration.
+  const lookedUpUser = await authService.getUserById(
+    db,
+    record?.userId ?? SIGNIN_DUMMY_USER_ID,
+  );
+  // Ignore any pathological row at the synthetic ID unless the email index
+  // independently resolved it. This query exists only to equalize D1 work.
+  const user = record ? lookedUpUser : null;
+  const storedPasswordHash = typeof user?.passwordHash === 'string'
+    && isPasswordHash(user.passwordHash)
+    ? user.passwordHash
+    : null;
+  const valid = await verifyPassword(
+    body.password,
+    storedPasswordHash ?? SIGNIN_DUMMY_PASSWORD_HASH,
+  );
+  if (!record || !user || !storedPasswordHash || !valid) {
     throw new EdgeBaseError(401, 'Invalid credentials.', undefined, 'invalid-credentials');
   }
-
-  // OAuth-only user check
-  if (!user.passwordHash) {
-    throw new EdgeBaseError(403, 'This account uses OAuth sign-in. Password login is not available.', undefined, 'oauth-only');
-  }
-
-  const valid = await verifyPassword(body.password, user.passwordHash as string);
-  if (!valid) {
-    throw new EdgeBaseError(401, 'Invalid credentials.', undefined, 'invalid-credentials');
-  }
+  const userId = record.userId;
 
   // Lazy re-hash: if password uses non-native format (e.g. imported bcrypt), upgrade to PBKDF2
-  if (needsRehash(user.passwordHash as string)) {
+  if (needsRehash(storedPasswordHash)) {
     const newHash = await hashPassword(body.password);
     await authService.updateUser(db, userId, { passwordHash: newHash });
   }
@@ -5262,69 +5275,101 @@ authRoute.openapi(requestPasswordReset, async (c) => {
 
   const db = getAuthDb(c);
 
-  // Look up email in D1
-  const record = await lookupEmail(db, body.email);
-
-  if (!record) {
-    // Don't reveal whether email exists -- return ok
-    return c.json({ ok: true, message: 'If the email exists, a reset link has been sent.' });
-  }
-
-  const { userId } = record;
-  const user = await authService.getUserById(db, userId);
-  if (!user || !user.email) {
-    return c.json({ ok: true, message: 'If the email exists, a reset link has been sent.' });
-  }
-
   const token = crypto.randomUUID();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 60 * 60 * 1000); // 1h
-
-  await authService.replaceEmailToken(db, {
-    token,
-    userId,
-    type: 'password-reset',
-    expiresAt: expiresAt.toISOString(),
-  });
-
-  const emailConfig = getEmailConfig(c.env);
-  const fallbackResetUrl = emailConfig?.resetUrl
-    ? emailConfig.resetUrl.replace('{token}', token)
-    : `#reset-password?token=${token}`;
-  const resetUrl = buildEmailActionUrl({
-    redirectUrl: redirect.redirectUrl,
-    fallbackUrl: fallbackResetUrl,
-    token,
-    type: 'password-reset',
-    state: redirect.state,
-  });
-
-  const provider = createEmailProvider(getEmailConfig(c.env), c.env);
-  if (!provider) {
-    if (shouldExposeAuthTestSecrets(c.env) || !isReleaseMode(c.env)) {
-      console.warn('[Auth] Email provider not configured. Reset email not sent. Token:', token);
-      return c.json({ ok: true, message: 'Email provider not configured.', token, actionUrl: resetUrl });
+  const performPasswordResetWork = async (): Promise<{
+    token: string;
+    actionUrl: string;
+    providerConfigured: boolean;
+    result?: { success: boolean; messageId?: string };
+  } | null> => {
+    // Everything that depends on account existence stays beyond the public
+    // response boundary. The absent branch still performs the same token hash
+    // used by persistence, without writing a fake user or producing a log.
+    const record = await lookupEmail(db, body.email);
+    if (!record) {
+      await hashAuthSecret(token);
+      return null;
     }
-    return c.json({ ok: true, message: 'Email provider not configured.' });
+
+    const { userId } = record;
+    const user = await authService.getUserById(db, userId);
+    if (!user || !user.email) {
+      await hashAuthSecret(token);
+      return null;
+    }
+
+    // Persistence must complete before any provider or hook receives the raw
+    // token, so a delivered link is never observable before it is usable.
+    await authService.replaceEmailToken(db, {
+      token,
+      userId,
+      type: 'password-reset',
+      expiresAt: expiresAt.toISOString(),
+    });
+
+    const emailConfig = getEmailConfig(c.env);
+    const fallbackResetUrl = emailConfig?.resetUrl
+      ? emailConfig.resetUrl.replace('{token}', token)
+      : `#reset-password?token=${token}`;
+    const resetUrl = buildEmailActionUrl({
+      redirectUrl: redirect.redirectUrl,
+      fallbackUrl: fallbackResetUrl,
+      token,
+      type: 'password-reset',
+      state: redirect.state,
+    });
+
+    const provider = createEmailProvider(emailConfig, c.env);
+    if (!provider) {
+      return { token, actionUrl: resetUrl, providerConfigured: false };
+    }
+
+    const locale = resolveEmailLocale(
+      c.env,
+      user.locale as string | null,
+      parseAcceptLanguage(c.req.header('accept-language')),
+    );
+    const html = renderPasswordReset({
+      appName: getAppName(c.env),
+      resetUrl,
+      token,
+      expiresInMinutes: 60,
+    }, resolveLocalizedString(getEmailTemplates(c.env)?.passwordReset, locale), locale);
+
+    const defaultSubject = getDefaultSubject(locale, 'passwordReset')
+      .replace(/\{\{appName\}\}/g, getAppName(c.env));
+    const result = await sendMailWithHook(
+      c.env, c.executionCtx, provider, 'passwordReset', user.email as string,
+      resolveSubject(c.env, 'passwordReset', defaultSubject, locale), html, locale,
+    );
+    return { token, actionUrl: resetUrl, providerConfigured: true, result };
+  };
+
+  if (shouldExposeAuthTestSecrets(c.env)) {
+    const outcome = await performPasswordResetWork();
+    if (!outcome) return c.json(completePrivatePasswordResetRequest());
+    if (!outcome.providerConfigured) {
+      return c.json({
+        ok: true,
+        message: 'Email provider not configured.',
+        token: outcome.token,
+        actionUrl: outcome.actionUrl,
+      });
+    }
+    return c.json({
+      ok: outcome.result?.success ?? false,
+      messageId: outcome.result?.messageId,
+      token: outcome.token,
+      actionUrl: outcome.actionUrl,
+    });
   }
 
-  const locale = resolveEmailLocale(c.env, user.locale as string | null, parseAcceptLanguage(c.req.header('accept-language')));
-  const html = renderPasswordReset({
-    appName: getAppName(c.env),
-    resetUrl,
-    token,
-    expiresInMinutes: 60,
-  }, resolveLocalizedString(getEmailTemplates(c.env)?.passwordReset, locale), locale);
-
-  const defaultSubject = getDefaultSubject(locale, 'passwordReset').replace(/\{\{appName\}\}/g, getAppName(c.env));
-  const result = await sendMailWithHook(
-    c.env, c.executionCtx, provider, 'passwordReset', user.email as string,
-    resolveSubject(c.env, 'passwordReset', defaultSubject, locale), html, locale,
-  );
-
-  return c.json(shouldExposeAuthTestSecrets(c.env)
-    ? { ok: result.success, messageId: result.messageId, token, actionUrl: resetUrl }
-    : { ok: result.success, messageId: result.messageId });
+  return c.json(completePrivatePasswordResetRequest({
+    backgroundWork: performPasswordResetWork,
+    waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+  }));
 });
 
 // POST /reset-password — KV token→shardId lookup → direct Shard call

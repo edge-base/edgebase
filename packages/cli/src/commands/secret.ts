@@ -4,7 +4,11 @@ import chalk from 'chalk';
 import { raiseCliError, raiseNeedsInput } from '../lib/agent-contract.js';
 import { isJson, isNonInteractive, isQuiet } from '../lib/cli-context.js';
 import { wranglerArgs, wranglerCommand } from '../lib/wrangler.js';
-import { parseWranglerSecretNames } from '../lib/wrangler-secrets.js';
+import {
+  isDeployControlWorkerSecretName,
+  isReservedHostedWorkerSecretName,
+  parseWranglerSecretNames,
+} from '../lib/wrangler-secrets.js';
 
 interface CommandFailureDetails {
   message: string;
@@ -82,6 +86,19 @@ secretCommand
   .description('Set a secret value')
   .option('--value <value>', 'Secret value (skip interactive wrangler prompt)')
   .action(async (key: string, options: { value?: string }) => {
+    const deployControlCredential = isDeployControlWorkerSecretName(key);
+    if (isReservedHostedWorkerSecretName(key) || deployControlCredential) {
+      raiseCliError({
+        code: 'secret_name_reserved',
+        message: deployControlCredential
+          ? `'${key}' is a deploy/control credential and cannot be set as a Worker application secret.`
+          : `'${key}' is reserved for EdgeBase hosted runtime integrity and cannot be set as a Worker secret.`,
+        hint: deployControlCredential
+          ? 'Pass deploy credentials through the CLI process environment. Self-destruct credentials are mapped only by the explicit deploy opt-in. The delete subcommand can remove a legacy copy.'
+          : 'Configure production behavior in edgebase.config.ts. The delete subcommand remains available for removing a legacy reserved secret.',
+      });
+    }
+
     if (!options.value && (!process.stdin.isTTY || isNonInteractive() || isJson())) {
       raiseNeedsInput({
         code: 'secret_value_required',

@@ -53,6 +53,7 @@ vi.mock('../lib/plugin-migrations.js', () => ({
 describe('scheduled handler', () => {
   beforeEach(() => {
     vi.resetModules();
+    delete (globalThis as Record<string, unknown>).__EDGEBASE_RUNTIME_CONFIG__;
     cleanExpiredSessionsMock.mockReset().mockResolvedValue(undefined);
     cleanStaleAnonymousAccountsMock.mockReset().mockResolvedValue([]);
     ensureAuthSchemaMock.mockReset().mockResolvedValue(undefined);
@@ -96,24 +97,26 @@ describe('scheduled handler', () => {
 
   it('runs plugin migration reconciliation before scheduled work when plugins are configured', async () => {
     const worker = (await import('../index.js')).default;
+    const { setConfig } = await import('../lib/do-router.js');
     const pending: Promise<unknown>[] = [];
     const ctx = {
       waitUntil: vi.fn((promise: Promise<unknown>) => {
         pending.push(Promise.resolve(promise));
       }),
     };
-    const env = {
-      EDGEBASE_CONFIG: {
-        release: true,
-        plugins: [
-          {
-            name: 'cert-plugin',
-            version: '0.1.0',
-            config: {},
-          },
-        ],
-      },
+    const config = {
+      release: true,
+      plugins: [
+        {
+          name: 'cert-plugin',
+          version: '0.1.0',
+          pluginApiVersion: 1,
+          config: {},
+        },
+      ],
     };
+    setConfig(config);
+    const env = {};
 
     await worker.scheduled(
       { scheduledTime: Date.parse('2026-03-07T03:00:00Z') } as never,

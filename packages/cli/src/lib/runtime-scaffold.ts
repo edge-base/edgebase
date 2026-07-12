@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   copyFileSync,
   cpSync,
   existsSync,
@@ -1207,11 +1208,18 @@ export function writeRuntimeConfigShim(
   options?: { importPath?: string },
 ): void {
   const shimPath = join(getRuntimeServerSrcDir(projectDir), 'generated-config.ts');
+  const containsInjectedEnv = injectedEnv !== undefined && Object.keys(injectedEnv).length > 0;
   writeFileSync(
     shimPath,
     buildRuntimeConfigShimContents(injectedEnv, options?.importPath),
-    'utf-8',
+    {
+      encoding: 'utf-8',
+      ...(containsInjectedEnv ? { mode: 0o600 } : {}),
+    },
   );
+  // writeFile does not replace permissions on an existing shim, so explicitly
+  // tighten a scaffold that was first created without embedded local values.
+  if (containsInjectedEnv) chmodSync(shimPath, 0o600);
 }
 
 function writeRuntimeTestConfigShim(

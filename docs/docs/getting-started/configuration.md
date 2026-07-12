@@ -582,6 +582,7 @@ auth: {
     cookie: {
       enabled: true,
       name: 'my-app-refresh',
+      legacyNames: [],
       sameSite: 'strict',
     },
   },
@@ -599,6 +600,8 @@ plain-HTTP local development, it uses the configured base name with
 The only exception is an HTTP `localhost`/`127.0.0.1`/`[::1]` request owned by
 the CLI's explicit `local-development` runtime; deployed and self-hosted
 release modes still fail closed, and `SameSite=None` always requires HTTPS.
+`legacyNames` may temporarily list up to 16 former cookie base names after a
+rename. They are deletion-only: EdgeBase never accepts them for authentication.
 
 ### Magic Link
 
@@ -866,6 +869,24 @@ export default defineConfig({
 ```
 
 These are default templates. The Web SDK and REST API can override them per request with `redirectUrl`.
+
+For `provider: 'cloudflare'`, `binding` defaults to `EMAIL`. `edgebase deploy`
+validates it as a JavaScript identifier and generates the corresponding
+Cloudflare `[[send_email]]` binding. Email action URLs for a release belong in
+this bundled config; local mock/action overrides such as
+`EDGEBASE_EMAIL_API_URL` and `EDGEBASE_APP_WEB_*_URL` are rejected in hosted
+release secrets and cannot replace a generated `release: true` config at
+runtime. The same release boundary rejects local-only
+`EDGEBASE_SMS_API_URL`, `EDGEBASE_INTERNAL_WORKER_URL`, and
+`EDGEBASE_DEV_SIDECAR_PORT` overrides, since they can receive OTP payloads,
+Service Keys, SQL, or internal signing credentials.
+
+`edgebase dev` is the only exception: the CLI injects a compile-time
+`EDGEBASE_LOCAL_DEV_BUILD` boolean and a `local-development` runtime mode, then
+allows only its loopback sidecar port. The selector is rejected from env files,
+the ambient shell, Worker vars/secrets, and every source Wrangler
+`vars`/`define` form, so hosted configuration cannot impersonate that local
+build boundary.
 
 ## SMS
 

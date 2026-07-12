@@ -10,6 +10,7 @@
  */
 import { materializeConfig, type EdgeBaseConfig, type DbBlock } from '@edge-base/shared';
 import { counter } from '../middleware/rate-limit.js';
+import { assertReleaseRuntimeIntegrity } from './release-runtime-integrity.js';
 
 const RUNTIME_CONFIG_GLOBAL_KEY = '__EDGEBASE_RUNTIME_CONFIG__';
 
@@ -286,25 +287,29 @@ export function setConfig(config: EdgeBaseConfig): void {
 
 /**
  * Get the current EdgeBase config.
- * Priority: request-scoped EDGEBASE_CONFIG → setConfig() singleton → {}.
+ * Non-release compatibility priority: request-scoped EDGEBASE_CONFIG →
+ * setConfig() singleton → {}. A bundled release singleton is authoritative.
  */
 export function parseConfig(env?: unknown): EdgeBaseConfig {
+  let runtimeConfig = _runtimeConfig;
+  if (runtimeConfig === null) {
+    const globalConfig = readGlobalRuntimeConfig();
+    if (globalConfig !== null) {
+      _runtimeConfig = globalConfig;
+      runtimeConfig = globalConfig;
+    }
+  }
+
+  assertReleaseRuntimeIntegrity(
+    runtimeConfig,
+    env && typeof env === 'object' && !Array.isArray(env)
+      ? env as Record<string, unknown>
+      : undefined,
+  );
+
   const envConfig = parseEnvConfig(env);
-  if (envConfig) {
-    return envConfig;
-  }
-
-  if (_runtimeConfig !== null) {
-    return _runtimeConfig;
-  }
-
-  const globalConfig = readGlobalRuntimeConfig();
-  if (globalConfig !== null) {
-    _runtimeConfig = globalConfig;
-    return globalConfig;
-  }
-
-  return {};
+  if (envConfig) return envConfig;
+  return runtimeConfig ?? {};
 }
 
 function parseEnvConfig(env?: unknown): EdgeBaseConfig | null {

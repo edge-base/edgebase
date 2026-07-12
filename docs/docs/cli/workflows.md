@@ -124,8 +124,13 @@ What `deploy` manages for you:
 - bundles functions and runtime scaffolding
 - attaches `.env.release` and CLI-managed secrets to the same Worker version as
   the code/config upload (a mode-0600 temporary file is removed immediately)
-- checks the remote Worker—not the gitignored local manifest—to preserve
-  existing service/JWT secrets on fresh CI checkouts
+- checks the remote Worker before changing service/JWT secrets. If an existing
+  Worker has a CLI-managed secret but the private `.edgebase/secrets.json`
+  authority is missing, weak, duplicated, symlinked, malformed, or oversized,
+  deploy stops before publish instead of inventing a mismatched local value.
+  Restore that mode-0600 file from a private deployment backup or use an
+  explicit key rotation/recovery flow; a fresh public checkout alone is not
+  credential authority.
 - provisions or reuses managed Cloudflare resources such as KV, D1, R2, Vectorize, Hyperdrive, and Turnstile when the project configuration requires them; managed CAPTCHA hostname changes are serialized by an expiring remote D1 lease and use a same-widget `old∪new` stage, version-owned Worker publish, and exact finalization
 - runs `scripts/edgebase-post-scaffold.mjs`, when present, as a non-interactive project hook with a five-minute hard timeout
 - writes a deploy manifest under `.edgebase/` so later cleanup can target the same project resources
@@ -166,7 +171,17 @@ If the project manages an R2 `STORAGE` bucket, `destroy` can also wipe the bucke
 npx edgebase destroy --yes --url https://my-worker.workers.dev --service-key <service-key>
 ```
 
-`destroy` is intended to leave a deployed project cleanly removed. It deletes the project-scoped managed resources discovered from the deploy manifest and project config rather than deleting arbitrary account assets.
+The deploy manifest URL is authoritative. If the manifest has no proven
+`workers.dev` URL or you intentionally use another exact HTTPS origin, add
+`--allow-worker-url-override` only after independently verifying the target.
+`destroy` does not inherit `EDGEBASE_URL`, which could point at another project.
+
+By default, `destroy` deletes only resources whose managed ownership is recorded
+in the current v2 deploy manifest. Missing or damaged manifests fail closed,
+and v1 ownership remains untrusted. Legacy recovery inferred from
+`wrangler.toml` requires `--allow-untracked-resources` and an exact 32-hex
+account proof; the real delete then compares that proof with the authenticated
+Cloudflare account.
 
 ## 5. Move Or Repair Data
 
@@ -198,6 +213,11 @@ npx edgebase backup create --url https://my-worker.workers.dev --service-key <se
 npx edgebase backup create --include-secrets --include-storage
 npx edgebase backup restore --from ./backup/backup.json --url https://my-worker.workers.dev --service-key <service-key> --yes
 ```
+
+Config snapshots are structural: namespaces, tables, schemas, and feature
+settings remain available for discovery, while embedded OAuth/email/SMS/DB and
+plugin credentials are always redacted. `--include-secrets` adds only the
+separate explicit secrets payload.
 
 Automation-oriented restore:
 

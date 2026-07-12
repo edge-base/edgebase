@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 const ensureCloudflareAuth = vi.fn();
 const ensureWranglerToml = vi.fn();
 const ensureRuntimeScaffold = vi.fn();
-const createAppBundle = vi.fn((projectDir: string) => ({
+const createAppBundle = vi.fn((projectDir: string, _options?: Record<string, unknown>) => ({
   format: 'app-bundle',
   projectDir,
   outputDir: join(projectDir, '.edgebase', 'targets', 'deploy-app-dry-run'),
@@ -66,6 +66,11 @@ vi.mock('../src/lib/schema-check.js', async (importOriginal) => {
 describe('deploy command dry-run', () => {
   let testDir: string;
   let originalCwd: string;
+  let originalAmbient: Record<string, string | undefined>;
+  const ambientNames = [
+    'EDGEBASE_CONFIG', 'EDGEBASE_TEST', 'EDGEBASE_USE_TEST_CONFIG', 'VITEST',
+    'VITEST_WORKER_ID', 'VITEST_POOL_ID', 'NODE_ENV', 'EDGEBASE_RUNTIME_MODE',
+  ];
 
   beforeEach(() => {
     vi.resetModules();
@@ -75,12 +80,20 @@ describe('deploy command dry-run', () => {
     writeFileSync(join(testDir, 'edgebase.config.ts'), 'export default {};');
     originalCwd = process.cwd();
     process.chdir(testDir);
+    originalAmbient = Object.fromEntries(ambientNames.map((name) => [name, process.env[name]]));
+    for (const name of ambientNames) delete process.env[name];
+    process.env.NODE_ENV = 'production';
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
+    for (const name of ambientNames) {
+      const value = originalAmbient[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
     vi.restoreAllMocks();
     rmSync(testDir, { recursive: true, force: true });
   });
@@ -92,10 +105,10 @@ describe('deploy command dry-run', () => {
 
     expect(loadConfigSafe).toHaveBeenCalled();
     expect(createAppBundle).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
-      injectedEnv: {},
       outputDir: join('.edgebase', 'targets', 'deploy-app-dry-run'),
       overwrite: true,
     }));
+    expect(createAppBundle.mock.calls[0]?.[1]).not.toHaveProperty('injectedEnv');
     expect(ensureCloudflareAuth).not.toHaveBeenCalled();
     expect(ensureWranglerToml).not.toHaveBeenCalled();
     expect(ensureRuntimeScaffold).not.toHaveBeenCalled();

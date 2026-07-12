@@ -145,6 +145,13 @@ This catches broken D1/KV/resource wiring that a public-only smoke test can miss
 
 Deploy also writes `.edgebase/cloudflare-deploy-manifest.json`. That manifest is the project-scoped source of truth for managed Cloudflare resources and is used later by cleanup and destroy flows.
 
+The manifest is a fail-closed trust boundary: only a bounded regular file with
+valid account, Worker, resource ID, ownership, and source fields is accepted.
+A v1 manifest preserves identity compatibility but grants no resource deletion
+authority unless an operator explicitly acknowledges untracked recovery.
+Destroy uses only a name-bound `workers.dev` origin recorded by deployment for
+automatic Storage cleanup; custom URLs need a separate explicit override.
+
 Account-global auto-provisioned resources are isolated by Worker. KV namespace,
 D1 database, default R2 bucket, Vectorize index, and Hyperdrive config names
 include a deterministic, length-bounded Worker identity; newly provisioned

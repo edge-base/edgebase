@@ -32,6 +32,26 @@ Technical limits for EdgeBase App Functions.
 | Methods | `GET`, `POST`, `PUT`, `PATCH`, `DELETE` (named exports) |
 | Middleware | `_middleware.ts` applies to directory and subdirectories |
 | Ignored files | `_helper.ts` (underscore prefix, not middleware) |
+| Request body | **1 MiB** by default. `Content-Length` is rejected early; otherwise the transport reads and bounds the actual bytes before CAPTCHA, middleware, or handler code runs. Set `maxRequestBodyBytes` on one HTTP function for a deliberate bounded override; use Storage for large or streaming files. |
+
+```typescript
+export const POST = defineFunction({
+  trigger: { type: 'http' },
+  maxRequestBodyBytes: 4 * 1024 * 1024,
+  handler: async ({ request }) => {
+    const body = await request.json();
+    return { accepted: body.items.length };
+  },
+});
+```
+
+The override must be a safe integer from `0` through `16 MiB`. The transport
+buffers no more than that bound and returns `413 payload-too-large` before
+CAPTCHA, middleware, or handler side effects if the request crosses it. This
+prevalidation intentionally trades streaming for a strong no-partial-mutation
+contract. Put large or streaming payloads in Storage instead. Raising the
+ceiling still does not make an unbounded JSON parser safe; validate item, text,
+and nesting limits inside the function.
 
 ## Database Triggers
 
@@ -86,6 +106,7 @@ The same bypass semantics apply to all Admin SDKs.
 | `unauthenticated` | 401 |
 | `invalid-argument` | 400 |
 | `already-exists` | 409 |
+| `payload-too-large` | 413 |
 | `internal` | 500 |
 | `unavailable` | 503 |
 | `failed-precondition` | 412 |

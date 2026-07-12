@@ -19,6 +19,7 @@ type SameSite = 'strict' | 'lax' | 'none';
 interface SessionCookieConfig {
   enabled: boolean;
   name: string;
+  legacyNames: string[];
   sameSite: SameSite;
 }
 
@@ -33,6 +34,7 @@ function cookieConfig(c: AuthContext): SessionCookieConfig {
   return {
     enabled: configured?.enabled === true,
     name: configured?.name ?? 'edgebase-refresh',
+    legacyNames: configured?.legacyNames ?? [],
     sameSite: configured?.sameSite ?? 'strict',
   };
 }
@@ -236,10 +238,26 @@ function expireCookieAtPath(
 
 /** Expire predecessor names/paths without ever accepting or migrating them. */
 function expireLegacyRefreshCookies(c: AuthContext): void {
-  if (!isSecureRequest(c)) return;
-  const baseName = cookieConfig(c).name;
-  expireCookieAtPath(c, `__Secure-${baseName}`, AUTH_COOKIE_PATH, true);
-  expireCookieAtPath(c, baseName, AUTH_COOKIE_PATH, false);
+  const config = cookieConfig(c);
+  const secure = isSecureRequest(c);
+
+  // On HTTPS the current cookie is __Host-prefixed, so retire predecessor
+  // variants of its base name left by older EdgeBase cookie handling.
+  if (secure) {
+    expireCookieAtPath(c, `__Secure-${config.name}`, AUTH_COOKIE_PATH, true);
+    expireCookieAtPath(c, config.name, AUTH_COOKIE_PATH, false);
+  }
+
+  // Product cookie renames are deletion-only compatibility. Never read any of
+  // these names: expire every formerly issued variant that the current request
+  // can safely overwrite, including the old __Host cookie at Path=/.
+  for (const legacyName of config.legacyNames) {
+    if (secure) {
+      expireCookieAtPath(c, `__Host-${legacyName}`, '/', true);
+      expireCookieAtPath(c, `__Secure-${legacyName}`, AUTH_COOKIE_PATH, true);
+    }
+    expireCookieAtPath(c, legacyName, AUTH_COOKIE_PATH, false);
+  }
 }
 
 export function applyAuthNoStore(c: AuthContext): void {

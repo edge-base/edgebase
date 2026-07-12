@@ -16,12 +16,85 @@ import {
   buildFunctionContext,
   getMiddlewareChain,
   getWorkerUrl,
+  httpFunctionBodyLimit,
 } from '../lib/functions.js';
 import { parseConfig } from '../lib/do-router.js';
 import { resolveRootServiceKey } from '../lib/service-key.js';
 import type { AuthContext } from '../lib/functions.js';
 import { captchaMiddleware } from '../middleware/captcha-verify.js';
 import { FunctionError } from '@edge-base/shared';
+
+class FunctionRequestBodyLimitError extends Error {
+  constructor(public readonly maxBytes: number) {
+    super(`Function request body exceeds ${maxBytes} bytes.`);
+    this.name = 'FunctionRequestBodyLimitError';
+  }
+}
+
+function declaredRequestBodyBytes(request: Request): number | null {
+  const raw = request.headers.get('content-length')?.trim();
+  if (!raw || !/^\d+$/.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : Number.POSITIVE_INFINITY;
+}
+
+function functionPayloadTooLarge(maxBytes: number): Response {
+  return Response.json(
+    {
+      code: 'payload-too-large',
+      message: `Function request body exceeds the configured limit of ${maxBytes} bytes.`,
+      status: 413,
+      details: { maxBytes },
+    },
+    { status: 413 },
+  );
+}
+
+async function bufferFunctionRequestBody(request: Request, maxBytes: number): Promise<Request> {
+  if (!request.body) return request;
+  const reader = request.body.getReader();
+  const slabs: Array<{ bytes: Uint8Array; used: number }> = [];
+  const slabBytes = 64 * 1024;
+  let consumedBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    consumedBytes += value.byteLength;
+    if (consumedBytes > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new FunctionRequestBodyLimitError(maxBytes);
+    }
+    let sourceOffset = 0;
+    while (sourceOffset < value.byteLength) {
+      let slab = slabs.at(-1);
+      if (!slab || slab.used === slab.bytes.byteLength) {
+        const remaining = maxBytes - (consumedBytes - value.byteLength + sourceOffset);
+        slab = {
+          bytes: new Uint8Array(Math.min(slabBytes, Math.max(1, remaining))),
+          used: 0,
+        };
+        slabs.push(slab);
+      }
+      const copyBytes = Math.min(
+        slab.bytes.byteLength - slab.used,
+        value.byteLength - sourceOffset,
+      );
+      slab.bytes.set(value.subarray(sourceOffset, sourceOffset + copyBytes), slab.used);
+      slab.used += copyBytes;
+      sourceOffset += copyBytes;
+    }
+  }
+  const bytes = new Uint8Array(consumedBytes);
+  let offset = 0;
+  for (const slab of slabs) {
+    bytes.set(slab.bytes.subarray(0, slab.used), offset);
+    offset += slab.used;
+  }
+  return new Request(
+    request,
+    { body: bytes, duplex: 'half' } as RequestInit & { duplex: 'half' },
+  );
+}
 
 function isFunctionErrorLike(
   value: unknown,
@@ -68,6 +141,12 @@ functionsRoute.all('/:functionName{.+}', async (c) => {
     );
   }
 
+  const maxRequestBodyBytes = httpFunctionBodyLimit(matched.route.definition);
+  const declaredBodyBytes = declaredRequestBodyBytes(c.req.raw);
+  if (declaredBodyBytes !== null && declaredBodyBytes > maxRequestBodyBytes) {
+    return functionPayloadTooLarge(maxRequestBodyBytes);
+  }
+
   const config = parseConfig(c.env);
   const serviceKey = resolveRootServiceKey(config, c.env);
 
@@ -76,24 +155,23 @@ functionsRoute.all('/:functionName{.+}', async (c) => {
 
   const workerUrl = getWorkerUrl(c.req.url, c.env) ?? 'http://localhost';
 
-  const ctx = buildFunctionContext({
-    request: c.req.raw,
-    auth,
-    databaseNamespace: c.env.DATABASE,
-    authNamespace: c.env.AUTH,
-    d1Database: c.env.AUTH_DB,
-    kvNamespace: c.env.KV,
-    env: c.env as never,
-    executionCtx: c.executionCtx as never,
-    config,
-    serviceKey,
-    workerUrl,
-    params: matched.params,
-  });
+  let functionRequest: Request;
+  try {
+    // Validate and materialize at most the configured bound before any user
+    // middleware, CAPTCHA body parsing, or handler side effect can run. A
+    // catch inside user code can therefore never turn an oversized request
+    // into a committed mutation followed by a transport-level 413.
+    functionRequest = await bufferFunctionRequestBody(c.req.raw, maxRequestBodyBytes);
+  } catch (error) {
+    if (error instanceof FunctionRequestBodyLimitError) {
+      return functionPayloadTooLarge(maxRequestBodyBytes);
+    }
+    throw error;
+  }
 
   // Captcha check for functions with captcha: true
   if (matched.route.definition.captcha) {
-    const captchaResponse = await captchaMiddleware('function')(c, async () => {});
+    const captchaResponse = await captchaMiddleware('function', functionRequest)(c, async () => {});
     // Manually composed Hono middleware returns its rejection Response. Always
     // forward it (403 verification failures and 503 fail-closed outages alike)
     // instead of inspecting only one status on c.res and continuing to user code.
@@ -101,6 +179,21 @@ functionsRoute.all('/:functionName{.+}', async (c) => {
   }
 
   try {
+    const ctx = buildFunctionContext({
+      request: functionRequest,
+      auth,
+      databaseNamespace: c.env.DATABASE,
+      authNamespace: c.env.AUTH,
+      d1Database: c.env.AUTH_DB,
+      kvNamespace: c.env.KV,
+      env: c.env as never,
+      executionCtx: c.executionCtx as never,
+      config,
+      serviceKey,
+      workerUrl,
+      params: matched.params,
+    });
+
     // Execute middleware chain (root → nested → handler)
     const middlewares = getMiddlewareChain(matched.route.name);
     for (const mw of middlewares) {
@@ -109,7 +202,6 @@ functionsRoute.all('/:functionName{.+}', async (c) => {
 
     // Execute handler
     const result = await matched.route.definition.handler(ctx);
-
     // If handler returns a Response, use it directly
     if (result instanceof Response) {
       return result;
@@ -128,6 +220,9 @@ functionsRoute.all('/:functionName{.+}', async (c) => {
     // Default: 204 No Content
     return c.body(null, 204);
   } catch (err: unknown) {
+    if (err instanceof FunctionRequestBodyLimitError) {
+      return functionPayloadTooLarge(maxRequestBodyBytes);
+    }
     // Handle FunctionError specially — return structured JSON
     if (err instanceof FunctionError) {
       return c.json(err.toJSON(), err.httpStatus as 400);

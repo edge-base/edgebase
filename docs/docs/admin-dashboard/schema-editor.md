@@ -40,7 +40,11 @@ The sidecar starts automatically when all of these conditions are met:
 2. `JWT_ADMIN_SECRET` is set in `.env.development`
 3. The sidecar port (default: `8788`, which is the main dev server port + 1) is available
 
-The CLI passes `EDGEBASE_DEV_SIDECAR_PORT` to the Worker via `wrangler --var`, so the Worker knows how to direct the dashboard to the sidecar.
+The CLI passes `EDGEBASE_DEV_SIDECAR_PORT` via `wrangler --var` and injects a
+compile-time local-dev marker, so a release-configured app can reach only the
+CLI-owned loopback sidecar during `edgebase dev`. Do not set
+`EDGEBASE_LOCAL_DEV_BUILD` in an env file, shell, secret, or Wrangler config;
+those user-controlled forms are rejected.
 
 ## What You Can Do
 

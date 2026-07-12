@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.4.2 — 2026-07-12
+
+### Security
+
+- Password sign-in no longer leaks whether an account exists. Absent,
+  passwordless, and wrong-password users now spend the same PBKDF2 work
+  (against a fixed dummy hash) and return one identical generic `401`, closing
+  a timing- and response-based account-enumeration channel.
+- Password-reset requests always return the same generic
+  `If the email exists, a reset link has been sent.` response. Absent,
+  delivered, and failed-delivery cases are now byte-for-byte identical, the
+  response is produced before the account lookup and persistence settle, and
+  delivery is moved behind `waitUntil` so timing cannot reveal existence.
+- Config backup/export routes redact credential-bearing values before
+  returning them. Nested credential keys (normalized) and credential-bearing
+  URLs are replaced with `[REDACTED]` while schema definitions are preserved,
+  covering both the Service-Key and admin-session backup config routes.
+- Release builds refuse dev/test runtime bindings that could override bundled
+  production authority. URL overrides, the dev sidecar port, and
+  `EDGEBASE_CONFIG`/`EDGEBASE_TEST` request bindings can no longer redirect
+  auth tokens or email/SMS bodies in a released Worker; response-only test
+  credentials unlock only under the dedicated compile-time test build, never
+  from a request env binding.
+- The PostgreSQL sidecar executor activates only when the runtime is in
+  `local-development` mode, so a stale or attacker-controlled sidecar port can
+  never receive arbitrary SQL plus `JWT_ADMIN_SECRET` outside CLI-owned local
+  development.
+- JWT rotation grace now requires a non-negative elapsed time, so a
+  future-dated token can no longer slip through the previous-secret grace
+  window.
+- Auth session-cookie clearing retires predecessor cookie variants
+  (`__Host-`/`__Secure-`/bare and configured legacy names) so stale
+  authentication cookies are not left behind.
+
+### Added
+
+- HTTP functions enforce a configurable request body size limit
+  (`httpFunctionBodyLimit`), rejecting oversized bodies (by declared
+  `Content-Length` and while streaming) with a clear error before they are
+  buffered.
+
 ## 0.4.1 — 2026-07-12
 
 ### Fixed

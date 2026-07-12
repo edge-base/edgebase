@@ -654,6 +654,7 @@ describe('buildFunctionContext admin.db', () => {
           },
         },
         env: {
+          EDGEBASE_RUNTIME_MODE: 'local-development',
           EDGEBASE_DEV_SIDECAR_PORT: '8788',
           JWT_ADMIN_SECRET: 'jwt-secret',
           DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
@@ -723,6 +724,7 @@ describe('buildFunctionContext admin.db', () => {
           },
         },
         env: {
+          EDGEBASE_RUNTIME_MODE: 'local-development',
           EDGEBASE_DEV_SIDECAR_PORT: '8788',
           JWT_ADMIN_SECRET: 'jwt-secret',
           DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
@@ -793,6 +795,7 @@ describe('buildFunctionContext admin.db', () => {
           },
         },
         env: {
+          EDGEBASE_RUNTIME_MODE: 'local-development',
           EDGEBASE_DEV_SIDECAR_PORT: '8788',
           JWT_ADMIN_SECRET: 'jwt-secret',
           DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
@@ -849,6 +852,7 @@ describe('buildFunctionContext admin.db', () => {
           },
         },
         env: {
+          EDGEBASE_RUNTIME_MODE: 'local-development',
           EDGEBASE_DEV_SIDECAR_PORT: '8788',
           JWT_ADMIN_SECRET: 'jwt-secret',
           DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
@@ -918,6 +922,7 @@ describe('buildFunctionContext admin.db', () => {
           },
         },
         env: {
+          EDGEBASE_RUNTIME_MODE: 'local-development',
           EDGEBASE_DEV_SIDECAR_PORT: '8788',
           JWT_ADMIN_SECRET: 'jwt-secret',
           DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
@@ -988,6 +993,7 @@ describe('buildFunctionContext admin.db', () => {
           },
         },
         env: {
+          EDGEBASE_RUNTIME_MODE: 'local-development',
           EDGEBASE_DEV_SIDECAR_PORT: '8788',
           JWT_ADMIN_SECRET: 'jwt-secret',
           DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',

@@ -166,7 +166,7 @@ This returns the current command tree, options, aliases, and arguments directly 
 
 | Variable | Used by |
 | --- | --- |
-| `EDGEBASE_URL` | Remote commands such as `migrate`, `backup`, `export`, `admin`, `plugins cleanup`, and `destroy` |
+| `EDGEBASE_URL` | Remote commands such as `migrate`, `backup`, `export`, `admin`, and `plugins cleanup` |
 | `EDGEBASE_SERVICE_KEY` | Remote admin commands that authenticate with the root Service Key |
 | `CLOUDFLARE_API_TOKEN` | Non-interactive Cloudflare deploy/destroy and operations that touch account-level resources |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare operations that need account scoping, especially backup/plugin cleanup flows |

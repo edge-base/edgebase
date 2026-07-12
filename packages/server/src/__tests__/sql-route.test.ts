@@ -319,6 +319,7 @@ describe('sql route', () => {
           idFromName: vi.fn().mockReturnValue('do-id'),
           get: vi.fn(),
         },
+        EDGEBASE_RUNTIME_MODE: 'local-development',
         EDGEBASE_DEV_SIDECAR_PORT: '8788',
         JWT_ADMIN_SECRET: 'jwt-secret',
         DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',

@@ -717,6 +717,23 @@ describe('Smoke: client', () => {
     expect(status).toBeLessThan(500);
   });
 
+  it('oauthExchange: POST /api/auth/oauth/exchange → not 5xx', async () => {
+    const { status, data } = await api('POST', '/api/auth/oauth/exchange', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('oauthExchange: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/auth/oauth/exchange', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
   it('oauthCallback: GET /api/auth/oauth/{provider}/callback → not 5xx', async () => {
     const { status, data } = await api('GET', '/api/auth/oauth/smoke-provider/callback', {
       headers: { 'X-EdgeBase-Service-Key': SK },
@@ -724,10 +741,61 @@ describe('Smoke: client', () => {
     expect(status).toBeLessThan(500);
   });
 
+  it('oauthCallbackPost: POST /api/auth/oauth/{provider}/callback → not 5xx', async () => {
+    const { status, data } = await api('POST', '/api/auth/oauth/smoke-provider/callback', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('oauthCallbackPost: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/auth/oauth/smoke-provider/callback', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
   it('oauthLinkStart: POST /api/auth/oauth/link/{provider} → not 5xx', async () => {
     const { status, data } = await api('POST', '/api/auth/oauth/link/smoke-provider', {
       headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
     });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('oauthLinkStart: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/auth/oauth/link/smoke-provider', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
+  it('oauthLinkContinue: GET /api/auth/oauth/link/{provider}/continue → not 5xx', async () => {
+    const { status, data } = await api('GET', '/api/auth/oauth/link/smoke-provider/continue', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('oauthLinkComplete: POST /api/auth/oauth/complete/link → not 5xx', async () => {
+    const { status, data } = await api('POST', '/api/auth/oauth/complete/link', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('oauthLinkComplete: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/auth/oauth/complete/link', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
     expect(status).toBeLessThan(500);
   });
 
@@ -735,6 +803,23 @@ describe('Smoke: client', () => {
     const { status, data } = await api('GET', '/api/auth/oauth/link/smoke-provider/callback', {
       headers: { 'X-EdgeBase-Service-Key': SK },
     });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('oauthLinkCallbackPost: POST /api/auth/oauth/link/{provider}/callback → not 5xx', async () => {
+    const { status, data } = await api('POST', '/api/auth/oauth/link/smoke-provider/callback', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('oauthLinkCallbackPost: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/auth/oauth/link/smoke-provider/callback', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
     expect(status).toBeLessThan(500);
   });
 
@@ -832,23 +917,6 @@ describe('Smoke: client', () => {
     expect(status).toBeLessThan(500);
   });
 
-  it('dbSingleTransact: POST /api/db/{namespace}/transact → not 5xx', async () => {
-    const { status, data } = await api('POST', '/api/db/test/transact', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-      body: {},
-    });
-    expect(status).toBeLessThan(500);
-  });
-
-  it('dbSingleTransact: bad input → 400', async () => {
-    const { status } = await api('POST', '/api/db/test/transact', {
-      headers: { 'X-EdgeBase-Service-Key': SK },
-      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
-    });
-    expect(status).toBeGreaterThanOrEqual(400);
-    expect(status).toBeLessThan(500);
-  });
-
   it('dbCountRecords: GET /api/db/{namespace}/{instanceId}/tables/{table}/count → not 5xx', async () => {
     const { status, data } = await api('GET', '/api/db/test/default/tables/posts/count', {
       headers: { 'X-EdgeBase-Service-Key': SK },
@@ -936,6 +1004,23 @@ describe('Smoke: client', () => {
 
   it('dbBatchByFilter: bad input → 400', async () => {
     const { status } = await api('POST', '/api/db/test/default/tables/posts/batch-by-filter', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleTransact: POST /api/db/{namespace}/transact → not 5xx', async () => {
+    const { status, data } = await api('POST', '/api/db/test/transact', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('dbSingleTransact: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/db/test/transact', {
       headers: { 'X-EdgeBase-Service-Key': SK },
       body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
     });
@@ -1083,13 +1168,6 @@ describe('Smoke: client', () => {
     expect(status).toBeLessThan(500);
   });
 
-  it('createSignedDownloadUrl: no auth → 401/403', async () => {
-    const { status } = await api('POST', '/api/storage/documents/signed-url', {
-      body: { key: "smoke-file.txt" },
-    });
-    expect([401, 403]).toContain(status);
-  });
-
   it('createSignedDownloadUrl: bad input → 400', async () => {
     const { status } = await api('POST', '/api/storage/documents/signed-url', {
       headers: { 'X-EdgeBase-Service-Key': SK },
@@ -1105,13 +1183,6 @@ describe('Smoke: client', () => {
       body: { keys: ["smoke-file.txt"] },
     });
     expect(status).toBeLessThan(500);
-  });
-
-  it('createSignedDownloadUrls: no auth → 401/403', async () => {
-    const { status } = await api('POST', '/api/storage/documents/signed-urls', {
-      body: { keys: ["smoke-file.txt"] },
-    });
-    expect([401, 403]).toContain(status);
   });
 
   it('createSignedDownloadUrls: bad input → 400', async () => {
@@ -1236,6 +1307,13 @@ describe('Smoke: client', () => {
     expect(status).toBeGreaterThanOrEqual(200);
     expect(status).toBeLessThan(300);
     if (data) expect(data).not.toHaveProperty('error');
+  });
+
+  it('getCaptchaChallenge: GET /api/captcha/challenge → not 5xx', async () => {
+    const { status, data } = await api('GET', '/api/captcha/challenge', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+    });
+    expect(status).toBeLessThan(500);
   });
 
   it('pushRegister: POST /api/push/register → not 5xx', async () => {
@@ -1374,6 +1452,30 @@ describe('Smoke: client', () => {
     const { status, data } = await api('GET', '/api/room/metadata?namespace=test-metadata&id=smoke-room', {
       headers: { 'X-EdgeBase-Service-Key': SK },
     });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('getRoomSummary: GET /api/room/summary → not 5xx', async () => {
+    const { status, data } = await api('GET', '/api/room/summary', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('getRoomSummaries: POST /api/room/summaries → not 5xx', async () => {
+    const { status, data } = await api('POST', '/api/room/summaries', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: {},
+    });
+    expect(status).toBeLessThan(500);
+  });
+
+  it('getRoomSummaries: bad input → 400', async () => {
+    const { status } = await api('POST', '/api/room/summaries', {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+      body: { __invalid_field__: true, $$badKey: [null, undefined], nested: { bad: Symbol } },
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
     expect(status).toBeLessThan(500);
   });
 

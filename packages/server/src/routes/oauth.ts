@@ -1091,6 +1091,13 @@ async function handleOAuthCallback(c: Context<HonoEnv>, input: OAuthCallbackInpu
     throw new EdgeBaseError(400, 'Missing code or state parameter.', undefined, 'validation-failed');
   }
 
+  // Require proof that the callback belongs to this browser before disclosing
+  // provider configuration state. This check does not consume the one-shot
+  // state, so a third party cannot burn the legitimate browser's flow.
+  if (!verifyOAuthStateCookie(c, state)) {
+    throw new EdgeBaseError(400, 'OAuth state is not bound to this browser.', undefined, 'invalid-token');
+  }
+
   // Configuration validation is independent of the one-shot state. Perform
   // it before consuming state so a broken release OIDC issuer cannot burn the
   // legitimate browser's flow merely by reaching the callback endpoint.
@@ -1106,12 +1113,7 @@ async function handleOAuthCallback(c: Context<HonoEnv>, input: OAuthCallbackInpu
     );
   }
 
-  if (!verifyOAuthStateCookie(c, state)) {
-    throw new EdgeBaseError(400, 'OAuth state is not bound to this browser.', undefined, 'invalid-token');
-  }
-
-  // Browser proof precedes the strongly consistent one-shot consume, so a
-  // third party that learns state cannot burn the legitimate browser's flow.
+  // Browser proof precedes the strongly consistent one-shot consume.
   const stateData = await consumeOAuthTransient(c.env, oauthStateKey(providerName, state));
   if (!stateData) {
     throw new EdgeBaseError(400, 'Invalid or expired OAuth state.', undefined, 'invalid-token');

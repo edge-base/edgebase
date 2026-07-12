@@ -7,7 +7,7 @@ unlisted: true
 # Headless Collaboration Surface
 
 :::info Draft
-This is a positioning and boundary document for the proposed `room.collab` surface tracked by [issue #59](https://github.com/edge-base/edgebase/issues/59). It explains what the product is, what it is not, and how it should relate to both EdgeBase Room and Inkline.
+This is a positioning and boundary document for the proposed `room.collab` surface tracked by [issue #59](https://github.com/edge-base/edgebase/issues/59). It explains what the product is, what it is not, and how it should relate to both EdgeBase Room and Hanji.
 :::
 
 ## Why this document exists
@@ -17,7 +17,7 @@ EdgeBase already has a strong real-time primitive in [Room](/docs/room). But the
 - Is EdgeBase trying to become a collaborative editor framework?
 - Is this just hosted Yjs?
 - Is this a fifth Room primitive?
-- How does this relate to Inkline?
+- How does this relate to Hanji?
 
 This document answers those questions and defines the intended product boundary.
 
@@ -27,7 +27,7 @@ The clearest product position is:
 
 > EdgeBase is a backend platform for collaborative applications.
 > `room.collab` is its headless real-time collaboration surface.
-> Inkline is a dogfood application that proves the model.
+> Hanji is a dogfood application that proves the model.
 
 This is intentionally different from narrower framings:
 
@@ -71,13 +71,13 @@ So the correct mental model is:
 
 It is **not** best described as “Room’s fifth primitive.” It is better understood as a productized layer on top of the existing Room foundations.
 
-## Relationship to Inkline
+## Relationship to Hanji
 
-Inkline should use `room.collab`, not be replaced by it.
+Hanji should use `room.collab`, not be replaced by it.
 
 The division of responsibility should look like this:
 
-### Inkline owns
+### Hanji owns
 
 - page and database semantics
 - block/document schema
@@ -100,7 +100,7 @@ The division of responsibility should look like this:
 - compaction hooks
 - permission downgrade to read-only
 
-Inkline is therefore the **dogfood application** that proves EdgeBase can power a Notion-like collaborative app without EdgeBase itself becoming a Notion-specific framework.
+Hanji is therefore the **dogfood application** that proves EdgeBase can power a Notion-style collaborative app without EdgeBase itself becoming a Notion-specific framework.
 
 ## System boundary
 
@@ -119,7 +119,7 @@ Authoritative long-lived data:
 - exported/searchable projections
 - audit/history records
 
-In Inkline, this stays in EdgeBase database, functions, storage, and workers.
+In Hanji, this stays in EdgeBase database, functions, storage, and workers.
 
 ### Live plane
 
@@ -183,7 +183,7 @@ A Yjs-first v1 is a good product decision because it lets EdgeBase provide immed
 Reasons:
 
 - Yjs already matches the document collaboration use case well
-- Inkline can dogfood it immediately
+- Hanji can dogfood it immediately
 - it gives a concrete SDK and room contract
 - it keeps the first version opinionated enough to ship
 
@@ -223,7 +223,7 @@ The safer shape is:
 - **richer server hook surface**
 - **even richer internal runtime**
 
-This keeps the platform reusable without turning the SDK into a giant Inkline-shaped API.
+This keeps the platform reusable without turning the SDK into a giant Hanji-shaped API.
 
 ## API layering
 
@@ -311,14 +311,14 @@ The client should benefit from those behaviors without having to control each on
 If `room.collab` exposes too many client-facing knobs:
 
 - the SDK becomes hard to learn
-- Inkline-specific needs leak into the public product surface
+- Hanji-specific needs leak into the public product surface
 - every advanced behavior starts looking like a first-class API promise
 - the product becomes harder to reuse across other app categories
 
 If the API stays small while the runtime stays capable:
 
-- Inkline can move quickly
-- other apps can adopt it without inheriting Inkline semantics
+- Hanji can move quickly
+- other apps can adopt it without inheriting Hanji semantics
 - EdgeBase can evolve replay, compaction, and downgrade behavior internally
 - the product feels more like a platform and less like an app-specific wrapper
 
@@ -340,9 +340,9 @@ If the API stays small while the runtime stays capable:
 | Database semantics | Does not own | Owns |
 | Product-specific permissions | Partially gates room access | Owns higher-level semantics |
 
-## Inkline integration model
+## Hanji integration model
 
-Inkline should integrate with `room.collab` in this order:
+Hanji should integrate with `room.collab` in this order:
 
 1. Load durable page snapshot through EdgeBase functions.
 2. Join a page room through `room.collab`.
@@ -351,12 +351,12 @@ Inkline should integrate with `room.collab` in this order:
 5. Persist or compact back into the durable plane through hooks and workers.
 6. Re-run secure snapshot queries when capability fingerprints change.
 
-That makes Inkline a proof that:
+That makes Hanji a proof that:
 
 - EdgeBase can host live collaborative editing
 - without embedding application-specific editor semantics into the platform
 
-## Reuse beyond Inkline
+## Reuse beyond Hanji
 
 If `room.collab` is shaped correctly, it should make many other products easier to build:
 
@@ -428,16 +428,16 @@ EdgeBase is a backend platform for collaborative apps, and `room.collab` is its 
 
 Build collaborative applications on EdgeBase with auth, data, storage, and server-authoritative rooms — plus a headless collaboration surface for live editing, presence, replay, and permission-aware sync.
 
-### Inkline-specific framing
+### Hanji-specific framing
 
-Inkline proves that EdgeBase can power a Notion-like collaborative product without forcing EdgeBase itself to become a Notion-specific framework.
+Hanji proves that EdgeBase can power a Notion-style collaborative product without forcing EdgeBase itself to become a Notion-specific framework.
 
 ## Success criteria
 
 This positioning is working if:
 
-- EdgeBase users understand that `room.collab` is reusable beyond Inkline
-- Inkline can use it without leaking Notion-specific assumptions into the platform
+- EdgeBase users understand that `room.collab` is reusable beyond Hanji
+- Hanji can use it without leaking Notion-specific assumptions into the platform
 - the product is seen as more than hosted Yjs
 - the platform boundary stays clean as richer collaboration features ship
 

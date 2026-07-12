@@ -94,6 +94,18 @@ describe('resolveOptionalServiceKey', () => {
     process.env.EDGEBASE_SERVICE_KEY = 'env-key-optional';
     expect(resolveOptionalServiceKey({})).toBe('env-key-optional');
   });
+
+  it('reads the secrets file from the explicitly selected project', () => {
+    mockedExistsSync.mockReturnValue(true);
+    mockedReadFileSync.mockReturnValue(JSON.stringify({ SERVICE_KEY: 'project-key' }));
+
+    expect(resolveOptionalServiceKey({ projectDir: '/trusted/project' })).toBe('project-key');
+    expect(mockedExistsSync).toHaveBeenCalledWith('/trusted/project/.edgebase/secrets.json');
+    expect(mockedReadFileSync).toHaveBeenCalledWith(
+      '/trusted/project/.edgebase/secrets.json',
+      'utf-8',
+    );
+  });
 });
 
 // ======================================================================

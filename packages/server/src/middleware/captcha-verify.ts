@@ -253,6 +253,7 @@ async function readBoundedResponseJson(
 async function extractCaptchaToken(
   c: HonoContext,
   allowOAuthQueryToken = false,
+  requestOverride?: Request,
 ): Promise<string | null> {
   // Headers and query parameters do not consume a protected function's body.
   // If a dedicated location is present but malformed, fail closed instead of
@@ -270,7 +271,7 @@ async function extractCaptchaToken(
   // Auth JSON bodies retain backward compatibility. Read a bounded clone so
   // user functions can still consume the original raw Request exactly once.
   if (c.req.method === 'POST' || c.req.method === 'PUT' || c.req.method === 'PATCH') {
-    const body = await readBoundedJson(c.req.raw);
+    const body = await readBoundedJson(requestOverride ?? c.req.raw);
     if (body && Object.prototype.hasOwnProperty.call(body, 'captchaToken')) {
       return normalizeCaptchaToken(body.captchaToken);
     }
@@ -293,7 +294,7 @@ async function siteverify(
   try {
     const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
       method: 'POST',
-      redirect: 'error',
+      redirect: 'manual',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         secret: secretKey,
@@ -366,7 +367,7 @@ function hasValidServiceKey(c: HonoContext): boolean {
  * Create a captcha middleware for Auth routes.
  * @param expectedAction - Expected Turnstile action value (e.g. 'signup', 'signin')
  */
-export function captchaMiddleware(expectedAction: string) {
+export function captchaMiddleware(expectedAction: string, requestOverride?: Request) {
   return async (c: HonoContext, next: Next) => {
     const captchaConfig = resolveCaptchaConfig(c.env, c.req.raw);
 
@@ -397,7 +398,7 @@ export function captchaMiddleware(expectedAction: string) {
     }
 
     // Step 4: Extract token
-    const token = await extractCaptchaToken(c, expectedAction === 'oauth');
+    const token = await extractCaptchaToken(c, expectedAction === 'oauth', requestOverride);
 
     // Step 5: No token → 403
     if (!token) {

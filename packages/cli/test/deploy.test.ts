@@ -2,14 +2,26 @@
  * Tests for CLI deploy command — validateConfig, scanFunctions, generateFunctionRegistry, mergePluginTables, extractDatabases.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { validateConfig, _internals } from '../src/commands/deploy.js';
 import { resolveRateLimitBindings } from '../src/lib/rate-limit-bindings.js';
-import type {
-  CloudflareDeployManifest,
-  CloudflareResourceRecord,
+import {
+  readCloudflareDeployManifest,
+  writeCloudflareDeployManifest,
+  type CloudflareDeployManifest,
+  type CloudflareResourceRecord,
 } from '../src/lib/cloudflare-deploy-manifest.js';
 import {
   buildLegacyManagedR2BucketName,
@@ -43,6 +55,8 @@ const {
   assertRequiredBindingCoverage,
   buildManagedWorkerResourceName,
   scopePreviousManifestToAccount,
+  assertCloudflareAccountContinuity,
+  assertWorkerIdentityContinuity,
   resolveAdminUrlFromRuntime,
   resolveReleaseSecretVars,
   resolveExistingR2BucketRecord,
@@ -56,9 +70,37 @@ const {
   prepareAtomicDeploySecrets,
   extractWorkerVersionIdFromWranglerDeployOutput,
   runProjectPostScaffoldHook,
+  createDeployAppBundle,
+  assertReleasePostDeployWorkerUrl,
+  resolveDeployedWorkerUrl,
+  assertNoReservedReleaseSecretVars,
+  assertNoDeployOnlyReleaseSecretVars,
+  assertNoDeployOnlyRemoteWorkerSecrets,
+  assertNoActiveHostedDeployProcessOverrides,
+  assertNoReservedRemoteWorkerSecrets,
+  resolveCloudflareEmailBinding,
 } = _internals;
 
 let tmpDir: string;
+
+function findSentinelInSmallRegularFiles(root: string, sentinel: string): string[] {
+  const matches: string[] = [];
+  const pending = [root];
+  const needle = Buffer.from(sentinel);
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    for (const name of readdirSync(current)) {
+      const path = join(current, name);
+      const stats = statSync(path);
+      if (stats.isDirectory()) {
+        pending.push(path);
+      } else if (stats.isFile() && stats.size <= 2 * 1024 * 1024) {
+        if (readFileSync(path).includes(needle)) matches.push(path);
+      }
+    }
+  }
+  return matches;
+}
 
 function manifestWithResource(
   resource: CloudflareResourceRecord,
@@ -68,7 +110,7 @@ function manifestWithResource(
     version: 2,
     deployedAt: '2026-01-01T00:00:00.000Z',
     accountId: '9def174e0c9c444685b8c773d076ce4b',
-    worker: { name: workerName, url: `https://${workerName}.example.test` },
+    worker: { name: workerName, url: `https://${workerName}.owner.workers.dev` },
     resources: [resource],
   };
 }
@@ -173,9 +215,126 @@ describe('validateConfig — Edge cases', () => {
     expect(warnings).toHaveLength(0);
     expect(errors).toHaveLength(0);
   });
+
+  it('rejects unsafe Cloudflare email binding names during deploy validation', () => {
+    const warnings: string[] = [];
+    const errors: string[] = [];
+    validateConfig({
+      release: true,
+      email: {
+        provider: 'cloudflare',
+        from: 'noreply@example.com',
+        binding: 'EMAIL\n[[send_email]]',
+      },
+    }, warnings, errors);
+
+    expect(errors).toContainEqual(expect.stringMatching(/email\.binding.*JavaScript identifier/i));
+  });
 });
 
 describe('version-bound deploy secrets', () => {
+  const validManagedSecrets = {
+    SERVICE_KEY: '0123456789abcdef'.repeat(4),
+    JWT_USER_SECRET: '123456789abcdef0'.repeat(4),
+    JWT_ADMIN_SECRET: '23456789abcdef01'.repeat(4),
+    SERVICE_KEY_CREATED_AT: '2026-01-01T00:00:00.000Z',
+    SERVICE_KEY_UPDATED_AT: '2026-01-01T00:00:00.000Z',
+  };
+
+  it('rejects reserved hosted runtime names from release vars without exposing values', () => {
+    expect(() => assertNoReservedReleaseSecretVars({
+      EDGEBASE_CONFIG: 'sensitive-config-value',
+      EDGEBASE_TEST: 'sensitive-test-value',
+      EDGEBASE_TEST_BUILD: 'true',
+      EDGEBASE_LOCAL_DEV_BUILD: 'true',
+      SAFE_SECRET: 'kept',
+    })).toThrow(/protected hosted runtime binding.*EDGEBASE_CONFIG, EDGEBASE_TEST, EDGEBASE_TEST_BUILD, EDGEBASE_LOCAL_DEV_BUILD/i);
+
+    try {
+      assertNoReservedReleaseSecretVars({ EDGEBASE_CONFIG: 'must-not-appear' });
+    } catch (error) {
+      expect((error as Error).message).not.toContain('must-not-appear');
+    }
+  });
+
+  it('rejects mock email and action URL overrides from hosted release secrets', () => {
+    expect(() => assertNoReservedReleaseSecretVars({
+      EDGEBASE_INTERNAL_WORKER_URL: 'https://sink.example.test/internal',
+      EDGEBASE_EMAIL_API_URL: 'https://sink.example.test',
+      EDGEBASE_SMS_API_URL: 'https://sink.example.test/sms',
+      EDGEBASE_APP_WEB_RESET_PASSWORD_URL: 'https://sink.example.test/reset',
+    })).toThrow(
+      /EDGEBASE_INTERNAL_WORKER_URL.*EDGEBASE_EMAIL_API_URL.*EDGEBASE_SMS_API_URL.*EDGEBASE_APP_WEB_RESET_PASSWORD_URL/i,
+    );
+  });
+
+  it('rejects deploy/control credentials from Worker release secret input', () => {
+    expect(() => assertNoDeployOnlyReleaseSecretVars({
+      CLOUDFLARE_API_TOKEN: 'cloudflare-sentinel',
+      NEON_API_KEY: 'neon-sentinel',
+      GITHUB_TOKEN: 'github-sentinel',
+    })).toThrow(/CLOUDFLARE_API_TOKEN, NEON_API_KEY, GITHUB_TOKEN/i);
+    try {
+      assertNoDeployOnlyReleaseSecretVars({ GITHUB_TOKEN: 'must-not-appear' });
+    } catch (error) {
+      expect((error as Error).message).not.toContain('must-not-appear');
+    }
+  });
+
+  it('rejects remote deploy credentials and gates mapped self-destruct credentials', () => {
+    expect(() => assertNoDeployOnlyRemoteWorkerSecrets(
+      new Set(['CLOUDFLARE_API_TOKEN', 'GITHUB_TOKEN']),
+      false,
+    )).toThrow(/secret delete CLOUDFLARE_API_TOKEN[\s\S]*secret delete GITHUB_TOKEN/i);
+    expect(() => assertNoDeployOnlyRemoteWorkerSecrets(
+      new Set(['CF_API_TOKEN', 'CF_ACCOUNT_ID']),
+      false,
+    )).toThrow(/CF_API_TOKEN, CF_ACCOUNT_ID/i);
+    expect(() => assertNoDeployOnlyRemoteWorkerSecrets(
+      new Set(['CF_API_TOKEN', 'CF_ACCOUNT_ID']),
+      true,
+    )).not.toThrow();
+  });
+
+  it('rejects active ambient test/config overrides before hosted deploy evaluation', () => {
+    expect(() => assertNoActiveHostedDeployProcessOverrides(
+      {
+        EDGEBASE_CONFIG: '{"release":false}',
+        EDGEBASE_TEST_BUILD: 'true',
+        EDGEBASE_LOCAL_DEV_BUILD: 'true',
+        EDGEBASE_DEV_SIDECAR_PORT: '8788',
+        EDGEBASE_INTERNAL_WORKER_URL: 'https://sink.example.test/internal',
+        EDGEBASE_SMS_API_URL: 'https://sink.example.test/sms',
+        EDGEBASE_USE_TEST_CONFIG: 'true',
+        VITEST_WORKER_ID: 'synthetic-worker',
+        NODE_ENV: 'test',
+        EDGEBASE_RUNTIME_MODE: 'self-hosted',
+      },
+    )).toThrow(
+      /EDGEBASE_CONFIG, EDGEBASE_TEST_BUILD, EDGEBASE_LOCAL_DEV_BUILD, EDGEBASE_DEV_SIDECAR_PORT, EDGEBASE_INTERNAL_WORKER_URL, EDGEBASE_SMS_API_URL, EDGEBASE_USE_TEST_CONFIG, VITEST_WORKER_ID, NODE_ENV, EDGEBASE_RUNTIME_MODE/i,
+    );
+    expect(() => assertNoActiveHostedDeployProcessOverrides(
+      { NODE_ENV: 'production', EDGEBASE_RUNTIME_MODE: 'cloudflare', VITEST: '0' },
+    )).not.toThrow();
+  });
+
+  it('fails closed on legacy remote reserved secrets with an explicit deletion path', () => {
+    expect(() => assertNoReservedRemoteWorkerSecrets(new Set([
+      'SERVICE_KEY',
+      'EDGEBASE_CONFIG',
+      'EDGEBASE_TEST',
+      'EDGEBASE_TEST_BUILD',
+      'EDGEBASE_LOCAL_DEV_BUILD',
+      'EDGEBASE_DEV_SIDECAR_PORT',
+      'EDGEBASE_INTERNAL_WORKER_URL',
+      'EDGEBASE_SMS_API_URL',
+    ]))).toThrow(
+      /secret delete EDGEBASE_CONFIG[\s\S]*secret delete EDGEBASE_TEST_BUILD[\s\S]*secret delete EDGEBASE_LOCAL_DEV_BUILD[\s\S]*secret delete EDGEBASE_DEV_SIDECAR_PORT[\s\S]*secret delete EDGEBASE_INTERNAL_WORKER_URL[\s\S]*secret delete EDGEBASE_SMS_API_URL/i,
+    );
+    expect(() => assertNoReservedRemoteWorkerSecrets(new Set(['SERVICE_KEY'])))
+      .not.toThrow();
+  });
+
   it('bounds a project post-scaffold hook and reports an actionable timeout', () => {
     const scriptsDir = join(tmpDir, 'scripts');
     mkdirSync(scriptsDir, { recursive: true });
@@ -288,7 +447,6 @@ describe('version-bound deploy secrets', () => {
     writeFileSync(join(tmpDir, '.env.release'), [
       'SYNTHETIC_SECRET=from-release-env',
       'SERVICE_KEY=must-be-ignored',
-      'EDGEBASE_RUNTIME_MODE=must-not-be-secret',
     ].join('\n'));
 
     const secretsPath = prepareAtomicDeploySecrets(
@@ -319,6 +477,197 @@ describe('version-bound deploy secrets', () => {
     ) as Record<string, string>;
     expect(persisted.SERVICE_KEY).toBe(payload.SERVICE_KEY);
     expect(persisted).not.toHaveProperty('TURNSTILE_SECRET');
+  });
+
+  it('never writes reserved runtime names into a Wrangler secrets file', () => {
+    writeFileSync(join(tmpDir, '.env.release'), [
+      'SAFE_SECRET=synthetic',
+      'EDGEBASE_TEST=1',
+    ].join('\n'));
+
+    expect(() => prepareAtomicDeploySecrets(
+      tmpDir,
+      '0123456789abcdef0123456789abcdef',
+      false,
+      { storeCfCredentials: false },
+    )).toThrow(/\.env\.release must not define.*EDGEBASE_TEST/i);
+    expect(existsSync(join(tmpDir, '.edgebase'))).toBe(false);
+  });
+
+  it('rejects symlinked, oversized, and non-string persisted secret stores', () => {
+    const edgebaseDir = join(tmpDir, '.edgebase');
+    const secretsPath = join(edgebaseDir, 'secrets.json');
+    const outsidePath = join(tmpDir, 'outside-secrets.json');
+    mkdirSync(edgebaseDir, { recursive: true });
+    writeFileSync(outsidePath, JSON.stringify(validManagedSecrets));
+    symlinkSync(outsidePath, secretsPath);
+
+    expect(() => prepareAtomicDeploySecrets(
+      tmpDir,
+      '0123456789abcdef0123456789abcdef',
+      false,
+      { storeCfCredentials: false },
+    )).toThrow(/regular file.*symbolic link/i);
+    expect(readFileSync(outsidePath, 'utf-8')).toBe(JSON.stringify(validManagedSecrets));
+
+    rmSync(secretsPath);
+    writeFileSync(secretsPath, 'x'.repeat(64 * 1024 + 1));
+    expect(() => prepareAtomicDeploySecrets(
+      tmpDir,
+      '0123456789abcdef0123456789abcdef',
+      false,
+      { storeCfCredentials: false },
+    )).toThrow(/64 KiB safety limit/i);
+
+    writeFileSync(secretsPath, JSON.stringify({ SERVICE_KEY: { nested: 'not-a-string' } }));
+    expect(() => prepareAtomicDeploySecrets(
+      tmpDir,
+      '0123456789abcdef0123456789abcdef',
+      false,
+      { storeCfCredentials: false },
+    )).toThrow(/string values only/i);
+  });
+
+  it('repairs persisted secret permissions even when no secret content changes', () => {
+    const edgebaseDir = join(tmpDir, '.edgebase');
+    const secretsPath = join(edgebaseDir, 'secrets.json');
+    mkdirSync(edgebaseDir, { recursive: true });
+    writeFileSync(secretsPath, JSON.stringify(validManagedSecrets));
+    chmodSync(secretsPath, 0o644);
+
+    prepareAtomicDeploySecrets(
+      tmpDir,
+      '0123456789abcdef0123456789abcdef',
+      false,
+      { storeCfCredentials: false },
+    );
+
+    expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(secretsPath, 'utf-8'))).toEqual(validManagedSecrets);
+  });
+
+  it('regenerates weak or duplicate local managed secrets before first upload', () => {
+    const edgebaseDir = join(tmpDir, '.edgebase');
+    const secretsPath = join(edgebaseDir, 'secrets.json');
+    const reusableUserSecret = validManagedSecrets.JWT_USER_SECRET;
+    mkdirSync(edgebaseDir, { recursive: true });
+    writeFileSync(secretsPath, JSON.stringify({
+      ...validManagedSecrets,
+      SERVICE_KEY: 'a'.repeat(64),
+      JWT_USER_SECRET: reusableUserSecret,
+      JWT_ADMIN_SECRET: reusableUserSecret,
+    }));
+
+    const deploySecretsPath = prepareAtomicDeploySecrets(
+      tmpDir,
+      '0123456789abcdef0123456789abcdef',
+      false,
+      { storeCfCredentials: false },
+    );
+    const persisted = JSON.parse(readFileSync(secretsPath, 'utf-8')) as Record<string, string>;
+    const uploaded = JSON.parse(readFileSync(deploySecretsPath!, 'utf-8')) as Record<string, string>;
+    const managedValues = ['SERVICE_KEY', 'JWT_USER_SECRET', 'JWT_ADMIN_SECRET']
+      .map((name) => persisted[name]);
+
+    expect(persisted.SERVICE_KEY).not.toBe('a'.repeat(64));
+    expect(persisted.JWT_USER_SECRET).toBe(reusableUserSecret);
+    expect(persisted.JWT_ADMIN_SECRET).not.toBe(reusableUserSecret);
+    expect(new Set(managedValues).size).toBe(3);
+    for (const value of managedValues) {
+      expect(value).toMatch(/^[0-9a-f]{64}$/);
+      expect(new Set(value).size).toBeGreaterThanOrEqual(8);
+    }
+    expect(uploaded).toMatchObject({
+      SERVICE_KEY: persisted.SERVICE_KEY,
+      JWT_USER_SECRET: persisted.JWT_USER_SECRET,
+      JWT_ADMIN_SECRET: persisted.JWT_ADMIN_SECRET,
+    });
+    expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
+  });
+
+  it('fails closed before publish when an existing Worker has no local managed-secret authority', () => {
+    expect(() => prepareAtomicDeploySecrets(
+      tmpDir,
+      '0123456789abcdef0123456789abcdef',
+      true,
+      {
+        storeCfCredentials: false,
+        remoteSecretNames: new Set(['SERVICE_KEY', 'JWT_USER_SECRET', 'JWT_ADMIN_SECRET']),
+      },
+    )).toThrow(/existing remote SERVICE_KEY.*Restore the private secrets file.*rotation\/recovery/i);
+
+    const edgebaseDir = join(tmpDir, '.edgebase');
+    expect(existsSync(join(edgebaseDir, 'secrets.json'))).toBe(false);
+    expect(existsSync(edgebaseDir)
+      ? readdirSync(edgebaseDir).filter((name) => name.startsWith('.deploy-secrets-'))
+      : []).toEqual([]);
+  });
+
+  it('does not replace weak local authority while retaining an unknown live secret', () => {
+    const edgebaseDir = join(tmpDir, '.edgebase');
+    const secretsPath = join(edgebaseDir, 'secrets.json');
+    const hostile = {
+      ...validManagedSecrets,
+      SERVICE_KEY: 'a'.repeat(64),
+    };
+    mkdirSync(edgebaseDir, { recursive: true });
+    writeFileSync(secretsPath, JSON.stringify(hostile));
+
+    expect(() => prepareAtomicDeploySecrets(
+      tmpDir,
+      '0123456789abcdef0123456789abcdef',
+      true,
+      {
+        storeCfCredentials: false,
+        remoteSecretNames: new Set(['SERVICE_KEY', 'JWT_USER_SECRET', 'JWT_ADMIN_SECRET']),
+      },
+    )).toThrow(/existing remote SERVICE_KEY.*valid authoritative local value/i);
+    expect(JSON.parse(readFileSync(secretsPath, 'utf-8'))).toEqual(hostile);
+    expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
+  });
+
+  it('retains verified local authority without re-uploading existing managed secrets', () => {
+    const edgebaseDir = join(tmpDir, '.edgebase');
+    const secretsPath = join(edgebaseDir, 'secrets.json');
+    mkdirSync(edgebaseDir, { recursive: true });
+    writeFileSync(secretsPath, JSON.stringify(validManagedSecrets));
+
+    const deploySecretsPath = prepareAtomicDeploySecrets(
+      tmpDir,
+      '0123456789abcdef0123456789abcdef',
+      true,
+      {
+        storeCfCredentials: false,
+        remoteSecretNames: new Set(['SERVICE_KEY', 'JWT_USER_SECRET', 'JWT_ADMIN_SECRET']),
+      },
+    );
+
+    expect(deploySecretsPath).toBeNull();
+    expect(JSON.parse(readFileSync(secretsPath, 'utf-8'))).toEqual(validManagedSecrets);
+    expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
+  });
+
+  it('maps an explicit self-destruct token only to the scoped runtime name', () => {
+    const sentinel = 'self-destruct-token-sentinel-9c70a1';
+    const previous = process.env.EDGEBASE_SELF_DESTRUCT_CF_TOKEN;
+    process.env.EDGEBASE_SELF_DESTRUCT_CF_TOKEN = sentinel;
+
+    try {
+      const secretsPath = prepareAtomicDeploySecrets(
+        tmpDir,
+        '0123456789abcdef0123456789abcdef',
+        false,
+        { storeCfCredentials: true },
+      );
+      const payload = JSON.parse(readFileSync(secretsPath!, 'utf8')) as Record<string, string>;
+      expect(payload.CF_API_TOKEN).toBe(sentinel);
+      expect(payload.CF_ACCOUNT_ID).toBe('0123456789abcdef0123456789abcdef');
+      expect(payload).not.toHaveProperty('EDGEBASE_SELF_DESTRUCT_CF_TOKEN');
+      expect(payload).not.toHaveProperty('CLOUDFLARE_API_TOKEN');
+    } finally {
+      if (previous === undefined) delete process.env.EDGEBASE_SELF_DESTRUCT_CF_TOKEN;
+      else process.env.EDGEBASE_SELF_DESTRUCT_CF_TOKEN = previous;
+    }
   });
 
 });
@@ -552,6 +901,211 @@ describe('Cloudflare resource provisioning fail-closed', () => {
       manifest,
       'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
     )).toBeNull();
+  });
+
+  it('fails closed when a previous deploy manifest belongs to a different Worker identity', () => {
+    const manifest = manifestWithResource({
+      type: 'd1_database',
+      name: 'auth',
+      binding: 'AUTH_DB',
+      id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    }, 'worker-before-rename');
+
+    expect(() => assertWorkerIdentityContinuity(
+      manifest,
+      'worker-after-rename',
+      false,
+    )).toThrow(/separate Durable Object storage/);
+    expect(() => assertWorkerIdentityContinuity(
+      manifest,
+      'worker-after-rename',
+      true,
+    )).not.toThrow();
+  });
+
+  it('fails closed when a previous deploy manifest belongs to a different Cloudflare account', () => {
+    const manifest = manifestWithResource({ type: 'r2_bucket', name: 'storage' });
+
+    expect(() => assertCloudflareAccountContinuity(
+      manifest,
+      'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      false,
+    )).toThrow(/separate Worker, Durable Object, and managed resource storage/);
+    expect(() => assertCloudflareAccountContinuity(
+      manifest,
+      'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      true,
+    )).not.toThrow();
+  });
+
+  it('allows first deploys and unchanged Cloudflare accounts without an override', () => {
+    expect(() => assertCloudflareAccountContinuity(
+      null,
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      false,
+    )).not.toThrow();
+    expect(() => assertCloudflareAccountContinuity(
+      manifestWithResource({ type: 'kv_namespace', name: 'cache' }),
+      '9DEF174E0C9C444685B8C773D076CE4B',
+      false,
+    )).not.toThrow();
+  });
+
+  it('allows first deploys and unchanged Worker identities without an override', () => {
+    expect(() => assertWorkerIdentityContinuity(null, 'worker-alpha', false)).not.toThrow();
+    expect(() => assertWorkerIdentityContinuity(
+      manifestWithResource({ type: 'r2_bucket', name: 'storage' }, 'worker-alpha'),
+      'WORKER-ALPHA',
+      false,
+    )).not.toThrow();
+  });
+
+  it('treats only a missing deploy manifest as first deploy and fails closed on corruption', () => {
+    expect(readCloudflareDeployManifest(tmpDir)).toBeNull();
+    const stateDir = join(tmpDir, '.edgebase');
+    const manifestPath = join(stateDir, 'cloudflare-deploy-manifest.json');
+    mkdirSync(stateDir, { recursive: true });
+
+    writeFileSync(manifestPath, '{not-json');
+    expect(() => readCloudflareDeployManifest(tmpDir)).toThrow(
+      /manifest is invalid.*Restore a valid copy.*intentionally accept a first deploy/is,
+    );
+
+    writeFileSync(manifestPath, JSON.stringify({ version: 2, accountId: 42 }));
+    expect(() => readCloudflareDeployManifest(tmpDir)).toThrow(/manifest is invalid/i);
+
+    const valid = manifestWithResource({
+      type: 'r2_bucket',
+      name: 'storage',
+      binding: 'STORAGE',
+      id: 'storage',
+      managed: false,
+      source: 'existing',
+    });
+    for (const corrupted of [
+      { ...valid, version: 3 },
+      { ...valid, worker: { name: '', url: valid.worker.url } },
+      { ...valid, resources: [{ ...valid.resources[0], managed: 'false' }] },
+      { ...valid, resources: [{ ...valid.resources[0], source: 'guessed' }] },
+      { ...valid, resources: [{ ...valid.resources[0], managed: undefined }] },
+      { ...valid, resources: [{ ...valid.resources[0], source: undefined }] },
+      { ...valid, resources: [{ ...valid.resources[0], id: undefined }] },
+      { ...valid, resources: [{ ...valid.resources[0], managed: true, source: 'manual' }] },
+      { ...valid, resources: [{ ...valid.resources[0], managed: false, source: 'created' }] },
+      { ...valid, resources: [{ type: 'r2_bucket', name: '' }] },
+    ]) {
+      writeFileSync(manifestPath, JSON.stringify(corrupted));
+      expect(() => readCloudflareDeployManifest(tmpDir)).toThrow(/manifest is invalid/i);
+    }
+
+    writeFileSync(manifestPath, `${JSON.stringify(valid)}${' '.repeat(4 * 1024 * 1024)}`);
+    expect(() => readCloudflareDeployManifest(tmpDir)).toThrow(/manifest is invalid/i);
+  });
+
+  it('replaces deploy manifests atomically with private permissions and no stale temp file', () => {
+    const first = manifestWithResource({
+      type: 'kv_namespace',
+      name: 'cache',
+      binding: 'CACHE_KV',
+      id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      managed: true,
+      source: 'created',
+    }, 'worker-one');
+    const second = manifestWithResource({
+      type: 'kv_namespace',
+      name: 'cache',
+      binding: 'CACHE_KV',
+      id: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      managed: true,
+      source: 'created',
+    }, 'worker-two');
+    const manifestPath = writeCloudflareDeployManifest(tmpDir, first);
+    writeCloudflareDeployManifest(tmpDir, second);
+
+    expect(readCloudflareDeployManifest(tmpDir)).toMatchObject(second);
+    expect(readdirSync(join(tmpDir, '.edgebase')).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    if (process.platform !== 'win32') {
+      expect(statSync(manifestPath).mode & 0o077).toBe(0);
+    }
+  });
+
+  it('never persists a stale EDGEBASE_URL as deploy-manifest authority', () => {
+    const previous = process.env.EDGEBASE_URL;
+    process.env.EDGEBASE_URL = 'https://unrelated-worker.example.test';
+    writeFileSync(join(tmpDir, 'wrangler.toml'), 'name = "worker-one"\n');
+    try {
+      expect(resolveDeployedWorkerUrl(tmpDir, 'deploy completed without a URL')).toBe('');
+      expect(resolveDeployedWorkerUrl(
+        tmpDir,
+        'Published at https://worker-one.owner.workers.dev',
+      )).toBe('https://worker-one.owner.workers.dev');
+      for (const unprovenOutput of [
+        'Published at https://worker-two.owner.workers.dev',
+        'Published at https://worker-one.example.test',
+        'Published at http://worker-one.owner.workers.dev',
+        'Published at https://worker-one.owner.workers.dev/admin',
+        'Published at https://worker-one.owner.workers.dev?preview=1',
+      ]) {
+        const resolved = resolveDeployedWorkerUrl(tmpDir, unprovenOutput);
+        expect(resolved).toBe('');
+        expect(() => assertReleasePostDeployWorkerUrl({ release: true }, resolved))
+          .toThrow(/post-deploy verification were not run/i);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.EDGEBASE_URL;
+      else process.env.EDGEBASE_URL = previous;
+    }
+  });
+
+  it('does not inject .env.release plaintext into deploy-generated config or bundled config', { timeout: 30_000 }, () => {
+    const envKey = 'EDGEBASE_DEPLOY_SECRET_SENTINEL';
+    const sentinel = 'deploy-release-secret-sentinel-7d67f0f4';
+    const previous = process.env[envKey];
+    writeFileSync(
+      join(tmpDir, 'edgebase.config.ts'),
+      `export default {
+  release: true,
+  runtimeSecretValue: process.env.${envKey},
+};\n`,
+    );
+    writeFileSync(join(tmpDir, '.env.release'), `${envKey}=${sentinel}\n`);
+    process.env[envKey] = sentinel;
+
+    try {
+      const bundle = createDeployAppBundle(
+        tmpDir,
+        join('.edgebase', 'targets', 'deploy-secret-safety'),
+      );
+      const generatedConfig = readFileSync(
+        join(bundle.outputDir, '.edgebase', 'runtime', 'server', 'src', 'generated-config.ts'),
+        'utf8',
+      );
+      const bundledConfig = readFileSync(
+        join(bundle.outputDir, '.edgebase', 'runtime', 'server', 'bundle', 'config', 'edgebase.config.bundle.js'),
+        'utf8',
+      );
+
+      expect(generatedConfig).not.toContain(sentinel);
+      expect(generatedConfig).not.toContain('const injectedEnv =');
+      expect(bundledConfig).not.toContain(sentinel);
+      expect(JSON.stringify(bundle.manifest)).not.toContain(sentinel);
+      expect(existsSync(join(bundle.outputDir, '.env.release'))).toBe(false);
+      expect(findSentinelInSmallRegularFiles(bundle.outputDir, sentinel)).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env[envKey];
+      else process.env[envKey] = previous;
+    }
+  });
+
+  it('fails a release after publish when Wrangler cannot prove the verification URL', () => {
+    expect(() => assertReleasePostDeployWorkerUrl({ release: true }, '')).toThrow(
+      /Worker deploy succeeded.*Bootstrap admin and post-deploy verification were not run/is,
+    );
+    expect(() => assertReleasePostDeployWorkerUrl(
+      { release: true },
+      'https://synthetic-worker.owner.workers.dev',
+    )).not.toThrow();
+    expect(() => assertReleasePostDeployWorkerUrl({ release: false }, '')).not.toThrow();
   });
 
   it('isolates new KV namespaces and reuses a legacy namespace only with manifest proof', () => {
@@ -1072,28 +1626,50 @@ describe('resolveReleaseSecretVars', () => {
     const envPath = join(tmpDir, '.env.release');
     writeFileSync(envPath, [
       'MOCK_SERVER_URL=https://old-tunnel.example.com',
-      'EDGEBASE_EMAIL_API_URL=https://old-tunnel.example.com/email',
-      'EDGEBASE_RUNTIME_MODE=self-hosted',
+      'EDGEBASE_EMAIL_API_KEY=old-email-key',
       'UNCHANGED=value-from-file',
     ].join('\n'));
 
     const previousMock = process.env.MOCK_SERVER_URL;
-    const previousEmail = process.env.EDGEBASE_EMAIL_API_URL;
+    const previousEmail = process.env.EDGEBASE_EMAIL_API_KEY;
     process.env.MOCK_SERVER_URL = 'https://new-tunnel.example.com';
-    process.env.EDGEBASE_EMAIL_API_URL = 'https://new-tunnel.example.com/email';
+    process.env.EDGEBASE_EMAIL_API_KEY = 'new-email-key';
 
     try {
       expect(resolveReleaseSecretVars(tmpDir)).toEqual({
         MOCK_SERVER_URL: 'https://new-tunnel.example.com',
-        EDGEBASE_EMAIL_API_URL: 'https://new-tunnel.example.com/email',
+        EDGEBASE_EMAIL_API_KEY: 'new-email-key',
         UNCHANGED: 'value-from-file',
       });
     } finally {
       if (previousMock === undefined) delete process.env.MOCK_SERVER_URL;
       else process.env.MOCK_SERVER_URL = previousMock;
-      if (previousEmail === undefined) delete process.env.EDGEBASE_EMAIL_API_URL;
-      else process.env.EDGEBASE_EMAIL_API_URL = previousEmail;
+      if (previousEmail === undefined) delete process.env.EDGEBASE_EMAIL_API_KEY;
+      else process.env.EDGEBASE_EMAIL_API_KEY = previousEmail;
     }
+  });
+
+  it('rejects test selectors and the CLI-owned runtime mode in .env.release', () => {
+    writeFileSync(join(tmpDir, '.env.release'), [
+      'EDGEBASE_USE_TEST_CONFIG=1',
+      'NODE_ENV=test',
+      'EDGEBASE_RUNTIME_MODE=self-hosted',
+    ].join('\n'));
+
+    expect(() => resolveReleaseSecretVars(tmpDir)).toThrow(
+      /EDGEBASE_USE_TEST_CONFIG, NODE_ENV, EDGEBASE_RUNTIME_MODE/i,
+    );
+  });
+
+  it('rejects deploy-only credentials in .env.release before secret preparation', () => {
+    writeFileSync(join(tmpDir, '.env.release'), [
+      'SAFE_APPLICATION_SECRET=synthetic',
+      'GITHUB_TOKEN=must-stay-with-cli',
+    ].join('\n'));
+
+    expect(() => resolveReleaseSecretVars(tmpDir)).toThrow(
+      /deploy\/control credential.*GITHUB_TOKEN/i,
+    );
   });
 });
 
@@ -1834,6 +2410,127 @@ const {
 } = _internals;
 
 describe('generateTempWranglerToml', () => {
+  it('adds the Cloudflare send_email binding required by release config', () => {
+    const wranglerPath = join(tmpDir, 'wrangler.toml');
+    writeFileSync(wranglerPath, 'name = "my-worker"\n');
+
+    expect(resolveCloudflareEmailBinding({
+      release: true,
+      email: { provider: 'cloudflare', from: 'noreply@example.com' },
+    })).toBe('EMAIL');
+    const result = generateTempWranglerToml(wranglerPath, {
+      bindings: [],
+      sendEmailBinding: 'EMAIL',
+    });
+
+    expect(result).not.toBeNull();
+    const content = readFileSync(result!, 'utf-8');
+    expect(content).toContain('[[send_email]]');
+    expect(content).toContain('name = "EMAIL"');
+    expect((content.match(/\[\[send_email\]\]/g) || [])).toHaveLength(1);
+    rmSync(result!);
+  });
+
+  it('preserves an existing matching send_email block and its destination restrictions', () => {
+    const wranglerPath = join(tmpDir, 'wrangler.toml');
+    writeFileSync(wranglerPath, [
+      'name = "my-worker"',
+      '',
+      '[[send_email]]',
+      'name = "TRANSACTIONAL_EMAIL"',
+      'allowed_destination_addresses = ["synthetic@example.com"]',
+    ].join('\n'));
+
+    const result = generateTempWranglerToml(wranglerPath, {
+      bindings: [],
+      sendEmailBinding: 'TRANSACTIONAL_EMAIL',
+    });
+    expect(result).not.toBeNull();
+    const content = readFileSync(result!, 'utf-8');
+    expect((content.match(/\[\[send_email\]\]/g) || [])).toHaveLength(1);
+    expect(content).toContain('allowed_destination_addresses = ["synthetic@example.com"]');
+    rmSync(result!);
+  });
+
+  it('rejects unsafe or reserved Cloudflare email binding names before TOML generation', () => {
+    const wranglerPath = join(tmpDir, 'wrangler.toml');
+    writeFileSync(wranglerPath, 'name = "my-worker"\n');
+
+    expect(() => resolveCloudflareEmailBinding({
+      email: { provider: 'cloudflare', binding: 'EMAIL\n[[d1_databases]]' },
+    })).toThrow(/must be a JavaScript identifier/i);
+    expect(() => resolveCloudflareEmailBinding({
+      email: { provider: 'cloudflare', binding: 'EDGEBASE_CONFIG' },
+    })).toThrow(/reserved for EdgeBase runtime integrity/i);
+    expect(() => generateTempWranglerToml(wranglerPath, {
+      bindings: [],
+      sendEmailBinding: 'EMAIL-WITH-DASH',
+    })).toThrow(/invalid.*JavaScript identifier/i);
+  });
+
+  it('rejects protected hosted runtime names from source Wrangler vars', () => {
+    const wranglerPath = join(tmpDir, 'wrangler.toml');
+    writeFileSync(wranglerPath, [
+      'name = "my-worker"',
+      '',
+      '[vars]',
+      'SAFE_PUBLIC_VALUE = "kept"',
+      'EDGEBASE_TEST = "1"',
+      'EDGEBASE_EMAIL_API_URL = "https://sink.example.test"',
+      'EDGEBASE_DEV_SIDECAR_PORT = "8788"',
+    ].join('\n'));
+
+    expect(() => generateTempWranglerToml(wranglerPath, {
+      bindings: [],
+      runtimeMode: 'cloudflare',
+    })).toThrow(/wrangler\.toml.*EDGEBASE_TEST, EDGEBASE_EMAIL_API_URL, EDGEBASE_DEV_SIDECAR_PORT/i);
+
+    for (const content of [
+      'name = "my-worker"\nenv.production.vars.EDGEBASE_SMS_API_URL = "https://sink.example.test"\n',
+      'name = "my-worker"\n["env"."production"."vars"]\n"EDGEBASE_SMS_API_URL" = "https://sink.example.test"\n',
+      'name = "my-worker"\nenv = { production = { vars = { EDGEBASE_SMS_API_URL = "https://sink.example.test" } } }\n',
+    ]) {
+      writeFileSync(wranglerPath, content);
+      expect(() => generateTempWranglerToml(wranglerPath, {
+        bindings: [],
+        runtimeMode: 'cloudflare',
+      })).toThrow(/EDGEBASE_SMS_API_URL/i);
+    }
+  });
+
+  it('rejects CLI-owned compile selectors from source Wrangler vars and defines', () => {
+    const wranglerPath = join(tmpDir, 'wrangler.toml');
+    for (const selector of ['EDGEBASE_TEST_BUILD', 'EDGEBASE_LOCAL_DEV_BUILD']) {
+      for (const content of [
+        ['name = "my-worker"', '[vars]', `${selector} = "true"`].join('\n'),
+        ['name = "my-worker"', '[define]', `${selector} = "true"`].join('\n'),
+        ['name = "my-worker"', '[env.production.define]', `${selector} = "true"`].join('\n'),
+        `name = "my-worker"\ndefine = { ${selector} = "true" }\n`,
+        `name = "my-worker"\n["env"."production"."define"]\n"${selector}" = "true"\n`,
+        `name = "my-worker"\n"env"."production"."define"."${selector}" = "true"\n`,
+        `name = "my-worker"\nenv.production.define = { "${selector}" = "true" }\n`,
+        `name = "my-worker"\nenv = { production = { define = { "${selector}" = "true" } } }\n`,
+      ]) {
+        writeFileSync(wranglerPath, content);
+        expect(() => generateTempWranglerToml(wranglerPath, {
+          bindings: [],
+          runtimeMode: 'cloudflare',
+        })).toThrow(new RegExp(selector));
+      }
+    }
+
+    writeFileSync(
+      wranglerPath,
+      'name = "my-worker"\ndefine = { SAFE_TEXT = "EDGEBASE_LOCAL_DEV_BUILD = true" }\n',
+    );
+    const safeResult = generateTempWranglerToml(wranglerPath, {
+      bindings: [],
+      runtimeMode: 'cloudflare',
+    });
+    expect(safeResult).not.toBeNull();
+    rmSync(safeResult!);
+  });
+
   it('owns the runtime mode variable without clobbering other root vars', () => {
     const wranglerPath = join(tmpDir, 'wrangler.toml');
     writeFileSync(
@@ -1861,6 +2558,30 @@ describe('generateTempWranglerToml', () => {
     expect(content).toContain('EDGEBASE_RUNTIME_MODE = "cloudflare"');
     expect(content).not.toContain('EDGEBASE_RUNTIME_MODE = "self-hosted"');
     expect(content.match(/EDGEBASE_RUNTIME_MODE/g)).toHaveLength(1);
+    rmSync(result!);
+  });
+
+  it('adds process-env compatibility required for hosted Worker secrets exactly once', () => {
+    const wranglerPath = join(tmpDir, 'wrangler.toml');
+    writeFileSync(wranglerPath, [
+      'name = "my-worker"',
+      'compatibility_date = "2025-02-10"',
+      'compatibility_flags = ["nodejs_compat"]',
+    ].join('\n'));
+
+    const result = generateTempWranglerToml(wranglerPath, {
+      bindings: [],
+      runtimeMode: 'cloudflare',
+      requiredCompatibilityFlags: [
+        'nodejs_compat',
+        'nodejs_compat_populate_process_env',
+      ],
+    });
+
+    expect(result).not.toBeNull();
+    const content = readFileSync(result!, 'utf-8');
+    expect((content.match(/nodejs_compat_populate_process_env/g) || [])).toHaveLength(1);
+    expect((content.match(/"nodejs_compat"/g) || [])).toHaveLength(1);
     rmSync(result!);
   });
 

@@ -76,6 +76,11 @@ vi.mock('../src/lib/schema-check.js', async (importOriginal) => {
 describe('deploy command agent mode', () => {
   let testDir: string;
   let originalCwd: string;
+  let originalAmbient: Record<string, string | undefined>;
+  const ambientNames = [
+    'EDGEBASE_CONFIG', 'EDGEBASE_TEST', 'EDGEBASE_USE_TEST_CONFIG', 'VITEST',
+    'VITEST_WORKER_ID', 'VITEST_POOL_ID', 'NODE_ENV', 'EDGEBASE_RUNTIME_MODE',
+  ];
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -85,6 +90,9 @@ describe('deploy command agent mode', () => {
     writeFileSync(join(testDir, 'edgebase.config.ts'), 'export default {};');
     originalCwd = process.cwd();
     process.chdir(testDir);
+    originalAmbient = Object.fromEntries(ambientNames.map((name) => [name, process.env[name]]));
+    for (const name of ambientNames) delete process.env[name];
+    process.env.NODE_ENV = 'production';
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
@@ -94,6 +102,11 @@ describe('deploy command agent mode', () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
+    for (const name of ambientNames) {
+      const value = originalAmbient[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
     setContext({ json: false, quiet: false, verbose: false, nonInteractive: false });
     vi.restoreAllMocks();
     rmSync(testDir, { recursive: true, force: true });

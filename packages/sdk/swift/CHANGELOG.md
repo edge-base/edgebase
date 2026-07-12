@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2
+
+- Synchronized the Swift package with the EdgeBase 0.4.2 security patch release.
+- No public Swift API compatibility break is introduced.
+
 ## 0.4.1
 
 - Defaulted client tokens to Keychain and made every Keychain/storage failure

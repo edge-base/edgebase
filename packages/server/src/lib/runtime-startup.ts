@@ -1,6 +1,3 @@
-// Compile-time constant — injected by wrangler [define] in wrangler.test.toml
-declare const EDGEBASE_TEST_BUILD: boolean | undefined;
-
 let startupPromise: Promise<void> | null = null;
 
 async function detectWorkersTestRuntime(): Promise<boolean> {
@@ -18,16 +15,23 @@ export async function ensureServerStartup(): Promise<void> {
   }
 
   startupPromise = (async () => {
-    const [{ resolveStartupConfig }, generatedConfigModule, { initFunctionRegistry }, doRouterModule] = await Promise.all([
+    const [
+      { resolveStartupConfig },
+      generatedConfigModule,
+      { initFunctionRegistry },
+      doRouterModule,
+      { isTrustedEdgeBaseTestBuild },
+    ] = await Promise.all([
       import('./startup-config.js'),
       import('../generated-config.js'),
       import('../_functions-registry.js'),
       import('./do-router.js'),
+      import('./release-runtime-integrity.js'),
     ]);
 
     try {
       const processEnv = typeof process !== 'undefined' ? process.env : undefined;
-      const isTestBuild = typeof EDGEBASE_TEST_BUILD !== 'undefined';
+      const isTestBuild = isTrustedEdgeBaseTestBuild();
       const preferTestConfig = await detectWorkersTestRuntime() || isTestBuild;
       const existingConfig = doRouterModule.parseConfig();
       const resolvedConfig = await resolveStartupConfig(

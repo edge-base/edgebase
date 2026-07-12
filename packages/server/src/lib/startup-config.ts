@@ -1,4 +1,5 @@
 import { materializeConfig, type EdgeBaseConfig } from '@edge-base/shared';
+import { assertReleaseRuntimeIntegrity } from './release-runtime-integrity.js';
 
 function hasConfigContent(config: unknown): config is EdgeBaseConfig {
   return Boolean(
@@ -79,6 +80,18 @@ export async function resolveStartupConfig(
   processEnv: Record<string, string | undefined> | undefined,
   options?: { preferTestConfig?: boolean },
 ): Promise<EdgeBaseConfig | null> {
+  const materializedGeneratedConfig = hasConfigContent(generatedConfig)
+    ? materializeConfig(generatedConfig as EdgeBaseConfig)
+    : null;
+
+  // A bundled release config is deployment authority. Legacy process-env
+  // config/test bindings must never replace it, even with malformed JSON or
+  // when a test-config preference flag is also present.
+  if (materializedGeneratedConfig?.release === true) {
+    assertReleaseRuntimeIntegrity(materializedGeneratedConfig, processEnv);
+    return materializedGeneratedConfig;
+  }
+
   const processEnvConfig = parseProcessEnvConfig(processEnv);
   if (processEnvConfig) {
     return processEnvConfig;
@@ -91,8 +104,8 @@ export async function resolveStartupConfig(
     }
   }
 
-  if (hasConfigContent(generatedConfig)) {
-    return materializeConfig(generatedConfig as EdgeBaseConfig);
+  if (materializedGeneratedConfig) {
+    return materializedGeneratedConfig;
   }
 
   return loadMaterializedTestConfig(loadTestConfig);

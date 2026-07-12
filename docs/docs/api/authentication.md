@@ -837,6 +837,9 @@ curl -X POST https://your-project.edgebase.fun/api/auth/verify-email \
 ### `POST /api/auth/request-password-reset`
 
 Send a password reset email. This endpoint always returns a success response regardless of whether the email exists, to prevent email enumeration.
+Outside the explicit test runtime, provider success/failure and message IDs are
+also hidden behind the same response, and email delivery continues as
+background work. Delivery failures are logged server-side.
 
 **Auth**: None
 

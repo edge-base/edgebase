@@ -23,6 +23,7 @@ import {
   verifyAdminToken,
   verifyAdminRefreshToken,
   verifyRefreshTokenWithFallback,
+  verifyAdminTokenWithFallback,
   verifyAdminRefreshTokenWithFallback,
   decodeTokenUnsafe,
   TokenExpiredError,
@@ -324,6 +325,42 @@ describe('verifyAdminRefreshTokenWithFallback', () => {
     await expect(
       verifyAdminRefreshTokenWithFallback(token, SECRET, OTHER_SECRET, expiredOldAt),
     ).rejects.toThrowError();
+  });
+});
+
+describe('JWT rotation fallback timestamp integrity', () => {
+  const futureRotationTimestamp = () => new Date(
+    Date.now() + 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  it('rejects a user refresh old-secret fallback whose rotation timestamp is in the future', async () => {
+    const token = await signRefreshToken({ sub: 'u1', type: 'refresh' }, OTHER_SECRET);
+    await expect(verifyRefreshTokenWithFallback(
+      token,
+      SECRET,
+      OTHER_SECRET,
+      futureRotationTimestamp(),
+    )).rejects.toThrow(TokenInvalidError);
+  });
+
+  it('rejects an admin access old-secret fallback whose rotation timestamp is in the future', async () => {
+    const token = await signAdminAccessToken({ sub: 'admin-1' }, OTHER_SECRET);
+    await expect(verifyAdminTokenWithFallback(
+      token,
+      SECRET,
+      OTHER_SECRET,
+      futureRotationTimestamp(),
+    )).rejects.toThrow(TokenInvalidError);
+  });
+
+  it('rejects an admin refresh old-secret fallback whose rotation timestamp is in the future', async () => {
+    const token = await signAdminRefreshToken({ sub: 'admin-1' }, OTHER_SECRET);
+    await expect(verifyAdminRefreshTokenWithFallback(
+      token,
+      SECRET,
+      OTHER_SECRET,
+      futureRotationTimestamp(),
+    )).rejects.toThrow(TokenInvalidError);
   });
 });
 

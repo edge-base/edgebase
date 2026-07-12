@@ -1,3 +1,8 @@
+## 0.4.2
+
+- Synchronized the Flutter package with the EdgeBase 0.4.2 security patch release
+- No public Dart API compatibility break is introduced
+
 ## 0.4.1
 
 - Persist access and refresh tokens as one SharedPreferences value, expose

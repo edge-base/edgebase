@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { PluginInstance } from '@edge-base/shared';
 import { buildManagedD1DatabaseName, extractWranglerWorkerName } from './managed-resource-names.js';
+import { RESERVED_HOSTED_WORKER_SECRET_NAMES } from './wrangler-secrets.js';
 
 export interface ProvisionedBinding {
   type: 'kv_namespace' | 'd1_database' | 'vectorize' | 'hyperdrive';
@@ -37,6 +38,8 @@ export const RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS = [
 interface GenerateTempWranglerBaseOptions {
   bindings: ProvisionedBinding[];
   rateLimitBindings?: ProvisionedRateLimitBinding[];
+  /** Cloudflare Workers send_email binding required by config.email. */
+  sendEmailBinding?: string;
   /** CLI-owned trust boundary for request forwarding headers. */
   runtimeMode?: EdgeBaseRuntimeMode;
   /** Compatibility flags required by the generated runtime only. */
@@ -58,6 +61,15 @@ export type GenerateTempWranglerTomlOptions =
 const EDGEBASE_ASSETS_DIRECTORY = '.edgebase/runtime/server/app-assets';
 const LEGACY_EDGEBASE_ASSETS_DIRECTORY = '.edgebase/runtime/server/admin-build';
 const EDGEBASE_ASSETS_BINDING = 'ASSETS';
+const WORKER_BINDING_NAME_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+const RESERVED_COMPILE_TIME_BUILD_SELECTORS = [
+  'EDGEBASE_TEST_BUILD',
+  'EDGEBASE_LOCAL_DEV_BUILD',
+] as const;
+
+export function isSafeWorkerBindingName(value: unknown): value is string {
+  return typeof value === 'string' && WORKER_BINDING_NAME_PATTERN.test(value);
+}
 
 function ensureRequiredCompatibilityFlags(
   wranglerToml: string,
@@ -153,6 +165,225 @@ function ensureRuntimeModeVar(
   }
 
   return { normalized: lines.join('\n'), changed: true };
+}
+
+function stripTomlComment(line: string): string {
+  let quote: '"' | "'" | null = null;
+  let escaped = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (quote) {
+      if (quote === '"' && escaped) {
+        escaped = false;
+        continue;
+      }
+      if (quote === '"' && character === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === '#') return line.slice(0, index);
+  }
+  return line;
+}
+
+function findTomlEquals(value: string, start = 0): number {
+  let quote: '"' | "'" | null = null;
+  let escaped = false;
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index];
+    if (quote) {
+      if (quote === '"' && escaped) {
+        escaped = false;
+        continue;
+      }
+      if (quote === '"' && character === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === '=') return index;
+    if (character === '}') return -1;
+  }
+  return -1;
+}
+
+function parseTomlKeyPath(value: string): string[] | null {
+  const path: string[] = [];
+  let index = 0;
+  const skipWhitespace = () => {
+    while (index < value.length && /\s/.test(value[index])) index += 1;
+  };
+
+  while (index < value.length) {
+    skipWhitespace();
+    if (index >= value.length) break;
+    const start = index;
+    let key = '';
+    if (value[index] === '"' || value[index] === "'") {
+      const quote = value[index];
+      index += 1;
+      let escaped = false;
+      while (index < value.length) {
+        const character = value[index];
+        index += 1;
+        if (quote === '"' && escaped) {
+          escaped = false;
+          continue;
+        }
+        if (quote === '"' && character === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (character === quote) break;
+      }
+      if (value[index - 1] !== quote) return null;
+      const raw = value.slice(start, index);
+      try {
+        key = quote === '"' ? JSON.parse(raw) as string : raw.slice(1, -1);
+      } catch {
+        return null;
+      }
+    } else {
+      const match = value.slice(index).match(/^[A-Za-z0-9_-]+/);
+      if (!match) return null;
+      key = match[0];
+      index += key.length;
+    }
+    path.push(key);
+    skipWhitespace();
+    if (index >= value.length) break;
+    if (value[index] !== '.') return null;
+    index += 1;
+  }
+
+  return path.length > 0 ? path : null;
+}
+
+function skipTomlValue(value: string, start: number): number {
+  let quote: '"' | "'" | null = null;
+  let escaped = false;
+  let arrayDepth = 0;
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index];
+    if (quote) {
+      if (quote === '"' && escaped) {
+        escaped = false;
+        continue;
+      }
+      if (quote === '"' && character === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === '[') arrayDepth += 1;
+    else if (character === ']') arrayDepth = Math.max(0, arrayDepth - 1);
+    else if (arrayDepth === 0 && (character === ',' || character === '}')) return index;
+  }
+  return value.length;
+}
+
+function scanInlineTomlTable(
+  value: string,
+  start: number,
+  parentPath: string[],
+  onPath: (path: string[]) => void,
+): number {
+  let index = start + 1;
+  while (index < value.length) {
+    while (index < value.length && (value[index] === ',' || /\s/.test(value[index]))) index += 1;
+    if (value[index] === '}') return index + 1;
+
+    const equals = findTomlEquals(value, index);
+    if (equals === -1) return value.length;
+    const keyPath = parseTomlKeyPath(value.slice(index, equals));
+    if (!keyPath) return value.length;
+    const fullPath = [...parentPath, ...keyPath];
+    onPath(fullPath);
+
+    index = equals + 1;
+    while (index < value.length && /\s/.test(value[index])) index += 1;
+    if (value[index] === '{') {
+      index = scanInlineTomlTable(value, index, fullPath, onPath);
+    } else {
+      index = skipTomlValue(value, index);
+    }
+    if (value[index] === '}') return index + 1;
+  }
+  return index;
+}
+
+export function assertNoProtectedWranglerRuntimeSelectors(wranglerToml: string): void {
+  const protectedNames = new Set<string>(RESERVED_HOSTED_WORKER_SECRET_NAMES);
+  // This one is a CLI-owned public var and is normalized below instead of
+  // rejected. It is still forbidden as a Worker secret by deploy preflight.
+  protectedNames.delete('EDGEBASE_RUNTIME_MODE');
+  const found = new Set<string>();
+  let sectionPath: string[] = [];
+  const collectPath = (path: string[]) => {
+    const name = path.at(-1);
+    if (!name) return;
+    const scopes = path.slice(0, -1).map((segment) => segment.toLowerCase());
+    if (scopes.includes('vars') && protectedNames.has(name)) found.add(name);
+    if (
+      scopes.includes('define')
+      && (RESERVED_COMPILE_TIME_BUILD_SELECTORS as readonly string[]).includes(name)
+    ) found.add(name);
+  };
+
+  for (const rawLine of wranglerToml.split(/\r?\n/)) {
+    const line = stripTomlComment(rawLine).trim();
+    if (!line) continue;
+    const section = line.startsWith('[')
+      && line.endsWith(']')
+      && !line.startsWith('[[')
+      && !line.endsWith(']]')
+      ? line.slice(1, -1)
+      : null;
+    if (section !== null && !section.includes('[') && !section.includes(']')) {
+      sectionPath = parseTomlKeyPath(section) ?? [];
+      continue;
+    }
+
+    const equals = findTomlEquals(line);
+    if (equals === -1) continue;
+    const keyPath = parseTomlKeyPath(line.slice(0, equals));
+    if (!keyPath) continue;
+    const fullPath = [...sectionPath, ...keyPath];
+    collectPath(fullPath);
+
+    let valueStart = equals + 1;
+    while (valueStart < line.length && /\s/.test(line[valueStart])) valueStart += 1;
+    if (line[valueStart] === '{') {
+      scanInlineTomlTable(line, valueStart, fullPath, collectPath);
+    }
+  }
+  if (found.size === 0) return;
+
+  throw new Error(
+    `wrangler.toml must not define protected hosted runtime selector(s): ${[...found].join(', ')}. `
+    + 'Remove them from [vars], environment vars, and [define]; configure production behavior in edgebase.config.ts. '
+    + 'EDGEBASE_TEST_BUILD is reserved for the dedicated test-only Wrangler config; '
+    + 'EDGEBASE_LOCAL_DEV_BUILD is injected only by the EdgeBase CLI dev command.',
+  );
 }
 
 function readAssetsDirectory(block: string): string | null {
@@ -307,10 +538,18 @@ export function generateTempWranglerToml(
       candidate.type === binding.type && candidate.binding === binding.binding) === index,
   );
   const rateLimitBindings = options.rateLimitBindings ?? [];
+  const sendEmailBinding = options.sendEmailBinding;
+  if (sendEmailBinding !== undefined && !isSafeWorkerBindingName(sendEmailBinding)) {
+    throw new Error(
+      `Cloudflare email binding '${String(sendEmailBinding)}' is invalid. `
+      + 'Use a JavaScript identifier such as EMAIL or TRANSACTIONAL_EMAIL.',
+    );
+  }
   const replaceTriggers = options.triggerMode === 'replace';
   const managedCrons = replaceTriggers ? options.managedCrons : [];
 
   const original = readFileSync(wranglerPath, 'utf-8');
+  assertNoProtectedWranglerRuntimeSelectors(original);
   const { normalized: runtimeNormalized, changed: normalizedRuntimeMode } =
     ensureRuntimeModeVar(original, options.runtimeMode);
   const { normalized: compatibilityNormalized, changed: normalizedCompatibilityFlags } =
@@ -325,6 +564,7 @@ export function generateTempWranglerToml(
     bindings.length === 0 &&
     !replaceTriggers &&
     rateLimitBindings.length === 0 &&
+    !sendEmailBinding &&
     !normalizedRuntimeMode &&
     !normalizedCompatibilityFlags &&
     !normalizedAssetsRouting
@@ -340,6 +580,14 @@ export function generateTempWranglerToml(
     bindings.filter((binding) => binding.type === 'd1_database').map((binding) => binding.binding),
   );
   const rateLimitBindingNames = new Set(rateLimitBindings.map((binding) => binding.binding));
+  const hasRequiredSendEmailBinding = sendEmailBinding
+    ? [...normalizedOriginal.matchAll(
+        /(?:^|\n)\[\[send_email\]\]([\s\S]*?)(?=\n\[\[|\n\[|$)/g,
+      )].some((match) => {
+        const nameMatch = match[1].match(/^\s*name\s*=\s*["']([^"']+)["']\s*$/m);
+        return nameMatch?.[1] === sendEmailBinding;
+      })
+    : false;
   let sanitizedOriginal =
     rateLimitBindingNames.size > 0
       ? normalizedOriginal.replace(/\n?\[\[unsafe\.bindings\]\][\s\S]*?(?=\n\[\[|\n\[|$)/g, (block) => {
@@ -439,6 +687,10 @@ export function generateTempWranglerToml(
     }
   }
 
+  if (sendEmailBinding && !hasRequiredSendEmailBinding) {
+    appendManagedSection(`[[send_email]]\nname = ${JSON.stringify(sendEmailBinding)}`);
+  }
+
   if (replaceTriggers) {
     appendManagedSection(`[triggers]\ncrons = [${managedCrons.map((c) => `"${c}"`).join(', ')}]`);
   }
@@ -448,6 +700,7 @@ export function generateTempWranglerToml(
     && !normalizedAssetsRouting
     && !normalizedRuntimeMode
     && !normalizedCompatibilityFlags
+    && (!sendEmailBinding || hasRequiredSendEmailBinding)
   ) return null;
 
   const tempDir = dirname(wranglerPath);

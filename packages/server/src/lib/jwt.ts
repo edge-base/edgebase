@@ -290,7 +290,7 @@ export async function verifyRefreshTokenWithFallback(
     if (!(err instanceof TokenExpiredError) && err instanceof TokenInvalidError && oldSecret && oldAt) {
       const elapsed = Date.now() - new Date(oldAt).getTime();
       const GRACE_MS = 28 * 24 * 60 * 60 * 1000;
-      if (elapsed <= GRACE_MS) {
+      if (elapsed >= 0 && elapsed <= GRACE_MS) {
         return await verifyRefreshToken(token, oldSecret);
       }
     }
@@ -313,7 +313,7 @@ export async function verifyAdminTokenWithFallback(
     if (!(err instanceof TokenExpiredError) && err instanceof TokenInvalidError && oldSecret && oldAt) {
       const elapsed = Date.now() - new Date(oldAt).getTime();
       const GRACE_MS = 28 * 24 * 60 * 60 * 1000;
-      if (elapsed <= GRACE_MS) {
+      if (elapsed >= 0 && elapsed <= GRACE_MS) {
         return await verifyAdminToken(token, oldSecret);
       }
     }
@@ -336,7 +336,7 @@ export async function verifyAdminRefreshTokenWithFallback(
     if (!(err instanceof TokenExpiredError) && err instanceof TokenInvalidError && oldSecret && oldAt) {
       const elapsed = Date.now() - new Date(oldAt).getTime();
       const GRACE_MS = 28 * 24 * 60 * 60 * 1000;
-      if (elapsed <= GRACE_MS) {
+      if (elapsed >= 0 && elapsed <= GRACE_MS) {
         return await verifyAdminRefreshToken(token, oldSecret);
       }
     }

@@ -925,11 +925,13 @@ describe('defineFunction', () => {
     const fn = defineFunction({
       trigger: { type: 'http', method: 'POST', path: '/api/webhook/stripe' },
       customBearerAuth: true,
+      maxRequestBodyBytes: 4 * 1024 * 1024,
       handler: async () => {},
     });
 
     expect(fn.trigger.type).toBe('http');
     expect(fn.customBearerAuth).toBe(true);
+    expect(fn.maxRequestBodyBytes).toBe(4 * 1024 * 1024);
   });
 
   it('should accept schedule trigger function', () => {
@@ -1057,6 +1059,7 @@ describe('auth session cookie config', () => {
           cookie: {
             enabled: true,
             name: 'edgebase-test-refresh',
+            legacyNames: ['former-app-refresh'],
             sameSite: 'strict',
           },
         },
@@ -1066,6 +1069,7 @@ describe('auth session cookie config', () => {
     expect(config.auth?.session?.cookie).toEqual({
       enabled: true,
       name: 'edgebase-test-refresh',
+      legacyNames: ['former-app-refresh'],
       sameSite: 'strict',
     });
   });
@@ -1090,6 +1094,41 @@ describe('auth session cookie config', () => {
         },
       },
     })).toThrow(/reserved admin cookie name/);
+
+    expect(() => defineConfig({
+      auth: {
+        session: {
+          cookie: { enabled: true, name: 'current-refresh', legacyNames: ['current-refresh'] },
+        },
+      },
+    })).toThrow(/must not contain the current cookie name/);
+
+    expect(() => defineConfig({
+      auth: {
+        session: {
+          cookie: { enabled: true, legacyNames: ['duplicate', 'duplicate'] },
+        },
+      },
+    })).toThrow(/must not contain duplicates/);
+
+    expect(() => defineConfig({
+      auth: {
+        session: {
+          cookie: { enabled: true, legacyNames: ['unsafe; Path=/'] },
+        },
+      },
+    })).toThrow(/legacyNames.*cookie-safe/);
+
+    expect(() => defineConfig({
+      auth: {
+        session: {
+          cookie: {
+            enabled: true,
+            legacyNames: Array.from({ length: 17 }, (_, index) => `former-${index}`),
+          },
+        },
+      },
+    })).toThrow(/at most 16/);
   });
 });
 

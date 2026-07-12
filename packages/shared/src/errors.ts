@@ -180,6 +180,7 @@ export const FunctionErrorCode = {
   'unauthenticated': 401,
   'invalid-argument': 400,
   'already-exists': 409,
+  'payload-too-large': 413,
   'resource-exhausted': 429,
   'failed-precondition': 412,
   'internal': 500,

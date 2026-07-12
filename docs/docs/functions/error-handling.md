@@ -52,6 +52,7 @@ export const POST = defineFunction(async ({ auth, admin }) => {
 | `not-found` | 404 | Resource not found |
 | `invalid-argument` | 400 | Bad request parameters |
 | `already-exists` | 409 | Resource already exists |
+| `payload-too-large` | 413 | Request body exceeds the HTTP function's configured byte limit |
 | `resource-exhausted` | 429 | Rate limit exceeded |
 | `failed-precondition` | 412 | Operation prerequisites not met |
 | `internal` | 500 | Internal server error |

@@ -88,6 +88,7 @@ import {
   normalizeAdminUserUpdates,
   updateManagedAdminUser,
 } from '../lib/admin-user-management.js';
+import { sanitizeConfigForBackup } from '../lib/config-backup-sanitizer.js';
 import { DATABASE_LIVE_HUB_DO_NAME } from '../lib/database-live-emitter.js';
 import { fetchRoomMonitoringStatsFromKv } from '../lib/room-monitoring.js';
 import {
@@ -3432,7 +3433,7 @@ const adminBackupGetConfig = createRoute({
 api.openapi(adminBackupGetConfig, (c) => {
   try {
     const config = parseConfig(c.env);
-    return c.json(config);
+    return c.json(sanitizeConfigForBackup(config));
   } catch {
     return c.json({});
   }

@@ -409,6 +409,12 @@ function textEmailToHtml(text: string): string {
 const functionRegistry = new Map<string, FunctionDefinition>();
 
 const HTTP_REGISTRY_SEPARATOR = '::';
+export const DEFAULT_HTTP_FUNCTION_BODY_LIMIT_BYTES = 1024 * 1024;
+export const MAX_HTTP_FUNCTION_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
+
+export function httpFunctionBodyLimit(definition: FunctionDefinition): number {
+  return definition.maxRequestBodyBytes ?? DEFAULT_HTTP_FUNCTION_BODY_LIMIT_BYTES;
+}
 
 function buildRegistryKey(name: string, def: FunctionDefinition): string {
   if (def.trigger.type !== 'http') return name;
@@ -433,6 +439,19 @@ export function registerFunction(name: string, def: FunctionDefinition): void {
       `registerFunction('${name}'): expected a FunctionDefinition with a 'trigger' property, but received ${received}. ` +
         `Functions must use defineFunction() from '@edge-base/shared' and be exported as named HTTP method exports ` +
         `(e.g. export const GET = defineFunction(...)). See https://docs.edgebase.dev/functions for details.`,
+    );
+  }
+  if (
+    def.trigger.type === 'http'
+    && def.maxRequestBodyBytes !== undefined
+    && (
+      !Number.isSafeInteger(def.maxRequestBodyBytes)
+      || def.maxRequestBodyBytes < 0
+      || def.maxRequestBodyBytes > MAX_HTTP_FUNCTION_BODY_LIMIT_BYTES
+    )
+  ) {
+    throw new Error(
+      `registerFunction('${name}'): maxRequestBodyBytes must be a safe integer from 0 to ${MAX_HTTP_FUNCTION_BODY_LIMIT_BYTES}.`,
     );
   }
   functionRegistry.set(buildRegistryKey(name, def), def);
@@ -749,6 +768,7 @@ export function wrapMethodExport(
         handler?: (ctx: unknown) => Promise<unknown>;
         captcha?: boolean;
         customBearerAuth?: boolean;
+        maxRequestBodyBytes?: number;
         trigger?: { path?: string };
       }
     | ((ctx: unknown) => Promise<unknown>),
@@ -772,6 +792,7 @@ export function wrapMethodExport(
   let fn: (ctx: unknown) => Promise<unknown>;
   let captcha: boolean | undefined;
   let customBearerAuth: boolean | undefined;
+  let maxRequestBodyBytes: number | undefined;
   let path: string | undefined;
 
   if (typeof handler === 'function') {
@@ -780,6 +801,7 @@ export function wrapMethodExport(
     fn = (handler.handler ?? handler) as unknown as (ctx: unknown) => Promise<unknown>;
     captcha = handler.captcha;
     customBearerAuth = handler.customBearerAuth;
+    maxRequestBodyBytes = handler.maxRequestBodyBytes;
     if (
       'trigger' in handler &&
       handler.trigger &&
@@ -801,6 +823,7 @@ export function wrapMethodExport(
     },
     captcha,
     customBearerAuth,
+    maxRequestBodyBytes,
     handler: fn,
   };
 }

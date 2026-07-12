@@ -7,7 +7,15 @@ import {
   readFileSync,
   writeFileSync,
   chmodSync,
+  closeSync,
+  constants as fsConstants,
+  fchmodSync,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
+  openSync,
   readdirSync,
+  renameSync,
   statSync,
   unlinkSync,
 } from 'node:fs';
@@ -26,7 +34,9 @@ import {
 import {
   extractDatabases,
   generateTempWranglerToml,
+  isSafeWorkerBindingName,
   mergePluginTables,
+  RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS,
   type ProvisionedBinding,
 } from '../lib/deploy-shared.js';
 import {
@@ -70,9 +80,15 @@ import {
   releaseTurnstileDeployLease,
   type TurnstileDeployLease,
 } from '../lib/turnstile-deploy-lease.js';
-import { listWranglerSecretNames } from '../lib/wrangler-secrets.js';
 import {
+  DEPLOY_CONTROL_WORKER_SECRET_NAMES,
+  listWranglerSecretNames,
+  RESERVED_HOSTED_WORKER_SECRET_NAMES,
+} from '../lib/wrangler-secrets.js';
+import {
+  assertCloudflareAccountContinuity,
   findCloudflareResourceRecord,
+  normalizeProvenCloudflareWorkerOrigin,
   readCloudflareDeployManifest,
   writeCloudflareDeployManifest,
   type CloudflareResourceRecord,
@@ -112,6 +128,10 @@ const WRANGLER_RESOURCE_COMMAND_TIMEOUT_MS = 30_000;
 const HYPERDRIVE_API_TIMEOUT_MS = 10_000;
 const HYPERDRIVE_API_RESPONSE_MAX_BYTES = 64 * 1024;
 const PROJECT_POST_SCAFFOLD_HOOK_TIMEOUT_MS = 5 * 60_000;
+const PERSISTED_SECRETS_MAX_BYTES = 64 * 1024;
+const PERSISTED_SECRETS_MAX_ENTRIES = 256;
+const PERSISTED_SECRET_VALUE_MAX_BYTES = 16 * 1024;
+const MANAGED_SECRET_NAMES = ['SERVICE_KEY', 'JWT_USER_SECRET', 'JWT_ADMIN_SECRET'] as const;
 
 type AuthEnvField = 'clientId' | 'clientSecret' | 'issuer' | 'scopes';
 type AuthProviderInspection = {
@@ -128,10 +148,17 @@ type AuthProviderInspection = {
 };
 
 export function extractWorkerUrlFromWranglerDeployOutput(output: string): string {
-  const matches = [...output.matchAll(/https:\/\/[A-Za-z0-9.-]+\.workers\.dev/g)].map(
-    (match) => match[0],
-  );
-  return matches.at(-1) ?? '';
+  const matches = [...output.matchAll(/https:\/\/[^\s<>"'`]+/g)].map((match) => match[0]);
+  for (let index = matches.length - 1; index >= 0; index -= 1) {
+    try {
+      if (new URL(matches[index]).hostname.toLowerCase().endsWith('.workers.dev')) {
+        return matches[index];
+      }
+    } catch {
+      // Ignore malformed URL-like output and keep scanning older candidates.
+    }
+  }
+  return '';
 }
 
 export function extractWorkerVersionIdFromWranglerDeployOutput(output: string): string | null {
@@ -301,20 +328,169 @@ export function registerDeploySecretCleanup(path: string): () => void {
   };
 }
 
-function resolveWorkerUrlFromProject(projectDir: string): string {
-  return resolveProjectWorkerUrl(projectDir);
-}
-
 function resolveWorkerNameFromProject(projectDir: string): string {
   return resolveProjectWorkerName(projectDir);
 }
 
 function resolveDeployedWorkerUrl(projectDir: string, deployOutput: string): string {
-  return (
-    extractWorkerUrlFromWranglerDeployOutput(deployOutput)
-    || process.env.EDGEBASE_URL
-    || resolveWorkerUrlFromProject(projectDir)
+  // Only Wrangler's response proves which Worker was just published. A stale
+  // global EDGEBASE_URL or a guessed workers.dev hostname can belong to a
+  // different account/project and must never become destructive manifest
+  // authority. Keep the URL empty when Wrangler does not report one.
+  const workerName = resolveWorkerNameFromProject(projectDir);
+  return normalizeProvenCloudflareWorkerOrigin(
+    workerName,
+    extractWorkerUrlFromWranglerDeployOutput(deployOutput),
   );
+}
+
+function createDeployAppBundle(projectDir: string, outputDir: string) {
+  // Release values are runtime secrets, not build-time source. In particular,
+  // never pass .env.release through CreateAppBundleOptions.injectedEnv because
+  // that option intentionally writes literal values into generated-config.ts
+  // for local development bundles.
+  return createAppBundle(projectDir, {
+    outputDir,
+    overwrite: true,
+  });
+}
+
+function reservedHostedRuntimeNames(names: Iterable<string>): string[] {
+  const present = new Set(names);
+  return RESERVED_HOSTED_WORKER_SECRET_NAMES.filter((name) => present.has(name));
+}
+
+function assertNoReservedReleaseSecretVars(vars: Record<string, string>): void {
+  const reserved = reservedHostedRuntimeNames(Object.keys(vars));
+  if (reserved.length === 0) return;
+
+  throw new Error(
+    `.env.release must not define protected hosted runtime binding(s): ${reserved.join(', ')}. `
+    + 'Production config and email action URLs are bundled from edgebase.config.ts; test/mock endpoint overrides are local-only. '
+    + 'Remove those exact entries; they are never valid production secrets.',
+  );
+}
+
+function assertNoDeployOnlyReleaseSecretVars(vars: Record<string, string>): void {
+  const present = new Set(Object.keys(vars));
+  const forbidden = DEPLOY_CONTROL_WORKER_SECRET_NAMES.filter((name) => present.has(name));
+  if (forbidden.length === 0) return;
+
+  throw new Error(
+    `.env.release must not define deploy/control credential(s): ${forbidden.join(', ')}. `
+    + 'Pass deployment credentials through the CLI process environment instead. They are not Worker application secrets.',
+  );
+}
+
+function assertNoActiveHostedDeployProcessOverrides(
+  processEnv: Record<string, string | undefined>,
+): void {
+  const enabled = (name: string) => {
+    const value = processEnv[name]?.trim().toLowerCase();
+    return value === '1' || value === 'true';
+  };
+  const nonEmpty = (name: string) => (processEnv[name]?.trim().length ?? 0) > 0;
+  const active: string[] = [];
+  if (nonEmpty('EDGEBASE_CONFIG')) active.push('EDGEBASE_CONFIG');
+  if (enabled('EDGEBASE_TEST')) active.push('EDGEBASE_TEST');
+  if (nonEmpty('EDGEBASE_TEST_BUILD')) active.push('EDGEBASE_TEST_BUILD');
+  if (nonEmpty('EDGEBASE_LOCAL_DEV_BUILD')) active.push('EDGEBASE_LOCAL_DEV_BUILD');
+  if (nonEmpty('EDGEBASE_DEV_SIDECAR_PORT')) active.push('EDGEBASE_DEV_SIDECAR_PORT');
+  if (nonEmpty('EDGEBASE_INTERNAL_WORKER_URL')) active.push('EDGEBASE_INTERNAL_WORKER_URL');
+  if (nonEmpty('EDGEBASE_EMAIL_API_URL')) active.push('EDGEBASE_EMAIL_API_URL');
+  if (nonEmpty('EDGEBASE_SMS_API_URL')) active.push('EDGEBASE_SMS_API_URL');
+  if (enabled('EDGEBASE_USE_TEST_CONFIG')) active.push('EDGEBASE_USE_TEST_CONFIG');
+  if (enabled('VITEST')) active.push('VITEST');
+  if (nonEmpty('VITEST_WORKER_ID')) active.push('VITEST_WORKER_ID');
+  if (nonEmpty('VITEST_POOL_ID')) active.push('VITEST_POOL_ID');
+  if (processEnv.NODE_ENV?.trim().toLowerCase() === 'test') active.push('NODE_ENV');
+  if (
+    nonEmpty('EDGEBASE_RUNTIME_MODE')
+    && processEnv.EDGEBASE_RUNTIME_MODE?.trim() !== 'cloudflare'
+  ) active.push('EDGEBASE_RUNTIME_MODE');
+  if (active.length === 0) return;
+
+  throw new Error(
+    `Hosted deploy cannot run with active local/test config override(s): ${active.join(', ')}. `
+    + 'Unset them (NODE_ENV=production is allowed) and rerun so config evaluation and bundling use production authority.',
+  );
+}
+
+function assertNoDeployOnlyRemoteWorkerSecrets(
+  secretNames: Set<string>,
+  allowMappedSelfDestructCredentials: boolean,
+): void {
+  const present = new Set(secretNames);
+  const forbidden = DEPLOY_CONTROL_WORKER_SECRET_NAMES.filter((name) => {
+    if (
+      allowMappedSelfDestructCredentials
+      && (name === 'CF_API_TOKEN' || name === 'CF_ACCOUNT_ID')
+    ) return false;
+    return present.has(name);
+  });
+  if (forbidden.length === 0) return;
+
+  throw new Error(
+    `The existing Worker still has deploy/control credential secret(s): ${forbidden.join(', ')}. `
+    + 'Verify the Worker, then remove only those exact secrets with:\n  '
+    + forbidden.map((name) => `npx edgebase secret delete ${name}`).join('\n  ')
+    + '\nEdgeBase never deletes live secrets implicitly.',
+  );
+}
+
+function assertNoReservedRemoteWorkerSecrets(secretNames: Set<string>): void {
+  const reserved = reservedHostedRuntimeNames(secretNames);
+  if (reserved.length === 0) return;
+
+  const commands = reserved
+    .map((name) => `npx edgebase secret delete ${name}`)
+    .join('\n  ');
+  throw new Error(
+    `The existing Worker still has reserved legacy secret(s): ${reserved.join(', ')}. `
+    + 'They can override the bundled release config or enable test-only behavior, so deploy stopped before publishing. '
+    + `After verifying this is the intended Worker, remove only those exact secrets explicitly:\n  ${commands}\n`
+    + 'Then rerun deploy. EdgeBase will not delete live Worker secrets implicitly.',
+  );
+}
+
+function resolveCloudflareEmailBinding(
+  config: Record<string, unknown> | null | undefined,
+): string | undefined {
+  const email = config?.email;
+  if (!email || typeof email !== 'object' || Array.isArray(email)) return undefined;
+  const emailConfig = email as { provider?: unknown; binding?: unknown };
+  if (emailConfig.provider !== 'cloudflare') return undefined;
+
+  const binding = emailConfig.binding ?? 'EMAIL';
+  if (!isSafeWorkerBindingName(binding)) {
+    throw new Error(
+      'email.binding for provider "cloudflare" must be a JavaScript identifier '
+      + 'such as EMAIL or TRANSACTIONAL_EMAIL.',
+    );
+  }
+  if (reservedHostedRuntimeNames([binding]).length > 0) {
+    throw new Error(
+      `email.binding '${binding}' is reserved for EdgeBase runtime integrity and cannot be used as a send_email binding.`,
+    );
+  }
+  return binding;
+}
+
+function assertReleasePostDeployWorkerUrl(
+  config: Record<string, unknown> | null,
+  deployedWorkerUrl: string,
+): void {
+  if (config?.release !== true || deployedWorkerUrl) return;
+
+  raiseCliError({
+    code: 'deploy_post_publish_url_unproven',
+    message: 'Worker deploy succeeded, but Wrangler did not report a verifiable workers.dev URL. Bootstrap admin and post-deploy verification were not run.',
+    hint: 'Verify the published Worker and its HTTPS URL in Cloudflare, run `npx edgebase admin bootstrap --url <worker-url>` to complete admin setup, then rerun deploy. The local deploy manifest was preserved without treating an unverified URL as authority.',
+    details: {
+      workerPublished: true,
+      bootstrapAdminVerified: false,
+    },
+  });
 }
 
 export async function resolveAdminUrlFromRuntime(workerUrl: string): Promise<string | null> {
@@ -417,6 +593,12 @@ export function validateConfig(
       'Release CAPTCHA must not embed captcha.secretKey in edgebase.config.ts. '
       + 'Remove it and set TURNSTILE_SECRET in .env.release or Workers Secrets.',
     );
+  }
+
+  try {
+    resolveCloudflareEmailBinding(config);
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : 'Invalid Cloudflare email binding.');
   }
 
   // ─── Check 1: Inline Service Key warning ───
@@ -591,6 +773,17 @@ export const _internals = {
   readBoundedJsonResponse,
   assertRequiredBindingCoverage,
   scopePreviousManifestToAccount,
+  assertCloudflareAccountContinuity,
+  assertWorkerIdentityContinuity,
+  createDeployAppBundle,
+  assertReleasePostDeployWorkerUrl,
+  resolveDeployedWorkerUrl,
+  assertNoReservedReleaseSecretVars,
+  assertNoDeployOnlyReleaseSecretVars,
+  assertNoDeployOnlyRemoteWorkerSecrets,
+  assertNoActiveHostedDeployProcessOverrides,
+  assertNoReservedRemoteWorkerSecrets,
+  resolveCloudflareEmailBinding,
   generateTempWranglerToml,
   provisionTurnstile,
   injectCaptchaSiteKey,
@@ -856,6 +1049,27 @@ function scopePreviousManifestToAccount(
   accountId: string,
 ): ReturnType<typeof readCloudflareDeployManifest> {
   return manifest?.accountId.toLowerCase() === accountId.toLowerCase() ? manifest : null;
+}
+
+function assertWorkerIdentityContinuity(
+  previousManifest: ReturnType<typeof readCloudflareDeployManifest>,
+  currentWorkerName: string,
+  allowWorkerRename: boolean,
+): void {
+  const previousWorkerName = previousManifest?.worker.name.trim();
+  const currentName = currentWorkerName.trim();
+  if (
+    !previousWorkerName
+    || previousWorkerName.toLowerCase() === currentName.toLowerCase()
+    || allowWorkerRename
+  ) return;
+
+  throw new Error(
+    `Cloudflare Worker identity changed from '${previousWorkerName}' to '${currentName}'. `
+    + 'Deploying under a new Worker name creates separate Durable Object storage and can make existing data appear lost. '
+    + 'Migrate or intentionally retire the previous Worker and its managed resources first, then rerun with '
+    + '--allow-worker-rename to acknowledge the new isolated Worker identity.',
+  );
 }
 
 function resolveExistingManagedBindingOwnership(
@@ -2100,6 +2314,14 @@ export const deployCommand = new Command('deploy')
   .alias('dp')
   .description('Deploy to Cloudflare')
   .option('--dry-run', 'Validate config without deploying')
+  .option(
+    '--allow-worker-rename',
+    'Acknowledge that a changed Worker name creates separate Durable Object storage',
+  )
+  .option(
+    '--allow-account-change',
+    'Acknowledge that a changed Cloudflare account creates separate storage and resources',
+  )
   .option('--bootstrap-admin-email <email>', 'Bootstrap admin email to ensure for release deployments')
   .option('--bootstrap-admin-password-file <path>', 'Read the bootstrap admin password from a file')
   .option('--bootstrap-admin-password-stdin', 'Read the bootstrap admin password from stdin')
@@ -2110,6 +2332,8 @@ export const deployCommand = new Command('deploy')
   )
   .action(async (options: {
     dryRun?: boolean;
+    allowWorkerRename?: boolean;
+    allowAccountChange?: boolean;
     ifDestructive?: string;
     bootstrapAdminEmail?: string;
     bootstrapAdminPasswordFile?: string;
@@ -2130,6 +2354,16 @@ export const deployCommand = new Command('deploy')
         hint: 'Run `npm create edgebase@latest my-app` first.',
       });
     }
+
+    // The local manifest and Worker identity are safety authority even for a
+    // dry run. Inspect them before hooks, bundling, or any Cloudflare call so
+    // corruption/renames cannot produce a false-green preview.
+    const storedPreviousManifest = readCloudflareDeployManifest(projectDir);
+    assertWorkerIdentityContinuity(
+      storedPreviousManifest,
+      resolveWorkerNameFromProject(projectDir),
+      options.allowWorkerRename === true,
+    );
 
     if (!isQuiet()) {
       console.log(chalk.blue(isDryRun ? '⚡ Validating EdgeBase deploy...' : '⚡ Deploying EdgeBase...'));
@@ -2160,6 +2394,25 @@ export const deployCommand = new Command('deploy')
 
     const envReleasePath = join(projectDir, '.env.release');
     const releaseVars = existsSync(envReleasePath) ? parseEnvFile(envReleasePath) : {};
+    try {
+      assertNoReservedReleaseSecretVars(releaseVars);
+      assertNoDeployOnlyReleaseSecretVars(releaseVars);
+    } catch (error) {
+      raiseCliError({
+        code: 'deploy_reserved_release_secret',
+        message: error instanceof Error ? error.message : 'Reserved release secret detected.',
+        hint: 'Remove the entries named in the error from .env.release. Keep deploy/control credentials in the CLI process environment and production behavior in edgebase.config.ts.',
+      });
+    }
+    try {
+      assertNoActiveHostedDeployProcessOverrides(process.env);
+    } catch (error) {
+      raiseCliError({
+        code: 'deploy_process_override_active',
+        message: error instanceof Error ? error.message : 'Active local/test hosted deploy override detected.',
+        hint: 'Unset the named local/test environment variables and rerun deploy. NODE_ENV=production is allowed.',
+      });
+    }
     for (const [key, value] of Object.entries(releaseVars)) {
       if (!(key in process.env)) {
         process.env[key] = value;
@@ -2230,6 +2483,11 @@ export const deployCommand = new Command('deploy')
         },
       });
     }
+
+    const cloudflareEmailBinding = resolveCloudflareEmailBinding(configJson);
+    const selfDestructCfg = configJson?.selfDestruct as { enabled?: boolean } | undefined;
+    const storeCfCredentials = selfDestructCfg?.enabled === true
+      || process.env.EDGEBASE_STORE_CF_TOKEN === '1';
 
     // ─── Schema Destructive Change Detection ───
     let currentSnapshot: ReturnType<typeof buildSnapshot> | null = null;
@@ -2380,11 +2638,10 @@ export const deployCommand = new Command('deploy')
     // Note: wildcard CORS in release mode is warned about in validateConfig().
 
     if (options.dryRun) {
-      const dryRunBundle = createAppBundle(projectDir, {
-        outputDir: join('.edgebase', 'targets', 'deploy-app-dry-run'),
-        overwrite: true,
-        injectedEnv: releaseVars,
-      });
+      const dryRunBundle = createDeployAppBundle(
+        projectDir,
+        join('.edgebase', 'targets', 'deploy-app-dry-run'),
+      );
 
       if (isJson()) {
         const result: Record<string, unknown> = {
@@ -2441,29 +2698,57 @@ export const deployCommand = new Command('deploy')
 
     // ─── Cloudflare Authentication Gate ───
     const cfAuth = await ensureCloudflareAuth(projectDir, isTTY);
-    ensureWranglerToml(projectDir, cfAuth.accountId);
-    runProjectPostScaffoldHook(projectDir);
-    const deployBundle = createAppBundle(projectDir, {
-      outputDir: join('.edgebase', 'targets', 'deploy-app'),
-      overwrite: true,
-      injectedEnv: releaseVars,
-    });
-    const deployRuntimeDir = deployBundle.outputDir;
-    const deployWranglerPath = join(deployRuntimeDir, 'wrangler.toml');
-    const storedPreviousManifest = readCloudflareDeployManifest(projectDir);
-    const previousManifest = scopePreviousManifestToAccount(
+    assertCloudflareAccountContinuity(
       storedPreviousManifest,
       cfAuth.accountId,
+      options.allowAccountChange === true,
     );
-    if (storedPreviousManifest && !previousManifest && !isQuiet()) {
-      console.log(chalk.yellow(
-        '  ⚠ Ignoring the previous deploy manifest because it belongs to a different Cloudflare account.',
-      ));
-    }
+    ensureWranglerToml(projectDir, cfAuth.accountId);
+    assertWorkerIdentityContinuity(
+      storedPreviousManifest,
+      resolveWorkerNameFromProject(projectDir),
+      options.allowWorkerRename === true,
+    );
+    runProjectPostScaffoldHook(projectDir);
+    const deployBundle = createDeployAppBundle(
+      projectDir,
+      join('.edgebase', 'targets', 'deploy-app'),
+    );
+    const deployRuntimeDir = deployBundle.outputDir;
+    const deployWranglerPath = join(deployRuntimeDir, 'wrangler.toml');
+    const postHookPreviousManifest = readCloudflareDeployManifest(projectDir);
+    assertCloudflareAccountContinuity(
+      postHookPreviousManifest,
+      cfAuth.accountId,
+      options.allowAccountChange === true,
+    );
+    const previousManifest = scopePreviousManifestToAccount(
+      postHookPreviousManifest,
+      cfAuth.accountId,
+    );
+    const currentWorkerName = resolveWorkerNameFromProject(projectDir);
+    assertWorkerIdentityContinuity(
+      previousManifest,
+      currentWorkerName,
+      options.allowWorkerRename === true,
+    );
     let workerAlreadyDeployed = remoteWorkerExists(
       projectDir,
-      resolveWorkerNameFromProject(projectDir),
+      currentWorkerName,
     );
+    if (workerAlreadyDeployed) {
+      try {
+        const remoteSecretNames = listWranglerSecretNames(projectDir);
+        assertNoReservedRemoteWorkerSecrets(remoteSecretNames);
+        assertNoDeployOnlyRemoteWorkerSecrets(remoteSecretNames, storeCfCredentials);
+      } catch (error) {
+        raiseCliError({
+          code: 'deploy_reserved_remote_secret',
+          message: error instanceof Error ? error.message : 'Reserved remote Worker secret detected.',
+          hint: 'Inspect `npx edgebase secret list`, verify the Worker identity, and run the exact `npx edgebase secret delete <name>` commands shown before retrying.',
+        });
+      }
+    }
     console.log();
 
     if (functions.length > 0) {
@@ -2588,7 +2873,9 @@ export const deployCommand = new Command('deploy')
             triggerMode: 'replace',
             managedCrons: cronSchedules,
             rateLimitBindings,
+            sendEmailBinding: cloudflareEmailBinding,
             runtimeMode: 'cloudflare',
+            requiredCompatibilityFlags: RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS,
           },
         );
         if (tempWranglerPath) {
@@ -2616,7 +2903,9 @@ export const deployCommand = new Command('deploy')
             triggerMode: 'replace',
             managedCrons: cronSchedules,
             rateLimitBindings,
+            sendEmailBinding: cloudflareEmailBinding,
             runtimeMode: 'cloudflare',
+            requiredCompatibilityFlags: RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS,
           },
         );
         if (tempWranglerPath) {
@@ -2640,7 +2929,9 @@ export const deployCommand = new Command('deploy')
       tempWranglerPath = generateTempWranglerToml(wranglerPath, {
         bindings: [],
         triggerMode: 'preserve',
+        sendEmailBinding: cloudflareEmailBinding,
         runtimeMode: 'cloudflare',
+        requiredCompatibilityFlags: RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS,
       });
       if (tempWranglerPath) {
         console.log(chalk.green('✓'), 'Generated temp wrangler.toml with admin assets binding');
@@ -2743,12 +3034,6 @@ export const deployCommand = new Command('deploy')
         console.log();
       }
     }
-
-    // Opt-in (default OFF) for uploading a Cloudflare API token as a Worker
-    // secret to power dashboard self-destruct ("Delete App").
-    const selfDestructCfg = configJson?.selfDestruct as { enabled?: boolean } | undefined;
-    const storeCfCredentials = selfDestructCfg?.enabled === true
-      || process.env.EDGEBASE_STORE_CF_TOKEN === '1';
 
     // ─── Atomic version-bound secret preparation ───
     // Wrangler's --secrets-file binds secret updates to the same Worker version
@@ -2979,6 +3264,12 @@ export const deployCommand = new Command('deploy')
       workerUrl: deployedWorkerUrl,
     });
 
+    // The Worker is already published and the local/KV identity manifests have
+    // been preserved at this point. A release still cannot be reported as
+    // successful until Wrangler proves the concrete URL used for bootstrap and
+    // admin verification.
+    assertReleasePostDeployWorkerUrl(configJson, deployedWorkerUrl);
+
     let bootstrapAdminResult: EnsureBootstrapAdminResult | null = null;
     if (configJson?.release === true && deployedWorkerUrl) {
       const serviceKey = resolveOptionalServiceKey({});
@@ -3110,6 +3401,116 @@ export const deployCommand = new Command('deploy')
 
 // ─── Version-bound deploy secrets ───
 
+function readPersistedSecretsFile(path: string): Record<string, string> {
+  const pathStats = lstatSync(path);
+  if (pathStats.isSymbolicLink() || !pathStats.isFile()) {
+    throw new Error('.edgebase/secrets.json must be a regular file and must not be a symbolic link.');
+  }
+  if (pathStats.size > PERSISTED_SECRETS_MAX_BYTES) {
+    throw new Error('.edgebase/secrets.json exceeds the 64 KiB safety limit.');
+  }
+
+  const noFollow = typeof fsConstants.O_NOFOLLOW === 'number' ? fsConstants.O_NOFOLLOW : 0;
+  let fd: number | null = null;
+  let raw = '';
+  try {
+    fd = openSync(path, fsConstants.O_RDONLY | noFollow);
+    const openedStats = fstatSync(fd);
+    if (
+      !openedStats.isFile()
+      || openedStats.dev !== pathStats.dev
+      || openedStats.ino !== pathStats.ino
+      || openedStats.size > PERSISTED_SECRETS_MAX_BYTES
+    ) {
+      throw new Error('.edgebase/secrets.json changed while it was being validated.');
+    }
+    fchmodSync(fd, 0o600);
+    raw = readFileSync(fd, 'utf-8');
+    if (Buffer.byteLength(raw, 'utf-8') > PERSISTED_SECRETS_MAX_BYTES) {
+      throw new Error('.edgebase/secrets.json exceeds the 64 KiB safety limit.');
+    }
+    // Enforce the private mode after the read too, including no-change deploys.
+    fchmodSync(fd, 0o600);
+  } finally {
+    if (fd !== null) {
+      try {
+        fchmodSync(fd, 0o600);
+      } finally {
+        closeSync(fd);
+      }
+    }
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error('Cannot prepare deployment with invalid .edgebase/secrets.json JSON.');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('.edgebase/secrets.json must contain one JSON object of string values.');
+  }
+
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  if (entries.length > PERSISTED_SECRETS_MAX_ENTRIES) {
+    throw new Error('.edgebase/secrets.json contains too many entries.');
+  }
+  const secrets: Record<string, string> = {};
+  for (const [name, value] of entries) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name) || typeof value !== 'string') {
+      throw new Error('.edgebase/secrets.json must use bounded environment-style names and string values only.');
+    }
+    if (Buffer.byteLength(value, 'utf-8') > PERSISTED_SECRET_VALUE_MAX_BYTES) {
+      throw new Error(`.edgebase/secrets.json value for ${name} exceeds the safety limit.`);
+    }
+    secrets[name] = value;
+  }
+  return secrets;
+}
+
+function writePersistedSecretsFile(path: string, secrets: Record<string, string>): void {
+  const tempPath = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  let fd: number | null = null;
+  try {
+    fd = openSync(
+      tempPath,
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL,
+      0o600,
+    );
+    writeFileSync(fd, JSON.stringify(secrets, null, 2), 'utf-8');
+    fchmodSync(fd, 0o600);
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
+    renameSync(tempPath, path);
+    chmodSync(path, 0o600);
+  } catch (error) {
+    if (fd !== null) closeSync(fd);
+    try {
+      unlinkSync(tempPath);
+    } catch {
+      // The temp file may already have been renamed or never created.
+    }
+    throw error;
+  }
+}
+
+function isReusableManagedSecret(value: unknown, alreadyUsed: Set<string>): value is string {
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/i.test(value)) return false;
+  const normalized = value.toLowerCase();
+  if (/^0{64}$/.test(normalized)) return false;
+  if (new Set(normalized).size < 8) return false;
+  return !alreadyUsed.has(normalized);
+}
+
+function generateIndependentManagedSecret(alreadyUsed: Set<string>): string {
+  let candidate = '';
+  do {
+    candidate = randomBytes(32).toString('hex');
+  } while (!isReusableManagedSecret(candidate, alreadyUsed));
+  return candidate;
+}
+
 /**
  * Build a short-lived Wrangler --secrets-file. Wrangler applies this file to
  * the exact version uploaded by `wrangler deploy`, so code/public vars and
@@ -3124,12 +3525,17 @@ function prepareAtomicDeploySecrets(
   options: {
     storeCfCredentials: boolean;
     turnstileSecret?: string;
+    /** Internal test seam; production always queries Wrangler. */
+    remoteSecretNames?: Set<string>;
   },
 ): string | null {
-  const secretNames = workerAlreadyDeployed
-    ? listWranglerSecretNames(projectDir)
-    : new Set<string>();
   const vars = resolveReleaseSecretVars(projectDir);
+  assertNoReservedReleaseSecretVars(vars);
+  const secretNames = workerAlreadyDeployed
+    ? (options.remoteSecretNames ?? listWranglerSecretNames(projectDir))
+    : new Set<string>();
+  assertNoReservedRemoteWorkerSecrets(secretNames);
+  assertNoDeployOnlyRemoteWorkerSecrets(secretNames, options.storeCfCredentials);
 
   // SERVICE_KEY is CLI-owned. Runtime trust mode is a non-secret Wrangler var.
   delete vars['SERVICE_KEY'];
@@ -3142,25 +3548,45 @@ function prepareAtomicDeploySecrets(
 
   let persistedSecrets: Record<string, string> = {};
   if (existsSync(secretsJsonPath)) {
-    try {
-      persistedSecrets = JSON.parse(readFileSync(secretsJsonPath, 'utf-8')) as Record<string, string>;
-    } catch {
-      throw new Error('Cannot prepare deployment with an invalid .edgebase/secrets.json file.');
-    }
+    persistedSecrets = readPersistedSecretsFile(secretsJsonPath);
   }
 
   let persistedSecretsChanged = false;
   const generatedAt = new Date().toISOString();
-  const ensureManagedSecret = (name: 'SERVICE_KEY' | 'JWT_USER_SECRET' | 'JWT_ADMIN_SECRET') => {
-    if (secretNames.has(name) || vars[name]) return;
-    const reusable = typeof persistedSecrets[name] === 'string' && persistedSecrets[name].length >= 32
-      ? persistedSecrets[name]
-      : randomBytes(32).toString('hex');
-    vars[name] = reusable;
-    if (persistedSecrets[name] !== reusable) {
+  const usedManagedSecrets = new Set<string>();
+  const ensureManagedSecret = (name: typeof MANAGED_SECRET_NAMES[number]) => {
+    const persisted = persistedSecrets[name];
+    const hasReusablePersisted = isReusableManagedSecret(persisted, usedManagedSecrets);
+    const remoteAlreadyHasSecret = secretNames.has(name);
+    const explicitVersionSecret = typeof vars[name] === 'string' && vars[name].length > 0;
+
+    if (remoteAlreadyHasSecret && !explicitVersionSecret && !hasReusablePersisted) {
+      throw new Error(
+        `Cannot safely deploy over existing remote ${name}: .edgebase/secrets.json does not contain its valid authoritative local value. `
+        + 'Restore the private secrets file from the deployment backup, or use an explicit credential rotation/recovery flow before publishing. '
+        + 'EdgeBase will not invent a different local value while retaining an unknown live Worker secret.',
+      );
+    }
+
+    if (remoteAlreadyHasSecret && !explicitVersionSecret && hasReusablePersisted) {
+      usedManagedSecrets.add(persisted.toLowerCase());
+      return;
+    }
+
+    // An explicit version-bound JWT secret is deployment authority and does
+    // not need a second CLI-owned plaintext copy. SERVICE_KEY is stripped
+    // above, so it always follows the local authority/recovery rule.
+    if (explicitVersionSecret) return;
+
+    const reusable = hasReusablePersisted
+      ? persisted.toLowerCase()
+      : generateIndependentManagedSecret(usedManagedSecrets);
+    usedManagedSecrets.add(reusable);
+    if (persisted !== reusable) {
       persistedSecrets[name] = reusable;
       persistedSecretsChanged = true;
     }
+    if (!secretNames.has(name) && !vars[name]) vars[name] = reusable;
     if (name === 'SERVICE_KEY' && !persistedSecrets['SERVICE_KEY_CREATED_AT']) {
       persistedSecrets['SERVICE_KEY_CREATED_AT'] = generatedAt;
       persistedSecrets['SERVICE_KEY_UPDATED_AT'] = generatedAt;
@@ -3168,9 +3594,7 @@ function prepareAtomicDeploySecrets(
     }
   };
 
-  ensureManagedSecret('SERVICE_KEY');
-  ensureManagedSecret('JWT_USER_SECRET');
-  ensureManagedSecret('JWT_ADMIN_SECRET');
+  for (const name of MANAGED_SECRET_NAMES) ensureManagedSecret(name);
 
   if (options.turnstileSecret) {
     vars['TURNSTILE_SECRET'] = options.turnstileSecret;
@@ -3194,12 +3618,7 @@ function prepareAtomicDeploySecrets(
     persistedSecretsChanged = true;
   }
   if (persistedSecretsChanged) {
-    writeFileSync(
-      secretsJsonPath,
-      JSON.stringify(persistedSecrets, null, 2),
-      { encoding: 'utf-8', mode: 0o600 },
-    );
-    chmodSync(secretsJsonPath, 0o600);
+    writePersistedSecretsFile(secretsJsonPath, persistedSecrets);
   }
 
   const names = Object.keys(vars).sort();
@@ -3225,7 +3644,8 @@ function resolveReleaseSecretVars(projectDir: string): Record<string, string> {
   if (!existsSync(envReleasePath)) return {};
 
   const vars = parseEnvFile(envReleasePath);
-  delete vars['EDGEBASE_RUNTIME_MODE'];
+  assertNoReservedReleaseSecretVars(vars);
+  assertNoDeployOnlyReleaseSecretVars(vars);
   for (const key of Object.keys(vars)) {
     const override = process.env[key];
     if (typeof override === 'string' && override.length > 0) {

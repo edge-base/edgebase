@@ -75,6 +75,8 @@ const WRANGLER_EXIT_GRACE_MS = 2_500;
 const WRANGLER_FORCE_KILL_GRACE_MS = 1_000;
 const DEV_BUNDLE_VARS_FILENAME = '.dev.vars';
 const DEV_REQUIRED_COMPATIBILITY_FLAGS = RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS;
+const LOCAL_DEV_BUILD_MARKER = 'EDGEBASE_LOCAL_DEV_BUILD';
+const LOCAL_DEV_BUILD_DEFINE = `${LOCAL_DEV_BUILD_MARKER}:true`;
 const PORT_RESERVATION_DIR = process.env.EDGEBASE_DEV_PORT_RESERVATION_DIR
   ? resolve(process.env.EDGEBASE_DEV_PORT_RESERVATION_DIR)
   : join(tmpdir(), 'edgebase-dev-port-reservations');
@@ -249,6 +251,21 @@ function isManagedAuthEnvKey(key: string): boolean {
     || MANAGED_AUTH_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
+function assertNoLocalDevBuildMarker(
+  fileEnv: Record<string, string>,
+  shellEnv: Record<string, string | undefined>,
+): void {
+  if (
+    Object.prototype.hasOwnProperty.call(fileEnv, LOCAL_DEV_BUILD_MARKER)
+    || typeof shellEnv[LOCAL_DEV_BUILD_MARKER] === 'string'
+  ) {
+    throw new Error(
+      `${LOCAL_DEV_BUILD_MARKER} is a CLI-owned compile-time selector and cannot be set `
+      + 'through .env.development, .dev.vars, or the ambient shell environment.',
+    );
+  }
+}
+
 /**
  * Build the exact environment used by config evaluation and the local Worker.
  * Values from .env.development/.dev.vars keep their existing precedence. Shell
@@ -260,6 +277,7 @@ function collectDevRuntimeConfigEnv(
   fileEnv: Record<string, string>,
   shellEnv: Record<string, string | undefined>,
 ): Record<string, string> {
+  assertNoLocalDevBuildMarker(fileEnv, shellEnv);
   const runtimeEnv = { ...fileEnv };
   const explicitAllowlist = new Set(
     (fileEnv[DEV_CONFIG_ENV_ALLOWLIST_KEY] ?? shellEnv[DEV_CONFIG_ENV_ALLOWLIST_KEY] ?? '')
@@ -312,6 +330,7 @@ function writeDevBundleVars(
   bundleDir: string,
   values: Record<string, string>,
 ): string {
+  assertNoLocalDevBuildMarker(values, {});
   mkdirSync(bundleDir, { recursive: true });
   const targetPath = join(bundleDir, DEV_BUNDLE_VARS_FILENAME);
   const tempPath = join(
@@ -344,6 +363,7 @@ function writeDevBundleVars(
 function resolveWranglerDevProcessEnv(
   shellEnv: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
+  assertNoLocalDevBuildMarker({}, shellEnv);
   return {
     ...shellEnv,
     // A bundle-local .dev.vars is the sole Worker env source. Force this off
@@ -820,6 +840,10 @@ function resolveWorkerVarBindings(sidecarPort?: number): string[] {
   }
 
   return vars;
+}
+
+function resolveWorkerCompileDefinitions(): string[] {
+  return [LOCAL_DEV_BUILD_DEFINE];
 }
 
 function parseEnvFileContent(content: string): Record<string, string> {
@@ -1408,6 +1432,9 @@ export const devCommand = new Command('dev')
       }
 
       // Pass internal-only runtime vars to the worker.
+      for (const definition of resolveWorkerCompileDefinitions()) {
+        wranglerArgs.push('--define', definition);
+      }
       for (const binding of resolveWorkerVarBindings(sidecarServer ? sidecarPort : undefined)) {
         wranglerArgs.push('--var', binding);
       }
@@ -1709,6 +1736,8 @@ export const _devInternals = {
   reserveDevPorts,
   resolveDevPersistence,
   resolveWorkerVarBindings,
+  resolveWorkerCompileDefinitions,
+  assertNoLocalDevBuildMarker,
   sanitizeIsolationName,
   ensureDevJwtSecrets,
   collectDevRuntimeConfigEnv,

@@ -11,6 +11,13 @@ import {
   parseProcessEnvConfig,
   resolveStartupConfig,
 } from '../lib/startup-config.js';
+import {
+  assertReleaseRuntimeIntegrity,
+  collectReleaseRuntimeIntegrityViolations,
+  isTrustedEdgeBaseLocalDevBuild,
+  isTrustedEdgeBaseTestBuild,
+  RELEASE_PROTECTED_RUNTIME_BINDINGS,
+} from '../lib/release-runtime-integrity.js';
 
 afterEach(() => {
   setConfig({} as EdgeBaseConfig);
@@ -171,9 +178,149 @@ describe('parseConfig', () => {
       },
     });
   });
+
+  it('fails closed when a request binding tries to override a bundled release config', () => {
+    setConfig({
+      release: true,
+      databases: { shared: { tables: { generated: {} } } },
+    } as EdgeBaseConfig);
+
+    expect(() => parseConfig({
+      EDGEBASE_CONFIG: JSON.stringify({ release: false, databases: {} }),
+    })).toThrow(/Release config integrity violation.*EDGEBASE_CONFIG/i);
+    expect(() => parseConfig({ EDGEBASE_TEST: '1' }))
+      .toThrow(/Release config integrity violation.*EDGEBASE_TEST/i);
+    expect(() => parseConfig({ EDGEBASE_LOCAL_DEV_BUILD: 'true' }))
+      .toThrow(/Release config integrity violation.*EDGEBASE_LOCAL_DEV_BUILD/i);
+    expect(() => parseConfig({ EDGEBASE_EMAIL_API_URL: 'https://sink.example.test' }))
+      .toThrow(/Release config integrity violation.*EDGEBASE_EMAIL_API_URL/i);
+    expect(() => parseConfig({ EDGEBASE_SMS_API_URL: 'https://sink.example.test/sms' }))
+      .toThrow(/Release config integrity violation.*EDGEBASE_SMS_API_URL/i);
+    expect(() => parseConfig({ EDGEBASE_INTERNAL_WORKER_URL: 'https://sink.example.test' }))
+      .toThrow(/Release config integrity violation.*EDGEBASE_INTERNAL_WORKER_URL/i);
+    expect(() => parseConfig({ EDGEBASE_DEV_SIDECAR_PORT: '8788' }))
+      .toThrow(/Release config integrity violation.*EDGEBASE_DEV_SIDECAR_PORT/i);
+    expect(() => parseConfig({
+      EDGEBASE_APP_WEB_RESET_PASSWORD_URL: 'https://sink.example.test/reset',
+    })).toThrow(/Release config integrity violation.*EDGEBASE_APP_WEB_RESET_PASSWORD_URL/i);
+    expect(parseConfig({ unrelated: true })).toMatchObject({ release: true });
+  });
 });
 
 describe('startup config resolution', () => {
+  it('centralizes the protected release runtime binding contract', () => {
+    expect(RELEASE_PROTECTED_RUNTIME_BINDINGS).toContain('EDGEBASE_EMAIL_API_URL');
+    expect(RELEASE_PROTECTED_RUNTIME_BINDINGS).toContain('EDGEBASE_SMS_API_URL');
+    expect(RELEASE_PROTECTED_RUNTIME_BINDINGS).toContain('EDGEBASE_INTERNAL_WORKER_URL');
+    expect(RELEASE_PROTECTED_RUNTIME_BINDINGS).toContain('EDGEBASE_TEST_BUILD');
+    expect(RELEASE_PROTECTED_RUNTIME_BINDINGS).toContain('EDGEBASE_LOCAL_DEV_BUILD');
+    expect(RELEASE_PROTECTED_RUNTIME_BINDINGS).toContain('EDGEBASE_DEV_SIDECAR_PORT');
+    expect(() => assertReleaseRuntimeIntegrity(
+      { release: true },
+      { EDGEBASE_APP_WEB_MAGIC_LINK_URL: 'https://sink.example.test' },
+    )).toThrow(/EDGEBASE_APP_WEB_MAGIC_LINK_URL/i);
+  });
+
+  it('allows test-only bindings only for the compile-time trusted test build', () => {
+    expect(isTrustedEdgeBaseTestBuild()).toBe(false);
+    const bindings = {
+      EDGEBASE_TEST: '1',
+      EDGEBASE_USE_TEST_CONFIG: '1',
+      EDGEBASE_TEST_BUILD: 'true',
+      EDGEBASE_DEV_SIDECAR_PORT: '8788',
+      EDGEBASE_CONFIG: '{"release":false}',
+      EDGEBASE_INTERNAL_WORKER_URL: 'https://sink.example.test',
+      EDGEBASE_SMS_API_URL: 'https://sink.example.test/sms',
+      NODE_ENV: 'test',
+    };
+
+    expect(collectReleaseRuntimeIntegrityViolations(bindings, false)).toEqual([
+      'EDGEBASE_CONFIG',
+      'EDGEBASE_TEST',
+      'EDGEBASE_TEST_BUILD',
+      'EDGEBASE_DEV_SIDECAR_PORT',
+      'EDGEBASE_INTERNAL_WORKER_URL',
+      'EDGEBASE_SMS_API_URL',
+      'EDGEBASE_USE_TEST_CONFIG',
+      'NODE_ENV',
+    ]);
+    expect(collectReleaseRuntimeIntegrityViolations(bindings, true)).toEqual([]);
+    expect(collectReleaseRuntimeIntegrityViolations(
+      { EDGEBASE_RUNTIME_MODE: 'untrusted' },
+      true,
+    )).toEqual(['EDGEBASE_RUNTIME_MODE']);
+  });
+
+  it('allows only the loopback sidecar binding for the compile-time trusted local-dev build', () => {
+    expect(isTrustedEdgeBaseLocalDevBuild()).toBe(false);
+    const localSidecar = {
+      EDGEBASE_RUNTIME_MODE: 'local-development',
+      EDGEBASE_DEV_SIDECAR_PORT: '8788',
+    };
+
+    expect(collectReleaseRuntimeIntegrityViolations(localSidecar, false, false))
+      .toEqual(['EDGEBASE_DEV_SIDECAR_PORT']);
+    expect(collectReleaseRuntimeIntegrityViolations(localSidecar, false, true))
+      .toEqual([]);
+    expect(collectReleaseRuntimeIntegrityViolations({
+      ...localSidecar,
+      EDGEBASE_EMAIL_API_URL: 'https://sink.example.test',
+    }, false, true)).toEqual(['EDGEBASE_EMAIL_API_URL']);
+    expect(collectReleaseRuntimeIntegrityViolations({
+      EDGEBASE_RUNTIME_MODE: 'cloudflare',
+      EDGEBASE_DEV_SIDECAR_PORT: '8788',
+    }, false, true)).toEqual(['EDGEBASE_DEV_SIDECAR_PORT']);
+    expect(collectReleaseRuntimeIntegrityViolations({
+      ...localSidecar,
+      EDGEBASE_LOCAL_DEV_BUILD: 'true',
+    }, false, true)).toEqual(['EDGEBASE_LOCAL_DEV_BUILD']);
+  });
+
+  it('keeps a generated release config authoritative and rejects process-env overrides', async () => {
+    const generated = {
+      release: true,
+      databases: { shared: { tables: { generated: {} } } },
+    };
+
+    await expect(resolveStartupConfig(
+      generated,
+      async () => ({ default: { release: false } }),
+      { EDGEBASE_CONFIG: JSON.stringify({ release: false }) },
+      { preferTestConfig: true },
+    )).rejects.toThrow(/Release config integrity violation.*EDGEBASE_CONFIG/i);
+
+    await expect(resolveStartupConfig(
+      generated,
+      async () => ({ default: { release: false } }),
+      { EDGEBASE_TEST: '0' },
+    )).rejects.toThrow(/Release config integrity violation.*EDGEBASE_TEST/i);
+
+    await expect(resolveStartupConfig(
+      generated,
+      async () => ({ default: { release: false } }),
+      { EDGEBASE_EMAIL_API_URL: 'https://sink.example.test' },
+    )).rejects.toThrow(/Release config integrity violation.*EDGEBASE_EMAIL_API_URL/i);
+
+    await expect(resolveStartupConfig(
+      generated,
+      async () => ({ default: { release: false } }),
+      { EDGEBASE_USE_TEST_CONFIG: '1' },
+      { preferTestConfig: true },
+    )).rejects.toThrow(/Release config integrity violation.*EDGEBASE_USE_TEST_CONFIG/i);
+
+    await expect(resolveStartupConfig(
+      generated,
+      async () => ({ default: { release: false } }),
+      { NODE_ENV: 'test' },
+    )).rejects.toThrow(/Release config integrity violation.*NODE_ENV/i);
+
+    await expect(resolveStartupConfig(
+      generated,
+      async () => ({ default: { release: false } }),
+      { EDGEBASE_RUNTIME_MODE: 'cloudflare', NODE_ENV: 'production' },
+    )).resolves.toMatchObject({ release: true });
+  });
+
   it('prefers process env EDGEBASE_CONFIG over generated or test config', async () => {
     const resolved = await resolveStartupConfig(
       {

@@ -108,13 +108,21 @@ describe('auth-passkeys — register', () => {
   it('잘못된 response → 400 (challenge 만료/미존재)', async () => {
     const { accessToken } = await createUserAndLogin();
     // Without requesting register-options first, there's no challenge
+    const clientDataJSON = btoa(JSON.stringify({
+      type: 'webauthn.create',
+      challenge: 'fake-challenge-123',
+      origin: 'http://localhost',
+    }))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/g, '');
     const { status, data } = await api('POST', '/passkeys/register', {
       response: {
         id: 'fake-credential-id',
         rawId: 'fake-raw-id',
         type: 'public-key',
         response: {
-          clientDataJSON: btoa(JSON.stringify({ type: 'webauthn.create', challenge: 'fake', origin: 'http://localhost' })),
+          clientDataJSON,
           attestationObject: 'fake',
         },
       },

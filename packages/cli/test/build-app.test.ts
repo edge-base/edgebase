@@ -160,6 +160,23 @@ afterEach(() => {
 }, 120_000);
 
 describe('build-app command', () => {
+  it('rejects protected compile selectors while copying the source Wrangler config', () => {
+    const projectDir = createTempProject('protected-wrangler-selector');
+    writeFileSync(
+      join(projectDir, 'edgebase.config.ts'),
+      `export default { release: true, databases: { shared: { tables: {} } } };\n`,
+    );
+    writeFileSync(
+      join(projectDir, 'wrangler.toml'),
+      'name = "unsafe-worker"\nenv = { production = { define = { "EDGEBASE_LOCAL_DEV_BUILD" = "true" } } }\n',
+    );
+
+    expect(() => createAppBundle(projectDir, {
+      outputDir: 'unsafe-selector-bundle',
+      overwrite: true,
+    })).toThrow(/EDGEBASE_LOCAL_DEV_BUILD/i);
+  });
+
   it('refuses to emit a release bundle containing an inline CAPTCHA secret', () => {
     const projectDir = createTempProject('captcha-secret');
     writeFileSync(

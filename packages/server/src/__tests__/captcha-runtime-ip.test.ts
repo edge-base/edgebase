@@ -72,7 +72,7 @@ describe('captcha remoteip runtime trust boundary', () => {
 
     expect(response.status).toBe(200);
     const request = siteverify.mock.calls[0]![1] as RequestInit;
-    expect(request.redirect).toBe('error');
+    expect(request.redirect).toBe('manual');
     const body = JSON.parse(String(request.body)) as Record<string, unknown>;
     if (expected === undefined) expect(body).not.toHaveProperty('remoteip');
     else expect(body.remoteip).toBe(expected);

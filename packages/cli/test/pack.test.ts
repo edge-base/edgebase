@@ -32,6 +32,25 @@ function cleanupTemporaryDirectory(dir: string): void {
   rmSync(dir, CLEANUP_RETRY_OPTIONS);
 }
 
+function findSentinelInSmallPackedFiles(root: string, sentinel: string): string[] {
+  const matches: string[] = [];
+  const pending = [root];
+  const needle = Buffer.from(sentinel);
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    for (const name of readdirSync(current)) {
+      const path = join(current, name);
+      const stats = lstatSync(path);
+      if (stats.isSymbolicLink()) continue;
+      if (stats.isDirectory()) pending.push(path);
+      else if (stats.isFile() && stats.size <= 2 * 1024 * 1024) {
+        if (readFileSync(path).includes(needle)) matches.push(path);
+      }
+    }
+  }
+  return matches;
+}
+
 async function findFreePort(): Promise<number> {
   return new Promise((resolvePromise, reject) => {
     const server = createServer();
@@ -189,6 +208,7 @@ function resolveInstalledPackageVersion(packageName: string): string {
 describe('pack command', () => {
   it('creates a backend-only directory artifact from a self-contained app bundle', { timeout: 90_000 }, async () => {
     const projectDir = createTempProject('backend');
+    const packSecretSentinel = 'pack-release-secret-sentinel-52a0c6d1';
     mkdirSync(join(projectDir, 'functions'), { recursive: true });
     mkdirSync(join(projectDir, 'config'), { recursive: true });
 
@@ -213,7 +233,7 @@ export default defineConfig({
 `,
     );
     writeFileSync(join(projectDir, 'config', 'rate-limits.ts'), 'export const DEFAULT_RATE_LIMITS = {};\n');
-    writeFileSync(join(projectDir, '.env.release'), 'SERVICE_KEY=super-secret\n');
+    writeFileSync(join(projectDir, '.env.release'), `SERVICE_KEY=${packSecretSentinel}\n`);
     writeFileSync(
       join(projectDir, 'wrangler.toml'),
       [
@@ -354,6 +374,20 @@ export default defineConfig({
       'compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]',
     );
     expect(existsSync(join(projectDir, 'packed', '.env.release'))).toBe(false);
+    for (const artifactPath of [
+      join(projectDir, 'packed', '.edgebase', 'runtime', 'server', 'src', 'generated-config.ts'),
+      join(projectDir, 'packed', '.edgebase', 'runtime', 'server', 'bundle', 'config', 'edgebase.config.bundle.js'),
+      join(projectDir, 'packed', 'edgebase-app.json'),
+      join(projectDir, 'packed', 'edgebase-pack.json'),
+      join(projectDir, 'packed', 'launcher.mjs'),
+      join(projectDir, 'packed', 'wrangler.toml'),
+    ]) {
+      expect(readFileSync(artifactPath, 'utf-8')).not.toContain(packSecretSentinel);
+    }
+    expect(findSentinelInSmallPackedFiles(
+      join(projectDir, 'packed'),
+      packSecretSentinel,
+    )).toEqual([]);
 
     const runtimeEnvPath = join(projectDir, 'pack-runtime.env');
     writeFileSync(runtimeEnvPath, 'EXPLICIT_APP_SECRET=synthetic-explicit-value\n');

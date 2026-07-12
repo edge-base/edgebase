@@ -49,6 +49,7 @@ async function adminCookieApi(path: string, body: unknown = {}, cookie?: string)
     'Content-Type': 'application/json',
     'Origin': BASE,
     'X-EdgeBase-Auth-Transport': 'cookie',
+    'CF-Connecting-IP': '127.0.0.1',
   };
   if (cookie) headers.Cookie = cookie;
   const res = await (globalThis as any).SELF.fetch(`${BASE}${path}`, {

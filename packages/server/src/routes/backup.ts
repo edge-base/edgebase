@@ -52,6 +52,7 @@ import {
   normalizeStorageContentType,
 } from '../lib/storage-content-security.js';
 import { isSignedUploadGrantMarker } from '../lib/signed-upload-grants.js';
+import { sanitizeConfigForBackup } from '../lib/config-backup-sanitizer.js';
 
 /** Resolve AuthDb from Hono context. Defaults to D1 (AUTH_DB binding). */
 function getAuthDb(c: { env: unknown }): AuthDb {
@@ -395,7 +396,7 @@ const getConfig = createRoute({
 
 backupRoute.openapi(getConfig, (c) => {
   const config = parseConfig(c.env);
-  return c.json(config);
+  return c.json(sanitizeConfigForBackup(config));
 });
 
 // POST /admin/api/backup/cleanup-plugin — remove plugin-prefixed tables from a namespace/DO

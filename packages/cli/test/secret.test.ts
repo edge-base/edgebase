@@ -3,6 +3,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  isDeployControlWorkerSecretName,
+  isReservedHostedWorkerSecretName,
   listWranglerSecretNames,
   parseWranglerSecretNames,
 } from '../src/lib/wrangler-secrets.js';
@@ -12,6 +14,29 @@ import {
 // ======================================================================
 
 describe('Secret set arguments', () => {
+  it('classifies production config, test selectors, and mock endpoints as reserved', () => {
+    for (const name of [
+      'EDGEBASE_CONFIG',
+      'EDGEBASE_TEST',
+      'EDGEBASE_TEST_BUILD',
+      'EDGEBASE_LOCAL_DEV_BUILD',
+      'EDGEBASE_DEV_SIDECAR_PORT',
+      'EDGEBASE_USE_TEST_CONFIG',
+      'EDGEBASE_INTERNAL_WORKER_URL',
+      'EDGEBASE_SMS_API_URL',
+      'NODE_ENV',
+      'EDGEBASE_RUNTIME_MODE',
+      'EDGEBASE_EMAIL_API_URL',
+      'EDGEBASE_APP_WEB_RESET_PASSWORD_URL',
+    ]) {
+      expect(isReservedHostedWorkerSecretName(name)).toBe(true);
+    }
+    expect(isReservedHostedWorkerSecretName('SERVICE_KEY')).toBe(false);
+    expect(isDeployControlWorkerSecretName('CLOUDFLARE_API_TOKEN')).toBe(true);
+    expect(isDeployControlWorkerSecretName('GITHUB_TOKEN')).toBe(true);
+    expect(isDeployControlWorkerSecretName('SERVICE_KEY')).toBe(false);
+  });
+
   it('builds correct wrangler secret put arguments', () => {
     const key = 'SERVICE_KEY';
     const args = ['wrangler', 'secret', 'put', key];

@@ -27,6 +27,7 @@ export interface WranglerHyperdrive {
 
 export interface WranglerResourceConfig {
   workerName: string;
+  accountId?: string;
   r2Buckets: WranglerR2Bucket[];
   d1Databases: WranglerD1Database[];
   kvNamespaces: WranglerKvNamespace[];
@@ -69,6 +70,7 @@ function readTopLevelTomlString(content: string, key: string): string | undefine
 
 export function parseWranglerResourceConfig(content: string): WranglerResourceConfig {
   const workerName = readTopLevelTomlString(content, 'name') ?? '';
+  const accountId = readTopLevelTomlString(content, 'account_id');
   const r2Buckets: WranglerR2Bucket[] = [];
   for (const block of getTomlBlockValues(content, 'r2_buckets')) {
     const binding = readTomlString(block, 'binding');
@@ -118,5 +120,13 @@ export function parseWranglerResourceConfig(content: string): WranglerResourceCo
     hyperdriveConfigs.push({ binding, id });
   }
 
-  return { workerName, r2Buckets, d1Databases, kvNamespaces, vectorizeIndexes, hyperdriveConfigs };
+  return {
+    workerName,
+    accountId,
+    r2Buckets,
+    d1Databases,
+    kvNamespaces,
+    vectorizeIndexes,
+    hyperdriveConfigs,
+  };
 }

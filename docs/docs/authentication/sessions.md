@@ -215,6 +215,7 @@ npx edgebase deploy  # Required: activate new secrets
 - **28-day grace period** — matches Refresh Token TTL, so no active user loses their session during rotation
 - Access Tokens (15m TTL) expire naturally — no grace period needed
 - After 28 days the old secrets are automatically ignored
+- A missing, invalid, or future-dated rotation timestamp never enables the old-secret grace path
 
 :::note
 The grace period only covers **signature mismatch** errors. Expired tokens are rejected regardless.
