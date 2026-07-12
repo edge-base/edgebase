@@ -262,6 +262,10 @@ export default defineConfig({
         emailAuth: true,
         anonymousAuth: true,
         cleanupOrphanData: true,
+        // Release mode requires an explicit redirect allowlist. A same-origin
+        // wildcard covers the local E2E auth-flow routes (magic link, password
+        // reset, email verify/change, OAuth callback) under localhost:4173.
+        allowedRedirectUrls: ['http://localhost:4173/*'],
         session: {
           accessTokenTTL: '15m',
           refreshTokenTTL: '28d',
