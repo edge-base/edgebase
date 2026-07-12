@@ -806,7 +806,10 @@ describe('RN E2E — AsyncStorage 세션 (언어특화)', () => {
         removeItem: async (key: string) => { store.delete(key); },
       };
     })();
-    await storage.setItem('edgebase:refresh-token', refreshToken);
+    // Persist under the namespaced key the TokenManager actually reads
+    // (edgebase:<encoded baseUrl>:refresh-token). Pre-namespace keys are
+    // deliberately not migrated (they carry no project binding).
+    await storage.setItem(`edgebase:${encodeURIComponent(BASE_URL)}:refresh-token`, refreshToken);
 
     // Create TokenManager with pre-populated storage
     const { TokenManager } = await import('../../src/token-manager');
