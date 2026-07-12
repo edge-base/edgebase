@@ -49,6 +49,14 @@ node ./scripts/run-with-services.mjs --server --mock-fcm -- bash -lc '
   cd ../admin                         && dart pub get && dart test test/admin_e2e_test.dart -r expanded'
 ```
 
+The Flutter package needs `flutter` installed (`brew install --cask flutter`):
+
+```bash
+node ./scripts/run-with-services.mjs --server --mock-fcm -- bash -lc '
+  cd packages/sdk/dart/packages/flutter
+  BASE_URL=http://127.0.0.1:8688 EDGEBASE_E2E_REQUIRED=1 flutter test test/flutter_e2e_test.dart -r expanded'
+```
+
 ### Kotlin
 
 Uses the bundled `./gradlew`. Local reproduction on macOS is fiddly: the forked

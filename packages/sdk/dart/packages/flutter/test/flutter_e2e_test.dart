@@ -279,17 +279,19 @@ void main() {
     test('revokeSession → session removed', () async {
       final email = 'dart-revoke-${DateTime.now().millisecondsSinceEpoch}@test.com';
       await client.auth.signUp(SignUpOptions(email: email, password: testPassword));
-      // Create a second session by signing in
+      // Capture this client's own session first so we never revoke it — revoking
+      // the caller's own session invalidates its token.
+      final ownId = (await client.auth.listSessions()).first.id;
+      // Create a second session by signing in from another client.
       final client2 = ClientEdgeBase(baseUrl, options: EdgeBaseClientOptions(tokenStorage: MemoryTokenStorage()));
       await client2.auth.signIn(SignInOptions(email: email, password: testPassword));
-      // List sessions from the first client
       final sessions = await client.auth.listSessions();
       expect(sessions.length, greaterThanOrEqualTo(2));
-      // Revoke the second session
-      final targetSession = sessions.last;
+      // Revoke the OTHER session, not this client's own.
+      final targetSession = sessions.firstWhere((s) => s.id != ownId);
       await client.auth.revokeSession(targetSession.id);
       final remaining = await client.auth.listSessions();
-      expect(remaining.length, lessThan(sessions.length));
+      expect(remaining.any((s) => s.id == targetSession.id), isFalse);
       client2.destroy();
     });
 
