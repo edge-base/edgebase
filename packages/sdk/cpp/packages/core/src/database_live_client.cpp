@@ -581,20 +581,26 @@ Result AuthClient::adoptAuthTokens(Result result,
   if (response.is_discarded() || !response.is_object()) {
     return result;
   }
-  const bool hasAccess = response.contains("accessToken");
-  const bool hasRefresh = response.contains("refreshToken");
+  const bool hasAccess =
+      response.contains("accessToken") && response["accessToken"].is_string();
+  const bool hasRefresh =
+      response.contains("refreshToken") && response["refreshToken"].is_string();
   if (!hasAccess && !hasRefresh) {
     return result;
   }
-  if (!hasAccess || !hasRefresh || !response["accessToken"].is_string() ||
-      !response["refreshToken"].is_string()) {
+  // A refresh token with no usable access token is never a valid replacement.
+  if (!hasAccess) {
     return {false, 0, "",
             "invalid-auth-response: server returned an incomplete replacement token pair"};
   }
 
+  // Access-token-only responses (e.g. a displayName change re-issues the access
+  // token but keeps the refresh token) adopt the new access token and retain
+  // the current refresh token, matching the JS/Kotlin SDKs.
   const AuthTokenPair replacement{
       response["accessToken"].get<std::string>(),
-      response["refreshToken"].get<std::string>()};
+      hasRefresh ? response["refreshToken"].get<std::string>()
+                 : http_->getRefreshToken()};
   if (replacement.accessToken.empty() || replacement.refreshToken.empty()) {
     return {false, 0, "",
             "invalid-auth-response: server returned an empty replacement token"};
