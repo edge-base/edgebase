@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 vi.mock('node:fs', () => ({
   existsSync: vi.fn(() => false),
@@ -100,11 +101,9 @@ describe('resolveOptionalServiceKey', () => {
     mockedReadFileSync.mockReturnValue(JSON.stringify({ SERVICE_KEY: 'project-key' }));
 
     expect(resolveOptionalServiceKey({ projectDir: '/trusted/project' })).toBe('project-key');
-    expect(mockedExistsSync).toHaveBeenCalledWith('/trusted/project/.edgebase/secrets.json');
-    expect(mockedReadFileSync).toHaveBeenCalledWith(
-      '/trusted/project/.edgebase/secrets.json',
-      'utf-8',
-    );
+    const expectedSecretsPath = join('/trusted/project', '.edgebase', 'secrets.json');
+    expect(mockedExistsSync).toHaveBeenCalledWith(expectedSecretsPath);
+    expect(mockedReadFileSync).toHaveBeenCalledWith(expectedSecretsPath, 'utf-8');
   });
 });
 
