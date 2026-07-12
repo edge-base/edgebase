@@ -15,6 +15,7 @@ import 'package:test/test.dart';
 import 'package:edgebase_flutter/src/client.dart';
 import 'package:edgebase_flutter/src/auth_client.dart';
 import 'package:edgebase_flutter/src/token_manager.dart';
+import 'package:edgebase_flutter/src/token_storage.dart';
 import 'package:edgebase_core/src/field_ops.dart';
 import 'package:edgebase_admin/edgebase_admin.dart';
 
@@ -24,6 +25,29 @@ final String prefix = 'dart-flutter-e2e-${DateTime.now().millisecondsSinceEpoch}
 
 final List<String> _createdIds = [];
 late AdminEdgeBase admin;
+
+/// In-memory storage that also satisfies [DurableTokenStorage], so it can back
+/// the anonymous account-upgrade flow (which requires durable storage) in tests
+/// without pulling in SharedPreferences / Flutter bindings.
+class _DurableMemoryTokenStorage implements DurableTokenStorage {
+  StoredTokenPair? _tokens;
+
+  @override
+  Future<String?> getRefreshToken() async => _tokens?.refreshToken;
+
+  @override
+  Future<void> setRefreshToken(String token) async =>
+      _tokens = StoredTokenPair(accessToken: null, refreshToken: token);
+
+  @override
+  Future<void> clearRefreshToken() async => _tokens = null;
+
+  @override
+  Future<StoredTokenPair?> getTokenPair() async => _tokens;
+
+  @override
+  Future<void> setTokenPair(StoredTokenPair pair) async => _tokens = pair;
+}
 
 void main() {
   setUpAll(() {
@@ -331,15 +355,20 @@ void main() {
 
     test('anonymous → link with email → signIn works', () async {
       final email = 'dart-link-${DateTime.now().millisecondsSinceEpoch}@test.com';
-      final anonResult = await client.auth.signInAnonymously();
+      // Anonymous upgrades require durable token storage so a replacement token
+      // survives a lost response; MemoryTokenStorage is intentionally not durable.
+      final anonClient = ClientEdgeBase(baseUrl,
+          options: EdgeBaseClientOptions(tokenStorage: _DurableMemoryTokenStorage()));
+      final anonResult = await anonClient.auth.signInAnonymously();
       expect(anonResult.user.id, isNotEmpty);
       // Link anonymous account to email
-      final linked = await client.auth.linkWithEmail(email: email, password: testPassword);
+      final linked = await anonClient.auth.linkWithEmail(email: email, password: testPassword);
       expect(linked.accessToken, isNotEmpty);
       // Now signIn with that email should work
       final client2 = ClientEdgeBase(baseUrl, options: EdgeBaseClientOptions(tokenStorage: MemoryTokenStorage()));
       final signInResult = await client2.auth.signIn(SignInOptions(email: email, password: testPassword));
       expect(signInResult.authResult!.accessToken, isNotEmpty);
+      anonClient.destroy();
       client2.destroy();
     });
   });
