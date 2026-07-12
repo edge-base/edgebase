@@ -1,7 +1,7 @@
 /**
  * Auto-generated admin API Core — DO NOT EDIT.
  * Regenerate: npx tsx tools/sdk-codegen/generate.ts
- * Source: openapi.json (0.4.2)
+ * Source: openapi.json (0.4.3)
  */
 
 // ─── Interface ─────────────────────────────────────────────────────────────

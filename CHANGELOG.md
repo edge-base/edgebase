@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.3 — 2026-07-13
+
+### Fixed
+
+- **C++ SDK:** `updateProfile` no longer fails on the server's access-token-only
+  response. Changing a `displayName` re-issues just the access token (the name
+  is embedded in the JWT) and keeps the existing refresh token, but the C++
+  `adoptAuthTokens` treated that as an "incomplete replacement token pair" and
+  returned `ok = false`. It now adopts the new access token and retains the
+  current refresh token for access-only responses (matching the JS, Kotlin,
+  Swift, and Dart SDKs), while still rejecting a refresh-only response. This is
+  the only shipped-code change in this release.
+
+### Internal
+
+- CI/test hardening only, no runtime impact: fixed cross-platform and stale
+  SDK end-to-end tests (JS/React Native web e2e, Dart core/admin/flutter, Swift
+  ios unit compile, Kotlin auth e2e, CLI Windows permission/path assertions),
+  a flaky in-flight-refresh unit test, and secret-scan false positives; added
+  `auth.allowedRedirectUrls` to the E2E server config; and documented the
+  per-language SDK E2E reproduction workflow in `dev/testing/sdk-e2e.md`.
+
 ## 0.4.2 — 2026-07-12
 
 ### Security

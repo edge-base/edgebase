@@ -216,7 +216,7 @@ Chrome 50+, Firefox 44+, Edge 17+, Safari 16+, Opera 42+
 dependencies:
   firebase_core: ^3.0.0
   firebase_messaging: ^15.0.0
-  edgebase_flutter: ^0.4.2
+  edgebase_flutter: ^0.4.3
 ```
 
 3. Initialize Firebase:
@@ -555,7 +555,7 @@ https://github.com/firebase/firebase-ios-sdk
 https://github.com/edge-base/edgebase-swift
 ```
 
-Use the current `0.4.2` release of the Swift package and import the `EdgeBase` module in your app target.
+Use the current `0.4.3` release of the Swift package and import the `EdgeBase` module in your app target.
 
 ## Setup
 
@@ -870,7 +870,7 @@ repositories {
 
 dependencies {
     implementation 'com.google.firebase:firebase-messaging:24.0.0'
-    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.4.2'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.4.3'
 }
 ```
 

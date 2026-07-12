@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3
+
+### Changed
+
+- Synchronized the Kotlin SDK packages with the EdgeBase 0.4.3 patch release.
+- No public Kotlin API compatibility break is introduced.
+
 ## 0.4.2
 
 ### Changed
