@@ -28,6 +28,7 @@ import {
   lookupOAuth,
   registerOAuthPending,
   confirmOAuth,
+  deleteOAuthPending,
   deleteOAuth,
   registerAnonPending,
   confirmAnon,
@@ -50,7 +51,9 @@ import {
   lookupPhone,
   registerPhonePending,
   confirmPhone,
+  deletePhonePending,
   deletePhone,
+  deletePhoneForUser,
   lookupTokenShard,
   deleteTokenMapping,
   lookupPasskey,
@@ -108,6 +111,10 @@ function createMockAuthDb(options: {
       }
     },
 
+    async batchWithLock(_lockKey: string | string[], statements: { sql: string; params?: unknown[] }[]) {
+      await db.batch(statements);
+    },
+
     async compareAndSwapAdminSession() {
       return true;
     },
@@ -115,6 +122,8 @@ function createMockAuthDb(options: {
     async compareAndSwapUserSession() {
       return true;
     },
+
+    async createSessionWithLimit() {},
 
     _calls: calls,
     _batchCalls: 0,
@@ -211,57 +220,51 @@ describe('lookupEmail', () => {
 
 describe('registerEmailPending', () => {
   it('inserts pending email when no existing', async () => {
-    const db = createMockAuthDb({ firstResult: null });
-    await registerEmailPending(db, 'new@test.com', 'u1');
+    const db = createMockAuthDb({ firstResult: { email: 'new@test.com' } });
+    const reservationId = await registerEmailPending(db, 'new@test.com', 'u1');
     const insertCall = db._calls.find((c) => c.sql.includes('INSERT INTO _email_index'));
     expect(insertCall).toBeDefined();
-    // bindings: [email, userId, 0 (hardcoded shardId), now]
     expect(insertCall!.bindings[0]).toBe('new@test.com');
     expect(insertCall!.bindings[1]).toBe('u1');
     expect(insertCall!.bindings[2]).toBe(0);
-    expect(insertCall!.bindings).toHaveLength(4); // includes ISO timestamp
+    expect(insertCall!.bindings[3]).toBe(reservationId);
+    expect(reservationId).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
 
   it('throws when email already confirmed', async () => {
     const db = createMockAuthDb({
-      firstResult: { email: 'taken@test.com', status: 'confirmed' },
+      firstResults: [null, { status: 'confirmed' }],
     });
     await expect(
       registerEmailPending(db, 'taken@test.com', 'u2'),
     ).rejects.toThrow('EMAIL_ALREADY_REGISTERED');
   });
 
-  it('replaces pending email', async () => {
+  it('does not replace a fresh pending reservation owned by another attempt', async () => {
     const db = createMockAuthDb({
-      firstResult: { email: 'pending@test.com', status: 'pending' },
+      firstResults: [null, { status: 'pending' }],
     });
-    await registerEmailPending(db, 'pending@test.com', 'u3');
-    // Should DELETE existing pending, then INSERT new
-    const deleteCall = db._calls.find(
-      (c) => c.sql.includes('DELETE FROM _email_index') && c.sql.includes('pending'),
-    );
-    expect(deleteCall).toBeDefined();
-    const insertCall = db._calls.find((c) => c.sql.includes('INSERT INTO _email_index'));
-    expect(insertCall).toBeDefined();
+    await expect(registerEmailPending(db, 'pending@test.com', 'u3', 'owner-b'))
+      .rejects.toThrow('EMAIL_RESERVATION_CONFLICT');
   });
 });
 
 describe('confirmEmail', () => {
   it('updates status to confirmed', async () => {
-    const db = createMockAuthDb();
-    await confirmEmail(db, 'user@test.com', 'u1');
+    const db = createMockAuthDb({ firstResult: { email: 'user@test.com' } });
+    await confirmEmail(db, 'user@test.com', 'u1', 'reservation-1');
     expect(db._calls[0].sql).toContain('UPDATE _email_index SET status');
-    expect(db._calls[0].bindings).toEqual(['user@test.com', 'u1']);
+    expect(db._calls[0].bindings).toEqual(['user@test.com', 'u1', 'reservation-1']);
   });
 });
 
 describe('deleteEmailPending', () => {
   it('deletes pending email', async () => {
-    const db = createMockAuthDb();
-    await deleteEmailPending(db, 'user@test.com');
+    const db = createMockAuthDb({ firstResult: { email: 'user@test.com' } });
+    await deleteEmailPending(db, 'user@test.com', 'u1', 'reservation-1');
     expect(db._calls[0].sql).toContain('DELETE FROM _email_index');
     expect(db._calls[0].sql).toContain('pending');
-    expect(db._calls[0].bindings[0]).toBe('user@test.com');
+    expect(db._calls[0].bindings).toEqual(['user@test.com', 'u1', 'reservation-1']);
   });
 });
 
@@ -294,17 +297,15 @@ describe('lookupOAuth', () => {
 
 describe('registerOAuthPending', () => {
   it('inserts pending when no conflict', async () => {
-    const db = createMockAuthDb({ firstResult: null });
+    const db = createMockAuthDb({ firstResult: { provider: 'google' } });
     await registerOAuthPending(db, 'google', 'g-1', 'u1');
     const insertCall = db._calls.find((c) => c.sql.includes('INSERT INTO _oauth_index'));
     expect(insertCall).toBeDefined();
   });
 
   it('throws when already confirmed', async () => {
-    // registerOAuthPending does 2 db.run() DELETEs then 1 db.first() SELECT
-    // The first db.first() call should return an existing confirmed record
     const mockDb = createMockAuthDb({
-      firstResults: [{ userId: 'existing', status: 'confirmed' }],
+      firstResults: [null, { status: 'confirmed' }],
     });
     await expect(
       registerOAuthPending(mockDb, 'google', 'g-1', 'u2'),
@@ -314,10 +315,37 @@ describe('registerOAuthPending', () => {
 
 describe('confirmOAuth', () => {
   it('updates status to confirmed', async () => {
-    const db = createMockAuthDb();
-    await confirmOAuth(db, 'google', 'g-1');
+    const db = createMockAuthDb({ firstResult: { provider: 'google' } });
+    await confirmOAuth(db, 'google', 'g-1', 'u1', 'reservation-1');
     expect(db._calls[0].sql).toContain('UPDATE _oauth_index');
-    expect(db._calls[0].bindings).toEqual(['google', 'g-1']);
+    expect(db._calls[0].bindings).toEqual(['google', 'g-1', 'u1', 'reservation-1']);
+  });
+
+  it('rejects confirmation after the owner reservation is lost', async () => {
+    const db = createMockAuthDb({
+      firstResults: [null, { userId: 'winner', status: 'pending' }],
+    });
+    await expect(confirmOAuth(db, 'google', 'g-1', 'loser', 'loser-reservation'))
+      .rejects.toThrow('OAUTH_RESERVATION_LOST');
+  });
+});
+
+describe('deleteOAuthPending', () => {
+  it('deletes only a matching pending owner reservation', async () => {
+    const db = createMockAuthDb({ firstResult: null });
+    await expect(deleteOAuthPending(
+      db,
+      'google',
+      'g-1',
+      'loser',
+      'loser-reservation',
+    )).resolves.toBe(false);
+    expect(db._calls[0].bindings).toEqual([
+      'google',
+      'g-1',
+      'loser',
+      'loser-reservation',
+    ]);
   });
 });
 
@@ -350,7 +378,7 @@ describe('lookupPhone', () => {
 
 describe('registerPhonePending', () => {
   it('inserts pending when no existing', async () => {
-    const db = createMockAuthDb({ firstResult: null });
+    const db = createMockAuthDb({ firstResult: { phone: '+821000000000' } });
     await registerPhonePending(db, '+821000000000', 'u1');
     const insertCall = db._calls.find((c) => c.sql.includes('INSERT INTO _phone_index'));
     expect(insertCall).toBeDefined();
@@ -358,7 +386,7 @@ describe('registerPhonePending', () => {
 
   it('throws when phone already confirmed', async () => {
     const db = createMockAuthDb({
-      firstResult: { phone: '+821000000000', status: 'confirmed' },
+      firstResults: [null, { status: 'confirmed' }],
     });
     await expect(
       registerPhonePending(db, '+821000000000', 'u2'),
@@ -368,10 +396,23 @@ describe('registerPhonePending', () => {
 
 describe('confirmPhone', () => {
   it('updates status to confirmed', async () => {
-    const db = createMockAuthDb();
-    await confirmPhone(db, '+821000000000', 'u1');
+    const db = createMockAuthDb({ firstResult: { phone: '+821000000000' } });
+    await confirmPhone(db, '+821000000000', 'u1', 'phone-reservation');
     expect(db._calls[0].sql).toContain('UPDATE _phone_index');
-    expect(db._calls[0].bindings).toEqual(['+821000000000', 'u1']);
+    expect(db._calls[0].bindings).toEqual(['+821000000000', 'u1', 'phone-reservation']);
+  });
+});
+
+describe('deletePhonePending', () => {
+  it('does not delete another owner reservation', async () => {
+    const db = createMockAuthDb({ firstResult: null });
+    await expect(deletePhonePending(db, '+821000000000', 'loser', 'loser-reservation'))
+      .resolves.toBe(false);
+    expect(db._calls[0].bindings).toEqual([
+      '+821000000000',
+      'loser',
+      'loser-reservation',
+    ]);
   });
 });
 
@@ -381,6 +422,15 @@ describe('deletePhone', () => {
     await deletePhone(db, '+821000000000');
     expect(db._calls[0].sql).toContain('DELETE FROM _phone_index');
     expect(db._calls[0].bindings[0]).toBe('+821000000000');
+  });
+});
+
+describe('deletePhoneForUser', () => {
+  it('deletes only the phone row owned by the expected user', async () => {
+    const db = createMockAuthDb();
+    await deletePhoneForUser(db, '+821000000000', 'u1');
+    expect(db._calls[0].sql).toContain('DELETE FROM _phone_index WHERE phone = ? AND userId = ?');
+    expect(db._calls[0].bindings).toEqual(['+821000000000', 'u1']);
   });
 });
 

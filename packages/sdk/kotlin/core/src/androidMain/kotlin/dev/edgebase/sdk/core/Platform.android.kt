@@ -42,6 +42,9 @@ actual fun createPlatformHttpClient(): KtorHttpClient = KtorHttpClient(OkHttp) {
             connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
             readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
             writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            // HttpClient owns retry policy. In particular, CAPTCHA-protected
+            // Function calls must not be transparently replayed by OkHttp.
+            retryOnConnectionFailure(false)
         }
     }
 }

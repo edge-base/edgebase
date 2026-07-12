@@ -70,59 +70,90 @@ public class HttpClient {
 
     public HttpClient(String baseUrl, TokenManager tokenManager, ContextManager contextManager,
             String serviceKey, String projectId) {
+        this(baseUrl, tokenManager, contextManager, serviceKey, projectId, null);
+    }
+
+    /**
+     * Creates a client with an application-supplied OkHttp transport.
+     * Useful for hosts that need a shared dispatcher/cache and for deterministic tests.
+     */
+    public HttpClient(String baseUrl, TokenManager tokenManager, ContextManager contextManager,
+            String serviceKey, String projectId, OkHttpClient transportClient) {
         this.baseUrl = baseUrl;
         this.tokenManager = tokenManager;
         this.serviceKey = serviceKey;
         this.projectId = projectId;
-        this.client = new OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(120, TimeUnit.SECONDS)
-                .writeTimeout(120, TimeUnit.SECONDS)
-                .build();
+        this.client = transportClient != null
+                ? transportClient
+                : new OkHttpClient.Builder()
+                        .connectTimeout(30, TimeUnit.SECONDS)
+                        .readTimeout(120, TimeUnit.SECONDS)
+                        .writeTimeout(120, TimeUnit.SECONDS)
+                        .build();
     }
 
     // ─── Public API ───
 
     @SuppressWarnings("unchecked")
     public Object get(String path) throws EdgeBaseError {
-        return get(path, null);
+        return get(path, null, null);
     }
 
     @SuppressWarnings("unchecked")
     public Object get(String path, Map<String, String> queryParams) throws EdgeBaseError {
-        return request("GET", path, null, false, false, queryParams, 0);
+        return get(path, queryParams, null);
+    }
+
+    public Object get(String path, Map<String, String> queryParams, String captchaToken) throws EdgeBaseError {
+        return request("GET", path, null, false, false, queryParams, 0, captchaToken);
     }
 
     public Object post(String path, Map<String, ?> body) throws EdgeBaseError {
-        return request("POST", path, body, false, false, null, 0);
+        return post(path, body, null);
+    }
+
+    public Object post(String path, Map<String, ?> body, String captchaToken) throws EdgeBaseError {
+        return request("POST", path, body, false, false, null, 0, captchaToken);
     }
 
     public Object patch(String path, Map<String, ?> body) throws EdgeBaseError {
-        return request("PATCH", path, body, false, false, null, 0);
+        return patch(path, body, null);
+    }
+
+    public Object patch(String path, Map<String, ?> body, String captchaToken) throws EdgeBaseError {
+        return request("PATCH", path, body, false, false, null, 0, captchaToken);
     }
 
     public Object put(String path, Map<String, ?> body) throws EdgeBaseError {
-        return request("PUT", path, body, false, false, null, 0);
+        return put(path, body, null);
+    }
+
+    public Object put(String path, Map<String, ?> body, String captchaToken) throws EdgeBaseError {
+        return request("PUT", path, body, false, false, null, 0, captchaToken);
     }
 
     public Object getWithQuery(String path, Map<String, String> queryParams) throws EdgeBaseError {
-        return request("GET", path, null, false, false, queryParams, 0);
+        return request("GET", path, null, false, false, queryParams, 0, null);
     }
 
     public Object postWithQuery(String path, Map<String, ?> body, Map<String, String> queryParams) throws EdgeBaseError {
-        return request("POST", path, body, false, false, queryParams, 0);
+        return request("POST", path, body, false, false, queryParams, 0, null);
     }
 
     public Object putWithQuery(String path, Map<String, ?> body, Map<String, String> queryParams) throws EdgeBaseError {
-        return request("PUT", path, body, false, false, queryParams, 0);
+        return request("PUT", path, body, false, false, queryParams, 0, null);
     }
 
     public Object delete(String path) throws EdgeBaseError {
-        return request("DELETE", path, null, false, false, null, 0);
+        return request("DELETE", path, null, false, false, null, 0, null);
+    }
+
+    public Object deleteWithCaptchaToken(String path, String captchaToken) throws EdgeBaseError {
+        return request("DELETE", path, null, false, false, null, 0, captchaToken);
     }
 
     public Object delete(String path, Map<String, ?> body) throws EdgeBaseError {
-        return request("DELETE", path, body, false, false, null, 0);
+        return request("DELETE", path, body, false, false, null, 0, null);
     }
 
     public void close() {
@@ -146,13 +177,9 @@ public class HttpClient {
             if (serviceKey != null) {
                 requestBuilder.addHeader("X-EdgeBase-Service-Key", serviceKey);
             } else {
-                try {
-                    String token = tokenManager.getAccessToken();
-                    if (token != null)
-                        requestBuilder.addHeader("Authorization", "Bearer " + token);
-                } catch (Exception ignored) {
-                    // Token refresh failed — proceed as unauthenticated
-                }
+                String token = tokenManager.getAccessToken();
+                if (token != null)
+                    requestBuilder.addHeader("Authorization", "Bearer " + token);
             }
             addRequestMetadataHeaders(requestBuilder);
 
@@ -168,11 +195,11 @@ public class HttpClient {
      * POST to public endpoint (no authentication).
      */
     public Object postPublic(String path) throws EdgeBaseError {
-        return request("POST", path, Collections.emptyMap(), true, false, null, 0);
+        return request("POST", path, Collections.emptyMap(), true, false, null, 0, null);
     }
 
     public Object postPublic(String path, Map<String, ?> body) throws EdgeBaseError {
-        return request("POST", path, body, true, false, null, 0);
+        return request("POST", path, body, true, false, null, 0, null);
     }
 
     /**
@@ -188,13 +215,9 @@ public class HttpClient {
             if (serviceKey != null) {
                 requestBuilder.addHeader("X-EdgeBase-Service-Key", serviceKey);
             } else {
-                try {
-                    String token = tokenManager.getAccessToken();
-                    if (token != null)
-                        requestBuilder.addHeader("Authorization", "Bearer " + token);
-                } catch (Exception ignored) {
-                    // Token refresh failed — proceed as unauthenticated
-                }
+                String token = tokenManager.getAccessToken();
+                if (token != null)
+                    requestBuilder.addHeader("Authorization", "Bearer " + token);
             }
             addRequestMetadataHeaders(requestBuilder);
 
@@ -232,13 +255,9 @@ public class HttpClient {
             if (serviceKey != null) {
                 requestBuilder.addHeader("X-EdgeBase-Service-Key", serviceKey);
             } else {
-                try {
-                    String token = tokenManager.getAccessToken();
-                    if (token != null)
-                        requestBuilder.addHeader("Authorization", "Bearer " + token);
-                } catch (Exception ignored) {
-                    // Token refresh failed — proceed as unauthenticated
-                }
+                String token = tokenManager.getAccessToken();
+                if (token != null)
+                    requestBuilder.addHeader("Authorization", "Bearer " + token);
             }
             addRequestMetadataHeaders(requestBuilder);
 
@@ -260,13 +279,9 @@ public class HttpClient {
             String url = buildUrl(path, null);
             Request.Builder requestBuilder = new Request.Builder().url(url).get();
 
-            try {
-                String token = tokenManager.getAccessToken();
-                if (token != null)
-                    requestBuilder.addHeader("Authorization", "Bearer " + token);
-            } catch (Exception ignored) {
-                // Token refresh failed — proceed as unauthenticated
-            }
+            String token = tokenManager.getAccessToken();
+            if (token != null)
+                requestBuilder.addHeader("Authorization", "Bearer " + token);
             addRequestMetadataHeaders(requestBuilder);
 
             try (Response response = client.newCall(requestBuilder.build()).execute()) {
@@ -331,7 +346,8 @@ public class HttpClient {
 
     @SuppressWarnings("unchecked")
     private Object request(String method, String path, Map<String, ?> body,
-            boolean isPublic, boolean isRetry, Map<String, String> queryParams, int rateLimitAttempt) throws EdgeBaseError {
+            boolean isPublic, boolean isRetry, Map<String, String> queryParams, int rateLimitAttempt,
+            String captchaToken) throws EdgeBaseError {
         try {
             String url = buildUrl(path, queryParams);
             RequestBody requestBody = null;
@@ -367,26 +383,33 @@ public class HttpClient {
                 if (serviceKey != null) {
                     requestBuilder.addHeader("X-EdgeBase-Service-Key", serviceKey);
                 } else {
-                    try {
-                        String token = tokenManager.getAccessToken();
-                        if (token != null)
-                            requestBuilder.addHeader("Authorization", "Bearer " + token);
-                    } catch (Exception ignored) {
-                        // Token refresh failed — proceed as unauthenticated
-                    }
+                    String token = tokenManager.getAccessToken();
+                    if (token != null)
+                        requestBuilder.addHeader("Authorization", "Bearer " + token);
                 }
             }
 
             addRequestMetadataHeaders(requestBuilder);
+            if (captchaToken != null) {
+                requestBuilder.addHeader("X-EdgeBase-Captcha-Token", captchaToken);
+            }
 
             // Transport retry: independent loop (max 2 retries) around the network call
             Response response = null;
-            for (int transportAttempt = 0; transportAttempt <= 2; transportAttempt++) {
+            int maxTransportAttempts = captchaToken == null ? 2 : 0;
+            OkHttpClient requestClient = captchaToken == null
+                    ? client
+                    : client.newBuilder()
+                            .retryOnConnectionFailure(false)
+                            .followRedirects(false)
+                            .followSslRedirects(false)
+                            .build();
+            for (int transportAttempt = 0; transportAttempt <= maxTransportAttempts; transportAttempt++) {
                 try {
-                    response = client.newCall(requestBuilder.build()).execute();
+                    response = requestClient.newCall(requestBuilder.build()).execute();
                     break;
                 } catch (IOException e) {
-                    if (transportAttempt < 2) {
+                    if (transportAttempt < maxTransportAttempts) {
                         try { Thread.sleep(50L * (transportAttempt + 1)); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
                         // Rebuild request for retry (OkHttp request can only be executed once)
                         requestBuilder = requestBuilder.build().newBuilder();
@@ -398,24 +421,21 @@ public class HttpClient {
 
             try {
                 // 429 retry with Retry-After
-                if (response.code() == 429 && rateLimitAttempt < 3) {
+                if (captchaToken == null && response.code() == 429 && rateLimitAttempt < 3) {
                     long delay = parseRetryAfterDelay(response.header("Retry-After"), rateLimitAttempt);
                     response.close();
                     Thread.sleep(delay);
-                    return request(method, path, body, isPublic, isRetry, queryParams, rateLimitAttempt + 1);
+                    return request(method, path, body, isPublic, isRetry, queryParams, rateLimitAttempt + 1, captchaToken);
                 }
 
                 // Handle 401 — retry once after token refresh
-                if (response.code() == 401 && !isRetry && !isPublic) {
+                if (captchaToken == null && response.code() == 401 && !isRetry && !isPublic) {
                     response.close();
                     String refreshToken = tokenManager.getRefreshToken();
                     if (refreshToken != null) {
-                        try {
-                            tokenManager.getAccessToken(); // triggers refresh internally
-                        } catch (Exception ignored) {
-                        }
+                        tokenManager.getAccessToken(); // triggers refresh internally
                     }
-                    return request(method, path, body, isPublic, true, queryParams, rateLimitAttempt);
+                    return request(method, path, body, isPublic, true, queryParams, rateLimitAttempt, captchaToken);
                 }
                 return parseResponse(response);
             } finally {

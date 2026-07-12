@@ -1,7 +1,7 @@
 /**
  * Auto-generated core API Core — DO NOT EDIT.
  * Regenerate: npx tsx tools/sdk-codegen/generate.ts
- * Source: openapi.json (0.3.8)
+ * Source: openapi.json (0.4.0)
  */
 
 // ─── Interface ─────────────────────────────────────────────────────────────
@@ -90,13 +90,23 @@ export interface GeneratedDbApi {
   /** Reset password with token — POST /api/auth/reset-password */
   authResetPassword(body: unknown): Promise<unknown>;
   /** Start OAuth redirect — GET /api/auth/oauth/{provider} */
-  oauthRedirect(provider: string): Promise<unknown>;
+  oauthRedirect(provider: string, query?: Record<string, string>): Promise<unknown>;
+  /** Atomically exchange a verified OAuth callback ticket — POST /api/auth/oauth/exchange */
+  oauthExchange(body: unknown): Promise<unknown>;
   /** OAuth callback — GET /api/auth/oauth/{provider}/callback */
-  oauthCallback(provider: string): Promise<unknown>;
+  oauthCallback(provider: string, query: Record<string, string>): Promise<unknown>;
+  /** OAuth form-post callback — POST /api/auth/oauth/{provider}/callback */
+  oauthCallbackPost(provider: string, body: unknown): Promise<unknown>;
   /** Start OAuth account linking — POST /api/auth/oauth/link/{provider} */
-  oauthLinkStart(provider: string): Promise<unknown>;
+  oauthLinkStart(provider: string, body?: unknown): Promise<unknown>;
+  /** Continue OAuth account linking in the system browser — GET /api/auth/oauth/link/{provider}/continue */
+  oauthLinkContinue(provider: string, query: Record<string, string>): Promise<unknown>;
+  /** Complete OAuth account linking for the current authenticated user — POST /api/auth/oauth/complete/link */
+  oauthLinkComplete(body: unknown): Promise<unknown>;
   /** OAuth link callback — GET /api/auth/oauth/link/{provider}/callback */
-  oauthLinkCallback(provider: string): Promise<unknown>;
+  oauthLinkCallback(provider: string, query: Record<string, string>): Promise<unknown>;
+  /** OAuth link form-post callback — POST /api/auth/oauth/link/{provider}/callback */
+  oauthLinkCallbackPost(provider: string, body: unknown): Promise<unknown>;
   /** Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count */
   dbSingleCountRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown>;
   /** Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search */
@@ -115,8 +125,6 @@ export interface GeneratedDbApi {
   dbSingleBatchRecords(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter */
   dbSingleBatchByFilter(namespace: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
-  /** Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact */
-  dbSingleTransact(namespace: string, body: unknown): Promise<unknown>;
   /** Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count */
   dbCountRecords(namespace: string, instanceId: string, table: string, query: Record<string, string>): Promise<unknown>;
   /** Search records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/search */
@@ -135,6 +143,8 @@ export interface GeneratedDbApi {
   dbBatchRecords(namespace: string, instanceId: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter */
   dbBatchByFilter(namespace: string, instanceId: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown>;
+  /** Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact */
+  dbSingleTransact(namespace: string, body: unknown): Promise<unknown>;
   /** Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact */
   dbTransact(namespace: string, instanceId: string, body: unknown): Promise<unknown>;
   /** Check database live subscription WebSocket prerequisites — GET /api/db/connect-check */
@@ -177,6 +187,8 @@ export interface GeneratedDbApi {
   abortMultipartUpload(bucket: string, body: unknown, query: Record<string, string>): Promise<unknown>;
   /** Get public configuration — GET /api/config */
   getConfig(): Promise<unknown>;
+  /** Render the hosted Turnstile page for native WebViews — GET /api/captcha/challenge */
+  getCaptchaChallenge(query: Record<string, string>): Promise<unknown>;
   /** Register push token — POST /api/push/register */
   pushRegister(body: unknown): Promise<unknown>;
   /** Unregister push token — POST /api/push/unregister */
@@ -191,6 +203,10 @@ export interface GeneratedDbApi {
   connectRoom(query: Record<string, string>): Promise<unknown>;
   /** Get room metadata — GET /api/room/metadata */
   getRoomMetadata(query: Record<string, string>): Promise<unknown>;
+  /** Get room summary — GET /api/room/summary */
+  getRoomSummary(query: Record<string, string>): Promise<unknown>;
+  /** Get summaries for multiple rooms — POST /api/room/summaries */
+  getRoomSummaries(body: unknown): Promise<unknown>;
   /** Track custom events — POST /api/analytics/track */
   trackEvents(body: unknown): Promise<unknown>;
 }
@@ -373,20 +389,44 @@ export class DefaultDbApi implements GeneratedDbApi {
     return this.transport.request('POST', '/api/auth/reset-password', { body });
   }
 
-  async oauthRedirect(provider: string): Promise<unknown> {
-    return this.transport.request('GET', `/api/auth/oauth/${provider}`);
+  async oauthRedirect(provider: string, query?: Record<string, string>): Promise<unknown> {
+    return query === undefined
+      ? this.transport.request('GET', `/api/auth/oauth/${provider}`)
+      : this.transport.request('GET', `/api/auth/oauth/${provider}`, { query });
   }
 
-  async oauthCallback(provider: string): Promise<unknown> {
-    return this.transport.request('GET', `/api/auth/oauth/${provider}/callback`);
+  async oauthExchange(body: unknown): Promise<unknown> {
+    return this.transport.request('POST', '/api/auth/oauth/exchange', { body });
   }
 
-  async oauthLinkStart(provider: string): Promise<unknown> {
-    return this.transport.request('POST', `/api/auth/oauth/link/${provider}`);
+  async oauthCallback(provider: string, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('GET', `/api/auth/oauth/${provider}/callback`, { query });
   }
 
-  async oauthLinkCallback(provider: string): Promise<unknown> {
-    return this.transport.request('GET', `/api/auth/oauth/link/${provider}/callback`);
+  async oauthCallbackPost(provider: string, body: unknown): Promise<unknown> {
+    return this.transport.request('POST', `/api/auth/oauth/${provider}/callback`, { body });
+  }
+
+  async oauthLinkStart(provider: string, body?: unknown): Promise<unknown> {
+    return body === undefined
+      ? this.transport.request('POST', `/api/auth/oauth/link/${provider}`)
+      : this.transport.request('POST', `/api/auth/oauth/link/${provider}`, { body });
+  }
+
+  async oauthLinkContinue(provider: string, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('GET', `/api/auth/oauth/link/${provider}/continue`, { query });
+  }
+
+  async oauthLinkComplete(body: unknown): Promise<unknown> {
+    return this.transport.request('POST', '/api/auth/oauth/complete/link', { body });
+  }
+
+  async oauthLinkCallback(provider: string, query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('GET', `/api/auth/oauth/link/${provider}/callback`, { query });
+  }
+
+  async oauthLinkCallbackPost(provider: string, body: unknown): Promise<unknown> {
+    return this.transport.request('POST', `/api/auth/oauth/link/${provider}/callback`, { body });
   }
 
   async dbSingleCountRecords(namespace: string, table: string, query: Record<string, string>): Promise<unknown> {
@@ -425,10 +465,6 @@ export class DefaultDbApi implements GeneratedDbApi {
     return this.transport.request('POST', `/api/db/${namespace}/tables/${table}/batch-by-filter`, { body, query });
   }
 
-  async dbSingleTransact(namespace: string, body: unknown): Promise<unknown> {
-    return this.transport.request('POST', `/api/db/${namespace}/transact`, { body });
-  }
-
   async dbCountRecords(namespace: string, instanceId: string, table: string, query: Record<string, string>): Promise<unknown> {
     return this.transport.request('GET', `/api/db/${namespace}/${instanceId}/tables/${table}/count`, { query });
   }
@@ -463,6 +499,10 @@ export class DefaultDbApi implements GeneratedDbApi {
 
   async dbBatchByFilter(namespace: string, instanceId: string, table: string, body: unknown, query: Record<string, string>): Promise<unknown> {
     return this.transport.request('POST', `/api/db/${namespace}/${instanceId}/tables/${table}/batch-by-filter`, { body, query });
+  }
+
+  async dbSingleTransact(namespace: string, body: unknown): Promise<unknown> {
+    return this.transport.request('POST', `/api/db/${namespace}/transact`, { body });
   }
 
   async dbTransact(namespace: string, instanceId: string, body: unknown): Promise<unknown> {
@@ -549,6 +589,10 @@ export class DefaultDbApi implements GeneratedDbApi {
     return this.transport.request('GET', '/api/config');
   }
 
+  async getCaptchaChallenge(query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('GET', '/api/captcha/challenge', { query });
+  }
+
   async pushRegister(body: unknown): Promise<unknown> {
     return this.transport.request('POST', '/api/push/register', { body });
   }
@@ -575,6 +619,14 @@ export class DefaultDbApi implements GeneratedDbApi {
 
   async getRoomMetadata(query: Record<string, string>): Promise<unknown> {
     return this.transport.request('GET', '/api/room/metadata', { query });
+  }
+
+  async getRoomSummary(query: Record<string, string>): Promise<unknown> {
+    return this.transport.request('GET', '/api/room/summary', { query });
+  }
+
+  async getRoomSummaries(body: unknown): Promise<unknown> {
+    return this.transport.request('POST', '/api/room/summaries', { body });
   }
 
   async trackEvents(body: unknown): Promise<unknown> {
@@ -691,8 +743,13 @@ export class ApiPaths {
   static readonly AUTH_MFA_VERIFY = '/api/auth/mfa/verify';
   static oauthRedirect(provider: string) { return `/api/auth/oauth/${provider}`; }
   static oauthCallback(provider: string) { return `/api/auth/oauth/${provider}/callback`; }
+  static oauthCallbackPost(provider: string) { return `/api/auth/oauth/${provider}/callback`; }
+  static readonly OAUTH_LINK_COMPLETE = '/api/auth/oauth/complete/link';
+  static readonly OAUTH_EXCHANGE = '/api/auth/oauth/exchange';
   static oauthLinkStart(provider: string) { return `/api/auth/oauth/link/${provider}`; }
   static oauthLinkCallback(provider: string) { return `/api/auth/oauth/link/${provider}/callback`; }
+  static oauthLinkCallbackPost(provider: string) { return `/api/auth/oauth/link/${provider}/callback`; }
+  static oauthLinkContinue(provider: string) { return `/api/auth/oauth/link/${provider}/continue`; }
   static readonly AUTH_PASSKEYS_LIST = '/api/auth/passkeys';
   static authPasskeysDelete(credentialId: string) { return `/api/auth/passkeys/${credentialId}`; }
   static readonly AUTH_PASSKEYS_AUTH_OPTIONS = '/api/auth/passkeys/auth-options';
@@ -719,6 +776,7 @@ export class ApiPaths {
   static readonly AUTH_VERIFY_LINK_PHONE = '/api/auth/verify-link-phone';
   static readonly AUTH_VERIFY_MAGIC_LINK = '/api/auth/verify-magic-link';
   static readonly AUTH_VERIFY_PHONE = '/api/auth/verify-phone';
+  static readonly GET_CAPTCHA_CHALLENGE = '/api/captcha/challenge';
   static readonly GET_CONFIG = '/api/config';
   static executeD1Query(database: string) { return `/api/d1/${database}`; }
   static dbListRecords(namespace: string, instanceId: string, table: string) { return `/api/db/${namespace}/${instanceId}/tables/${table}`; }
@@ -762,6 +820,8 @@ export class ApiPaths {
   static readonly CONNECT_ROOM = '/api/room';
   static readonly CHECK_ROOM_CONNECTION = '/api/room/connect-check';
   static readonly GET_ROOM_METADATA = '/api/room/metadata';
+  static readonly GET_ROOM_SUMMARIES = '/api/room/summaries';
+  static readonly GET_ROOM_SUMMARY = '/api/room/summary';
   static readonly GET_SCHEMA = '/api/schema';
   static readonly EXECUTE_SQL = '/api/sql';
   static listFiles(bucket: string) { return `/api/storage/${bucket}`; }

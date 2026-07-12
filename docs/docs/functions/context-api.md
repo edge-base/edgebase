@@ -205,7 +205,11 @@ await context.admin.auth.revokeAllSessions('user-id');
 
 ## context.admin.kv(namespace)
 
-Access user-defined KV namespaces declared in `config.kv`. This is separate from EdgeBase's internal KV (which handles OAuth state, WebSocket pending tokens, etc.).
+Access user-defined KV namespaces declared in `config.kv`. This is separate
+from EdgeBase's internal KV caches (WebSocket pending tokens, push metadata,
+and a best-effort legacy OAuth migration mirror). New OAuth callback authority
+lives in a key-sharded Durable Object and is atomically consumed; it is not
+available through this API.
 
 ```typescript
 // edgebase.config.ts
@@ -382,6 +386,12 @@ await context.storage.put('avatars/user-123.jpg', fileBuffer, {
 
 // Get a file
 const file = await context.storage.get('avatars/user-123.jpg');
+if (file) {
+  console.log(file.size, file.contentType, file.etag);
+}
+
+// Read metadata without the body. Both get() and head() expose the R2 ETag.
+const metadata = await context.storage.head('avatars/user-123.jpg');
 
 // Delete a file
 await context.storage.delete('avatars/user-123.jpg');

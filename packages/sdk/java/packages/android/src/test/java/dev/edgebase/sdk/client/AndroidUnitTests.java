@@ -2,12 +2,21 @@ package dev.edgebase.sdk.client;
 
 import dev.edgebase.sdk.core.RoomClient;
 import org.junit.jupiter.api.Test;
+import okhttp3.Interceptor;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.*;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -52,6 +61,135 @@ class TokenPairTest {
     void test_null_refresh_token() {
         TokenPair tp = new TokenPair("access", null);
         assertNull(tp.getRefreshToken());
+    }
+}
+
+class TurnstileHostedChallengeTest {
+    @Test
+    void buildsHttpsChannelBoundUrl() throws Exception {
+        String channel = "0123456789abcdef0123456789abcdef";
+        assertEquals(
+            "https://api.example.test/api/captcha/challenge?action=signin&channel=" +
+                channel + "&bridge=android",
+            TurnstileProvider.buildChallengeUrl("https://api.example.test/", "signin", channel)
+        );
+    }
+
+    @Test
+    void rejectsHttpAndDynamicAction() {
+        String channel = "0123456789abcdef0123456789abcdef";
+        assertThrows(Exception.class, () ->
+            TurnstileProvider.buildChallengeUrl("http://api.example.test", "signin", channel));
+        assertThrows(Exception.class, () ->
+            TurnstileProvider.buildChallengeUrl("https://api.example.test", "function:unsafe", channel));
+    }
+
+    @Test
+    void parsesOnlyExpectedVersionedChannel() {
+        String channel = "0123456789abcdef0123456789abcdef";
+        String valid = "{\"v\":1,\"channel\":\"" + channel +
+            "\",\"type\":\"token\",\"value\":\"synthetic-token\"}";
+        String wrong = "{\"v\":1,\"channel\":\"fedcba9876543210fedcba9876543210\"," +
+            "\"type\":\"token\",\"value\":\"synthetic-token\"}";
+
+        assertArrayEquals(
+            new String[]{"token", "synthetic-token"},
+            TurnstileProvider.parseBridgeMessage(valid, channel)
+        );
+        assertNull(TurnstileProvider.parseBridgeMessage(wrong, channel));
+    }
+}
+
+class FunctionsCaptchaTransportTest {
+    @Test
+    void sendsDedicatedHeaderForGetPostAndDelete() throws Exception {
+        List<String> methods = new CopyOnWriteArrayList<>();
+        List<String> tokens = new CopyOnWriteArrayList<>();
+        List<String> urls = new CopyOnWriteArrayList<>();
+        OkHttpClient transport = new OkHttpClient.Builder()
+                .addInterceptor(chain -> {
+                    methods.add(chain.request().method());
+                    tokens.add(chain.request().header("X-EdgeBase-Captcha-Token"));
+                    urls.add(chain.request().url().toString());
+                    return jsonResponse(chain, 200, "{}");
+                })
+                .build();
+        dev.edgebase.sdk.core.HttpClient http = testHttpClient(transport);
+        FunctionsClient functions = new FunctionsClient(http);
+
+        for (String method : List.of("GET", "POST", "DELETE")) {
+            functions.call(
+                    "protected-" + method.toLowerCase(Locale.ROOT),
+                    new FunctionsClient.FunctionCallOptions(
+                            method,
+                            method.equals("POST") ? Map.of("ok", true) : null,
+                            method.equals("GET") ? Map.of("page", "1") : null,
+                            "captcha-" + method));
+        }
+
+        assertEquals(List.of("GET", "POST", "DELETE"), methods);
+        assertEquals(List.of("captcha-GET", "captcha-POST", "captcha-DELETE"), tokens);
+        assertTrue(urls.get(0).endsWith("/api/functions/protected-get?page=1"));
+        http.close();
+    }
+
+    @Test
+    void neverReplaysNetwork401Or429Failures() {
+        Map<String, Integer> attempts = new ConcurrentHashMap<>();
+        OkHttpClient transport = new OkHttpClient.Builder()
+                .addInterceptor(chain -> {
+                    String name = chain.request().url().pathSegments().get(
+                            chain.request().url().pathSegments().size() - 1);
+                    attempts.merge(name, 1, Integer::sum);
+                    if (name.equals("network")) {
+                        throw new IOException("synthetic connection reset");
+                    }
+                    return jsonResponse(
+                            chain,
+                            name.equals("unauthorized") ? 401 : 429,
+                            "{\"message\":\"synthetic failure\"}");
+                })
+                .build();
+        dev.edgebase.sdk.core.HttpClient http = testHttpClient(transport);
+        FunctionsClient functions = new FunctionsClient(http);
+
+        for (String name : List.of("network", "unauthorized", "rate-limited")) {
+            assertThrows(
+                    dev.edgebase.sdk.core.EdgeBaseError.class,
+                    () -> functions.call(
+                            name,
+                            new FunctionsClient.FunctionCallOptions(
+                                    "POST", null, null, "single-use-token")));
+        }
+
+        assertEquals(Map.of("network", 1, "unauthorized", 1, "rate-limited", 1), attempts);
+        http.close();
+    }
+
+    private static dev.edgebase.sdk.core.HttpClient testHttpClient(OkHttpClient transport) {
+        dev.edgebase.sdk.core.TokenManager tokens = new dev.edgebase.sdk.core.TokenManager() {
+            @Override public String getAccessToken() { return null; }
+            @Override public String getRefreshToken() { return null; }
+            @Override public void setTokens(String access, String refresh) {}
+            @Override public void clearTokens() {}
+        };
+        return new dev.edgebase.sdk.core.HttpClient(
+                "https://api.example.test",
+                tokens,
+                new dev.edgebase.sdk.core.ContextManager(),
+                null,
+                null,
+                transport);
+    }
+
+    private static Response jsonResponse(Interceptor.Chain chain, int status, String body) {
+        return new Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(status)
+                .message("synthetic")
+                .body(ResponseBody.create(body, MediaType.parse("application/json")))
+                .build();
     }
 }
 

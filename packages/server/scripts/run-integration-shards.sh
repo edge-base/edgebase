@@ -2,8 +2,9 @@
 # run-integration-shards.sh — 서버 통합 테스트 16-shard 병렬 + 3차 프로세스 레벨 재시도
 #
 # 1차: 16-shard 병렬 실행 (각 shard = 별도 Miniflare)
-# 2차: 실패 파일을 개별 fresh Miniflare로 병렬 재실행
-# 3차: 2차에서도 실패한 파일을 한 번 더 개별 fresh Miniflare로 재실행
+# 2차: 실패 파일은 개별 실행하고, 파일 경로가 없는 실패 shard는 shard 전체를
+#      fresh Miniflare로 병렬 재실행
+# 3차: 2차에서도 실패한 동일 retry target을 fresh Miniflare로 한 번 더 재실행
 #
 # DO invalidation으로 오염된 Miniflare에서는 in-process retry가 무의미하므로
 # 프로세스 자체를 새로 띄워서 깨끗한 Miniflare에서 재시도한다.
@@ -19,9 +20,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SERVER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOG_DIR="/tmp/integration-shard-logs-$$"
 mkdir -p "$LOG_DIR"
+source "$SCRIPT_DIR/lib/owned-process-groups.sh"
+owned_process_init "$LOG_DIR/owned-processes" "$SCRIPT_DIR/lib/owned-process-runner.mjs"
+OWNED_PROCESS_CHILD_TMPDIR="/tmp"
 DEV_VARS_PATH="$SERVER_DIR/.dev.vars"
 TEST_DEV_VARS_PATH="$SERVER_DIR/.dev.vars.test"
 DEV_VARS_BACKUP_PATH=""
+TEMP_CONFIG_FILES=()
 
 TOTAL_SHARDS="${TOTAL_SHARDS:-16}"
 
@@ -31,20 +36,14 @@ TOTAL_SHARDS="${TOTAL_SHARDS:-16}"
 # Uses coreutils `timeout` (Linux/CI) or `gtimeout` (macOS/brew) when present;
 # falls back to no cap on dev machines where the hang does not occur.
 SHARD_TIMEOUT="${SHARD_TIMEOUT:-420}"
+VITEST_COMMAND=(pnpm exec vitest)
 if command -v timeout >/dev/null 2>&1; then
-  TIMEOUT_CMD="timeout -k 30 ${SHARD_TIMEOUT}"
+  VITEST_COMMAND=("$(command -v timeout)" -k 30 "$SHARD_TIMEOUT" pnpm exec vitest)
 elif command -v gtimeout >/dev/null 2>&1; then
-  TIMEOUT_CMD="gtimeout -k 30 ${SHARD_TIMEOUT}"
-else
-  TIMEOUT_CMD=""
+  VITEST_COMMAND=("$(command -v gtimeout)" -k 30 "$SHARD_TIMEOUT" pnpm exec vitest)
 fi
 
 RST='\033[0m'; BOLD='\033[1m'; GRN='\033[0;32m'; RED='\033[0;31m'; CYN='\033[0;36m'; YLW='\033[0;33m'
-
-kill_workerd() {
-  pkill -f "workerd serve.*--binary.*--experimental" 2>/dev/null || true
-  sleep 1
-}
 
 activate_test_dev_vars() {
   if [ ! -f "$TEST_DEV_VARS_PATH" ]; then
@@ -71,7 +70,29 @@ restore_dev_vars() {
   fi
 }
 
-trap 'restore_dev_vars; kill_workerd' EXIT
+cleanup_temp_configs() {
+  if [ "${#TEMP_CONFIG_FILES[@]}" -eq 0 ]; then
+    return
+  fi
+
+  local path
+  for path in "${TEMP_CONFIG_FILES[@]}"; do
+    rm -f "$path"
+  done
+  TEMP_CONFIG_FILES=()
+}
+
+cleanup_harness() {
+  owned_process_cleanup
+  cleanup_temp_configs
+  restore_dev_vars
+}
+
+trap 'cleanup_harness' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+trap 'exit 131' QUIT
 activate_test_dev_vars
 
 # 실패 파일을 개별 프로세스로 병렬 재실행하는 함수
@@ -87,17 +108,19 @@ retry_failed_files() {
     echo -e "  ${YLW}↻ ${f}${RST}"
   done
 
-  kill_workerd
-
   local pids=()
   local file_map=()
+  local config_map=()
+  local log_map=()
+  local idx=0
 
   for f in "${files[@]}"; do
-    local retry_log="$LOG_DIR/r${round}-$(basename "$f" .test.ts).log"
-    (
-      cd "$SERVER_DIR"
-      local retry_config=".tmp-vitest-integration-r${round}-$(basename "$f" .test.ts)-$$.config.ts"
-      cat > "$retry_config" <<EOF
+    local safe_base
+    safe_base=$(printf '%s' "$(basename "$f" .test.ts)" | tr -c 'A-Za-z0-9._-' '_')
+    local retry_log="$LOG_DIR/r${round}-${safe_base}-${idx}.log"
+    local retry_config="$SERVER_DIR/.tmp-vitest-integration-r${round}-${safe_base}-$$-${idx}.config.ts"
+    TEMP_CONFIG_FILES+=("$retry_config")
+    cat > "$retry_config" <<EOF
 import base from './vitest.integration.config.ts';
 export default {
   ...base,
@@ -107,12 +130,14 @@ export default {
   },
 };
 EOF
-      trap 'rm -f "$retry_config"' EXIT
-      TMPDIR=/tmp ${TIMEOUT_CMD} pnpm exec vitest run --passWithNoTests \
-        --config "$retry_config"
-    ) > "$retry_log" 2>&1 &
-    pids+=($!)
+    owned_process_start "retry-${round}-${safe_base}-${idx}" "$SERVER_DIR" "$retry_log" \
+      "${VITEST_COMMAND[@]}" run --passWithNoTests \
+      --config "$(basename "$retry_config")"
+    pids+=("$OWNED_PROCESS_LAST_PID")
     file_map+=("$f")
+    config_map+=("$retry_config")
+    log_map+=("$retry_log")
+    idx=$((idx + 1))
   done
 
   STILL_FAILED=()
@@ -120,8 +145,8 @@ EOF
 
   for idx in $(seq 0 $((${#pids[@]} - 1))); do
     local f="${file_map[$idx]}"
-    local retry_log="$LOG_DIR/r${round}-$(basename "$f" .test.ts).log"
-    if wait "${pids[$idx]}"; then
+    local retry_log="${log_map[$idx]}"
+    if owned_process_wait "${pids[$idx]}"; then
       echo -e "  ${GRN}✅ ${f} — 통과 (flake)${RST}"
       pass=$((pass + 1))
     else
@@ -132,15 +157,68 @@ EOF
       raw_tests=$(perl -pe 's/\x1b\[[0-9;]*[mK]//g' "$retry_log" 2>/dev/null | grep -E '^\s+Tests\s+[0-9]+' | head -1) || raw_tests=""
       [ -n "$raw_tests" ] && echo -e "     ${raw_tests}"
     fi
+    rm -f "${config_map[$idx]}"
   done
 
   echo ""
   echo -e "  ${BOLD}[${round}차 결과]${RST} 통과: ${GRN}${pass}${RST}, 실패: ${RED}${fail}${RST} (총 ${#files[@]})"
 }
 
+# 실패 로그에 파일 경로가 남지 않은 shard를 fresh Miniflare로 다시 실행한다.
+# Workerd/vitest가 teardown에서 timeout되면 모든 테스트가 끝났어도 FAIL/❯ 라인이
+# 없을 수 있다. 이 경우 shard를 누락하거나 즉시 최종 실패로 처리하지 않는다.
+retry_failed_shards() {
+  local round=$1; shift
+  local shards=("$@")
+
+  echo ""
+  echo -e "${BOLD}${YLW}▶ [${round}차] ${#shards[@]}개 미식별 실패 shard 재실행 (fresh Miniflare)${RST}"
+  for shard in "${shards[@]}"; do
+    echo -e "  ${YLW}↻ shard ${shard}/${TOTAL_SHARDS}${RST}"
+  done
+
+  local pids=()
+  local shard_map=()
+  local log_map=()
+  local idx=0
+
+  for shard in "${shards[@]}"; do
+    local retry_log="$LOG_DIR/r${round}-shard-${shard}-${TOTAL_SHARDS}.log"
+    owned_process_start "retry-${round}-shard-${shard}-${TOTAL_SHARDS}" "$SERVER_DIR" "$retry_log" \
+      "${VITEST_COMMAND[@]}" run --passWithNoTests \
+      --config vitest.integration.config.ts \
+      "--shard=${shard}/${TOTAL_SHARDS}"
+    pids+=("$OWNED_PROCESS_LAST_PID")
+    shard_map+=("$shard")
+    log_map+=("$retry_log")
+    idx=$((idx + 1))
+  done
+
+  STILL_FAILED_SHARDS=()
+  local pass=0 fail=0
+
+  for idx in $(seq 0 $((${#pids[@]} - 1))); do
+    local shard="${shard_map[$idx]}"
+    local retry_log="${log_map[$idx]}"
+    if owned_process_wait "${pids[$idx]}"; then
+      echo -e "  ${GRN}✅ shard ${shard}/${TOTAL_SHARDS} — 통과 (flake/teardown hang)${RST}"
+      pass=$((pass + 1))
+    else
+      echo -e "  ${RED}❌ shard ${shard}/${TOTAL_SHARDS} — 실패${RST}"
+      fail=$((fail + 1))
+      STILL_FAILED_SHARDS+=("$shard")
+      local raw_tests
+      raw_tests=$(perl -pe 's/\x1b\[[0-9;]*[mK]//g' "$retry_log" 2>/dev/null | grep -E '^\s+Tests\s+[0-9]+' | head -1) || raw_tests=""
+      [ -n "$raw_tests" ] && echo -e "     ${raw_tests}"
+    fi
+  done
+
+  echo ""
+  echo -e "  ${BOLD}[${round}차 미식별 shard 결과]${RST} 통과: ${GRN}${pass}${RST}, 실패: ${RED}${fail}${RST} (총 ${#shards[@]})"
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 
-kill_workerd
 START=$(date +%s)
 
 # ─── 1차: 16-shard 병렬 실행 ─────────────────────────────────────────────────
@@ -155,18 +233,16 @@ FAIL_COUNT=0
 for i in $(seq 1 "$TOTAL_SHARDS"); do
   safe_label="shard-${i}-${TOTAL_SHARDS}"
   log_file="$LOG_DIR/${safe_label}.log"
-  (
-    cd "$SERVER_DIR"
-    TMPDIR=/tmp ${TIMEOUT_CMD} pnpm exec vitest run --passWithNoTests \
-      --config vitest.integration.config.ts \
-      "--shard=${i}/${TOTAL_SHARDS}"
-  ) > "$log_file" 2>&1 &
-  SHARD_PIDS+=($!)
+  owned_process_start "$safe_label" "$SERVER_DIR" "$log_file" \
+    "${VITEST_COMMAND[@]}" run --passWithNoTests \
+    --config vitest.integration.config.ts \
+    "--shard=${i}/${TOTAL_SHARDS}"
+  SHARD_PIDS+=("$OWNED_PROCESS_LAST_PID")
 done
 
 FAILED_SHARD_IDX=()
 for i in $(seq 0 $((TOTAL_SHARDS - 1))); do
-  if wait "${SHARD_PIDS[$i]}"; then
+  if owned_process_wait "${SHARD_PIDS[$i]}"; then
     PASS_COUNT=$((PASS_COUNT + 1))
   else
     FAIL_COUNT=$((FAIL_COUNT + 1))
@@ -186,28 +262,22 @@ done
 # ─── 실패 파일 수집 ──────────────────────────────────────────────────────────
 
 FAILED_FILES=()
+UNIDENTIFIED_SHARDS=()
 if [ "$FAIL_COUNT" -gt 0 ]; then
-  for i in $(seq 1 "$TOTAL_SHARDS"); do
-    safe_label="shard-${i}-${TOTAL_SHARDS}"
-    log_file="$LOG_DIR/${safe_label}.log"
-    while IFS= read -r file; do
-      [ -n "$file" ] && FAILED_FILES+=("$file")
-    done < <(perl -pe 's/\x1b\[[0-9;]*[mK]//g' "$log_file" 2>/dev/null \
-      | perl -ne 'print "$1\n" if /FAIL\s+(test\/integration\/\S+\.test\.ts)/' \
-      | sort -u)
-  done
-
-  # A shard killed by the timeout leaves no "FAIL" summary, so also pull the
-  # in-progress (❯) file(s) from every shard that exited non-zero — that is the
-  # test that hung. Without this, a timed-out hang would be silently dropped
-  # from the retry set (and could even false-pass below).
   for sidx in "${FAILED_SHARD_IDX[@]}"; do
     log_file="$LOG_DIR/shard-${sidx}-${TOTAL_SHARDS}.log"
+    shard_failed_files=()
     while IFS= read -r file; do
-      [ -n "$file" ] && FAILED_FILES+=("$file")
+      if [ -n "$file" ]; then
+        FAILED_FILES+=("$file")
+        shard_failed_files+=("$file")
+      fi
     done < <(perl -pe 's/\x1b\[[0-9;]*[mK]//g' "$log_file" 2>/dev/null \
-      | perl -ne 'print "$1\n" if /❯\s+(test\/integration\/\S+\.test\.ts)/' \
+      | perl -ne 'print "$1\n" if /(?:FAIL|❯)\s+(test\/integration\/\S+\.test\.ts)/' \
       | sort -u)
+    if [ ${#shard_failed_files[@]} -eq 0 ]; then
+      UNIDENTIFIED_SHARDS+=("$sidx")
+    fi
   done
 
   if [ ${#FAILED_FILES[@]} -gt 0 ]; then
@@ -218,6 +288,8 @@ fi
 # ─── 2차 + 3차 재시도 ────────────────────────────────────────────────────────
 
 FINAL_FAIL=0
+STILL_FAILED=()
+STILL_FAILED_SHARDS=()
 
 if [ ${#FAILED_FILES[@]} -gt 0 ]; then
   UNIQUE_FILES=($(printf '%s\n' "${FAILED_FILES[@]}" | sort -u))
@@ -243,25 +315,43 @@ if [ ${#FAILED_FILES[@]} -gt 0 ]; then
   else
     echo -e "  ${GRN}✅ 2차에서 전부 통과 → 최종 PASS${RST}"
   fi
-elif [ "$FAIL_COUNT" -gt 0 ]; then
-  # Shard(s) exited non-zero but no test file could be identified (e.g. a
-  # timeout kill with no ❯ line). Never treat this as a pass.
-  echo ""
-  echo -e "  ${RED}⚠ ${FAIL_COUNT}개 shard가 실패/타임아웃했으나 재시도할 파일을 식별하지 못함 — 최종 FAIL${RST}"
-  FINAL_FAIL=$FAIL_COUNT
-else
+fi
+
+if [ ${#UNIDENTIFIED_SHARDS[@]} -gt 0 ]; then
+  retry_failed_shards 2 "${UNIDENTIFIED_SHARDS[@]}"
+
+  if [ ${#STILL_FAILED_SHARDS[@]} -gt 0 ]; then
+    ROUND2_FAILED_SHARDS=("${STILL_FAILED_SHARDS[@]}")
+    retry_failed_shards 3 "${ROUND2_FAILED_SHARDS[@]}"
+
+    if [ ${#STILL_FAILED_SHARDS[@]} -gt 0 ]; then
+      echo ""
+      echo -e "  ${RED}⚠ 미식별 shard가 3차까지 실패:${RST}"
+      for shard in "${STILL_FAILED_SHARDS[@]}"; do
+        echo -e "    ${RED}• shard ${shard}/${TOTAL_SHARDS}${RST}"
+      done
+      FINAL_FAIL=$((FINAL_FAIL + ${#STILL_FAILED_SHARDS[@]}))
+    else
+      echo -e "  ${GRN}✅ 미식별 shard가 3차에서 전부 통과 → 최종 PASS${RST}"
+    fi
+  else
+    echo -e "  ${GRN}✅ 미식별 shard가 2차에서 전부 통과 → 최종 PASS${RST}"
+  fi
+fi
+
+if [ "$FAIL_COUNT" -eq 0 ]; then
   echo ""
   echo -e "  ${GRN}✅ 1차에서 전부 통과 — 재시도 불필요${RST}"
 fi
 
 # ─── 정리 및 결과 ────────────────────────────────────────────────────────────
 
-kill_workerd
+owned_process_cleanup
 
 ELAPSED=$(( $(date +%s) - START ))
 echo ""
 echo -e "${BOLD}${CYN}──────────────────────────────────────────────────────────${RST}"
-echo -e "${BOLD}Integration 소요 시간: ${ELAPSED}s | 최종: $( [ $FINAL_FAIL -eq 0 ] && echo "${GRN}PASS" || echo "${RED}FAIL (${FINAL_FAIL} files)" )${RST}"
+echo -e "${BOLD}Integration 소요 시간: ${ELAPSED}s | 최종: $( [ $FINAL_FAIL -eq 0 ] && echo "${GRN}PASS" || echo "${RED}FAIL (${FINAL_FAIL} retry targets)" )${RST}"
 echo -e "상세 로그: $LOG_DIR"
 echo -e "${BOLD}${CYN}──────────────────────────────────────────────────────────${RST}"
 

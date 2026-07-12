@@ -5,6 +5,8 @@ import type { Env } from '../types.js';
 import { parseConfig } from './do-router.js';
 import { parseDuration } from './jwt.js';
 import { matchOrigin } from '../middleware/cors.js';
+import { trustsSelfHostedProxyHeaders } from './public-origin.js';
+import { getTrustedClientIp } from './client-ip.js';
 
 const AUTH_TRANSPORT_HEADER = 'X-EdgeBase-Auth-Transport';
 const COOKIE_AUTH_TRANSPORT = 'cookie';
@@ -26,12 +28,21 @@ function rawTransport(c: AdminAuthContext): string | null {
 
 function isSecureRequest(c: AdminAuthContext): boolean {
   if (new URL(c.req.url).protocol === 'https:') return true;
-  if (parseConfig(c.env)?.trustSelfHostedProxy !== true) return false;
+  if (!trustsSelfHostedProxyHeaders(c.env)) return false;
   const forwardedProto = c.req.header('X-Forwarded-Proto')
     ?.split(',')[0]
     ?.trim()
     .toLowerCase();
   return forwardedProto === 'https';
+}
+
+function isExplicitLocalDevelopmentLoopback(c: AdminAuthContext): boolean {
+  if (c.env?.EDGEBASE_RUNTIME_MODE !== 'local-development') return false;
+  const url = new URL(c.req.raw.url);
+  const ip = getTrustedClientIp(c.env, c.req.raw);
+  const loopbackPeer = ip === '::1' || ip === '[::1]' || ip?.startsWith('127.') === true;
+  return loopbackPeer && url.protocol === 'http:'
+    && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]');
 }
 
 function requestOrigin(c: AdminAuthContext): URL {
@@ -64,7 +75,7 @@ function usesCrossSiteCookie(c: AdminAuthContext): boolean {
 
 function adminRefreshCookieName(c: AdminAuthContext): string {
   return isSecureRequest(c)
-    ? `__Secure-${ADMIN_REFRESH_COOKIE}`
+    ? `__Host-${ADMIN_REFRESH_COOKIE}`
     : ADMIN_REFRESH_COOKIE;
 }
 
@@ -83,7 +94,7 @@ function cookieOptions(c: AdminAuthContext, maxAge: number) {
     httpOnly: true,
     secure,
     sameSite: crossSite ? 'none' as const : 'strict' as const,
-    path: ADMIN_AUTH_COOKIE_PATH,
+    path: secure ? '/' : ADMIN_AUTH_COOKIE_PATH,
     maxAge,
     expires: new Date(Date.now() + Math.max(0, maxAge) * 1000),
     priority: 'high' as const,
@@ -103,6 +114,18 @@ export function assertAdminAuthTransportAllowed(c: AdminAuthContext): void {
   if (transport === null) return;
   if (transport !== COOKIE_AUTH_TRANSPORT) {
     throw new EdgeBaseError(400, `Unsupported auth transport '${transport}'.`, undefined, 'invalid-input');
+  }
+  if (
+    parseConfig(c.env)?.release === true
+    && !isSecureRequest(c)
+    && !isExplicitLocalDevelopmentLoopback(c)
+  ) {
+    throw new EdgeBaseError(
+      400,
+      'Admin cookie authentication requires HTTPS in release mode.',
+      undefined,
+      'insecure-cookie-config',
+    );
   }
 
   const origin = browserOrigin(c);
@@ -144,6 +167,7 @@ export function setAdminRefreshCookie(c: AdminAuthContext, refreshToken: string)
     refreshToken,
     cookieOptions(c, parseDuration(ADMIN_REFRESH_TOKEN_TTL)),
   );
+  expireLegacyAdminRefreshCookies(c);
 }
 
 export function clearAdminRefreshCookie(c: AdminAuthContext): void {
@@ -151,15 +175,30 @@ export function clearAdminRefreshCookie(c: AdminAuthContext): void {
   const options = cookieOptions(c, 0);
   setCookie(c, currentName, '', { ...options, expires: new Date(0) });
 
-  // Clear the local-development name after an HTTP -> HTTPS transition too.
-  if (currentName !== ADMIN_REFRESH_COOKIE) {
-    setCookie(c, ADMIN_REFRESH_COOKIE, '', {
-      ...options,
-      secure: false,
-      sameSite: 'strict',
-      expires: new Date(0),
-    });
-  }
+  expireLegacyAdminRefreshCookies(c);
+}
+
+function expireLegacyAdminRefreshCookies(c: AdminAuthContext): void {
+  if (!isSecureRequest(c)) return;
+  const expired = new Date(0);
+  setCookie(c, `__Secure-${ADMIN_REFRESH_COOKIE}`, '', {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict',
+    path: ADMIN_AUTH_COOKIE_PATH,
+    maxAge: 0,
+    expires: expired,
+    priority: 'high',
+  });
+  setCookie(c, ADMIN_REFRESH_COOKIE, '', {
+    httpOnly: true,
+    secure: false,
+    sameSite: 'strict',
+    path: ADMIN_AUTH_COOKIE_PATH,
+    maxAge: 0,
+    expires: expired,
+    priority: 'high',
+  });
 }
 
 export function applyAdminAuthNoStore(c: AdminAuthContext): void {

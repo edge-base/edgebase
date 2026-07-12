@@ -13,21 +13,17 @@
 // ─── How it works ───────────────────────────────────────────────────────────
 //
 // 1. On app start, [RuntimeInitializeOnLoadMethod] auto-registers the adapter.
-// 2. When signUp/signIn/etc. need a captcha token, the adapter:
-//    a. Creates an off-screen WebView
-//    b. Loads Turnstile HTML (from TurnstileProvider.GetTurnstileHtml)
-//    c. Turnstile auto-passes invisibly for 99% of users
-//    d. If interactive challenge needed, shows the WebView as overlay
-//    e. Token received via JS bridge → returned to auth method
+// 2. Native and desktop adapters load the app-owned HTTPS challenge endpoint in
+//    a persistent WebView and validate a per-request channel on every message.
+// 3. WebGL renders the widget on the application's actual browser origin.
 // 3. If no supported plugin is installed, falls back to TurnstileProvider.SetWebViewFactory().
 //
 // ─── Custom Plugin Support ──────────────────────────────────────────────────
 //
 // If your project uses a different WebView plugin, call SetWebViewFactory():
 //
-//   TurnstileProvider.SetWebViewFactory(async (siteKey, action) => {
-//       var html = TurnstileProvider.GetTurnstileHtml(siteKey, action);
-//       // Load html in your WebView, capture token from JS bridge
+//   TurnstileProvider.SetWebViewFactory(async (challengeUrl, channel) => {
+//       // Load challengeUrl, validate channel in the versioned JSON bridge.
 //       return token;
 //   });
 
@@ -143,7 +139,8 @@ internal sealed class WebGLTurnstileReceiver : MonoBehaviour
 
         if (message.type == "error")
         {
-            completion.TrySetException(new Exception($"Turnstile error: {message.value}"));
+            completion.TrySetException(new CaptchaUnavailableException(
+                TurnstileProvider.NormalizeFailureReason(message.value)));
             ClearRequest(message.requestId);
             return;
         }
@@ -174,7 +171,7 @@ internal sealed class WebGLTurnstileReceiver : MonoBehaviour
         {
             if (Pending.TryGetValue(requestId, out var completion))
             {
-                completion.TrySetException(new TimeoutException("Turnstile timeout"));
+                completion.TrySetException(new CaptchaUnavailableException("timeout"));
             }
             EB_Turnstile_CancelTokenRequest(requestId);
             ClearRequest(requestId);
@@ -207,14 +204,9 @@ public static class NativeMobileTurnstileAdapter
 {
     private const float TimeoutSeconds = 45f;
 
-    public static Task<string> AcquireTokenAsync(string siteKey, string action)
+    public static Task<string> AcquireTokenAsync(string challengeUrl, string channel)
     {
-        return NativeTurnstileReceiver.RequestTokenAsync(siteKey, action, "interaction-only", TimeoutSeconds);
-    }
-
-    public static Task<string> AcquirePreviewTokenAsync(string siteKey, string action, string appearance = "always")
-    {
-        return NativeTurnstileReceiver.RequestTokenAsync(siteKey, action, appearance, TimeoutSeconds);
+        return NativeTurnstileReceiver.RequestTokenAsync(challengeUrl, channel, TimeoutSeconds);
     }
 }
 
@@ -225,7 +217,8 @@ internal sealed class NativeTurnstileReceiver : MonoBehaviour
     private static extern void EB_Turnstile_RequestToken(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string gameObjectName,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string requestId,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string html);
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string challengeUrl,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string channel);
 
     [DllImport("__Internal")]
     private static extern void EB_Turnstile_CancelTokenRequest([MarshalAs(UnmanagedType.LPUTF8Str)] string requestId);
@@ -244,17 +237,14 @@ internal sealed class NativeTurnstileReceiver : MonoBehaviour
     private static readonly Dictionary<string, TaskCompletionSource<string>> Pending = new();
     private static readonly Dictionary<string, DateTime> Deadlines = new();
 
-    public static Task<string> RequestTokenAsync(string siteKey, string action, string appearance, float timeoutSeconds)
-    {
-        var html = TurnstileProvider.GetTurnstileHtml(siteKey, action, appearance);
-        return RequestHtmlAsync(html, timeoutSeconds);
-    }
-
-    public static Task<string> RequestHtmlAsync(string html, float timeoutSeconds)
+    public static Task<string> RequestTokenAsync(
+        string challengeUrl,
+        string channel,
+        float timeoutSeconds)
     {
         var instance = EnsureInstance();
         var requestId = Guid.NewGuid().ToString("N");
-        var completion = new TaskCompletionSource<string>();
+        var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         lock (Sync)
         {
@@ -262,7 +252,11 @@ internal sealed class NativeTurnstileReceiver : MonoBehaviour
             Deadlines[requestId] = DateTime.UtcNow.AddSeconds(timeoutSeconds);
         }
 
-        UnityMainThreadDispatcher.Enqueue(() => RequestNativeToken(instance.gameObject.name, requestId, html));
+        UnityMainThreadDispatcher.Enqueue(() => RequestNativeToken(
+            instance.gameObject.name,
+            requestId,
+            challengeUrl,
+            channel));
         return completion.Task;
     }
 
@@ -270,21 +264,6 @@ internal sealed class NativeTurnstileReceiver : MonoBehaviour
     {
         var message = JsonUtility.FromJson<BridgeMessage>(json);
         var requestId = message.requestId;
-        if (string.IsNullOrEmpty(requestId))
-        {
-            lock (Sync)
-            {
-                if (Pending.Count == 1)
-                {
-                    foreach (var entry in Pending)
-                    {
-                        requestId = entry.Key;
-                        break;
-                    }
-                }
-            }
-        }
-
         if (string.IsNullOrEmpty(requestId))
         {
             Debug.LogWarning("[EdgeBase] Turnstile: missing request id from native bridge.");
@@ -309,11 +288,12 @@ internal sealed class NativeTurnstileReceiver : MonoBehaviour
                 ClearRequest(requestId);
                 break;
             case "error":
-                completion.TrySetException(new Exception($"Turnstile error: {message.value}"));
+                completion.TrySetException(new CaptchaUnavailableException(
+                    TurnstileProvider.NormalizeFailureReason(message.value)));
                 ClearRequest(requestId);
                 break;
-            case "debug":
-                Debug.Log($"[EdgeBase] Turnstile: {message.value}");
+            case "interactive":
+            case "ready":
                 break;
         }
     }
@@ -354,19 +334,23 @@ internal sealed class NativeTurnstileReceiver : MonoBehaviour
                 Pending.TryGetValue(requestId, out completion);
             }
 
-            completion?.TrySetException(new TimeoutException("Turnstile timeout"));
+            completion?.TrySetException(new CaptchaUnavailableException("timeout"));
             CancelNativeToken(requestId);
             ClearRequest(requestId);
         }
     }
 
-    private static void RequestNativeToken(string gameObjectName, string requestId, string html)
+    private static void RequestNativeToken(
+        string gameObjectName,
+        string requestId,
+        string challengeUrl,
+        string channel)
     {
 #if UNITY_ANDROID
         using var bridge = new AndroidJavaClass("dev.edgebase.unity.EdgeBaseTurnstileBridge");
-        bridge.CallStatic("requestToken", gameObjectName, requestId, html);
+        bridge.CallStatic("requestToken", gameObjectName, requestId, challengeUrl, channel);
 #elif UNITY_IOS
-        EB_Turnstile_RequestToken(gameObjectName, requestId, html);
+        EB_Turnstile_RequestToken(gameObjectName, requestId, challengeUrl, channel);
 #endif
     }
 
@@ -405,14 +389,9 @@ internal sealed class NativeTurnstileReceiver : MonoBehaviour
 #else
 public static class NativeMobileTurnstileAdapter
 {
-    public static Task<string> AcquireTokenAsync(string siteKey, string action)
+    public static Task<string> AcquireTokenAsync(string challengeUrl, string channel)
     {
-        return Task.FromException<string>(new PlatformNotSupportedException("Native mobile Turnstile is only available on Android and iOS players."));
-    }
-
-    public static Task<string> AcquirePreviewTokenAsync(string siteKey, string action, string appearance = "always")
-    {
-        return Task.FromException<string>(new PlatformNotSupportedException("Native mobile Turnstile is only available on Android and iOS players."));
+        return Task.FromException<string>(new CaptchaUnavailableException("unsupported_platform"));
     }
 }
 #endif
@@ -424,92 +403,69 @@ public static class NativeMobileTurnstileAdapter
 #if UNIWEBVIEW
 public static class UniWebViewAdapter
 {
-    public static async Task<string> AcquireTokenAsync(string siteKey, string action)
+    public static async Task<string> AcquireTokenAsync(string challengeUrl, string channel)
     {
-        var tcs = new TaskCompletionSource<string>();
-        string html = TurnstileProvider.GetTurnstileHtml(siteKey, action);
+        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hostedUrl = TurnstileProvider.WithChallengeBridge(challengeUrl, "uniwebview");
 
-        // Must run on Unity main thread
         await RunOnMainThread(() =>
         {
             var go = new GameObject("EdgeBase_Turnstile");
             var webView = go.AddComponent<UniWebView>();
+            var finished = 0;
 
-            // Start off-screen (invisible for 99% auto-pass)
+            Action cleanup = () =>
+            {
+                if (System.Threading.Interlocked.Exchange(ref finished, 1) != 0) return;
+                if (webView != null) webView.Stop();
+                if (go != null) UnityEngine.Object.Destroy(go);
+            };
+
             webView.Frame = new Rect(0, 0, 1, 1);
             webView.SetShowSpinnerWhileLoading(false);
             webView.SetBackgroundColor(Color.clear);
 
-            // JS → Unity message handler
             webView.OnMessageReceived += (view, message) =>
             {
-                // Messages arrive as uniwebview://action?token=xxx
-                if (message.Path == "token" && !string.IsNullOrEmpty(message.Args["value"]))
+                if (message.Path != "message" || !message.Args.ContainsKey("value")) return;
+                var json = message.Args["value"];
+                if (!TurnstileProvider.TryParseChallengeMessage(json, channel, out var type, out var value)) return;
+                if (type == "token")
                 {
-                    if (!tcs.Task.IsCompleted)
-                        tcs.TrySetResult(message.Args["value"]);
-                    CleanupWebView(go, webView);
+                    if (tcs.TrySetResult(value)) cleanup();
                 }
-                else if (message.Path == "error")
+                else if (type == "error")
                 {
-                    if (!tcs.Task.IsCompleted)
-                        tcs.TrySetException(new Exception($"Turnstile error: {message.Args["value"]}"));
-                    CleanupWebView(go, webView);
+                    if (tcs.TrySetException(new CaptchaUnavailableException(
+                        TurnstileProvider.NormalizeFailureReason(value)))) cleanup();
                 }
-                else if (message.Path == "interactive")
+                else if (type == "interactive")
                 {
-                    if (message.Args["value"] == "show")
+                    if (value == "show")
                     {
-                        // Show WebView for user interaction
                         webView.Frame = new Rect(0, 0, Screen.width, Screen.height);
                         webView.Show();
                     }
-                    else if (message.Args["value"] == "hide")
+                    else
                     {
                         webView.Hide();
                     }
                 }
             };
 
-            // Load Turnstile HTML with UniWebView-compatible JS bridge
-            string adaptedHtml = html
-                .Replace(
-                    "window.external.notify('token:'+t)",
-                    "location.href='uniwebview://token?value='+encodeURIComponent(t)")
-                .Replace(
-                    "window.external.notify('error:'+e)",
-                    "location.href='uniwebview://error?value='+encodeURIComponent(e)")
-                .Replace(
-                    "window.external.notify('interactive:show')",
-                    "location.href='uniwebview://interactive?value=show'")
-                .Replace(
-                    "window.external.notify('interactive:hide')",
-                    "location.href='uniwebview://interactive?value=hide'")
-                .Replace(
-                    "window.external.notify('error:timeout')",
-                    "location.href='uniwebview://error?value=timeout'");
+            webView.Load(hostedUrl);
+            webView.Show(false);
 
-            webView.LoadHTMLString(adaptedHtml, "https://challenges.cloudflare.com");
-            webView.Show(false); // Load in background
-
-            // Timeout
             _ = Task.Delay(30000).ContinueWith(_ =>
             {
-                if (!tcs.Task.IsCompleted)
+                if (tcs.TrySetException(new CaptchaUnavailableException("timeout")))
                 {
-                    tcs.TrySetException(new TimeoutException("Turnstile timeout"));
-                    RunOnMainThread(() => CleanupWebView(go, webView));
+                    RunOnMainThread(cleanup);
                 }
             });
         });
 
         return await tcs.Task;
-    }
-
-    private static void CleanupWebView(GameObject go, UniWebView webView)
-    {
-        if (webView != null) webView.CleanCache();
-        if (go != null) UnityEngine.Object.Destroy(go);
     }
 
     private static Task RunOnMainThread(Action action)
@@ -533,95 +489,57 @@ public static class UniWebViewAdapter
 #if VUPLEX_WEBVIEW
 public static class VuplexAdapter
 {
-    public static async Task<string> AcquireTokenAsync(string siteKey, string action)
+    public static async Task<string> AcquireTokenAsync(string challengeUrl, string channel)
     {
-        var tcs = new TaskCompletionSource<string>();
-        string html = TurnstileProvider.GetTurnstileHtml(siteKey, action);
+        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hostedUrl = TurnstileProvider.WithChallengeBridge(challengeUrl, "vuplex");
 
         await RunOnMainThread(async () =>
         {
-            // Create prefab-less CanvasWebViewPrefab or WebViewPrefab
             var go = new GameObject("EdgeBase_Turnstile");
             var webViewPrefab = go.AddComponent<Vuplex.WebView.CanvasWebViewPrefab>();
             await webViewPrefab.WaitUntilInitialized();
-
             var webView = webViewPrefab.WebView;
-
-            // Start invisible (off-screen position)
             go.transform.position = new Vector3(9999, 9999, 9999);
-
-            // Listen for JS messages via postMessage
-            webView.MessageEmitted += (sender, e) =>
+            var finished = 0;
+            Action cleanup = () =>
             {
-                // e.Value is the JSON string from window.vuplex.postMessage()
-                try
-                {
-                    var msg = JsonUtility.FromJson<VuplexMessage>(e.Value);
-                    if (msg.type == "token" && !tcs.Task.IsCompleted)
-                    {
-                        tcs.TrySetResult(msg.value);
-                        UnityEngine.Object.Destroy(go);
-                    }
-                    else if (msg.type == "error")
-                    {
-                        if (!tcs.Task.IsCompleted)
-                            tcs.TrySetException(new Exception($"Turnstile error: {msg.value}"));
-                        UnityEngine.Object.Destroy(go);
-                    }
-                    else if (msg.type == "interactive")
-                    {
-                        if (msg.value == "show")
-                        {
-                            go.transform.position = Vector3.zero; // Move to visible position
-                        }
-                        else if (msg.value == "hide")
-                        {
-                            go.transform.position = new Vector3(9999, 9999, 9999);
-                        }
-                    }
-                }
-                catch { /* ignore parse errors */ }
+                if (System.Threading.Interlocked.Exchange(ref finished, 1) != 0) return;
+                if (go != null) UnityEngine.Object.Destroy(go);
             };
 
-            // Adapt HTML for Vuplex's JS bridge (window.vuplex.postMessage)
-            string adaptedHtml = html
-                .Replace(
-                    "window.external.notify('token:'+t)",
-                    "window.vuplex.postMessage(JSON.stringify({type:'token',value:t}))")
-                .Replace(
-                    "window.external.notify('error:'+e)",
-                    "window.vuplex.postMessage(JSON.stringify({type:'error',value:String(e)}))")
-                .Replace(
-                    "window.external.notify('interactive:show')",
-                    "window.vuplex.postMessage(JSON.stringify({type:'interactive',value:'show'}))")
-                .Replace(
-                    "window.external.notify('interactive:hide')",
-                    "window.vuplex.postMessage(JSON.stringify({type:'interactive',value:'hide'}))")
-                .Replace(
-                    "window.external.notify('error:timeout')",
-                    "window.vuplex.postMessage(JSON.stringify({type:'error',value:'timeout'}))");
+            webView.MessageEmitted += (sender, e) =>
+            {
+                if (!TurnstileProvider.TryParseChallengeMessage(e.Value, channel, out var type, out var value)) return;
+                if (type == "token")
+                {
+                    if (tcs.TrySetResult(value)) cleanup();
+                }
+                else if (type == "error")
+                {
+                    if (tcs.TrySetException(new CaptchaUnavailableException(
+                        TurnstileProvider.NormalizeFailureReason(value)))) cleanup();
+                }
+                else if (type == "interactive")
+                {
+                    go.transform.position = value == "show"
+                        ? Vector3.zero
+                        : new Vector3(9999, 9999, 9999);
+                }
+            };
 
-            webView.LoadHtml(adaptedHtml);
+            webView.LoadUrl(hostedUrl);
 
-            // Timeout
             _ = Task.Delay(30000).ContinueWith(_ =>
             {
-                if (!tcs.Task.IsCompleted)
+                if (tcs.TrySetException(new CaptchaUnavailableException("timeout")))
                 {
-                    tcs.TrySetException(new TimeoutException("Turnstile timeout"));
-                    RunOnMainThread(() => UnityEngine.Object.Destroy(go));
+                    RunOnMainThread(cleanup);
                 }
             });
         });
 
         return await tcs.Task;
-    }
-
-    [Serializable]
-    private struct VuplexMessage
-    {
-        public string type;
-        public string value;
     }
 
     private static Task RunOnMainThread(Action action)
@@ -655,96 +573,57 @@ public static class VuplexAdapter
 #if UNITY_WEBVIEW_GREE
 public static class GreeWebViewAdapter
 {
-    public static async Task<string> AcquireTokenAsync(string siteKey, string action)
+    public static async Task<string> AcquireTokenAsync(string challengeUrl, string channel)
     {
-        return await AcquireTokenAsync(siteKey, action, "interaction-only");
-    }
-
-    public static async Task<string> AcquirePreviewTokenAsync(string siteKey, string action, string appearance = "always")
-    {
-        return await AcquireTokenAsync(siteKey, action, appearance);
-    }
-
-    private static async Task<string> AcquireTokenAsync(string siteKey, string action, string appearance)
-    {
-        var tcs = new TaskCompletionSource<string>();
-        string html = TurnstileProvider.GetTurnstileHtml(siteKey, action, appearance);
-        var startVisible = string.Equals(appearance, "always", StringComparison.Ordinal);
-        var useSeparateWindow =
-#if UNITY_STANDALONE_OSX && !UNITY_EDITOR
-            startVisible;
-#else
-            false;
-#endif
+        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         await RunOnMainThread(() =>
         {
             var go = new GameObject("EdgeBase_Turnstile");
             var webView = go.AddComponent<WebViewObject>();
+            var finished = 0;
+            Action cleanup = () =>
+            {
+                if (System.Threading.Interlocked.Exchange(ref finished, 1) != 0) return;
+                if (go != null) UnityEngine.Object.Destroy(go);
+            };
 
             webView.Init(
                 cb: (msg) =>
                 {
-                    // Messages arrive as "type:value" strings via Unity.call()
-                    if (msg.StartsWith("token:") && !tcs.Task.IsCompleted)
+                    if (!TurnstileProvider.TryParseChallengeMessage(msg, channel, out var type, out var value)) return;
+                    if (type == "token")
                     {
-                        tcs.TrySetResult(msg.Substring(6));
-                        UnityEngine.Object.Destroy(go);
+                        if (tcs.TrySetResult(value)) cleanup();
                     }
-                    else if (msg.StartsWith("error:"))
+                    else if (type == "error")
                     {
-                        if (!tcs.Task.IsCompleted)
-                            tcs.TrySetException(new Exception($"Turnstile error: {msg.Substring(6)}"));
-                        UnityEngine.Object.Destroy(go);
+                        if (tcs.TrySetException(new CaptchaUnavailableException(
+                            TurnstileProvider.NormalizeFailureReason(value)))) cleanup();
                     }
-                    else if (msg == "interactive:show")
+                    else if (type == "interactive" && value == "show")
                     {
                         webView.SetVisibility(true);
                         webView.SetMargins(0, 0, 0, 0);
                     }
-                    else if (msg == "interactive:hide" && !startVisible)
+                    else if (type == "interactive")
                     {
                         webView.SetVisibility(false);
                     }
                 },
                 transparent: true,
                 enableWKWebView: true,
-                separated: useSeparateWindow
+                separated: false
             );
 
-            webView.SetVisibility(startVisible);
-            if (startVisible)
-            {
-                webView.SetMargins(0, 0, 0, 0);
-            }
+            webView.SetVisibility(false);
+            webView.LoadURL(challengeUrl);
 
-            // Adapt HTML for gree/unity-webview JS bridge (Unity.call)
-            string adaptedHtml = html
-                .Replace(
-                    "window.external.notify('token:'+t)",
-                    "Unity.call('token:'+t)")
-                .Replace(
-                    "window.external.notify('error:'+e)",
-                    "Unity.call('error:'+String(e))")
-                .Replace(
-                    "window.external.notify('interactive:show')",
-                    "Unity.call('interactive:show')")
-                .Replace(
-                    "window.external.notify('interactive:hide')",
-                    "Unity.call('interactive:hide')")
-                .Replace(
-                    "window.external.notify('error:timeout')",
-                    "Unity.call('error:timeout')");
-
-            webView.LoadHTML(adaptedHtml, "https://challenges.cloudflare.com");
-
-            // Timeout
             _ = Task.Delay(30000).ContinueWith(_ =>
             {
-                if (!tcs.Task.IsCompleted)
+                if (tcs.TrySetException(new CaptchaUnavailableException("timeout")))
                 {
-                    tcs.TrySetException(new TimeoutException("Turnstile timeout"));
-                    RunOnMainThread(() => UnityEngine.Object.Destroy(go));
+                    RunOnMainThread(cleanup);
                 }
             });
         });

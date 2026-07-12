@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FunctionDefinition } from '@edge-base/shared';
 import { OpenAPIHono } from '../lib/hono.js';
 import { setConfig } from '../lib/do-router.js';
@@ -107,10 +107,10 @@ function httpFunction(
   };
 }
 
-async function invokeFunction(path: string, method = 'GET') {
+async function invokeFunction(path: string, method = 'GET', envOverrides: Partial<Env> = {}) {
   return createApp().fetch(
     new Request(`http://localhost/api/functions/${path}`, { method }),
-    createEnv(),
+    createEnv(envOverrides),
     createExecutionContext(),
   );
 }
@@ -120,6 +120,7 @@ afterEach(() => {
   clearMiddlewareRegistry();
   rebuildCompiledRoutes();
   setConfig({});
+  vi.unstubAllGlobals();
 });
 
 describe('function registry wrapping', () => {
@@ -281,6 +282,86 @@ describe('functionsRoute FunctionError compatibility', () => {
 });
 
 describe('functionsRoute HTTP contracts', () => {
+  it('forwards CAPTCHA rejection responses and never executes a protected function', async () => {
+    const handler = vi.fn(async () => ({ shouldNotRun: true }));
+    setConfig({
+      release: true,
+      captcha: {
+        siteKey: 'synthetic-site-key',
+        secretKey: 'synthetic-secret-key',
+        hostnames: ['localhost'],
+      },
+    });
+    registerFunction('protected', {
+      ...httpFunction('POST', handler),
+      captcha: true,
+    });
+    rebuildCompiledRoutes();
+
+    const missingToken = await invokeFunction('protected', 'POST', {
+      TURNSTILE_SECRET: 'synthetic-secret-key',
+    });
+    expect(missingToken.status).toBe(403);
+    expect(handler).not.toHaveBeenCalled();
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    const unavailable = await createApp().fetch(
+      new Request('http://localhost/api/functions/protected', {
+        method: 'POST',
+        headers: { 'X-EdgeBase-Captcha-Token': 'synthetic-token' },
+      }),
+      createEnv({ TURNSTILE_SECRET: 'synthetic-secret-key' }),
+      createExecutionContext(),
+    );
+    expect(unavailable.status).toBe(503);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('uses the valid fixed Turnstile action and preserves a protected function body', async () => {
+    setConfig({
+      release: true,
+      captcha: {
+        siteKey: 'synthetic-site-key',
+        secretKey: 'synthetic-secret-key',
+        hostnames: ['localhost'],
+      },
+    });
+    const handler = vi.fn(async (ctx: Record<string, any>) => ({
+      body: await (ctx.request as Request).json(),
+    }));
+    registerFunction('a/very/long/route/name/that/must/not/become/a-turnstile-action', {
+      ...httpFunction('POST', handler),
+      captcha: true,
+    });
+    rebuildCompiledRoutes();
+    const siteverify = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      action: 'function',
+      hostname: 'localhost',
+    }), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', siteverify);
+
+    const response = await createApp().fetch(
+      new Request(
+        'http://localhost/api/functions/a/very/long/route/name/that/must/not/become/a-turnstile-action',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-EdgeBase-Captcha-Token': 'synthetic-token',
+          },
+          body: JSON.stringify({ value: 'preserved' }),
+        },
+      ),
+      createEnv({ TURNSTILE_SECRET: 'synthetic-secret-key' }),
+      createExecutionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ body: { value: 'preserved' } });
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
   it('serializes plain objects as JSON responses', async () => {
     registerFunction('reports/summary', httpFunction('GET', async () => ({
       ok: true,

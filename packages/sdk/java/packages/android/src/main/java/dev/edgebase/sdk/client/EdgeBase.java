@@ -13,9 +13,12 @@ import dev.edgebase.sdk.core.*;
  * Usage:
  * 
  * <pre>{@code
- * // Client (Android / desktop)
+ * // Client (desktop JVM)
  * ClientEdgeBase client = EdgeBase.client("https://my-app.edgebase.fun");
  * client.auth().signUp("user@test.com", "pass123");
+ *
+ * // Client (Android; pass the current Activity)
+ * ClientEdgeBase androidClient = AndroidEdgeBase.client(activity, "https://my-app.edgebase.fun");
  *
  * // Admin (Spring / Ktor / backend)
  * AdminEdgeBase admin = EdgeBase.admin(
@@ -29,21 +32,23 @@ public final class EdgeBase {
     }
 
     /**
-     * Create a client-side SDK instance (Android / mobile / desktop).
+     * Create a desktop JVM client. Android apps must use
+     * {@link AndroidEdgeBase#client(android.app.Activity, String)}.
      */
     public static ClientEdgeBase client(String url) {
         return new ClientEdgeBase(url);
     }
 
     /**
-     * Create a client-side SDK instance with custom token storage.
+     * Create a desktop JVM client with custom token storage. Android apps must
+     * use {@link AndroidEdgeBase#client(android.app.Activity, String, TokenStorage)}.
      */
     public static ClientEdgeBase client(String url, TokenStorage tokenStorage) {
         return new ClientEdgeBase(url, tokenStorage, null);
     }
 
     /**
-     * Create a client-side SDK instance with custom options.
+     * Create a desktop JVM client with custom options.
      */
     public static ClientEdgeBase client(String url, TokenStorage tokenStorage, String projectId) {
         return new ClientEdgeBase(url, tokenStorage, projectId);

@@ -5,12 +5,13 @@
  * No authentication required.
  * Currently exposes captcha siteKey for client-side Turnstile rendering.
  *
- * siteKey is served from CAPTCHA_SITE_KEY env var (set by deploy.ts after provisioning).
- * Falls back to bundled runtime config for advanced captcha object configs.
+ * The site key is exposed only when the runtime has a complete, hostname-bound
+ * CAPTCHA configuration. A release misconfiguration therefore fails closed
+ * instead of advertising a widget while protected routes silently bypass it.
  */
 import { OpenAPIHono, createRoute, type HonoEnv } from '../lib/hono.js';
-import { parseConfig } from '../lib/do-router.js';
 import { zodDefaultHook, jsonResponseSchema } from '../lib/schemas.js';
+import { resolveCaptchaConfig } from '../middleware/captcha-verify.js';
 
 
 export const configRoute = new OpenAPIHono<HonoEnv>({ defaultHook: zodDefaultHook });
@@ -27,24 +28,8 @@ const getConfig = createRoute({
 });
 
 configRoute.openapi(getConfig, (c) => {
-  let captcha: { siteKey: string } | null = null;
-
-  try {
-    // §34: CAPTCHA_SITE_KEY env var takes priority (set by deploy.ts)
-    if (c.env.CAPTCHA_SITE_KEY) {
-      captcha = { siteKey: c.env.CAPTCHA_SITE_KEY };
-    } else {
-      // Fallback: parseConfig() singleton for advanced captcha object configs
-      const config = parseConfig(c.env);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const captchaCfg = (config as any)?.captcha;
-      if (captchaCfg && typeof captchaCfg === 'object' && captchaCfg.siteKey) {
-        captcha = { siteKey: captchaCfg.siteKey };
-      }
-    }
-  } catch {
-    // Return null captcha on error
-  }
+  const resolved = resolveCaptchaConfig(c.env, c.req.raw);
+  const captcha = resolved ? { siteKey: resolved.siteKey } : null;
 
   return c.json({ captcha }, 200, {
     'Cache-Control': 'public, max-age=60, s-maxage=60',

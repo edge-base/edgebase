@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/web",
-    "version": "0.3.8",
+    "version": "0.4.0",
     "description": "EdgeBase web SDK — browser client with database-live subscriptions, room, and auth persistence",
     "license": "MIT",
     "repository": {
@@ -41,7 +41,7 @@
         "prepack": "pnpm run build"
     },
     "peerDependencies": {
-        "yjs": "^13.6.27"
+        "yjs": "^13.6.31"
     },
     "peerDependenciesMeta": {
         "yjs": {
@@ -55,6 +55,6 @@
         "fake-indexeddb": "^6.2.5",
         "typescript": "^5.7.0",
         "vitest": "^3.2.6",
-        "yjs": "^13.6.27"
+        "yjs": "^13.6.31"
     }
 }

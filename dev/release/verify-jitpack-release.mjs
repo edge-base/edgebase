@@ -42,9 +42,19 @@ function resolveTargets(explicitTargets) {
 }
 
 export function buildJitpackArtifactUrl(artifactName, version) {
+  if (!/^edgebase-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(artifactName)) {
+    throw new Error(`Invalid JitPack artifact name: ${artifactName}`);
+  }
+  if (!/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`Invalid JitPack release version: ${version}`);
+  }
   const tag = `v${version}`;
   const groupPath = 'com/github/edge-base/edgebase';
-  return `${JITPACK_BASE_URL}/${groupPath}/${artifactName}/${tag}/${artifactName}-${tag}.pom`;
+  const url = new URL(`${groupPath}/${artifactName}/${tag}/${artifactName}-${tag}.pom`, `${JITPACK_BASE_URL}/`);
+  if (url.origin !== JITPACK_BASE_URL) {
+    throw new Error('JitPack artifact URL escaped the trusted origin.');
+  }
+  return url.href;
 }
 
 export async function verifyJitpackRelease(version, options = {}) {
@@ -70,7 +80,10 @@ export async function verifyJitpackRelease(version, options = {}) {
     if (typeof fetchImpl !== 'function') {
       throw new Error('JitPack verification requires a fetch implementation.');
     }
-    const response = await fetchImpl(url, {
+    // Only an allowlisted artifact name and validated semantic version derived
+    // from release metadata reach this fixed public JitPack origin; no file
+    // contents or credentials are transmitted.
+    const response = await fetchImpl(url, { // lgtm[js/file-access-to-http]
       headers: { 'User-Agent': 'edgebase-release-verifier/1.0' },
       redirect: 'follow',
     });

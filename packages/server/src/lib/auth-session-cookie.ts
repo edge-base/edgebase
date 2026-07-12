@@ -5,10 +5,13 @@ import type { Env } from '../types.js';
 import { parseConfig } from './do-router.js';
 import { parseDuration } from './jwt.js';
 import { matchOrigin } from '../middleware/cors.js';
+import { trustsSelfHostedProxyHeaders } from './public-origin.js';
+import { getTrustedClientIp } from './client-ip.js';
 
 const AUTH_TRANSPORT_HEADER = 'X-EdgeBase-Auth-Transport';
 const COOKIE_AUTH_TRANSPORT = 'cookie';
 const AUTH_COOKIE_PATH = '/api/auth';
+const OAUTH_COOKIE_PATH = `${AUTH_COOKIE_PATH}/oauth`;
 
 type AuthContext = Context<{ Bindings: Env }>;
 type SameSite = 'strict' | 'lax' | 'none';
@@ -36,7 +39,7 @@ function cookieConfig(c: AuthContext): SessionCookieConfig {
 
 function isSecureRequest(c: AuthContext): boolean {
   if (new URL(c.req.url).protocol === 'https:') return true;
-  if (parseConfig(c.env)?.trustSelfHostedProxy !== true) return false;
+  if (!trustsSelfHostedProxyHeaders(c.env)) return false;
   const forwardedProto = c.req.header('X-Forwarded-Proto')
     ?.split(',')[0]
     ?.trim()
@@ -48,10 +51,19 @@ function requestUsesSecureCookies(c: AuthContext): boolean {
   return isSecureRequest(c);
 }
 
+function isExplicitLocalDevelopmentLoopback(c: AuthContext): boolean {
+  if (c.env?.EDGEBASE_RUNTIME_MODE !== 'local-development') return false;
+  const url = new URL(c.req.raw.url);
+  const ip = getTrustedClientIp(c.env, c.req.raw);
+  const loopbackPeer = ip === '::1' || ip === '[::1]' || ip?.startsWith('127.') === true;
+  return loopbackPeer && url.protocol === 'http:'
+    && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]');
+}
+
 function refreshCookieName(c: AuthContext): string {
   const config = cookieConfig(c);
   return requestUsesSecureCookies(c)
-    ? `__Secure-${config.name}`
+    ? `__Host-${config.name}`
     : config.name;
 }
 
@@ -62,7 +74,7 @@ function cookieOptions(c: AuthContext, maxAge: number) {
     httpOnly: true,
     secure,
     sameSite: config.sameSite,
-    path: AUTH_COOKIE_PATH,
+    path: secure ? '/' : AUTH_COOKIE_PATH,
     maxAge,
     expires: new Date(Date.now() + Math.max(0, maxAge) * 1000),
     priority: 'high' as const,
@@ -81,6 +93,18 @@ export function assertCookieAuthEnabled(c: AuthContext): void {
   const config = cookieConfig(c);
   if (!config.enabled) {
     throw new EdgeBaseError(400, 'Refresh cookie transport is not enabled.', undefined, 'feature-not-enabled');
+  }
+  if (
+    parseConfig(c.env)?.release === true
+    && !isSecureRequest(c)
+    && !isExplicitLocalDevelopmentLoopback(c)
+  ) {
+    throw new EdgeBaseError(
+      400,
+      'Cookie authentication requires HTTPS in release mode.',
+      undefined,
+      'insecure-cookie-config',
+    );
   }
   if (config.sameSite === 'none' && !isSecureRequest(c)) {
     throw new EdgeBaseError(
@@ -108,7 +132,12 @@ export function assertAuthTransportAllowed(c: AuthContext): void {
 
   const rawOrigin = c.req.header('Origin')?.trim();
   if (!rawOrigin) {
-    throw new EdgeBaseError(403, 'Cookie auth requests require an Origin header.', undefined, 'forbidden');
+    throw new EdgeBaseError(
+      403,
+      'Cookie auth requests require an Origin header.',
+      undefined,
+      'cookie-auth-origin-required',
+    );
   }
 
   let browserOrigin: URL;
@@ -127,17 +156,32 @@ export function assertAuthTransportAllowed(c: AuthContext): void {
       requestUrl.protocol = 'https:';
     }
   } catch {
-    throw new EdgeBaseError(403, 'Cookie auth request origin could not be verified.', undefined, 'forbidden');
+    throw new EdgeBaseError(
+      403,
+      'Cookie auth request origin could not be verified.',
+      undefined,
+      'cookie-auth-origin-unverifiable',
+    );
   }
   if (browserOrigin.origin === requestUrl.origin) return;
 
   const cors = parseConfig(c.env)?.cors;
   if (cors?.credentials === false || !cors?.origin) {
-    throw new EdgeBaseError(403, 'Cookie auth origin is not trusted.', undefined, 'forbidden');
+    throw new EdgeBaseError(
+      403,
+      'Cookie auth origin is not trusted.',
+      undefined,
+      'cookie-auth-origin-untrusted',
+    );
   }
   const match = matchOrigin(browserOrigin.origin, cors.origin);
   if (!match.allowed || match.viaWildcard) {
-    throw new EdgeBaseError(403, 'Cookie auth requires an exact trusted origin.', undefined, 'forbidden');
+    throw new EdgeBaseError(
+      403,
+      'Cookie auth requires an exact trusted origin.',
+      undefined,
+      'cookie-auth-origin-untrusted',
+    );
   }
 
   const crossSite = c.req.header('Sec-Fetch-Site')?.trim().toLowerCase() === 'cross-site'
@@ -161,6 +205,7 @@ export function setRefreshCookie(c: AuthContext, refreshToken: string): void {
   assertCookieAuthEnabled(c);
   const ttl = parseDuration(parseConfig(c.env)?.auth?.session?.refreshTokenTTL ?? '28d');
   setCookie(c, refreshCookieName(c), refreshToken, cookieOptions(c, ttl));
+  expireLegacyRefreshCookies(c);
 }
 
 export function clearRefreshCookie(c: AuthContext): void {
@@ -168,17 +213,33 @@ export function clearRefreshCookie(c: AuthContext): void {
   const options = cookieOptions(c, 0);
   setCookie(c, currentName, '', { ...options, expires: new Date(0) });
 
-  // When HTTPS is introduced after local HTTP development, also clear the
-  // unprefixed development cookie. It is never accepted on the secure path.
+  expireLegacyRefreshCookies(c);
+}
+
+function expireCookieAtPath(
+  c: AuthContext,
+  name: string,
+  path: string,
+  secure: boolean,
+  sameSite: SameSite = 'strict',
+): void {
+  setCookie(c, name, '', {
+    httpOnly: true,
+    secure,
+    sameSite,
+    path,
+    maxAge: 0,
+    expires: new Date(0),
+    priority: 'high',
+  });
+}
+
+/** Expire predecessor names/paths without ever accepting or migrating them. */
+function expireLegacyRefreshCookies(c: AuthContext): void {
+  if (!isSecureRequest(c)) return;
   const baseName = cookieConfig(c).name;
-  if (currentName !== baseName) {
-    setCookie(c, baseName, '', {
-      ...options,
-      secure: false,
-      sameSite: 'strict',
-      expires: new Date(0),
-    });
-  }
+  expireCookieAtPath(c, `__Secure-${baseName}`, AUTH_COOKIE_PATH, true);
+  expireCookieAtPath(c, baseName, AUTH_COOKIE_PATH, false);
 }
 
 export function applyAuthNoStore(c: AuthContext): void {
@@ -205,6 +266,12 @@ export function cookieSessionResponse<T extends SessionResponsePayload>(
   status: number = 200,
 ): Response {
   applyAuthNoStore(c);
+  const requestPath = new URL(c.req.raw.url).pathname;
+  if (!requestPath.endsWith('/auth/refresh')) {
+    // Any authoritative non-refresh session transition supersedes OAuth flows
+    // initiated under the previous browser identity generation.
+    rotateOAuthBrowserGeneration(c);
+  }
   setRefreshCookie(c, payload.refreshToken);
   const { refreshToken: _refreshToken, ...safePayload } = payload;
   return c.json(
@@ -216,32 +283,144 @@ export function cookieSessionResponse<T extends SessionResponsePayload>(
 function oauthStateCookieName(c: AuthContext, state: string): string {
   const secure = isSecureRequest(c);
   const base = `${cookieConfig(c).name}-oauth-${state.slice(0, 32)}`;
-  return secure ? `__Secure-${base}` : base;
+  return secure ? `__Host-${base}` : base;
 }
 
-export function setOAuthStateCookie(c: AuthContext, state: string): void {
+function oauthBrowserGenerationCookieName(c: AuthContext): string {
   const secure = isSecureRequest(c);
-  setCookie(c, oauthStateCookieName(c, state), state, {
+  const base = `${cookieConfig(c).name}-oauth-generation`;
+  return secure ? `__Host-${base}` : base;
+}
+
+function generateOAuthBrowserGeneration(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function setOAuthBrowserGenerationCookie(c: AuthContext, value: string): void {
+  const secure = isSecureRequest(c);
+  setCookie(c, oauthBrowserGenerationCookieName(c), value, {
     httpOnly: true,
     secure,
-    sameSite: 'lax',
-    path: `${AUTH_COOKIE_PATH}/oauth`,
-    maxAge: 300,
-    expires: new Date(Date.now() + 300_000),
+    // Secure deployments use None so Apple's cross-site form_post carries the
+    // generation fence. The value is random, HttpOnly, and validated together
+    // with the per-flow state cookie.
+    sameSite: secure ? 'none' : 'lax',
+    path: secure ? '/' : OAUTH_COOKIE_PATH,
+    maxAge: 86_400,
+    expires: new Date(Date.now() + 86_400_000),
     priority: 'high',
   });
 }
 
-export function verifyAndClearOAuthStateCookie(c: AuthContext, state: string): boolean {
+export function ensureOAuthBrowserGeneration(c: AuthContext): string {
+  const existing = getCookie(c, oauthBrowserGenerationCookieName(c));
+  const value = existing && /^[0-9a-f]{64}$/.test(existing)
+    ? existing
+    : generateOAuthBrowserGeneration();
+  setOAuthBrowserGenerationCookie(c, value);
+  expireLegacyOAuthGenerationCookies(c);
+  return value;
+}
+
+/** Read the existing generation without minting authority during completion. */
+export function readOAuthBrowserGeneration(c: AuthContext): string | null {
+  const value = getCookie(c, oauthBrowserGenerationCookieName(c));
+  return value && /^[0-9a-f]{64}$/.test(value) ? value : null;
+}
+
+export function verifyOAuthBrowserGeneration(c: AuthContext, expected: string): boolean {
+  return getCookie(c, oauthBrowserGenerationCookieName(c)) === expected;
+}
+
+/** Fence OAuth flows started before any authoritative browser session transition. */
+export function setOAuthBrowserGeneration(c: AuthContext, value: string): void {
+  if (!/^[0-9a-f]{64}$/.test(value)) {
+    throw new EdgeBaseError(500, 'Invalid OAuth browser generation.', undefined, 'internal-error');
+  }
+  setOAuthBrowserGenerationCookie(c, value);
+  expireLegacyOAuthGenerationCookies(c);
+}
+
+export function rotateOAuthBrowserGeneration(c: AuthContext): string {
+  const value = generateOAuthBrowserGeneration();
+  setOAuthBrowserGeneration(c, value);
+  return value;
+}
+
+export function setOAuthStateCookie(
+  c: AuthContext,
+  state: string,
+  options: { crossSitePost?: boolean } = {},
+): void {
+  const secure = isSecureRequest(c);
+  if (options.crossSitePost && !secure) {
+    throw new EdgeBaseError(
+      400,
+      'Cross-site OAuth POST callbacks require HTTPS for secure state binding.',
+      undefined,
+      'validation-failed',
+    );
+  }
+  setCookie(c, oauthStateCookieName(c, state), state, {
+    httpOnly: true,
+    secure,
+    sameSite: options.crossSitePost ? 'none' : 'lax',
+    path: secure ? '/' : OAUTH_COOKIE_PATH,
+    maxAge: 300,
+    expires: new Date(Date.now() + 300_000),
+    priority: 'high',
+  });
+  if (secure) {
+    const base = `${cookieConfig(c).name}-oauth-${state.slice(0, 32)}`;
+    expireCookieAtPath(c, `__Secure-${base}`, OAUTH_COOKIE_PATH, true, options.crossSitePost ? 'none' : 'lax');
+    expireCookieAtPath(c, base, OAUTH_COOKIE_PATH, false);
+  }
+}
+
+export function verifyOAuthStateCookie(
+  c: AuthContext,
+  state: string,
+): boolean {
+  return getCookie(c, oauthStateCookieName(c, state)) === state;
+}
+
+export function clearOAuthStateCookie(
+  c: AuthContext,
+  state: string,
+  options: { crossSitePost?: boolean } = {},
+): void {
+  const secure = isSecureRequest(c);
   const name = oauthStateCookieName(c, state);
-  const value = getCookie(c, name);
   setCookie(c, name, '', {
     httpOnly: true,
-    secure: isSecureRequest(c),
-    sameSite: 'lax',
-    path: `${AUTH_COOKIE_PATH}/oauth`,
+    secure,
+    sameSite: options.crossSitePost ? 'none' : 'lax',
+    path: secure ? '/' : OAUTH_COOKIE_PATH,
     maxAge: 0,
     expires: new Date(0),
   });
-  return value === state;
+  if (secure) {
+    const base = `${cookieConfig(c).name}-oauth-${state.slice(0, 32)}`;
+    expireCookieAtPath(c, `__Secure-${base}`, OAUTH_COOKIE_PATH, true, options.crossSitePost ? 'none' : 'lax');
+    expireCookieAtPath(c, base, OAUTH_COOKIE_PATH, false);
+  }
+}
+
+export function verifyAndClearOAuthStateCookie(
+  c: AuthContext,
+  state: string,
+  options: { crossSitePost?: boolean } = {},
+): boolean {
+  const verified = verifyOAuthStateCookie(c, state);
+  clearOAuthStateCookie(c, state, options);
+  return verified;
+}
+
+function expireLegacyOAuthGenerationCookies(c: AuthContext): void {
+  if (!isSecureRequest(c)) return;
+  const base = `${cookieConfig(c).name}-oauth-generation`;
+  expireCookieAtPath(c, `__Secure-${base}`, OAUTH_COOKIE_PATH, true, 'none');
+  expireCookieAtPath(c, base, OAUTH_COOKIE_PATH, false);
 }

@@ -7,41 +7,82 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:edgebase_core/src/http_client.dart' as core;
 import 'package:edgebase_core/src/generated/api_core.dart';
+import 'captcha_errors.dart';
+import 'captcha_site_key_cache.dart';
 
 // ─── Site Key Cache ───
 
-final Map<String, String?> _siteKeyCacheByBaseUrl = {};
+final CaptchaSiteKeyCache _siteKeyCacheByBaseUrl = CaptchaSiteKeyCache();
 final Map<String, Future<String?>> _siteKeyPromiseByBaseUrl = {};
+const Duration _captchaConfigFetchTimeout = Duration(seconds: 10);
 
-Future<String?> _fetchSiteKey(String baseUrl,
-    [core.HttpClient? httpClient]) async {
-  if (_siteKeyCacheByBaseUrl.containsKey(baseUrl)) {
-    return _siteKeyCacheByBaseUrl[baseUrl];
-  }
+String _normalizeCaptchaBaseUrl(String baseUrl) =>
+    baseUrl.trim().replaceFirst(RegExp(r'/+$'), '');
+
+Future<String?> _fetchSiteKey(
+  String baseUrl, [
+  core.HttpClient? httpClient,
+]) async {
+  baseUrl = _normalizeCaptchaBaseUrl(baseUrl);
+  final cachedSiteKey = _siteKeyCacheByBaseUrl.read(baseUrl);
+  if (cachedSiteKey != null) return cachedSiteKey;
   final inflight = _siteKeyPromiseByBaseUrl[baseUrl];
   if (inflight != null) return inflight;
 
   final nextPromise = (() async {
     try {
-      final Map<String, dynamic> data;
+      final Object? data;
       if (httpClient != null) {
-        data = await GeneratedDbApi(httpClient).getConfig()
-            as Map<String, dynamic>;
+        try {
+          data = await GeneratedDbApi(httpClient).getConfig();
+        } on FormatException catch (error) {
+          throw CaptchaUnavailableException(
+            'config_invalid_response',
+            cause: error,
+          );
+        } catch (error) {
+          throw CaptchaUnavailableException(
+            'config_fetch_failed',
+            cause: error,
+          );
+        }
       } else {
-        final res = await http.get(Uri.parse('$baseUrl/api/config'));
-        if (res.statusCode != 200) return null;
-        data = jsonDecode(res.body) as Map<String, dynamic>;
+        final http.Response res;
+        try {
+          res = await http
+              .get(Uri.parse('$baseUrl/api/config'))
+              .timeout(_captchaConfigFetchTimeout);
+        } catch (error) {
+          throw CaptchaUnavailableException(
+            'config_fetch_failed',
+            cause: error,
+          );
+        }
+        if (res.statusCode != 200) {
+          throw CaptchaUnavailableException(
+            'config_fetch_failed',
+            cause: StateError(
+              'GET /api/config returned HTTP ${res.statusCode}',
+            ),
+          );
+        }
+        try {
+          data = jsonDecode(res.body);
+        } catch (error) {
+          throw CaptchaUnavailableException(
+            'config_invalid_response',
+            cause: error,
+          );
+        }
       }
-      final captcha = data['captcha'] as Map<String, dynamic>?;
-      final nextKey = captcha?['siteKey'] as String?;
-      _siteKeyCacheByBaseUrl[baseUrl] = nextKey;
+      final nextKey = parseCaptchaSiteKeyConfig(data);
+      if (nextKey != null) _siteKeyCacheByBaseUrl.write(baseUrl, nextKey);
       return nextKey;
-    } catch (_) {
-      return null;
     } finally {
       _siteKeyPromiseByBaseUrl.remove(baseUrl);
     }
@@ -51,169 +92,226 @@ Future<String?> _fetchSiteKey(String baseUrl,
   return nextPromise;
 }
 
-// ─── Turnstile HTML Template ───
+Future<String?> debugFetchCaptchaSiteKey(
+  String baseUrl, [
+  core.HttpClient? httpClient,
+]) =>
+    _fetchSiteKey(baseUrl, httpClient);
 
-String _turnstileHtml(String siteKey, String action) => '''
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async></script>
-  <style>
-    body { margin:0; display:flex; align-items:center; justify-content:center;
-           min-height:100vh; background:transparent; font-family:system-ui; }
-    .msg { color:#666; font-size:14px; text-align:center; padding:20px; }
-  </style>
-</head>
-<body>
-  <div id="cf-turnstile"></div>
-  <div class="msg" id="msg">Verifying...</div>
-  <script>
-    function initTurnstile() {
-      if (window.turnstile) {
-        document.getElementById('msg').style.display = 'none';
-        window.turnstile.render('#cf-turnstile', {
-          sitekey: '$siteKey',
-          action: '$action',
-          appearance: 'interaction-only',
-          callback: function(token) {
-            window.flutter_inappwebview.callHandler('onToken', token);
-          },
-          'error-callback': function(err) {
-            window.flutter_inappwebview.callHandler('onError', String(err));
-          },
-          'before-interactive-callback': function() {
-            window.flutter_inappwebview.callHandler('onInteractive', 'show');
-          },
-          'after-interactive-callback': function() {
-            window.flutter_inappwebview.callHandler('onInteractive', 'hide');
-          },
-          'timeout-callback': function() {
-            window.flutter_inappwebview.callHandler('onError', 'timeout');
-          }
-        });
-      } else {
-        setTimeout(initTurnstile, 50);
-      }
+const _captchaActions = {
+  'signup',
+  'signin',
+  'anonymous',
+  'magic-link',
+  'phone',
+  'password-reset',
+  'oauth',
+  'function',
+};
+
+Uri buildCaptchaChallengeUri(String baseUrl, String action, String channel) {
+  final base = Uri.parse(baseUrl);
+  if (base.scheme != 'https' ||
+      base.host.isEmpty ||
+      base.userInfo.isNotEmpty ||
+      (base.path.isNotEmpty && base.path != '/') ||
+      base.hasQuery ||
+      base.hasFragment ||
+      !_captchaActions.contains(action) ||
+      !RegExp(r'^[A-Za-z0-9_-]{22,64}$').hasMatch(channel)) {
+    throw ArgumentError(
+      'Turnstile requires an HTTPS EdgeBase URL, fixed action, and secure channel.',
+    );
+  }
+  return base.replace(
+    path: '/api/captcha/challenge',
+    queryParameters: {
+      'action': action,
+      'channel': channel,
+      'bridge': 'flutter',
+    },
+    fragment: '',
+  );
+}
+
+({String type, String value})? parseCaptchaBridgeMessage(
+  Object? raw,
+  String expectedChannel,
+) {
+  if (raw is! String || utf8.encode(raw).length > 4096) return null;
+  try {
+    final payload = jsonDecode(raw);
+    if (payload is! Map<String, dynamic> ||
+        payload['v'] != 1 ||
+        payload['channel'] != expectedChannel ||
+        payload['type'] is! String ||
+        payload['value'] is! String) return null;
+    final type = payload['type'] as String;
+    final value = payload['value'] as String;
+    if (type == 'token' && value.isNotEmpty && value.length <= 2048) {
+      return (type: type, value: value);
     }
-    initTurnstile();
-  </script>
-</body>
-</html>
-''';
+    if (type == 'error') {
+      return (
+        type: type,
+        value: value.substring(0, value.length > 256 ? 256 : value.length),
+      );
+    }
+    if (type == 'interactive' && (value == 'show' || value == 'hide')) {
+      return (type: type, value: value);
+    }
+    if (type == 'ready' && value.length <= 32)
+      return (type: type, value: value);
+  } catch (_) {}
+  return null;
+}
+
+String _secureChannel() {
+  try {
+    final random = Random.secure();
+    return List<int>.generate(
+      16,
+      (_) => random.nextInt(256),
+    ).map((value) => value.toRadixString(16).padLeft(2, '0')).join();
+  } catch (error) {
+    throw CaptchaUnavailableException(
+      'secure_random_unavailable',
+      cause: error,
+    );
+  }
+}
 
 // ─── InAppBrowser for Interactive Challenge ───
 
 class _TurnstileBrowser extends InAppBrowser {
   final Completer<String> _completer;
+  final String channel;
+  final Uri challengeUri;
 
-  _TurnstileBrowser(this._completer);
+  _TurnstileBrowser(this._completer, this.channel, this.challengeUri);
+
+  void _fail(String reason) {
+    if (_completer.isCompleted) return;
+    _completer.completeError(CaptchaUnavailableException(reason));
+    unawaited(close());
+  }
 
   @override
   void onBrowserCreated() {
     webViewController?.addJavaScriptHandler(
-      handlerName: 'onToken',
+      handlerName: 'edgebaseCaptcha',
       callback: (args) {
-        if (!_completer.isCompleted) {
-          _completer.complete(args[0].toString());
+        final message = parseCaptchaBridgeMessage(
+          args.isNotEmpty ? args.first : null,
+          channel,
+        );
+        if (message == null || _completer.isCompleted) return;
+        if (message.type == 'token') {
+          _completer.complete(message.value);
           close();
+        } else if (message.type == 'error') {
+          _fail(message.value);
+        } else if (message.type == 'interactive' && message.value == 'show') {
+          show();
+        } else if (message.type == 'interactive' && message.value == 'hide') {
+          hide();
         }
+        return;
       },
-    );
-    webViewController?.addJavaScriptHandler(
-      handlerName: 'onError',
-      callback: (args) {
-        if (!_completer.isCompleted) {
-          _completer.completeError(Exception('Turnstile error: ${args[0]}'));
-          close();
-        }
-      },
-    );
-    webViewController?.addJavaScriptHandler(
-      handlerName: 'onInteractive',
-      callback: (_) {}, // Already visible in browser mode
     );
   }
 
   @override
   void onExit() {
     if (!_completer.isCompleted) {
-      _completer.completeError(Exception('Turnstile browser closed'));
+      _completer.completeError(
+        CaptchaUnavailableException('browser_closed'),
+      );
     }
+  }
+
+  @override
+  Future<NavigationActionPolicy?>? shouldOverrideUrlLoading(
+    NavigationAction navigationAction,
+  ) async {
+    if (!navigationAction.isForMainFrame) return NavigationActionPolicy.ALLOW;
+    final next = navigationAction.request.url;
+    if (next != null && next.toString() == challengeUri.toString()) {
+      return NavigationActionPolicy.ALLOW;
+    }
+    _fail('navigation_blocked');
+    return NavigationActionPolicy.CANCEL;
+  }
+
+  @override
+  void onReceivedError(WebResourceRequest request, WebResourceError error) {
+    if (request.isForMainFrame == true) _fail('load_failed');
+  }
+
+  @override
+  void onReceivedHttpError(
+    WebResourceRequest request,
+    WebResourceResponse errorResponse,
+  ) {
+    if (request.isForMainFrame == true) _fail('http_error');
+  }
+
+  @override
+  void onLoadError(Uri? url, int code, String message) {
+    if (url?.toString() == challengeUri.toString()) _fail('load_failed');
+  }
+
+  @override
+  void onLoadHttpError(Uri? url, int statusCode, String description) {
+    if (url?.toString() == challengeUri.toString()) _fail('http_error');
+  }
+
+  @override
+  void onRenderProcessGone(RenderProcessGoneDetail detail) {
+    _fail('renderer_terminated');
+  }
+
+  @override
+  void onWebContentProcessDidTerminate() {
+    _fail('renderer_terminated');
   }
 }
 
 // ─── Token Acquisition ───
 
-Future<String> _acquireCaptchaToken(String siteKey, String action) async {
+Future<String> _acquireCaptchaToken(String baseUrl, String action) async {
   final completer = Completer<String>();
-  bool disposed = false;
-  HeadlessInAppWebView? headless;
-
-  // Phase 1: HeadlessInAppWebView (invisible, auto-pass for 99% of users)
-  headless = HeadlessInAppWebView(
-    initialData: InAppWebViewInitialData(data: _turnstileHtml(siteKey, action)),
-    initialSettings: InAppWebViewSettings(
-      javaScriptEnabled: true,
+  final channel = _secureChannel();
+  final uri = buildCaptchaChallengeUri(baseUrl, action, channel);
+  final browser = _TurnstileBrowser(completer, channel, uri);
+  await browser.openUrlRequest(
+    urlRequest: URLRequest(url: WebUri(uri.toString())),
+    settings: InAppBrowserClassSettings(
+      browserSettings: InAppBrowserSettings(
+        hidden: true,
+        hideUrlBar: true,
+        hideToolbarTop: true,
+      ),
+      webViewSettings: InAppWebViewSettings(
+        javaScriptEnabled: true,
+        domStorageEnabled: true,
+        thirdPartyCookiesEnabled: true,
+        sharedCookiesEnabled: true,
+        transparentBackground: true,
+        cacheEnabled: false,
+        useShouldOverrideUrlLoading: true,
+      ),
     ),
-    onWebViewCreated: (controller) {
-      controller.addJavaScriptHandler(
-        handlerName: 'onToken',
-        callback: (args) {
-          if (!completer.isCompleted) {
-            completer.complete(args[0].toString());
-          }
-        },
-      );
-      controller.addJavaScriptHandler(
-        handlerName: 'onError',
-        callback: (args) {
-          if (!completer.isCompleted) {
-            completer.completeError(Exception('Turnstile error: ${args[0]}'));
-          }
-        },
-      );
-      controller.addJavaScriptHandler(
-        handlerName: 'onInteractive',
-        callback: (args) async {
-          // Phase 2: Interactive challenge needed — open visible browser
-          if (args[0] == 'show' && !completer.isCompleted) {
-            if (!disposed) {
-              disposed = true;
-              try {
-                await headless?.dispose();
-              } catch (_) {}
-            }
-            final browser = _TurnstileBrowser(completer);
-            await browser.openData(
-              data: _turnstileHtml(siteKey, action),
-              settings: InAppBrowserClassSettings(
-                webViewSettings: InAppWebViewSettings(
-                  javaScriptEnabled: true,
-                  transparentBackground: true,
-                ),
-              ),
-            );
-          }
-        },
-      );
-    },
   );
 
-  await headless.run();
-
-  // Wait with timeout
   try {
     return await completer.future.timeout(const Duration(seconds: 30));
   } on TimeoutException {
-    throw Exception('Turnstile timeout');
+    throw CaptchaUnavailableException('timeout');
   } finally {
-    if (!disposed) {
-      disposed = true;
-      try {
-        await headless.dispose();
-      } catch (_) {}
-    }
+    try {
+      await browser.close();
+    } catch (_) {}
   }
 }
 
@@ -224,20 +322,26 @@ Future<String> _acquireCaptchaToken(String siteKey, String action) async {
 /// - If [manualToken] is provided → return it (manual override).
 /// - If siteKey is available → auto-acquire via Turnstile in WebView.
 /// - If no siteKey (captcha not configured) → return null.
-Future<String?> resolveCaptchaToken(String baseUrl, String action,
-    [String? manualToken, core.HttpClient? httpClient]) async {
+Future<String?> resolveCaptchaToken(
+  String baseUrl,
+  String action, [
+  String? manualToken,
+  core.HttpClient? httpClient,
+]) async {
   if (manualToken != null) return manualToken;
   if (Platform.environment['EDGEBASE_DISABLE_AUTO_CAPTCHA'] == '1' ||
       Platform.environment.containsKey('FLUTTER_TEST')) {
     return null;
   }
 
-  final siteKey = await _fetchSiteKey(baseUrl, httpClient);
-  if (siteKey == null) return null;
+  final normalizedBaseUrl = _normalizeCaptchaBaseUrl(baseUrl);
+  if (await _fetchSiteKey(normalizedBaseUrl, httpClient) == null) return null;
 
   try {
-    return await _acquireCaptchaToken(siteKey, action);
-  } catch (_) {
-    return null; // Turnstile failed — let server handle (failMode: open/closed)
+    return await _acquireCaptchaToken(normalizedBaseUrl, action);
+  } on CaptchaUnavailableException {
+    rethrow;
+  } catch (error) {
+    throw CaptchaUnavailableException('acquisition_failed', cause: error);
   }
 }

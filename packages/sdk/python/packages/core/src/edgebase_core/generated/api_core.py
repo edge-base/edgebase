@@ -1,7 +1,7 @@
 """Auto-generated core API Core — DO NOT EDIT.
 
 Regenerate: npx tsx tools/sdk-codegen/generate.ts
-Source: openapi.json (0.3.8)
+Source: openapi.json (0.4.0)
 """
 
 from __future__ import annotations
@@ -184,21 +184,45 @@ class GeneratedDbApi:
         """Reset password with token — POST /api/auth/reset-password"""
         return self._http.post("/auth/reset-password", body)
 
-    def oauth_redirect(self, provider: str) -> Any:
+    def oauth_redirect(self, provider: str, query: dict[str, str] | None = None) -> Any:
         """Start OAuth redirect — GET /api/auth/oauth/{provider}"""
-        return self._http.get(f"/auth/oauth/{urllib.parse.quote(provider, safe='')}")
+        if query is None:
+            return self._http.get(f"/auth/oauth/{urllib.parse.quote(provider, safe='')}")
+        return self._http.get(f"/auth/oauth/{urllib.parse.quote(provider, safe='')}", params=query)
 
-    def oauth_callback(self, provider: str) -> Any:
+    def oauth_exchange(self, body: Any) -> Any:
+        """Atomically exchange a verified OAuth callback ticket — POST /api/auth/oauth/exchange"""
+        return self._http.post("/auth/oauth/exchange", body)
+
+    def oauth_callback(self, provider: str, query: dict[str, str] | None = None) -> Any:
         """OAuth callback — GET /api/auth/oauth/{provider}/callback"""
-        return self._http.get(f"/auth/oauth/{urllib.parse.quote(provider, safe='')}/callback")
+        return self._http.get(f"/auth/oauth/{urllib.parse.quote(provider, safe='')}/callback", params=query)
 
-    def oauth_link_start(self, provider: str) -> Any:
+    def oauth_callback_post(self, provider: str, body: Any) -> Any:
+        """OAuth form-post callback — POST /api/auth/oauth/{provider}/callback"""
+        return self._http.post(f"/auth/oauth/{urllib.parse.quote(provider, safe='')}/callback", body)
+
+    def oauth_link_start(self, provider: str, body: Any = None) -> Any:
         """Start OAuth account linking — POST /api/auth/oauth/link/{provider}"""
-        return self._http.post(f"/auth/oauth/link/{urllib.parse.quote(provider, safe='')}")
+        if body is None:
+            return self._http.post(f"/auth/oauth/link/{urllib.parse.quote(provider, safe='')}")
+        return self._http.post(f"/auth/oauth/link/{urllib.parse.quote(provider, safe='')}", body)
 
-    def oauth_link_callback(self, provider: str) -> Any:
+    def oauth_link_continue(self, provider: str, query: dict[str, str] | None = None) -> Any:
+        """Continue OAuth account linking in the system browser — GET /api/auth/oauth/link/{provider}/continue"""
+        return self._http.get(f"/auth/oauth/link/{urllib.parse.quote(provider, safe='')}/continue", params=query)
+
+    def oauth_link_complete(self, body: Any) -> Any:
+        """Complete OAuth account linking for the current authenticated user — POST /api/auth/oauth/complete/link"""
+        return self._http.post("/auth/oauth/complete/link", body)
+
+    def oauth_link_callback(self, provider: str, query: dict[str, str] | None = None) -> Any:
         """OAuth link callback — GET /api/auth/oauth/link/{provider}/callback"""
-        return self._http.get(f"/auth/oauth/link/{urllib.parse.quote(provider, safe='')}/callback")
+        return self._http.get(f"/auth/oauth/link/{urllib.parse.quote(provider, safe='')}/callback", params=query)
+
+    def oauth_link_callback_post(self, provider: str, body: Any) -> Any:
+        """OAuth link form-post callback — POST /api/auth/oauth/link/{provider}/callback"""
+        return self._http.post(f"/auth/oauth/link/{urllib.parse.quote(provider, safe='')}/callback", body)
 
     def db_single_count_records(self, namespace: str, table: str, query: dict[str, str] | None = None) -> Any:
         """Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count"""
@@ -236,10 +260,6 @@ class GeneratedDbApi:
         """Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter"""
         return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/tables/{urllib.parse.quote(table, safe='')}/batch-by-filter", body, params=query)
 
-    def db_single_transact(self, namespace: str, body: Any) -> Any:
-        """Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact"""
-        return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/transact", body)
-
     def db_count_records(self, namespace: str, instance_id: str, table: str, query: dict[str, str] | None = None) -> Any:
         """Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count"""
         return self._http.get(f"/db/{urllib.parse.quote(namespace, safe='')}/{urllib.parse.quote(instance_id, safe='')}/tables/{urllib.parse.quote(table, safe='')}/count", params=query)
@@ -275,6 +295,10 @@ class GeneratedDbApi:
     def db_batch_by_filter(self, namespace: str, instance_id: str, table: str, body: Any, query: dict[str, str] | None = None) -> Any:
         """Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter"""
         return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/{urllib.parse.quote(instance_id, safe='')}/tables/{urllib.parse.quote(table, safe='')}/batch-by-filter", body, params=query)
+
+    def db_single_transact(self, namespace: str, body: Any) -> Any:
+        """Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact"""
+        return self._http.post(f"/db/{urllib.parse.quote(namespace, safe='')}/transact", body)
 
     def db_transact(self, namespace: str, instance_id: str, body: Any) -> Any:
         """Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact"""
@@ -360,6 +384,10 @@ class GeneratedDbApi:
         """Get public configuration — GET /api/config"""
         return self._http.get("/config")
 
+    def get_captcha_challenge(self, query: dict[str, str] | None = None) -> Any:
+        """Render the hosted Turnstile page for native WebViews — GET /api/captcha/challenge"""
+        return self._http.get("/captcha/challenge", params=query)
+
     def push_register(self, body: Any) -> Any:
         """Register push token — POST /api/push/register"""
         return self._http.post("/push/register", body)
@@ -387,6 +415,14 @@ class GeneratedDbApi:
     def get_room_metadata(self, query: dict[str, str] | None = None) -> Any:
         """Get room metadata — GET /api/room/metadata"""
         return self._http.get("/room/metadata", params=query)
+
+    def get_room_summary(self, query: dict[str, str] | None = None) -> Any:
+        """Get room summary — GET /api/room/summary"""
+        return self._http.get("/room/summary", params=query)
+
+    def get_room_summaries(self, body: Any) -> Any:
+        """Get summaries for multiple rooms — POST /api/room/summaries"""
+        return self._http.post("/room/summaries", body)
 
     def track_events(self, body: Any) -> Any:
         """Track custom events — POST /api/analytics/track"""
@@ -469,6 +505,8 @@ class ApiPaths:
     AUTH_MFA_TOTP_ENROLL = "/api/auth/mfa/totp/enroll"
     AUTH_MFA_TOTP_VERIFY = "/api/auth/mfa/totp/verify"
     AUTH_MFA_VERIFY = "/api/auth/mfa/verify"
+    OAUTH_LINK_COMPLETE = "/api/auth/oauth/complete/link"
+    OAUTH_EXCHANGE = "/api/auth/oauth/exchange"
     AUTH_PASSKEYS_LIST = "/api/auth/passkeys"
     AUTH_PASSKEYS_AUTH_OPTIONS = "/api/auth/passkeys/auth-options"
     AUTH_PASSKEYS_AUTHENTICATE = "/api/auth/passkeys/authenticate"
@@ -493,6 +531,7 @@ class ApiPaths:
     AUTH_VERIFY_LINK_PHONE = "/api/auth/verify-link-phone"
     AUTH_VERIFY_MAGIC_LINK = "/api/auth/verify-magic-link"
     AUTH_VERIFY_PHONE = "/api/auth/verify-phone"
+    GET_CAPTCHA_CHALLENGE = "/api/captcha/challenge"
     GET_CONFIG = "/api/config"
     DATABASE_LIVE_BROADCAST = "/api/db/broadcast"
     CHECK_DATABASE_SUBSCRIPTION_CONNECTION = "/api/db/connect-check"
@@ -514,6 +553,8 @@ class ApiPaths:
     CONNECT_ROOM = "/api/room"
     CHECK_ROOM_CONNECTION = "/api/room/connect-check"
     GET_ROOM_METADATA = "/api/room/metadata"
+    GET_ROOM_SUMMARIES = "/api/room/summaries"
+    GET_ROOM_SUMMARY = "/api/room/summary"
     GET_SCHEMA = "/api/schema"
     EXECUTE_SQL = "/api/sql"
 
@@ -646,12 +687,24 @@ class ApiPaths:
         return f"/api/auth/oauth/{provider}/callback"
 
     @staticmethod
+    def oauth_callback_post(provider: str) -> str:
+        return f"/api/auth/oauth/{provider}/callback"
+
+    @staticmethod
     def oauth_link_start(provider: str) -> str:
         return f"/api/auth/oauth/link/{provider}"
 
     @staticmethod
     def oauth_link_callback(provider: str) -> str:
         return f"/api/auth/oauth/link/{provider}/callback"
+
+    @staticmethod
+    def oauth_link_callback_post(provider: str) -> str:
+        return f"/api/auth/oauth/link/{provider}/callback"
+
+    @staticmethod
+    def oauth_link_continue(provider: str) -> str:
+        return f"/api/auth/oauth/link/{provider}/continue"
 
     @staticmethod
     def auth_passkeys_delete(credential_id: str) -> str:

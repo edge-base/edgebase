@@ -43,6 +43,11 @@ let admin = EdgeBaseServerClient("https://your-project.edgebase.fun", serviceKey
 - keep Service Keys out of client apps
 - use async/await for networked operations
 - prefer `EdgeBaseCore` for shared low-level primitives
+- call `try await client.tryRestoreSession()` before authenticated work after launch
+- Keychain is the durable default; custom storage must conform to `DurableTokenStorage` for anonymous email/phone upgrades
+- never use `MemoryTokenStorage` for an irreversible anonymous account upgrade
+- token storage and configured CAPTCHA failures are thrown, not converted to missing auth/CAPTCHA state
+- storage `exists`/generated HEAD APIs are `async throws`
 
 ## Quick Reference
 
@@ -54,6 +59,7 @@ client.db(namespace, instanceId?)                   -> DbRef
 client.storage                                      -> StorageClient
 client.functions                                    -> FunctionsClient
 client.analytics                                    -> AnalyticsClient
+client.tryRestoreSession()                          -> async throws Bool
 admin.adminAuth                                     -> AdminAuthClient
 admin.db(namespace, instanceId?)                   -> AdminDbRef
 admin.destroy()                                     -> async Void

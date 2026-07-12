@@ -39,13 +39,36 @@ function getTomlBlockValues(content: string, blockName: string): string[] {
   return [...content.matchAll(pattern)].map((match) => match[1] ?? '');
 }
 
+function decodeTomlString(match: RegExpMatchArray | null): string | undefined {
+  if (!match) return undefined;
+  if (match[2] !== undefined) return match[2];
+  if (match[1] === undefined) return undefined;
+  try {
+    return JSON.parse(`"${match[1]}"`) as string;
+  } catch {
+    return undefined;
+  }
+}
+
 function readTomlString(block: string, key: string): string | undefined {
-  const match = block.match(new RegExp(`^\\s*${key}\\s*=\\s*"([^"]+)"`, 'm'));
-  return match?.[1];
+  const match = block.match(new RegExp(
+    `^\\s*${key}\\s*=\\s*(?:"((?:\\\\.|[^"\\\\])*)"|'([^']*)')`,
+    'm',
+  ));
+  return decodeTomlString(match);
+}
+
+function readTopLevelTomlString(content: string, key: string): string | undefined {
+  const topLevelLines: string[] = [];
+  for (const line of content.split(/\r?\n/)) {
+    if (/^\s*\[/.test(line)) break;
+    topLevelLines.push(line);
+  }
+  return readTomlString(topLevelLines.join('\n'), key);
 }
 
 export function parseWranglerResourceConfig(content: string): WranglerResourceConfig {
-  const workerName = content.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? '';
+  const workerName = readTopLevelTomlString(content, 'name') ?? '';
   const r2Buckets: WranglerR2Bucket[] = [];
   for (const block of getTomlBlockValues(content, 'r2_buckets')) {
     const binding = readTomlString(block, 'binding');

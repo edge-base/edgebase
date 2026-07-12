@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { wranglerArgs, wranglerCommand, wranglerHint } from '../lib/wrangler.js';
 import {
   existsSync,
@@ -7,6 +7,8 @@ import {
   readFileSync,
   writeFileSync,
   chmodSync,
+  readdirSync,
+  statSync,
   unlinkSync,
 } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
@@ -56,10 +58,18 @@ import { spin } from '../lib/spinner.js';
 import { isJson, isNonInteractive, isQuiet } from '../lib/cli-context.js';
 import { promptConfirm } from '../lib/prompts.js';
 import {
+  cleanupLegacyTurnstileWidgets,
+  finalizeTurnstileProvision,
   injectCaptchaSiteKey,
   provisionTurnstile,
-  storeSecretIfMissing,
+  type TurnstileProvisionResult,
 } from '../lib/turnstile-provision.js';
+import {
+  acquireTurnstileDeployLease,
+  renewTurnstileDeployLease,
+  releaseTurnstileDeployLease,
+  type TurnstileDeployLease,
+} from '../lib/turnstile-deploy-lease.js';
 import { listWranglerSecretNames } from '../lib/wrangler-secrets.js';
 import {
   findCloudflareResourceRecord,
@@ -69,8 +79,12 @@ import {
 } from '../lib/cloudflare-deploy-manifest.js';
 import { parseWranglerResourceConfig } from '../lib/cloudflare-wrangler-resources.js';
 import {
+  buildLegacyManagedR2BucketName,
   buildLegacyManagedD1DatabaseName,
+  buildLegacyWorkerScopedD1DatabaseName,
   buildManagedD1DatabaseName,
+  buildManagedR2BucketName,
+  buildManagedWorkerResourceName,
 } from '../lib/managed-resource-names.js';
 import { upsertEnvValue } from '../lib/neon.js';
 import {
@@ -92,6 +106,12 @@ import {
 const FULL_CONFIG_EVAL = { allowRegexFallback: false } as const;
 const RELEASE_ENV_HEADER = '# EdgeBase production secrets';
 const ANSI_ESCAPE_REGEX = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, 'g');
+const DEPLOY_SUBPROCESS_TIMEOUT_MS = 10 * 60 * 1000;
+const DEPLOY_SUBPROCESS_FORCE_KILL_DELAY_MS = 5_000;
+const WRANGLER_RESOURCE_COMMAND_TIMEOUT_MS = 30_000;
+const HYPERDRIVE_API_TIMEOUT_MS = 10_000;
+const HYPERDRIVE_API_RESPONSE_MAX_BYTES = 64 * 1024;
+const PROJECT_POST_SCAFFOLD_HOOK_TIMEOUT_MS = 5 * 60_000;
 
 type AuthEnvField = 'clientId' | 'clientSecret' | 'issuer' | 'scopes';
 type AuthProviderInspection = {
@@ -112,6 +132,173 @@ export function extractWorkerUrlFromWranglerDeployOutput(output: string): string
     (match) => match[0],
   );
   return matches.at(-1) ?? '';
+}
+
+export function extractWorkerVersionIdFromWranglerDeployOutput(output: string): string | null {
+  const normalized = output.replace(ANSI_ESCAPE_REGEX, '');
+  const matches = [...normalized.matchAll(
+    /(?:Current|Worker)\s+Version ID:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi,
+  )];
+  return matches.at(-1)?.[1] ?? null;
+}
+
+export function registerDeploySubprocessTimeout(
+  child: Pick<ChildProcess, 'kill'>,
+  onTimeout: () => void,
+  timeoutMs = DEPLOY_SUBPROCESS_TIMEOUT_MS,
+): () => void {
+  let active = true;
+  let forceKillTimer: NodeJS.Timeout | undefined;
+  const timeout = setTimeout(() => {
+    if (!active) return;
+    onTimeout();
+    child.kill('SIGTERM');
+    forceKillTimer = setTimeout(() => {
+      if (active) child.kill('SIGKILL');
+    }, DEPLOY_SUBPROCESS_FORCE_KILL_DELAY_MS);
+  }, timeoutMs);
+  timeout.unref?.();
+
+  return () => {
+    if (!active) return;
+    active = false;
+    clearTimeout(timeout);
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+  };
+}
+
+type RemoteWorkerLookupRunner = (
+  command: string,
+  args: string[],
+  options: { cwd: string; encoding: 'utf-8'; stdio: ['ignore', 'pipe', 'pipe']; timeout: number },
+) => string;
+
+function commandFailureText(error: unknown): string {
+  if (!error || typeof error !== 'object') return String(error ?? '');
+  const record = error as { message?: unknown; stdout?: unknown; stderr?: unknown };
+  return [record.message, record.stdout, record.stderr]
+    .map((value) => Buffer.isBuffer(value) ? value.toString('utf8') : String(value ?? ''))
+    .join('\n');
+}
+
+export function classifyRemoteWorkerLookupFailure(
+  error: unknown,
+): 'absent' | 'exists-without-deployment' | 'unknown' {
+  const message = commandFailureText(error);
+  if (/\bhas no deployments\b/i.test(message)) return 'exists-without-deployment';
+  if (
+    /\b(?:10090|10092)\b/.test(message)
+    || /\bWorker\b[^\n]*(?:not found|does not exist)/i.test(message)
+  ) return 'absent';
+  return 'unknown';
+}
+
+/**
+ * Remote Cloudflare state is authoritative. A local deploy manifest is
+ * intentionally gitignored and is commonly absent in CI, so using it to infer
+ * a first deploy would rotate SERVICE_KEY/JWT secrets on every fresh checkout.
+ */
+export function remoteWorkerExists(
+  projectDir: string,
+  workerName: string,
+  runner?: RemoteWorkerLookupRunner,
+): boolean {
+  const run = runner ?? ((command, args, options) => execFileSync(command, args, options));
+  try {
+    run(
+      wranglerCommand(),
+      wranglerArgs(['wrangler', 'deployments', 'status', '--name', workerName, '--json']),
+      {
+        cwd: projectDir,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 30_000,
+      },
+    );
+    return true;
+  } catch (error) {
+    const state = classifyRemoteWorkerLookupFailure(error);
+    if (state === 'absent') return false;
+    if (state === 'exists-without-deployment') return true;
+    throw new Error(
+      `Cannot determine whether Worker '${workerName}' already exists: ${commandFailureText(error).split('\n')[0]}`,
+    );
+  }
+}
+
+const TEMP_DEPLOY_SECRET_PATTERN = /^\.deploy-secrets-(\d+)-[0-9a-f]{12}\.json$/;
+
+function removeTempDeploySecretFile(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch {
+    // Already removed or never created.
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function scavengeStaleDeploySecrets(edgebaseDir: string): string[] {
+  if (!existsSync(edgebaseDir)) return [];
+  const removed: string[] = [];
+  const now = Date.now();
+  for (const entry of readdirSync(edgebaseDir)) {
+    const match = entry.match(TEMP_DEPLOY_SECRET_PATTERN);
+    if (!match) continue;
+    const path = join(edgebaseDir, entry);
+    const ownerPid = Number(match[1]);
+    let oldEnoughToOverridePidReuse = false;
+    try {
+      oldEnoughToOverridePidReuse = now - statSync(path).mtimeMs > 24 * 60 * 60 * 1000;
+    } catch {
+      continue;
+    }
+    if (processIsAlive(ownerPid) && !oldEnoughToOverridePidReuse) continue;
+    removeTempDeploySecretFile(path);
+    if (!existsSync(path)) removed.push(path);
+  }
+  return removed;
+}
+
+/** Register synchronous cleanup for normal completion, parent exit, and the
+ * catchable termination signals. Signal forwarding preserves conventional
+ * 130/143 exit behavior after the secret file is removed. */
+export function registerDeploySecretCleanup(path: string): () => void {
+  let active = true;
+  const cleanupFile = () => {
+    if (!active) return;
+    removeTempDeploySecretFile(path);
+  };
+  const signalHandlers = new Map<NodeJS.Signals, () => void>();
+  const unregister = () => {
+    process.off('exit', cleanupFile);
+    for (const [signal, handler] of signalHandlers) process.off(signal, handler);
+  };
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    const handler = () => {
+      cleanupFile();
+      active = false;
+      unregister();
+      process.kill(process.pid, signal);
+    };
+    signalHandlers.set(signal, handler);
+    process.once(signal, handler);
+  }
+  process.once('exit', cleanupFile);
+
+  return () => {
+    if (!active) return;
+    cleanupFile();
+    active = false;
+    unregister();
+  };
 }
 
 function resolveWorkerUrlFromProject(projectDir: string): string {
@@ -205,6 +392,31 @@ export function validateConfig(
           'Set cors.origin to your production frontend origin(s) before deploying to production.',
       );
     }
+  }
+
+  const captcha = config.captcha;
+  if (
+    captcha
+    && typeof captcha === 'object'
+    && !Array.isArray(captcha)
+    && (captcha as { failMode?: unknown }).failMode === 'open'
+  ) {
+    errors.push(
+      'captcha.failMode="open" is restricted to the trusted local-development runtime. '
+      + 'Cloud deployments must use failMode: "closed" (or omit failMode).',
+    );
+  }
+  if (
+    config.release === true
+    && captcha
+    && typeof captcha === 'object'
+    && !Array.isArray(captcha)
+    && Object.prototype.hasOwnProperty.call(captcha, 'secretKey')
+  ) {
+    errors.push(
+      'Release CAPTCHA must not embed captcha.secretKey in edgebase.config.ts. '
+      + 'Remove it and set TURNSTILE_SECRET in .env.release or Workers Secrets.',
+    );
   }
 
   // ─── Check 1: Inline Service Key warning ───
@@ -363,13 +575,24 @@ export const _internals = {
   buildMergedKvConfig,
   dedupeBindingConfigs,
   buildMergedD1Config,
+  buildManagedWorkerResourceName,
   parseWranglerJsonOutput,
+  parseKvNamespaceListOutput,
+  parseD1DatabaseListOutput,
+  parseVectorizeIndexListOutput,
   parseHyperdriveListOutput,
+  listHyperdriveConfigs,
   dedupeManifestResources,
+  provisionR2Buckets,
   provisionVectorizeIndexes,
+  provisionProviderHyperdrives,
+  provisionAuthPostgresHyperdrive,
+  createHyperdriveConfigViaApi,
+  readBoundedJsonResponse,
+  assertRequiredBindingCoverage,
+  scopePreviousManifestToAccount,
   generateTempWranglerToml,
   provisionTurnstile,
-  storeSecretIfMissing,
   injectCaptchaSiteKey,
   extractDatabases,
   collectManagedCronSchedules,
@@ -381,6 +604,16 @@ export const _internals = {
   collectAuthEnvWarnings,
   copyDevelopmentAuthProviderToRelease,
   resolveExistingR2BucketRecord,
+  isValidCloudflareAccountId,
+  isValidHyperdriveConfigName,
+  classifyRemoteWorkerLookupFailure,
+  remoteWorkerExists,
+  scavengeStaleDeploySecrets,
+  registerDeploySecretCleanup,
+  registerDeploySubprocessTimeout,
+  prepareAtomicDeploySecrets,
+  extractWorkerVersionIdFromWranglerDeployOutput,
+  runProjectPostScaffoldHook,
 };
 
 // ─── KV/D1/Vectorize Auto-Provisioning ───
@@ -392,7 +625,10 @@ function dedupeBindingConfigs<T extends { binding: string }>(
   const seenBindings = new Set<string>();
 
   for (const [name, value] of Object.entries(config)) {
-    if (!value?.binding || seenBindings.has(value.binding)) continue;
+    if (!value || typeof value.binding !== 'string' || !value.binding.trim()) {
+      throw new Error(`Resource '${name}' must declare a non-empty binding.`);
+    }
+    if (seenBindings.has(value.binding)) continue;
     deduped[name] = value;
     seenBindings.add(value.binding);
   }
@@ -427,14 +663,20 @@ function buildMergedKvConfig(
   return merged;
 }
 
-function parseWranglerJsonOutput<T>(output: string): T {
-  const trimmed = output.trim();
-  const candidates = [trimmed, trimmed.slice(trimmed.indexOf('[')), trimmed.slice(trimmed.indexOf('{'))]
-    .filter((candidate, index, arr) => candidate && arr.indexOf(candidate) === index);
+function parseWranglerJsonOutput(output: string): unknown {
+  const trimmed = output.replace(ANSI_ESCAPE_REGEX, '').trim();
+  const candidates = [trimmed];
+  for (const opening of ['[', '{']) {
+    const start = trimmed.indexOf(opening);
+    if (start >= 0) candidates.push(trimmed.slice(start));
+  }
+  const uniqueCandidates = candidates.filter(
+    (candidate, index, all) => candidate.length > 0 && all.indexOf(candidate) === index,
+  );
 
-  for (const candidate of candidates) {
+  for (const candidate of uniqueCandidates) {
     try {
-      return JSON.parse(candidate) as T;
+      return JSON.parse(candidate) as unknown;
     } catch {
       // Try the next candidate.
     }
@@ -443,18 +685,77 @@ function parseWranglerJsonOutput<T>(output: string): T {
   throw new Error('Unexpected Wrangler JSON output.');
 }
 
-function parseHyperdriveListOutput(output: string): Array<{ id: string; name: string }> {
-  const trimmed = output.trim();
-  if (!trimmed) {
-    return [];
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isBoundedNonEmptyString(value: unknown, maxLength = 512): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= maxLength;
+}
+
+function isCloudflareResourceId(value: unknown): value is string {
+  return typeof value === 'string' && (
+    /^[a-f0-9]{32}$/i.test(value)
+    || /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value)
+  );
+}
+
+function parseKvNamespaceListOutput(output: string): Array<{ title: string; id: string }> {
+  const parsed = parseWranglerJsonOutput(output);
+  if (!Array.isArray(parsed) || !parsed.every((item) =>
+    isRecord(item)
+    && isBoundedNonEmptyString(item.title)
+    && typeof item.id === 'string'
+    && /^[a-f0-9]{32}$/i.test(item.id)
+  )) {
+    throw new Error('Unexpected Wrangler KV namespace list shape.');
   }
+  return parsed as Array<{ title: string; id: string }>;
+}
+
+function parseD1DatabaseListOutput(output: string): Array<{ name: string; uuid: string }> {
+  const parsed = parseWranglerJsonOutput(output);
+  if (!Array.isArray(parsed) || !parsed.every((item) =>
+    isRecord(item)
+    && isBoundedNonEmptyString(item.name)
+    && isCloudflareResourceId(item.uuid)
+  )) {
+    throw new Error('Unexpected Wrangler D1 database list shape.');
+  }
+  return parsed as Array<{ name: string; uuid: string }>;
+}
+
+function parseVectorizeIndexListOutput(output: string): Array<{ name: string }> {
+  const parsed = parseWranglerJsonOutput(output);
+  if (!Array.isArray(parsed) || !parsed.every((item) =>
+    isRecord(item) && isBoundedNonEmptyString(item.name)
+  )) {
+    throw new Error('Unexpected Wrangler Vectorize index list shape.');
+  }
+  return parsed as Array<{ name: string }>;
+}
+
+function parseHyperdriveListOutput(output: string): Array<{ id: string; name: string }> {
+  const normalized = output.replace(ANSI_ESCAPE_REGEX, '');
+  const trimmed = normalized.trim();
+  if (!trimmed) throw new Error('Unexpected empty Wrangler Hyperdrive list output.');
 
   if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-    return parseWranglerJsonOutput(output);
+    const parsed = parseWranglerJsonOutput(normalized);
+    if (!Array.isArray(parsed) || !parsed.every((item) =>
+      isRecord(item)
+      && typeof item.id === 'string'
+      && /^[a-f0-9]{32}$/i.test(item.id)
+      && isBoundedNonEmptyString(item.name)
+    )) {
+      throw new Error('Unexpected Wrangler Hyperdrive list JSON shape.');
+    }
+    return parsed as Array<{ id: string; name: string }>;
   }
 
   const rows: Array<{ id: string; name: string }> = [];
-  for (const line of output.split(/\r?\n/)) {
+  let sawHeader = false;
+  for (const line of normalized.split(/\r?\n/)) {
     if (!line.trim().startsWith('│')) {
       continue;
     }
@@ -464,35 +765,134 @@ function parseHyperdriveListOutput(output: string): Array<{ id: string; name: st
       .slice(1, -1)
       .map((cell) => cell.trim());
 
-    if (cells.length < 2) {
+    if (cells.length < 2) throw new Error('Unexpected Wrangler Hyperdrive table row.');
+
+    const [id, name] = cells;
+    if (id.toLowerCase() === 'id' && name.toLowerCase() === 'name') {
+      sawHeader = true;
       continue;
     }
 
-    const [id, name] = cells;
-    if (id === 'id' || name === 'name' || !/^[a-f0-9]{32}$/i.test(id)) {
-      continue;
+    if (!/^[a-f0-9]{32}$/i.test(id) || !isBoundedNonEmptyString(name)) {
+      throw new Error('Unexpected Wrangler Hyperdrive table row shape.');
     }
 
     rows.push({ id, name });
   }
 
+  if (!sawHeader) {
+    const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const sawListBanner = lines.some((line) => line === '📋 Listing Hyperdrive configs');
+    const unknownLines = lines.filter((line) =>
+      line !== '📋 Listing Hyperdrive configs'
+      && !/wrangler\s+\d+\.\d+\.\d+/i.test(line)
+      && !/^-+$/.test(line)
+    );
+    if (sawListBanner && unknownLines.length === 0) return [];
+    throw new Error('Unexpected Wrangler Hyperdrive list table.');
+  }
   return rows;
 }
 
-function listHyperdriveConfigs(projectDir: string): Array<{ id: string; name: string }> {
-  try {
-    const output = execFileSync(
-      wranglerCommand(),
-      wranglerArgs(['wrangler', 'hyperdrive', 'list']),
-      {
-        cwd: projectDir,
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      },
+type WranglerResourceRunner = (
+  args: string[],
+  options: {
+    cwd: string;
+    stdio: ['ignore' | 'pipe', 'pipe', 'ignore' | 'pipe'];
+  },
+) => string;
+
+type ResourceProvisionOptions = {
+  previousManifest?: ReturnType<typeof readCloudflareDeployManifest>;
+};
+
+const runWranglerResourceCommand: WranglerResourceRunner = (args, options) =>
+  execFileSync(
+    wranglerCommand(),
+    wranglerArgs(args),
+    {
+      cwd: options.cwd,
+      encoding: 'utf-8',
+      stdio: options.stdio,
+      timeout: WRANGLER_RESOURCE_COMMAND_TIMEOUT_MS,
+    },
+  );
+
+function provisioningFailureDetail(error: unknown): string {
+  const lines = commandFailureText(error)
+    .replace(ANSI_ESCAPE_REGEX, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return [...new Set(lines)].join(' | ').slice(0, 500) || 'unknown error';
+}
+
+function assertRequiredBindingCoverage(
+  resourceType: string,
+  expectedBindings: Iterable<string>,
+  bindings: Array<{ binding?: string }>,
+): void {
+  const actual = new Set(bindings.map((binding) => binding.binding).filter(Boolean));
+  const missing = [...expectedBindings].filter((binding) => !actual.has(binding));
+  if (missing.length > 0) {
+    throw new Error(
+      `Required ${resourceType} binding(s) were not provisioned: ${missing.join(', ')}. Deployment aborted.`,
     );
+  }
+}
+
+function findPreviousManifestBinding(
+  manifest: ReturnType<typeof readCloudflareDeployManifest>,
+  type: CloudflareResourceRecord['type'],
+  binding: string,
+): CloudflareResourceRecord | null {
+  return manifest?.resources.find((resource) =>
+    resource.type === type && resource.binding === binding,
+  ) ?? null;
+}
+
+function scopePreviousManifestToAccount(
+  manifest: ReturnType<typeof readCloudflareDeployManifest>,
+  accountId: string,
+): ReturnType<typeof readCloudflareDeployManifest> {
+  return manifest?.accountId.toLowerCase() === accountId.toLowerCase() ? manifest : null;
+}
+
+function resolveExistingManagedBindingOwnership(
+  previousRecord: CloudflareResourceRecord | null,
+): Pick<ProvisionedBinding, 'managed' | 'source'> {
+  return {
+    managed: previousRecord?.managed ?? true,
+    source: previousRecord?.source === 'created' ? 'created' : 'existing',
+  };
+}
+
+function matchPreviousOwnership(
+  previousRecord: CloudflareResourceRecord | null,
+  existingId: string,
+  legacyNameMatched: boolean,
+): CloudflareResourceRecord | null {
+  if (!previousRecord) return null;
+  return previousRecord.id
+    ? (previousRecord.id === existingId ? previousRecord : null)
+    : (legacyNameMatched ? previousRecord : null);
+}
+
+function listHyperdriveConfigs(
+  projectDir: string,
+  runner: WranglerResourceRunner = runWranglerResourceCommand,
+): Array<{ id: string; name: string }> {
+  try {
+    const output = runner(['wrangler', 'hyperdrive', 'list'], {
+      cwd: projectDir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     return parseHyperdriveListOutput(output);
-  } catch {
-    return [];
+  } catch (err) {
+    throw new Error(
+      'Cannot safely provision required Hyperdrive configs because the existing-config list '
+      + `could not be verified: ${provisioningFailureDetail(err)}`,
+    );
   }
 }
 
@@ -538,6 +938,69 @@ type HyperdriveCreateResult =
   | { status: 'exists'; message: string }
   | { status: 'error'; message: string };
 
+function isValidCloudflareAccountId(value: string): boolean {
+  return /^[a-f0-9]{32}$/i.test(value);
+}
+
+function isValidHyperdriveConfigName(value: string): boolean {
+  return /^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?$/i.test(value);
+}
+
+async function readBoundedJsonResponse(
+  response: Response,
+  maxBytes = HYPERDRIVE_API_RESPONSE_MAX_BYTES,
+): Promise<unknown> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    throw new Error('Hyperdrive API response limit is invalid.');
+  }
+
+  const contentLength = response.headers.get('content-length');
+  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > maxBytes) {
+    throw new Error(`Hyperdrive API response exceeded ${maxBytes} bytes.`);
+  }
+  if (!response.body) throw new Error('Hyperdrive API returned an empty response body.');
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error(`Hyperdrive API response exceeded ${maxBytes} bytes.`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const text = new TextDecoder().decode(bytes);
+  if (!text.trim()) throw new Error('Hyperdrive API returned an empty response body.');
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Error('Hyperdrive API returned malformed JSON.');
+  }
+}
+
+type HyperdriveApiOptions = {
+  fetchImpl?: typeof fetch;
+  apiToken?: string;
+  timeoutMs?: number;
+  maxResponseBytes?: number;
+};
+
 /**
  * Create a Hyperdrive config via the Cloudflare REST API. The connection string
  * (which contains the database password) is sent in the JSON request body, not
@@ -548,7 +1011,14 @@ async function createHyperdriveConfigViaApi(
   hdName: string,
   connectionString: string,
   accountId: string,
+  options: HyperdriveApiOptions = {},
 ): Promise<HyperdriveCreateResult> {
+  if (!isValidCloudflareAccountId(accountId)) {
+    return { status: 'error', message: 'Cloudflare account id must be exactly 32 hexadecimal characters.' };
+  }
+  if (!isValidHyperdriveConfigName(hdName)) {
+    return { status: 'error', message: 'Hyperdrive config name contains unsupported characters or length.' };
+  }
   const origin = parsePostgresConnectionString(connectionString);
   if (!origin) {
     return { status: 'error', message: 'Could not parse the Postgres connection string (expected postgres://…).' };
@@ -556,16 +1026,29 @@ async function createHyperdriveConfigViaApi(
 
   let apiToken: string;
   try {
-    apiToken = resolveApiToken().token;
+    apiToken = options.apiToken ?? resolveApiToken().token;
   } catch (err) {
     return { status: 'error', message: err instanceof Error ? err.message : String(err) };
   }
 
+  const controller = new AbortController();
+  const timeoutMs = options.timeoutMs ?? HYPERDRIVE_API_TIMEOUT_MS;
+  const timeout = setTimeout(
+    () => controller.abort(new Error(`Hyperdrive API request timed out after ${timeoutMs}ms.`)),
+    timeoutMs,
+  );
+  timeout.unref?.();
+
   try {
-    const resp = await fetch(
+    // Sending the explicitly configured database origin (including its
+    // password) to Cloudflare's fixed Hyperdrive endpoint is the purpose of
+    // this user-requested provisioning action. It is never sent elsewhere.
+    const resp = await (options.fetchImpl ?? fetch)( // lgtm[js/file-access-to-http]
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/hyperdrive/configs`,
       {
         method: 'POST',
+        redirect: 'error',
+        signal: controller.signal,
         headers: {
           Authorization: `Bearer ${apiToken}`,
           'Content-Type': 'application/json',
@@ -573,25 +1056,41 @@ async function createHyperdriveConfigViaApi(
         body: JSON.stringify({ name: hdName, origin }),
       },
     );
-    const json = (await resp.json()) as {
-      success?: boolean;
-      result?: { id?: string };
-      errors?: Array<{ code?: number; message?: string }>;
-    };
-
-    if (json.success && json.result?.id) {
-      return { status: 'created', id: json.result.id };
+    const json = await readBoundedJsonResponse(
+      resp,
+      options.maxResponseBytes ?? HYPERDRIVE_API_RESPONSE_MAX_BYTES,
+    );
+    if (!isRecord(json)) {
+      return { status: 'error', message: `Hyperdrive API returned an invalid response shape (HTTP ${resp.status}).` };
     }
 
-    const errors = json.errors ?? [];
-    const message = errors.map((e) => e.message).filter(Boolean).join('; ')
+    const result = isRecord(json.result) ? json.result : null;
+    if (
+      resp.ok
+      && json.success === true
+      && result
+      && typeof result.id === 'string'
+      && /^[a-f0-9]{32}$/i.test(result.id)
+    ) {
+      return { status: 'created', id: result.id };
+    }
+
+    const errors = Array.isArray(json.errors)
+      ? json.errors.filter(isRecord)
+      : [];
+    const message = errors
+      .map((error) => isBoundedNonEmptyString(error.message, 1_000) ? error.message : null)
+      .filter((value): value is string => !!value)
+      .join('; ')
       || `Hyperdrive API returned HTTP ${resp.status}`;
-    if (errors.some((e) => e.code === 2017) || isHyperdriveAlreadyExistsError(message)) {
+    if (errors.some((error) => error.code === 2017) || isHyperdriveAlreadyExistsError(message)) {
       return { status: 'exists', message };
     }
     return { status: 'error', message };
   } catch (err) {
     return { status: 'error', message: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -662,6 +1161,7 @@ function toManifestResourceRecord(binding: ProvisionedBinding): CloudflareResour
     id: binding.id,
     managed: binding.managed ?? true,
     source: binding.source ?? 'existing',
+    metadata: binding.resourceName ? { resourceName: binding.resourceName } : undefined,
   };
 }
 
@@ -696,6 +1196,7 @@ function resolveExistingR2BucketRecord(
 function provisionR2Buckets(
   projectDir: string,
   previousManifest: ReturnType<typeof readCloudflareDeployManifest>,
+  runner: WranglerResourceRunner = runWranglerResourceCommand,
 ): CloudflareResourceRecord[] {
   const wranglerPath = join(projectDir, 'wrangler.toml');
   if (!existsSync(wranglerPath)) return [];
@@ -703,23 +1204,36 @@ function provisionR2Buckets(
   const wranglerContent = readFileSync(wranglerPath, 'utf-8');
   const { r2Buckets } = parseWranglerResourceConfig(wranglerContent);
   const resources: CloudflareResourceRecord[] = [];
+  const workerName = resolveProjectWorkerName(projectDir) || 'edgebase';
 
   for (const bucket of r2Buckets) {
-    const existingRecord = findCloudflareResourceRecord(previousManifest, {
-      type: 'r2_bucket',
-      name: bucket.bucketName,
-      binding: bucket.binding,
-      id: bucket.bucketName,
-    });
+    const manifestRecord = findPreviousManifestBinding(
+      previousManifest,
+      'r2_bucket',
+      bucket.binding,
+    );
+    const existingRecord = manifestRecord && (
+      manifestRecord.id === bucket.bucketName || manifestRecord.name === bucket.bucketName
+    ) ? manifestRecord : null;
+    const scopedDefaultName = buildManagedR2BucketName(workerName);
+    const legacyDefaultName = buildLegacyManagedR2BucketName(workerName);
+    const isScopedDefault = bucket.binding === 'STORAGE' && bucket.bucketName === scopedDefaultName;
+    const isLegacyDefault = bucket.binding === 'STORAGE' && bucket.bucketName === legacyDefaultName;
+    if (isLegacyDefault && !existingRecord) {
+      throw new Error(
+        `Legacy R2 bucket '${bucket.bucketName}' cannot be reused or created without a current-account `
+        + `deploy manifest proving binding '${bucket.binding}'. Regenerate the managed wrangler.toml `
+        + 'or restore .edgebase/cloudflare-deploy-manifest.json before deploying.',
+      );
+    }
     const args = ['wrangler', 'r2', 'bucket', 'create', bucket.bucketName];
     if (bucket.jurisdiction) {
       args.push(`--jurisdiction=${bucket.jurisdiction}`);
     }
 
     try {
-      execFileSync(wranglerCommand(), wranglerArgs(args), {
+      runner(args, {
         cwd: projectDir,
-        encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       console.log(chalk.green('✓'), `R2 '${bucket.binding}': created → ${bucket.bucketName}`);
@@ -733,9 +1247,11 @@ function provisionR2Buckets(
         metadata: bucket.jurisdiction ? { jurisdiction: bucket.jurisdiction } : undefined,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = commandFailureText(err);
       if (isR2BucketAlreadyExistsError(msg)) {
-        const ownership = resolveExistingR2BucketRecord(existingRecord);
+        const ownership = isScopedDefault
+          ? resolveExistingManagedBindingOwnership(existingRecord)
+          : resolveExistingR2BucketRecord(existingRecord);
         console.log(chalk.dim(`  R2 '${bucket.binding}': already exists → ${bucket.bucketName}`));
         resources.push({
           type: 'r2_bucket',
@@ -753,9 +1269,13 @@ function provisionR2Buckets(
       for (const hint of hints) {
         console.log(chalk.dim(`    ${hint}`));
       }
+      throw new Error(
+        `Required R2 binding '${bucket.binding}' could not be provisioned: ${provisioningFailureDetail(err)}`,
+      );
     }
   }
 
+  assertRequiredBindingCoverage('R2', r2Buckets.map((bucket) => bucket.binding), resources);
   return resources;
 }
 
@@ -767,80 +1287,92 @@ function provisionR2Buckets(
 function provisionKvNamespaces(
   kvConfig: Record<string, { binding: string }>,
   projectDir: string,
+  options: ResourceProvisionOptions = {},
+  runner: WranglerResourceRunner = runWranglerResourceCommand,
 ): ProvisionedBinding[] {
   const bindings: ProvisionedBinding[] = [];
   const dedupedKvConfig = dedupeBindingConfigs(kvConfig);
+  const workerName = resolveProjectWorkerName(projectDir) || 'edgebase';
 
   // Get existing KV namespaces
-  let existingNamespaces: Array<{ title: string; id: string }> = [];
+  let existingNamespaces: Array<{ title: string; id: string }>;
   try {
-    const output = execFileSync(
-      wranglerCommand(),
-      wranglerArgs(['wrangler', 'kv', 'namespace', 'list']),
-      {
+    const output = runner(['wrangler', 'kv', 'namespace', 'list'], {
       cwd: projectDir,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    existingNamespaces = parseKvNamespaceListOutput(output);
+  } catch (err) {
+    throw new Error(
+      'Cannot safely provision required KV namespaces because the existing-namespace list '
+      + `could not be verified: ${provisioningFailureDetail(err)}`,
     );
-    existingNamespaces = parseWranglerJsonOutput(output);
-  } catch {
-    // If listing fails, we'll try to create each one
   }
 
   for (const [name, config] of Object.entries(dedupedKvConfig)) {
     const bindingName = config.binding;
-    // Convention: Wrangler uses Worker name prefix in title
-    const existing = existingNamespaces.find(
-      (ns) => ns.title.endsWith(`-${bindingName}`) || ns.title === bindingName,
+    const namespaceTitle = buildManagedWorkerResourceName(workerName, 'kv', bindingName);
+    const previousRecord = findPreviousManifestBinding(
+      options.previousManifest ?? null,
+      'kv_namespace',
+      bindingName,
     );
+    const legacyTitles = new Set([bindingName, `${workerName}-${bindingName}`]);
+    const existing = existingNamespaces.find(
+      (namespace) => namespace.title === namespaceTitle,
+    ) ?? (previousRecord
+      ? existingNamespaces.find((namespace) =>
+          previousRecord.id
+            ? namespace.id === previousRecord.id
+            : legacyTitles.has(namespace.title),
+        )
+      : undefined);
 
-    if (existing) {
+    const existingNamespace = existing;
+
+    if (existingNamespace) {
+      const ownershipRecord = matchPreviousOwnership(
+        previousRecord,
+        existingNamespace.id,
+        legacyTitles.has(existingNamespace.title),
+      );
+      const ownership = resolveExistingManagedBindingOwnership(ownershipRecord);
       console.log(
-        chalk.dim(`  KV '${name}' (${bindingName}): already exists → ${existing.id.slice(0, 8)}…`),
+        chalk.dim(`  KV '${name}' (${bindingName}): already exists → ${existingNamespace.id.slice(0, 8)}…`),
       );
       bindings.push({
         type: 'kv_namespace',
         name,
         binding: bindingName,
-        id: existing.id,
-        managed: true,
-        source: 'existing',
+        id: existingNamespace.id,
+        managed: ownership.managed,
+        source: ownership.source,
       });
     } else {
       // Create new KV namespace
       try {
-        const output = execFileSync(
-          wranglerCommand(),
-          wranglerArgs(['wrangler', 'kv', 'namespace', 'create', bindingName]),
-          {
-            cwd: projectDir,
-            encoding: 'utf-8',
-            stdio: ['pipe', 'pipe', 'pipe'],
-          },
-        );
+        const output = runner(['wrangler', 'kv', 'namespace', 'create', namespaceTitle], {
+          cwd: projectDir,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
         // Extract ID from output: "Add the following to your configuration file..."
         // "kv_namespaces = [{ binding = "...", id = "..." }]"
         const idMatch = output.match(/id\s*=\s*"([^"]+)"/);
-        if (idMatch) {
-          console.log(
-            chalk.green('✓'),
-            `KV '${name}' (${bindingName}): created → ${idMatch[1].slice(0, 8)}…`,
-          );
-          bindings.push({
-            type: 'kv_namespace',
-            name,
-            binding: bindingName,
-            id: idMatch[1],
-            managed: true,
-            source: 'created',
-          });
-        } else {
-          console.log(
-            chalk.yellow('⚠'),
-            `KV '${name}': created but could not parse ID from wrangler output. Skipping managed binding registration.`,
-          );
+        if (!idMatch || !/^[a-f0-9]{32}$/i.test(idMatch[1])) {
+          throw new Error('Wrangler reported success without a valid KV namespace id.');
         }
+        console.log(
+          chalk.green('✓'),
+          `KV '${name}' (${bindingName}): created → ${idMatch[1].slice(0, 8)}…`,
+        );
+        bindings.push({
+          type: 'kv_namespace',
+          name,
+          binding: bindingName,
+          id: idMatch[1],
+          managed: true,
+          source: 'created',
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.log(chalk.red('✗'), `KV '${name}': provisioning failed — ${msg}`);
@@ -848,10 +1380,18 @@ function provisionKvNamespaces(
         for (const hint of hints) {
           console.log(chalk.dim(`    ${hint}`));
         }
+        throw new Error(
+          `Required KV binding '${bindingName}' could not be provisioned: ${provisioningFailureDetail(err)}`,
+        );
       }
     }
   }
 
+  assertRequiredBindingCoverage(
+    'KV',
+    Object.values(dedupedKvConfig).map((config) => config.binding),
+    bindings,
+  );
   return bindings;
 }
 
@@ -865,42 +1405,53 @@ function provisionD1Databases(
   options?: {
     previousManifest?: ReturnType<typeof readCloudflareDeployManifest>;
   },
+  runner: WranglerResourceRunner = runWranglerResourceCommand,
 ): ProvisionedBinding[] {
   const bindings: ProvisionedBinding[] = [];
   const dedupedD1Config = dedupeBindingConfigs(d1Config);
   const workerName = resolveProjectWorkerName(projectDir) || 'edgebase';
 
   // Get existing D1 databases
-  let existingDatabases: Array<{ name: string; uuid: string }> = [];
+  let existingDatabases: Array<{ name: string; uuid: string }>;
   try {
-    const output = execFileSync(
-      wranglerCommand(),
-      wranglerArgs(['wrangler', 'd1', 'list', '--json']),
-      {
+    const output = runner(['wrangler', 'd1', 'list', '--json'], {
       cwd: projectDir,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    existingDatabases = parseD1DatabaseListOutput(output);
+  } catch (err) {
+    throw new Error(
+      'Cannot safely provision required D1 databases because the existing-database list '
+      + `could not be verified: ${provisioningFailureDetail(err)}`,
     );
-    existingDatabases = parseWranglerJsonOutput(output);
-  } catch {
-    // If listing fails, we'll try to create each one
   }
 
   for (const [name, config] of Object.entries(dedupedD1Config)) {
     const bindingName = config.binding;
     const dbName = buildManagedD1DatabaseName(workerName, name);
     const legacyDbName = buildLegacyManagedD1DatabaseName(name);
-    const allowLegacyReuse = !!findCloudflareResourceRecord(options?.previousManifest ?? null, {
-      type: 'd1_database',
-      name,
-      binding: bindingName,
-    });
+    const legacyWorkerDbName = buildLegacyWorkerScopedD1DatabaseName(workerName, name);
+    const previousRecord = findPreviousManifestBinding(
+      options?.previousManifest ?? null,
+      'd1_database',
+      bindingName,
+    );
     const existing = existingDatabases.find(
-      (db) => db.name === dbName || (allowLegacyReuse && db.name === legacyDbName),
+      (db) => db.name === dbName
+        || (!!previousRecord && (
+          previousRecord.id
+            ? db.uuid === previousRecord.id
+            : db.name === legacyDbName || db.name === legacyWorkerDbName
+        )),
     );
 
     if (existing) {
+      const ownershipRecord = matchPreviousOwnership(
+        previousRecord,
+        existing.uuid,
+        existing.name === legacyDbName || existing.name === legacyWorkerDbName,
+      );
+      const ownership = resolveExistingManagedBindingOwnership(ownershipRecord);
       console.log(
         chalk.dim(
           `  D1 '${name}' (${bindingName}): already exists → ${existing.uuid.slice(0, 8)}…`,
@@ -911,36 +1462,33 @@ function provisionD1Databases(
         name,
         binding: bindingName,
         id: existing.uuid,
-        managed: true,
-        source: 'existing',
+        resourceName: existing.name,
+        managed: ownership.managed,
+        source: ownership.source,
       });
     } else {
       try {
-        const output = execFileSync(wranglerCommand(), wranglerArgs(['wrangler', 'd1', 'create', dbName]), {
+        const output = runner(['wrangler', 'd1', 'create', dbName], {
           cwd: projectDir,
-          encoding: 'utf-8',
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         const idMatch = output.match(/database_id\s*=\s*"([^"]+)"/);
-        if (idMatch) {
-          console.log(
-            chalk.green('✓'),
-            `D1 '${name}' (${bindingName}): created → ${idMatch[1].slice(0, 8)}…`,
-          );
-          bindings.push({
-            type: 'd1_database',
-            name,
-            binding: bindingName,
-            id: idMatch[1],
-            managed: true,
-            source: 'created',
-          });
-        } else {
-          console.log(
-            chalk.yellow('⚠'),
-            `D1 '${name}': created but could not parse ID. Skipping managed binding registration.`,
-          );
+        if (!idMatch || !isCloudflareResourceId(idMatch[1])) {
+          throw new Error('Wrangler reported success without a valid D1 database id.');
         }
+        console.log(
+          chalk.green('✓'),
+          `D1 '${name}' (${bindingName}): created → ${idMatch[1].slice(0, 8)}…`,
+        );
+        bindings.push({
+          type: 'd1_database',
+          name,
+          binding: bindingName,
+          id: idMatch[1],
+          resourceName: dbName,
+          managed: true,
+          source: 'created',
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.log(chalk.red('✗'), `D1 '${name}': provisioning failed — ${msg}`);
@@ -948,10 +1496,18 @@ function provisionD1Databases(
         for (const hint of hints) {
           console.log(chalk.dim(`    ${hint}`));
         }
+        throw new Error(
+          `Required D1 binding '${bindingName}' could not be provisioned: ${provisioningFailureDetail(err)}`,
+        );
       }
     }
   }
 
+  assertRequiredBindingCoverage(
+    'D1',
+    Object.values(dedupedD1Config).map((config) => config.binding),
+    bindings,
+  );
   return bindings;
 }
 
@@ -1055,58 +1611,82 @@ function provisionSingleInstanceD1Databases(
 function provisionVectorizeIndexes(
   vectorizeConfig: Record<string, { dimensions?: number; metric?: string; binding?: string }>,
   projectDir: string,
+  options: ResourceProvisionOptions = {},
+  runner: WranglerResourceRunner = runWranglerResourceCommand,
 ): ProvisionedBinding[] {
   const bindings: ProvisionedBinding[] = [];
+  const workerName = resolveProjectWorkerName(projectDir) || 'edgebase';
 
   // Get existing Vectorize indexes
-  let existingIndexes: Array<{ name: string }> = [];
+  let existingIndexes: Array<{ name: string }>;
   try {
-    const output = execFileSync(
-      wranglerCommand(),
-      wranglerArgs(['wrangler', 'vectorize', 'list', '--json']),
-      {
+    const output = runner(['wrangler', 'vectorize', 'list', '--json'], {
       cwd: projectDir,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    existingIndexes = parseVectorizeIndexListOutput(output);
+  } catch (err) {
+    throw new Error(
+      'Cannot safely provision required Vectorize indexes because the existing-index list '
+      + `could not be verified: ${provisioningFailureDetail(err)}`,
     );
-    existingIndexes = parseWranglerJsonOutput(output);
-  } catch {
-    // Vectorize may not be available (free plan)
   }
 
   for (const [name, config] of Object.entries(vectorizeConfig)) {
+    if (!config || typeof config !== 'object') {
+      throw new Error(`Vectorize resource '${name}' must be an object.`);
+    }
     const bindingName = config.binding ?? `VECTORIZE_${name.toUpperCase()}`;
-    const indexName = `edgebase-${name}`;
-    const existing = existingIndexes.find((idx) => idx.name === indexName);
+    if (typeof bindingName !== 'string' || !bindingName.trim()) {
+      throw new Error(`Vectorize resource '${name}' must resolve to a non-empty binding.`);
+    }
+    const indexName = buildManagedWorkerResourceName(workerName, 'vectorize', name);
+    const previousRecord = findPreviousManifestBinding(
+      options.previousManifest ?? null,
+      'vectorize',
+      bindingName,
+    );
+    const legacyIndexName = `edgebase-${name}`;
+    const existing = existingIndexes.find((index) => index.name === indexName)
+      ?? (previousRecord
+        ? existingIndexes.find((index) =>
+            previousRecord.id
+              ? index.name === previousRecord.id
+              : index.name === legacyIndexName,
+          )
+        : undefined);
 
     if (existing) {
+      const ownershipRecord = matchPreviousOwnership(
+        previousRecord,
+        existing.name,
+        existing.name === legacyIndexName,
+      );
+      const ownership = resolveExistingManagedBindingOwnership(ownershipRecord);
       console.log(chalk.dim(`  Vectorize '${name}' (${bindingName}): already exists`));
       bindings.push({
         type: 'vectorize',
         name,
         binding: bindingName,
-        id: indexName,
-        managed: true,
-        source: 'existing',
+        id: existing.name,
+        managed: ownership.managed,
+        source: ownership.source,
       });
     } else {
       const dimensions = config.dimensions ?? 1536;
       const metric = config.metric ?? 'cosine';
       try {
-        execFileSync(
-          wranglerCommand(),
-          wranglerArgs([
+        runner(
+          [
             'wrangler',
             'vectorize',
             'create',
             indexName,
             `--dimensions=${dimensions}`,
             `--metric=${metric}`,
-          ]),
+          ],
           {
             cwd: projectDir,
-            encoding: 'utf-8',
             stdio: ['pipe', 'pipe', 'pipe'],
           },
         );
@@ -1133,10 +1713,20 @@ function provisionVectorizeIndexes(
         } else {
           console.log(chalk.dim('    Vectorize requires a paid Workers plan.'));
         }
+        throw new Error(
+          `Required Vectorize binding '${bindingName}' could not be provisioned: ${provisioningFailureDetail(err)}`,
+        );
       }
     }
   }
 
+  assertRequiredBindingCoverage(
+    'Vectorize',
+    Object.entries(vectorizeConfig).map(
+      ([name, config]) => config.binding ?? `VECTORIZE_${name.toUpperCase()}`,
+    ),
+    bindings,
+  );
   return bindings;
 }
 
@@ -1145,20 +1735,47 @@ function provisionVectorizeIndexes(
  */
 function readEnvValue(envPath: string, key: string): string | undefined {
   if (!existsSync(envPath)) return undefined;
-  const content = readFileSync(envPath, 'utf-8');
-  const match = content.match(new RegExp(`^${key}=(.+)$`, 'm'));
-  return match?.[1]?.trim();
+  const value = parseEnvFile(envPath)[key];
+  return value?.trim() || undefined;
 }
 
-function runProjectPostScaffoldHook(projectDir: string): void {
+type PostScaffoldHookRunner = (
+  command: string,
+  args: string[],
+  options: { cwd: string; stdio: 'inherit'; timeout: number },
+) => unknown;
+
+export function runProjectPostScaffoldHook(
+  projectDir: string,
+  runner: PostScaffoldHookRunner = (command, args, options) =>
+    execFileSync(command, args, options),
+): void {
   const hookPath = join(projectDir, 'scripts', 'edgebase-post-scaffold.mjs');
   if (!existsSync(hookPath)) return;
 
   console.log(chalk.dim(`  Running project post-scaffold hook: ${basename(hookPath)}`));
-  execFileSync(process.execPath, [hookPath, '--project-dir', projectDir], {
-    cwd: projectDir,
-    stdio: 'inherit',
-  });
+  try {
+    runner(process.execPath, [hookPath, '--project-dir', projectDir], {
+      cwd: projectDir,
+      stdio: 'inherit',
+      timeout: PROJECT_POST_SCAFFOLD_HOOK_TIMEOUT_MS,
+    });
+  } catch (error) {
+    const failure = error as { code?: unknown; signal?: unknown; message?: unknown };
+    if (
+      failure.code === 'ETIMEDOUT'
+      || failure.signal === 'SIGTERM'
+      || /timed?\s*out/i.test(String(failure.message ?? ''))
+    ) {
+      throw new Error(
+        'Project post-scaffold hook exceeded 5 minutes and was terminated. '
+        + 'Make scripts/edgebase-post-scaffold.mjs bounded and non-interactive, then retry.',
+      );
+    }
+    throw new Error(
+      `Project post-scaffold hook failed: ${String(failure.message ?? error)}`,
+    );
+  }
 }
 
 /**
@@ -1169,14 +1786,20 @@ function runProjectPostScaffoldHook(projectDir: string): void {
  * or the db block's custom connectionString env key when provided).
  *
  * Binding convention: DB_POSTGRES_{NAMESPACE_UPPER}
- * Hyperdrive name: edgebase-db-{namespace}
+ * Hyperdrive name: deterministic Worker-scoped managed name
  */
 async function provisionProviderHyperdrives(
   databases: Record<string, DeployDbBlockMeta>,
   projectDir: string,
   accountId: string,
+  dependencies: {
+    runner?: WranglerResourceRunner;
+    createConfig?: typeof createHyperdriveConfigViaApi;
+    previousManifest?: ReturnType<typeof readCloudflareDeployManifest>;
+  } = {},
 ): Promise<ProvisionedBinding[]> {
   const bindings: ProvisionedBinding[] = [];
+  const workerName = resolveProjectWorkerName(projectDir) || 'edgebase';
 
   // Filter to PostgreSQL-backed DB blocks
   const pgBlocks = Object.entries(databases).filter(
@@ -1185,15 +1808,38 @@ async function provisionProviderHyperdrives(
   if (pgBlocks.length === 0) return bindings;
 
   // Get existing Hyperdrive configs
-  let existingConfigs = listHyperdriveConfigs(projectDir);
+  const runner = dependencies.runner ?? runWranglerResourceCommand;
+  const createConfig = dependencies.createConfig ?? createHyperdriveConfigViaApi;
+  let existingConfigs = listHyperdriveConfigs(projectDir, runner);
 
   for (const [namespace, block] of pgBlocks) {
-    const hdName = `edgebase-db-${namespace}`;
+    const hdName = buildManagedWorkerResourceName(workerName, 'hyperdrive', `db-${namespace}`);
+    const legacyHdName = `edgebase-db-${namespace}`;
     const normalized = namespace.toUpperCase().replace(/-/g, '_');
     const bindingName = `DB_POSTGRES_${normalized}`;
-    const existing = existingConfigs.find((c) => c.name === hdName);
+    const previousRecord = findPreviousManifestBinding(
+      dependencies.previousManifest ?? null,
+      'hyperdrive',
+      bindingName,
+    );
+    const findExisting = (configs: Array<{ id: string; name: string }>) =>
+      configs.find((config) => config.name === hdName)
+      ?? (previousRecord
+        ? configs.find((config) =>
+            previousRecord.id
+              ? config.id === previousRecord.id
+              : config.name === legacyHdName,
+          )
+        : undefined);
+    const existing = findExisting(existingConfigs);
 
     if (existing) {
+      const ownershipRecord = matchPreviousOwnership(
+        previousRecord,
+        existing.id,
+        existing.name === legacyHdName,
+      );
+      const ownership = resolveExistingManagedBindingOwnership(ownershipRecord);
       console.log(
         chalk.dim(
           `  Hyperdrive '${namespace}' (provider): already exists → ${existing.id.slice(0, 8)}…`,
@@ -1204,8 +1850,8 @@ async function provisionProviderHyperdrives(
         name: namespace,
         binding: bindingName,
         id: existing.id,
-        managed: true,
-        source: 'existing',
+        managed: ownership.managed,
+        source: ownership.source,
       });
       continue;
     }
@@ -1225,14 +1871,16 @@ async function provisionProviderHyperdrives(
             `    Add ${secretKey}=postgres://... to .env.release${setupHint}`,
         ),
       );
-      continue;
+      throw new Error(
+        `Required Hyperdrive binding '${bindingName}' is missing connection string ${secretKey}. Deployment aborted.`,
+      );
     }
 
     // Create Hyperdrive config (connection string sent in the API request
     // body, never on argv).
-    const result = await createHyperdriveConfigViaApi(hdName, connectionString, accountId);
+    const result = await createConfig(hdName, connectionString, accountId);
 
-    if (result.status === 'created') {
+    if (result.status === 'created' && /^[a-f0-9]{32}$/i.test(result.id)) {
       bindings.push({
         type: 'hyperdrive',
         name: namespace,
@@ -1249,8 +1897,14 @@ async function provisionProviderHyperdrives(
     }
 
     if (result.status === 'exists') {
-      const existingConfig = listHyperdriveConfigs(projectDir).find((config) => config.name === hdName);
+      const existingConfig = findExisting(listHyperdriveConfigs(projectDir, runner));
       if (existingConfig) {
+        const ownershipRecord = matchPreviousOwnership(
+          previousRecord,
+          existingConfig.id,
+          existingConfig.name === legacyHdName,
+        );
+        const ownership = resolveExistingManagedBindingOwnership(ownershipRecord);
         console.log(
           chalk.dim(
             `  Hyperdrive '${namespace}' (provider): already exists → ${existingConfig.id.slice(0, 8)}…`,
@@ -1261,24 +1915,37 @@ async function provisionProviderHyperdrives(
           name: namespace,
           binding: bindingName,
           id: existingConfig.id,
-          managed: true,
-          source: 'existing',
+          managed: ownership.managed,
+          source: ownership.source,
         });
         existingConfigs = [...existingConfigs, existingConfig];
         continue;
       }
     }
 
+    const failureMessage = result.status === 'created'
+      ? 'Hyperdrive API returned an invalid config id.'
+      : result.message;
     console.log(
       chalk.yellow('⚠'),
-      `Hyperdrive '${namespace}' (provider): provisioning failed — ${result.message}`,
+      `Hyperdrive '${namespace}' (provider): provisioning failed — ${failureMessage}`,
     );
-    const hints = diagnoseProvisioningError('Hyperdrive', result.message);
+    const hints = diagnoseProvisioningError('Hyperdrive', failureMessage);
     for (const hint of hints) {
       console.log(chalk.dim(`    ${hint}`));
     }
+    throw new Error(
+      `Required Hyperdrive binding '${bindingName}' could not be provisioned: ${failureMessage}`,
+    );
   }
 
+  assertRequiredBindingCoverage(
+    'Hyperdrive',
+    pgBlocks.map(([namespace]) =>
+      `DB_POSTGRES_${namespace.toUpperCase().replace(/-/g, '_')}`,
+    ),
+    bindings,
+  );
   return bindings;
 }
 
@@ -1287,27 +1954,56 @@ async function provisionProviderHyperdrives(
  * Follows the same pattern as provisionProviderHyperdrives but for a single global auth binding.
  *
  * Binding name: AUTH_POSTGRES (matches getAuthPostgresBindingName() in server)
- * Hyperdrive name: edgebase-auth
+ * Hyperdrive name: deterministic Worker-scoped managed name
  * Connection string: read from .env.release AUTH_POSTGRES_URL (or config.auth.connectionString)
  */
 async function provisionAuthPostgresHyperdrive(
   authConfig: { provider?: string; connectionString?: string },
   projectDir: string,
   accountId: string,
+  dependencies: {
+    runner?: WranglerResourceRunner;
+    createConfig?: typeof createHyperdriveConfigViaApi;
+    previousManifest?: ReturnType<typeof readCloudflareDeployManifest>;
+  } = {},
 ): Promise<ProvisionedBinding[]> {
   const bindings: ProvisionedBinding[] = [];
   const provider = authConfig.provider;
 
   if (provider !== 'neon' && provider !== 'postgres') return bindings;
 
-  const hdName = 'edgebase-auth';
+  const workerName = resolveProjectWorkerName(projectDir) || 'edgebase';
+  const hdName = buildManagedWorkerResourceName(workerName, 'hyperdrive', 'auth');
+  const legacyHdName = 'edgebase-auth';
   const bindingName = 'AUTH_POSTGRES';
 
   // Check existing Hyperdrive configs
-  const existingConfigs = listHyperdriveConfigs(projectDir);
+  const runner = dependencies.runner ?? runWranglerResourceCommand;
+  const createConfig = dependencies.createConfig ?? createHyperdriveConfigViaApi;
+  const existingConfigs = listHyperdriveConfigs(projectDir, runner);
+  const previousRecord = findPreviousManifestBinding(
+    dependencies.previousManifest ?? null,
+    'hyperdrive',
+    bindingName,
+  );
+  const findExisting = (configs: Array<{ id: string; name: string }>) =>
+    configs.find((config) => config.name === hdName)
+    ?? (previousRecord
+      ? configs.find((config) =>
+          previousRecord.id
+            ? config.id === previousRecord.id
+            : config.name === legacyHdName,
+        )
+      : undefined);
 
-  const existing = existingConfigs.find((c) => c.name === hdName);
+  const existing = findExisting(existingConfigs);
   if (existing) {
+    const ownershipRecord = matchPreviousOwnership(
+      previousRecord,
+      existing.id,
+      existing.name === legacyHdName,
+    );
+    const ownership = resolveExistingManagedBindingOwnership(ownershipRecord);
     console.log(
       chalk.dim(`  Hyperdrive 'auth' (${provider}): already exists → ${existing.id.slice(0, 8)}…`),
     );
@@ -1316,8 +2012,8 @@ async function provisionAuthPostgresHyperdrive(
       name: 'auth',
       binding: bindingName,
       id: existing.id,
-      managed: true,
-      source: 'existing',
+      managed: ownership.managed,
+      source: ownership.source,
     });
     return bindings;
   }
@@ -1337,14 +2033,16 @@ async function provisionAuthPostgresHyperdrive(
           `    Add ${secretKey}=postgres://... to .env.release${setupHint}`,
       ),
     );
-    return bindings;
+    throw new Error(
+      `Required Hyperdrive binding '${bindingName}' is missing connection string ${secretKey}. Deployment aborted.`,
+    );
   }
 
   // Create Hyperdrive config (connection string sent in the API request body,
   // never on argv).
-  const result = await createHyperdriveConfigViaApi(hdName, connectionString, accountId);
+  const result = await createConfig(hdName, connectionString, accountId);
 
-  if (result.status === 'created') {
+  if (result.status === 'created' && /^[a-f0-9]{32}$/i.test(result.id)) {
     bindings.push({
       type: 'hyperdrive',
       name: 'auth',
@@ -1361,8 +2059,14 @@ async function provisionAuthPostgresHyperdrive(
   }
 
   if (result.status === 'exists') {
-    const existingConfig = listHyperdriveConfigs(projectDir).find((config) => config.name === hdName);
+    const existingConfig = findExisting(listHyperdriveConfigs(projectDir, runner));
     if (existingConfig) {
+      const ownershipRecord = matchPreviousOwnership(
+        previousRecord,
+        existingConfig.id,
+        existingConfig.name === legacyHdName,
+      );
+      const ownership = resolveExistingManagedBindingOwnership(ownershipRecord);
       console.log(
         chalk.dim(`  Hyperdrive 'auth' (${provider}): already exists → ${existingConfig.id.slice(0, 8)}…`),
       );
@@ -1371,20 +2075,25 @@ async function provisionAuthPostgresHyperdrive(
         name: 'auth',
         binding: bindingName,
         id: existingConfig.id,
-        managed: true,
-        source: 'existing',
+        managed: ownership.managed,
+        source: ownership.source,
       });
       return bindings;
     }
   }
 
-  console.log(chalk.yellow('⚠'), `Hyperdrive 'auth' (${provider}): provisioning failed — ${result.message}`);
-  const hints = diagnoseProvisioningError('Hyperdrive', result.message);
+  const failureMessage = result.status === 'created'
+    ? 'Hyperdrive API returned an invalid config id.'
+    : result.message;
+  console.log(chalk.yellow('⚠'), `Hyperdrive 'auth' (${provider}): provisioning failed — ${failureMessage}`);
+  const hints = diagnoseProvisioningError('Hyperdrive', failureMessage);
   for (const hint of hints) {
     console.log(chalk.dim(`    ${hint}`));
   }
 
-  return bindings;
+  throw new Error(
+    `Required Hyperdrive binding '${bindingName}' could not be provisioned: ${failureMessage}`,
+  );
 }
 
 export const deployCommand = new Command('deploy')
@@ -1741,7 +2450,20 @@ export const deployCommand = new Command('deploy')
     });
     const deployRuntimeDir = deployBundle.outputDir;
     const deployWranglerPath = join(deployRuntimeDir, 'wrangler.toml');
-    const previousManifest = readCloudflareDeployManifest(projectDir);
+    const storedPreviousManifest = readCloudflareDeployManifest(projectDir);
+    const previousManifest = scopePreviousManifestToAccount(
+      storedPreviousManifest,
+      cfAuth.accountId,
+    );
+    if (storedPreviousManifest && !previousManifest && !isQuiet()) {
+      console.log(chalk.yellow(
+        '  ⚠ Ignoring the previous deploy manifest because it belongs to a different Cloudflare account.',
+      ));
+    }
+    let workerAlreadyDeployed = remoteWorkerExists(
+      projectDir,
+      resolveWorkerNameFromProject(projectDir),
+    );
     console.log();
 
     if (functions.length > 0) {
@@ -1765,75 +2487,123 @@ export const deployCommand = new Command('deploy')
     const manifestResources: CloudflareResourceRecord[] = [];
     const rateLimitBindings = resolveRateLimitBindings(configJson ?? undefined);
     let tempWranglerPath: string | null = null;
-    const provisionSpinner = spin('Provisioning Cloudflare resources...');
-
-    manifestResources.push(...provisionR2Buckets(projectDir, previousManifest));
-
-    if (configJson) {
-      const kvCfg = configJson.kv as Record<string, { binding: string }> | undefined;
-      const d1Cfg = configJson.d1 as Record<string, { binding: string }> | undefined;
-      const vecCfg = configJson.vectorize as
-        | Record<string, { dimensions?: number; metric?: string; binding?: string }>
-        | undefined;
-      const dbsCfg = configJson.databases as Record<string, DeployDbBlockMeta> | undefined;
-
-      // Check for PostgreSQL-backed database blocks (Hyperdrive)
-      const hasProviderDbs =
-        dbsCfg && Object.values(dbsCfg).some((db) => isPostgresProvider(db.provider));
-
-      // Check for auth PostgreSQL provider (Hyperdrive)
-      const authCfg = configJson.auth as
-        | { provider?: string; connectionString?: string }
-        | undefined;
-      const hasAuthPostgres = authCfg?.provider === 'neon' || authCfg?.provider === 'postgres';
-
-      const mergedKvConfig = buildMergedKvConfig(kvCfg);
-      if (Object.keys(mergedKvConfig).length > 0) {
-        provisionedBindings.push(...provisionKvNamespaces(mergedKvConfig, projectDir));
+    let tempDeploySecretsPath: string | null = null;
+    let disposeTempDeploySecretCleanup: (() => void) | null = null;
+    let turnstileSecret: string | undefined;
+    let turnstileProvision: TurnstileProvisionResult | null = null;
+    let turnstileDeployLease: TurnstileDeployLease | null = null;
+    const renewManagedTurnstileLease = async () => {
+      if (!turnstileDeployLease) {
+        throw new Error('Managed Turnstile mutation requires an active remote deploy lease.');
       }
-      const mergedD1Config = buildMergedD1Config(d1Cfg, dbsCfg);
-      if (Object.keys(mergedD1Config).length > 0) {
-        provisionedBindings.push(...provisionD1Databases(mergedD1Config, projectDir, { previousManifest }));
-      }
-      if (vecCfg && Object.keys(vecCfg).length > 0) {
-        provisionedBindings.push(...provisionVectorizeIndexes(vecCfg, projectDir));
-      }
-      if (dbsCfg && hasProviderDbs) {
-        provisionedBindings.push(...await provisionProviderHyperdrives(dbsCfg, projectDir, cfAuth.accountId));
-      }
-      if (authCfg && hasAuthPostgres) {
-        provisionedBindings.push(...await provisionAuthPostgresHyperdrive(authCfg, projectDir, cfAuth.accountId));
-      }
-    } else {
-      provisionedBindings.push(...provisionInternalD1Databases(projectDir, { previousManifest }));
-    }
-
-    manifestResources.push(...provisionedBindings.map(toManifestResourceRecord));
-
-    // Generate temp wrangler.toml with bindings + cron triggers
-    const wranglerPath = deployWranglerPath;
-    if (
-      existsSync(wranglerPath) &&
-      (provisionedBindings.length > 0 || cronSchedules.length > 0 || rateLimitBindings.length > 0)
-    ) {
-      tempWranglerPath = generateTempWranglerToml(
-        wranglerPath,
-        {
-          bindings: provisionedBindings,
-          triggerMode: 'replace',
-          managedCrons: cronSchedules,
-          rateLimitBindings,
-        },
+      const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+      if (!apiToken) throw new Error('CLOUDFLARE_API_TOKEN is required to renew the deploy lease.');
+      turnstileDeployLease = await renewTurnstileDeployLease(
+        turnstileDeployLease,
+        apiToken,
       );
-      if (tempWranglerPath) {
-        console.log(
-          chalk.green('✓'),
-          `Generated temp wrangler.toml with ${provisionedBindings.length} resource binding(s)`,
-        );
-      }
-    }
+    };
+    const releaseManagedTurnstileLease = async () => {
+      if (!turnstileDeployLease) return;
+      const lease = turnstileDeployLease;
+      const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+      if (!apiToken) throw new Error('CLOUDFLARE_API_TOKEN disappeared before deploy-lease release.');
+      await releaseTurnstileDeployLease(lease, apiToken);
+      if (turnstileDeployLease === lease) turnstileDeployLease = null;
+    };
+    const provisionSpinner = spin('Provisioning Cloudflare resources...');
+    const wranglerPath = deployWranglerPath;
 
-    provisionSpinner.succeed('Cloudflare resources provisioned');
+    try {
+      manifestResources.push(...provisionR2Buckets(projectDir, previousManifest));
+
+      if (configJson) {
+        const kvCfg = configJson.kv as Record<string, { binding: string }> | undefined;
+        const d1Cfg = configJson.d1 as Record<string, { binding: string }> | undefined;
+        const vecCfg = configJson.vectorize as
+          | Record<string, { dimensions?: number; metric?: string; binding?: string }>
+          | undefined;
+        const dbsCfg = configJson.databases as Record<string, DeployDbBlockMeta> | undefined;
+
+        // Check for PostgreSQL-backed database blocks (Hyperdrive)
+        const hasProviderDbs =
+          dbsCfg && Object.values(dbsCfg).some((db) => isPostgresProvider(db.provider));
+
+        // Check for auth PostgreSQL provider (Hyperdrive)
+        const authCfg = configJson.auth as
+          | { provider?: string; connectionString?: string }
+          | undefined;
+        const hasAuthPostgres = authCfg?.provider === 'neon' || authCfg?.provider === 'postgres';
+
+        const mergedKvConfig = buildMergedKvConfig(kvCfg);
+        if (Object.keys(mergedKvConfig).length > 0) {
+          provisionedBindings.push(...provisionKvNamespaces(
+            mergedKvConfig,
+            projectDir,
+            { previousManifest },
+          ));
+        }
+        const mergedD1Config = buildMergedD1Config(d1Cfg, dbsCfg);
+        if (Object.keys(mergedD1Config).length > 0) {
+          provisionedBindings.push(...provisionD1Databases(mergedD1Config, projectDir, { previousManifest }));
+        }
+        if (vecCfg && Object.keys(vecCfg).length > 0) {
+          provisionedBindings.push(...provisionVectorizeIndexes(
+            vecCfg,
+            projectDir,
+            { previousManifest },
+          ));
+        }
+        if (dbsCfg && hasProviderDbs) {
+          provisionedBindings.push(...await provisionProviderHyperdrives(
+            dbsCfg,
+            projectDir,
+            cfAuth.accountId,
+            { previousManifest },
+          ));
+        }
+        if (authCfg && hasAuthPostgres) {
+          provisionedBindings.push(...await provisionAuthPostgresHyperdrive(
+            authCfg,
+            projectDir,
+            cfAuth.accountId,
+            { previousManifest },
+          ));
+        }
+      } else {
+        provisionedBindings.push(...provisionInternalD1Databases(projectDir, { previousManifest }));
+      }
+
+      manifestResources.push(...provisionedBindings.map(toManifestResourceRecord));
+
+      // Generate temp wrangler.toml with bindings + cron triggers
+      if (
+        existsSync(wranglerPath) &&
+        (provisionedBindings.length > 0 || cronSchedules.length > 0 || rateLimitBindings.length > 0)
+      ) {
+        tempWranglerPath = generateTempWranglerToml(
+          wranglerPath,
+          {
+            bindings: provisionedBindings,
+            triggerMode: 'replace',
+            managedCrons: cronSchedules,
+            rateLimitBindings,
+            runtimeMode: 'cloudflare',
+          },
+        );
+        if (tempWranglerPath) {
+          console.log(
+            chalk.green('✓'),
+            `Generated temp wrangler.toml with ${provisionedBindings.length} resource binding(s)`,
+          );
+        }
+      }
+
+      provisionSpinner.succeed('Cloudflare resources provisioned');
+    } catch (err) {
+      provisionSpinner.fail('Cloudflare resource provisioning failed');
+      throw err;
+    }
 
     // Generate temp wrangler.toml for cron triggers even if no resource bindings
     if (!tempWranglerPath && (cronSchedules.length > 0 || rateLimitBindings.length > 0)) {
@@ -1846,6 +2616,7 @@ export const deployCommand = new Command('deploy')
             triggerMode: 'replace',
             managedCrons: cronSchedules,
             rateLimitBindings,
+            runtimeMode: 'cloudflare',
           },
         );
         if (tempWranglerPath) {
@@ -1869,6 +2640,7 @@ export const deployCommand = new Command('deploy')
       tempWranglerPath = generateTempWranglerToml(wranglerPath, {
         bindings: [],
         triggerMode: 'preserve',
+        runtimeMode: 'cloudflare',
       });
       if (tempWranglerPath) {
         console.log(chalk.green('✓'), 'Generated temp wrangler.toml with admin assets binding');
@@ -1879,35 +2651,94 @@ export const deployCommand = new Command('deploy')
     if (configJson) {
       const captchaCfg = configJson.captcha as
         | boolean
-        | { siteKey: string; secretKey: string }
+        | { siteKey: string; secretKey?: string; hostnames?: string[] }
         | undefined;
       if (captchaCfg) {
-        const turnstileResult = await provisionTurnstile(
-          captchaCfg,
-          projectDir,
-          configJson,
-          cfAuth.accountId,
-        );
-        if (turnstileResult) {
-          // §28: Inject siteKey as CAPTCHA_SITE_KEY wrangler var (independent from bundled app config)
-          const targetToml = tempWranglerPath ?? deployWranglerPath;
-          injectCaptchaSiteKey(targetToml, turnstileResult.siteKey);
-
-          if (turnstileResult.managed && turnstileResult.widgetName) {
-            const previousTurnstile = findCloudflareResourceRecord(previousManifest, {
-              type: 'turnstile_widget',
-              name: turnstileResult.widgetName,
-              id: turnstileResult.widgetName,
-            });
-            manifestResources.push({
-              type: 'turnstile_widget',
-              name: turnstileResult.widgetName,
-              id: turnstileResult.widgetName,
-              managed: previousTurnstile?.managed ?? true,
-              source: turnstileResult.source,
-              metadata: { siteKey: turnstileResult.siteKey },
-            });
+        try {
+          if (captchaCfg === true) {
+            const controlDb = provisionedBindings.find((binding) =>
+              binding.type === 'd1_database' && binding.binding === 'CONTROL_DB',
+            );
+            const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+            if (!controlDb || !apiToken) {
+              throw new Error(
+                'Managed CAPTCHA requires the provisioned CONTROL_DB and a '
+                + 'CLOUDFLARE_API_TOKEN with D1 Write plus Turnstile Edit permissions.',
+              );
+            }
+            turnstileDeployLease = await acquireTurnstileDeployLease(
+              cfAuth.accountId,
+              controlDb.id,
+              apiToken,
+            );
+            // The pre-provisioning lookup may be stale after waiting for the
+            // distributed lease. Re-read remote authority while holding it so
+            // first-deploy secret preparation cannot overwrite a deploy that
+            // completed immediately before this owner acquired the lease.
+            workerAlreadyDeployed = remoteWorkerExists(
+              projectDir,
+              resolveWorkerNameFromProject(projectDir),
+            );
           }
+          turnstileProvision = await provisionTurnstile(
+            captchaCfg,
+            projectDir,
+            configJson,
+            cfAuth.accountId,
+            renewManagedTurnstileLease,
+          );
+          if (!turnstileProvision) {
+            throw new Error('CAPTCHA runtime configuration could not be provisioned.');
+          }
+          if (turnstileDeployLease) {
+            const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+            if (!apiToken) throw new Error('CLOUDFLARE_API_TOKEN is required to renew the deploy lease.');
+            turnstileDeployLease = await renewTurnstileDeployLease(
+              turnstileDeployLease,
+              apiToken,
+            );
+          }
+
+          // The site key and exact hostname allowlist are public runtime vars;
+          // the paired secret is synchronized as a Workers secret below.
+          const targetToml = tempWranglerPath ?? deployWranglerPath;
+          injectCaptchaSiteKey(
+            targetToml,
+            turnstileProvision.siteKey,
+            turnstileProvision.hostnames,
+          );
+          turnstileSecret = turnstileProvision.secretKey;
+        } catch (err) {
+          try {
+            await releaseManagedTurnstileLease();
+          } catch {
+            // The bounded remote lease expires after a crashed/failed deploy.
+          }
+          raiseCliError({
+            code: 'captcha_provision_failed',
+            message: `CAPTCHA provisioning failed: ${(err as Error).message}`,
+            hint: 'Deployment was aborted before publishing. Configure 1-10 exact '
+              + 'hostnames and valid Turnstile credentials, then retry.',
+          });
+        }
+
+        if (turnstileProvision.managed && turnstileProvision.widgetName) {
+          const previousTurnstile = findCloudflareResourceRecord(previousManifest, {
+            type: 'turnstile_widget',
+            name: turnstileProvision.widgetName,
+            id: turnstileProvision.widgetName,
+          });
+          manifestResources.push({
+            type: 'turnstile_widget',
+            name: turnstileProvision.widgetName,
+            id: turnstileProvision.widgetName,
+            managed: previousTurnstile?.managed ?? true,
+            source: turnstileProvision.source,
+            metadata: {
+              siteKey: turnstileProvision.siteKey,
+              hostnames: turnstileProvision.hostnames.join(','),
+            },
+          });
         }
         console.log();
       }
@@ -1919,26 +2750,33 @@ export const deployCommand = new Command('deploy')
     const storeCfCredentials = selfDestructCfg?.enabled === true
       || process.env.EDGEBASE_STORE_CF_TOKEN === '1';
 
-    // ─── Pre-deploy secret sync (re-deploys only) ───
-    // wrangler secret put/bulk require an already-deployed Worker, so this is
-    // only possible when the Worker already exists. Doing it BEFORE `wrangler
-    // deploy` means a re-deploy never goes live with missing/rotated auth
-    // secrets, and a secret-sync failure aborts before the new version is
-    // published (the previous live version stays intact). First-ever deploys
-    // must set secrets after the Worker exists (handled post-deploy).
-    const workerAlreadyDeployed = !!previousManifest?.worker;
-    if (workerAlreadyDeployed) {
-      try {
-        syncEnvSecrets(projectDir, { failOnError: true });
-        ensureManagedWorkerSecrets(projectDir, cfAuth.accountId, { failOnError: true, storeCfCredentials });
-      } catch (err) {
-        raiseCliError({
-          code: 'deploy_secret_presync_failed',
-          message: `Secret synchronization failed before deploy: ${(err as Error).message}`,
-          hint: 'Aborted before publishing — the previous live version is unchanged. '
-            + 'Fix Cloudflare auth/secrets and re-run `npx edgebase deploy`.',
-        });
+    // ─── Atomic version-bound secret preparation ───
+    // Wrangler's --secrets-file binds secret updates to the same Worker version
+    // as the public config/code upload. This prevents both first-deploy gaps and
+    // redeploy windows where a new Turnstile site key is paired with an old
+    // secret (or the old Worker suddenly receives a rotated secret).
+    try {
+      tempDeploySecretsPath = prepareAtomicDeploySecrets(
+        projectDir,
+        cfAuth.accountId,
+        workerAlreadyDeployed,
+        { storeCfCredentials, turnstileSecret },
+      );
+      if (tempDeploySecretsPath) {
+        disposeTempDeploySecretCleanup = registerDeploySecretCleanup(tempDeploySecretsPath);
       }
+    } catch (err) {
+      try {
+        await releaseManagedTurnstileLease();
+      } catch {
+        // Expiry is the crash-safe fallback.
+      }
+      raiseCliError({
+        code: 'deploy_secret_prepare_failed',
+        message: `Secret preparation failed before deploy: ${(err as Error).message}`,
+        hint: 'Aborted before publishing — the previous live version is unchanged. '
+          + 'Fix Cloudflare auth/secrets and re-run `npx edgebase deploy`.',
+      });
     }
 
     // ─── Deploy ───
@@ -1946,6 +2784,10 @@ export const deployCommand = new Command('deploy')
     if (tempWranglerPath) {
       deployArgs.push('--config', tempWranglerPath);
       console.log(chalk.dim(`  Using generated config: ${tempWranglerPath}`));
+    }
+    if (tempDeploySecretsPath) {
+      deployArgs.push('--secrets-file', tempDeploySecretsPath);
+      console.log(chalk.dim('  Applying runtime secrets atomically with the Worker version'));
     }
     if (!isQuiet()) console.log(chalk.dim('  Running wrangler deploy...'));
 
@@ -1962,6 +2804,11 @@ export const deployCommand = new Command('deploy')
           stdio: ['inherit', 'pipe', 'pipe'],
         });
         let capturedDeployOutput = '';
+        const disposeDeployTimeout = registerDeploySubprocessTimeout(wrangler, () => {
+          const timeoutMessage = '\nWrangler deploy exceeded 10 minutes and was terminated.\n';
+          capturedDeployOutput += timeoutMessage;
+          process.stderr.write(timeoutMessage);
+        });
 
         wrangler.stdout?.on('data', (chunk) => {
           const text = chunk.toString();
@@ -1975,16 +2822,19 @@ export const deployCommand = new Command('deploy')
         });
 
         wrangler.on('error', (err) => {
+          disposeDeployTimeout();
           if (tempWranglerPath)
             try {
               unlinkSync(tempWranglerPath);
             } catch {
               /* ignore */
             }
+          disposeTempDeploySecretCleanup?.();
           rejectDeploy(err);
         });
 
         wrangler.on('exit', (code) => {
+          disposeDeployTimeout();
           if (tempWranglerPath) {
             try {
               unlinkSync(tempWranglerPath);
@@ -1993,10 +2843,19 @@ export const deployCommand = new Command('deploy')
             }
             console.log(chalk.dim('  Cleaned up temp wrangler.toml'));
           }
+          if (tempDeploySecretsPath) {
+            disposeTempDeploySecretCleanup?.();
+            console.log(chalk.dim('  Removed temporary deploy secrets file'));
+          }
           resolveDeploy({ code: code ?? 1, output: capturedDeployOutput });
         });
       }));
     } catch (err) {
+      try {
+        await releaseManagedTurnstileLease();
+      } catch {
+        // Expiry is the crash-safe fallback.
+      }
       raiseCliError({
         code: 'deploy_spawn_failed',
         message: `Deploy failed to start: ${(err as Error).message}`,
@@ -2018,6 +2877,11 @@ export const deployCommand = new Command('deploy')
       } else if (outputLower.includes('quota') || outputLower.includes('exceeded')) {
         deployHint = `You may have reached a resource limit on your Cloudflare plan. Check: Cloudflare Dashboard → Workers & Pages → Plans.`;
       }
+      try {
+        await releaseManagedTurnstileLease();
+      } catch {
+        // Expiry is the crash-safe fallback.
+      }
       raiseCliError({
         code: 'deploy_failed',
         message: `Deploy failed with exit code: ${deployExitCode}`,
@@ -2028,8 +2892,35 @@ export const deployCommand = new Command('deploy')
       }, deployExitCode);
     }
 
+    try {
+      if (turnstileDeployLease) {
+        // Assert ownership immediately after Wrangler returns. The process may
+        // have been suspended beyond the bounded lease while the child deploy
+        // completed; a lost owner must leave the safe staged union untouched.
+        await renewManagedTurnstileLease();
+      }
+      await finalizeTurnstileProvision(
+        turnstileProvision,
+        cfAuth.accountId,
+        extractWorkerVersionIdFromWranglerDeployOutput(deployOutput),
+        turnstileDeployLease ? renewManagedTurnstileLease : undefined,
+      );
+      await releaseManagedTurnstileLease();
+    } catch (err) {
+      try {
+        await releaseManagedTurnstileLease();
+      } catch {
+        // The original finalization/lease error is more actionable; expiry is bounded.
+      }
+      raiseCliError({
+        code: 'captcha_hostname_finalize_failed',
+        message: `Worker deploy succeeded, but managed CAPTCHA finalization failed: ${(err as Error).message}`,
+        hint: 'The staged old∪new hostname union was left safe. Resolve the live Worker version or D1/Turnstile API access, then rerun deploy.',
+      });
+    }
+
     const deployedWorkerUrl = resolveDeployedWorkerUrl(projectDir, deployOutput);
-    const persistedManifestResources = dedupeManifestResources([
+    let persistedManifestResources = dedupeManifestResources([
       ...(previousManifest?.resources ?? []),
       ...manifestResources,
     ]);
@@ -2047,19 +2938,38 @@ export const deployCommand = new Command('deploy')
       console.log(chalk.dim(`  Saved deploy manifest: ${deployManifestPath}`));
     }
 
-    // Post-deploy secret sync. Required for first deploys (secrets can only be
-    // set once the Worker exists); a no-op for re-deploys where secrets were
-    // already synced pre-deploy above.
     try {
-      syncEnvSecrets(projectDir, { failOnError: true });
-      ensureManagedWorkerSecrets(projectDir, cfAuth.accountId, { failOnError: true, storeCfCredentials });
+      const retiredTurnstileWidgets = await cleanupLegacyTurnstileWidgets(
+        turnstileProvision,
+        cfAuth.accountId,
+      );
+      if (retiredTurnstileWidgets.length > 0) {
+        const retiredNames = new Set(retiredTurnstileWidgets.map((widget) => widget.name));
+        persistedManifestResources = persistedManifestResources.filter((resource) =>
+          resource.type !== 'turnstile_widget' || !retiredNames.has(resource.name),
+        );
+        writeCloudflareDeployManifest(projectDir, {
+          version: 2,
+          deployedAt: new Date().toISOString(),
+          accountId: cfAuth.accountId,
+          worker: {
+            name: resolveWorkerNameFromProject(projectDir),
+            url: deployedWorkerUrl,
+          },
+          resources: persistedManifestResources,
+        });
+        if (!isQuiet()) {
+          console.log(
+            chalk.green('✓'),
+            `Removed ${retiredTurnstileWidgets.length} legacy Turnstile widget(s)`,
+          );
+        }
+      }
     } catch (err) {
       raiseCliError({
-        code: 'deploy_secret_sync_failed',
-        message: `Deploy completed but secret synchronization failed: ${(err as Error).message}`,
-        hint: 'The Worker was deployed but required runtime secrets were not fully applied. '
-          + `Re-run \`${wranglerHint(['wrangler', 'secret', 'put', 'SERVICE_KEY'])}\` (and JWT_USER_SECRET / JWT_ADMIN_SECRET), `
-          + 'or re-run `npx edgebase deploy` to complete secret setup before serving production traffic.',
+        code: 'captcha_legacy_widget_cleanup_failed',
+        message: `Worker deploy succeeded, but legacy Turnstile widget cleanup failed: ${(err as Error).message}`,
+        hint: 'No live/recent widget was deleted. Fix Cloudflare API access and re-run deploy before the account reaches its widget quota.',
       });
     }
 
@@ -2198,42 +3108,116 @@ export const deployCommand = new Command('deploy')
     }
   });
 
-// ─── Sync .env.release → Cloudflare Secrets ───
+// ─── Version-bound deploy secrets ───
 
 /**
- * If `.env.release` exists, parse it and bulk-upload all key-value pairs
- * to Cloudflare Workers Secrets via `wrangler secret bulk`.
- *
- * This runs before SERVICE_KEY auto-generation so user-defined secrets
- * are available first. SERVICE_KEY is excluded even if present in the file
- * (it is auto-managed by the deploy pipeline).
+ * Build a short-lived Wrangler --secrets-file. Wrangler applies this file to
+ * the exact version uploaded by `wrangler deploy`, so code/public vars and
+ * rotated credentials become visible together. Omitted secrets are retained
+ * by Wrangler, which lets existing deployments keep secrets whose plaintext is
+ * intentionally unavailable to the CLI.
  */
-function syncEnvSecrets(projectDir: string, options?: { failOnError?: boolean }): void {
-  const envReleasePath = join(projectDir, '.env.release');
-  if (!existsSync(envReleasePath)) return;
-
+function prepareAtomicDeploySecrets(
+  projectDir: string,
+  accountId: string,
+  workerAlreadyDeployed: boolean,
+  options: {
+    storeCfCredentials: boolean;
+    turnstileSecret?: string;
+  },
+): string | null {
+  const secretNames = workerAlreadyDeployed
+    ? listWranglerSecretNames(projectDir)
+    : new Set<string>();
   const vars = resolveReleaseSecretVars(projectDir);
-  // SERVICE_KEY is auto-managed — ignore if user accidentally included it
+
+  // SERVICE_KEY is CLI-owned. Runtime trust mode is a non-secret Wrangler var.
   delete vars['SERVICE_KEY'];
-  const keys = Object.keys(vars);
-  if (keys.length === 0) return;
+  delete vars['EDGEBASE_RUNTIME_MODE'];
 
-  const s = spin('Syncing .env.release → Cloudflare Secrets...');
+  const edgebaseDir = join(projectDir, '.edgebase');
+  const secretsJsonPath = join(edgebaseDir, 'secrets.json');
+  if (!existsSync(edgebaseDir)) mkdirSync(edgebaseDir, { recursive: true });
+  scavengeStaleDeploySecrets(edgebaseDir);
 
-  try {
-    execFileSync(wranglerCommand(), wranglerArgs(['wrangler', 'secret', 'bulk']), {
-      cwd: projectDir,
-      input: JSON.stringify(vars),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    s.succeed(`${keys.length} secret(s) synced: ${keys.join(', ')}`);
-  } catch (err) {
-    s.fail('Failed to sync .env.release secrets');
-    console.error(chalk.dim('  Error: ' + ((err as Error).message?.split('\n')[0] ?? '')));
-    console.error(chalk.dim(`  You can manually run: ${wranglerHint(['wrangler', 'secret', 'bulk'])} < .env.release`));
-    if (options?.failOnError) throw err;
+  let persistedSecrets: Record<string, string> = {};
+  if (existsSync(secretsJsonPath)) {
+    try {
+      persistedSecrets = JSON.parse(readFileSync(secretsJsonPath, 'utf-8')) as Record<string, string>;
+    } catch {
+      throw new Error('Cannot prepare deployment with an invalid .edgebase/secrets.json file.');
+    }
   }
+
+  let persistedSecretsChanged = false;
+  const generatedAt = new Date().toISOString();
+  const ensureManagedSecret = (name: 'SERVICE_KEY' | 'JWT_USER_SECRET' | 'JWT_ADMIN_SECRET') => {
+    if (secretNames.has(name) || vars[name]) return;
+    const reusable = typeof persistedSecrets[name] === 'string' && persistedSecrets[name].length >= 32
+      ? persistedSecrets[name]
+      : randomBytes(32).toString('hex');
+    vars[name] = reusable;
+    if (persistedSecrets[name] !== reusable) {
+      persistedSecrets[name] = reusable;
+      persistedSecretsChanged = true;
+    }
+    if (name === 'SERVICE_KEY' && !persistedSecrets['SERVICE_KEY_CREATED_AT']) {
+      persistedSecrets['SERVICE_KEY_CREATED_AT'] = generatedAt;
+      persistedSecrets['SERVICE_KEY_UPDATED_AT'] = generatedAt;
+      persistedSecretsChanged = true;
+    }
+  };
+
+  ensureManagedSecret('SERVICE_KEY');
+  ensureManagedSecret('JWT_USER_SECRET');
+  ensureManagedSecret('JWT_ADMIN_SECRET');
+
+  if (options.turnstileSecret) {
+    vars['TURNSTILE_SECRET'] = options.turnstileSecret;
+  }
+
+  if (options.storeCfCredentials) {
+    const explicitToken = process.env.EDGEBASE_SELF_DESTRUCT_CF_TOKEN
+      || process.env.CLOUDFLARE_API_TOKEN;
+    if (explicitToken) {
+      if (!secretNames.has('CF_API_TOKEN')) vars['CF_API_TOKEN'] = explicitToken;
+      if (!secretNames.has('CF_ACCOUNT_ID')) vars['CF_ACCOUNT_ID'] = accountId;
+    } else if (!isQuiet()) {
+      console.log(chalk.yellow('  ⚠ Self-management enabled but no explicit Cloudflare token provided.'));
+      console.log(chalk.dim('    Set EDGEBASE_SELF_DESTRUCT_CF_TOKEN (or CLOUDFLARE_API_TOKEN) to a scoped token.'));
+    }
+  }
+
+  // Strip plaintext copies written by legacy CLI versions.
+  if (Object.prototype.hasOwnProperty.call(persistedSecrets, 'CF_API_TOKEN')) {
+    delete persistedSecrets['CF_API_TOKEN'];
+    persistedSecretsChanged = true;
+  }
+  if (persistedSecretsChanged) {
+    writeFileSync(
+      secretsJsonPath,
+      JSON.stringify(persistedSecrets, null, 2),
+      { encoding: 'utf-8', mode: 0o600 },
+    );
+    chmodSync(secretsJsonPath, 0o600);
+  }
+
+  const names = Object.keys(vars).sort();
+  if (names.length === 0) return null;
+  const secretsPath = join(
+    edgebaseDir,
+    `.deploy-secrets-${process.pid}-${randomBytes(6).toString('hex')}.json`,
+  );
+  writeFileSync(
+    secretsPath,
+    JSON.stringify(vars),
+    { encoding: 'utf-8', mode: 0o600 },
+  );
+  chmodSync(secretsPath, 0o600);
+  if (!isQuiet()) {
+    console.log(chalk.green('✓'), `Prepared ${names.length} version-bound Worker secret(s)`);
+  }
+  return secretsPath;
 }
 
 function resolveReleaseSecretVars(projectDir: string): Record<string, string> {
@@ -2241,6 +3225,7 @@ function resolveReleaseSecretVars(projectDir: string): Record<string, string> {
   if (!existsSync(envReleasePath)) return {};
 
   const vars = parseEnvFile(envReleasePath);
+  delete vars['EDGEBASE_RUNTIME_MODE'];
   for (const key of Object.keys(vars)) {
     const override = process.env[key];
     if (typeof override === 'string' && override.length > 0) {
@@ -2503,116 +3488,6 @@ async function promptToSyncAuthReleaseEnv(projectDir: string): Promise<void> {
   console.log();
 }
 
-function ensureManagedWorkerSecrets(
-  projectDir: string,
-  accountId: string,
-  options?: { failOnError?: boolean; storeCfCredentials?: boolean },
-): void {
-  try {
-    const secretNames = listWranglerSecretNames(projectDir);
-    const edgebaseDir = join(projectDir, '.edgebase');
-    const secretsJsonPath = join(edgebaseDir, 'secrets.json');
-    if (!existsSync(edgebaseDir)) mkdirSync(edgebaseDir, { recursive: true });
-
-    let existingSecrets: Record<string, string> = {};
-    if (existsSync(secretsJsonPath)) {
-      try {
-        existingSecrets = JSON.parse(readFileSync(secretsJsonPath, 'utf-8'));
-      } catch {
-        /* ignore invalid JSON */
-      }
-    }
-
-    const generatedAt = new Date().toISOString();
-    const generatedSecrets: Array<{ name: string; value: string; spinnerLabel: string }> = [];
-
-    if (!secretNames.has('SERVICE_KEY')) {
-      generatedSecrets.push({
-        name: 'SERVICE_KEY',
-        value: randomBytes(32).toString('hex'),
-        spinnerLabel: 'Generating Service Key...',
-      });
-    }
-    if (!secretNames.has('JWT_USER_SECRET')) {
-      generatedSecrets.push({
-        name: 'JWT_USER_SECRET',
-        value: randomBytes(32).toString('hex'),
-        spinnerLabel: 'Generating JWT user secret...',
-      });
-    }
-    if (!secretNames.has('JWT_ADMIN_SECRET')) {
-      generatedSecrets.push({
-        name: 'JWT_ADMIN_SECRET',
-        value: randomBytes(32).toString('hex'),
-        spinnerLabel: 'Generating JWT admin secret...',
-      });
-    }
-
-    // Store CF credentials for self-destruct capability (dashboard "Delete App").
-    // OFF by default: uploading a Cloudflare token as a Worker secret makes it
-    // readable at runtime and, previously, persisted it in plaintext locally.
-    // Only do this when explicitly opted in, and only with a user-supplied
-    // scoped token — never the broad wrangler OAuth token.
-    if (options?.storeCfCredentials) {
-      const explicitToken = process.env.EDGEBASE_SELF_DESTRUCT_CF_TOKEN
-        || process.env.CLOUDFLARE_API_TOKEN;
-      if (explicitToken) {
-        if (!isQuiet()) {
-          console.log(chalk.yellow('  ⚠ Self-management enabled: storing a Cloudflare API token as Worker secret CF_API_TOKEN.'));
-          console.log(chalk.dim('    The token is readable by the Worker at runtime. Use a token scoped to only this app\'s resources.'));
-        }
-        if (!secretNames.has('CF_API_TOKEN')) {
-          generatedSecrets.push({
-            name: 'CF_API_TOKEN',
-            value: explicitToken,
-            spinnerLabel: 'Storing scoped CF API token for self-management...',
-          });
-        }
-        if (!secretNames.has('CF_ACCOUNT_ID')) {
-          generatedSecrets.push({
-            name: 'CF_ACCOUNT_ID',
-            value: accountId,
-            spinnerLabel: 'Storing CF account ID...',
-          });
-        }
-      } else if (!isQuiet()) {
-        console.log(chalk.yellow('  ⚠ Self-management enabled but no explicit Cloudflare token provided.'));
-        console.log(chalk.dim('    Set EDGEBASE_SELF_DESTRUCT_CF_TOKEN (or CLOUDFLARE_API_TOKEN) to a scoped token to enable dashboard "Delete App".'));
-      }
-    }
-
-    for (const secret of generatedSecrets) {
-      const spinner = spin(secret.spinnerLabel);
-      execFileSync(wranglerCommand(), wranglerArgs(['wrangler', 'secret', 'put', secret.name]), {
-        cwd: projectDir,
-        input: secret.value,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      spinner.succeed(`${secret.name} stored`);
-      existingSecrets[secret.name] = secret.value;
-      if (secret.name === 'SERVICE_KEY') {
-        existingSecrets['SERVICE_KEY_CREATED_AT'] = generatedAt;
-        existingSecrets['SERVICE_KEY_UPDATED_AT'] = generatedAt;
-        console.log(chalk.dim('  Key: sk_' + '*'.repeat(12) + secret.value.slice(-4)));
-      }
-    }
-
-    // Never persist the Cloudflare API token in plaintext .edgebase/secrets.json.
-    // When self-management is enabled it lives only as a Worker secret; also
-    // strip any legacy plaintext copy left by older CLI versions.
-    delete existingSecrets['CF_API_TOKEN'];
-
-    if (generatedSecrets.length > 0) {
-      console.log();
-      writeFileSync(secretsJsonPath, JSON.stringify(existingSecrets, null, 2), 'utf-8');
-      chmodSync(secretsJsonPath, 0o600);
-      console.log(chalk.dim('  Saved to .edgebase/secrets.json (backup-ready)'));
-    }
-  } catch (err) {
-    if (options?.failOnError) throw err;
-  }
-}
-
 /**
  * Store the deploy manifest in KV so the Worker can read it at runtime
  * for self-destruct ("Delete App" from dashboard).
@@ -2659,6 +3534,7 @@ function storeManifestInKv(
         cwd: projectDir,
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: WRANGLER_RESOURCE_COMMAND_TIMEOUT_MS,
       },
     );
     if (!isQuiet()) {

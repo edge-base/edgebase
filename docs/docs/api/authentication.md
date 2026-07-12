@@ -36,6 +36,15 @@ than setting this header manually. Cookie-mode auth responses omit
 `sessionTransport: "cookie"`. `POST /api/auth/refresh` and
 `POST /api/auth/signout` then accept an empty body and use the cookie.
 
+On HTTPS, EdgeBase writes the rotating refresh credential as a host-only
+`__Host-{configuredName}` cookie with `HttpOnly`, `Secure`, and `Path=/`.
+Plain-HTTP local development uses the configured base name and `/api/auth`
+path. Release mode rejects cookie auth unless the public request is HTTPS (or
+arrives through an explicitly trusted TLS-terminating proxy), except for an
+HTTP loopback request owned by the CLI's explicit `local-development` runtime.
+That exception never applies to deployed Cloudflare or self-hosted release
+traffic, and `SameSite=None` still requires HTTPS.
+
 Cookie transport requires same-origin requests or an exact `cors.origin` entry
 with `credentials: true`. Wildcard origins do not qualify.
 
@@ -180,7 +189,9 @@ curl -X POST https://your-project.edgebase.fun/api/auth/signout \
 
 ### `POST /api/auth/refresh`
 
-Refresh an expired access token. Uses token rotation with a 30-second grace period -- the old refresh token remains valid for 30 seconds after rotation to handle concurrent requests.
+Refresh an expired access token. Rotation uses a 30-second previous-token
+grace path: a retry with the old token returns the already-winning current
+replacement instead of rotating a second branch.
 
 **Auth**: None (identified by refresh token)
 
@@ -205,7 +216,7 @@ curl -X POST https://your-project.edgebase.fun/api/auth/refresh \
 
 | Error                 | Status | Description                        |
 | --------------------- | ------ | ---------------------------------- |
-| Invalid/expired token | `401`  | Token is expired or already used   |
+| Invalid/expired token | `401`  | Token is expired, revoked, or outside the previous-token grace path |
 
 ---
 
@@ -352,14 +363,17 @@ curl -X POST https://your-project.edgebase.fun/api/auth/change-password \
 
 ### `POST /api/auth/link/email`
 
-Link an email and password to an existing anonymous account. After linking, the user can sign in with the email and password. New tokens are issued.
+Link an email and password to an existing anonymous account. After linking, the
+user can sign in with the email and password. The email identity, anonymous
+index deletion, revocation of all provisional sessions, sole replacement
+session, and a five-minute encrypted completion checkpoint commit atomically.
 
 **Auth**: Bearer Token (anonymous account)
 
 | Request Body | Type   | Required | Description                        |
 | ------------ | ------ | -------- | ---------------------------------- |
-| `email`      | string | Yes      | Email to link                      |
-| `password`   | string | Yes      | Password to set (minimum 8 characters) |
+| `email`      | string | Yes      | Normalized email to link (maximum 320 characters) |
+| `password`   | string | Yes      | Password to set (8–256 characters and configured password policy) |
 
 ```bash
 curl -X POST https://your-project.edgebase.fun/api/auth/link/email \
@@ -368,7 +382,19 @@ curl -X POST https://your-project.edgebase.fun/api/auth/link/email \
   -d '{"email": "user@example.com", "password": "secret123"}'
 ```
 
-**Response** `200` -- Includes new tokens (`user`, `accessToken`, `refreshToken`)
+**Response** `200` -- Body-token transport returns `user`, `accessToken`,
+`refreshToken`, and `sessionId`. Cookie transport omits `refreshToken`, sets the
+negotiated HttpOnly refresh cookie, and returns `sessionTransport: "cookie"`.
+
+If the request may have committed but its response or local credential write
+was lost, retry promptly with the same normalized email and exact password,
+using the initiating access token. Although that token's session was revoked
+by the successful upgrade, this endpoint permits it only to recover the exact
+encrypted completion for about five minutes. The replay returns the original
+replacement pair and never creates a second session. A different user, email,
+password, or access token from another session of the same user fails closed.
+The checkpoint stores a server-keyed password proof, not the password or a
+plaintext refresh token.
 
 ---
 
@@ -665,17 +691,49 @@ Initiate an OAuth login flow. This endpoint redirects the user's browser to the 
 
 | Path Parameter | Description                                                                                     |
 | -------------- | ----------------------------------------------------------------------------------------------- |
-| `provider`     | OAuth provider name: `google`, `github`, `apple`, `discord`, `microsoft`, `facebook`, `kakao`, `naver`, `x`, `line`, `slack`, `spotify`, `twitch` |
+| `provider`     | OAuth provider name: `google`, `github`, `apple`, `discord`, `microsoft`, `facebook`, `kakao`, `naver`, `x`, `reddit`, `line`, `slack`, `spotify`, `twitch`, or a configured `oidc:{name}` |
 
 | Query Parameter | Description                                     |
 | --------------- | ----------------------------------------------- |
-| `redirect_url`  | URL to redirect to after authentication completes |
+| `redirect_url`  | App URL to redirect to after authentication completes. In release it must be HTTPS and match an explicit `auth.allowedRedirectUrls` URL, origin, or path-prefix entry. |
+| `auth_transport` | Optional refresh-token transport. Only `cookie` is accepted; use the Web SDK instead of setting this manually. |
+| `oauth_recovery_nonce` | Optional 64-character lowercase hexadecimal CSPRNG nonce that EdgeBase binds to server OAuth state and returns to the app callback. The Web SDK creates and verifies this automatically. |
 
 ```
 GET https://your-project.edgebase.fun/api/auth/oauth/google?redirect_url=https://myapp.com/callback
 ```
 
 **Response**: `302` redirect to the OAuth provider's authorization page
+
+---
+
+## Exchange OAuth Completion Ticket
+
+### `POST /api/auth/oauth/exchange`
+
+An OAuth provider callback with an app `redirect_url` creates no EdgeBase
+session and redirects with no bearer credentials. Instead, the app fragment
+contains a five-minute `oauth_exchange_ticket`, `auth_transport`, and the
+SDK-managed callback nonce. A supported SDK scrubs those fields and atomically
+exchanges the ticket here.
+
+**Auth**: None (the one-time ticket is the authority)
+
+```json
+{
+  "ticket": "64-character-lowercase-hex",
+  "oauthRecoveryNonce": "64-character-lowercase-hex"
+}
+```
+
+The nonce must exactly match the value bound at OAuth start, including absence.
+The requested body/cookie transport must also match the stored flow. A ticket
+is claimed once; response-loss retries of the exact ticket receive the cached
+exact result and do not create another session. Body transport returns
+`user`, `accessToken`, `refreshToken`, and `sessionId` in JSON. Cookie transport
+sets the rotating refresh cookie and omits `refreshToken` from JSON.
+
+Use `handleOAuthCallback()` rather than calling this endpoint directly.
 
 ---
 
@@ -693,8 +751,9 @@ Start an OAuth account linking flow for the currently authenticated user. This i
 
 | Request Body  | Type   | Required | Description                                      |
 | ------------- | ------ | -------- | ------------------------------------------------ |
-| `redirectUrl` | string |          | URL to redirect to after OAuth flow completes     |
+| `redirectUrl` | string |          | App URL to redirect to after OAuth flow completes. Release requires HTTPS plus an explicit allowlist match. |
 | `state`       | string |          | Optional state to pass through the OAuth redirect |
+| `oauthRecoveryNonce` | string |   | Optional 64-character lowercase hexadecimal callback-binding nonce. The Web SDK creates and verifies this automatically. |
 
 ```bash
 curl -X POST https://your-project.edgebase.fun/api/auth/oauth/link/google \
@@ -707,11 +766,43 @@ curl -X POST https://your-project.edgebase.fun/api/auth/oauth/link/google \
 
 ```json
 {
-  "redirectUrl": "https://accounts.google.com/o/oauth2/v2/auth?..."
+  "redirectUrl": "https://your-project.edgebase.fun/api/auth/oauth/link/google/continue?ticket=..."
 }
 ```
 
-The client should redirect the user to the returned `redirectUrl`. After the user completes authorization with the OAuth provider, they will be redirected to the link callback endpoint (`/api/auth/oauth/link/:provider/callback`), which handles the token exchange and account linking. If a `redirectUrl` was provided, the user is then redirected there with `access_token` and `refresh_token` as query parameters.
+The returned URL is a short-lived, one-time EdgeBase continuation, not the
+provider URL itself. Opening it in the same system browser that completes the
+flow lets EdgeBase establish the required browser state cookie before
+redirecting to the provider. The link state and continuation are stored in a
+key-sharded `AUTH` Durable Object and atomically consumed.
+
+After provider authorization, EdgeBase returns to
+`/api/auth/oauth/link/:provider/callback`, verifies the browser binding, and
+stores a five-minute completion record without mutating the account. If
+`redirectUrl` was provided, the app fragment receives only
+`oauth_link_ticket`, `auth_transport`, optional `state`, and the SDK callback
+nonce. Supported SDKs must finish with `handleOAuthCallback()`.
+
+### `POST /api/auth/oauth/complete/link`
+
+**Auth**: Bearer Token
+
+```json
+{
+  "ticket": "64-character-lowercase-hex",
+  "oauthRecoveryNonce": "64-character-lowercase-hex"
+}
+```
+
+This is the only step that mutates the account. The Bearer identity and session
+ID must exactly match the user and session captured at link start, and the
+account must still have the same anonymous/permanent mode. The server consumes
+the ticket atomically, attaches or upgrades that exact account, then returns a
+fresh session (or sets the negotiated HttpOnly refresh cookie). Account switch,
+sign-out, disabled/deleted user, and state-mode changes fail closed. An
+ambiguous response-loss retry of the exact completion ticket returns the cached
+exact result without linking or issuing a session twice.
+Use the supported SDK handler instead of calling this endpoint manually.
 
 ---
 

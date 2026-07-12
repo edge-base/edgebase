@@ -2,7 +2,7 @@
 
 // Auto-generated admin API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 declare(strict_types=1);
 
@@ -82,7 +82,7 @@ class GeneratedAdminApi
         return $this->http->post('/db/broadcast', $body);
     }
 
-    /** Execute SQL via DatabaseDO — POST /api/sql */
+    /** Execute provider-aware raw SQL — POST /api/sql */
     public function execute_sql(mixed $body = null): mixed
     {
         return $this->http->post('/sql', $body);

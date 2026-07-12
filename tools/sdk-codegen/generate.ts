@@ -55,9 +55,22 @@ interface MethodDef {
   summary: string;
   hasBody: boolean;
   hasQuery: boolean;
+  /** Endpoint gained optional request input after shipping an inputless Core method. */
+  preserveInputlessCall: boolean;
   isHead: boolean;   // HEAD requests return no body — special handling needed
   params: string[];  // path parameters
 }
+
+/**
+ * These operations shipped as inputless Core methods before their optional
+ * OpenAPI inputs were documented. Generators must keep that exact call shape
+ * (and binary overload where the language supports it) while exposing the new
+ * query/body form.
+ */
+const INPUTLESS_COMPAT_OPERATION_IDS = new Set([
+  'oauthRedirect',
+  'oauthLinkStart',
+]);
 
 interface PathDef {
   operationId: string;
@@ -214,6 +227,7 @@ function extractMethods(): Map<string, MethodDef[]> {
         summary: operation.summary ?? '',
         hasBody: !!operation.requestBody,
         hasQuery: !!(operation.parameters?.some(p => p.in === 'query')),
+        preserveInputlessCall: INPUTLESS_COMPAT_OPERATION_IDS.has(operation.operationId ?? ''),
         isHead: method === 'head',
         params: pathParams,
       });
@@ -302,9 +316,21 @@ function generateTypeScript(tag: string, methods: MethodDef[]): string {
       if (m.hasBody && m.hasQuery) {
         lines.push(`    return this.transport.request('${m.method}', ${pathExpr}, { body, query });`);
       } else if (m.hasBody) {
-        lines.push(`    return this.transport.request('${m.method}', ${pathExpr}, { body });`);
+        if (m.preserveInputlessCall) {
+          lines.push(`    return body === undefined`);
+          lines.push(`      ? this.transport.request('${m.method}', ${pathExpr})`);
+          lines.push(`      : this.transport.request('${m.method}', ${pathExpr}, { body });`);
+        } else {
+          lines.push(`    return this.transport.request('${m.method}', ${pathExpr}, { body });`);
+        }
       } else if (m.hasQuery) {
-        lines.push(`    return this.transport.request('${m.method}', ${pathExpr}, { query });`);
+        if (m.preserveInputlessCall) {
+          lines.push(`    return query === undefined`);
+          lines.push(`      ? this.transport.request('${m.method}', ${pathExpr})`);
+          lines.push(`      : this.transport.request('${m.method}', ${pathExpr}, { query });`);
+        } else {
+          lines.push(`    return this.transport.request('${m.method}', ${pathExpr}, { query });`);
+        }
       } else {
         lines.push(`    return this.transport.request('${m.method}', ${pathExpr});`);
       }
@@ -324,8 +350,8 @@ function tsBuildArgs(m: MethodDef): string {
   for (const param of m.params) {
     args.push(`${param}: string`);
   }
-  if (m.hasBody) args.push('body: unknown');
-  if (m.hasQuery) args.push('query: Record<string, string>');
+  if (m.hasBody) args.push(m.preserveInputlessCall ? 'body?: unknown' : 'body: unknown');
+  if (m.hasQuery) args.push(m.preserveInputlessCall ? 'query?: Record<string, string>' : 'query: Record<string, string>');
   return args.join(', ');
 }
 
@@ -387,8 +413,16 @@ function generatePython(tag: string, methods: MethodDef[]): string {
       if (m.hasBody && m.hasQuery) {
         lines.push(`        return self._http.${verb}(${pyPath}, body, params=query)`);
       } else if (m.hasBody) {
+        if (m.preserveInputlessCall) {
+          lines.push(`        if body is None:`);
+          lines.push(`            return self._http.${verb}(${pyPath})`);
+        }
         lines.push(`        return self._http.${verb}(${pyPath}, body)`);
       } else if (m.hasQuery) {
+        if (m.preserveInputlessCall) {
+          lines.push(`        if query is None:`);
+          lines.push(`            return self._http.get(${pyPath})`);
+        }
         lines.push(`        return self._http.get(${pyPath}, params=query)`);
       } else if (verb === 'post' || verb === 'put' || verb === 'patch') {
         lines.push(`        return self._http.${verb}(${pyPath})`);
@@ -409,7 +443,7 @@ function pyBuildParams(m: MethodDef): string {
   for (const param of m.params) {
     args.push(`${toSnakeCase(param)}: str`);
   }
-  if (m.hasBody) args.push('body: Any');
+  if (m.hasBody) args.push(m.preserveInputlessCall ? 'body: Any = None' : 'body: Any');
   if (m.hasQuery) args.push('query: dict[str, str] | None = None');
   return args.join(', ');
 }
@@ -544,6 +578,25 @@ function generateGo(tag: string, methods: MethodDef[]): string {
     lines.push(``);
     lines.push(`// ${name} — ${m.summary} — ${m.method} ${m.path}`);
 
+    if (m.preserveInputlessCall) {
+      const legacyParams = ['ctx context.Context', ...m.params.map((param) => `${goParam(param)} string`)].join(', ');
+      const helperName = `${name}With${m.hasBody ? 'Body' : 'Query'}`;
+      const goMethod = m.method === 'POST' ? 'Post' : 'Get';
+      lines.push(`func (a *${structName}) ${name}(${legacyParams}) (map[string]interface{}, error) {`);
+      lines.push(m.hasBody
+        ? `\treturn a.client.${goMethod}(ctx, ${goPath}, nil)`
+        : `\treturn a.client.${goMethod}(ctx, ${goPath})`);
+      lines.push(`}`);
+      lines.push(``);
+      lines.push(`// ${helperName} — ${m.summary} with optional request input.`);
+      lines.push(`func (a *${structName}) ${helperName}(${goParams}) (map[string]interface{}, error) {`);
+      lines.push(m.hasBody
+        ? `\treturn a.client.do(ctx, "${m.method}", ${goPath}, body)`
+        : `\treturn a.client.GetWithQuery(ctx, ${goPath}, query)`);
+      lines.push(`}`);
+      continue;
+    }
+
     if (m.isHead) {
       lines.push(`func (a *${structName}) ${name}(${goParams}) (bool, error) {`);
       lines.push(`\treturn a.client.Head(ctx, ${goPath})`);
@@ -640,6 +693,29 @@ function generateRust(tag: string, methods: MethodDef[]): string {
     lines.push(``);
     lines.push(`    /// ${m.summary} — ${m.method} ${m.path}`);
 
+    if (m.preserveInputlessCall) {
+      const legacyParams = ['&self', ...m.params.map((param) => `${rustParam(param)}: &str`)].join(', ');
+      const helperName = `${name}_${m.hasBody ? 'with_body' : 'with_query'}`;
+      const verb = httpVerb(m.method);
+      lines.push(`    pub async fn ${name}(${legacyParams}) -> Result<Value, Error> {`);
+      if (m.hasBody) {
+        lines.push(`        self.http.${verb}(${rustPath}, &Value::Null).await`);
+      } else {
+        lines.push(`        self.http.get(${rustPath}).await`);
+      }
+      lines.push(`    }`);
+      lines.push(``);
+      lines.push(`    /// ${m.summary} with optional request input.`);
+      lines.push(`    pub async fn ${helperName}(${rustParams}) -> Result<Value, Error> {`);
+      if (m.hasBody) {
+        lines.push(`        self.http.${verb}(${rustPath}, body).await`);
+      } else {
+        lines.push(`        self.http.get_with_query(${rustPath}, query).await`);
+      }
+      lines.push(`    }`);
+      continue;
+    }
+
     if (m.isHead) {
       lines.push(`    pub async fn ${name}(${rustParams}) -> Result<bool, Error> {`);
       lines.push(`        self.http.head(${rustPath}).await`);
@@ -734,6 +810,9 @@ function generateDart(tag: string, methods: MethodDef[]): string {
       if (m.hasBody && m.hasQuery) {
         lines.push(`    return _http.${verb}WithQuery(${dartPath}, body, query);`);
       } else if (m.hasBody) {
+        if (m.preserveInputlessCall) {
+          lines.push(`    if (body == null) return _http.${verb}(${dartPath}, {});`);
+        }
         lines.push(`    return _http.${verb}(${dartPath}, body);`);
       } else if (m.hasQuery) {
         lines.push(`    return _http.get(${dartPath}, query);`);
@@ -758,8 +837,8 @@ function dartBuildParams(m: MethodDef): string {
   for (const param of m.params) {
     args.push(`String ${param}`);
   }
-  if (m.hasBody) args.push('Object? body');
-  if (m.hasQuery) args.push('Map<String, String>? query');
+  if (m.hasBody) args.push(m.preserveInputlessCall ? '[Object? body]' : 'Object? body');
+  if (m.hasQuery) args.push(m.preserveInputlessCall ? '[Map<String, String>? query]' : 'Map<String, String>? query');
   return args.join(', ');
 }
 
@@ -807,9 +886,20 @@ function generateSwift(tag: string, methods: MethodDef[]): string {
     lines.push(``);
     lines.push(`    /// ${m.summary} — ${m.method} ${m.path}`);
 
+    if (m.preserveInputlessCall) {
+      const legacyParams = m.params.map((param) => `_ ${param}: String`).join(', ');
+      lines.push(`    public func ${name}(${legacyParams}) async throws -> Any {`);
+      lines.push(m.hasBody
+        ? `        return try await http.${httpVerb(m.method)}(${swiftPath}, [:])`
+        : `        return try await http.get(${swiftPath})`);
+      lines.push(`    }`);
+      lines.push(``);
+      lines.push(`    /// ${m.summary} with optional request input.`);
+    }
+
     if (m.isHead) {
-      lines.push(`    public func ${name}(${swiftParams}) async -> Bool {`);
-      lines.push(`        return await http.head(${swiftPath})`);
+      lines.push(`    public func ${name}(${swiftParams}) async throws -> Bool {`);
+      lines.push(`        return try await http.head(${swiftPath})`);
     } else {
       const verb = httpVerb(m.method);
       lines.push(`    public func ${name}(${swiftParams}) async throws -> Any {`);
@@ -841,7 +931,9 @@ function swiftBuildParams(m: MethodDef): string {
     args.push(`_ ${param}: String`);
   }
   if (m.hasBody) args.push('_ body: [String: Any]');
-  if (m.hasQuery) args.push('query: [String: String]? = nil');
+  if (m.hasQuery) args.push(m.preserveInputlessCall
+    ? 'query: [String: String]?'
+    : 'query: [String: String]? = nil');
   return args.join(', ');
 }
 
@@ -897,6 +989,17 @@ function generateKotlin(tag: string, methods: MethodDef[]): string {
     lines.push(``);
     lines.push(`    /** ${m.summary} — ${m.method} ${m.path} */`);
 
+    if (m.preserveInputlessCall) {
+      const legacyParams = m.params.map((param) => `${param}: String`).join(', ');
+      lines.push(`    @Suppress("UNCHECKED_CAST")`);
+      lines.push(`    suspend fun ${name}(${legacyParams}): Any? =`);
+      lines.push(m.hasBody
+        ? `        http.${httpVerb(m.method)}(${ktPath})`
+        : `        http.get(${ktPath})`);
+      lines.push(``);
+      lines.push(`    /** ${m.summary} with optional request input. */`);
+    }
+
     if (m.isHead) {
       lines.push(`    ${ktMethodMod}suspend fun ${name}(${ktParams}): Boolean =`);
       lines.push(`        http.head(${ktPath})`);
@@ -930,8 +1033,12 @@ function ktBuildParams(m: MethodDef): string {
   for (const param of m.params) {
     args.push(`${param}: String`);
   }
-  if (m.hasBody) args.push('body: Map<String, Any?> = emptyMap()');
-  if (m.hasQuery) args.push('query: Map<String, String>? = null');
+  if (m.hasBody) args.push(m.preserveInputlessCall
+    ? 'body: Map<String, Any?>'
+    : 'body: Map<String, Any?> = emptyMap()');
+  if (m.hasQuery) args.push(m.preserveInputlessCall
+    ? 'query: Map<String, String>?'
+    : 'query: Map<String, String>? = null');
   return args.join(', ');
 }
 
@@ -988,6 +1095,17 @@ function generateJava(tag: string, methods: MethodDef[]): string {
 
     lines.push(``);
     lines.push(`    /** ${m.summary} — ${m.method} ${m.path} */`);
+
+    if (m.preserveInputlessCall) {
+      const legacyParams = m.params.map((param) => `String ${param}`).join(', ');
+      lines.push(`    public Object ${name}(${legacyParams}) throws EdgeBaseError {`);
+      lines.push(m.hasBody
+        ? `        return http.${httpVerb(m.method)}(${javaPath}, null);`
+        : `        return http.get(${javaPath});`);
+      lines.push(`    }`);
+      lines.push(``);
+      lines.push(`    /** ${m.summary} with optional request input. */`);
+    }
 
     if (m.isHead) {
       lines.push(`    public boolean ${name}(${javaParams}) throws EdgeBaseError {`);
@@ -1176,20 +1294,34 @@ function generateCSharp(tag: string, methods: MethodDef[]): string {
     lines.push(``);
     lines.push(`    /// <summary>${m.summary} — ${m.method} ${m.path}</summary>`);
 
+    if (m.preserveInputlessCall) {
+      const legacyPathParams = m.params.map((param) => `string ${csParam(param)}`);
+      const legacyParams = [...legacyPathParams, 'CancellationToken ct = default'].join(', ');
+      lines.push(`    public Task<Dictionary<string, object?>> ${name}(${legacyParams})`);
+      lines.push(m.hasBody
+        ? `        => _http.PostAsync(${csPath}, null, ct);`
+        : `        => _http.GetAsync(${csPath}, ct);`);
+      lines.push(``);
+      lines.push(`    /// <summary>${m.summary} with optional request input.</summary>`);
+    }
+
     if (m.isHead) {
       lines.push(`    public Task<bool> ${name}(${csParams})`);
       lines.push(`        => _http.HeadAsync(${csPath}, ct);`);
     } else {
       const httpMethod = m.method === 'GET' ? 'GetAsync' : m.method === 'POST' ? 'PostAsync' : m.method === 'PATCH' ? 'PatchAsync' : m.method === 'PUT' ? 'PutAsync' : 'DeleteAsync';
+      const inputName = m.preserveInputlessCall
+        ? `${name.replace(/Async$/, '')}With${m.hasBody ? 'Body' : 'Query'}Async`
+        : name;
 
       if (m.hasBody && m.hasQuery) {
-        lines.push(`    public Task<Dictionary<string, object?>> ${name}(${csParams})`);
+        lines.push(`    public Task<Dictionary<string, object?>> ${inputName}(${csParams})`);
         lines.push(`        => _http.${httpMethod}WithQuery(${csPath}, body, query, ct);`);
       } else if (m.hasBody) {
-        lines.push(`    public Task<Dictionary<string, object?>> ${name}(${csParams})`);
+        lines.push(`    public Task<Dictionary<string, object?>> ${inputName}(${csParams})`);
         lines.push(`        => _http.${httpMethod}(${csPath}, body, ct);`);
       } else if (m.hasQuery) {
-        lines.push(`    public Task<Dictionary<string, object?>> ${name}(${csParams})`);
+        lines.push(`    public Task<Dictionary<string, object?>> ${inputName}(${csParams})`);
         lines.push(`        => _http.GetWithQueryAsync(${csPath}, query, ct);`);
       } else {
         lines.push(`    public Task<Dictionary<string, object?>> ${name}(${csParams})`);
@@ -1210,8 +1342,10 @@ function csBuildParams(m: MethodDef): string {
   for (const param of m.params) {
     args.push(`string ${csParam(param)}`);
   }
-  if (m.hasBody) args.push('object? body = null');
-  if (m.hasQuery) args.push('Dictionary<string, string>? query = null');
+  if (m.hasBody) args.push(m.preserveInputlessCall ? 'object? body' : 'object? body = null');
+  if (m.hasQuery) args.push(m.preserveInputlessCall
+    ? 'Dictionary<string, string>? query'
+    : 'Dictionary<string, string>? query = null');
   args.push('CancellationToken ct = default');
   return args.join(', ');
 }
@@ -1264,6 +1398,13 @@ function generateCppHeader(tag: string, methods: MethodDef[]): string {
     const cppVirtual = tag === 'core' && m.operationId.startsWith('dbSingle') ? 'virtual ' : '';
 
     lines.push(`  /// ${m.summary} — ${m.method} ${m.path}`);
+    if (m.preserveInputlessCall) {
+      const legacyParams = m.params
+        .map((param) => `const std::string& ${cppParam(toSnakeCase(param))}`)
+        .join(', ');
+      lines.push(`  ${cppVirtual}Result ${name}(${legacyParams}) const;`);
+      lines.push(`  /// ${m.summary} with optional request input.`);
+    }
     if (m.isHead) {
       lines.push(`  ${cppVirtual}bool ${name}(${cppParams}) const;`);
     } else {
@@ -1326,6 +1467,20 @@ function generateCppImpl(tag: string, methods: MethodDef[]): string {
 
     lines.push(``);
 
+    if (m.preserveInputlessCall) {
+      const legacyParams = m.params
+        .map((param) => `const std::string& ${cppParam(toSnakeCase(param))}`)
+        .join(', ');
+      lines.push(`Result ${className}::${name}(${legacyParams}) const {`);
+      if (m.hasBody) {
+        lines.push(`  return http_.${httpVerb(m.method)}(${cppPath}, "{}");`);
+      } else {
+        lines.push(`  return http_.get(${cppPath});`);
+      }
+      lines.push(`}`);
+      lines.push(``);
+    }
+
     if (m.isHead) {
       lines.push(`bool ${className}::${name}(${cppParams}) const {`);
       lines.push(`  return http_.head(${cppPath});`);
@@ -1363,7 +1518,9 @@ function cppBuildHeaderParams(m: MethodDef): string {
     args.push(`const std::string& ${cppParam(toSnakeCase(param))}`);
   }
   if (m.hasBody) args.push('const std::string& json_body');
-  if (m.hasQuery) args.push('const std::map<std::string, std::string>& query = {}');
+  if (m.hasQuery) args.push(m.preserveInputlessCall
+    ? 'const std::map<std::string, std::string>& query'
+    : 'const std::map<std::string, std::string>& query = {}');
   return args.join(', ');
 }
 
@@ -2176,12 +2333,12 @@ function generateWrappersSwift(groups: ResolvedWrapperGroup[]): string {
       lines.push(``);
       lines.push(`    /// ${m.summary}`);
       if (m.isHead) {
-        lines.push(`    public func ${wm.wrapperName}(${params.join(', ')}) async -> Bool {`);
+        lines.push(`    public func ${wm.wrapperName}(${params.join(', ')}) async throws -> Bool {`);
       } else {
         lines.push(`    public func ${wm.wrapperName}(${params.join(', ')}) async throws -> Any {`);
       }
       if (m.isHead) {
-        lines.push(`        return await core.${wm.coreName}(${callArgs.join(', ')})`);
+        lines.push(`        return try await core.${wm.coreName}(${callArgs.join(', ')})`);
       } else {
         lines.push(`        return try await core.${wm.coreName}(${callArgs.join(', ')})`);
       }

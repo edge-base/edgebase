@@ -189,6 +189,36 @@ if (user != null) {
 }
 ```
 
+### Restore and account upgrades
+
+The default Flutter storage persists the access and refresh tokens together in
+SharedPreferences. Restore that pair before the first authenticated request:
+
+```dart
+final restored = await client.tryRestoreSession();
+```
+
+Anonymous `linkWithEmail` and `verifyLinkPhone` calls can revoke the initiating
+session. They therefore fail before the network unless storage implements
+`DurableTokenStorage`. `MemoryTokenStorage` is intentionally rejected for those
+flows. A custom durable implementation must atomically store the full
+`StoredTokenPair`, survive process restart, and report write failures.
+
+Auth results are exposed only after pair persistence succeeds. If persistence
+fails, the old in-memory session remains available so the identical link request
+can replay the server's bounded recovery checkpoint.
+
+### CAPTCHA failures
+
+When CAPTCHA is configured, rendering or script failures throw
+`CaptchaUnavailableException` with code `captcha-unavailable` and a stable
+reason. Automatically fetched positive site keys are cached for five minutes;
+missing keys are not cached. Flutter Web retries once only when a direct
+Turnstile challenge reports `challenge_error`, using a freshly fetched key.
+Config transport/malformed responses throw `config_fetch_failed` or
+`config_invalid_response`; only an explicit `captcha: null` response is
+disabled.
+
 Read more: [Authentication Docs](https://edgebase.fun/docs/authentication)
 
 ## Database Queries

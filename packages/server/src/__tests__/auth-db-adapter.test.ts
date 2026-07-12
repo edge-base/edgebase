@@ -26,6 +26,41 @@ describe('auth db adapter', () => {
     vi.doUnmock('pg');
   });
 
+  it('adapts conflict clauses for semicolons, RETURNING, and unquoted tables', async () => {
+    mockPgClient();
+    const { adaptSqlDialect } = await import('../lib/auth-db-adapter.js');
+
+    expect(adaptSqlDialect(
+      'INSERT OR IGNORE INTO _meta (key, value) VALUES (?, ?);',
+    )).toBe('INSERT INTO _meta (key, value) VALUES (?, ?) ON CONFLICT DO NOTHING');
+    expect(adaptSqlDialect(
+      'INSERT OR IGNORE INTO _meta (key, value) VALUES (?, ?) RETURNING key;',
+    )).toBe('INSERT INTO _meta (key, value) VALUES (?, ?) ON CONFLICT DO NOTHING RETURNING key');
+    expect(adaptSqlDialect(
+      'INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?) RETURNING key;',
+    )).toBe(
+      'INSERT INTO _meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value RETURNING key',
+    );
+  });
+
+  it('canonicalizes PostgreSQL lowercase auth columns and bigint counts', async () => {
+    const pg = mockPgClient();
+    pg.query.mockResolvedValueOnce({
+      fields: [],
+      rows: [{ userid: 'user-1', refreshtoken: 'refresh-1', createdat: 'now', cnt: '2' }],
+      rowCount: 1,
+    });
+    const { PgAuthDb } = await import('../lib/auth-db-adapter.js');
+    const db = new PgAuthDb('postgres://edgebase:test@localhost/auth');
+
+    await expect(db.first('SELECT * FROM _sessions')).resolves.toEqual({
+      userId: 'user-1',
+      refreshToken: 'refresh-1',
+      createdAt: 'now',
+      cnt: 2,
+    });
+  });
+
   it('resolves auth provider and custom connectionString from config by default', async () => {
     const pg = mockPgClient();
     const { resolveAuthDb } = await import('../lib/auth-db-adapter.js');
@@ -156,6 +191,37 @@ describe('auth db adapter', () => {
     expect(bind.mock.calls[0]).toHaveLength(8);
   });
 
+  it('creates and prunes capped D1 sessions in one atomic batch', async () => {
+    const statements: Array<{ sql: string; bindings: unknown[] }> = [];
+    const prepare = vi.fn((sql: string) => ({
+      bind: vi.fn((...bindings: unknown[]) => ({ sql, bindings, run: vi.fn() })),
+    }));
+    const batch = vi.fn(async (items: Array<{ sql: string; bindings: unknown[] }>) => {
+      statements.push(...items);
+      return [];
+    });
+    const { D1AuthDb } = await import('../lib/auth-db-adapter.js');
+    const db = new D1AuthDb({ prepare, batch } as unknown as D1Database);
+
+    await db.createSessionWithLimit({
+      id: 'new-session',
+      userId: 'user-1',
+      refreshToken: 'refresh-new',
+      previousRefreshToken: null,
+      rotatedAt: null,
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      createdAt: '2026-07-12T00:00:00.000Z',
+      metadata: null,
+    }, 1);
+
+    expect(batch).toHaveBeenCalledOnce();
+    expect(statements).toHaveLength(3);
+    expect(statements[0].sql).toContain('expiresAt <= ?');
+    expect(statements[1].sql).toContain('INSERT INTO _sessions');
+    expect(statements[2].sql).toContain('LIMIT -1 OFFSET ?');
+    expect(statements[2].bindings).toEqual(['user-1', 'new-session', 1]);
+  });
+
   it('uses exact-token UPDATE ... RETURNING for PostgreSQL user-session CAS', async () => {
     const pg = mockPgClient();
     pg.query.mockResolvedValueOnce({ fields: [], rows: [{ id: 'user-session-1' }], rowCount: 1 });
@@ -171,7 +237,7 @@ describe('auth db adapter', () => {
     })).resolves.toBe(true);
     expect(pg.query).toHaveBeenCalledOnce();
     expect(pg.query.mock.calls[0][0]).toContain('UPDATE _sessions');
-    expect(pg.query.mock.calls[0][0]).toContain('"refreshToken" = $7');
+    expect(pg.query.mock.calls[0][0]).toContain('refreshToken = $7');
     expect(pg.query.mock.calls[0][0]).toContain('RETURNING id');
   });
 });

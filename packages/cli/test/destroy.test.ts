@@ -26,6 +26,16 @@ jurisdiction = "eu"
     ]);
   });
 
+  it('accepts an indented TOML literal string for the top-level Worker name', () => {
+    const config = parseWranglerResourceConfig([
+      "   name = 'literal-worker'",
+      '[env.staging]',
+      'name = "must-not-shadow-root"',
+    ].join('\n'));
+
+    expect(config.workerName).toBe('literal-worker');
+  });
+
   it('extracts vectorize indexes from wrangler.toml', () => {
     const config = parseWranglerResourceConfig(`
 name = "my-worker"

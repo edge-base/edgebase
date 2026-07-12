@@ -245,7 +245,11 @@ export class HttpClient {
     method: string,
     path: string,
     body?: unknown,
-    options: { skipAuth?: boolean; query?: Record<string, string> } = {},
+    options: {
+      skipAuth?: boolean;
+      query?: Record<string, string>;
+      captchaToken?: string;
+    } = {},
   ): Promise<T> {
     const url = new URL(path, this.baseUrl);
     const requestLabel = `${method.toUpperCase()} ${url.pathname}`;
@@ -257,11 +261,18 @@ export class HttpClient {
       }
     }
 
-    const maxRetries = 3;
+    // Turnstile tokens are single-use. Once a protected request leaves the
+    // client, transport/HTTP failure cannot prove whether the server consumed
+    // it, so automatic replay would be ambiguous and potentially duplicate a
+    // function side effect.
+    const maxRetries = options.captchaToken ? 0 : 3;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       let refreshFailure: Error | null = null;
       const headers = await this.buildHeaders(options.skipAuth);
+      if (options.captchaToken) {
+        headers['X-EdgeBase-Captcha-Token'] = options.captchaToken;
+      }
       if (body === undefined) {
         delete headers['Content-Type'];
       }
@@ -278,6 +289,7 @@ export class HttpClient {
         // Transport retry: retry on network errors (max 2 transport retries)
         if (
           attempt < 2
+          && !options.captchaToken
           && !(err instanceof CookieAuthRequestTimeoutError)
           && isRetryableNetworkError(err)
         ) {
@@ -298,7 +310,12 @@ export class HttpClient {
       }
 
       // Handle 401 with one forced token refresh retry.
-      if (response.status === 401 && !options.skipAuth && !this.serviceKey) {
+      if (
+        response.status === 401
+        && !options.skipAuth
+        && !this.serviceKey
+        && !options.captchaToken
+      ) {
         // Route the refresh through the token manager's SAME deduped /
         // leader-elected path (via getAccessToken) rather than calling
         // refreshToken() directly. Otherwise concurrent 401s — and multiple
@@ -321,6 +338,9 @@ export class HttpClient {
 
         try {
           const newHeaders = await this.buildHeaders(true);
+          if (options.captchaToken) {
+            newHeaders['X-EdgeBase-Captcha-Token'] = options.captchaToken;
+          }
           // Reuse the token from the single refresh above — do NOT call
           // getAccessToken again here (that could trigger a second refresh).
           if (refreshedAccessToken) {
@@ -399,6 +419,26 @@ export class HttpClient {
   /** DELETE request */
   async delete<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>('DELETE', path, body);
+  }
+
+  /** App Function request with a Turnstile token in the dedicated header. */
+  async requestFunction<T>(
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    path: string,
+    body?: unknown,
+    query?: Record<string, string>,
+    captchaToken?: string,
+  ): Promise<T> {
+    if (
+      captchaToken !== undefined
+      && (typeof captchaToken !== 'string' || captchaToken.length === 0 || captchaToken.length > 2048)
+    ) {
+      throw new Error('captchaToken must be a non-empty string of at most 2048 characters.');
+    }
+    return this.request<T>(method, path, method === 'GET' ? undefined : body, {
+      query,
+      captchaToken,
+    });
   }
 
   /** POST request without auth (for signup, signin) */

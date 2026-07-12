@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 import Foundation
 
@@ -228,9 +228,24 @@ public struct GeneratedDbApi {
         return try await http.get("/auth/oauth/\(edgebaseEncodePathParam(provider))")
     }
 
+    /// Start OAuth redirect with optional request input.
+    public func oauthRedirect(_ provider: String, query: [String: String]?) async throws -> Any {
+        return try await http.get("/auth/oauth/\(edgebaseEncodePathParam(provider))", queryParams: query)
+    }
+
+    /// Atomically exchange a verified OAuth callback ticket — POST /api/auth/oauth/exchange
+    public func oauthExchange(_ body: [String: Any]) async throws -> Any {
+        return try await http.post("/auth/oauth/exchange", body)
+    }
+
     /// OAuth callback — GET /api/auth/oauth/{provider}/callback
-    public func oauthCallback(_ provider: String) async throws -> Any {
-        return try await http.get("/auth/oauth/\(edgebaseEncodePathParam(provider))/callback")
+    public func oauthCallback(_ provider: String, query: [String: String]? = nil) async throws -> Any {
+        return try await http.get("/auth/oauth/\(edgebaseEncodePathParam(provider))/callback", queryParams: query)
+    }
+
+    /// OAuth form-post callback — POST /api/auth/oauth/{provider}/callback
+    public func oauthCallbackPost(_ provider: String, _ body: [String: Any]) async throws -> Any {
+        return try await http.post("/auth/oauth/\(edgebaseEncodePathParam(provider))/callback", body)
     }
 
     /// Start OAuth account linking — POST /api/auth/oauth/link/{provider}
@@ -238,9 +253,29 @@ public struct GeneratedDbApi {
         return try await http.post("/auth/oauth/link/\(edgebaseEncodePathParam(provider))", [:])
     }
 
+    /// Start OAuth account linking with optional request input.
+    public func oauthLinkStart(_ provider: String, _ body: [String: Any]) async throws -> Any {
+        return try await http.post("/auth/oauth/link/\(edgebaseEncodePathParam(provider))", body)
+    }
+
+    /// Continue OAuth account linking in the system browser — GET /api/auth/oauth/link/{provider}/continue
+    public func oauthLinkContinue(_ provider: String, query: [String: String]? = nil) async throws -> Any {
+        return try await http.get("/auth/oauth/link/\(edgebaseEncodePathParam(provider))/continue", queryParams: query)
+    }
+
+    /// Complete OAuth account linking for the current authenticated user — POST /api/auth/oauth/complete/link
+    public func oauthLinkComplete(_ body: [String: Any]) async throws -> Any {
+        return try await http.post("/auth/oauth/complete/link", body)
+    }
+
     /// OAuth link callback — GET /api/auth/oauth/link/{provider}/callback
-    public func oauthLinkCallback(_ provider: String) async throws -> Any {
-        return try await http.get("/auth/oauth/link/\(edgebaseEncodePathParam(provider))/callback")
+    public func oauthLinkCallback(_ provider: String, query: [String: String]? = nil) async throws -> Any {
+        return try await http.get("/auth/oauth/link/\(edgebaseEncodePathParam(provider))/callback", queryParams: query)
+    }
+
+    /// OAuth link form-post callback — POST /api/auth/oauth/link/{provider}/callback
+    public func oauthLinkCallbackPost(_ provider: String, _ body: [String: Any]) async throws -> Any {
+        return try await http.post("/auth/oauth/link/\(edgebaseEncodePathParam(provider))/callback", body)
     }
 
     /// Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
@@ -288,11 +323,6 @@ public struct GeneratedDbApi {
         return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/tables/\(edgebaseEncodePathParam(table))/batch-by-filter", body, queryParams: query)
     }
 
-    /// Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
-    public func dbSingleTransact(_ namespace: String, _ body: [String: Any]) async throws -> Any {
-        return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/transact", body)
-    }
-
     /// Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
     public func dbCountRecords(_ namespace: String, _ instanceId: String, _ table: String, query: [String: String]? = nil) async throws -> Any {
         return try await http.get("/db/\(edgebaseEncodePathParam(namespace))/\(edgebaseEncodePathParam(instanceId))/tables/\(edgebaseEncodePathParam(table))/count", queryParams: query)
@@ -338,6 +368,11 @@ public struct GeneratedDbApi {
         return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/\(edgebaseEncodePathParam(instanceId))/tables/\(edgebaseEncodePathParam(table))/batch-by-filter", body, queryParams: query)
     }
 
+    /// Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
+    public func dbSingleTransact(_ namespace: String, _ body: [String: Any]) async throws -> Any {
+        return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/transact", body)
+    }
+
     /// Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact
     public func dbTransact(_ namespace: String, _ instanceId: String, _ body: [String: Any]) async throws -> Any {
         return try await http.post("/db/\(edgebaseEncodePathParam(namespace))/\(edgebaseEncodePathParam(instanceId))/transact", body)
@@ -374,8 +409,8 @@ public struct GeneratedDbApi {
     }
 
     /// Check if file exists — HEAD /api/storage/{bucket}/{key}
-    public func checkFileExists(_ bucket: String, _ key: String) async -> Bool {
-        return await http.head("/storage/\(edgebaseEncodePathParam(bucket))/\(edgebaseEncodePathParam(key))")
+    public func checkFileExists(_ bucket: String, _ key: String) async throws -> Bool {
+        return try await http.head("/storage/\(edgebaseEncodePathParam(bucket))/\(edgebaseEncodePathParam(key))")
     }
 
     /// Download file — GET /api/storage/{bucket}/{key}
@@ -443,6 +478,11 @@ public struct GeneratedDbApi {
         return try await http.get("/config")
     }
 
+    /// Render the hosted Turnstile page for native WebViews — GET /api/captcha/challenge
+    public func getCaptchaChallenge(query: [String: String]? = nil) async throws -> Any {
+        return try await http.get("/captcha/challenge", queryParams: query)
+    }
+
     /// Register push token — POST /api/push/register
     public func pushRegister(_ body: [String: Any]) async throws -> Any {
         return try await http.post("/push/register", body)
@@ -476,6 +516,16 @@ public struct GeneratedDbApi {
     /// Get room metadata — GET /api/room/metadata
     public func getRoomMetadata(query: [String: String]? = nil) async throws -> Any {
         return try await http.get("/room/metadata", queryParams: query)
+    }
+
+    /// Get room summary — GET /api/room/summary
+    public func getRoomSummary(query: [String: String]? = nil) async throws -> Any {
+        return try await http.get("/room/summary", queryParams: query)
+    }
+
+    /// Get summaries for multiple rooms — POST /api/room/summaries
+    public func getRoomSummaries(_ body: [String: Any]) async throws -> Any {
+        return try await http.post("/room/summaries", body)
     }
 
     /// Track custom events — POST /api/analytics/track
@@ -592,8 +642,13 @@ public enum ApiPaths {
     public static let AUTH_MFA_VERIFY = "/api/auth/mfa/verify"
     public static func oauthRedirect(_ provider: String) -> String { "/api/auth/oauth/\(provider)" }
     public static func oauthCallback(_ provider: String) -> String { "/api/auth/oauth/\(provider)/callback" }
+    public static func oauthCallbackPost(_ provider: String) -> String { "/api/auth/oauth/\(provider)/callback" }
+    public static let OAUTH_LINK_COMPLETE = "/api/auth/oauth/complete/link"
+    public static let OAUTH_EXCHANGE = "/api/auth/oauth/exchange"
     public static func oauthLinkStart(_ provider: String) -> String { "/api/auth/oauth/link/\(provider)" }
     public static func oauthLinkCallback(_ provider: String) -> String { "/api/auth/oauth/link/\(provider)/callback" }
+    public static func oauthLinkCallbackPost(_ provider: String) -> String { "/api/auth/oauth/link/\(provider)/callback" }
+    public static func oauthLinkContinue(_ provider: String) -> String { "/api/auth/oauth/link/\(provider)/continue" }
     public static let AUTH_PASSKEYS_LIST = "/api/auth/passkeys"
     public static func authPasskeysDelete(_ credentialId: String) -> String { "/api/auth/passkeys/\(credentialId)" }
     public static let AUTH_PASSKEYS_AUTH_OPTIONS = "/api/auth/passkeys/auth-options"
@@ -620,6 +675,7 @@ public enum ApiPaths {
     public static let AUTH_VERIFY_LINK_PHONE = "/api/auth/verify-link-phone"
     public static let AUTH_VERIFY_MAGIC_LINK = "/api/auth/verify-magic-link"
     public static let AUTH_VERIFY_PHONE = "/api/auth/verify-phone"
+    public static let GET_CAPTCHA_CHALLENGE = "/api/captcha/challenge"
     public static let GET_CONFIG = "/api/config"
     public static func executeD1Query(_ database: String) -> String { "/api/d1/\(database)" }
     public static func dbListRecords(_ namespace: String, _ instanceId: String, _ table: String) -> String { "/api/db/\(namespace)/\(instanceId)/tables/\(table)" }
@@ -663,6 +719,8 @@ public enum ApiPaths {
     public static let CONNECT_ROOM = "/api/room"
     public static let CHECK_ROOM_CONNECTION = "/api/room/connect-check"
     public static let GET_ROOM_METADATA = "/api/room/metadata"
+    public static let GET_ROOM_SUMMARIES = "/api/room/summaries"
+    public static let GET_ROOM_SUMMARY = "/api/room/summary"
     public static let GET_SCHEMA = "/api/schema"
     public static let EXECUTE_SQL = "/api/sql"
     public static func listFiles(_ bucket: String) -> String { "/api/storage/\(bucket)" }

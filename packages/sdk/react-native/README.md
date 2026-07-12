@@ -35,8 +35,8 @@
 
 It keeps the familiar browser SDK shape while adding the pieces mobile apps need:
 
-- `AsyncStorage` token persistence
-- deep-link based OAuth callbacks
+- `AsyncStorage` for non-secret app caches plus required Keychain/Keystore auth storage
+- claimed HTTPS Universal Link / Android App Link OAuth callbacks
 - `AppState` lifecycle handling
 - React Native friendly push registration
 - Turnstile support through `react-native-webview`
@@ -81,8 +81,14 @@ Use it when you want an agent to:
 ## Installation
 
 ```bash
-npm install @edge-base/react-native @react-native-async-storage/async-storage
+npm install @edge-base/react-native @react-native-async-storage/async-storage react-native-keychain react-native-get-random-values
 ```
+
+`react-native-keychain` is one compatible secure-storage implementation; you
+may supply a different Keychain/Keystore-backed adapter with the same async
+`getItem`/`setItem`/`removeItem` shape. The random-values polyfill is needed on
+Hermes versions that do not provide `crypto.getRandomValues`; alternatively
+pass a `secureRandom(length)` provider.
 
 If you want Turnstile-based captcha, also install:
 
@@ -99,12 +105,28 @@ cd ios && pod install
 ## Quick Start
 
 ```ts
+import 'react-native-get-random-values';
 import { createClient } from '@edge-base/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Keychain from 'react-native-keychain';
 import { AppState, Linking } from 'react-native';
 
+const secureStorage = {
+  async getItem(key: string) {
+    const credentials = await Keychain.getGenericPassword({ service: key });
+    return credentials ? credentials.password : null;
+  },
+  async setItem(key: string, value: string) {
+    await Keychain.setGenericPassword('edgebase', value, { service: key });
+  },
+  async removeItem(key: string) {
+    await Keychain.resetGenericPassword({ service: key });
+  },
+};
+
 const client = createClient('https://your-project.edgebase.fun', {
-  storage: AsyncStorage,
+  storage: AsyncStorage,       // non-secret push/device caches
+  secureStorage,               // refresh token, auth epoch, OAuth state
   linking: Linking,
   appState: AppState,
 });
@@ -142,11 +164,16 @@ Once you create a client, these are the main surfaces you will use:
 - `client.analytics`
   Track client analytics
 
-## OAuth With Deep Links
+`secureStorage` is required. For local development only, you may omit it and
+set `allowInsecureAuthStorageForDevelopment: true`; that deliberately stores
+auth credentials in the ordinary `storage` adapter and must not ship in a
+production build.
+
+## OAuth With Claimed HTTPS Links
 
 ```ts
-client.auth.signInWithOAuth('google', {
-  redirectUrl: 'myapp://auth/callback',
+await client.auth.signInWithOAuth('google', {
+  redirectUrl: 'https://app.example.com/auth/callback',
 });
 
 Linking.addEventListener('url', async ({ url }) => {
@@ -155,35 +182,50 @@ Linking.addEventListener('url', async ({ url }) => {
     console.log('OAuth success:', result.user);
   }
 });
+
+// A callback can launch an app that was not already running.
+await client.auth.handleInitialOAuthCallback();
 ```
 
-In React Native, the app is responsible for registering the deep link scheme in the platform configuration.
+OAuth start persists a CSPRNG one-shot nonce in `secureStorage` before opening
+the browser. `handleOAuthCallback()` accepts the server fragment, consumes that
+nonce, and atomically exchanges the five-minute callback ticket with EdgeBase
+before it stores the session. Bearer credentials never transit the claimed HTTPS
+callback URL. Account linking uses the authenticated
+`/api/auth/oauth/complete/link` endpoint and must still match the initiating
+user and session. Unsolicited, mismatched, replayed, or sign-out-superseded
+callbacks resolve to `null`.
+
+Configure the callback host as an iOS Associated Domain and Android verified
+App Link, and add the callback to the server's `auth.allowedRedirectUrls`.
+Release mode accepts only HTTPS app callbacks. Do not use a custom URL scheme:
+another installed app can claim it and steal the callback.
+
+Credential keys, OAuth state, auth epochs, pending sign-out records, and push
+caches are namespaced by `authNamespace` (or the normalized base URL by
+default), so clients for different EdgeBase projects cannot restore one
+another's session. If one app intentionally keeps multiple profiles for the
+same server, give each client a distinct `authNamespace`. Pre-namespace global
+refresh-token keys are not imported.
 
 ## Turnstile Captcha
 
 ```tsx
 import { Button } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { TurnstileWebView, useTurnstile } from '@edge-base/react-native';
+import { useTurnstile } from '@edge-base/react-native';
 
 function SignUpScreen() {
-  const captcha = useTurnstile({
-    baseUrl: 'https://your-project.edgebase.fun',
+  // Binds this client's backend and secureRandom provider. The hook returns
+  // the ready-to-mount hosted challenge after config and channel resolution.
+  const captcha = useTurnstile(client.turnstileOptions({
     action: 'signup',
-  });
+    WebViewComponent: WebView,
+  }));
 
   return (
     <>
-      {captcha.siteKey && (
-        <TurnstileWebView
-          siteKey={captcha.siteKey}
-          action="signup"
-          WebViewComponent={WebView}
-          onToken={captcha.onToken}
-          onError={captcha.onError}
-          onInteractive={captcha.onInteractive}
-        />
-      )}
+      {captcha.webView}
       <Button
         title="Sign Up"
         onPress={() =>
@@ -229,8 +271,8 @@ When you pass `appState` to `createClient()`, the SDK automatically coordinates 
 
 | Feature | Web | React Native |
 | --- | --- | --- |
-| Token storage | `localStorage` | `AsyncStorage` |
-| OAuth redirect | browser redirect | `Linking.openURL()` + deep-link callback |
+| Token storage | Body mode: `localStorage`; recommended cookie mode: EdgeBase HttpOnly cookie | Keychain/Keystore `secureStorage` (AsyncStorage only for non-secret caches) |
+| OAuth redirect | browser redirect + bound fragment handler | `Linking.openURL()` + claimed HTTPS Universal/App Link callback |
 | Lifecycle | document visibility | `AppState` |
 | Captcha | DOM-based widget | `react-native-webview` |
 | Push | web push | native token provider integration |

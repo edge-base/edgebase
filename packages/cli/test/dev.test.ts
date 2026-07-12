@@ -13,13 +13,23 @@
  * 9. Edge Cases
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readlinkSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer as createNetServer } from 'node:net';
 import { _internals } from '../src/commands/deploy.js';
 import { _devInternals, resolveLocalDevBindings } from '../src/commands/dev.js';
 import { parseEnvFile } from '../src/lib/dev-sidecar.js';
+import { buildManagedR2BucketName } from '../src/lib/managed-resource-names.js';
 import {
   buildDefaultWranglerToml,
   ensureProjectSharedPackageLink,
@@ -70,21 +80,29 @@ describe('Runtime config scaffold', () => {
   it('uses a project-scoped default R2 bucket name', () => {
     const wranglerToml = buildDefaultWranglerToml(undefined, 'instagram-clone-edgebase');
 
-    expect(wranglerToml).toContain('bucket_name = "instagram-clone-edgebase-storage"');
+    expect(wranglerToml).toContain(
+      `bucket_name = "${buildManagedR2BucketName('instagram-clone-edgebase')}"`,
+    );
   });
 
   it('normalizes long local worker and storage names for Wrangler compatibility', () => {
+    const sharedPrefix = 'EdgeBase Pack Portable Runtime 1775206607004 very-long-project-name-that-keeps-going';
     const wranglerToml = buildDefaultWranglerToml(
       undefined,
-      'EdgeBase Pack Portable Runtime 1775206607004 very-long-project-name-that-keeps-going',
+      `${sharedPrefix}-one`,
     );
+    const otherWranglerToml = buildDefaultWranglerToml(undefined, `${sharedPrefix}-two`);
     const workerName = wranglerToml.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? '';
     const bucketName = wranglerToml.match(/^bucket_name\s*=\s*"([^"]+)"/m)?.[1] ?? '';
+    const otherWorkerName = otherWranglerToml.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? '';
+    const otherBucketName = otherWranglerToml.match(/^bucket_name\s*=\s*"([^"]+)"/m)?.[1] ?? '';
 
     expect(workerName).toMatch(/^[a-z0-9-]+$/);
     expect(workerName.length).toBeLessThanOrEqual(55);
+    expect(workerName).not.toBe(otherWorkerName);
     expect(bucketName).toMatch(/^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$/);
     expect(bucketName.length).toBeLessThanOrEqual(63);
+    expect(bucketName).not.toBe(otherBucketName);
   });
 
   it('creates a runtime test-config shim that points at the project test config when present', () => {
@@ -117,6 +135,159 @@ describe('Runtime config scaffold', () => {
     expect(shim).toContain('"MOCK_FCM_BASE_URL": "https://mock.example.com"');
     expect(shim).toContain('process.env[key] === undefined');
     expect(shim).toContain("await import('../../../../edgebase.config.ts')");
+  });
+
+  it('writes only project and explicitly permitted shell env to a private dev-bundle file', () => {
+    ensureRuntimeScaffold(tmpDir);
+    const runtimeEnv = _devInternals.collectDevRuntimeConfigEnv(
+      {
+        JWT_USER_SECRET: 'synthetic-dev-secret',
+        SERVICE_KEY: 'synthetic-service-key',
+      },
+      {
+        NODE_ENV: 'development',
+        NOTIONLIKE_RATE_LIMIT_PROFILE: 'development',
+        EDGEBASE_CONFIG_ENV_ALLOWLIST: 'CUSTOM_CONFIG_MODE, INVALID-KEY',
+        CUSTOM_CONFIG_MODE: 'preview',
+        UNRELATED_SHELL_SECRET: 'must-not-reach-worker',
+      },
+    );
+
+    expect(runtimeEnv).toEqual({
+      JWT_USER_SECRET: 'synthetic-dev-secret',
+      SERVICE_KEY: 'synthetic-service-key',
+      NODE_ENV: 'development',
+      NOTIONLIKE_RATE_LIMIT_PROFILE: 'development',
+      CUSTOM_CONFIG_MODE: 'preview',
+    });
+
+    const devVarsPath = _devInternals.writeDevBundleVars(tmpDir, runtimeEnv);
+    const devVars = readFileSync(devVarsPath, 'utf-8');
+    expect(parseEnvFile(devVarsPath)).toEqual(runtimeEnv);
+    expect(devVars).toContain('CUSTOM_CONFIG_MODE="preview"');
+    expect(devVars).toContain('JWT_USER_SECRET="synthetic-dev-secret"');
+    expect(devVars).not.toContain('UNRELATED_SHELL_SECRET');
+    expect(devVars).not.toContain('must-not-reach-worker');
+    if (process.platform !== 'win32') {
+      expect(statSync(devVarsPath).mode & 0o777).toBe(0o600);
+    }
+
+    const shim = readFileSync(
+      join(tmpDir, '.edgebase', 'runtime', 'server', 'src', 'generated-config.ts'),
+      'utf-8',
+    );
+    expect(shim).not.toContain('synthetic-dev-secret');
+    expect(shim).not.toContain('synthetic-service-key');
+  });
+
+  it('atomically replaces the dev-bundle env file so removed keys do not linger', () => {
+    const devVarsPath = _devInternals.writeDevBundleVars(tmpDir, {
+      KEEP_ME: 'first',
+      REMOVE_ME: 'stale-secret',
+    });
+
+    _devInternals.writeDevBundleVars(tmpDir, {
+      KEEP_ME: 'second',
+    });
+
+    expect(parseEnvFile(devVarsPath)).toEqual({ KEEP_ME: 'second' });
+    expect(readFileSync(devVarsPath, 'utf-8')).not.toContain('stale-secret');
+    expect(readdirSync(tmpDir).filter((name) => name.startsWith('.dev.vars.'))).toEqual([]);
+  });
+
+  it('forces Wrangler process-env inclusion off even when the parent shell enabled it', () => {
+    const childEnv = _devInternals.resolveWranglerDevProcessEnv({
+      PATH: '/synthetic/bin',
+      CLOUDFLARE_INCLUDE_PROCESS_ENV: 'true',
+      UNRELATED_SHELL_SECRET: 'parent-only',
+    });
+
+    expect(childEnv.CLOUDFLARE_INCLUDE_PROCESS_ENV).toBe('false');
+    expect(childEnv.PATH).toBe('/synthetic/bin');
+  });
+
+  it('keeps development env-file values ahead of shell values', () => {
+    const runtimeEnv = _devInternals.collectDevRuntimeConfigEnv(
+      { NOTIONLIKE_RATE_LIMIT_PROFILE: 'production' },
+      { NOTIONLIKE_RATE_LIMIT_PROFILE: 'development' },
+    );
+
+    expect(runtimeEnv.NOTIONLIKE_RATE_LIMIT_PROFILE).toBe('production');
+  });
+
+  it('evaluates dev config with the selected env instead of arbitrary parent-shell values', () => {
+    const configPath = join(tmpDir, 'edgebase.config.ts');
+    const unrelatedKey = 'SYNTHETIC_PARENT_ONLY_SECRET';
+    const previousUnrelated = process.env[unrelatedKey];
+    process.env[unrelatedKey] = 'must-not-reach-config';
+    writeFileSync(
+      configPath,
+      `export default {
+  fileValue: process.env.SYNTHETIC_FILE_VALUE,
+  allowedValue: process.env.SYNTHETIC_ALLOWED_FLAG,
+  unrelatedValue: process.env.${unrelatedKey} ?? null,
+};
+`,
+    );
+
+    try {
+      const selectedEnv = _devInternals.collectDevRuntimeConfigEnv(
+        { SYNTHETIC_FILE_VALUE: 'from-file' },
+        {
+          EDGEBASE_CONFIG_ENV_ALLOWLIST: 'SYNTHETIC_ALLOWED_FLAG',
+          SYNTHETIC_ALLOWED_FLAG: 'enabled',
+          [unrelatedKey]: 'must-not-reach-config',
+        },
+      );
+      expect(_devInternals.evaluateDevConfig(configPath, tmpDir, selectedEnv)).toMatchObject({
+        fileValue: 'from-file',
+        allowedValue: 'enabled',
+        unrelatedValue: null,
+      });
+    } finally {
+      if (previousUnrelated === undefined) delete process.env[unrelatedKey];
+      else process.env[unrelatedKey] = previousUnrelated;
+    }
+  });
+
+  it('includes a shell-only rate-limit profile in the real dev sync path', () => {
+    writeFileSync(join(tmpDir, '.env.development'), 'SYNTHETIC_FILE_VALUE=from-file\n');
+    const previousProfile = process.env.NOTIONLIKE_RATE_LIMIT_PROFILE;
+    const previousFileValue = process.env.SYNTHETIC_FILE_VALUE;
+    process.env.NOTIONLIKE_RATE_LIMIT_PROFILE = 'development';
+
+    try {
+      expect(_devInternals.syncDevEnvToProcess(tmpDir)).toMatchObject({
+        SYNTHETIC_FILE_VALUE: 'from-file',
+        NOTIONLIKE_RATE_LIMIT_PROFILE: 'development',
+      });
+    } finally {
+      if (previousProfile === undefined) delete process.env.NOTIONLIKE_RATE_LIMIT_PROFILE;
+      else process.env.NOTIONLIKE_RATE_LIMIT_PROFILE = previousProfile;
+      if (previousFileValue === undefined) delete process.env.SYNTHETIC_FILE_VALUE;
+      else process.env.SYNTHETIC_FILE_VALUE = previousFileValue;
+    }
+  });
+
+  it('removes a deleted env-file key from subsequent config evaluation', () => {
+    const staleKey = 'SYNTHETIC_REMOVED_CONFIG_VALUE';
+    const previousValue = process.env[staleKey];
+    writeFileSync(join(tmpDir, '.env.development'), `${staleKey}=first\n`);
+
+    try {
+      expect(_devInternals.syncDevEnvToProcess(tmpDir)[staleKey]).toBe('first');
+      expect(process.env[staleKey]).toBe('first');
+
+      writeFileSync(join(tmpDir, '.env.development'), 'STILL_PRESENT=second\n');
+      const refreshed = _devInternals.syncDevEnvToProcess(tmpDir);
+      expect(refreshed).not.toHaveProperty(staleKey);
+      expect(process.env[staleKey]).toBe(previousValue);
+    } finally {
+      writeFileSync(join(tmpDir, '.env.development'), '');
+      _devInternals.syncDevEnvToProcess(tmpDir);
+      if (previousValue === undefined) delete process.env[staleKey];
+      else process.env[staleKey] = previousValue;
+    }
   });
 
   it('does not copy the package registry into the runtime scaffold', () => {
@@ -275,6 +446,30 @@ describe('Wrangler dev arguments', () => {
     expect(args).toEqual(['wrangler', 'dev', '--port', '8787']);
   });
 
+  it('enables process.env from the isolated Worker bindings in the generated dev config', () => {
+    const wranglerPath = join(tmpDir, 'wrangler.toml');
+    writeFileSync(
+      wranglerPath,
+      [
+        'name = "dev-worker"',
+        'compatibility_date = "2025-02-10"',
+        'compatibility_flags = ["nodejs_compat"]',
+      ].join('\n'),
+    );
+
+    const generatedPath = _internals.generateTempWranglerToml(wranglerPath, {
+      bindings: [],
+      requiredCompatibilityFlags: _devInternals.requiredDevCompatibilityFlags,
+    });
+
+    expect(generatedPath).not.toBeNull();
+    const generated = readFileSync(generatedPath!, 'utf-8');
+    expect(generated).toContain(
+      'compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]',
+    );
+    expect(generated.match(/nodejs_compat_populate_process_env/g)).toHaveLength(1);
+  });
+
   it('supports an explicit host binding', () => {
     const args = ['wrangler', 'dev', '--port', '8787', '--ip', '0.0.0.0'];
     expect(args).toEqual(['wrangler', 'dev', '--port', '8787', '--ip', '0.0.0.0']);
@@ -287,6 +482,7 @@ describe('Wrangler dev arguments', () => {
     try {
       expect(_devInternals.resolveWorkerVarBindings(8788)).toEqual([
         'EDGEBASE_ALLOW_PUBLIC_ADMIN_SETUP:1',
+        'EDGEBASE_RUNTIME_MODE:local-development',
         'EDGEBASE_DEV_SIDECAR_PORT:8788',
         'EDGEBASE_INTERNAL_WORKER_URL:http://127.0.0.1:8787',
       ]);

@@ -9,13 +9,14 @@ namespace EdgeBase
         public string Method { get; set; } = "POST";
         public object? Body { get; set; }
         public Dictionary<string, string>? Query { get; set; }
+        public string? CaptchaToken { get; set; }
     }
 
     public sealed class FunctionsClient
     {
         private readonly JbHttpClient _http;
 
-        internal FunctionsClient(JbHttpClient http)
+        public FunctionsClient(JbHttpClient http)
         {
             _http = http;
         }
@@ -27,6 +28,17 @@ namespace EdgeBase
         {
             var resolved = options ?? new FunctionCallOptions();
             var normalizedPath = $"/api/functions/{path.TrimStart('/')}";
+
+            if (resolved.CaptchaToken != null)
+            {
+                return _http.RequestFunctionWithCaptchaAsync(
+                    resolved.Method,
+                    normalizedPath,
+                    resolved.Body,
+                    resolved.Query,
+                    resolved.CaptchaToken,
+                    ct);
+            }
 
             return resolved.Method.ToUpperInvariant() switch
             {

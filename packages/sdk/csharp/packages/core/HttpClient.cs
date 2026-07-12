@@ -38,6 +38,15 @@ public sealed class JbHttpClient : IDisposable
 #endif
     }
 
+#if !(UNITY_WEBGL && !UNITY_EDITOR)
+    /// <summary>Creates a client with an application-supplied HTTP handler.</summary>
+    public JbHttpClient(string baseUrl, System.Net.Http.HttpMessageHandler handler)
+    {
+        BaseUrl = baseUrl.TrimEnd('/');
+        _http = new System.Net.Http.HttpClient(handler ?? throw new ArgumentNullException(nameof(handler)));
+    }
+#endif
+
     public void SetToken(string? token)         => _token = token;
     public string? GetToken()                   => _token;
     public void SetRefreshToken(string? token)  => _refreshToken = token;
@@ -62,23 +71,18 @@ public sealed class JbHttpClient : IDisposable
     }
 
 #if !(UNITY_WEBGL && !UNITY_EDITOR)
-    private void ApplyHeaders(System.Net.Http.HttpRequestMessage req)
+    private void ApplyHeaders(System.Net.Http.HttpRequestMessage req, string? captchaToken = null)
     {
         if (!string.IsNullOrEmpty(_serviceKey))
             req.Headers.TryAddWithoutValidation("X-EdgeBase-Service-Key", _serviceKey);
-        try
-        {
-            var token = GetAccessToken();
-            if (!string.IsNullOrEmpty(token))
-                req.Headers.Authorization =
-                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-        }
-        catch
-        {
-            // Token refresh failed — proceed as unauthenticated
-        }
+        var token = GetAccessToken();
+        if (!string.IsNullOrEmpty(token))
+            req.Headers.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         if (!string.IsNullOrEmpty(_locale))
             req.Headers.TryAddWithoutValidation("Accept-Language", _locale);
+        if (captchaToken != null)
+            req.Headers.TryAddWithoutValidation("X-EdgeBase-Captcha-Token", captchaToken);
     }
 
     private static long ParseRetryAfterDelay(System.Net.Http.HttpResponseMessage resp, int attempt)
@@ -99,9 +103,10 @@ public sealed class JbHttpClient : IDisposable
     private async Task<Dictionary<string, object?>> SendAsync(
         System.Net.Http.HttpRequestMessage req,
         CancellationToken ct = default,
-        int _retryCount = 0)
+        int _retryCount = 0,
+        string? captchaToken = null)
     {
-        ApplyHeaders(req);
+        ApplyHeaders(req, captchaToken);
         System.Net.Http.HttpResponseMessage resp;
         try
         {
@@ -111,7 +116,7 @@ public sealed class JbHttpClient : IDisposable
         {
             // Network-level errors (connection refused, DNS failure, etc.)
             // Retry transport errors up to 2 times before wrapping.
-            if (_retryCount < 2)
+            if (captchaToken == null && _retryCount < 2)
             {
                 await Task.Delay(50 * (_retryCount + 1), ct);
                 var retry = new System.Net.Http.HttpRequestMessage(req.Method, req.RequestUri);
@@ -119,14 +124,14 @@ public sealed class JbHttpClient : IDisposable
                     retry.Content = new System.Net.Http.StringContent(
                         await req.Content.ReadAsStringAsync(),
                         System.Text.Encoding.UTF8, "application/json");
-                return await SendAsync(retry, ct, _retryCount + 1);
+                return await SendAsync(retry, ct, _retryCount + 1, captchaToken);
             }
             throw new EdgeBaseException(0, ex.Message, ex);
         }
         var body = await resp.Content.ReadAsStringAsync();
         // "worker restarted mid-request" means the request was NOT processed;
         // safe to retry once regardless of HTTP method.
-        if (!resp.IsSuccessStatusCode && _retryCount < 1
+        if (captchaToken == null && !resp.IsSuccessStatusCode && _retryCount < 1
             && body.Contains("worker restarted"))
         {
             var retry = new System.Net.Http.HttpRequestMessage(req.Method, req.RequestUri);
@@ -134,9 +139,9 @@ public sealed class JbHttpClient : IDisposable
                 retry.Content = new System.Net.Http.StringContent(
                     await req.Content.ReadAsStringAsync(),
                     System.Text.Encoding.UTF8, "application/json");
-            return await SendAsync(retry, ct, _retryCount + 1);
+            return await SendAsync(retry, ct, _retryCount + 1, captchaToken);
         }
-        if ((int)resp.StatusCode == 429 && _retryCount < 3)
+        if (captchaToken == null && (int)resp.StatusCode == 429 && _retryCount < 3)
         {
             long delayMs = ParseRetryAfterDelay(resp, _retryCount);
             await Task.Delay((int)delayMs, ct);
@@ -145,7 +150,7 @@ public sealed class JbHttpClient : IDisposable
                 retry2.Content = new System.Net.Http.StringContent(
                     await req.Content.ReadAsStringAsync(),
                     System.Text.Encoding.UTF8, "application/json");
-            return await SendAsync(retry2, ct, _retryCount + 1);
+            return await SendAsync(retry2, ct, _retryCount + 1, captchaToken);
         }
         if (!resp.IsSuccessStatusCode)
             throw new EdgeBaseException((int)resp.StatusCode, body);
@@ -168,28 +173,25 @@ public sealed class JbHttpClient : IDisposable
     private string SerializeBody(object? body) =>
         JsonSerializer.Serialize(body ?? new { }, _json);
 #else
-    private void ApplyHeaders(UnityWebRequest req)
+    private void ApplyHeaders(UnityWebRequest req, string? captchaToken = null)
     {
         if (!string.IsNullOrEmpty(_serviceKey))
         {
             req.SetRequestHeader("X-EdgeBase-Service-Key", _serviceKey);
         }
 
-        try
+        var token = GetAccessToken();
+        if (!string.IsNullOrEmpty(token))
         {
-            var token = GetAccessToken();
-            if (!string.IsNullOrEmpty(token))
-            {
-                req.SetRequestHeader("Authorization", $"Bearer {token}");
-            }
-        }
-        catch
-        {
-            // Token refresh failed — proceed as unauthenticated
+            req.SetRequestHeader("Authorization", $"Bearer {token}");
         }
         if (!string.IsNullOrEmpty(_locale))
         {
             req.SetRequestHeader("Accept-Language", _locale);
+        }
+        if (captchaToken != null)
+        {
+            req.SetRequestHeader("X-EdgeBase-Captcha-Token", captchaToken);
         }
 
     }
@@ -222,7 +224,8 @@ public sealed class JbHttpClient : IDisposable
         string path,
         string? body = null,
         CancellationToken ct = default,
-        int retryCount = 0)
+        int retryCount = 0,
+        string? captchaToken = null)
     {
         using var req = new UnityWebRequest(BaseUrl + path, method)
         {
@@ -235,7 +238,7 @@ public sealed class JbHttpClient : IDisposable
             req.SetRequestHeader("Content-Type", "application/json");
         }
 
-        ApplyHeaders(req);
+        ApplyHeaders(req, captchaToken);
 
         try
         {
@@ -254,9 +257,9 @@ public sealed class JbHttpClient : IDisposable
 
         if (req.responseCode < 200 || req.responseCode >= 300)
         {
-            if (retryCount < 1 && responseBody.Contains("worker restarted"))
+            if (captchaToken == null && retryCount < 1 && responseBody.Contains("worker restarted"))
             {
-                return await SendUnityJsonAsync(method, path, body, ct, retryCount + 1);
+                return await SendUnityJsonAsync(method, path, body, ct, retryCount + 1, captchaToken);
             }
 
             throw new EdgeBaseException((int)req.responseCode, responseBody);
@@ -337,6 +340,65 @@ public sealed class JbHttpClient : IDisposable
         return req.responseCode >= 200 && req.responseCode < 300;
     }
 #endif
+
+    /// <summary>
+    /// Sends a CAPTCHA-protected Function request exactly once. Turnstile tokens
+    /// are single-use, so transport, worker-restart, 401, and 429 responses are
+    /// never replayed automatically.
+    /// </summary>
+    public Task<Dictionary<string, object?>> RequestFunctionWithCaptchaAsync(
+        string method,
+        string path,
+        object? body,
+        Dictionary<string, string>? query,
+        string captchaToken,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(captchaToken) || captchaToken.Length > 2048)
+            throw new ArgumentException(
+                "captchaToken must be non-empty and at most 2048 characters",
+                nameof(captchaToken));
+
+        var url = path;
+        if (query != null && query.Count > 0)
+        {
+            var parts = new System.Collections.Generic.List<string>();
+            foreach (var kv in query)
+                parts.Add($"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}");
+            url += "?" + string.Join("&", parts);
+        }
+
+        var normalizedMethod = method.ToUpperInvariant();
+        if (normalizedMethod != "GET" && normalizedMethod != "POST" &&
+            normalizedMethod != "PUT" && normalizedMethod != "PATCH" &&
+            normalizedMethod != "DELETE")
+        {
+            normalizedMethod = "POST";
+        }
+#if UNITY_WEBGL && !UNITY_EDITOR
+        var serializedBody = normalizedMethod == "GET" || normalizedMethod == "DELETE"
+            ? null
+            : SerializeBody(body);
+        return SendUnityJsonAsync(
+            normalizedMethod,
+            url,
+            serializedBody,
+            ct,
+            captchaToken: captchaToken);
+#else
+        var req = new System.Net.Http.HttpRequestMessage(
+            new System.Net.Http.HttpMethod(normalizedMethod),
+            BaseUrl + url);
+        if (normalizedMethod != "GET" && normalizedMethod != "DELETE")
+        {
+            req.Content = new System.Net.Http.StringContent(
+                SerializeBody(body),
+                System.Text.Encoding.UTF8,
+                "application/json");
+        }
+        return SendAsync(req, ct, captchaToken: captchaToken);
+#endif
+    }
 
     public Task<Dictionary<string, object?>> GetAsync(string path,
         CancellationToken ct = default)

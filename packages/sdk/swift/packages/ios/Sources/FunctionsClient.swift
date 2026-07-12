@@ -5,11 +5,13 @@ public struct FunctionCallOptions {
     public let method: String
     public let body: [String: Any]?
     public let query: [String: String]?
+    public let captchaToken: String?
 
-    public init(method: String = "POST", body: [String: Any]? = nil, query: [String: String]? = nil) {
+    public init(method: String = "POST", body: [String: Any]? = nil, query: [String: String]? = nil, captchaToken: String? = nil) {
         self.method = method
         self.body = body
         self.query = query
+        self.captchaToken = captchaToken
     }
 }
 
@@ -22,19 +24,22 @@ public final class FunctionsClient {
 
     public func call(_ path: String, options: FunctionCallOptions = FunctionCallOptions()) async throws -> Any {
         let normalizedPath = "/functions/\(path)"
+        if let captchaToken = options.captchaToken, captchaToken.isEmpty || captchaToken.count > 2_048 {
+            throw EdgeBaseError(statusCode: 0, message: "captchaToken must be non-empty and at most 2048 characters")
+        }
         switch options.method.uppercased() {
         case "GET":
-            return try await httpClient.get(normalizedPath, queryParams: options.query)
+            return try await httpClient.get(normalizedPath, queryParams: options.query, captchaToken: options.captchaToken)
         case "PUT":
-            return try await httpClient.put(normalizedPath, options.body ?? [:])
+            return try await httpClient.put(normalizedPath, options.body ?? [:], captchaToken: options.captchaToken)
         case "PATCH":
-            return try await httpClient.patch(normalizedPath, options.body ?? [:])
+            return try await httpClient.patch(normalizedPath, options.body ?? [:], captchaToken: options.captchaToken)
         case "DELETE":
-            return try await httpClient.delete(normalizedPath)
+            return try await httpClient.delete(normalizedPath, captchaToken: options.captchaToken)
         case "POST":
             fallthrough
         default:
-            return try await httpClient.post(normalizedPath, options.body ?? [:])
+            return try await httpClient.post(normalizedPath, options.body ?? [:], captchaToken: options.captchaToken)
         }
     }
 

@@ -1,3 +1,9 @@
+## 0.4.0
+
+- Synchronized the Dart workspace with the EdgeBase 0.3.9 security and
+  reliability patch release
+- No Dart API compatibility break is introduced
+
 ## 0.3.8
 
 - Synchronized the Dart workspace with the EdgeBase 0.3.8 patch release

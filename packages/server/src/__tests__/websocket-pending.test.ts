@@ -45,6 +45,7 @@ function createMockRoomEnv(
   return {
     KV: kv,
     ROOMS: roomNamespace,
+    EDGEBASE_RUNTIME_MODE: 'cloudflare',
   } as unknown as Env;
 }
 

@@ -54,8 +54,14 @@ This is a recommendation, not a requirement. Separate repos or a different subdi
 ```ts
 import { createClient } from '@edge-base/web';
 
-const client = createClient('https://your-project.edgebase.fun');
+const client = createClient('https://your-project.edgebase.fun', {
+  refreshTokenTransport: 'httpOnlyCookie',
+});
 ```
+
+This secure browser example requires `auth.session.cookie.enabled: true` on the
+server. Without that server setting, omit the option; `'body'` is the legacy
+compatibility default.
 
 ### Sign in and react to auth changes
 
@@ -166,6 +172,15 @@ await client
 - write operations require an authenticated user
 - `requestPasswordReset()` takes the email as the first positional argument
 - `changePassword()` expects `currentPassword`, not `oldPassword`
+- OAuth callback fields are in the browser URL fragment, never a server query;
+  the fragment contains a one-time completion ticket, not bearer credentials;
+  complete it with `handleOAuthCallback()` in the browser, which posts to
+  `/api/auth/oauth/exchange` (or authenticated `/api/auth/oauth/complete/link`)
+- release app redirects require HTTPS plus an explicit
+  `auth.allowedRedirectUrls` match
+- cookie transport stores the refresh token only in EdgeBase's `__Host-`
+  HttpOnly cookie on HTTPS; auth responses and sign-out are serialized so late
+  cross-tab responses cannot resurrect a signed-out session
 - `createSignedUrl()` expects `expiresIn` as a string like `'1h'`, not a number
 - batch updates and deletes are chained from filters, for example `table.where(...).updateMany(...)`
 
@@ -174,7 +189,9 @@ await client
 ```js
 // Initialize
 import { createClient } from '@edge-base/web'
-const client = createClient('https://my-project.edgebase.fun')
+const client = createClient('https://my-project.edgebase.fun', {
+  refreshTokenTransport: 'httpOnlyCookie',
+})
 
 // Auth — currentUser is a PROPERTY, not a method
 const user = client.auth.currentUser   // TokenUser | null
@@ -219,7 +236,7 @@ await posts.update(id, { views: increment(1), temp: deleteField() })
 
 ```
 import { createClient } from '@edge-base/web'
-const client = createClient(url, options?: { schema?, authNamespace?, databaseLive?: { autoReconnect?, maxReconnectAttempts?, reconnectBaseDelay? } })
+const client = createClient(url, options?: { schema?, authNamespace?, refreshTokenTransport?: 'body'|'httpOnlyCookie', databaseLive?: { autoReconnect?, maxReconnectAttempts?, reconnectBaseDelay? } })
 ```
 
 ### Client Lifecycle
@@ -236,7 +253,7 @@ client.auth.signUp({email, password, data?, locale?, captchaToken?}) → Promise
 client.auth.signIn({email, password, captchaToken?})                → Promise<AuthResult | {mfaRequired, mfaTicket, factors}>
 client.auth.signInAnonymously({captchaToken?}?)                     → Promise<AuthResult>
 client.auth.signOut()                                                → Promise<void>
-client.auth.signInWithOAuth(provider, {redirectUrl?, captchaToken?}) → {url}
+client.auth.signInWithOAuth(provider, {redirectUrl?, captchaToken?}) → Promise<{url}>
 client.auth.handleOAuthCallback(url?)                                → Promise<AuthResult | null>
 client.auth.signInWithMagicLink({email, captchaToken?, redirectUrl?, state?}) → Promise<void>
 client.auth.verifyMagicLink(token)                                   → Promise<AuthResult>

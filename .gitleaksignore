@@ -1,0 +1,22 @@
+# Exact historical fingerprints for documented examples and deterministic test
+# fixtures. Keep this list fingerprint-specific: never allowlist whole paths or
+# rules, so a newly introduced credential in the same files still fails CI.
+d5844cc5f94ac2a05db637a5cd6fd8e98162ca4b:packages/server/src/__tests__/totp.test.ts:generic-api-key:212
+569a5750e958d78c05c332ab153dfe6d0d754a5d:docs/docs/api/push.md:generic-api-key:32
+569a5750e958d78c05c332ab153dfe6d0d754a5d:docs/docs/api/push.md:generic-api-key:42
+569a5750e958d78c05c332ab153dfe6d0d754a5d:docs/docs/api/push.md:generic-api-key:68
+569a5750e958d78c05c332ab153dfe6d0d754a5d:docs/docs/api/push.md:generic-api-key:259
+569a5750e958d78c05c332ab153dfe6d0d754a5d:docs/docs/api/push.md:generic-api-key:421
+569a5750e958d78c05c332ab153dfe6d0d754a5d:docs/docs/api/push.md:generic-api-key:427
+569a5750e958d78c05c332ab153dfe6d0d754a5d:docs/docs/push/configuration.md:private-key:41
+569a5750e958d78c05c332ab153dfe6d0d754a5d:docs/docs/server/service-keys.md:generic-api-key:153
+569a5750e958d78c05c332ab153dfe6d0d754a5d:packages/admin/src/lib/email-defaults.ts:generic-api-key:450
+569a5750e958d78c05c332ab153dfe6d0d754a5d:packages/admin/src/lib/email-defaults.ts:generic-api-key:451
+569a5750e958d78c05c332ab153dfe6d0d754a5d:packages/cli/test/keys.test.ts:generic-api-key:57
+569a5750e958d78c05c332ab153dfe6d0d754a5d:packages/cli/test/env.test.ts:generic-api-key:168
+569a5750e958d78c05c332ab153dfe6d0d754a5d:packages/cli/test/env.test.ts:generic-api-key:169
+569a5750e958d78c05c332ab153dfe6d0d754a5d:packages/cli/test/env.test.ts:generic-api-key:191
+569a5750e958d78c05c332ab153dfe6d0d754a5d:packages/server/src/__tests__/password-policy.test.ts:generic-api-key:144
+569a5750e958d78c05c332ab153dfe6d0d754a5d:packages/server/edgebase.test.config.ts:private-key:253
+569a5750e958d78c05c332ab153dfe6d0d754a5d:packages/server/wrangler.test.toml:private-key:86
+569a5750e958d78c05c332ab153dfe6d0d754a5d:packages/server/test/integration/cli.test.ts:generic-api-key:787

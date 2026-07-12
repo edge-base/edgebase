@@ -7,6 +7,7 @@ package dev.edgebase.sdk.client
 
 import dev.edgebase.sdk.core.*
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
@@ -22,7 +23,7 @@ data class TokenPair(
 /**
  * Token storage interface — allows DI of platform-specific storage.
  *
- * Android: EncryptedSharedPreferences
+ * Android: app-injected durable storage (memory-only by default)
  * iOS: Keychain
  * JS: localStorage
  * JVM: java.util.prefs.Preferences
@@ -32,6 +33,25 @@ interface TokenStorage {
     suspend fun saveTokens(pair: TokenPair)
     suspend fun clearTokens()
 }
+
+/**
+ * Opt-in contract for storage that survives process restart and reports failed
+ * writes. Irreversible anonymous-account upgrades require this capability.
+ */
+interface DurableTokenStorage : TokenStorage
+
+/** Storage failed before a token state transition could be exposed. */
+class TokenPersistenceException(
+    val operation: String,
+    cause: Throwable,
+) : IllegalStateException(
+    "Token persistence $operation failed before token adoption.",
+    cause,
+)
+
+class InvalidTokenPairException(
+    val operation: String,
+) : IllegalStateException("EdgeBase token pair is incomplete during $operation.")
 
 /**
  * In-memory token storage for testing / default usage.
@@ -150,9 +170,10 @@ class ClientTokenManager(private val storage: TokenStorage) : TokenManager {
      * Store tokens and persist to storage.
      */
     suspend fun setTokens(pair: TokenPair) {
+        validateTokenPair(pair, "save")
         mutex.withLock {
+            saveTokens(pair)
             currentTokens = pair
-            storage.saveTokens(pair)
         }
         notifyAuthStateChange(decodeJwtPayload(pair.accessToken))
     }
@@ -174,16 +195,18 @@ class ClientTokenManager(private val storage: TokenStorage) : TokenManager {
                 val callback = refreshCallback ?: return tokens.accessToken
                 return try {
                     val newTokens = callback(tokens.refreshToken)
+                    validateTokenPair(newTokens, "refresh")
+                    saveTokens(newTokens)
                     currentTokens = newTokens
-                    storage.saveTokens(newTokens)
                     notifyAuthStateChange(decodeJwtPayload(newTokens.accessToken))
                     newTokens.accessToken
                 } catch (e: Exception) {
+                    if (e is TokenPersistenceException || e is InvalidTokenPairException) throw e
                     // 401 means token revoked/expired — clear session (matches JS SDK).
                     // Other errors (network, 5xx) keep session for retry.
                     if (e is EdgeBaseError && e.statusCode == 401) {
+                        clearStoredTokens()
                         currentTokens = null
-                        storage.clearTokens()
                         notifyAuthStateChange(null)
                         null
                     } else {
@@ -208,13 +231,23 @@ class ClientTokenManager(private val storage: TokenStorage) : TokenManager {
         return decodeJwtPayload(token)
     }
 
+    /** Fail closed before an upgrade that may revoke the current session. */
+    fun requireDurableStorageForAccountUpgrade() {
+        if (storage is DurableTokenStorage) return
+        if (currentUser()?.get("isAnonymous") == false) return
+        throw IllegalStateException(
+            "Anonymous account upgrades require a DurableTokenStorage so replacement " +
+                "tokens survive response loss or process termination."
+        )
+    }
+
     /**
      * Clear all tokens.
      */
     override suspend fun clearTokens() {
         mutex.withLock {
+            clearStoredTokens()
             currentTokens = null
-            storage.clearTokens()
         }
         notifyAuthStateChange(null)
     }
@@ -227,12 +260,47 @@ class ClientTokenManager(private val storage: TokenStorage) : TokenManager {
      */
     suspend fun tryRestoreSession(): Boolean {
         val stored = mutex.withLock {
-            val s = storage.getTokens() ?: return false
+            val s = loadTokens() ?: return false
+            validateTokenPair(s, "restore")
             currentTokens = s
             s
         }
         notifyAuthStateChange(decodeJwtPayload(stored.accessToken))
         return true
+    }
+
+    private suspend fun loadTokens(): TokenPair? = try {
+        storage.getTokens()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        throw TokenPersistenceException("load", error)
+    }
+
+    private fun validateTokenPair(pair: TokenPair, operation: String) {
+        if (pair.accessToken.isBlank() || pair.refreshToken.isBlank()) {
+            throw InvalidTokenPairException(operation)
+        }
+    }
+
+    private suspend fun saveTokens(pair: TokenPair) {
+        try {
+            storage.saveTokens(pair)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            throw TokenPersistenceException("save", error)
+        }
+    }
+
+    private suspend fun clearStoredTokens() {
+        try {
+            storage.clearTokens()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            throw TokenPersistenceException("clear", error)
+        }
     }
 
     /**

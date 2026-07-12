@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { _internals } from '../src/commands/docker.js';
+import { buildManagedD1DatabaseName } from '../src/lib/managed-resource-names.js';
 
 let tmpDir: string;
 const dockerfilePath = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'Dockerfile');
@@ -29,6 +30,8 @@ describe('Docker build argument construction', () => {
     const dockerfile = readFileSync(dockerfilePath, 'utf-8');
 
     expect(dockerfile).toContain('ENV CLOUDFLARE_INCLUDE_PROCESS_ENV=true');
+    expect(dockerfile).toContain('ENV EDGEBASE_RUNTIME_MODE=self-hosted');
+    expect(dockerfile).toContain('export EDGEBASE_RUNTIME_MODE=self-hosted');
     expect(dockerfile).toContain('rm -f /app/.dev.vars');
     expect(dockerfile).not.toContain('echo "JWT_USER_SECRET=${JWT_USER_SECRET}"');
   });
@@ -122,7 +125,13 @@ describe('Docker build argument construction', () => {
     expect(wranglerToml).toContain('binding = "AUTH_DB"');
     expect(wranglerToml).toContain('binding = "CONTROL_DB"');
     expect(wranglerToml).toContain('binding = "DB_D1_APP"');
-    expect(wranglerToml).toContain('database_name = "docker-worker-db-app"');
+    expect(wranglerToml).toContain(
+      `database_name = "${buildManagedD1DatabaseName('docker-worker', 'db-app')}"`,
+    );
+    expect(wranglerToml).toContain('EDGEBASE_RUNTIME_MODE = "self-hosted"');
+    expect(wranglerToml).toContain(
+      'compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]',
+    );
   });
 
   it('detects a responsive docker daemon via docker info', () => {

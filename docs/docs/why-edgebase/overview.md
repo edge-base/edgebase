@@ -56,7 +56,9 @@ The real fear for startups: start free, app goes viral, next month's bill is cat
 
 **Why?** Because the architecture changes which line items exist in the first place:
 
-- **Auth $0** — JWT verified locally (pure crypto), no session server. D1 included allowance (25B reads/month) handles all auth data. Outgrow D1? Switch to Neon PostgreSQL with one config change.
+- **No per-MAU auth fee** — ordinary requests verify JWTs locally; D1 stores
+  durable auth records and a key-sharded Durable Object atomically coordinates
+  OAuth state. Normal infrastructure usage still applies.
 - **No egress or bandwidth fees** — R2 serves files with $0 egress, and Workers/D1 do not add separate transfer or throughput billing. Realtime stays inside DO compute instead of creating a separate per-recipient bill.
 - **Database subscriptions stay inside compute** — WebSocket broadcast happens inside a DO, so the billing model is compute + ops rather than a separate per-recipient realtime product.
 - **Idle $0** — Durable Objects hibernate. No traffic = no cost.

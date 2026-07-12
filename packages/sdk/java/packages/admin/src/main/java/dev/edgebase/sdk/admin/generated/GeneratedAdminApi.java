@@ -1,6 +1,6 @@
 // Auto-generated admin API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 package dev.edgebase.sdk.admin.generated;
 
@@ -75,7 +75,7 @@ public class GeneratedAdminApi {
         return http.post("/db/broadcast", body);
     }
 
-    /** Execute SQL via DatabaseDO — POST /api/sql */
+    /** Execute provider-aware raw SQL — POST /api/sql */
     public Object executeSql(Map<String, ?> body) throws EdgeBaseError {
         return http.post("/sql", body);
     }

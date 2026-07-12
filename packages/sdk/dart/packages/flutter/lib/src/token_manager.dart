@@ -1,8 +1,7 @@
 // Token management for EdgeBase SDK.
 //
-// Access Token: always in memory.
-// Refresh Token: SharedPrefsTokenStorage (기본, 영구 저장)
-// JS SDK의 localStorage 패턴과 동일 — 앱 재시작 후에도 세션 유지.
+// Access + refresh tokens are persisted as one pair so a response-loss restart
+// can replay an anonymous-account upgrade checkpoint safely.
 
 import 'dart:async';
 import 'dart:convert';
@@ -58,6 +57,32 @@ class TokenPair {
 /// Callback type for performing token refresh via HTTP.
 typedef RefreshTokenCallback = Future<TokenPair> Function(String refreshToken);
 
+/// Persistent token storage failed before a new session could be exposed.
+class TokenPersistenceException implements Exception {
+  final String operation;
+  final Object cause;
+  final StackTrace causeStackTrace;
+
+  TokenPersistenceException(
+    this.operation,
+    this.cause,
+    this.causeStackTrace,
+  );
+
+  @override
+  String toString() =>
+      'TokenPersistenceException: $operation failed before token adoption: $cause';
+}
+
+class InvalidTokenPairException implements Exception {
+  final String operation;
+  const InvalidTokenPairException(this.operation);
+
+  @override
+  String toString() =>
+      'InvalidTokenPairException: incomplete token pair during $operation';
+}
+
 /// Token manager — handles Access/Refresh tokens and auth state.
 /// Implements core.TokenManager so it can be used with HttpClient and other
 /// core components that accept the abstract interface.
@@ -100,7 +125,8 @@ class TokenManager implements core.TokenManager {
 
   /// Get the stored refresh token (implements core.TokenManager).
   @override
-  Future<String?> getRefreshToken() => storage.getRefreshToken();
+  Future<String?> getRefreshToken() async =>
+      (await _loadStoredPair())?.refreshToken;
 
   /// Get a valid access token, refreshing if needed.
   /// Implements core.TokenManager with optional RefreshCallback.
@@ -119,7 +145,7 @@ class TokenManager implements core.TokenManager {
     }
 
     // Try to refresh
-    final storedRefreshToken = await storage.getRefreshToken();
+    final storedRefreshToken = (await _loadStoredPair())?.refreshToken;
     if (storedRefreshToken == null) return _accessToken;
 
     _isRefreshing = true;
@@ -134,6 +160,17 @@ class TokenManager implements core.TokenManager {
       _refreshCompleter!.complete(_accessToken);
       return _accessToken;
     } catch (e) {
+      if (e is TokenPersistenceException || e is InvalidTokenPairException) {
+        final completion = _refreshCompleter!;
+        // Attach a handler for the initiating caller while still propagating
+        // the same failure to any concurrent refresh waiters.
+        unawaited(completion.future.catchError((_) => null));
+        final failureStack = e is TokenPersistenceException
+            ? e.causeStackTrace
+            : StackTrace.current;
+        completion.completeError(e, failureStack);
+        rethrow;
+      }
       // 401 means token revoked/expired — clear session (matches JS SDK).
       // Other errors (network, 5xx) keep session for retry.
       if (e is EdgeBaseError && e.statusCode == 401) {
@@ -159,19 +196,79 @@ class TokenManager implements core.TokenManager {
     required String accessToken,
     required String refreshToken,
   }) async {
+    if (accessToken.isEmpty || refreshToken.isEmpty) {
+      throw const InvalidTokenPairException('save');
+    }
+    final nextUser = _decodeJwt(accessToken);
+    final nextExpiration = _extractExp(accessToken);
+    try {
+      if (storage is AtomicTokenPairStorage) {
+        await (storage as AtomicTokenPairStorage).setTokenPair(StoredTokenPair(
+          accessToken: accessToken,
+          refreshToken: refreshToken,
+        ));
+      } else {
+        await storage.setRefreshToken(refreshToken);
+      }
+    } catch (error, stackTrace) {
+      throw TokenPersistenceException('save', error, stackTrace);
+    }
+    // Persist-before-expose: a failed refresh-token write must never leave a
+    // new access token or user visible only in memory.
+    _accessToken = accessToken;
+    _currentUser = nextUser;
+    _accessTokenExp = nextExpiration;
+    if (!_isClosed) _authStateController.add(_currentUser);
+  }
+
+  void _adoptStoredTokens(StoredTokenPair pair) {
+    final accessToken = pair.accessToken;
+    if (accessToken == null ||
+        accessToken.isEmpty ||
+        pair.refreshToken.isEmpty) {
+      throw const InvalidTokenPairException('restore');
+    }
     _accessToken = accessToken;
     _currentUser = _decodeJwt(accessToken);
     _accessTokenExp = _extractExp(accessToken);
-    await storage.setRefreshToken(refreshToken);
     if (!_isClosed) _authStateController.add(_currentUser);
+  }
+
+  Future<StoredTokenPair?> _loadStoredPair() async {
+    try {
+      if (storage is AtomicTokenPairStorage) {
+        return await (storage as AtomicTokenPairStorage).getTokenPair();
+      }
+      final refreshToken = await storage.getRefreshToken();
+      return refreshToken == null
+          ? null
+          : StoredTokenPair(accessToken: null, refreshToken: refreshToken);
+    } catch (error, stackTrace) {
+      throw TokenPersistenceException('load', error, stackTrace);
+    }
+  }
+
+  /// Fail closed before an operation that can revoke the initiating session.
+  void requireDurableStorageForAccountUpgrade() {
+    if (storage is DurableTokenStorage || currentUser?.isAnonymous == false) {
+      return;
+    }
+    throw StateError(
+      'Anonymous account upgrades require durable access/refresh pair storage '
+      'so replacement tokens survive response loss or process termination.',
+    );
   }
 
   /// Clear tokens on sign-out.
   Future<void> clearTokens() async {
+    try {
+      await storage.clearRefreshToken();
+    } catch (error, stackTrace) {
+      throw TokenPersistenceException('clear', error, stackTrace);
+    }
     _accessToken = null;
     _accessTokenExp = null;
     _currentUser = null;
-    await storage.clearRefreshToken();
     if (!_isClosed) _authStateController.add(null);
   }
 
@@ -207,17 +304,26 @@ class TokenManager implements core.TokenManager {
 
   /// Try to restore session from stored refresh token.
   Future<bool> tryRestoreSession(RefreshTokenCallback refreshFn) async {
-    final refreshToken = await storage.getRefreshToken();
-    if (refreshToken == null) return false;
+    final stored = await _loadStoredPair();
+    if (stored == null) return false;
+
+    if (stored.accessToken != null) {
+      _adoptStoredTokens(stored);
+      return true;
+    }
 
     try {
-      final pair = await refreshFn(refreshToken);
+      final pair = await refreshFn(stored.refreshToken);
       await _applyTokens(
         accessToken: pair.accessToken,
         refreshToken: pair.refreshToken,
       );
       return true;
-    } catch (_) {
+    } catch (error) {
+      if (error is TokenPersistenceException ||
+          error is InvalidTokenPairException) {
+        rethrow;
+      }
       await clearTokens();
       return false;
     }

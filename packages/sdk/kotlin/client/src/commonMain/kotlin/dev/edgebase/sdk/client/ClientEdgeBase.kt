@@ -3,9 +3,11 @@
 // Main SDK class for Android, iOS, Web, and Desktop clients.
 //: client/server split, #122: Server→Admin rename, #130: KMP 전환.
 //
-// Usage:
+// Usage (iOS, browser JS, desktop JVM):
 //   val client = ClientEdgeBase("https://my-app.edgebase.fun")
 //   val user = client.auth.signUp(email = "test@example.com", password = "pass123")
+// Android:
+//   val client = AndroidEdgeBase.client(activity, "https://my-app.edgebase.fun")
 
 package dev.edgebase.sdk.client
 
@@ -17,6 +19,10 @@ import dev.edgebase.sdk.core.generated.GeneratedDbApi
  *
  * Exposes: auth, db, storage, push, destroy.
  * Does NOT expose: adminAuth, sql (admin-only).
+ *
+ * On Android, use `AndroidEdgeBase.client(currentActivity, url, ...)` instead
+ * of constructing this class directly. Android fails fast without an Activity
+ * so first-interaction CAPTCHA and permission UI always have a valid host.
  *
  * ```kotlin
  * val client = ClientEdgeBase("https://my-app.edgebase.fun")
@@ -30,6 +36,10 @@ class ClientEdgeBase(
     projectId: String? = null
 ) {
     val baseUrl: String = url.trimEnd('/')
+    // Android cannot replay an ActivityLifecycleCallbacks event when the SDK
+    // is first created after RESUMED. Its actual implementation therefore
+    // requires AndroidEdgeBase.client(currentActivity, ...) up front.
+    private val platformInitialization = validateClientPlatformInitialization()
     private val contextManager = ContextManager()
     private val _tokenManager = ClientTokenManager(tokenStorage ?: createDefaultTokenStorage())
     private val httpClient = HttpClient(
@@ -102,3 +112,5 @@ class ClientEdgeBase(
         httpClient.close()
     }
 }
+
+internal expect fun validateClientPlatformInitialization()

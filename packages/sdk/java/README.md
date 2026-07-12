@@ -9,9 +9,9 @@
 Official Java SDK for EdgeBase, published for Gradle and Maven consumers through
 JitPack as three installable artifacts:
 
-- `com.github.edge-base.edgebase:edgebase-core-java:v0.3.8`
-- `com.github.edge-base.edgebase:edgebase-android-java:v0.3.8`
-- `com.github.edge-base.edgebase:edgebase-admin-java:v0.3.8`
+- `com.github.edge-base.edgebase:edgebase-core-java:v0.4.0`
+- `com.github.edge-base.edgebase:edgebase-android-java:v0.4.0`
+- `com.github.edge-base.edgebase:edgebase-admin-java:v0.4.0`
 
 The monorepo root `edgebase-sdk-java` artifact is intentionally not part of the
 public JitPack install path. Depend on the split artifacts below.
@@ -30,9 +30,9 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.edge-base.edgebase:edgebase-core-java:v0.3.8'
-    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.3.8'
-    implementation 'com.github.edge-base.edgebase:edgebase-admin-java:v0.3.8'
+    implementation 'com.github.edge-base.edgebase:edgebase-core-java:v0.4.0'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.4.0'
+    implementation 'com.github.edge-base.edgebase:edgebase-admin-java:v0.4.0'
 }
 ```
 
@@ -49,17 +49,17 @@ dependencies {
 <dependency>
     <groupId>com.github.edge-base.edgebase</groupId>
     <artifactId>edgebase-core-java</artifactId>
-    <version>v0.3.8</version>
+    <version>v0.4.0</version>
 </dependency>
 <dependency>
     <groupId>com.github.edge-base.edgebase</groupId>
     <artifactId>edgebase-android-java</artifactId>
-    <version>v0.3.8</version>
+    <version>v0.4.0</version>
 </dependency>
 <dependency>
     <groupId>com.github.edge-base.edgebase</groupId>
     <artifactId>edgebase-admin-java</artifactId>
-    <version>v0.3.8</version>
+    <version>v0.4.0</version>
 </dependency>
 ```
 
@@ -73,16 +73,24 @@ dependencies {
 
 ## Quick Start
 
-### Client SDK (Android / Desktop)
+### Client SDK
+
+Android must initialize from the current `Activity`. The shared desktop factory
+fails fast on Android because CAPTCHA and permission UI require a valid UI host
+from the first interaction.
 
 ```java
+import dev.edgebase.sdk.client.AndroidEdgeBase;
 import dev.edgebase.sdk.client.ClientEdgeBase;
-import dev.edgebase.sdk.client.EdgeBase;
 import dev.edgebase.sdk.core.EdgeBaseFieldOps;
 import dev.edgebase.sdk.core.ListResult;
 import java.util.Map;
 
-ClientEdgeBase client = EdgeBase.client("https://my-app.edgebase.fun");
+ClientEdgeBase client = AndroidEdgeBase.client(
+    this,
+    "https://my-app.edgebase.fun",
+    appSecureDurableTokenStorage
+);
 
 client.auth().signUp("user@example.com", "password123!");
 client.auth().signIn("user@example.com", "password123!");
@@ -101,11 +109,17 @@ ListResult results = client.db("shared").table("posts")
 client.functions().post("welcome-email", Map.of("to", "user@example.com"));
 client.analytics().track("java_example_opened");
 
+// Before authenticated work after launch:
+client.tryRestoreSession();
+
 client.storage().bucket("avatars").upload("profile.png", imageBytes, "image/png");
 String url = client.storage().bucket("avatars").getUrl("profile.png");
 
 client.destroy();
 ```
+
+For desktop JVM clients, use
+`EdgeBase.client("https://my-app.edgebase.fun")` instead.
 
 ### Server SDK (Spring / Ktor / Backend)
 

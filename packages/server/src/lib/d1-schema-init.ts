@@ -14,14 +14,13 @@ import type { TableConfig, MigrationConfig } from '@edge-base/shared';
 import {
   META_TABLE_DDL,
   generateTableDDL,
-  generateAddColumnDDL,
+  generateSQLiteAddColumnDDLs,
   generateFTS5DDL,
   generateFTS5Triggers,
   generateIndexDDL,
   buildEffectiveSchema,
   computeSchemaHashSync,
 } from './schema.js';
-import type { SchemaField } from '@edge-base/shared';
 
 // Track initialized namespaces to avoid redundant checks per Worker process.
 const _initialized = new Set<string>();
@@ -113,38 +112,17 @@ async function handleD1SchemaUpdate(
   const effectiveSchema = buildEffectiveSchema(config.schema);
 
   // Add missing columns
-  const stmts: D1PreparedStatement[] = [];
-  const indexDDLs: string[] = [];
+  const migrationDDLs: string[] = [];
   for (const [colName, field] of Object.entries(effectiveSchema)) {
     if (!existingCols.has(colName)) {
-      const columnField = normalizeD1AddColumnField(field);
-      const ddl = generateAddColumnDDL(tableName, colName, columnField);
-      stmts.push(db.prepare(ddl));
-      if (field.unique) {
-        indexDDLs.push(
-          `CREATE UNIQUE INDEX IF NOT EXISTS "${`idx_${tableName}_${colName}`.replace(/"/g, '""')}" ON "${tableName.replace(/"/g, '""')}"("${colName.replace(/"/g, '""')}");`,
-        );
-      }
+      migrationDDLs.push(...generateSQLiteAddColumnDDLs(tableName, colName, field));
     }
   }
-  if (stmts.length > 0) {
-    await db.batch(stmts);
+  if (migrationDDLs.length > 0) {
+    // D1 batches are transactional, so ADD COLUMN and its separate UNIQUE
+    // index either both commit or both remain retryable.
+    await db.batch(migrationDDLs.map((ddl) => db.prepare(ddl)));
   }
-  if (indexDDLs.length > 0) {
-    await db.batch(indexDDLs.map((ddl) => db.prepare(ddl)));
-  }
-}
-
-function normalizeD1AddColumnField(field: SchemaField): SchemaField {
-  return {
-    ...field,
-    // SQLite/D1 cannot add UNIQUE columns inline via ALTER TABLE.
-    unique: false,
-    // Existing rows make NOT NULL additions fail unless a default is supplied.
-    required: field.required && field.default !== undefined,
-    // Primary keys are also unsupported on ALTER TABLE ADD COLUMN.
-    primaryKey: false,
-  };
 }
 
 /**

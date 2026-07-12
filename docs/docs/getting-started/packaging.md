@@ -83,6 +83,16 @@ Packed launchers default to a local-friendly runtime model:
 - reuse that port across restarts unless overridden
 - persist data in an app-specific OS data directory by default
 - support explicit overrides such as `--port`, `--data-dir`, and `--persist-to`
+- load application variables from `.env`, `.env.local`, `--env-file`, standard
+  EdgeBase runtime process variables, and custom process keys named by
+  `EDGEBASE_RUNTIME_ENV_ALLOWLIST`
+- keep the generated runtime `.dev.vars` owner-only and transient; it is
+  atomically replaced at launch and removed on exit or launch failure
+
+Other ambient shell, package-manager, CI, and tooling variables are excluded
+from automatic Worker forwarding. If the application intentionally needs a
+custom process key, list its name in the comma-separated
+`EDGEBASE_RUNTIME_ENV_ALLOWLIST` value or declare it in the explicit env file.
 
 Default app-data locations:
 

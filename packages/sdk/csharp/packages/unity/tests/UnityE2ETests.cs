@@ -231,7 +231,7 @@ namespace EdgeBase.Tests
         {
             var url = _client.Auth.SignInWithOAuth("google", "https://example.com/callback");
             Assert.Contains("/api/auth/oauth/google", url);
-            Assert.Contains("redirectUrl=", url);
+            Assert.Contains("redirect_url=", url);
             return Task.CompletedTask;
         }
 
@@ -708,7 +708,9 @@ namespace EdgeBase.Tests
         [Fact]
         public async Task LinkWithEmail_after_anonymous()
         {
-            using var client = new EdgeBase(_baseUrl);
+            // Test-only durable marker: production apps must back this contract
+            // with platform-secure persistence that survives process restart.
+            using var client = new EdgeBase(_baseUrl, new E2EDurableMemoryStorage());
             var anonResult = await client.Auth.SignInAnonymouslyAsync();
             Assert.NotNull(anonResult.GetValueOrDefault("accessToken"));
 
@@ -720,6 +722,25 @@ namespace EdgeBase.Tests
             using var client2 = new EdgeBase(_baseUrl);
             var signInResult = await client2.Auth.SignInAsync(linkEmail, "LinkPass123!");
             Assert.NotNull(signInResult.GetValueOrDefault("accessToken"));
+        }
+
+        private sealed class E2EDurableMemoryStorage : IDurableAuthTokenStorage
+        {
+            private AuthTokenPair? _tokens;
+
+            public Task<AuthTokenPair?> LoadTokensAsync() => Task.FromResult(_tokens);
+
+            public Task SaveTokensAsync(AuthTokenPair tokens)
+            {
+                _tokens = tokens;
+                return Task.CompletedTask;
+            }
+
+            public Task ClearTokensAsync()
+            {
+                _tokens = null;
+                return Task.CompletedTask;
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════════════

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(EdgeBaseUnreal VERSION 0.3.8 LANGUAGES CXX)
+project(EdgeBaseUnreal VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -73,6 +73,29 @@ target_link_libraries(edgebase_unreal
   PRIVATE ixwebsocket
 )
 
+if(WIN32)
+  target_link_libraries(edgebase_unreal PRIVATE bcrypt)
+endif()
+
+# Compile the packaged Source/EdgeBase provider in both supported modes. These
+# object-only targets prevent the independently distributed plugin tree from
+# drifting into code that the standalone CMake package never compiles.
+set(EDGEBASE_SOURCE_TURNSTILE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../Source/EdgeBase/Private/TurnstileProvider.cpp
+)
+add_library(turnstile_source_core_contract OBJECT ${EDGEBASE_SOURCE_TURNSTILE})
+target_compile_definitions(turnstile_source_core_contract PRIVATE EDGEBASE_HAS_CORE=1)
+target_include_directories(turnstile_source_core_contract PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../Source/EdgeBase/Public
+  ${CMAKE_CURRENT_SOURCE_DIR}/../core/include
+  ${nlohmann_json_SOURCE_DIR}/include
+)
+add_library(turnstile_source_nocore_contract OBJECT ${EDGEBASE_SOURCE_TURNSTILE})
+target_compile_definitions(turnstile_source_nocore_contract PRIVATE EDGEBASE_HAS_CORE=0)
+target_include_directories(turnstile_source_nocore_contract PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../Source/EdgeBase/Public
+)
+
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 enable_testing()
@@ -88,6 +111,25 @@ target_include_directories(unit_test PRIVATE
   ${nlohmann_json_SOURCE_DIR}/include
 )
 catch_discover_tests(unit_test)
+
+# Static release guard: both the standalone Unreal package and the packaged
+# Source/EdgeBase plugin must keep the hosted challenge protocol in sync and
+# must never regress to inline Turnstile HTML or the legacy token URI.
+add_custom_target(
+  turnstile_packaging_check ALL
+  COMMAND ${CMAKE_COMMAND}
+    -DUNREAL_PACKAGE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DCPP_SDK_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/../..
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_turnstile_packaging.cmake
+  VERBATIM
+)
+add_test(
+  NAME turnstile_packaging_guard
+  COMMAND ${CMAKE_COMMAND}
+    -DUNREAL_PACKAGE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DCPP_SDK_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/../..
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_turnstile_packaging.cmake
+)
 
 # E2E tests (requires running wrangler dev server)
 add_executable(e2e_test tests/e2e_tests.cpp)

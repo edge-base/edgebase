@@ -102,6 +102,11 @@ const LOCK_TIMEOUT_MS = 10_000;
 const REFRESH_IDLE_DEADLINE_MS = 20_000;
 const LOCK_VERIFY_DELAY_MS = 16;
 const OAUTH_RECOVERY_TTL_MS = 10 * 60_000;
+const OAUTH_COMPLETION_TTL_MS = 5 * 60_000;
+const OAUTH_RECOVERY_NONCE_BYTES = 32;
+const OAUTH_RECOVERY_NONCE_HEX_LENGTH = OAUTH_RECOVERY_NONCE_BYTES * 2;
+const OAUTH_RECOVERY_NONCE_PATTERN = /^[0-9a-f]{64}$/;
+const OAUTH_PENDING_RECOVERY_LIMIT = 8;
 /**
  * How long a fallback (no-BroadcastChannel) refresh-result stays valid for a
  * waiting tab to consume. Kept short: the result parks a bearer access token in
@@ -131,10 +136,36 @@ interface CookieSessionMarker {
   userId: string;
 }
 
-interface CookieOAuthRecoveryMarker {
+interface PendingOAuthRecoveryEntry {
+  createdAt: number;
+  nonce: string;
+  version: 1;
+  authEpoch: number;
+}
+
+export interface PendingOAuthCompletion {
+  ticket: string;
+  recoveryNonce: string | null;
+  kind: 'signin' | 'link';
+  authTransport: 'body' | 'cookie';
+  createdAt: number;
+  authEpoch: number;
+}
+
+interface InterimCookieOAuthRecoveryMarker {
+  version: 2;
+  kind: 'cookie-recovery';
+  createdAt: number;
+}
+
+interface LegacyCookieOAuthRecoveryMarker {
   version: 1;
   createdAt: number;
 }
+
+type CookieOAuthRecoveryMarker =
+  | InterimCookieOAuthRecoveryMarker
+  | LegacyCookieOAuthRecoveryMarker;
 
 function isExplicitlyOffline(): boolean {
   return typeof navigator !== 'undefined' && navigator.onLine === false;
@@ -169,16 +200,121 @@ function parseCookieSessionMarker(value: string | null): CookieSessionMarker | n
   }
 }
 
+function isFreshOAuthRecoveryTimestamp(createdAt: unknown): createdAt is number {
+  if (typeof createdAt !== 'number' || !Number.isFinite(createdAt)) return false;
+  const age = Date.now() - createdAt;
+  return age >= -60_000 && age <= OAUTH_RECOVERY_TTL_MS;
+}
+
 function parseCookieOAuthRecoveryMarker(value: string | null): CookieOAuthRecoveryMarker | null {
   if (!value) return null;
   try {
-    const parsed = JSON.parse(value) as { version?: unknown; createdAt?: unknown };
-    if (parsed.version !== 1 || typeof parsed.createdAt !== 'number') return null;
-    if (Date.now() - parsed.createdAt > OAUTH_RECOVERY_TTL_MS) return null;
-    return { version: 1, createdAt: parsed.createdAt };
+    const parsed = JSON.parse(value) as {
+      version?: unknown;
+      kind?: unknown;
+      createdAt?: unknown;
+    };
+    if (!isFreshOAuthRecoveryTimestamp(parsed.createdAt)) return null;
+    if (parsed.version === 1) {
+      // Version 1 was written only after a verified cookie callback by the
+      // previously released SDK. It is safe solely for parameterless cookie
+      // refresh recovery; it must never authorize a bearer callback.
+      return { version: 1, createdAt: parsed.createdAt };
+    }
+    if (parsed.version !== 2) return null;
+    if (parsed.kind === 'cookie-recovery') {
+      return { version: 2, kind: 'cookie-recovery', createdAt: parsed.createdAt };
+    }
+    return null;
   } catch {
     return null;
   }
+}
+
+function parsePendingOAuthRecoveryEntry(
+  nonce: string,
+  value: string | null,
+): PendingOAuthRecoveryEntry | null {
+  if (!value || !OAUTH_RECOVERY_NONCE_PATTERN.test(nonce)) return null;
+  try {
+    const parsed = JSON.parse(value) as {
+      version?: unknown;
+      createdAt?: unknown;
+      authEpoch?: unknown;
+    };
+    if (
+      parsed.version !== 1
+      || !isFreshOAuthRecoveryTimestamp(parsed.createdAt)
+      || typeof parsed.authEpoch !== 'number'
+      || !Number.isSafeInteger(parsed.authEpoch)
+      || parsed.authEpoch < 0
+    ) return null;
+    return {
+      version: 1,
+      createdAt: parsed.createdAt,
+      nonce,
+      authEpoch: parsed.authEpoch,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parsePendingOAuthCompletion(
+  ticket: string,
+  value: string | null,
+): PendingOAuthCompletion | null {
+  if (!value || !OAUTH_RECOVERY_NONCE_PATTERN.test(ticket)) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<PendingOAuthCompletion> & { version?: unknown };
+    const age = Date.now() - Number(parsed.createdAt);
+    if (
+      parsed.version !== 1
+      || parsed.ticket !== ticket
+      || (parsed.recoveryNonce !== null
+        && (typeof parsed.recoveryNonce !== 'string'
+          || !OAUTH_RECOVERY_NONCE_PATTERN.test(parsed.recoveryNonce)))
+      || (parsed.kind !== 'signin' && parsed.kind !== 'link')
+      || (parsed.authTransport !== 'body' && parsed.authTransport !== 'cookie')
+      || typeof parsed.createdAt !== 'number'
+      || !Number.isFinite(parsed.createdAt)
+      || age < -60_000
+      || age > OAUTH_COMPLETION_TTL_MS
+      || typeof parsed.authEpoch !== 'number'
+      || !Number.isSafeInteger(parsed.authEpoch)
+      || parsed.authEpoch < 0
+    ) return null;
+    return {
+      ticket,
+      recoveryNonce: parsed.recoveryNonce,
+      kind: parsed.kind,
+      authTransport: parsed.authTransport,
+      createdAt: parsed.createdAt,
+      authEpoch: parsed.authEpoch,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function createOAuthRecoveryNonce(): string {
+  const secureCrypto = globalThis.crypto;
+  if (!secureCrypto || typeof secureCrypto.getRandomValues !== 'function') {
+    throw new EdgeBaseError(0, 'Secure random generation is required to start OAuth.');
+  }
+  const bytes = new Uint8Array(OAUTH_RECOVERY_NONCE_BYTES);
+  secureCrypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/** Compare fixed-format OAuth nonces without data-dependent early exits. */
+function oauthRecoveryNoncesMatch(expected: string, candidate: string | null): boolean {
+  const actual = candidate ?? '';
+  let mismatch = expected.length ^ actual.length;
+  for (let index = 0; index < OAUTH_RECOVERY_NONCE_HEX_LENGTH; index += 1) {
+    mismatch |= expected.charCodeAt(index) ^ (actual.charCodeAt(index) || 0);
+  }
+  return mismatch === 0;
 }
 
 function parseRefreshResult(value: string | null): StoredRefreshResult | null {
@@ -202,8 +338,14 @@ interface TokenManagerKeySet {
   refreshTokenKey: string;
   refreshLockKey: string;
   refreshResultKey: string;
+  authMutationLockKey: string;
   cookieSessionKey: string;
   cookieOAuthRecoveryKey: string;
+  oauthPendingRecoveryPrefix: string;
+  oauthConsumeLockPrefix: string;
+  oauthPendingCompletionPrefix: string;
+  /** Rolling-upgrade cleanup only; new flows never write this shared key. */
+  oauthPendingRecoveriesKey: string;
   pendingSignOutKey: string;
   authEpochKey: string;
   broadcastChannelName: string;
@@ -258,19 +400,37 @@ function isFreshRefreshLock(lock: RefreshLock): boolean {
   return Date.now() - lock.timestamp < LOCK_TIMEOUT_MS;
 }
 
+function isTerminalOAuthConsumeClaim(lock: RefreshLock | null): boolean {
+  return lock?.ownerId === 'consumed' && isFreshOAuthRecoveryTimestamp(lock.timestamp);
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function buildTokenManagerKeys(authNamespace?: string): TokenManagerKeySet {
+function buildTokenManagerKeys(baseUrl: string, authNamespace?: string): TokenManagerKeySet {
   const trimmedNamespace = authNamespace?.trim();
-  const prefix = trimmedNamespace ? `edgebase:${trimmedNamespace}` : 'edgebase';
+  let canonicalBaseUrl = baseUrl.replace(/\/$/, '');
+  try {
+    canonicalBaseUrl = new URL(baseUrl).toString().replace(/\/$/, '');
+  } catch {
+    // HttpClient will surface an invalid base URL; keep key construction
+    // deterministic without falling back to the unsafe global legacy prefix.
+  }
+  const prefix = trimmedNamespace
+    ? `edgebase:${trimmedNamespace}`
+    : `edgebase:${encodeURIComponent(canonicalBaseUrl)}`;
   return {
     refreshTokenKey: `${prefix}:refresh-token`,
     refreshLockKey: `${prefix}:refresh-lock`,
     refreshResultKey: `${prefix}:refresh-result`,
+    authMutationLockKey: `${prefix}:auth-mutation-lock`,
     cookieSessionKey: `${prefix}:cookie-session`,
     cookieOAuthRecoveryKey: `${prefix}:cookie-oauth-recovery`,
+    oauthPendingRecoveryPrefix: `${prefix}:oauth-pending:`,
+    oauthConsumeLockPrefix: `${prefix}:oauth-consume-lock:`,
+    oauthPendingCompletionPrefix: `${prefix}:oauth-pending-completion:`,
+    oauthPendingRecoveriesKey: `${prefix}:oauth-pending-recoveries`,
     pendingSignOutKey: `${prefix}:pending-signout`,
     authEpochKey: `${prefix}:auth-epoch`,
     broadcastChannelName: `${prefix}:auth`,
@@ -296,10 +456,116 @@ export class TokenManager {
   private expectedCookieUserId: string | null = null;
   private cookieRevalidationHandler: (() => Promise<TokenPair>) | null = null;
   private cookiePrincipalRevalidation: Promise<void> | null = null;
+  private lastOAuthRecoveryCreatedAt = 0;
+  private readonly pendingOAuthCompletionMemory = new Map<string, PendingOAuthCompletion>();
+  /**
+   * Same-process replay fence for the rare case where browser storage fails
+   * while a callback is being consumed. Durable storage remains the cross-tab
+   * authority; this map prevents a recovered storage adapter from replaying
+   * the same nonce in this TokenManager instance when both terminal-write and
+   * pending-record deletion failed.
+   */
+  private readonly consumedOAuthRecoveryNonces = new Map<string, number>();
+
+  private async withAuthMutationLock<T>(
+    operation: () => Promise<T>,
+    allowPendingSignOut: boolean,
+  ): Promise<T> {
+    const guarded = async (): Promise<T> => {
+      if (!allowPendingSignOut && this.hasPendingSignOut()) {
+        throw new EdgeBaseError(
+          409,
+          'A sign-out is pending server revocation.',
+          undefined,
+          'signout-pending',
+        );
+      }
+      return operation();
+    };
+    const locks = typeof navigator !== 'undefined'
+      ? (navigator as Navigator & {
+        locks?: {
+          request<T>(
+            name: string,
+            options: { mode: 'exclusive' },
+            callback: () => T | Promise<T>,
+          ): Promise<T>;
+        };
+      }).locks
+      : undefined;
+    if (locks && typeof locks.request === 'function') {
+      return locks.request(this.keys.authMutationLockKey, { mode: 'exclusive' }, guarded);
+    }
+
+    const ownerId = createRefreshOwnerId();
+    const deadline = Date.now() + REFRESH_IDLE_DEADLINE_MS;
+    while (Date.now() < deadline) {
+      const active = parseRefreshLock(this.storage.getItem(this.keys.authMutationLockKey));
+      if (active && isFreshRefreshLock(active)) {
+        await delay(25);
+        continue;
+      }
+      if (active) this.storage.removeItem(this.keys.authMutationLockKey);
+      this.storage.setItem(this.keys.authMutationLockKey, serializeRefreshLock(ownerId));
+      await delay(LOCK_VERIFY_DELAY_MS);
+      const acquired = parseRefreshLock(this.storage.getItem(this.keys.authMutationLockKey));
+      if (acquired?.ownerId !== ownerId) continue;
+
+      const heartbeat = setInterval(() => {
+        const current = parseRefreshLock(this.storage.getItem(this.keys.authMutationLockKey));
+        if (current?.ownerId === ownerId) {
+          this.storage.setItem(this.keys.authMutationLockKey, serializeRefreshLock(ownerId));
+        }
+      }, Math.max(250, Math.floor(LOCK_TIMEOUT_MS / 3)));
+      try {
+        return await guarded();
+      } finally {
+        clearInterval(heartbeat);
+        const current = parseRefreshLock(this.storage.getItem(this.keys.authMutationLockKey));
+        if (current?.ownerId === ownerId) this.storage.removeItem(this.keys.authMutationLockKey);
+      }
+    }
+    throw new EdgeBaseError(0, 'Timed out waiting for another authentication mutation.');
+  }
+
+  /** Serialize every token/cookie-creating auth response across tabs. */
+  async runAuthMutation<T>(
+    operation: () => Promise<T>,
+    commit?: (result: T) => void,
+    expectedEpoch?: number,
+  ): Promise<T> {
+    return this.withAuthMutationLock(async () => {
+      const epoch = expectedEpoch ?? this.captureAuthEpoch();
+      if (!this.isAuthEpochCurrent(epoch)) {
+        throw new EdgeBaseError(
+          401,
+          'Authentication operation was superseded by a newer auth state.',
+          undefined,
+          'auth-state-changed',
+        );
+      }
+      const result = await operation();
+      if (!this.isAuthEpochCurrent(epoch)) {
+        throw new EdgeBaseError(
+          401,
+          'Authentication response was superseded by a newer auth state.',
+          undefined,
+          'auth-state-changed',
+        );
+      }
+      commit?.(result);
+      return result;
+    }, false);
+  }
+
+  /** Queue final cookie revocation after every earlier auth mutation settles. */
+  runFinalSignOutMutation<T>(operation: () => Promise<T>): Promise<T> {
+    return this.withAuthMutationLock(operation, true);
+  }
 
   constructor(private baseUrl: string, options: TokenManagerOptions = {}) {
     this.storage = createBrowserStorage();
-    this.keys = buildTokenManagerKeys(options.authNamespace);
+    this.keys = buildTokenManagerKeys(baseUrl, options.authNamespace);
     this.transport = options.refreshTokenTransport ?? 'body';
     this.authEpoch = this.readPersistedAuthEpoch();
     this.setupCrossTabListeners();
@@ -363,6 +629,7 @@ export class TokenManager {
           this.storage.setItem(this.keys.refreshTokenKey, refreshToken);
           this.updateUser(accessToken);
         } else if (type === 'signed-out') {
+          this.authEpoch = Math.max(this.authEpoch, this.readPersistedAuthEpoch());
           const preserveRefreshLock = this.usesHttpOnlyCookie && this.hasPendingSignOut();
           this.clearTokensInternal(
             false,
@@ -375,7 +642,7 @@ export class TokenManager {
     // Also listen to storage events (fallback + additional tab sync for signout)
     if (typeof window !== 'undefined') {
       this.storageListener = (e: StorageEvent) => {
-        if (this.usesHttpOnlyCookie && e.key === this.keys.authEpochKey) {
+        if (e.key === this.keys.authEpochKey) {
           this.authEpoch = Math.max(this.authEpoch, this.readPersistedAuthEpoch());
         }
         if (this.usesHttpOnlyCookie && e.key === this.keys.cookieSessionKey) {
@@ -416,6 +683,14 @@ export class TokenManager {
       this.accessToken = null;
       this.cachedUser = null;
       this.emitAuthStateChange(null);
+      return;
+    }
+
+    if (this.cachedUser && marker.userId === this.cachedUser.id) {
+      // A peer refreshing the same principal only rotates the shared HttpOnly
+      // cookie. This tab's access token remains valid, and re-emitting the same
+      // positive auth state can make application-level session validation ping
+      // pong refreshes between tabs indefinitely.
       return;
     }
 
@@ -604,7 +879,25 @@ export class TokenManager {
         if (typeof doRefresh !== 'function') {
           throw new EdgeBaseError(0, 'No token refresh function was provided.');
         }
-        return doRefresh(tokenForRefresh);
+        return this.withAuthMutationLock(
+          () => {
+            // The refresh may have queued behind a newer explicit sign-in.
+            // Re-check *inside* the mutation lock before reading or rotating
+            // that new session's refresh token on the server.
+            this.assertAuthEpoch(expectedEpoch);
+            if (this.hasPendingSignOut()) {
+              throw new EdgeBaseError(
+                401,
+                'Sign-out superseded this session refresh.',
+                undefined,
+                'auth-state-changed',
+              );
+            }
+            const latestRefreshToken = this.storage.getItem(this.keys.refreshTokenKey);
+            return doRefresh(latestRefreshToken ?? tokenForRefresh);
+          },
+          false,
+        );
       })
       .then((tokens) => {
         this.assertAuthEpoch(expectedEpoch);
@@ -639,7 +932,6 @@ export class TokenManager {
             // A definitive rejection means the legacy migration credential is
             // unusable. Network and 5xx failures intentionally keep it so a
             // later online retry can still exchange it for the HttpOnly cookie.
-            this.advanceAuthEpoch();
             this.clearTokens();
           } else {
             const currentRefreshToken = this.storage.getItem(this.keys.refreshTokenKey);
@@ -930,7 +1222,14 @@ export class TokenManager {
 
   /** Set tokens after successful auth */
   setTokens(tokens: TokenPair, userOverride?: TokenUser | null): void {
-    this.accessToken = tokens.accessToken;
+    const tokenUser = extractUser(tokens.accessToken);
+    const nextUser = userOverride
+      ? { ...(tokenUser ?? {}), ...userOverride }
+      : tokenUser;
+    // A server-validated cookie refresh completes post-callback recovery. Do
+    // not clear a still-pending flow nonce here: an unrelated background token
+    // refresh may occur while a popup or account-link redirect is in flight.
+    this.clearCookieOAuthRecovery();
     if (this.usesHttpOnlyCookie) {
       // Successful cookie exchange completes legacy migration. Never persist
       // the empty compatibility sentinel or any server-returned credential.
@@ -944,18 +1243,37 @@ export class TokenManager {
         this.storage.removeItem(this.keys.cookieSessionKey);
         return;
       }
+      this.persistCookieSessionMarkerFor(nextUser);
       this.expectedCookieUserId = null;
-      this.clearPendingOAuthRecovery();
     } else {
-      this.storage.setItem(this.keys.refreshTokenKey, tokens.refreshToken);
+      // Persist the rotating credential before exposing its access token in
+      // memory. A quota/security failure therefore leaves no partial session.
+      try {
+        this.storage.setItem(this.keys.refreshTokenKey, tokens.refreshToken);
+      } catch {
+        throw new EdgeBaseError(
+          0,
+          'The authenticated session could not be persisted in browser storage.',
+          undefined,
+          'auth-session-persist-failed',
+        );
+      }
     }
-    this.setUserFromAccessToken(tokens.accessToken, userOverride);
+    this.accessToken = tokens.accessToken;
+    this.cachedUser = nextUser;
+    this.emitAuthStateChange(nextUser);
   }
 
   /** Replace only the access token while keeping the current refresh token. */
   setAccessToken(accessToken: string, userOverride?: TokenUser | null): void {
+    const tokenUser = extractUser(accessToken);
+    const nextUser = userOverride
+      ? { ...(tokenUser ?? {}), ...userOverride }
+      : tokenUser;
+    this.persistCookieSessionMarkerFor(nextUser);
     this.accessToken = accessToken;
-    this.setUserFromAccessToken(accessToken, userOverride);
+    this.cachedUser = nextUser;
+    this.emitAuthStateChange(nextUser);
   }
 
   /** Get the stored refresh token (for signout) */
@@ -971,7 +1289,7 @@ export class TokenManager {
     return Boolean(
       this.storage.getItem(this.keys.cookieSessionKey)
       || this.storage.getItem(this.keys.refreshTokenKey)
-      || this.hasPendingOAuthRecovery(),
+      || this.hasCookieOAuthRecovery(),
     );
   }
 
@@ -983,6 +1301,37 @@ export class TokenManager {
   /** Whether an async auth operation still belongs to the current local session. */
   isAuthEpochCurrent(epoch: number): boolean {
     return !this.hasPendingSignOut() && this.currentAuthEpoch() === epoch;
+  }
+
+  /** Invalidate older refresh/OAuth work after a new identity is committed. */
+  commitAuthoritativeAuthTransition(preserveOAuthCompletionTicket?: string): number {
+    const preserved = preserveOAuthCompletionTicket
+      ? this.getPendingOAuthCompletions()
+      : [];
+    const preservedRecoveries = preserveOAuthCompletionTicket
+      ? this.readPendingOAuthRecoveries()
+      : [];
+    const nextEpoch = this.advanceAuthEpoch();
+    if (preserveOAuthCompletionTicket) {
+      // A completion request has started but has not won yet. Keep sibling
+      // provider callbacks viable and move them to the new epoch so a later
+      // callback can explicitly supersede this one. The eventual successful
+      // winner clears all remaining flow authority.
+      for (const recovery of preservedRecoveries) {
+        this.storage.setItem(this.pendingOAuthRecoveryKey(recovery.nonce), JSON.stringify({
+          version: recovery.version,
+          createdAt: recovery.createdAt,
+          authEpoch: nextEpoch,
+        }));
+      }
+      this.clearPendingOAuthCompletions();
+    } else {
+      this.clearPendingOAuthRecovery();
+    }
+    for (const completion of preserved) {
+      this.storePendingOAuthCompletion({ ...completion, authEpoch: nextEpoch });
+    }
+    return nextEpoch;
   }
 
   /** Get the current refresh-token session id when the token carries a jti claim. */
@@ -1005,13 +1354,21 @@ export class TokenManager {
 
   /** Replace cached user state without mutating stored tokens. */
   setCurrentUser(user: TokenUser | null): void {
+    this.persistCookieSessionMarkerFor(user);
     this.cachedUser = user;
-    this.persistCookieSessionMarker();
     this.emitAuthStateChange(user);
   }
 
-  markPendingSignOut(): void {
+  markPendingSignOut(pushDeviceId?: string): void {
     if (!this.usesHttpOnlyCookie) return;
+    if (
+      pushDeviceId !== undefined
+      && (pushDeviceId.length < 1
+        || pushDeviceId.length > 128
+        || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(pushDeviceId))
+    ) {
+      throw new EdgeBaseError(400, 'Invalid push device ID for sign-out cleanup.');
+    }
     if (!this.hasPendingSignOut()) {
       this.advanceAuthEpoch();
     }
@@ -1020,7 +1377,24 @@ export class TokenManager {
       timestamp: Date.now(),
       nonce: createRefreshOwnerId(),
       epoch: this.currentAuthEpoch(),
+      ...(pushDeviceId ? { pushDeviceId } : {}),
     }));
+  }
+
+  getPendingSignOutPushDeviceId(): string | null {
+    if (!this.usesHttpOnlyCookie) return null;
+    try {
+      const parsed = JSON.parse(this.storage.getItem(this.keys.pendingSignOutKey) ?? '{}') as {
+        pushDeviceId?: unknown;
+      };
+      return typeof parsed.pushDeviceId === 'string'
+        && parsed.pushDeviceId.length <= 128
+        && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(parsed.pushDeviceId)
+        ? parsed.pushDeviceId
+        : null;
+    } catch {
+      return null;
+    }
   }
 
   hasPendingSignOut(): boolean {
@@ -1077,27 +1451,330 @@ export class TokenManager {
     this.clearPendingSignOut();
   }
 
-  /** Remember a successful cookie OAuth redirect until its first refresh settles. */
-  markPendingOAuthRecovery(): void {
+  private pendingOAuthRecoveryKey(nonce: string): string {
+    return `${this.keys.oauthPendingRecoveryPrefix}${nonce}`;
+  }
+
+  private oauthConsumeLockKey(nonce: string): string {
+    return `${this.keys.oauthConsumeLockPrefix}${nonce}`;
+  }
+
+  /**
+   * Enumerate/prune independent per-flow records. Each write and removal
+   * touches one nonce key, so interleaved tabs can never resurrect or overwrite
+   * a sibling flow through shared JSON read/modify/write.
+   */
+  private readPendingOAuthRecoveries(): PendingOAuthRecoveryEntry[] {
+    const entries: PendingOAuthRecoveryEntry[] = [];
+    for (const key of this.storage.keys()) {
+      if (key.startsWith(this.keys.oauthConsumeLockPrefix)) {
+        const claim = parseRefreshLock(this.storage.getItem(key));
+        if (
+          !claim
+          || (claim.ownerId === 'consumed'
+            ? !isFreshOAuthRecoveryTimestamp(claim.timestamp)
+            : !isFreshRefreshLock(claim))
+        ) this.storage.removeItem(key);
+        continue;
+      }
+      if (!key.startsWith(this.keys.oauthPendingRecoveryPrefix)) continue;
+      const nonce = key.slice(this.keys.oauthPendingRecoveryPrefix.length);
+      const entry = parsePendingOAuthRecoveryEntry(nonce, this.storage.getItem(key));
+      if (!entry) {
+        this.storage.removeItem(key);
+        continue;
+      }
+      entries.push(entry);
+    }
+    entries.sort((left, right) =>
+      left.createdAt - right.createdAt || left.nonce.localeCompare(right.nonce));
+    const excess = Math.max(0, entries.length - OAUTH_PENDING_RECOVERY_LIMIT);
+    for (let index = 0; index < excess; index += 1) {
+      this.storage.removeItem(this.pendingOAuthRecoveryKey(entries[index].nonce));
+    }
+    return entries.slice(excess);
+  }
+
+  /** Bind an OAuth callback to a flow initiated by this browser. */
+  markPendingOAuthRecovery(): string {
+    if (!this.storage.isPersistent) {
+      throw new EdgeBaseError(
+        0,
+        'Persistent browser storage is required to start OAuth safely.',
+      );
+    }
+    const nonce = createOAuthRecoveryNonce();
+    const key = this.pendingOAuthRecoveryKey(nonce);
+    const createdAt = Math.max(Date.now(), this.lastOAuthRecoveryCreatedAt + 1);
+    this.lastOAuthRecoveryCreatedAt = createdAt;
+    const entry: PendingOAuthRecoveryEntry = {
+      version: 1,
+      createdAt,
+      nonce,
+      authEpoch: this.currentAuthEpoch(),
+    };
+    try {
+      // Publish this flow before discovery/pruning. A peer doing the same only
+      // creates another independent key; neither can lose the other's write.
+      this.storage.setItem(key, JSON.stringify({
+        version: entry.version,
+        createdAt: entry.createdAt,
+        authEpoch: entry.authEpoch,
+      }));
+      this.readPendingOAuthRecoveries();
+      return nonce;
+    } catch (error) {
+      try {
+        this.storage.removeItem(key);
+      } catch {
+        // The original persistence failure is the actionable error.
+      }
+      throw error;
+    }
+  }
+
+  /** Retain only a verified cookie callback across a transient refresh/reload. */
+  markCookieOAuthRecovery(): void {
     if (!this.usesHttpOnlyCookie) return;
+    // Keep the released v1 shape and key so a page rollback can complete a
+    // callback that the new bundle already verified.
     this.storage.setItem(this.keys.cookieOAuthRecoveryKey, JSON.stringify({
       version: 1,
       createdAt: Date.now(),
-    } satisfies CookieOAuthRecoveryMarker));
+    } satisfies LegacyCookieOAuthRecoveryMarker));
   }
 
   hasPendingOAuthRecovery(): boolean {
-    if (!this.usesHttpOnlyCookie) return false;
+    return this.readPendingOAuthRecoveries().length > 0;
+  }
+
+  /** Whether a verified cookie callback may retry a tokenless refresh. */
+  hasCookieOAuthRecovery(): boolean {
     const marker = parseCookieOAuthRecoveryMarker(
       this.storage.getItem(this.keys.cookieOAuthRecoveryKey),
     );
-    if (marker) return true;
-    this.storage.removeItem(this.keys.cookieOAuthRecoveryKey);
-    return false;
+    if (!marker) {
+      this.storage.removeItem(this.keys.cookieOAuthRecoveryKey);
+      return false;
+    }
+    return true;
   }
 
-  clearPendingOAuthRecovery(): void {
-    this.storage.removeItem(this.keys.cookieOAuthRecoveryKey);
+  private clearCookieOAuthRecovery(): void {
+    const marker = parseCookieOAuthRecoveryMarker(
+      this.storage.getItem(this.keys.cookieOAuthRecoveryKey),
+    );
+    if (marker) this.storage.removeItem(this.keys.cookieOAuthRecoveryKey);
+  }
+
+  /**
+   * Consume only the OAuth flow whose callback carries the matching nonce.
+   * Mismatched/malformed callbacks cannot cancel other concurrent flows.
+   */
+  async consumePendingOAuthRecovery(
+    recoveryNonce: string | null,
+    callbackEpoch: number,
+  ): Promise<boolean> {
+    if (!recoveryNonce || !OAUTH_RECOVERY_NONCE_PATTERN.test(recoveryNonce)) return false;
+    const now = Date.now();
+    for (const [nonce, consumedAt] of this.consumedOAuthRecoveryNonces) {
+      if (!isFreshOAuthRecoveryTimestamp(consumedAt)) {
+        this.consumedOAuthRecoveryNonces.delete(nonce);
+      }
+    }
+    if (this.consumedOAuthRecoveryNonces.has(recoveryNonce)) return false;
+    const claimKey = this.oauthConsumeLockKey(recoveryNonce);
+    const existingClaim = parseRefreshLock(this.storage.getItem(claimKey));
+    if (isTerminalOAuthConsumeClaim(existingClaim)) return false;
+    if (existingClaim?.ownerId === 'consumed') this.storage.removeItem(claimKey);
+
+    const consume = (): boolean => {
+      const key = this.pendingOAuthRecoveryKey(recoveryNonce);
+      const entry = parsePendingOAuthRecoveryEntry(
+        recoveryNonce,
+        this.storage.getItem(key),
+      );
+      if (entry && oauthRecoveryNoncesMatch(entry.nonce, recoveryNonce)) {
+        this.consumedOAuthRecoveryNonces.set(recoveryNonce, now);
+        // Persist terminal authority before removing the flow. If removal
+        // fails, replay remains rejected for the full original flow TTL.
+        let terminalPersisted = false;
+        let pendingRemoved = false;
+        try {
+          this.storage.setItem(claimKey, JSON.stringify({
+            ownerId: 'consumed',
+            timestamp: now,
+          }));
+          terminalPersisted = true;
+        } catch {
+          // Exact-key deletion below can still make the consume durable.
+        }
+        try {
+          this.storage.removeItem(key);
+          pendingRemoved = true;
+        } catch {
+          // A terminal marker (or the in-memory fence) remains authoritative.
+        }
+        if (pendingRemoved) {
+          try {
+            // No replay material remains. Avoid retaining a lock-shaped marker
+            // for the full OAuth TTL after a clean exact-key deletion.
+            this.storage.removeItem(claimKey);
+          } catch {
+            // A leftover terminal marker is conservative and self-prunes.
+          }
+        }
+        // Do not adopt callback credentials unless the one-time pending record
+        // itself was deleted. A durable terminal marker safely blocks replay,
+        // but the first attempt still fails closed when exact-key deletion did
+        // not complete.
+        if (!pendingRemoved) return false;
+      } else {
+        // Exact-key removal is deliberately unconditional for a recognized
+        // nonce. Stale/malformed/old-epoch callbacks cannot linger for replay.
+        this.storage.removeItem(key);
+      }
+      if (!entry || !oauthRecoveryNoncesMatch(entry.nonce, recoveryNonce)) return false;
+      const currentEpoch = this.currentAuthEpoch();
+      return entry.authEpoch === callbackEpoch && callbackEpoch === currentEpoch;
+    };
+
+    const locks = typeof navigator !== 'undefined'
+      ? (navigator as Navigator & {
+        locks?: {
+          request<T>(
+            name: string,
+            options: { mode: 'exclusive' },
+            callback: () => T | Promise<T>,
+          ): Promise<T>;
+        };
+      }).locks
+      : undefined;
+    if (locks && typeof locks.request === 'function') {
+      return locks.request(
+        `${this.keys.oauthPendingRecoveryPrefix}consume:${recoveryNonce}`,
+        { mode: 'exclusive' },
+        consume,
+      );
+    }
+    // localStorage has no compare-and-swap primitive, so use the same
+    // write-delay-verify lease used by refresh leader election. Concurrent
+    // contenders may both observe an empty key, but only the last verified
+    // owner is allowed to remove and accept the pending flow.
+    const ownerId = createRefreshOwnerId();
+    const activeClaim = parseRefreshLock(this.storage.getItem(claimKey));
+    if (activeClaim && isFreshRefreshLock(activeClaim)) return false;
+    if (activeClaim) this.storage.removeItem(claimKey);
+
+    this.storage.setItem(claimKey, serializeRefreshLock(ownerId));
+    await delay(LOCK_VERIFY_DELAY_MS);
+    const acquiredClaim = parseRefreshLock(this.storage.getItem(claimKey));
+    if (!acquiredClaim || acquiredClaim.ownerId !== ownerId) return false;
+
+    try {
+      return consume();
+    } finally {
+      const currentClaim = parseRefreshLock(this.storage.getItem(claimKey));
+      if (currentClaim?.ownerId === ownerId) {
+        this.storage.removeItem(claimKey);
+      }
+    }
+  }
+
+  /** Persist a verified callback ticket before any fallible exchange request. */
+  storePendingOAuthCompletion(input: Omit<PendingOAuthCompletion, 'createdAt'> & { createdAt?: number }): boolean {
+    if (
+      !OAUTH_RECOVERY_NONCE_PATTERN.test(input.ticket)
+      || (input.recoveryNonce !== null
+        && !OAUTH_RECOVERY_NONCE_PATTERN.test(input.recoveryNonce))
+    ) {
+      throw new EdgeBaseError(400, 'Invalid OAuth completion record.');
+    }
+    const record: PendingOAuthCompletion & { version: 1 } = {
+      version: 1,
+      ...input,
+      createdAt: input.createdAt ?? Date.now(),
+    };
+    this.pendingOAuthCompletionMemory.set(input.ticket, record);
+    try {
+      this.storage.setItem(
+        `${this.keys.oauthPendingCompletionPrefix}${input.ticket}`,
+        JSON.stringify(record),
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Recover every unexpired ticket for this exact API namespace/epoch. */
+  getPendingOAuthCompletions(): PendingOAuthCompletion[] {
+    const currentEpoch = this.currentAuthEpoch();
+    const candidates = new Map<string, PendingOAuthCompletion>();
+    for (const [ticket, record] of this.pendingOAuthCompletionMemory) {
+      const parsed = parsePendingOAuthCompletion(ticket, JSON.stringify({ version: 1, ...record }));
+      if (!parsed || parsed.authEpoch !== currentEpoch || this.hasPendingSignOut()) {
+        this.pendingOAuthCompletionMemory.delete(ticket);
+        continue;
+      }
+      candidates.set(ticket, parsed);
+    }
+    for (const key of this.storage.keys()) {
+      if (!key.startsWith(this.keys.oauthPendingCompletionPrefix)) continue;
+      const ticket = key.slice(this.keys.oauthPendingCompletionPrefix.length);
+      const record = parsePendingOAuthCompletion(ticket, this.storage.getItem(key));
+      if (!record || record.authEpoch !== currentEpoch || this.hasPendingSignOut()) {
+        this.storage.removeItem(key);
+        this.pendingOAuthCompletionMemory.delete(ticket);
+        continue;
+      }
+      candidates.set(ticket, record);
+      this.pendingOAuthCompletionMemory.set(ticket, record);
+    }
+    return [...candidates.values()].sort((left, right) => right.createdAt - left.createdAt);
+  }
+
+  /** Recover the newest unexpired ticket for compatibility with single-flow callers. */
+  getPendingOAuthCompletion(): PendingOAuthCompletion | null {
+    return this.getPendingOAuthCompletions()[0] ?? null;
+  }
+
+  clearPendingOAuthCompletion(ticket: string): void {
+    if (!OAUTH_RECOVERY_NONCE_PATTERN.test(ticket)) return;
+    this.pendingOAuthCompletionMemory.delete(ticket);
+    this.storage.removeItem(`${this.keys.oauthPendingCompletionPrefix}${ticket}`);
+  }
+
+  clearPendingOAuthCompletions(): void {
+    this.pendingOAuthCompletionMemory.clear();
+    for (const key of this.storage.keys()) {
+      if (key.startsWith(this.keys.oauthPendingCompletionPrefix)) this.storage.removeItem(key);
+    }
+  }
+
+  clearPendingOAuthRecovery(recoveryNonce?: string): void {
+    if (recoveryNonce) {
+      if (OAUTH_RECOVERY_NONCE_PATTERN.test(recoveryNonce)) {
+        this.storage.removeItem(this.pendingOAuthRecoveryKey(recoveryNonce));
+        this.storage.removeItem(this.oauthConsumeLockKey(recoveryNonce));
+      }
+      return;
+    }
+    this.pendingOAuthCompletionMemory.clear();
+    for (const key of this.storage.keys()) {
+      if (key.startsWith(this.keys.oauthPendingRecoveryPrefix)) {
+        this.storage.removeItem(key);
+      }
+      if (key.startsWith(this.keys.oauthConsumeLockPrefix)) {
+        this.storage.removeItem(key);
+      }
+      if (key.startsWith(this.keys.oauthPendingCompletionPrefix)) {
+        this.storage.removeItem(key);
+      }
+    }
+    // Remove the old shared registry during rolling upgrades without ever
+    // reading or rewriting it.
+    this.storage.removeItem(this.keys.oauthPendingRecoveriesKey);
   }
 
   setPendingSignOutRetry(retry: Promise<void>): void {
@@ -1118,6 +1795,7 @@ export class TokenManager {
 
   /** Clear all tokens (signout) */
   clearTokens(): void {
+    this.advanceAuthEpoch();
     this.clearTokensInternal(true);
   }
 
@@ -1126,6 +1804,9 @@ export class TokenManager {
     preserveRefreshLock = false,
   ): void {
     this.accessToken = null;
+    this.expectedCookieUserId = null;
+    this.cachedUser = null;
+    this.emitAuthStateChange(null);
     this.storage.removeItem(this.keys.refreshTokenKey);
     if (!preserveRefreshLock) {
       this.storage.removeItem(this.keys.refreshLockKey);
@@ -1133,9 +1814,7 @@ export class TokenManager {
     this.storage.removeItem(this.keys.refreshResultKey);
     this.storage.removeItem(this.keys.cookieSessionKey);
     this.storage.removeItem(this.keys.cookieOAuthRecoveryKey);
-    this.expectedCookieUserId = null;
-    this.cachedUser = null;
-    this.emitAuthStateChange(null);
+    this.clearPendingOAuthRecovery();
 
     // Notify other tabs
     if (shouldBroadcast && this.broadcastChannel) {
@@ -1177,14 +1856,18 @@ export class TokenManager {
   }
 
   private persistCookieSessionMarker(): void {
+    this.persistCookieSessionMarkerFor(this.cachedUser);
+  }
+
+  private persistCookieSessionMarkerFor(user: TokenUser | null): void {
     if (!this.usesHttpOnlyCookie) return;
-    if (!this.cachedUser?.id) {
+    if (!user?.id) {
       this.storage.removeItem(this.keys.cookieSessionKey);
       return;
     }
     const marker: CookieSessionMarker = {
       version: 1,
-      userId: this.cachedUser.id,
+      userId: user.id,
     };
     this.storage.setItem(this.keys.cookieSessionKey, JSON.stringify(marker));
   }
@@ -1216,8 +1899,8 @@ export class TokenManager {
 
   private advanceAuthEpoch(): number {
     const next = this.currentAuthEpoch() + 1;
-    this.authEpoch = next;
     this.storage.setItem(this.keys.authEpochKey, String(next));
+    this.authEpoch = next;
     return next;
   }
 

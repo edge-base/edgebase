@@ -131,6 +131,47 @@ test('npm packages publish after their first-party runtime dependencies', () => 
   }
 });
 
+test('native OAuth documentation matches secure callback implementation support', () => {
+  const oauthGuide = readFileSync(
+    resolve(REPO_ROOT, 'docs/docs/authentication/oauth-callback.md'),
+    'utf8',
+  );
+  const rnReadme = readFileSync(
+    resolve(REPO_ROOT, 'packages/sdk/react-native/README.md'),
+    'utf8',
+  );
+  const rnLlms = readFileSync(
+    resolve(REPO_ROOT, 'packages/sdk/react-native/llms.txt'),
+    'utf8',
+  );
+  const rnAuth = readFileSync(
+    resolve(REPO_ROOT, 'packages/sdk/react-native/src/auth.ts'),
+    'utf8',
+  );
+
+  assert.match(oauthGuide, /React Native .* Supported with `handleOAuthCallback\(\)`/);
+  assert.match(oauthGuide, /Flutter\/Dart .* Not currently supported/);
+  assert.match(oauthGuide, /Swift\/iOS .* Not currently supported/);
+  assert.match(oauthGuide, /Kotlin\/Android and Java\/Android .* Not currently supported/);
+  assert.match(oauthGuide, /errors in the URL fragment, not the query string/);
+  assert.doesNotMatch(oauthGuide, /client\.auth\.handleOAuthCallback\(link\)/);
+  assert.match(rnReadme, /await client\.auth\.signInWithOAuth/);
+  assert.match(rnLlms, /await client\.auth\.signInWithOAuth/);
+  assert.match(rnAuth, /markPendingOAuthRecovery\(redirectUrl\)/);
+  assert.match(rnAuth, /consumePendingOAuthRecovery/);
+  assert.match(rnAuth, /corePublic\.authRefresh\(\{ refreshToken \}\)/);
+
+  for (const path of [
+    'packages/sdk/dart/packages/flutter/lib/src/auth_client.dart',
+    'packages/sdk/swift/packages/ios/Sources/AuthClient.swift',
+    'packages/sdk/kotlin/client/src/commonMain/kotlin/dev/edgebase/sdk/client/AuthClient.kt',
+    'packages/sdk/java/packages/android/src/main/java/dev/edgebase/sdk/client/AuthClient.java',
+  ]) {
+    const source = readFileSync(resolve(REPO_ROOT, path), 'utf8');
+    assert.doesNotMatch(source, /handleOAuthCallback/, `${path} must remain documented as unsupported until it has a secure callback handler`);
+  }
+});
+
 test('Node and Wrangler release floors stay aligned with the Docker runtime', () => {
   const nodeEngineManifests = [
     'package.json',
@@ -168,8 +209,11 @@ test('Node and Wrangler release floors stay aligned with the Docker runtime', ()
   );
 
   const dockerfile = readFileSync(resolve(REPO_ROOT, 'Dockerfile'), 'utf8');
-  assert.match(dockerfile, /^FROM node:22-slim$/m);
-  assert.match(dockerfile, /^RUN npm install -g wrangler@4\.103\.0$/m);
+  assert.match(dockerfile, /^FROM node:22-slim@sha256:[a-f0-9]{64}$/m);
+  assert.match(
+    dockerfile,
+    /^RUN npm install -g npm@12\.0\.1 && npm install -g wrangler@4\.103\.0$/m,
+  );
 });
 
 test('release security audit covers development tooling and keeps patched floors', () => {
@@ -201,6 +245,11 @@ test('release security audit covers development tooling and keeps patched floors
     readFileSync(resolve(REPO_ROOT, 'packages/sdk/js/package.json'), 'utf8'),
   );
   assert.equal(jsSdkManifest.devDependencies?.['happy-dom'], '^20.8.9');
+  const webSdkManifest = JSON.parse(
+    readFileSync(resolve(REPO_ROOT, 'packages/sdk/js/packages/web/package.json'), 'utf8'),
+  );
+  assert.equal(webSdkManifest.peerDependencies?.yjs, '^13.6.31');
+  assert.equal(webSdkManifest.devDependencies?.yjs, '^13.6.31');
 
   for (const path of [
     'packages/admin/package.json',
@@ -865,5 +914,13 @@ test('JitPack verifier builds the canonical multi-module POM URL', () => {
   assert.equal(
     buildJitpackArtifactUrl('edgebase-client', version),
     `https://jitpack.io/com/github/edge-base/edgebase/edgebase-client/v${version}/edgebase-client-v${version}.pom`,
+  );
+  assert.throws(
+    () => buildJitpackArtifactUrl('../credential-file', version),
+    /Invalid JitPack artifact name/,
+  );
+  assert.throws(
+    () => buildJitpackArtifactUrl('edgebase-client', `${version}/metadata`),
+    /Invalid JitPack release version/,
   );
 });

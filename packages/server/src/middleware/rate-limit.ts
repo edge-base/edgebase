@@ -10,6 +10,8 @@ import {
 } from '../lib/service-key.js';
 import { parseConfig } from '../lib/do-router.js';
 import { getTrustedClientIp } from '../lib/client-ip.js';
+import { resolveFrontendAssetPath } from '../lib/frontend-assets.js';
+import { normalizeFrontendMountPath } from '../lib/frontend-config.js';
 
 type HonoEnv = { Bindings: Env };
 
@@ -26,7 +28,7 @@ type HonoEnv = { Bindings: Env };
  *   - Miniflare emulates in all environments (Edge, dev, self-hosting)
  *
  * Groups handled here:
- *   - `global`      — all routes (last-resort safety net)
+ *   - `global`      — API/control routes (last-resort safety net)
  *   - `db` — /api/db/* table CRUD
  *   - `storage`     — /api/storage/*
  *   - `functions`   — /api/functions/*
@@ -194,6 +196,81 @@ function getBinding(env: Env, group: string): RateLimit | undefined {
   }
 }
 
+const RATE_LIMITED_CONTROL_PATHS = [
+  '/api',
+  '/admin/api',
+  '/internal',
+  '/.well-known',
+  '/cdn-cgi',
+] as const;
+
+function isPathAtOrBelow(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
+/**
+ * Static bytes must not consume the API-wide per-IP budget. A single frontend
+ * cold load can request hundreds of immutable chunks, and charging those
+ * requests to `global` lets ordinary page loads starve auth/API traffic.
+ *
+ * Only GET/HEAD requests that are actually owned by the configured frontend or
+ * the built-in admin/harness asset mounts bypass the limiter. API, admin API,
+ * internal, metadata, and Cloudflare control paths always remain limited.
+ */
+export function isRateLimitExemptStaticRequest(
+  path: string,
+  options: {
+    method?: string;
+    accept?: string | null;
+    config?: EdgeBaseConfig;
+  } = {},
+): boolean {
+  const method = (options.method ?? 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') return false;
+
+  if (
+    path === '/openapi.json'
+    || RATE_LIMITED_CONTROL_PATHS.some((prefix) => isPathAtOrBelow(path, prefix))
+  ) {
+    return false;
+  }
+
+  // Built-in dashboard and integration-harness assets are served by ASSETS.
+  if (
+    path === '/admin'
+    || path.startsWith('/admin/')
+    || path === '/harness'
+    || path.startsWith('/harness/')
+    || path === '/favicon.ico'
+    || path === '/favicon.svg'
+    || path.startsWith('/_app/')
+  ) {
+    return true;
+  }
+
+  const frontend = options.config?.frontend;
+  if (!frontend) return false;
+
+  const resolvedAssetPath = resolveFrontendAssetPath(path, {
+    method,
+    accept: options.accept,
+    mountPath: frontend.mountPath,
+    spaFallback: frontend.spaFallback,
+  });
+  if (resolvedAssetPath === null) return false;
+
+  const mountPath = normalizeFrontendMountPath(frontend.mountPath);
+  const isMountRoot = mountPath === '/'
+    ? path === '/'
+    : path === mountPath || path === `${mountPath}/`;
+  const isExplicitAsset = (path.split('/').pop() ?? '').includes('.');
+  const isHtmlNavigation = frontend.spaFallback === true
+    && !!options.accept
+    && (options.accept.includes('text/html') || options.accept.includes('application/xhtml+xml'));
+
+  return isMountRoot || isExplicitAsset || isHtmlNavigation;
+}
+
 /** Determine the rate limit group for a request path */
 export function getGroup(path: string): string {
   if (path.startsWith('/api/db/')) {
@@ -224,25 +301,34 @@ export function getGroup(path: string): string {
  */
 export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) => {
   const path = new URL(c.req.url).pathname;
+  const config = c.env ? parseConfig(c.env) : undefined;
+  if (isRateLimitExemptStaticRequest(path, {
+    method: c.req.method,
+    accept: c.req.header('accept'),
+    config,
+  })) {
+    await next();
+    return;
+  }
   const group = getGroup(path);
 
   // ── Determine identifier — always IP ──
-  // Security: CF-Connecting-IP is set by Cloudflare and cannot be spoofed by clients.
-  // X-Forwarded-For is only used as a fallback for self-hosted environments and
-  // MUST be set by a trusted reverse proxy (Nginx/Caddy). If EdgeBase is exposed
-  // directly without a proxy, clients can forge this header to bypass rate limits.
+  // Security: the CLI-managed runtime mode decides whether CF-Connecting-IP is
+  // authoritative. Self-hosted runtimes ignore it and X-Forwarded-For unless
+  // trustSelfHostedProxy is explicitly enabled for a proxy that overwrites XFF.
+  // Unknown/missing runtime modes collapse to one `unknown` bucket rather than
+  // accepting a client-selected rate-limit key.
   const ip = getTrustedClientIp(c.env, c.req) ?? 'unknown';
 
   // ── Service Key check ──
   const serviceKeyHeader = extractServiceKeyHeader(c.req) ?? extractBearerToken(c.req) ?? undefined;
   let isServiceKey = false;
   if (serviceKeyHeader) {
-    const config = c.env ? parseConfig(c.env) : {};
     const constraintCtx: ConstraintContext = {
       env: c.env?.ENVIRONMENT,
       ip: ip !== 'unknown' ? ip : undefined,
     };
-    const keymap = c.env ? buildKeymap(config, c.env as never) : null;
+    const keymap = c.env ? buildKeymap(config ?? {}, c.env as never) : null;
     isServiceKey = validateConfiguredKey(serviceKeyHeader, keymap, constraintCtx) === 'valid';
   }
 
@@ -250,9 +336,6 @@ export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) =
     await next();
     return;
   }
-
-  // ── Parse config ──
-  const config = c.env ? parseConfig(c.env) : undefined;
 
   // ── Layer 1: Software counter (config-driven) ──
   const { requests, windowSec } = getLimit(config, group);

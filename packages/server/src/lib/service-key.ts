@@ -107,7 +107,7 @@ export function timingSafeEqual(a: string, b: string): boolean {
 export interface ConstraintContext {
   /** Server environment name from ENVIRONMENT env var */
   env?: string;
-  /** Client IP from cf-connecting-ip / x-forwarded-for */
+  /** Client IP from the runtime-authorized forwarding source */
   ip?: string;
   /** Tenant ID — auto-injected from DB URL instanceId (§15/136) */
   tenantId?: string;
@@ -121,7 +121,12 @@ export interface ConstraintContext {
  * @param req    - Request object with .header() method (optional)
  */
 export function buildConstraintCtx(
-  env: { ENVIRONMENT?: string; EDGEBASE_CONFIG?: unknown; trustSelfHostedProxy?: boolean },
+  env: {
+    ENVIRONMENT?: string;
+    EDGEBASE_CONFIG?: unknown;
+    EDGEBASE_RUNTIME_MODE?: string;
+    trustSelfHostedProxy?: boolean;
+  },
   req?: { header: (name: string) => string | undefined },
 ): ConstraintContext {
   const ctx: ConstraintContext = {

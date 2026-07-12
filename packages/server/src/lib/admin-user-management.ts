@@ -1,16 +1,13 @@
 import { EdgeBaseError } from '@edge-base/shared';
 import type { AuthDb } from './auth-db-adapter.js';
 import {
-  confirmEmail,
-  confirmPhone,
-  deleteEmail,
   deleteEmailPending,
-  deletePhone,
+  deletePhonePending,
   registerEmailPending,
   registerPhonePending,
 } from './auth-d1.js';
 import * as authService from './auth-d1-service.js';
-import { deletePublicUserProjection, invalidatePublicUserCache, syncPublicUserProjection } from './public-user-profile.js';
+import { invalidatePublicUserCache, syncPublicUserProjection } from './public-user-profile.js';
 import { unregisterAllTokens } from './push-token.js';
 import { hashPassword, isPasswordHash } from './password.js';
 
@@ -18,24 +15,10 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const VALID_STATUSES = new Set(['active', 'suspended', 'banned', 'disabled']);
 const VALID_EMAIL_VISIBILITY = new Set(['public', 'private']);
 const UPDATABLE_USER_FIELDS = new Set([
-  'email',
-  'passwordHash',
-  'displayName',
-  'avatarUrl',
-  'emailVisibility',
-  'role',
-  'status',
-  'verified',
-  'isAnonymous',
-  'customClaims',
-  'phone',
-  'phoneVerified',
-  'metadata',
-  'appMetadata',
-  'disabled',
-  'locale',
+  'email', 'passwordHash', 'displayName', 'avatarUrl', 'emailVisibility',
+  'role', 'status', 'verified', 'isAnonymous', 'customClaims', 'phone',
+  'phoneVerified', 'metadata', 'appMetadata', 'disabled', 'locale',
 ]);
-
 interface ManagedUserOptions {
   executionCtx?: ExecutionContext;
   kv?: KVNamespace;
@@ -81,43 +64,8 @@ function normalizePhone(phone: string): string {
   return cleaned;
 }
 
-async function ensureConfirmedEmailIndex(
-  db: AuthDb,
-  email: string,
-  userId: string,
-): Promise<void> {
-  try {
-    await registerEmailPending(db, email, userId);
-  } catch (err) {
-    if ((err as Error).message !== 'EMAIL_ALREADY_REGISTERED') {
-      throw err;
-    }
-  }
-  await confirmEmail(db, email, userId);
-}
-
-async function ensureConfirmedPhoneIndex(
-  db: AuthDb,
-  phone: string,
-  userId: string,
-): Promise<void> {
-  try {
-    await registerPhonePending(db, phone, userId);
-  } catch (err) {
-    if ((err as Error).message !== 'PHONE_ALREADY_REGISTERED') {
-      throw err;
-    }
-  }
-  await confirmPhone(db, phone, userId);
-}
-
 function toNullableString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-function toRollbackValue(existing: Record<string, unknown>, key: string): unknown {
-  if (hasOwn(existing, key)) return existing[key];
-  return null;
 }
 
 function toEdgeBaseError(
@@ -250,63 +198,63 @@ export async function normalizeAdminUserUpdates(
   return updates as authService.UpdateUserInput;
 }
 
-async function cleanupCreatedUser(
-  db: AuthDb,
-  userId: string,
-  email: string,
-  options: ManagedUserOptions,
-): Promise<void> {
-  await authService.deleteUserCascade(db, userId).catch(() => {});
-  await deletePublicUserProjection(db, userId, {
-    executionCtx: options.executionCtx,
-    kv: options.kv,
-    awaitCacheWrites: true,
-  }).catch(() => {});
-  await deleteEmailPending(db, email).catch(() => {});
-  await deleteEmail(db, email).catch(() => {});
-}
-
 export async function createManagedAdminUser(
   db: AuthDb,
   input: CreateManagedUserInput,
   options: ManagedUserOptions = {},
 ): Promise<Record<string, unknown>> {
+  let emailReservationId: string;
   try {
-    await registerEmailPending(db, input.email, input.userId);
+    emailReservationId = await registerEmailPending(db, input.email, input.userId);
   } catch (err) {
-    if ((err as Error).message === 'EMAIL_ALREADY_REGISTERED') {
+    if (['EMAIL_ALREADY_REGISTERED', 'EMAIL_RESERVATION_CONFLICT'].includes((err as Error).message)) {
       throw new EdgeBaseError(409, 'Email already registered.');
     }
     throw new EdgeBaseError(500, 'User creation failed.');
   }
 
-  let user: Record<string, unknown> | null = null;
   try {
-    user = await authService.createUser(db, {
-      userId: input.userId,
-      email: input.email,
-      passwordHash: input.passwordHash,
-      displayName: input.displayName,
-      avatarUrl: input.avatarUrl,
-      role: input.role || 'user',
-      verified: input.verified ?? true,
-      locale: input.locale,
-      metadata: input.metadata,
-      appMetadata: input.appMetadata,
+    await authService.finalizeManagedUserCreation(db, {
+      user: {
+        userId: input.userId,
+        email: input.email,
+        passwordHash: input.passwordHash,
+        displayName: input.displayName,
+        avatarUrl: input.avatarUrl,
+        role: input.role || 'user',
+        verified: input.verified ?? true,
+        locale: input.locale,
+        metadata: input.metadata,
+        appMetadata: input.appMetadata,
+      },
+      emailReservationId,
     });
-
-    await confirmEmail(db, input.email, input.userId);
-    await syncPublicUserProjection(db, input.userId, authService.buildPublicUserData(user), {
-      executionCtx: options.executionCtx,
-      kv: options.kv,
-      awaitCacheWrites: false,
-    });
-
-    return user;
   } catch (err) {
-    await cleanupCreatedUser(db, input.userId, input.email, options);
+    // If COMMIT outcome was ambiguous, this owner-scoped delete is a no-op
+    // for a transaction that actually confirmed the email. It can never
+    // remove an existing user's identity.
+    await deleteEmailPending(
+      db,
+      input.email,
+      input.userId,
+      emailReservationId,
+    ).catch(() => {});
     throw toEdgeBaseError(err, 500, 'User creation failed.');
   }
+
+  const user = await authService.getUserById(db, input.userId);
+  if (!user) {
+    throw new EdgeBaseError(500, 'User creation completed but the user could not be read.');
+  }
+  await syncPublicUserProjection(db, input.userId, authService.buildPublicUserData(user), {
+    executionCtx: options.executionCtx,
+    kv: options.kv,
+    awaitCacheWrites: false,
+  }).catch((err) => {
+    console.error(`[EdgeBase] Failed to sync public profile after creating ${input.userId}:`, err);
+  });
+
+  return user;
 }
 
 export async function deleteManagedAdminUser(
@@ -359,12 +307,14 @@ export async function updateManagedAdminUser(
     : undefined;
   const emailChanged = newEmail !== undefined && newEmail !== oldEmail;
   const phoneChanged = newPhone !== undefined && newPhone !== oldPhone;
+  let emailReservationId: string | null = null;
+  let phoneReservationId: string | null = null;
 
   if (emailChanged && newEmail) {
     try {
-      await registerEmailPending(db, newEmail, userId);
+      emailReservationId = await registerEmailPending(db, newEmail, userId);
     } catch (err) {
-      if ((err as Error).message === 'EMAIL_ALREADY_REGISTERED') {
+      if (['EMAIL_ALREADY_REGISTERED', 'EMAIL_RESERVATION_CONFLICT'].includes((err as Error).message)) {
         throw new EdgeBaseError(409, 'Email already registered.');
       }
       throw new EdgeBaseError(500, 'User update failed.');
@@ -373,75 +323,65 @@ export async function updateManagedAdminUser(
 
   if (phoneChanged && typeof newPhone === 'string') {
     try {
-      await registerPhonePending(db, newPhone, userId);
+      phoneReservationId = await registerPhonePending(db, newPhone, userId);
     } catch (err) {
-      if (newEmail) {
-        await deleteEmailPending(db, newEmail).catch(() => {});
+      if (emailChanged && newEmail && emailReservationId) {
+        await deleteEmailPending(db, newEmail, userId, emailReservationId).catch(() => {});
       }
-      if ((err as Error).message === 'PHONE_ALREADY_REGISTERED') {
+      if (['PHONE_ALREADY_REGISTERED', 'PHONE_RESERVATION_CONFLICT'].includes((err as Error).message)) {
         throw new EdgeBaseError(409, 'Phone number is already registered.');
       }
       throw new EdgeBaseError(500, 'User update failed.');
     }
   }
 
-  const user = await authService.updateUser(db, userId, updates);
-  if (!user) {
-    if (newEmail) await deleteEmailPending(db, newEmail).catch(() => {});
-    if (typeof newPhone === 'string') await deletePhone(db, newPhone).catch(() => {});
-    return null;
-  }
-
-  const rollbackUpdates: authService.UpdateUserInput = {};
-  for (const key of Object.keys(updates as Record<string, unknown>)) {
-    if (UPDATABLE_USER_FIELDS.has(key)) {
-      (rollbackUpdates as Record<string, unknown>)[key] = toRollbackValue(existing, key);
-    }
-  }
-
   try {
-    if (emailChanged && newEmail) {
-      await confirmEmail(db, newEmail, userId);
-    }
-    if (phoneChanged && typeof newPhone === 'string') {
-      await confirmPhone(db, newPhone, userId);
-    }
-
-    await syncPublicUserProjection(db, userId, authService.buildPublicUserData(user), {
-      executionCtx: options.executionCtx,
-      kv: options.kv,
-      awaitCacheWrites: false,
+    await authService.finalizeManagedUserUpdate(db, {
+      userId,
+      expectedAuthRevision: Number(existing.authRevision ?? 0),
+      updates,
+      contacts: [
+        ...(emailChanged ? [{
+          kind: 'email' as const,
+          previousValue: oldEmail,
+          nextValue: newEmail ?? null,
+          reservationId: emailReservationId ?? undefined,
+        }] : []),
+        ...(phoneChanged ? [{
+          kind: 'phone' as const,
+          previousValue: oldPhone,
+          nextValue: newPhone ?? null,
+          reservationId: phoneReservationId ?? undefined,
+        }] : []),
+      ],
     });
-
-    if (emailChanged && oldEmail) {
-      await deleteEmail(db, oldEmail);
-    }
-    if (phoneChanged && oldPhone) {
-      await deletePhone(db, oldPhone);
-    }
-
-    return user;
   } catch (err) {
-    await authService.updateUser(db, userId, rollbackUpdates).catch(() => {});
-    await syncPublicUserProjection(db, userId, authService.buildPublicUserData(existing), {
-      executionCtx: options.executionCtx,
-      kv: options.kv,
-      awaitCacheWrites: false,
-    }).catch(() => {});
-    if (newEmail) await deleteEmail(db, newEmail).catch(() => {});
-    if (emailChanged && oldEmail) {
-      await ensureConfirmedEmailIndex(db, oldEmail, userId).catch((restoreErr) => {
-        console.error(`[EdgeBase] Failed to restore old email index for ${userId}:`, restoreErr);
-      });
+    if (newEmail && emailReservationId) {
+      await deleteEmailPending(db, newEmail, userId, emailReservationId).catch(() => {});
     }
-    if (typeof newPhone === 'string') await deletePhone(db, newPhone).catch(() => {});
-    if (phoneChanged && oldPhone) {
-      await ensureConfirmedPhoneIndex(db, oldPhone, userId).catch((restoreErr) => {
-        console.error(`[EdgeBase] Failed to restore old phone index for ${userId}:`, restoreErr);
-      });
+    if (typeof newPhone === 'string' && phoneReservationId) {
+      await deletePhonePending(db, newPhone, userId, phoneReservationId).catch(() => {});
+    }
+    if (err instanceof Error && err.message === 'AUTH_STATE_CONFLICT') {
+      throw new EdgeBaseError(409, 'User changed concurrently. Retry the update.');
     }
     throw toEdgeBaseError(err, 500, 'User update failed.');
   }
+
+  const user = await authService.getUserById(db, userId);
+  if (!user) return null;
+
+  // The canonical auth transaction is committed. Projection refresh is
+  // best-effort and must never compensate by overwriting newer auth state.
+  await syncPublicUserProjection(db, userId, authService.buildPublicUserData(user), {
+    executionCtx: options.executionCtx,
+    kv: options.kv,
+    awaitCacheWrites: false,
+  }).catch((err) => {
+    console.error(`[EdgeBase] Failed to sync public profile after updating ${userId}:`, err);
+  });
+
+  return user;
 }
 
 export async function prepareImportedPasswordHash(user: {

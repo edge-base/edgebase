@@ -93,11 +93,11 @@ functionsRoute.all('/:functionName{.+}', async (c) => {
 
   // Captcha check for functions with captcha: true
   if (matched.route.definition.captcha) {
-    const captchaMw = captchaMiddleware(`function:${matched.route.name}`);
-    await captchaMw(c, async () => {});
-    if (c.res && c.res.status === 403) {
-      return c.res;
-    }
+    const captchaResponse = await captchaMiddleware('function')(c, async () => {});
+    // Manually composed Hono middleware returns its rejection Response. Always
+    // forward it (403 verification failures and 503 fail-closed outages alike)
+    // instead of inspecting only one status on c.res and continuing to user code.
+    if (captchaResponse instanceof Response) return captchaResponse;
   }
 
   try {

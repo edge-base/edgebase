@@ -1,6 +1,6 @@
 //! Auto-generated core API Core — DO NOT EDIT.
 //! Regenerate: npx tsx tools/sdk-codegen/generate.ts
-//! Source: openapi.json (0.3.8)
+//! Source: openapi.json (0.4.0)
 
 use crate::Error;
 use crate::HttpClient;
@@ -230,9 +230,24 @@ impl<'a> GeneratedDbApi<'a> {
         self.http.get(&format!("/api/auth/oauth/{}", encode_path_param(provider))).await
     }
 
+    /// Start OAuth redirect with optional request input.
+    pub async fn oauth_redirect_with_query(&self, provider: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.get_with_query(&format!("/api/auth/oauth/{}", encode_path_param(provider)), query).await
+    }
+
+    /// Atomically exchange a verified OAuth callback ticket — POST /api/auth/oauth/exchange
+    pub async fn oauth_exchange(&self, body: &Value) -> Result<Value, Error> {
+        self.http.post("/api/auth/oauth/exchange", body).await
+    }
+
     /// OAuth callback — GET /api/auth/oauth/{provider}/callback
-    pub async fn oauth_callback(&self, provider: &str) -> Result<Value, Error> {
-        self.http.get(&format!("/api/auth/oauth/{}/callback", encode_path_param(provider))).await
+    pub async fn oauth_callback(&self, provider: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.get_with_query(&format!("/api/auth/oauth/{}/callback", encode_path_param(provider)), query).await
+    }
+
+    /// OAuth form-post callback — POST /api/auth/oauth/{provider}/callback
+    pub async fn oauth_callback_post(&self, provider: &str, body: &Value) -> Result<Value, Error> {
+        self.http.post(&format!("/api/auth/oauth/{}/callback", encode_path_param(provider)), body).await
     }
 
     /// Start OAuth account linking — POST /api/auth/oauth/link/{provider}
@@ -240,9 +255,29 @@ impl<'a> GeneratedDbApi<'a> {
         self.http.post(&format!("/api/auth/oauth/link/{}", encode_path_param(provider)), &Value::Null).await
     }
 
+    /// Start OAuth account linking with optional request input.
+    pub async fn oauth_link_start_with_body(&self, provider: &str, body: &Value) -> Result<Value, Error> {
+        self.http.post(&format!("/api/auth/oauth/link/{}", encode_path_param(provider)), body).await
+    }
+
+    /// Continue OAuth account linking in the system browser — GET /api/auth/oauth/link/{provider}/continue
+    pub async fn oauth_link_continue(&self, provider: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.get_with_query(&format!("/api/auth/oauth/link/{}/continue", encode_path_param(provider)), query).await
+    }
+
+    /// Complete OAuth account linking for the current authenticated user — POST /api/auth/oauth/complete/link
+    pub async fn oauth_link_complete(&self, body: &Value) -> Result<Value, Error> {
+        self.http.post("/api/auth/oauth/complete/link", body).await
+    }
+
     /// OAuth link callback — GET /api/auth/oauth/link/{provider}/callback
-    pub async fn oauth_link_callback(&self, provider: &str) -> Result<Value, Error> {
-        self.http.get(&format!("/api/auth/oauth/link/{}/callback", encode_path_param(provider))).await
+    pub async fn oauth_link_callback(&self, provider: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.get_with_query(&format!("/api/auth/oauth/link/{}/callback", encode_path_param(provider)), query).await
+    }
+
+    /// OAuth link form-post callback — POST /api/auth/oauth/link/{provider}/callback
+    pub async fn oauth_link_callback_post(&self, provider: &str, body: &Value) -> Result<Value, Error> {
+        self.http.post(&format!("/api/auth/oauth/link/{}/callback", encode_path_param(provider)), body).await
     }
 
     /// Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
@@ -290,11 +325,6 @@ impl<'a> GeneratedDbApi<'a> {
         self.http.post_with_query(&format!("/api/db/{}/tables/{}/batch-by-filter", encode_path_param(namespace), encode_path_param(table)), body, query).await
     }
 
-    /// Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
-    pub async fn db_single_transact(&self, namespace: &str, body: &Value) -> Result<Value, Error> {
-        self.http.post(&format!("/api/db/{}/transact", encode_path_param(namespace)), body).await
-    }
-
     /// Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
     pub async fn db_count_records(&self, namespace: &str, instance_id: &str, table: &str, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
         self.http.get_with_query(&format!("/api/db/{}/{}/tables/{}/count", encode_path_param(namespace), encode_path_param(instance_id), encode_path_param(table)), query).await
@@ -338,6 +368,11 @@ impl<'a> GeneratedDbApi<'a> {
     /// Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter
     pub async fn db_batch_by_filter(&self, namespace: &str, instance_id: &str, table: &str, body: &Value, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
         self.http.post_with_query(&format!("/api/db/{}/{}/tables/{}/batch-by-filter", encode_path_param(namespace), encode_path_param(instance_id), encode_path_param(table)), body, query).await
+    }
+
+    /// Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
+    pub async fn db_single_transact(&self, namespace: &str, body: &Value) -> Result<Value, Error> {
+        self.http.post(&format!("/api/db/{}/transact", encode_path_param(namespace)), body).await
     }
 
     /// Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact
@@ -445,6 +480,11 @@ impl<'a> GeneratedDbApi<'a> {
         self.http.get("/api/config").await
     }
 
+    /// Render the hosted Turnstile page for native WebViews — GET /api/captcha/challenge
+    pub async fn get_captcha_challenge(&self, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.get_with_query("/api/captcha/challenge", query).await
+    }
+
     /// Register push token — POST /api/push/register
     pub async fn push_register(&self, body: &Value) -> Result<Value, Error> {
         self.http.post("/api/push/register", body).await
@@ -478,6 +518,16 @@ impl<'a> GeneratedDbApi<'a> {
     /// Get room metadata — GET /api/room/metadata
     pub async fn get_room_metadata(&self, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
         self.http.get_with_query("/api/room/metadata", query).await
+    }
+
+    /// Get room summary — GET /api/room/summary
+    pub async fn get_room_summary(&self, query: &std::collections::HashMap<String, String>) -> Result<Value, Error> {
+        self.http.get_with_query("/api/room/summary", query).await
+    }
+
+    /// Get summaries for multiple rooms — POST /api/room/summaries
+    pub async fn get_room_summaries(&self, body: &Value) -> Result<Value, Error> {
+        self.http.post("/api/room/summaries", body).await
     }
 
     /// Track custom events — POST /api/analytics/track
@@ -660,11 +710,22 @@ impl ApiPaths {
     pub fn oauth_callback(provider: &str) -> String {
         format!("/api/auth/oauth/{}/callback", provider)
     }
+    pub fn oauth_callback_post(provider: &str) -> String {
+        format!("/api/auth/oauth/{}/callback", provider)
+    }
+    pub const OAUTH_LINK_COMPLETE: &'static str = "/api/auth/oauth/complete/link";
+    pub const OAUTH_EXCHANGE: &'static str = "/api/auth/oauth/exchange";
     pub fn oauth_link_start(provider: &str) -> String {
         format!("/api/auth/oauth/link/{}", provider)
     }
     pub fn oauth_link_callback(provider: &str) -> String {
         format!("/api/auth/oauth/link/{}/callback", provider)
+    }
+    pub fn oauth_link_callback_post(provider: &str) -> String {
+        format!("/api/auth/oauth/link/{}/callback", provider)
+    }
+    pub fn oauth_link_continue(provider: &str) -> String {
+        format!("/api/auth/oauth/link/{}/continue", provider)
     }
     pub const AUTH_PASSKEYS_LIST: &'static str = "/api/auth/passkeys";
     pub fn auth_passkeys_delete(credential_id: &str) -> String {
@@ -696,6 +757,7 @@ impl ApiPaths {
     pub const AUTH_VERIFY_LINK_PHONE: &'static str = "/api/auth/verify-link-phone";
     pub const AUTH_VERIFY_MAGIC_LINK: &'static str = "/api/auth/verify-magic-link";
     pub const AUTH_VERIFY_PHONE: &'static str = "/api/auth/verify-phone";
+    pub const GET_CAPTCHA_CHALLENGE: &'static str = "/api/captcha/challenge";
     pub const GET_CONFIG: &'static str = "/api/config";
     pub fn execute_d1_query(database: &str) -> String {
         format!("/api/d1/{}", database)
@@ -783,6 +845,8 @@ impl ApiPaths {
     pub const CONNECT_ROOM: &'static str = "/api/room";
     pub const CHECK_ROOM_CONNECTION: &'static str = "/api/room/connect-check";
     pub const GET_ROOM_METADATA: &'static str = "/api/room/metadata";
+    pub const GET_ROOM_SUMMARIES: &'static str = "/api/room/summaries";
+    pub const GET_ROOM_SUMMARY: &'static str = "/api/room/summary";
     pub const GET_SCHEMA: &'static str = "/api/schema";
     pub const EXECUTE_SQL: &'static str = "/api/sql";
     pub fn list_files(bucket: &str) -> String {

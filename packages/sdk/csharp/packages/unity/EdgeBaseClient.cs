@@ -19,12 +19,12 @@ namespace EdgeBase
         private readonly GeneratedDbApi _core;
         private readonly DatabaseLiveClient _databaseLive;
 
-        public EdgeBase(string baseUrl)
+        public EdgeBase(string baseUrl, IAuthTokenStorage? tokenStorage = null)
         {
             BaseUrl = baseUrl.TrimEnd('/');
             _http = new JbHttpClient(BaseUrl);
             _core = new GeneratedDbApi(_http);
-            Auth = new AuthClient(_http);
+            Auth = new AuthClient(_http, tokenStorage);
             Storage = new StorageClient(_http);
             _databaseLive = new DatabaseLiveClient(BaseUrl, _http, Auth);
             Push = new PushClient(_http);
@@ -32,7 +32,10 @@ namespace EdgeBase
             Analytics = new AnalyticsClient(_core);
         }
 
-        public static EdgeBase CreateClient(string baseUrl) => new(baseUrl);
+        public static EdgeBase CreateClient(
+            string baseUrl,
+            IAuthTokenStorage? tokenStorage = null
+        ) => new(baseUrl, tokenStorage);
 
         public DbRef Db(string ns, string? instanceId = null) => new DbRef(_databaseLive, _core, ns, instanceId);
 
@@ -56,6 +59,10 @@ namespace EdgeBase
         public void SetLocale(string? locale) => _http.SetLocale(locale);
 
         public string? GetLocale() => _http.GetLocale();
+
+        /// <summary>Restore persisted auth tokens before authenticated calls.</summary>
+        public System.Threading.Tasks.Task<bool> TryRestoreSessionAsync() =>
+            Auth.TryRestoreSessionAsync();
 
         public void ClearContext() => _http.SetContext(new Dictionary<string, object>());
 

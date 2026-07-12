@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`OpenAPI spec stability > operation list matches snapshot 1`] = `196`;
+exports[`OpenAPI spec stability > operation list matches snapshot 1`] = `202`;
 
 exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
 [
@@ -57,10 +57,12 @@ exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
   "GET /api/auth/me",
   "GET /api/auth/mfa/factors",
   "GET /api/auth/oauth/link/{provider}/callback",
+  "GET /api/auth/oauth/link/{provider}/continue",
   "GET /api/auth/oauth/{provider}",
   "GET /api/auth/oauth/{provider}/callback",
   "GET /api/auth/passkeys",
   "GET /api/auth/sessions",
+  "GET /api/captcha/challenge",
   "GET /api/config",
   "GET /api/db/connect-check",
   "GET /api/db/subscribe",
@@ -141,7 +143,11 @@ exports[`OpenAPI spec stability > operation list matches snapshot 2`] = `
   "POST /api/auth/mfa/totp/enroll",
   "POST /api/auth/mfa/totp/verify",
   "POST /api/auth/mfa/verify",
+  "POST /api/auth/oauth/complete/link",
+  "POST /api/auth/oauth/exchange",
   "POST /api/auth/oauth/link/{provider}",
+  "POST /api/auth/oauth/link/{provider}/callback",
+  "POST /api/auth/oauth/{provider}/callback",
   "POST /api/auth/passkeys/auth-options",
   "POST /api/auth/passkeys/authenticate",
   "POST /api/auth/passkeys/register",

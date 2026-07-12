@@ -8,12 +8,20 @@
  * Key differences from web AuthClient:
  * - signInWithOAuth uses Linking.openURL() instead of window.location.href
  * - Handles deep link OAuth callback via Linking.addEventListener
- * - TokenManager.getRefreshToken() is async (AsyncStorage)
+ * - TokenManager restores AsyncStorage asynchronously, then serves its cached
+ *   refresh token synchronously
  * - Captcha is handled via TurnstileWebView component (see turnstile.tsx)
  */
 
-import type { HttpClient, GeneratedDbApi } from '@edge-base/core';
-import type { TokenManager, TokenUser, AuthStateChangeHandler } from './token-manager.js';
+import { EdgeBaseError, type HttpClient, type GeneratedDbApi } from '@edge-base/core';
+import type {
+  TokenManager,
+  TokenUser,
+  AuthStateChangeHandler,
+  PendingOAuthCompletion,
+  PendingSessionRevocation,
+} from './token-manager.js';
+import { invalidateSiteKeyCache } from './turnstile.js';
 
 // ─── Types ───
 
@@ -40,6 +48,15 @@ export interface AuthResult {
   user: TokenUser;
   accessToken: string;
   refreshToken: string;
+}
+
+function isAuthResult(value: unknown): value is AuthResult {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<AuthResult>;
+  return typeof candidate.accessToken === 'string'
+    && candidate.accessToken.length > 0
+    && typeof candidate.refreshToken === 'string'
+    && Boolean(candidate.user && typeof candidate.user === 'object');
 }
 
 /** Returned when MFA is required during sign-in */
@@ -112,6 +129,11 @@ export interface IdentitiesResult {
   methods: IdentityMethods;
 }
 
+interface PushSignOutAdapter {
+  getCachedRegistrationDeviceId(): Promise<string | null>;
+  completeSignOutCleanup(deviceId: string): Promise<void>;
+}
+
 /** Minimal Linking interface — compatible with react-native Linking API */
 export interface LinkingAdapter {
   openURL(url: string): Promise<void>;
@@ -121,14 +143,43 @@ export interface LinkingAdapter {
 
 type OAuthStartOptions = {
   provider: string;
-  redirectUrl?: string;
+  redirectUrl: string;
   captchaToken?: string;
 };
+
+const OAUTH_RECOVERY_NONCE_PARAM = 'oauth_recovery_nonce';
+
+function requireClaimedHttpsOAuthRedirect(value: string | undefined): string {
+  if (!value || !value.trim()) {
+    throw new EdgeBaseError(
+      400,
+      'React Native OAuth requires a claimed HTTPS Universal Link or Android App Link redirectUrl.',
+      undefined,
+      'validation-failed',
+    );
+  }
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) throw new Error('unsafe');
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    throw new EdgeBaseError(
+      400,
+      'OAuth redirectUrl must be an absolute claimed HTTPS Universal Link or Android App Link.',
+      undefined,
+      'validation-failed',
+    );
+  }
+}
 
 // ─── AuthClient ───
 
 export class AuthClient {
   private baseUrl: string;
+  private authTransition = 0;
+  private pendingRevocationRetry: Promise<void> | null = null;
+  private readonly pendingOAuthCompletionRetries = new Map<string, Promise<AuthResult | null>>();
 
   constructor(
     private client: HttpClient,
@@ -136,8 +187,243 @@ export class AuthClient {
     private core: GeneratedDbApi,
     private corePublic: GeneratedDbApi,
     private linking?: LinkingAdapter,
+    private pushSignOut?: PushSignOutAdapter,
   ) {
     this.baseUrl = client.getBaseUrl();
+    // Retry crash/offline-safe revocations once on cold start. Failures stay
+    // queued in secure storage and are retried before the next auth mutation.
+    void this.tokenManager.ready()
+      .then(() => this.retryPendingSessionRevocations())
+      .then(() => this.retryNewestPendingOAuthTicket())
+      .catch(() => undefined);
+  }
+
+  private async invalidateCaptchaConfigOnFailure<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      const data = error instanceof EdgeBaseError ? error.data as unknown : null;
+      if (
+        error instanceof EdgeBaseError
+        && error.code === 403
+        && data
+        && typeof data === 'object'
+        && (data as Record<string, unknown>).captcha_required === true
+      ) {
+        // React Native tokens are caller/UI-owned. Never replay one here; only
+        // make the next documented WebView reset fetch the current site key.
+        invalidateSiteKeyCache(this.baseUrl);
+      }
+      throw error;
+    }
+  }
+
+  private beginAuthTransition(): number {
+    this.authTransition += 1;
+    return this.authTransition;
+  }
+
+  private assertAuthTransition(transition: number): void {
+    if (transition !== this.authTransition) {
+      throw new EdgeBaseError(
+        401,
+        'A newer authentication transition superseded this response.',
+        undefined,
+        'auth-state-changed',
+      );
+    }
+  }
+
+  private async runAuthoritativeAuthOperation<T>(
+    operation: () => Promise<T>,
+    authResult: (value: T) => AuthResult | null,
+    preserveOAuthCompletionTicket?: string,
+  ): Promise<T> {
+    const transition = this.beginAuthTransition();
+    return this.tokenManager.runAuthMutation(async () => {
+      try {
+        await this.retryPendingSessionRevocations();
+      } catch {
+        throw new EdgeBaseError(
+          503,
+          'A previous session still requires server revocation. Retry after connectivity recovers.',
+          undefined,
+          'signout-pending',
+        );
+      }
+      // Last-started explicit identity transition wins before any queued
+      // request can reach the server.
+      this.assertAuthTransition(transition);
+      const authEpoch = await this.tokenManager.beginAuthoritativeAuthTransition(
+        preserveOAuthCompletionTicket,
+      );
+      const value = await operation();
+      const result = authResult(value);
+      try {
+        this.assertAuthTransition(transition);
+        if (result) {
+          await this.tokenManager.setTokensPersisted({
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+          }, authEpoch);
+        }
+      } catch (error) {
+        // The server may already have created a session even though a newer
+        // sign-in/sign-out won locally. Persist cleanup authority before any
+        // best-effort network call so the session cannot become a ghost after
+        // a crash or offline transition.
+        const supersededOAuthCompletion = preserveOAuthCompletionTicket
+          && error instanceof EdgeBaseError
+          && error.slug === 'auth-state-changed';
+        if (result?.refreshToken && (!preserveOAuthCompletionTicket || supersededOAuthCompletion)) {
+          await this.revokeUnadoptedSession(result.refreshToken);
+        }
+        throw error;
+      }
+      return value;
+    });
+  }
+
+  private async revokeRefreshToken(pending: Pick<PendingSessionRevocation, 'refreshToken' | 'pushDeviceId'>): Promise<void> {
+    try {
+      await this.client.postPublic('/api/auth/signout', {
+        refreshToken: pending.refreshToken,
+        ...(pending.pushDeviceId ? { pushDeviceId: pending.pushDeviceId } : {}),
+      });
+    } catch (error) {
+      if (error instanceof EdgeBaseError && error.code === 401) return;
+      throw error;
+    }
+  }
+
+  private async revokeUnadoptedSession(refreshToken: string): Promise<void> {
+    await this.tokenManager.addPendingSessionRevocation(refreshToken);
+    // Do not make rejection of the superseded local operation depend on an
+    // unbounded network call. Cleanup authority is already durable; start a
+    // best-effort revoke and retain the queue on any failure/hang.
+    void (async () => {
+      try {
+        await this.revokeRefreshToken({ refreshToken });
+        await this.tokenManager.completePendingSessionRevocation(refreshToken);
+        await this.tokenManager.completePendingSignOutIfRevoked();
+      } catch {
+        // A queued auth operation, cold start, or later sign-out retries it.
+      }
+    })();
+  }
+
+  private retryPendingSessionRevocations(): Promise<void> {
+    if (this.pendingRevocationRetry) return this.pendingRevocationRetry;
+    const retry = (async () => {
+      const pending = await this.tokenManager.getPendingSessionRevocations();
+      for (const storedRevocation of pending) {
+        let revocation = storedRevocation;
+        try {
+          if (revocation.pushCleanupPending) {
+            const pushDeviceId = await this.pushSignOut?.getCachedRegistrationDeviceId() ?? null;
+            await this.tokenManager.resolvePendingPushCleanup(revocation.refreshToken, pushDeviceId);
+            revocation = { ...revocation, pushDeviceId: pushDeviceId ?? undefined, pushCleanupPending: false };
+          }
+          await this.revokeRefreshToken(revocation);
+          if (revocation.pushDeviceId) {
+            await this.pushSignOut?.completeSignOutCleanup(revocation.pushDeviceId);
+          }
+          await this.tokenManager.completePendingSessionRevocation(revocation.refreshToken);
+        } catch (error) {
+          throw error;
+        }
+      }
+      await this.tokenManager.completePendingSignOutIfRevoked();
+    })().finally(() => {
+      if (this.pendingRevocationRetry === retry) this.pendingRevocationRetry = null;
+    });
+    this.pendingRevocationRetry = retry;
+    return retry;
+  }
+
+  private async ensureAuthenticatedRequestReady(): Promise<void> {
+    const candidate = this.client as HttpClient & { getAuthHeaders?: () => Promise<Record<string, string>> };
+    if (typeof candidate.getAuthHeaders === 'function') await candidate.getAuthHeaders();
+  }
+
+  private completePendingOAuthTicket(
+    supplied?: PendingOAuthCompletion,
+  ): Promise<AuthResult | null> {
+    return (async () => {
+      const pending = supplied ?? await this.tokenManager.getPendingOAuthCompletion();
+      if (!pending) return null;
+      const existing = this.pendingOAuthCompletionRetries.get(pending.ticket);
+      if (existing) return existing;
+      const retry = this.performPendingOAuthTicket(pending).finally(() => {
+        if (this.pendingOAuthCompletionRetries.get(pending.ticket) === retry) {
+          this.pendingOAuthCompletionRetries.delete(pending.ticket);
+        }
+      });
+      this.pendingOAuthCompletionRetries.set(pending.ticket, retry);
+      return retry;
+    })().then((result) => result);
+  }
+
+  private async retryNewestPendingOAuthTicket(): Promise<void> {
+    const pending = await this.tokenManager.getPendingOAuthCompletion();
+    if (pending) await this.completePendingOAuthTicket(pending).catch(() => null);
+  }
+
+  private async performPendingOAuthTicket(
+    supplied?: PendingOAuthCompletion,
+  ): Promise<AuthResult | null> {
+    const pending = supplied ?? await this.tokenManager.getPendingOAuthCompletion();
+    if (!pending) return null;
+    try {
+      await this.tokenManager.storePendingOAuthCompletion(pending);
+    } catch {
+      throw new EdgeBaseError(
+        0,
+        'OAuth completion ticket could not be persisted. Free secure storage and retry.',
+        undefined,
+        'oauth-completion-persist-failed',
+      );
+    }
+    if (pending.authTransport !== 'body') {
+      await this.tokenManager.clearPendingOAuthCompletions();
+      return null;
+    }
+    try {
+      if (pending.kind === 'link') await this.ensureAuthenticatedRequestReady();
+      const result = await this.runAuthoritativeAuthOperation(
+        () => pending.kind === 'link'
+          ? this.client.post<AuthResult>('/api/auth/oauth/complete/link', {
+              ticket: pending.ticket,
+              oauthRecoveryNonce: pending.recoveryNonce ?? undefined,
+            })
+          : this.client.postPublic<AuthResult>('/api/auth/oauth/exchange', {
+              ticket: pending.ticket,
+              oauthRecoveryNonce: pending.recoveryNonce ?? undefined,
+            }),
+        (value) => value,
+        pending.ticket,
+      );
+      // The durable auth result is the sole winner. Remove every sibling
+      // callback nonce/ticket so a terminated app cannot later adopt an older
+      // account after relaunch.
+      await this.tokenManager.clearPendingOAuthRecovery();
+      await this.tokenManager.clearPendingOAuthCompletions();
+      const user = this.tokenManager.getCurrentUser();
+      if (!user || !result.accessToken || !result.refreshToken) return null;
+      return { ...result, user };
+    } catch (error) {
+      if (
+        error instanceof EdgeBaseError
+        && error.code >= 400
+        && error.code < 500
+        && error.code !== 408
+        && error.code !== 429
+        && error.slug !== 'auth-state-changed'
+      ) {
+        await this.tokenManager.clearPendingOAuthCompletion(pending.ticket);
+      }
+      throw error;
+    }
   }
 
   /** Register a new user. Optionally include user metadata. */
@@ -149,12 +435,12 @@ export class AuthClient {
     if (options.data) body.data = options.data;
     if (options.captchaToken) body.captchaToken = options.captchaToken;
 
-    const result = await this.corePublic.authSignup(body) as AuthResult;
-    this.tokenManager.setTokens({
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-    });
-    return result;
+    return this.runAuthoritativeAuthOperation(
+      () => this.invalidateCaptchaConfigOnFailure(
+        () => this.corePublic.authSignup(body) as Promise<AuthResult>,
+      ),
+      (result) => result,
+    );
   }
 
   /** Sign in with email and password. Returns MfaRequiredResult if MFA is enabled. */
@@ -165,79 +451,116 @@ export class AuthClient {
     };
     if (options.captchaToken) body.captchaToken = options.captchaToken;
 
-    const result = await this.corePublic.authSignin(body) as SignInResult;
-    if ('mfaRequired' in result && result.mfaRequired) {
-      return result;
-    }
-    const authResult = result as AuthResult;
-    this.tokenManager.setTokens({
-      accessToken: authResult.accessToken,
-      refreshToken: authResult.refreshToken,
-    });
-    return authResult;
+    return this.runAuthoritativeAuthOperation(
+      () => this.invalidateCaptchaConfigOnFailure(
+        () => this.corePublic.authSignin(body) as Promise<SignInResult>,
+      ),
+      (result) => 'mfaRequired' in result && result.mfaRequired
+        ? null
+        : result as AuthResult,
+    );
   }
 
   /** Sign out — revokes current session on server and clears local tokens. */
-  async signOut(): Promise<void> {
+  async signOut(options?: { pushDeviceId?: string }): Promise<void> {
+    this.beginAuthTransition();
+    await this.tokenManager.ready();
+    const refreshToken = this.tokenManager.getRefreshToken();
+    // Local invalidation and epoch advancement happen before any network wait,
+    // so a late OAuth/refresh response can never resurrect the session.
+    let persistenceError: unknown;
     try {
-      const refreshToken = await this.tokenManager.getRefreshToken();
-      if (refreshToken) {
-        await this.core.authSignout({ refreshToken });
-      }
-    } catch {
-      // Continue even if server call fails
+      await this.tokenManager.beginPendingSignOut(
+        refreshToken,
+        options?.pushDeviceId,
+        Boolean(!options?.pushDeviceId && this.pushSignOut),
+      );
+    } catch (error) {
+      persistenceError = error;
+      // In-memory auth is already cleared; still attempt server revocation.
     }
-    this.tokenManager.clearTokens();
+    // Revocation is serialized after any in-flight token-producing operation,
+    // but signOut itself never waits on an offline/hung request. The durable
+    // queue is cleared only after the server confirms every revoke.
+    void this.tokenManager.runAuthMutation(
+      () => this.retryPendingSessionRevocations(),
+    ).catch(() => undefined);
+    if (persistenceError) {
+      throw new EdgeBaseError(
+        0,
+        'Sign-out cleared memory and attempted server revocation, but durable local sign-out failed. Retry sign-out before closing the app.',
+        undefined,
+        'signout-persistence-failed',
+      );
+    }
   }
 
   /** Refresh the current session using the stored refresh token. */
   async refreshSession(): Promise<AuthResult> {
+    const refreshEpoch = await this.tokenManager.captureAuthEpoch();
     const refreshToken = await this.tokenManager.getRefreshToken();
     if (!refreshToken) {
       throw new Error('No refresh token available.');
     }
-    const result = await this.corePublic.authRefresh({ refreshToken }) as AuthResult;
-    this.tokenManager.setTokens({
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
+    return this.tokenManager.runAuthMutation(async () => {
+      await this.tokenManager.assertRefreshSource(refreshToken, refreshEpoch);
+      const result = await this.corePublic.authRefresh({ refreshToken }) as AuthResult;
+      await this.tokenManager.setTokensPersisted({
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+      }, refreshEpoch);
+      return result;
     });
-    return result;
   }
 
   /**
    * Start OAuth sign-in flow.
    * Opens the OAuth URL via Linking.openURL() and listens for the deep link callback.
-   * The app must be configured with a deep link scheme (e.g. myapp://auth/callback).
+   * The app must own a claimed HTTPS Universal Link / Android App Link.
    *
    * @param provider - OAuth provider name (e.g. 'google', 'github')
    * @param options.redirectUrl - Deep link URL to redirect back to after OAuth (required for RN)
    * @param options.captchaToken - Optional captcha token
-   * @returns Promise that resolves with AuthResult when OAuth completes
+   * @returns Promise resolving to the provider start URL after the one-shot
+   * callback nonce has been persisted (and opened when Linking is configured)
    *
    * NOTE: Not delegated to Generated Core — this is URL construction + redirect, not a standard HTTP call.
    */
-  signInWithOAuth(
+  async signInWithOAuth(options: OAuthStartOptions): Promise<{ url: string }>;
+  async signInWithOAuth(
+    provider: string,
+    options: { redirectUrl: string; captchaToken?: string },
+  ): Promise<{ url: string }>;
+  async signInWithOAuth(
     providerOrOptions: string | OAuthStartOptions,
-    options?: { redirectUrl?: string; captchaToken?: string },
-  ): { url: string } {
+    options?: { redirectUrl: string; captchaToken?: string },
+  ): Promise<{ url: string }> {
     const provider = typeof providerOrOptions === 'string'
       ? providerOrOptions
       : providerOrOptions.provider;
     const resolvedOptions = typeof providerOrOptions === 'string'
       ? options
       : providerOrOptions;
+    const redirectUrl = requireClaimedHttpsOAuthRedirect(resolvedOptions?.redirectUrl);
     let url = `${this.baseUrl}/api/auth/oauth/${encodeURIComponent(provider)}`;
     if (resolvedOptions?.captchaToken) {
       url += `?captcha_token=${encodeURIComponent(resolvedOptions.captchaToken)}`;
     }
-    if (resolvedOptions?.redirectUrl) {
-      const sep = url.includes('?') ? '&' : '?';
-      url += `${sep}redirect_url=${encodeURIComponent(resolvedOptions.redirectUrl)}`;
-    }
+    const redirectSeparator = url.includes('?') ? '&' : '?';
+    url += `${redirectSeparator}redirect_url=${encodeURIComponent(redirectUrl)}`;
+
+    const recoveryNonce = await this.tokenManager.markPendingOAuthRecovery(redirectUrl);
+    const separator = url.includes('?') ? '&' : '?';
+    url += `${separator}${OAUTH_RECOVERY_NONCE_PARAM}=${encodeURIComponent(recoveryNonce)}`;
 
     // Open in system browser via Linking API
     if (this.linking) {
-      void this.linking.openURL(url);
+      try {
+        await this.linking.openURL(url);
+      } catch (error) {
+        await this.tokenManager.clearPendingOAuthRecovery(recoveryNonce);
+        throw error;
+      }
     }
 
     return { url };
@@ -246,29 +569,80 @@ export class AuthClient {
   /**
    * Handle OAuth deep link callback.
    * Call this when your app receives a deep link URL with auth tokens.
-   * Extract tokens from query params and store them.
+   * Accept the server's fragment (with query fallback for custom deep-link
+   * bridges), consume its one-shot nonce, and rotate the refresh token with the
+   * server before adopting any credential.
    *
    * @example
    * // In your navigation/linking config:
    * Linking.addEventListener('url', ({ url }) => client.auth.handleOAuthCallback(url));
    */
-  async handleOAuthCallback(url: string): Promise<AuthResult | null> {
+  async handleOAuthCallback(url?: string): Promise<AuthResult | null> {
+    if (!url) {
+      try {
+        return await this.completePendingOAuthTicket();
+      } catch {
+        return null;
+      }
+    }
+    const observedTransition = this.authTransition;
     try {
       const parsed = new URL(url);
-      const accessToken = parsed.searchParams.get('access_token');
-      const refreshToken = parsed.searchParams.get('refresh_token');
-      if (!accessToken || !refreshToken) return null;
-
-      this.tokenManager.setTokens({ accessToken, refreshToken });
-
-      return {
-        user: this.tokenManager.getCurrentUser()!,
-        accessToken,
-        refreshToken,
+      const fragment = new URLSearchParams(
+        parsed.hash.startsWith('#') ? parsed.hash.slice(1) : parsed.hash,
+      );
+      const getParam = (key: string): string | null =>
+        fragment.get(key) ?? parsed.searchParams.get(key);
+      const callbackEpoch = await this.tokenManager.captureAuthEpoch();
+      const recoveryNonce = getParam(OAUTH_RECOVERY_NONCE_PARAM);
+      const callbackBound = await this.tokenManager.consumePendingOAuthRecovery(
+        recoveryNonce,
+        callbackEpoch,
+        url,
+      );
+      if (!callbackBound || getParam('error')) return null;
+      const exchangeTicket = getParam('oauth_exchange_ticket');
+      const linkTicket = getParam('oauth_link_ticket');
+      if ((!exchangeTicket && !linkTicket) || (exchangeTicket && linkTicket)) return null;
+      this.assertAuthTransition(observedTransition);
+      const ticket = linkTicket ?? exchangeTicket!;
+      const pending: PendingOAuthCompletion = {
+        ticket,
+        recoveryNonce,
+        kind: linkTicket ? 'link' : 'signin',
+        authTransport: 'body',
+        createdAt: Date.now(),
+        authEpoch: callbackEpoch,
       };
-    } catch {
+      try {
+        await this.tokenManager.storePendingOAuthCompletion(pending);
+      } catch {
+        throw new EdgeBaseError(
+          0,
+          'OAuth completion ticket could not be persisted. Free secure storage and retry.',
+          undefined,
+          'oauth-completion-persist-failed',
+        );
+      }
+      return await this.completePendingOAuthTicket(pending);
+    } catch (error) {
+      if (
+        error instanceof EdgeBaseError
+        && [
+          'auth-token-persistence-failed',
+          'auth-state-changed',
+          'oauth-completion-persist-failed',
+        ].includes(error.slug ?? '')
+      ) throw error;
       return null;
     }
+  }
+
+  /** Complete a callback that launched a previously terminated app. */
+  async handleInitialOAuthCallback(): Promise<AuthResult | null> {
+    if (!this.linking) return null;
+    const initialUrl = await this.linking.getInitialURL();
+    return this.handleOAuthCallback(initialUrl ?? undefined);
   }
 
   /** Sign in anonymously. */
@@ -276,12 +650,12 @@ export class AuthClient {
     const body: Record<string, unknown> | undefined = options?.captchaToken
       ? { captchaToken: options.captchaToken }
       : undefined;
-    const result = await this.corePublic.authSigninAnonymous(body) as AuthResult;
-    this.tokenManager.setTokens({
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-    });
-    return result;
+    return this.runAuthoritativeAuthOperation(
+      () => this.invalidateCaptchaConfigOnFailure(
+        () => this.corePublic.authSigninAnonymous(body) as Promise<AuthResult>,
+      ),
+      (result) => result,
+    );
   }
 
   /**
@@ -293,7 +667,9 @@ export class AuthClient {
     if (options.captchaToken) {
       body.captchaToken = options.captchaToken;
     }
-    await this.corePublic.authSigninMagicLink(body);
+    await this.invalidateCaptchaConfigOnFailure(
+      () => this.corePublic.authSigninMagicLink(body),
+    );
   }
 
   /**
@@ -301,12 +677,10 @@ export class AuthClient {
    * Called after user clicks the link from their email.
    */
   async verifyMagicLink(token: string): Promise<AuthResult> {
-    const result = await this.corePublic.authVerifyMagicLink({ token }) as AuthResult;
-    this.tokenManager.setTokens({
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-    });
-    return result;
+    return this.runAuthoritativeAuthOperation(
+      () => this.corePublic.authVerifyMagicLink({ token }) as Promise<AuthResult>,
+      (result) => result,
+    );
   }
 
   // ─── Phone / SMS Auth ───
@@ -320,7 +694,9 @@ export class AuthClient {
     if (options.captchaToken) {
       body.captchaToken = options.captchaToken;
     }
-    await this.corePublic.authSigninPhone(body);
+    await this.invalidateCaptchaConfigOnFailure(
+      () => this.corePublic.authSigninPhone(body),
+    );
   }
 
   /**
@@ -328,15 +704,13 @@ export class AuthClient {
    * Called after user receives the code from signInWithPhone.
    */
   async verifyPhone(options: { phone: string; code: string }): Promise<AuthResult> {
-    const result = await this.corePublic.authVerifyPhone({
-      phone: options.phone,
-      code: options.code,
-    }) as AuthResult;
-    this.tokenManager.setTokens({
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-    });
-    return result;
+    return this.runAuthoritativeAuthOperation(
+      () => this.corePublic.authVerifyPhone({
+        phone: options.phone,
+        code: options.code,
+      }) as Promise<AuthResult>,
+      (result) => result,
+    );
   }
 
   /** Link current account with a phone number. Sends an SMS code. */
@@ -344,36 +718,41 @@ export class AuthClient {
     await this.core.authLinkPhone({ phone: options.phone });
   }
 
-  /** Verify phone link code. Completes phone linking for the current account. */
-  async verifyLinkPhone(options: { phone: string; code: string }): Promise<void> {
-    await this.core.authVerifyLinkPhone({
-      phone: options.phone,
-      code: options.code,
-    });
+  /** Verify phone link code. Anonymous upgrades return and adopt a replacement session. */
+  async verifyLinkPhone(options: { phone: string; code: string }): Promise<AuthResult | void> {
+    const result = await this.runAuthoritativeAuthOperation(
+      () => this.core.authVerifyLinkPhone({
+        phone: options.phone,
+        code: options.code,
+      }) as Promise<AuthResult | { ok: true }>,
+      (value) => isAuthResult(value) ? value : null,
+    );
+    return isAuthResult(result) ? result : undefined;
   }
 
   /** Link anonymous account to email/password. */
   async linkWithEmail(options: { email: string; password: string }): Promise<AuthResult> {
-    const result = await this.core.authLinkEmail({
-      email: options.email,
-      password: options.password,
-    }) as AuthResult;
-    this.tokenManager.setTokens({
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-    });
-    return result;
+    await this.ensureAuthenticatedRequestReady();
+    return this.runAuthoritativeAuthOperation(
+      () => this.core.authLinkEmail({
+        email: options.email,
+        password: options.password,
+      }) as Promise<AuthResult>,
+      (result) => result,
+    );
   }
 
   /**
    * Link anonymous account to OAuth provider. Returns URL to open in browser.
-   *
-   * NOTE: Not delegated — Generated Core's oauthLinkStart(provider) takes no body,
-   * but we need to pass { redirectUrl }.
    */
+  async linkWithOAuth(options: { provider: string; redirectUrl: string }): Promise<{ redirectUrl: string }>;
   async linkWithOAuth(
-    providerOrOptions: string | { provider: string; redirectUrl?: string },
-    options?: { redirectUrl?: string },
+    provider: string,
+    options: { redirectUrl: string },
+  ): Promise<{ redirectUrl: string }>;
+  async linkWithOAuth(
+    providerOrOptions: string | { provider: string; redirectUrl: string },
+    options?: { redirectUrl: string },
   ): Promise<{ redirectUrl: string }> {
     const provider = typeof providerOrOptions === 'string'
       ? providerOrOptions
@@ -381,13 +760,25 @@ export class AuthClient {
     const resolvedOptions = typeof providerOrOptions === 'string'
       ? options
       : providerOrOptions;
-    const redirectUrl = resolvedOptions?.redirectUrl ?? '';
-    const result = await this.client.post<{ redirectUrl: string }>(
-      `/api/auth/oauth/link/${encodeURIComponent(provider)}`,
-      { redirectUrl },
-    );
+    const redirectUrl = requireClaimedHttpsOAuthRedirect(resolvedOptions?.redirectUrl);
+    const recoveryNonce = await this.tokenManager.markPendingOAuthRecovery(redirectUrl);
+    let result: { redirectUrl: string };
+    try {
+      result = await this.core.oauthLinkStart(provider, {
+        redirectUrl,
+        oauthRecoveryNonce: recoveryNonce,
+      }) as { redirectUrl: string };
+    } catch (error) {
+      await this.tokenManager.clearPendingOAuthRecovery(recoveryNonce);
+      throw error;
+    }
     if (this.linking) {
-      void this.linking.openURL(result.redirectUrl);
+      try {
+        await this.linking.openURL(result.redirectUrl);
+      } catch (error) {
+        await this.tokenManager.clearPendingOAuthRecovery(recoveryNonce);
+        throw error;
+      }
     }
     return result;
   }
@@ -415,13 +806,11 @@ export class AuthClient {
 
   /** Update current user's profile. */
   async updateProfile(data: UpdateProfileOptions): Promise<TokenUser> {
-    const result = await this.core.authUpdateProfile(data) as AuthResult;
-    if (result.accessToken && result.refreshToken) {
-      this.tokenManager.setTokens({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-      });
-    }
+    await this.ensureAuthenticatedRequestReady();
+    await this.runAuthoritativeAuthOperation(
+      () => this.core.authUpdateProfile(data) as Promise<AuthResult>,
+      (result) => result.accessToken && result.refreshToken ? result : null,
+    );
     return this.tokenManager.getCurrentUser()!;
   }
 
@@ -449,7 +838,9 @@ export class AuthClient {
   ): Promise<void> {
     const body: Record<string, unknown> = { email };
     if (options?.captchaToken) body.captchaToken = options.captchaToken;
-    await this.corePublic.authRequestPasswordReset(body);
+    await this.invalidateCaptchaConfigOnFailure(
+      () => this.corePublic.authRequestPasswordReset(body),
+    );
   }
 
   /** Reset password with token. */
@@ -462,15 +853,14 @@ export class AuthClient {
     currentPassword: string;
     newPassword: string;
   }): Promise<AuthResult> {
-    const result = await this.core.authChangePassword({
-      currentPassword: options.currentPassword,
-      newPassword: options.newPassword,
-    }) as AuthResult;
-    this.tokenManager.setTokens({
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-    });
-    return result;
+    await this.ensureAuthenticatedRequestReady();
+    return this.runAuthoritativeAuthOperation(
+      () => this.core.authChangePassword({
+        currentPassword: options.currentPassword,
+        newPassword: options.newPassword,
+      }) as Promise<AuthResult>,
+      (result) => result,
+    );
   }
 
   /** Request an email change for the authenticated user. */
@@ -500,15 +890,13 @@ export class AuthClient {
 
   /** Verify an email OTP code and sign in. */
   async verifyEmailOtp(options: { email: string; code: string }): Promise<AuthResult> {
-    const result = await this.corePublic.authVerifyEmailOtp({
-      email: options.email,
-      code: options.code,
-    }) as AuthResult;
-    this.tokenManager.setTokens({
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-    });
-    return result;
+    return this.runAuthoritativeAuthOperation(
+      () => this.corePublic.authVerifyEmailOtp({
+        email: options.email,
+        code: options.code,
+      }) as Promise<AuthResult>,
+      (result) => result,
+    );
   }
 
   // ─── Passkeys / WebAuthn REST layer ───
@@ -530,12 +918,10 @@ export class AuthClient {
 
   /** Verify a WebAuthn assertion and establish a session. */
   async passkeysAuthenticate(response: unknown): Promise<AuthResult> {
-    const result = await this.corePublic.authPasskeysAuthenticate({ response }) as AuthResult;
-    this.tokenManager.setTokens({
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-    });
-    return result;
+    return this.runAuthoritativeAuthOperation(
+      () => this.corePublic.authPasskeysAuthenticate({ response }) as Promise<AuthResult>,
+      (result) => result,
+    );
   }
 
   /** List registered passkeys for the current authenticated user. */
@@ -556,6 +942,7 @@ export class AuthClient {
     const core = this.core;
     const corePublic = this.corePublic;
     const tokenManager = this.tokenManager;
+    const authClient = this;
     return {
       /** Enroll TOTP — returns secret, QR code URI, and recovery codes. */
       async enrollTotp(): Promise<TotpEnrollResult> {
@@ -569,28 +956,18 @@ export class AuthClient {
 
       /** Verify TOTP code during MFA challenge (after signIn returns mfaRequired). */
       async verifyTotp(mfaTicket: string, code: string): Promise<AuthResult> {
-        const result = await corePublic.authMfaVerify({
-          mfaTicket,
-          code,
-        }) as AuthResult;
-        tokenManager.setTokens({
-          accessToken: result.accessToken,
-          refreshToken: result.refreshToken,
-        });
-        return result;
+        return authClient.runAuthoritativeAuthOperation(
+          () => corePublic.authMfaVerify({ mfaTicket, code }) as Promise<AuthResult>,
+          (result) => result,
+        );
       },
 
       /** Use a recovery code during MFA challenge. */
       async useRecoveryCode(mfaTicket: string, recoveryCode: string): Promise<AuthResult> {
-        const result = await corePublic.authMfaRecovery({
-          mfaTicket,
-          recoveryCode,
-        }) as AuthResult;
-        tokenManager.setTokens({
-          accessToken: result.accessToken,
-          refreshToken: result.refreshToken,
-        });
-        return result;
+        return authClient.runAuthoritativeAuthOperation(
+          () => corePublic.authMfaRecovery({ mfaTicket, recoveryCode }) as Promise<AuthResult>,
+          (result) => result,
+        );
       },
 
       /**

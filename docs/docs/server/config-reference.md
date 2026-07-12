@@ -95,7 +95,7 @@ export default defineConfig({
   // ─── Release Mode ──────────────────────────────────────
   release: false,  // Set to true before production deployment
   baseUrl: 'https://api.example.com',
-  trustSelfHostedProxy: true, // Self-hosted only: trust X-Forwarded-For from your reverse proxy
+  trustSelfHostedProxy: true, // Self-hosted only: trust proxy-overwritten X-Forwarded-For
 
   // ─── Databases ──────────────────────────────────────────
   databases: {
@@ -141,7 +141,7 @@ export default defineConfig({
     anonymousAuth: true,
     allowedRedirectUrls: [
       'https://app.example.com/auth/*',
-      'http://localhost:3000/auth/*',
+      'https://app.example.com/settings/connections/callback',
     ],
     anonymousRetentionDays: 30,
     // Delete Isolated DO data when a user is deleted (DECISIONS #118)
@@ -166,10 +166,11 @@ export default defineConfig({
   // captcha: true,                     // Auto-provision via Cloudflare deploy
   captcha: {                            // Manual keys (self-hosting / Docker)
     siteKey: '0x4AAAAAAA...',           // Turnstile dashboard → siteKey
-    secretKey: '0x4AAAAAAA...',         // Turnstile dashboard → secretKey
-    failMode: 'open',                   // 'open' (default) | 'closed'
+    hostnames: ['api.example.com'],      // 1-10 exact hostnames; no wildcards
+    failMode: 'closed',                 // Required for every deployed runtime; open is local-dev only
     siteverifyTimeout: 3000,            // ms (default: 3000)
   },
+  // Runtime-only secret: TURNSTILE_SECRET. Never place it in this config.
 
   // ─── Rate Limiting ────────────────────────────────────
   rateLimiting: {
@@ -272,12 +273,31 @@ Set `baseUrl` to the public origin where your EdgeBase server is reachable.
 - Email-action links and runtime metadata use the same canonical origin.
 - In local development, this is typically `http://127.0.0.1:8787` or `http://localhost:8787`, whichever your provider callback configuration expects.
 
+An HTTP loopback `baseUrl` is accepted with `release: true` only when the CLI
+has marked the process `EDGEBASE_RUNTIME_MODE=local-development`. This supports
+release-policy testing on localhost. A deployed Cloudflare or self-hosted
+release runtime requires an HTTPS OAuth base origin and fails closed otherwise.
+
+If an OAuth or email action supplies an app `redirectUrl`, release mode also
+requires a non-empty `auth.allowedRedirectUrls` and an HTTPS destination. Each
+candidate must match an explicitly approved exact URL, HTTPS origin-wide entry,
+or HTTPS path-prefix entry ending in `*`. Custom schemes are development-only;
+mobile release callbacks must be claimed HTTPS Universal Links or Android App
+Links.
+
 ## Trusted Proxy Headers
 
 Set `trustSelfHostedProxy: true` only when EdgeBase is running behind a reverse proxy that overwrites `X-Forwarded-For` with the real client IP.
 
+The CLI also injects an internal `EDGEBASE_RUNTIME_MODE` binding. It is
+`cloudflare` for deploys, `local-development` for `edgebase dev`, and
+`self-hosted` for Docker/pack. In `self-hosted` mode, `CF-Connecting-IP` is
+never trusted; without the proxy opt-in above, no forwarded IP is accepted.
+Missing or unrecognized runtime modes fail closed. Only raw manual Wrangler
+setups need to supply this binding themselves.
+
 - Default: `false`
-- Always trusted: `CF-Connecting-IP` on Cloudflare Edge
+- Trusted only in CLI-declared Cloudflare/local-development modes: `CF-Connecting-IP`
 - Trusted only when `trustSelfHostedProxy: true`: `X-Forwarded-For` in self-hosted deployments
 
 This setting affects IP-based features such as:
@@ -313,11 +333,11 @@ Notes:
 | Section | Description |
 |---------|-------------|
 | `baseUrl` | Canonical public server origin used for OAuth callbacks and auth/email redirects |
-| `trustSelfHostedProxy` | Trust `X-Forwarded-For` from a self-hosted reverse proxy; Cloudflare `CF-Connecting-IP` stays trusted regardless |
+| `trustSelfHostedProxy` | Trust proxy-overwritten `X-Forwarded-For`; self-hosted runtimes otherwise ignore every forwarded IP header |
 | `release` | Release mode — `true` enables deny-by-default, `false` (default) bypasses access checks |
 | `databases` | DB blocks (app, namespace:\{id\}...) with tables, schemas, and access policies |
 | `auth` | OAuth providers, anonymous auth settings |
-| `captcha` | [Captcha (bot protection) settings](/docs/authentication/captcha) — `true` for auto-provision, or `{ siteKey, secretKey }` for manual |
+| `captcha` | [CAPTCHA settings](/docs/authentication/captcha) — `true` for managed provisioning, or `{ siteKey, hostnames, failMode?, siteverifyTimeout? }`; inject `TURNSTILE_SECRET` at runtime |
 | `storage` | Bucket definitions, size/type limits, rules |
 | `serviceKeys` | [Service Key definitions, scopes, constraints](/docs/server/service-keys) |
 | `rateLimiting` | Request limits per time window |

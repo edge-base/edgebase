@@ -87,7 +87,10 @@ class HttpClient {
   }
 
   /// Headers with auth token and request metadata.
-  Future<Map<String, String>> _buildHeaders({bool withAuth = true}) async {
+  Future<Map<String, String>> _buildHeaders({
+    bool withAuth = true,
+    String? captchaToken,
+  }) async {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Connection': 'close',
@@ -98,17 +101,16 @@ class HttpClient {
       // /api routes do not try to parse the key as a user JWT.
       headers['X-EdgeBase-Service-Key'] = serviceKey!;
     } else if (withAuth) {
-      try {
-        final token = await tokenManager?.getAccessToken(_refreshToken);
-        if (token != null) {
-          headers['Authorization'] = 'Bearer $token';
-        }
-      } catch (_) {
-        // Token refresh failed — proceed as unauthenticated
+      final token = await tokenManager?.getAccessToken(_refreshToken);
+      if (token != null) {
+        headers['Authorization'] = 'Bearer $token';
       }
     }
     if (_locale != null && _locale!.isNotEmpty) {
       headers['Accept-Language'] = _locale!;
+    }
+    if (captchaToken != null) {
+      headers['X-EdgeBase-Captcha-Token'] = captchaToken;
     }
     return headers;
   }
@@ -147,19 +149,23 @@ class HttpClient {
     Object? body,
     bool skipAuth = false,
     Map<String, String>? query,
+    String? captchaToken,
   }) async {
     final uri = _buildUri(path, query);
     final encoded = body != null ? jsonEncode(body) : null;
     var did401Retry = false;
 
     for (var attempt = 0; attempt <= 3; attempt++) {
-      final headers = await _buildHeaders(withAuth: !skipAuth);
+      final headers = await _buildHeaders(
+        withAuth: !skipAuth,
+        captchaToken: captchaToken,
+      );
 
       http.Response response;
       try {
         response = await _send(method, uri, headers, encoded);
       } on TimeoutException {
-        if (attempt < 2) {
+        if (captchaToken == null && attempt < 2) {
           await Future.delayed(Duration(milliseconds: 50 * (attempt + 1)));
           continue;
         }
@@ -168,7 +174,9 @@ class HttpClient {
         );
       } catch (e) {
         if (e is EdgeBaseError) rethrow;
-        if (attempt < 2 && _isRetryableTransportError(e)) {
+        if (captchaToken == null &&
+            attempt < 2 &&
+            _isRetryableTransportError(e)) {
           await Future.delayed(Duration(milliseconds: 50 * (attempt + 1)));
           continue;
         }
@@ -176,22 +184,22 @@ class HttpClient {
       }
 
       // 429 retry with Retry-After
-      if (response.statusCode == 429 && attempt < 3) {
+      if (captchaToken == null && response.statusCode == 429 && attempt < 3) {
         await Future.delayed(_parseRetryAfter(response, attempt));
         continue;
       }
 
       // 401 auto-retry: refresh token and retry once (independent of transport/429 retries)
-      if (response.statusCode == 401 && !skipAuth && serviceKey == null && !did401Retry) {
+      if (captchaToken == null &&
+          response.statusCode == 401 &&
+          !skipAuth &&
+          serviceKey == null &&
+          !did401Retry) {
         did401Retry = true;
-        try {
-          final newHeaders = await _buildHeaders(withAuth: true);
-          response = await _send(method, uri, newHeaders, encoded);
-          if (response.statusCode >= 200 && response.statusCode < 300) {
-            return _handleResponse(response);
-          }
-        } catch (_) {
-          // Retry failed, fall through to original response handling
+        final newHeaders = await _buildHeaders(withAuth: true);
+        response = await _send(method, uri, newHeaders, encoded);
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          return _handleResponse(response);
         }
       }
 
@@ -273,6 +281,34 @@ class HttpClient {
   Future<dynamic> delete(String path, [Object? body]) =>
       _request('DELETE', path, body: body);
 
+  /// Perform a CAPTCHA-protected request without any automatic replay.
+  ///
+  /// Turnstile tokens are single-use. A network error or an HTTP 401/429 may
+  /// arrive after the server consumed the token, so callers must reconcile the
+  /// operation and explicitly retry with a newly acquired token.
+  Future<dynamic> requestWithCaptchaToken(
+    String method,
+    String path, {
+    Object? body,
+    Map<String, String>? query,
+    required String captchaToken,
+  }) {
+    if (captchaToken.isEmpty || captchaToken.length > 2048) {
+      throw ArgumentError.value(
+        captchaToken,
+        'captchaToken',
+        'must be non-empty and at most 2048 characters',
+      );
+    }
+    return _request(
+      method.toUpperCase(),
+      path,
+      body: body,
+      query: query,
+      captchaToken: captchaToken,
+    );
+  }
+
   // ─── Public API (no auth, for signup/signin) ───
 
   Future<dynamic> postPublic(String path, [Object? body]) =>
@@ -348,9 +384,12 @@ class HttpClient {
 
   static bool _isRetryableTransportError(Object error) {
     final msg = error.toString().toLowerCase();
-    return msg.contains('timeout') || msg.contains('socket') ||
-        msg.contains('connection') || msg.contains('reset') ||
-        msg.contains('refused') || msg.contains('network');
+    return msg.contains('timeout') ||
+        msg.contains('socket') ||
+        msg.contains('connection') ||
+        msg.contains('reset') ||
+        msg.contains('refused') ||
+        msg.contains('network');
   }
 
   void close() => _client.close();

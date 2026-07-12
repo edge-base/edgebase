@@ -60,7 +60,7 @@ Every incoming request is classified into a group based on its URL path. Each gr
 
 | Group | Path Prefix | Default Limit | Identifier | Purpose |
 |-------|-------------|---------------|------------|---------|
-| `global` | All routes | 10,000,000 / 60s | IP | Last-resort safety net |
+| `global` | API and control routes | 10,000,000 / 60s | IP | Last-resort API safety net |
 | `db` | `/api/db/*` | 100 / 60s | IP | DB CRUD abuse prevention |
 | `storage` | `/api/storage/*` | 50 / 60s | IP | File upload/download throttle |
 | `functions` | `/api/functions/*` | 50 / 60s | IP | Custom function call throttle |
@@ -72,6 +72,12 @@ Every incoming request is classified into a group based on its URL path. Each gr
 :::info Layered Enforcement
 Non-global routes are checked against **both** their group limit and the global limit. For example, a request to `/api/db/app/tables/posts` must pass both the `db` and `global` counters.
 :::
+
+Static `GET`/`HEAD` responses served from the configured frontend or the
+built-in admin/harness mounts bypass both the software and Cloudflare `global`
+layers. HTML shells, SPA navigations, immutable chunks, favicons, manifests,
+and service workers therefore cannot exhaust the API budget. API, admin API,
+internal, OpenAPI, and well-known metadata routes are never treated as static.
 
 ### Custom Rate Limit Groups
 
@@ -159,7 +165,11 @@ Both layers work when self-hosting with Docker. [Miniflare](https://miniflare.de
 That means the soft counter is often **more consistent per process** in local/self-hosted setups, but it is still best to think of the whole system as abuse protection rather than strict quota enforcement.
 
 :::danger Reverse Proxy Required for IP-Based Rate Limiting
-On Cloudflare Edge, the tamper-proof `CF-Connecting-IP` header identifies clients. In self-hosted environments, EdgeBase only uses `X-Forwarded-For` when `trustSelfHostedProxy: true` is enabled, and that header **must be set by a trusted reverse proxy** (Nginx or Caddy).
+On a CLI-declared Cloudflare runtime, the tamper-proof `CF-Connecting-IP`
+header identifies clients. Docker and packaged runtimes ignore that
+client-supplied header. Self-hosted EdgeBase only uses `X-Forwarded-For` when
+`trustSelfHostedProxy: true` is enabled, and that header **must be overwritten
+by a trusted reverse proxy** (Nginx or Caddy).
 
 **Without a reverse proxy**, leave `trustSelfHostedProxy: false` so client-supplied `X-Forwarded-For` headers are ignored. If you need per-client rate limiting while self-hosting, enable `trustSelfHostedProxy: true` and configure the proxy to overwrite `X-Forwarded-For`. See the [Self-Hosting Guide](/docs/getting-started/self-hosting#3-https-reverse-proxy) for proper proxy configuration.
 :::

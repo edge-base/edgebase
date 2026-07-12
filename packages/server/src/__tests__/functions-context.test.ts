@@ -1,9 +1,93 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildFunctionContext, getWorkerUrl } from '../lib/functions.js';
+import { buildFunctionContext, buildFunctionStorageProxy, getWorkerUrl } from '../lib/functions.js';
+import type { Env } from '../types.js';
 
 function makeTaggedTemplateStrings(parts: string[]): TemplateStringsArray {
   return Object.assign([...parts], { raw: [...parts] }) as unknown as TemplateStringsArray;
 }
+
+describe('buildFunctionStorageProxy object identity', () => {
+  it('exposes the R2 etag from both get and head', async () => {
+    const body = new ReadableStream();
+    const object = {
+      key: 'uploads/report.pdf',
+      body,
+      size: 42,
+      etag: 'etag-report-v2',
+      httpMetadata: { contentType: 'application/pdf' },
+      customMetadata: { source: 'signed-upload' },
+    };
+    const r2 = {
+      get: vi.fn().mockResolvedValue(object),
+      head: vi.fn().mockResolvedValue(object),
+    } as unknown as R2Bucket;
+    const storage = buildFunctionStorageProxy(r2, 'uploads', {} as Env);
+
+    await expect(storage.get('report.pdf')).resolves.toMatchObject({
+      body,
+      size: 42,
+      contentType: 'application/pdf',
+      etag: 'etag-report-v2',
+      customMetadata: { source: 'signed-upload' },
+    });
+    await expect(storage.head('report.pdf')).resolves.toEqual({
+      key: 'report.pdf',
+      size: 42,
+      contentType: 'application/pdf',
+      etag: 'etag-report-v2',
+      customMetadata: { source: 'signed-upload' },
+    });
+    expect(r2.get).toHaveBeenCalledWith('uploads/report.pdf');
+    expect(r2.head).toHaveBeenCalledWith('uploads/report.pdf');
+  });
+
+  it('refuses to create an unversioned signed URL for a missing object', async () => {
+    const r2 = {
+      head: vi.fn().mockResolvedValue(null),
+    } as unknown as R2Bucket;
+    const storage = buildFunctionStorageProxy(r2, 'uploads', {
+      JWT_USER_SECRET: 'signed-url-secret',
+    } as Env);
+
+    await expect(storage.getSignedUrl('missing.pdf')).rejects.toThrow(
+      "Cannot create a signed download URL for missing object 'missing.pdf'.",
+    );
+  });
+
+  it('uses the trusted browser-facing proxy origin and encodes the whole storage key', async () => {
+    const object = {
+      key: 'default/folder/report ?#1.pdf',
+      size: 42,
+      etag: 'etag-report-v2',
+      uploaded: new Date('2026-07-11T00:00:00Z'),
+      httpMetadata: { contentType: 'application/pdf' },
+    } as unknown as R2Object;
+    const env = {
+      EDGEBASE_RUNTIME_MODE: 'self-hosted',
+      EDGEBASE_CONFIG: JSON.stringify({ trustSelfHostedProxy: true }),
+      JWT_USER_SECRET: 'signed-url-secret',
+      STORAGE: { head: vi.fn().mockResolvedValue(object) } as unknown as R2Bucket,
+    } as unknown as Env;
+    const ctx = buildFunctionContext({
+      request: new Request('http://127.0.0.1:8787/api/functions/share', {
+        headers: {
+          'X-Forwarded-Proto': 'https',
+          'X-Forwarded-Host': 'files.example.com',
+        },
+      }),
+      auth: null,
+      databaseNamespace: {} as DurableObjectNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      config: { trustSelfHostedProxy: true },
+      env,
+    });
+
+    const signed = new URL(await ctx.storage!.getSignedUrl('folder/report ?#1.pdf'));
+    expect(signed.origin).toBe('https://files.example.com');
+    expect(signed.pathname).toBe('/api/storage/default/folder%2Freport%20%3F%231.pdf');
+    expect(signed.searchParams.get('token')).toMatch(/^v2\./);
+  });
+});
 
 describe('buildFunctionContext admin.db', () => {
   afterEach(() => {

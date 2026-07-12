@@ -147,12 +147,23 @@ See [Scaling & Data Isolation](/docs/why-edgebase/data-isolation) for details.
 
 ## How does auth work? Is it really free?
 
-Yes, auth is free at any scale. Here's how:
+There is no EdgeBase per-MAU license fee. Infrastructure usage is still billed
+by Cloudflare or borne by your self-hosted deployment:
 
-1. **Sign-up / sign-in** goes directly to D1 (AUTH_DB), Cloudflare's serverless SQL database, which stores all auth data — users, sessions, OAuth accounts, email tokens. No Durable Object is involved. Even the Free plan includes 5M D1 reads and 100K writes per day — enough for most apps. The Workers Paid plan ($5/mo) raises this to 25B reads and 50M writes per month. If you ever outgrow D1 limits, a single config change switches auth to Neon PostgreSQL — no code modifications needed.
-2. **Every subsequent request** verifies the JWT locally in the Worker using cryptographic signature verification. No Durable Object is contacted, no database is queried. This is why auth doesn't scale with user count.
+1. **Durable auth records** go directly to D1 (AUTH_DB), which stores users,
+   sessions, OAuth accounts, and email tokens. OAuth start/callback adds one
+   short-lived, key-sharded Durable Object coordinator so state and account-link
+   continuations are atomically consumed instead of replayable through KV.
+   Normal email/password sign-up and sign-in do not use that coordinator.
+2. **Every ordinary bearer-authenticated data request** verifies the JWT
+   locally in the Worker. It does not contact D1 or a Durable Object merely to
+   authenticate the request. Session refresh and OAuth flow endpoints are the
+   deliberate stateful exceptions described above.
 
-Auth methods: Email/password, Magic Link, Email OTP, Passkeys (WebAuthn), 14 OAuth providers, Phone/SMS, Anonymous, MFA/TOTP. See [Authentication](/docs/authentication).
+EdgeBase does not charge a per-MAU license fee, but Cloudflare or self-hosted
+infrastructure usage still applies. Auth methods include email/password, Magic
+Link, Email OTP, Passkeys (WebAuthn), 14 OAuth providers, Phone/SMS, Anonymous,
+and MFA/TOTP. See [Authentication](/docs/authentication).
 
 ## What SDKs are available?
 

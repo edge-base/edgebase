@@ -31,7 +31,7 @@ async function api(method: string, path: string, body?: unknown, token?: string)
   return { status: res.status, data };
 }
 
-async function getToken(email?: string): Promise<{ accessToken: string; userId: string }> {
+async function getToken(email?: string): Promise<{ accessToken: string; refreshToken: string; userId: string }> {
   const e = email ?? `push-${crypto.randomUUID().slice(0, 8)}@test.com`;
   const res = await (globalThis as any).SELF.fetch(`${BASE}/api/auth/signup`, {
     method: 'POST',
@@ -39,7 +39,7 @@ async function getToken(email?: string): Promise<{ accessToken: string; userId: 
     body: JSON.stringify({ email: e, password: 'Push1234!' }),
   });
   const data = (await res.json()) as any;
-  return { accessToken: data.accessToken, userId: data.user?.id };
+  return { accessToken: data.accessToken, refreshToken: data.refreshToken, userId: data.user?.id };
 }
 
 function createOversizedMultibyteMetadata() {
@@ -210,6 +210,43 @@ describe('push — full flow (fetchMock)', () => {
       deviceId: 'nonexistent',
     }, accessToken);
     expect(unreg.status).toBe(200);
+  });
+
+  it('auth signout removes only the verified user scoped device and bounds its ID', async () => {
+    const first = await getToken();
+    const second = await getToken();
+    const sharedDeviceId = `web-${crypto.randomUUID()}`;
+    await api('POST', '/api/push/register', {
+      deviceId: sharedDeviceId,
+      token: 'first-user-token',
+      platform: 'web',
+    }, first.accessToken);
+    await api('POST', '/api/push/register', {
+      deviceId: sharedDeviceId,
+      token: 'second-user-token',
+      platform: 'web',
+    }, second.accessToken);
+
+    const invalid = await api('POST', '/api/auth/signout', {
+      refreshToken: first.refreshToken,
+      pushDeviceId: '../not-allowed',
+    }, first.accessToken);
+    expect(invalid.status).toBe(400);
+
+    const signout = await api('POST', '/api/auth/signout', {
+      refreshToken: first.refreshToken,
+      pushDeviceId: sharedDeviceId,
+    }, first.accessToken);
+    expect(signout.status).toBe(200);
+    expect(signout.data).toMatchObject({ ok: true, pushUnregistered: true });
+
+    const firstDevices = await api('GET', `/api/push/tokens?userId=${first.userId}`);
+    const secondDevices = await api('GET', `/api/push/tokens?userId=${second.userId}`);
+    expect(firstDevices.data.items).toHaveLength(0);
+    expect(secondDevices.data.items).toMatchObject([{
+      deviceId: sharedDeviceId,
+      token: 'second-user-token',
+    }]);
   });
 
   // ─── C. Send to User ───

@@ -25,7 +25,7 @@ Use the higher-level client package for most app and trusted-service workflows:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.3.8")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.4.0")
 ]
 ```
 
@@ -33,7 +33,7 @@ If you only need the low-level shared primitives, install `EdgeBaseCore` directl
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift-core", from: "0.3.8")
+    .package(url: "https://github.com/edge-base/edgebase-swift-core", from: "0.4.0")
 ]
 ```
 
@@ -79,11 +79,32 @@ let url = await bucket.getUrl("profile.png")
 
 ## Token Storage
 
-By default, tokens are stored in Keychain. For testing, use `MemoryTokenStorage`:
+By default, the complete access/refresh pair is stored in Keychain. Restore it
+before the first authenticated request:
+
+```swift
+let client = EdgeBaseClient("https://...")
+let restored = try await client.tryRestoreSession()
+```
+
+For non-upgrade tests, use `MemoryTokenStorage`:
 
 ```swift
 let client = EdgeBaseClient("https://...", tokenStorage: MemoryTokenStorage())
 ```
+
+Anonymous email/phone upgrades require `DurableTokenStorage` because the server
+may revoke the initiating session before the replacement response is persisted.
+`MemoryTokenStorage` fails that preflight before any request. Custom durable
+stores must atomically persist both tokens, survive process restart, and report
+failures. Auth and refresh results are exposed only after storage succeeds.
+
+Configured CAPTCHA failures throw `CaptchaUnavailableError` with code
+`captcha-unavailable`; a missing token must not be interpreted as disabled
+protection. Positive site keys are cached for five minutes and missing keys are
+not cached. Config transport/malformed responses throw `config_fetch_failed` or
+`config_invalid_response`; only an explicit `captcha: null` response is
+disabled.
 
 ## Features
 

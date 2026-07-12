@@ -12,6 +12,8 @@ export interface ProvisionedBinding {
   binding: string;
   /** Resource ID from Wrangler (namespace_id, database_id, etc.) */
   id: string;
+  /** Actual account-global resource name when it differs from the logical name. */
+  resourceName?: string;
   /** Whether this resource should be deleted by project destroy. */
   managed?: boolean;
   /** Whether the resource was created during deploy or already existed. */
@@ -25,9 +27,20 @@ export interface ProvisionedRateLimitBinding {
   period: 10 | 60;
 }
 
+export type EdgeBaseRuntimeMode = 'cloudflare' | 'local-development' | 'self-hosted';
+
+export const RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS = [
+  'nodejs_compat',
+  'nodejs_compat_populate_process_env',
+];
+
 interface GenerateTempWranglerBaseOptions {
   bindings: ProvisionedBinding[];
   rateLimitBindings?: ProvisionedRateLimitBinding[];
+  /** CLI-owned trust boundary for request forwarding headers. */
+  runtimeMode?: EdgeBaseRuntimeMode;
+  /** Compatibility flags required by the generated runtime only. */
+  requiredCompatibilityFlags?: string[];
 }
 
 export type GenerateTempWranglerTomlOptions =
@@ -45,6 +58,102 @@ export type GenerateTempWranglerTomlOptions =
 const EDGEBASE_ASSETS_DIRECTORY = '.edgebase/runtime/server/app-assets';
 const LEGACY_EDGEBASE_ASSETS_DIRECTORY = '.edgebase/runtime/server/admin-build';
 const EDGEBASE_ASSETS_BINDING = 'ASSETS';
+
+function ensureRequiredCompatibilityFlags(
+  wranglerToml: string,
+  requiredFlags: string[] | undefined,
+): { normalized: string; changed: boolean } {
+  const required = [...new Set(requiredFlags ?? [])].filter(Boolean);
+  if (required.length === 0) {
+    return { normalized: wranglerToml, changed: false };
+  }
+
+  const firstSection = /^[ \t]*\[/m.exec(wranglerToml);
+  const rootEnd = firstSection?.index ?? wranglerToml.length;
+  const root = wranglerToml.slice(0, rootEnd);
+  const remainder = wranglerToml.slice(rootEnd);
+  const assignmentPattern = /^[ \t]*compatibility_flags[ \t]*=[ \t]*\[([\s\S]*?)\]/m;
+  const assignment = assignmentPattern.exec(root);
+  if (assignment) {
+    const existing = [...assignment[1].matchAll(/["']([^"']+)["']/g)]
+      .map((match) => match[1]);
+    const flags = [...new Set([...existing, ...required])];
+    if (required.every((flag) => existing.includes(flag))) {
+      return { normalized: wranglerToml, changed: false };
+    }
+    const normalizedAssignment = `compatibility_flags = [${flags.map((flag) => JSON.stringify(flag)).join(', ')}]`;
+    return {
+      normalized: `${root.replace(assignment[0], normalizedAssignment)}${remainder}`,
+      changed: true,
+    };
+  }
+
+  const assignmentLine = `compatibility_flags = [${required.map((flag) => JSON.stringify(flag)).join(', ')}]`;
+  const compatibilityDatePattern = /^([ \t]*compatibility_date[ \t]*=.*)$/m;
+  if (compatibilityDatePattern.test(root)) {
+    return {
+      normalized: `${root.replace(
+        compatibilityDatePattern,
+        `$1\n${assignmentLine}`,
+      )}${remainder}`,
+      changed: true,
+    };
+  }
+
+  const normalizedRoot = root.replace(/\s*$/, '');
+  const separator = remainder.length > 0 ? '\n\n' : '\n';
+  return {
+    normalized: `${normalizedRoot}\n${assignmentLine}${separator}${remainder}`,
+    changed: true,
+  };
+}
+
+function ensureRuntimeModeVar(
+  wranglerToml: string,
+  runtimeMode: EdgeBaseRuntimeMode | undefined,
+): { normalized: string; changed: boolean } {
+  if (!runtimeMode) return { normalized: wranglerToml, changed: false };
+
+  const lines = wranglerToml.split(/\r?\n/);
+  const rootVarsIndex = lines.findIndex((line) => line.trim() === '[vars]');
+  const assignment = `EDGEBASE_RUNTIME_MODE = "${runtimeMode}"`;
+
+  if (rootVarsIndex === -1) {
+    const normalized = wranglerToml.replace(/\s*$/, '');
+    return {
+      normalized: `${normalized}\n\n[vars]\n${assignment}\n`,
+      changed: true,
+    };
+  }
+
+  let blockEnd = lines.length;
+  for (let index = rootVarsIndex + 1; index < lines.length; index += 1) {
+    if (/^\s*\[/.test(lines[index])) {
+      blockEnd = index;
+      break;
+    }
+  }
+
+  let existingIndex = -1;
+  for (let index = rootVarsIndex + 1; index < blockEnd; index += 1) {
+    if (/^\s*EDGEBASE_RUNTIME_MODE\s*=/.test(lines[index])) {
+      existingIndex = index;
+      break;
+    }
+  }
+
+  if (existingIndex !== -1 && lines[existingIndex].trim() === assignment) {
+    return { normalized: wranglerToml, changed: false };
+  }
+
+  if (existingIndex !== -1) {
+    lines[existingIndex] = assignment;
+  } else {
+    lines.splice(rootVarsIndex + 1, 0, assignment);
+  }
+
+  return { normalized: lines.join('\n'), changed: true };
+}
 
 function readAssetsDirectory(block: string): string | null {
   const match = block.match(/^\s*directory\s*=\s*"([^"\n]*)"\s*$/m);
@@ -202,13 +311,22 @@ export function generateTempWranglerToml(
   const managedCrons = replaceTriggers ? options.managedCrons : [];
 
   const original = readFileSync(wranglerPath, 'utf-8');
+  const { normalized: runtimeNormalized, changed: normalizedRuntimeMode } =
+    ensureRuntimeModeVar(original, options.runtimeMode);
+  const { normalized: compatibilityNormalized, changed: normalizedCompatibilityFlags } =
+    ensureRequiredCompatibilityFlags(
+      runtimeNormalized,
+      options.requiredCompatibilityFlags,
+    );
   const { normalized: normalizedOriginal, changed: normalizedAssetsRouting } =
-    ensureManagedAssetsBlock(original);
+    ensureManagedAssetsBlock(compatibilityNormalized);
 
   if (
     bindings.length === 0 &&
     !replaceTriggers &&
     rateLimitBindings.length === 0 &&
+    !normalizedRuntimeMode &&
+    !normalizedCompatibilityFlags &&
     !normalizedAssetsRouting
   ) {
     return null;
@@ -285,7 +403,7 @@ export function generateTempWranglerToml(
   if (d1Bindings.length > 0) {
     for (const b of d1Bindings) {
       appendManagedSection(
-        `[[d1_databases]]\nbinding = "${b.binding}"\ndatabase_name = "${buildManagedD1DatabaseName(workerName, b.name)}"\ndatabase_id = "${b.id}"`,
+        `[[d1_databases]]\nbinding = "${b.binding}"\ndatabase_name = "${b.resourceName ?? buildManagedD1DatabaseName(workerName, b.name)}"\ndatabase_id = "${b.id}"`,
       );
     }
   }
@@ -325,7 +443,12 @@ export function generateTempWranglerToml(
     appendManagedSection(`[triggers]\ncrons = [${managedCrons.map((c) => `"${c}"`).join(', ')}]`);
   }
 
-  if (!didAppend && !normalizedAssetsRouting) return null;
+  if (
+    !didAppend
+    && !normalizedAssetsRouting
+    && !normalizedRuntimeMode
+    && !normalizedCompatibilityFlags
+  ) return null;
 
   const tempDir = dirname(wranglerPath);
   const tempPath = join(tempDir, `.wrangler.generated.${randomBytes(6).toString('hex')}.toml`);

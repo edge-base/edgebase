@@ -6,3 +6,4 @@
 export 'captcha_stub.dart'
     if (dart.library.html) 'captcha_web.dart'
     if (dart.library.ui) 'captcha_native.dart';
+export 'captcha_errors.dart';

@@ -15,6 +15,7 @@
 #include <edgebase/edgebase.h>
 #include <edgebase/field_ops.h>
 #include <gtest/gtest.h>
+#include <functional>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
@@ -696,6 +697,101 @@ TEST(EdgeBaseUnit, FunctionsReturnsFunctionsClient) {
   EXPECT_NO_THROW({ auto functions = client.functions(); });
 }
 
+TEST(FunctionsCaptchaTransportUnit, SendsDedicatedHeaderForGetPostAndDelete) {
+  struct RequestRecord {
+    std::string method;
+    std::string url;
+    std::string captchaToken;
+  };
+  std::vector<RequestRecord> requests;
+  auto http = std::make_shared<HttpClient>(
+      "https://api.example.test", "",
+      [&requests](const std::string &method, const std::string &url,
+                  const std::string &,
+                  const std::map<std::string, std::string> &headers) {
+        const auto token = headers.find("X-EdgeBase-Captcha-Token");
+        requests.push_back(
+            {method, url, token == headers.end() ? "" : token->second});
+        return Result{true, 200, "{}", ""};
+      });
+  FunctionsClient functions(http);
+
+  for (const auto &method : {std::string("GET"), std::string("POST"),
+                             std::string("DELETE")}) {
+    FunctionsClient::FunctionCallOptions options;
+    options.method = method;
+    options.jsonBody = method == "POST" ? R"({"ok":true})" : "{}";
+    if (method == "GET")
+      options.query = {{"page", "1"}};
+    options.captchaToken = "captcha-" + method;
+    EXPECT_TRUE(functions.call("protected-" + method, options).ok);
+  }
+
+  ASSERT_EQ(requests.size(), 3u);
+  EXPECT_EQ(requests[0].method, "GET");
+  EXPECT_EQ(requests[1].method, "POST");
+  EXPECT_EQ(requests[2].method, "DELETE");
+  EXPECT_EQ(requests[0].captchaToken, "captcha-GET");
+  EXPECT_EQ(requests[1].captchaToken, "captcha-POST");
+  EXPECT_EQ(requests[2].captchaToken, "captcha-DELETE");
+  EXPECT_NE(requests[0].url.find("page=1"), std::string::npos);
+}
+
+TEST(FunctionsCaptchaTransportUnit, NeverReplaysNetwork401Or429Failures) {
+  std::map<std::string, int> attempts;
+  auto http = std::make_shared<HttpClient>(
+      "https://api.example.test", "",
+      [&attempts](const std::string &, const std::string &url,
+                  const std::string &,
+                  const std::map<std::string, std::string> &) {
+        const auto name = url.substr(url.find_last_of('/') + 1);
+        ++attempts[name];
+        if (name == "network")
+          return Result{false, 0, "", "synthetic connection reset"};
+        const auto status = name == "unauthorized" ? 401 : 429;
+        return Result{false, status, "", "synthetic failure"};
+      });
+  FunctionsClient functions(http);
+
+  for (const auto &name : {std::string("network"),
+                           std::string("unauthorized"),
+                           std::string("rate-limited")}) {
+    FunctionsClient::FunctionCallOptions options;
+    options.captchaToken = "single-use-token";
+    EXPECT_FALSE(functions.call(name, options).ok);
+  }
+
+  EXPECT_EQ(attempts["network"], 1);
+  EXPECT_EQ(attempts["unauthorized"], 1);
+  EXPECT_EQ(attempts["rate-limited"], 1);
+}
+
+TEST(FunctionsCaptchaTransportUnit, RejectsInvalidTokensBeforeTransport) {
+  int attempts = 0;
+  auto http = std::make_shared<HttpClient>(
+      "https://api.example.test", "",
+      [&attempts](const std::string &, const std::string &,
+                  const std::string &,
+                  const std::map<std::string, std::string> &) {
+        ++attempts;
+        return Result{true, 200, "{}", ""};
+      });
+  FunctionsClient functions(http);
+
+  FunctionsClient::FunctionCallOptions empty;
+  empty.captchaToken = std::string{};
+  const auto emptyResult = functions.call("empty", empty);
+  EXPECT_FALSE(emptyResult.ok);
+  EXPECT_NE(emptyResult.error.find("non-empty"), std::string::npos);
+
+  FunctionsClient::FunctionCallOptions oversized;
+  oversized.captchaToken = std::string(2049, 'x');
+  const auto oversizedResult = functions.call("oversized", oversized);
+  EXPECT_FALSE(oversizedResult.ok);
+  EXPECT_NE(oversizedResult.error.find("2048"), std::string::npos);
+  EXPECT_EQ(attempts, 0);
+}
+
 TEST(EdgeBaseUnit, AnalyticsReturnsAnalyticsClient) {
   EdgeBase client("http://localhost:8688");
   EXPECT_NO_THROW({ auto analytics = client.analytics(); });
@@ -1108,6 +1204,240 @@ TEST(HttpClientUnit, RAIIDestruction) {
   }
   // If we reach here, destruction succeeded
   EXPECT_TRUE(true);
+}
+
+namespace {
+
+std::string base64UrlForAuthTest(const std::string &value) {
+  static constexpr char alphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string encoded;
+  unsigned int buffer = 0;
+  int bits = 0;
+  for (const unsigned char ch : value) {
+    buffer = (buffer << 8) | ch;
+    bits += 8;
+    while (bits >= 6) {
+      bits -= 6;
+      encoded.push_back(alphabet[(buffer >> bits) & 0x3f]);
+      buffer &= bits == 0 ? 0u : ((1u << bits) - 1u);
+    }
+  }
+  if (bits > 0) {
+    encoded.push_back(alphabet[(buffer << (6 - bits)) & 0x3f]);
+  }
+  for (auto &ch : encoded) {
+    if (ch == '+') ch = '-';
+    else if (ch == '/') ch = '_';
+  }
+  return encoded;
+}
+
+std::string authTestJwt(bool isAnonymous) {
+  return base64UrlForAuthTest(R"({"alg":"HS256"})") + "." +
+         base64UrlForAuthTest(
+             std::string(R"({"sub":"synthetic-user","isAnonymous":)") +
+             (isAnonymous ? "true}" : "false}")) +
+         ".synthetic-signature";
+}
+
+class RecordingAuthTokenStorage final : public AuthTokenStorage {
+public:
+  std::optional<AuthTokenPair> stored;
+  bool failWrites = false;
+  int saveCalls = 0;
+  std::function<void()> onSave;
+
+  std::optional<AuthTokenPair> loadTokens() override { return stored; }
+
+  void saveTokens(const AuthTokenPair &tokens) override {
+    ++saveCalls;
+    if (onSave) onSave();
+    if (failWrites) {
+      throw std::runtime_error("synthetic secure-store failure");
+    }
+    stored = tokens;
+  }
+
+  void clearTokens() override { stored.reset(); }
+};
+
+} // namespace
+
+TEST(AuthTokenPersistenceUnit,
+     AnonymousPhoneUpgradeWithoutStorageFailsBeforeNetwork) {
+  int requestCount = 0;
+  auto http = std::make_shared<HttpClient>(
+      "https://api.example.test", "",
+      [&requestCount](const std::string &, const std::string &,
+                      const std::string &,
+                      const std::map<std::string, std::string> &) {
+        ++requestCount;
+        return Result{true, 200, "{}", ""};
+      });
+  const std::string oldAccess = authTestJwt(true);
+  http->setTokens(oldAccess, "old-refresh");
+  auto core = std::make_shared<GeneratedDbApi>(*http);
+  AuthClient auth(http, core);
+
+  const Result result =
+      auth.verifyLinkPhone("+15550001001", "123456");
+
+  EXPECT_FALSE(result.ok);
+  EXPECT_EQ(result.statusCode, 0);
+  EXPECT_TRUE(result.body.empty());
+  EXPECT_NE(result.error.find("token-persistence-required"),
+            std::string::npos);
+  EXPECT_NE(result.error.find("no request was sent"), std::string::npos);
+  EXPECT_EQ(requestCount, 0);
+  EXPECT_EQ(http->getToken(), oldAccess);
+  EXPECT_EQ(http->getRefreshToken(), "old-refresh");
+}
+
+TEST(AuthTokenPersistenceUnit,
+     AnonymousEmailUpgradeWithoutStorageFailsBeforeNetwork) {
+  int requestCount = 0;
+  auto http = std::make_shared<HttpClient>(
+      "https://api.example.test", "",
+      [&requestCount](const std::string &, const std::string &,
+                      const std::string &,
+                      const std::map<std::string, std::string> &) {
+        ++requestCount;
+        return Result{
+            true, 200,
+            R"({"accessToken":"replacement-access","refreshToken":"replacement-refresh"})",
+            ""};
+      });
+  http->setTokens(authTestJwt(true), "old-refresh");
+  auto core = std::make_shared<GeneratedDbApi>(*http);
+  AuthClient auth(http, core);
+
+  const Result result =
+      auth.linkWithEmail("synthetic@example.com", "SyntheticPass123!");
+
+  EXPECT_FALSE(result.ok);
+  EXPECT_NE(result.error.find("token-persistence-required"),
+            std::string::npos);
+  EXPECT_EQ(requestCount, 0);
+}
+
+TEST(AuthTokenPersistenceUnit,
+     NonAnonymousPhoneLinkDoesNotRequireReplacementStorage) {
+  int requestCount = 0;
+  auto http = std::make_shared<HttpClient>(
+      "https://api.example.test", "",
+      [&requestCount](const std::string &, const std::string &,
+                      const std::string &,
+                      const std::map<std::string, std::string> &) {
+        ++requestCount;
+        return Result{true, 200, R"({"linked":true})", ""};
+      });
+  http->setTokens(authTestJwt(false), "existing-refresh");
+  auto core = std::make_shared<GeneratedDbApi>(*http);
+  AuthClient auth(http, core);
+
+  const Result result =
+      auth.verifyLinkPhone("+15550001002", "123456");
+
+  EXPECT_TRUE(result.ok) << result.error;
+  EXPECT_EQ(requestCount, 1);
+}
+
+TEST(AuthTokenPersistenceUnit,
+     ReplacementPersistsBeforeMemoryAndCheckpointRetryKeepsOldPair) {
+  std::vector<std::string> requestBodies;
+  std::vector<std::string> authorizationHeaders;
+  auto http = std::make_shared<HttpClient>(
+      "https://api.example.test", "",
+      [&requestBodies, &authorizationHeaders](
+          const std::string &, const std::string &, const std::string &body,
+          const std::map<std::string, std::string> &headers) {
+        requestBodies.push_back(body);
+        const auto authorization = headers.find("Authorization");
+        authorizationHeaders.push_back(
+            authorization == headers.end() ? "" : authorization->second);
+        return Result{
+            true, 200,
+            R"({"accessToken":"replacement-access","refreshToken":"replacement-refresh"})",
+            ""};
+      });
+
+  const std::string oldAccess = authTestJwt(true);
+  auto storage = std::make_shared<RecordingAuthTokenStorage>();
+  storage->stored = AuthTokenPair{oldAccess, "old-refresh"};
+  storage->failWrites = true;
+  std::string accessObservedDuringSave;
+  storage->onSave = [&]() { accessObservedDuringSave = http->getToken(); };
+  auto core = std::make_shared<GeneratedDbApi>(*http);
+  AuthClient auth(http, core, storage);
+  ASSERT_EQ(http->getToken(), oldAccess);
+
+  const Result failed =
+      auth.verifyLinkPhone("+15550001003", "123456");
+
+  EXPECT_FALSE(failed.ok);
+  EXPECT_TRUE(failed.body.empty());
+  EXPECT_NE(failed.error.find("token-persistence-failed"),
+            std::string::npos);
+  EXPECT_NE(failed.error.find("same phone and code"), std::string::npos);
+  EXPECT_EQ(accessObservedDuringSave, oldAccess);
+  EXPECT_EQ(http->getToken(), oldAccess);
+  EXPECT_EQ(http->getRefreshToken(), "old-refresh");
+  ASSERT_TRUE(storage->stored.has_value());
+  EXPECT_EQ(storage->stored->accessToken, oldAccess);
+  EXPECT_EQ(storage->stored->refreshToken, "old-refresh");
+
+  storage->failWrites = false;
+  const Result recovered =
+      auth.verifyLinkPhone("+15550001003", "123456");
+
+  EXPECT_TRUE(recovered.ok) << recovered.error;
+  ASSERT_EQ(requestBodies.size(), 2u);
+  EXPECT_EQ(requestBodies[0], requestBodies[1]);
+  ASSERT_EQ(authorizationHeaders.size(), 2u);
+  EXPECT_EQ(authorizationHeaders[0], "Bearer " + oldAccess);
+  EXPECT_EQ(authorizationHeaders[1], "Bearer " + oldAccess);
+  EXPECT_EQ(http->getToken(), "replacement-access");
+  EXPECT_EQ(http->getRefreshToken(), "replacement-refresh");
+  ASSERT_TRUE(storage->stored.has_value());
+  EXPECT_EQ(storage->stored->accessToken, "replacement-access");
+  EXPECT_EQ(storage->stored->refreshToken, "replacement-refresh");
+  EXPECT_EQ(storage->saveCalls, 2);
+}
+
+TEST(AuthStateCallbackUnit, ReentrantSubscriptionNeverDeadlocks) {
+  auto http = std::make_shared<HttpClient>(
+      "https://api.example.test", "",
+      [](const std::string &, const std::string &, const std::string &,
+         const std::map<std::string, std::string> &) {
+        return Result{
+            true, 200,
+            R"({"accessToken":"access","refreshToken":"refresh"})", ""};
+      });
+  auto core = std::make_shared<GeneratedDbApi>(*http);
+  AuthClient auth(http, core);
+  int originalCalls = 0;
+  int reentrantCalls = 0;
+
+  auth.onAuthStateChange([&](const std::string &) {
+    ++originalCalls;
+    if (originalCalls == 1) {
+      auth.onAuthStateChange(
+          [&](const std::string &) { ++reentrantCalls; });
+    }
+  });
+
+  ASSERT_TRUE(auth.signIn("user@example.test", "Synthetic-Pass-123!",
+                          "manual-captcha")
+                  .ok);
+  EXPECT_EQ(originalCalls, 1);
+  EXPECT_EQ(reentrantCalls, 0);
+
+  ASSERT_TRUE(auth.signIn("user@example.test", "Synthetic-Pass-123!",
+                          "manual-captcha")
+                  .ok);
+  EXPECT_EQ(originalCalls, 2);
+  EXPECT_EQ(reentrantCalls, 1);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

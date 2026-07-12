@@ -14,7 +14,7 @@ This feature is in **alpha**. APIs and behavior may change without notice. Not r
 
 Push notification setup varies significantly per platform. Select your platform below for the complete integration guide.
 
-All platforms follow the same pattern: **inject a token provider** → **register** → **handle messages**. The SDK automatically unregisters when the user signs out.
+All platforms follow the same pattern: **inject a token provider** → **register** → **handle messages**. On Web and React Native, sign-out clears local auth first, then sends the project-scoped cached `deviceId` together with the verified refresh session. The server removes only that user's matching device before revoking the session. A failed combined cleanup is retained or surfaced for retry, and the SDK removes its registration cache only after server confirmation.
 
 <Tabs groupId="push-platform">
 <TabItem value="web" label="Web (JS/TS)" default>
@@ -216,7 +216,7 @@ Chrome 50+, Firefox 44+, Edge 17+, Safari 16+, Opera 42+
 dependencies:
   firebase_core: ^3.0.0
   firebase_messaging: ^15.0.0
-  edgebase_flutter: ^0.3.8
+  edgebase_flutter: ^0.4.0
 ```
 
 3. Initialize Firebase:
@@ -555,7 +555,7 @@ https://github.com/firebase/firebase-ios-sdk
 https://github.com/edge-base/edgebase-swift
 ```
 
-Use the current `0.3.8` release of the Swift package and import the `EdgeBase` module in your app target.
+Use the current `0.4.0` release of the Swift package and import the `EdgeBase` module in your app target.
 
 ## Setup
 
@@ -870,7 +870,7 @@ repositories {
 
 dependencies {
     implementation 'com.google.firebase:firebase-messaging:24.0.0'
-    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.3.8'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.4.0'
 }
 ```
 

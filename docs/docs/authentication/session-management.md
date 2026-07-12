@@ -89,8 +89,15 @@ const client = createClient(edgeBaseUrl, {
 The server must also enable `auth.session.cookie`. The Web SDK then negotiates
 the transport with `X-EdgeBase-Auth-Transport: cookie`, sends auth requests with
 credentials, and stores only the access token in memory. The refresh token is
-set by EdgeBase as a host-only `HttpOnly` cookie scoped to `/api/auth`; it is
-`Secure` on HTTPS and uses `SameSite=Strict` by default.
+set by EdgeBase as a host-only `HttpOnly` cookie. HTTPS requests use the
+`__Host-{configuredName}` form with `Secure` and `Path=/`; plain-HTTP local
+development uses the configured base name with `Path=/api/auth`.
+`SameSite=Strict` is the default.
+
+An HTTP loopback request is allowed only when the CLI marks the process as
+`EDGEBASE_RUNTIME_MODE=local-development`, even if the loaded config sets
+`release: true`. Deployed Cloudflare and self-hosted release runtimes remain
+HTTPS-only. The exception does not make `SameSite=None` valid over HTTP.
 
 Cookie auth requests require a verifiable `Origin`. Cross-origin browser apps
 must use an exact `cors.origin` entry with `credentials: true`; wildcard origins
@@ -104,10 +111,28 @@ HTTP when `SameSite=None` is configured instead of returning a successful
 response with a cookie the browser would drop. Third-party-cookie blocking can
 still prevent that topology from working.
 
+Origin failures use stable error slugs so browser apps can show an actionable
+configuration message without exposing raw server details:
+
+- `cookie-auth-origin-required`: the negotiated cookie request omitted Origin.
+- `cookie-auth-origin-unverifiable`: Origin was opaque, malformed, or used an
+  unsupported scheme.
+- `cookie-auth-origin-untrusted`: Origin was not the request origin or an exact
+  credentialed CORS origin.
+
+These remain HTTP 403 responses. `incompatible-cookie-config` remains the
+separate error for a trusted cross-site request whose SameSite mode cannot
+carry the cookie.
+
 `Secure` is derived from the request URL. A self-hosted TLS-terminating reverse
 proxy may forward `X-Forwarded-Proto: https` only when
 `trustSelfHostedProxy: true` is configured; EdgeBase intentionally ignores that
 client-spoofable header otherwise.
+
+The `__Host-` migration is fail closed. Secure deployments do not read or
+migrate predecessor `__Secure-` cookies or the old unprefixed `/api/auth`
+cookie; they expire those variants and require the user to sign in again. This
+prevents an older, less strictly scoped cookie from being silently promoted.
 
 Existing body-token SDKs remain the default. A cookie-mode Web SDK can exchange
 one existing localStorage refresh token when no refresh cookie exists, then
@@ -134,19 +159,26 @@ When another tab changes the shared cookie to a different account, the Web SDK
 first emits signed-out state and closes room/database-live sockets belonging to
 the old principal. It then performs its own cookie-authenticated refresh and
 emits the newly verified account; bearer tokens are never transferred between
-tabs. A live refresh lock is heartbeated so sign-out waits for any already
-applied refresh response before performing the final cookie clear/revocation.
-Cookie-auth POSTs, including the raw refresh path used by Room and Database
-Live recovery, are aborted after a bounded wait so a stalled connection cannot
-hold that lock forever. If a nonstandard refresh callback outlives the absolute
-sign-out wait, the SDK keeps the non-secret tombstone and revokes again after
-the callback settles, preventing a late cookie response from reopening a
-signed-out session.
+tabs. Every credential- or cookie-creating auth request is serialized across
+tabs with a heartbeated auth-mutation lock. Sign-out first advances a persisted
+auth epoch and hides the local session, waits for earlier mutations, then takes
+the final mutation slot to clear/revoke the cookie. Late responses fail their
+epoch check and cannot become visible. Cookie-auth POSTs, including the raw
+refresh path used by Room and Database Live recovery, use bounded waits so a
+stalled connection cannot hold that lock forever. If a request outlives the
+absolute sign-out wait, the SDK keeps the non-secret tombstone and performs a
+final revocation after it settles, preventing its late `Set-Cookie` response
+from reopening a signed-out session on reload.
 
-Cookie OAuth callbacks are scrubbed from browser history before refresh. A
-short-lived, non-secret recovery marker lets the callback page retry after a
-network or server failure without leaving URL tokens or probing cookies from an
-unrelated page. The marker is removed on successful or definitive refresh.
+OAuth app callbacks contain only a five-minute completion ticket, transport, and
+SDK binding fields—never bearer credentials. The Web SDK scrubs those fields,
+consumes the matching CSPRNG flow nonce, then atomically posts the ticket to
+`/api/auth/oauth/exchange`; cookie transport sets the refresh cookie only in
+that exchange response. Pending nonces live in a separate bounded registry:
+matching success or provider-error callbacks consume only their own flow, while
+missing, malformed, and nonce-mismatched callbacks leave other flows intact.
+Sign-out clears the registry and advances a persisted auth epoch, preventing a
+slow ticket exchange in this tab or another tab from restoring the session.
 
 ### Refresh Token Rotation
 
@@ -157,7 +189,9 @@ EdgeBase implements **automatic refresh token rotation** with a 30-second grace 
 3. The database changes those fields only if the supplied token is still the
    current token; concurrent refreshes therefore converge on one winning token
    instead of creating divergent sessions
-4. During the 30-second grace period, both tokens are valid
+4. During the 30-second grace period, the previous token resolves to the one
+   already-issued current replacement; it does not rotate again or create a
+   divergent token branch
 5. After 30 seconds, using the old token triggers **the session is revoked** (token theft detection)
 
 Sign-out revokes the stable session ID that was verified before any blocking
@@ -288,7 +322,13 @@ Expired sessions are cleaned up automatically:
 
 ## Multi-Tab Support
 
-In browser environments, EdgeBase uses **BroadcastChannel** leader election to prevent multiple tabs from simultaneously refreshing tokens. Only one tab performs the refresh, and the new tokens are shared with all tabs via BroadcastChannel.
+In browser environments, EdgeBase uses a localStorage mutex plus
+**BroadcastChannel** notifications to prevent simultaneous refreshes. Body
+transport shares the winning token result with peer tabs. Cookie transport
+never broadcasts bearer tokens: a peer receives only a refresh signal and
+performs its own cookie-authenticated refresh for an access token. All auth
+storage keys, locks, channels, and push caches are isolated by `authNamespace`
+or the normalized EdgeBase base URL.
 
 Fallback: `window.storage` event for browsers without BroadcastChannel support.
 

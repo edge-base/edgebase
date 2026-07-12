@@ -8,7 +8,38 @@ interface ResolveFrontendAssetPathOptions {
 }
 
 const HTML_ACCEPT_MARKERS = ['text/html', 'application/xhtml+xml'];
-const HASHED_ASSET_PATTERN = /(?:^|[-._])[A-Za-z0-9]{8,}\.[A-Za-z0-9]+$/;
+const HASH_TOKEN_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+const HEX_HASH_TOKEN_PATTERN = /^[A-Fa-f0-9]+$/;
+
+function isLikelyContentHashToken(token: string): boolean {
+  if (!HASH_TOKEN_PATTERN.test(token)) return false;
+
+  const hasLetter = /[A-Za-z]/.test(token);
+  const hasDigit = /[0-9]/.test(token);
+  if (HEX_HASH_TOKEN_PATTERN.test(token)) {
+    return hasLetter && hasDigit;
+  }
+
+  return /[A-Z]/.test(token) && /[a-z]/.test(token) && hasDigit;
+}
+
+function hasLikelyContentHash(assetName: string): boolean {
+  const extensionIndex = assetName.lastIndexOf('.');
+  if (extensionIndex <= 0 || extensionIndex === assetName.length - 1) return false;
+  const stem = assetName.slice(0, extensionIndex);
+
+  // Content hashes are conventionally suffixes separated from the logical
+  // asset name. Walk separators from right to left so URL-safe hashes that
+  // themselves contain '-' or '_' remain recognizable. False negatives only
+  // shorten caching; false positives can pin mutable metadata for a year.
+  for (let index = stem.length - 1; index >= 0; index -= 1) {
+    if (stem[index] !== '-' && stem[index] !== '_' && stem[index] !== '.') continue;
+    const token = stem.slice(index + 1);
+    if (token.length < 8) continue;
+    if (isLikelyContentHashToken(token)) return true;
+  }
+  return false;
+}
 
 function isExplicitAssetPath(pathname: string): boolean {
   const lastSegment = pathname.split('/').pop() ?? '';
@@ -94,11 +125,16 @@ export function createFrontendAssetRequest(
 function getFrontendCacheControl(pathname: string): string | null {
   const assetName = pathname.split('/').pop() ?? '';
 
-  if (assetName === 'index.html' || assetName === 'manifest.webmanifest' || assetName === 'sw.js') {
+  if (
+    assetName === 'index.html'
+    || assetName === 'manifest.webmanifest'
+    || assetName === 'sw.js'
+    || assetName === 'sw-precache.json'
+  ) {
     return 'no-cache';
   }
 
-  if (HASHED_ASSET_PATTERN.test(assetName)) {
+  if (hasLikelyContentHash(assetName)) {
     return 'public, max-age=31536000, immutable';
   }
 

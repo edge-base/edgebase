@@ -337,6 +337,89 @@ afterEach(() => {
 });
 
 describe('HttpClient — bodyless JSON requests', () => {
+  it('puts function CAPTCHA tokens in the dedicated header and never in the URL/body', async () => {
+    const cm = new ContextManager();
+    const client = new HttpClient({ baseUrl: 'https://api.example.test', contextManager: cm });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('{"ok":true}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await client.requestFunction(
+      'POST',
+      '/api/functions/protected',
+      { value: 1 },
+      undefined,
+      'synthetic-captcha-token',
+    );
+
+    const [url, options] = fetchSpy.mock.calls[0] ?? [];
+    const headers = (options?.headers ?? {}) as Record<string, string>;
+    expect(url).toBe('https://api.example.test/api/functions/protected');
+    expect(headers['X-EdgeBase-Captcha-Token']).toBe('synthetic-captcha-token');
+    expect(options?.body).toBe('{"value":1}');
+    expect(String(url)).not.toContain('synthetic-captcha-token');
+  });
+
+  it('rejects invalid function CAPTCHA tokens before network I/O', async () => {
+    const cm = new ContextManager();
+    const client = new HttpClient({ baseUrl: 'https://api.example.test', contextManager: cm });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    await expect(client.requestFunction(
+      'GET',
+      '/api/functions/protected',
+      undefined,
+      undefined,
+      'x'.repeat(2049),
+    )).rejects.toThrow(/at most 2048/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('never replays a single-use function CAPTCHA token after transport failure', async () => {
+    const cm = new ContextManager();
+    const client = new HttpClient({ baseUrl: 'https://api.example.test', contextManager: cm });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      new TypeError('synthetic connection reset'),
+    );
+
+    await expect(client.requestFunction(
+      'POST',
+      '/api/functions/protected',
+      { operationId: 'synthetic-op' },
+      undefined,
+      'single-use-captcha-token',
+    )).rejects.toThrow(/could not reach/);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([401, 429])(
+    'never replays a single-use function CAPTCHA token after HTTP %s',
+    async (status) => {
+      const cm = new ContextManager();
+      const client = new HttpClient({ baseUrl: 'https://api.example.test', contextManager: cm });
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('{"message":"retry explicitly"}', {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      await expect(client.requestFunction(
+        'POST',
+        '/api/functions/protected',
+        { operationId: 'synthetic-op' },
+        undefined,
+        'single-use-captcha-token',
+      )).rejects.toBeDefined();
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('postPublic() without body omits Content-Type and request body', async () => {
     const cm = new ContextManager();
     const client = new HttpClient({ baseUrl: 'http://localhost:8688', contextManager: cm });
@@ -391,6 +474,62 @@ describe('HttpClient — bodyless JSON requests', () => {
     const [, options] = fetchSpy.mock.calls[0] ?? [];
     const headers = (options?.headers ?? {}) as Record<string, string>;
     expect(headers['X-EdgeBase-Context']).toBeUndefined();
+  });
+});
+
+describe('Generated OAuth request contracts', () => {
+  it('preserves the exact legacy two-argument transport call when optional input is omitted', async () => {
+    const transport = {
+      request: vi.fn().mockResolvedValue({}),
+      head: vi.fn().mockResolvedValue(true),
+    };
+    const core = new DefaultDbApi(transport);
+
+    await core.oauthRedirect('google');
+    await core.oauthLinkStart('google');
+
+    expect(transport.request).toHaveBeenNthCalledWith(
+      1,
+      'GET',
+      '/api/auth/oauth/google',
+    );
+    expect(transport.request).toHaveBeenNthCalledWith(
+      2,
+      'POST',
+      '/api/auth/oauth/link/google',
+    );
+  });
+
+  it('forwards documented redirect query and link-start body inputs', async () => {
+    const transport = {
+      request: vi.fn().mockResolvedValue({}),
+      head: vi.fn().mockResolvedValue(true),
+    };
+    const core = new DefaultDbApi(transport);
+    const query = {
+      redirect_url: 'https://app.example.com/auth/callback',
+      oauth_recovery_nonce: 'ab'.repeat(32),
+    };
+    const body = {
+      redirectUrl: 'https://app.example.com/auth/callback',
+      oauthRecoveryNonce: 'cd'.repeat(32),
+    };
+
+    await core.oauthRedirect('google', query);
+    await core.oauthLinkStart('google', body);
+
+    expect(transport.request).toHaveBeenNthCalledWith(
+      1,
+      'GET',
+      '/api/auth/oauth/google',
+      { query },
+    );
+    expect(transport.request).toHaveBeenNthCalledWith(
+      2,
+      'POST',
+      '/api/auth/oauth/link/google',
+      { body },
+    );
   });
 });
 

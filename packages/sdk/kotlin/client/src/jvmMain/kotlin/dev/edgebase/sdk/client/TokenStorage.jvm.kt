@@ -6,6 +6,11 @@
 package dev.edgebase.sdk.client
 
 import java.util.prefs.Preferences
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 actual fun createDefaultTokenStorage(): TokenStorage = PreferencesTokenStorage()
 
@@ -19,25 +24,39 @@ actual fun createDefaultTokenStorage(): TokenStorage = PreferencesTokenStorage()
  */
 class PreferencesTokenStorage(
     nodeName: String = "dev/edgebase/sdk"
-) : TokenStorage {
+) : DurableTokenStorage {
 
     private val prefs: Preferences = Preferences.userRoot().node(nodeName)
+    private val pairKey = "token_pair"
     private val accessKey = "access_token"
     private val refreshKey = "refresh_token"
 
     override suspend fun getTokens(): TokenPair? {
+        val encoded = prefs.get(pairKey, null)
+        if (encoded != null) {
+            val value = Json.parseToJsonElement(encoded).jsonObject
+            return TokenPair(
+                value.getValue("accessToken").jsonPrimitive.content,
+                value.getValue("refreshToken").jsonPrimitive.content,
+            )
+        }
         val access = prefs.get(accessKey, null) ?: return null
         val refresh = prefs.get(refreshKey, null) ?: return null
-        return TokenPair(accessToken = access, refreshToken = refresh)
+        return TokenPair(accessToken = access, refreshToken = refresh).also { saveTokens(it) }
     }
 
     override suspend fun saveTokens(pair: TokenPair) {
-        prefs.put(accessKey, pair.accessToken)
-        prefs.put(refreshKey, pair.refreshToken)
+        prefs.put(pairKey, buildJsonObject {
+            put("accessToken", pair.accessToken)
+            put("refreshToken", pair.refreshToken)
+        }.toString())
+        prefs.remove(accessKey)
+        prefs.remove(refreshKey)
         prefs.flush()
     }
 
     override suspend fun clearTokens() {
+        prefs.remove(pairKey)
         prefs.remove(accessKey)
         prefs.remove(refreshKey)
         prefs.flush()

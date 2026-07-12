@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -17,6 +17,78 @@ function normalizePath(value: string): string {
 }
 
 describe('runtime scaffold path utilities', () => {
+  it('rejects symbolic links in runtime and frontend copy trees', () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'edgebase-runtime-copy-'));
+    tempDirs.push(fixtureRoot);
+    const sourceRoot = join(fixtureRoot, 'source');
+    const targetRoot = join(fixtureRoot, 'target');
+    const outsideFile = join(fixtureRoot, 'outside-secret.txt');
+    mkdirSync(sourceRoot, { recursive: true });
+    writeFileSync(join(sourceRoot, 'index.html'), '<!doctype html>\n', 'utf-8');
+    writeFileSync(outsideFile, 'must-not-be-bundled\n', 'utf-8');
+    symlinkSync(outsideFile, join(sourceRoot, 'leak.txt'), 'file');
+
+    expect(() => __runtimeScaffoldTestUtils.copyRuntimeDir(sourceRoot, targetRoot)).toThrow(
+      /Refusing to bundle symbolic link from runtime or frontend assets/,
+    );
+    expect(existsSync(targetRoot)).toBe(false);
+  });
+
+  it('rejects runtime dependency links outside selected package roots', () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'edgebase-runtime-dependencies-'));
+    tempDirs.push(fixtureRoot);
+    const candidateRoot = join(fixtureRoot, 'node_modules');
+    const packageDir = join(candidateRoot, 'synthetic-package');
+    const targetRoot = join(fixtureRoot, 'bundle', 'node_modules');
+    const outsideFile = join(fixtureRoot, 'outside-secret.txt');
+    mkdirSync(packageDir, { recursive: true });
+    writeFileSync(
+      join(packageDir, 'package.json'),
+      JSON.stringify({ name: 'synthetic-package', version: '1.0.0' }),
+      'utf-8',
+    );
+    writeFileSync(outsideFile, 'must-not-be-bundled\n', 'utf-8');
+    symlinkSync(outsideFile, join(packageDir, 'leak.txt'), 'file');
+
+    expect(() => __runtimeScaffoldTestUtils.materializeNodeModulesTree(
+      candidateRoot,
+      targetRoot,
+      [candidateRoot],
+      [{
+        packageName: 'synthetic-package',
+        packageDir,
+        manifestPath: join(packageDir, 'package.json'),
+      }],
+    )).toThrow(/symbolic link outside approved package roots/);
+    expect(existsSync(join(targetRoot, 'synthetic-package', 'leak.txt'))).toBe(false);
+  });
+
+  it('rejects cyclic links while materializing runtime dependencies', () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'edgebase-runtime-dependency-cycle-'));
+    tempDirs.push(fixtureRoot);
+    const candidateRoot = join(fixtureRoot, 'node_modules');
+    const packageDir = join(candidateRoot, 'synthetic-package');
+    const targetRoot = join(fixtureRoot, 'bundle', 'node_modules');
+    mkdirSync(packageDir, { recursive: true });
+    writeFileSync(
+      join(packageDir, 'package.json'),
+      JSON.stringify({ name: 'synthetic-package', version: '1.0.0' }),
+      'utf-8',
+    );
+    symlinkSync('.', join(packageDir, 'self'), 'dir');
+
+    expect(() => __runtimeScaffoldTestUtils.materializeNodeModulesTree(
+      candidateRoot,
+      targetRoot,
+      [candidateRoot],
+      [{
+        packageName: 'synthetic-package',
+        packageDir,
+        manifestPath: join(packageDir, 'package.json'),
+      }],
+    )).toThrow(/cyclic runtime dependency symbolic link/);
+  });
+
   it('fails closed when a copied runtime has no dependency source', () => {
     const missingCandidates = ['/missing/consumer/node_modules', '/missing/cli/node_modules'];
 

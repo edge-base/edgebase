@@ -52,7 +52,7 @@ public final class EdgeBaseClient: @unchecked Sendable {
     /// Initialize with base URL, optional token storage, and an optional custom URLSession.
     public init(_ url: String, tokenStorage: TokenStorage? = nil, session: URLSession = .shared) {
         self.baseUrl = url.hasSuffix("/") ? String(url.dropLast()) : url
-        self._tokenManager = TokenManager(storage: tokenStorage ?? MemoryTokenStorage())
+        self._tokenManager = TokenManager(storage: tokenStorage ?? KeychainTokenStorage())
         self.httpClient = HttpClient(baseUrl: baseUrl, tokenManager: _tokenManager, session: session)
         self.core = GeneratedDbApi(http: httpClient)
         self.auth = AuthClient(client: httpClient, tokenManager: _tokenManager, core: core)
@@ -131,6 +131,12 @@ public final class EdgeBaseClient: @unchecked Sendable {
 
     public func getContext() -> [String: Any] {
         context
+    }
+
+    /// Restore a previously persisted Keychain/custom-storage session before
+    /// issuing authenticated calls.
+    public func tryRestoreSession() async throws -> Bool {
+        try await _tokenManager.tryRestoreSession()
     }
 
     /// Destroy — clean up resources.

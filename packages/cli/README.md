@@ -169,6 +169,7 @@ Read more: [CLI Reference](https://edgebase.fun/docs/cli/reference)
 | `CLOUDFLARE_API_TOKEN` | Non-interactive deploy/destroy flows |
 | `CLOUDFLARE_ACCOUNT_ID` | Account-scoped Cloudflare operations |
 | `NEON_API_KEY` | `edgebase neon setup` in non-interactive environments |
+| `EDGEBASE_RUNTIME_ENV_ALLOWLIST` | Comma-separated custom process keys forwarded by packed launchers; explicit env-file keys do not need listing |
 
 ## Related Packages
 

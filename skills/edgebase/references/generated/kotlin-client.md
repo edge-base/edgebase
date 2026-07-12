@@ -21,12 +21,21 @@ Kotlin admin module instead.
 
 ## Public Artifact
 
-- `com.github.edge-base.edgebase:edgebase-client:v0.3.8`
+- `com.github.edge-base.edgebase:edgebase-client:v0.4.0`
 - this is the current JitPack JVM publication for the shared `:client` module
 
 ## Canonical Examples
 
-### Create a client
+### Create an Android client
+
+```kotlin
+val client = AndroidEdgeBase.client(
+    activity = activity,
+    url = "https://your-project.edgebase.fun",
+)
+```
+
+### Create an iOS, browser JS, or desktop JVM client
 
 ```kotlin
 val client = ClientEdgeBase("https://your-project.edgebase.fun")
@@ -47,6 +56,10 @@ client.analytics.track("kotlin_example_opened")
 ## Hard Rules
 
 - use `ClientEdgeBase` for app-side code
+- use `AndroidEdgeBase.client(currentActivity, url, ...)` on Android; direct construction fails fast
+- inject a platform-secure `DurableTokenStorage` for anonymous Android email/phone upgrades; the memory default is rejected before network
+- call `client.tryRestoreSession()` before authenticated work after launch
+- token persistence and configured CAPTCHA failures remain visible to callers
 - do not expose Service Keys through this module
 - prefer `:admin` for trusted server-side operations
 
@@ -54,11 +67,13 @@ client.analytics.track("kotlin_example_opened")
 
 ```text
 ClientEdgeBase(url)     -> ClientEdgeBase
+AndroidEdgeBase.client(activity, url, tokenStorage?) -> ClientEdgeBase (Android)
 client.auth             -> AuthClient
 client.db(namespace)    -> DbRef
 client.storage          -> StorageClient
 client.push             -> PushClient
 client.functions        -> FunctionsClient
 client.analytics        -> AnalyticsClient
+client.tryRestoreSession() -> suspend Boolean
 client.destroy()        -> Unit
 ```

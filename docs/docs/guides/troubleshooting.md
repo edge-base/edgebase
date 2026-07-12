@@ -109,8 +109,11 @@ Also check that your server clock and client clock are not significantly out of 
      // ...
    });
    ```
-2. In your OAuth provider's console, add `{baseUrl}/api/auth/callback/{provider}` as an authorized redirect URI.
-3. If using `allowedRedirectUrls`, make sure your app's callback URL matches one of the patterns.
+2. In your OAuth provider's console, add
+   `{baseUrl}/api/auth/oauth/{provider}/callback` as an authorized redirect URI.
+3. Configure `auth.allowedRedirectUrls` for the separate app callback. In
+   release the target must be HTTPS and match an explicitly approved exact URL,
+   origin-wide entry, or path-prefix `*` entry.
 
 ---
 

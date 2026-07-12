@@ -1,6 +1,7 @@
-import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +30,49 @@ function createTempProject(name: string): string {
 
 function cleanupTemporaryDirectory(dir: string): void {
   rmSync(dir, CLEANUP_RETRY_OPTIONS);
+}
+
+async function findFreePort(): Promise<number> {
+  return new Promise((resolvePromise, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close();
+        reject(new Error('Could not resolve a free launcher test port.'));
+        return;
+      }
+      server.close((error) => {
+        if (error) reject(error);
+        else resolvePromise(address.port);
+      });
+    });
+  });
+}
+
+async function waitForFile(filePath: string, timeoutMs = 10_000): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (existsSync(filePath)) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+  }
+  throw new Error(`Timed out waiting for launcher file: ${filePath}`);
+}
+
+async function stopChild(child: ChildProcess, timeoutMs = 10_000): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolvePromise, reject) => {
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error('Timed out stopping packed launcher.'));
+    }, timeoutMs);
+    child.once('exit', () => {
+      clearTimeout(timeout);
+      resolvePromise();
+    });
+    child.kill('SIGTERM');
+  });
 }
 
 function runPack(projectDir: string, outputDirName: string, options?: { format?: 'dir' | 'portable' | 'archive'; appName?: string }) {
@@ -143,7 +187,7 @@ function resolveInstalledPackageVersion(packageName: string): string {
 }
 
 describe('pack command', () => {
-  it('creates a backend-only directory artifact from a self-contained app bundle', { timeout: 90_000 }, () => {
+  it('creates a backend-only directory artifact from a self-contained app bundle', { timeout: 90_000 }, async () => {
     const projectDir = createTempProject('backend');
     mkdirSync(join(projectDir, 'functions'), { recursive: true });
     mkdirSync(join(projectDir, 'config'), { recursive: true });
@@ -301,20 +345,124 @@ export default defineConfig({
     expect(existsSync(join(projectDir, 'packed', '.edgebase', 'runtime', 'server', 'app-assets', 'admin', 'index.html'))).toBe(true);
     expect(existsSync(join(projectDir, 'packed', '.edgebase', 'runtime', 'server', 'app-assets', 'index.html'))).toBe(false);
     expect(existsSync(join(projectDir, 'packed', 'wrangler.toml'))).toBe(true);
+    expect(existsSync(join(projectDir, 'packed', '.dev.vars'))).toBe(false);
     expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).toContain('binding = "DB_D1_SHARED"');
     expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).toContain('directory = ".edgebase/runtime/server/app-assets"');
     expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).not.toContain('directory = ".edgebase/runtime/server/admin-build"');
+    expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).toContain('EDGEBASE_RUNTIME_MODE = "self-hosted"');
+    expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).toContain(
+      'compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]',
+    );
     expect(existsSync(join(projectDir, 'packed', '.env.release'))).toBe(false);
+
+    const runtimeEnvPath = join(projectDir, 'pack-runtime.env');
+    writeFileSync(runtimeEnvPath, 'EXPLICIT_APP_SECRET=synthetic-explicit-value\n');
+    const liveDataRoot = join(projectDir, 'launcher-live-data');
+    const liveWorkDir = join(liveDataRoot, manifest.launcher.runtimeDir);
+    const liveDevVarsPath = join(liveWorkDir, '.dev.vars');
+    mkdirSync(liveWorkDir, { recursive: true });
+    writeFileSync(liveDevVarsPath, 'STALE_SECRET=must-be-replaced\n');
+    if (process.platform !== 'win32') {
+      chmodSync(liveDevVarsPath, 0o644);
+    }
+    const launcher = spawn(
+      process.execPath,
+      [
+        join(projectDir, 'packed', 'launcher.mjs'),
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(await findFreePort()),
+        '--data-dir',
+        liveDataRoot,
+        '--persist-to',
+        join(liveDataRoot, 'state'),
+        '--env-file',
+        runtimeEnvPath,
+      ],
+      {
+        cwd: join(projectDir, 'packed'),
+        env: {
+          ...process.env,
+          EDGEBASE_RUNTIME_ENV_ALLOWLIST: 'CUSTOM_APP_API_KEY,PACK_DOLLAR_SECRET',
+          CUSTOM_APP_API_KEY: 'synthetic-process-value',
+          PACK_DOLLAR_SECRET: 'prefix-$UNSET-suffix',
+          UNRELATED_SHELL_SECRET: 'must-not-reach-worker',
+          NPM_TOKEN: 'must-not-reach-worker',
+          GITHUB_TOKEN: 'must-not-reach-worker',
+          CLOUDFLARE_INCLUDE_PROCESS_ENV: 'true',
+        },
+        stdio: 'ignore',
+      },
+    );
+    try {
+      await waitForFile(liveDevVarsPath);
+      // Let the launcher install its signal forwarders before asking it to
+      // stop, so the normal child-exit cleanup path is exercised.
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+      const liveDevVars = readFileSync(liveDevVarsPath, 'utf-8');
+      const liveEnvKeys = new Set(
+        liveDevVars
+          .split(/\r?\n/)
+          .filter((line) => line && !line.startsWith('#') && line.includes('='))
+          .map((line) => line.slice(0, line.indexOf('='))),
+      );
+      expect(liveDevVars.includes('CUSTOM_APP_API_KEY=synthetic-process-value')).toBe(true);
+      expect(liveDevVars.includes('EDGEBASE_RUNTIME_MODE=self-hosted')).toBe(true);
+      expect(liveDevVars.includes('EXPLICIT_APP_SECRET=synthetic-explicit-value')).toBe(true);
+      expect(liveDevVars.includes('PACK_DOLLAR_SECRET="prefix-\\$UNSET-suffix"')).toBe(true);
+      for (const ambientKey of [
+        'CLOUDFLARE_INCLUDE_PROCESS_ENV',
+        'EDGEBASE_RUNTIME_ENV_ALLOWLIST',
+        'GITHUB_TOKEN',
+        'HOME',
+        'NPM_TOKEN',
+        'PATH',
+        'SHELL',
+        'SSH_AUTH_SOCK',
+        'UNRELATED_SHELL_SECRET',
+        'USER',
+      ]) {
+        expect(liveEnvKeys.has(ambientKey)).toBe(false);
+      }
+      expect(liveEnvKeys.has('STALE_SECRET')).toBe(false);
+      if (process.platform !== 'win32') {
+        expect(statSync(liveDevVarsPath).mode & 0o777).toBe(0o600);
+      }
+      expect(readdirSync(liveWorkDir).filter((entry) => entry.startsWith('.dev.vars.'))).toEqual([]);
+    } finally {
+      await stopChild(launcher);
+    }
+    expect(existsSync(liveDevVarsPath)).toBe(false);
+    expect(readdirSync(liveWorkDir).filter((entry) => entry.startsWith('.dev.vars.'))).toEqual([]);
+
+    const expectedWorkDir = join(appDataRoot, manifest.launcher.runtimeDir);
+    mkdirSync(expectedWorkDir, { recursive: true });
+    writeFileSync(join(expectedWorkDir, '.dev.vars'), 'STALE_SECRET=must-be-replaced\n');
+    if (process.platform !== 'win32') {
+      chmodSync(join(expectedWorkDir, '.dev.vars'), 0o644);
+    }
 
     const dryRun = spawnSync(
       process.execPath,
-      [join(projectDir, 'packed', 'launcher.mjs'), '--dry-run', '--json'],
+      [
+        join(projectDir, 'packed', 'launcher.mjs'),
+        '--dry-run',
+        '--json',
+        '--env-file',
+        runtimeEnvPath,
+      ],
       {
         cwd: join(projectDir, 'packed'),
         encoding: 'utf-8',
         env: {
           ...process.env,
           NO_COLOR: '1',
+          EDGEBASE_RUNTIME_ENV_ALLOWLIST: 'CUSTOM_APP_API_KEY',
+          CUSTOM_APP_API_KEY: 'synthetic-process-value',
+          NPM_TOKEN: 'must-not-reach-worker',
+          GITHUB_TOKEN: 'must-not-reach-worker',
+          CLOUDFLARE_INCLUDE_PROCESS_ENV: 'true',
         },
       },
     );
@@ -326,6 +474,7 @@ export default defineConfig({
       port: number;
       persistDir: string;
       devVarsPath: string;
+      devVarsMode: number | null;
       openUrl: string;
       wranglerBin: string;
       wranglerArgs: string[];
@@ -352,7 +501,45 @@ export default defineConfig({
       '--persist-to',
       join(appDataRoot, manifest.launcher.stateDir),
     ]));
-    expect(existsSync(join(appDataRoot, manifest.launcher.runtimeDir, '.dev.vars'))).toBe(true);
+    if (process.platform !== 'win32') {
+      expect(launchPlan.devVarsMode).toBe(0o600);
+    }
+    expect(existsSync(join(appDataRoot, manifest.launcher.runtimeDir, '.dev.vars'))).toBe(false);
+    expect(
+      readdirSync(join(appDataRoot, manifest.launcher.runtimeDir))
+        .filter((entry) => entry.startsWith('.dev.vars.')),
+    ).toEqual([]);
+
+    const failureDataRoot = join(projectDir, 'launcher-failure-data');
+    const failedLaunch = spawnSync(
+      process.execPath,
+      [
+        join(projectDir, 'packed', 'launcher.mjs'),
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '70000',
+        '--data-dir',
+        failureDataRoot,
+        '--persist-to',
+        join(failureDataRoot, 'state'),
+      ],
+      {
+        cwd: join(projectDir, 'packed'),
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          CUSTOM_APP_API_KEY: 'synthetic-process-value',
+        },
+        timeout: 30_000,
+      },
+    );
+    expect(failedLaunch.status).not.toBe(0);
+    expect(existsSync(join(failureDataRoot, manifest.launcher.runtimeDir, '.dev.vars'))).toBe(false);
+    expect(
+      readdirSync(join(failureDataRoot, manifest.launcher.runtimeDir))
+        .filter((entry) => entry.startsWith('.dev.vars.')),
+    ).toEqual([]);
   });
 
   it('includes configured frontend assets in the packed runtime scaffold', { timeout: 90_000 }, () => {

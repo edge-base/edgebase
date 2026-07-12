@@ -40,9 +40,15 @@ export default defineConfig({
 | `magicLinkUrl` | `string` | — | Default magic link URL. Use `{token}` as placeholder |
 | `emailChangeUrl` | `string` | — | Default email-change verification URL. Use `{token}` as placeholder |
 
-These templates are default fallbacks. For magic link, password reset, and email change, clients can override them per request with `redirectUrl`. EdgeBase appends `token`, `type`, and optional `state` to that request-specific URL.
+These templates are default fallbacks. For magic link, password reset, and
+email change, clients can override them per request with `redirectUrl`.
+EdgeBase appends `token`, `type`, and optional `state` to that request-specific
+URL's fragment so browsers do not send the action token to an application
+server route. A static template still controls its own `{token}` placement.
 
-If you want to restrict request-specific redirects, configure `auth.allowedRedirectUrls`.
+Configure `auth.allowedRedirectUrls` for every request-specific redirect used
+in release. Release mode requires the allowlist, accepts only HTTPS, and rejects
+destinations outside its explicitly approved URL/origin/path scope.
 
 :::info No email provider?
 If `email` is not configured, EdgeBase cannot deliver transactional emails. Email-driven flows can still generate action tokens for testing, but production apps should configure a provider.

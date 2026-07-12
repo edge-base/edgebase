@@ -155,17 +155,23 @@ class AuthClient(
     }
 
     /** Verify phone link code. Completes phone linking for the current account. */
+    @Suppress("UNCHECKED_CAST")
     suspend fun verifyLinkPhone(phone: String, code: String) {
+        tokenManager.requireDurableStorageForAccountUpgrade()
         val body = mapOf<String, Any?>("phone" to phone, "code" to code)
-        if (core != null) {
+        val result = if (core != null) {
             core.authVerifyLinkPhone(body)
         } else {
             client.post("/auth/verify-link-phone", body)
         }
+        // Anonymous upgrades atomically revoke the provisional session and
+        // return its authoritative replacement token pair.
+        if (result is Map<*, *>) handleAuthResponse(result as Map<String, Any?>)
     }
 
     @Suppress("UNCHECKED_CAST")
     suspend fun linkWithEmail(email: String, password: String): Map<String, Any?> {
+        tokenManager.requireDurableStorageForAccountUpgrade()
         val body = mapOf<String, Any?>("email" to email, "password" to password)
         val result = if (core != null) {
             core.authLinkEmail(body) as Map<String, Any?>
@@ -183,7 +189,7 @@ class AuthClient(
     suspend fun linkWithOAuth(provider: String, redirectUrl: String = ""): String {
         val body = mapOf<String, Any?>("redirectUrl" to redirectUrl)
         val result = if (core != null) {
-            core.oauthLinkStart(provider) as Map<String, Any?>
+            core.oauthLinkStart(provider, body) as Map<String, Any?>
         } else {
             client.post("/auth/oauth/link/${platformUrlEncode(provider)}", body) as Map<String, Any?>
         }
@@ -273,7 +279,7 @@ class AuthClient(
         } else {
             client.patch("/auth/profile", data) as Map<String, Any?>
         }
-        handleAuthResponse(result)
+        handleAuthResponse(result, allowExistingRefreshToken = true)
         return result
     }
 
@@ -499,12 +505,23 @@ class AuthClient(
 
     // MARK: - Internal
 
-    private suspend fun handleAuthResponse(result: Map<String, Any?>) {
+    private suspend fun handleAuthResponse(
+        result: Map<String, Any?>,
+        allowExistingRefreshToken: Boolean = false,
+    ) {
+        if (!result.containsKey("accessToken") && !result.containsKey("refreshToken")) return
         val accessToken = result["accessToken"] as? String
-        val refreshToken = result["refreshToken"] as? String
-        if (accessToken != null && refreshToken != null) {
-            tokenManager.setTokens(TokenPair(accessToken, refreshToken))
+        val refreshToken = if (result.containsKey("refreshToken")) {
+            result["refreshToken"] as? String
+        } else if (allowExistingRefreshToken) {
+            tokenManager.getRefreshToken()
+        } else {
+            null
         }
+        if (accessToken.isNullOrBlank() || refreshToken.isNullOrBlank()) {
+            throw InvalidTokenPairException("response")
+        }
+        tokenManager.setTokens(TokenPair(accessToken, refreshToken))
     }
 
     suspend fun signInWithEmailOtp(email: String) {

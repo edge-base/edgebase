@@ -6,4 +6,6 @@
 
 package dev.edgebase.sdk.client
 
-actual suspend fun acquireCaptchaToken(siteKey: String, action: String): String? = null
+internal actual val usesDirectCaptchaSiteKey: Boolean = false
+
+actual suspend fun acquireCaptchaToken(baseUrl: String, siteKey: String, action: String): String? = null

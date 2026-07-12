@@ -47,6 +47,11 @@ import {
   getProviderBindingName,
   withPostgresConnection,
 } from '../lib/postgres-executor.js';
+import {
+  applyStorageContentSecurityHeaders,
+  normalizeStorageContentType,
+} from '../lib/storage-content-security.js';
+import { isSignedUploadGrantMarker } from '../lib/signed-upload-grants.js';
 
 /** Resolve AuthDb from Hono context. Defaults to D1 (AUTH_DB binding). */
 function getAuthDb(c: { env: unknown }): AuthDb {
@@ -1220,6 +1225,7 @@ backupRoute.openapi(dumpStorage, async (c) => {
       });
 
       for (const obj of listed.objects) {
+        if (isSignedUploadGrantMarker(obj.key)) continue;
         objects.push({
           key: obj.key,
           size: obj.size,
@@ -1241,19 +1247,21 @@ backupRoute.openapi(dumpStorage, async (c) => {
   if (action === 'get') {
     const key = c.req.query('key');
     if (!key) throw new EdgeBaseError(400, 'key query parameter is required.');
+    if (isSignedUploadGrantMarker(key)) {
+      throw new EdgeBaseError(400, 'Internal signed-upload grant state is not exportable.');
+    }
 
     const object = await c.env.STORAGE.get(key);
     if (!object) {
       throw new EdgeBaseError(404, `Object not found: ${key}`);
     }
 
-    return new Response(object.body, {
-      headers: {
-        'Content-Type': object.httpMetadata?.contentType || 'application/octet-stream',
-        'Content-Length': String(object.size),
-        'X-R2-Key': key,
-      },
+    const headers = new Headers({
+      'Content-Length': String(object.size),
+      'X-R2-Key': key,
     });
+    applyStorageContentSecurityHeaders(headers, key, object.httpMetadata?.contentType);
+    return new Response(object.body, { headers });
   }
 
   throw new EdgeBaseError(400, 'action query parameter must be "list" or "get".');
@@ -1290,7 +1298,7 @@ backupRoute.openapi(restoreStorage, async (c) => {
   const action = c.req.query('action');
 
   if (action === 'wipe') {
-    // Delete all objects in R2 bucket
+    // Delete user objects while preserving unexpired single-use grant state.
     let deleted = 0;
     let cursor: string | undefined;
 
@@ -1301,9 +1309,13 @@ backupRoute.openapi(restoreStorage, async (c) => {
       });
 
       if (listed.objects.length > 0) {
-        const keys = listed.objects.map((obj) => obj.key);
-        await c.env.STORAGE.delete(keys);
-        deleted += keys.length;
+        const keys = listed.objects
+          .map((obj) => obj.key)
+          .filter((key) => !isSignedUploadGrantMarker(key));
+        if (keys.length > 0) {
+          await c.env.STORAGE.delete(keys);
+          deleted += keys.length;
+        }
       }
 
       cursor = listed.truncated ? listed.cursor : undefined;
@@ -1315,9 +1327,12 @@ backupRoute.openapi(restoreStorage, async (c) => {
   if (action === 'put') {
     const key = c.req.query('key');
     if (!key) throw new EdgeBaseError(400, 'key query parameter is required.');
+    if (isSignedUploadGrantMarker(key)) {
+      throw new EdgeBaseError(400, 'Internal signed-upload grant state cannot be restored directly.');
+    }
 
     const body = await c.req.arrayBuffer();
-    const contentType = c.req.header('Content-Type') || 'application/octet-stream';
+    const contentType = normalizeStorageContentType(c.req.header('Content-Type'));
 
     await c.env.STORAGE.put(key, body, {
       httpMetadata: { contentType },

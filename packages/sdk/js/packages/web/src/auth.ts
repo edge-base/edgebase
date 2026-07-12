@@ -7,8 +7,13 @@
 
 import { EdgeBaseError } from '@edge-base/core';
 import type { HttpClient, GeneratedDbApi } from '@edge-base/core';
-import type { TokenManager, TokenUser, AuthStateChangeHandler } from './token-manager.js';
-import { resolveCaptchaToken } from './turnstile.js';
+import type {
+  TokenManager,
+  TokenUser,
+  AuthStateChangeHandler,
+  PendingOAuthCompletion,
+} from './token-manager.js';
+import { invalidateSiteKeyCache, resolveCaptchaToken } from './turnstile.js';
 
 export interface SignUpOptions {
   email: string;
@@ -40,6 +45,15 @@ export interface AuthResult {
   sessionTransport?: 'cookie';
   /** Stable server session identifier (also carried as the access-token `sid`). */
   sessionId?: string;
+}
+
+function isFullAuthResult(value: unknown): value is AuthResult {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<AuthResult>;
+  return typeof candidate.accessToken === 'string'
+    && candidate.accessToken.length > 0
+    && typeof candidate.refreshToken === 'string'
+    && Boolean(candidate.user && typeof candidate.user === 'object');
 }
 
 /** Returned when MFA is required during sign-in */
@@ -160,6 +174,8 @@ function resolveOAuthRedirectUrl(options?: OAuthRedirectOptions): string {
   return options?.redirectUrl ?? options?.redirectTo ?? getDefaultBrowserOAuthRedirectUrl();
 }
 
+const OAUTH_RECOVERY_NONCE_PARAM = 'oauth_recovery_nonce' as const;
+
 function toTokenUser(user: unknown): TokenUser | null {
   if (!user || typeof user !== 'object') return null;
   const source = user as Record<string, unknown>;
@@ -193,9 +209,11 @@ export class AuthClient {
   private pendingSignOutRetryAttempt = 0;
   private lastPendingSignOutError: unknown = null;
   private pendingLegacyRevocationToken: string | null = null;
+  private readonly pendingOAuthCompletionRetries = new Map<string, Promise<AuthResult | null>>();
   private readonly onlineHandler = () => {
     this.cancelScheduledSignOutRetry();
     void this.retryPendingSignOut();
+    this.retryNewestPendingOAuthTicket();
   };
 
   constructor(
@@ -213,14 +231,56 @@ export class AuthClient {
         }
         return { accessToken: result.accessToken, refreshToken: '' };
       });
-      window.addEventListener('online', this.onlineHandler);
       if (this.tokenManager.hasPendingSignOut()) {
         void this.retryPendingSignOut();
       }
     }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', this.onlineHandler);
+      this.retryNewestPendingOAuthTicket();
+    }
   }
 
-  private syncAuthResult(result: Partial<AuthResult>): TokenUser | null {
+  private isCaptchaRequiredError(error: unknown): error is EdgeBaseError {
+    if (!(error instanceof EdgeBaseError) || error.code !== 403) return false;
+    const data = error.data as unknown;
+    return Boolean(
+      data
+      && typeof data === 'object'
+      && (data as Record<string, unknown>).captcha_required === true,
+    );
+  }
+
+  /**
+   * Recover once when an automatically acquired token came from a cached
+   * pre-rotation site key. Explicit caller tokens are never replayed, and a
+   * second CAPTCHA rejection is returned unchanged.
+   */
+  private async runCaptchaProtected<T>(
+    action: string,
+    explicitToken: string | undefined,
+    operation: (captchaToken: string | undefined) => Promise<T>,
+  ): Promise<T> {
+    const firstToken = await resolveCaptchaToken(this.baseUrl, action, explicitToken);
+    try {
+      return await operation(firstToken);
+    } catch (error) {
+      if (explicitToken || !this.isCaptchaRequiredError(error)) throw error;
+      invalidateSiteKeyCache(this.baseUrl);
+      const replacementToken = await resolveCaptchaToken(this.baseUrl, action);
+      if (!replacementToken) throw error;
+      return operation(replacementToken);
+    }
+  }
+
+  private syncAuthResult(
+    result: Partial<AuthResult>,
+    authoritativeIdentityTransition = false,
+    preserveOAuthCompletionTicket?: string,
+  ): TokenUser | null {
+    if (authoritativeIdentityTransition) {
+      this.tokenManager.commitAuthoritativeAuthTransition(preserveOAuthCompletionTicket);
+    }
     if (this.tokenManager.usesHttpOnlyCookie && result.accessToken) {
       // Fail safe if an older/misconfigured server includes the credential:
       // cookie-mode callers receive the required compatibility property, but
@@ -258,6 +318,97 @@ export class AuthClient {
     return this.tokenManager.getCurrentUser();
   }
 
+  private completePendingOAuthTicket(
+    supplied?: PendingOAuthCompletion,
+  ): Promise<AuthResult | null> {
+    const pending = supplied ?? this.tokenManager.getPendingOAuthCompletion();
+    if (!pending) return Promise.resolve(null);
+    const existing = this.pendingOAuthCompletionRetries.get(pending.ticket);
+    if (existing) return existing;
+    const retry = this.performPendingOAuthTicket(pending).finally(() => {
+      if (this.pendingOAuthCompletionRetries.get(pending.ticket) === retry) {
+        this.pendingOAuthCompletionRetries.delete(pending.ticket);
+      }
+    });
+    this.pendingOAuthCompletionRetries.set(pending.ticket, retry);
+    return retry;
+  }
+
+  private retryNewestPendingOAuthTicket(): void {
+    const pending = this.tokenManager.getPendingOAuthCompletion();
+    if (pending) void this.completePendingOAuthTicket(pending).catch(() => undefined);
+  }
+
+  private async performPendingOAuthTicket(
+    supplied?: PendingOAuthCompletion,
+  ): Promise<AuthResult | null> {
+    const pending = supplied ?? this.tokenManager.getPendingOAuthCompletion();
+    if (!pending) return null;
+    if (!this.tokenManager.storePendingOAuthCompletion(pending)) {
+      throw new EdgeBaseError(
+        0,
+        'OAuth completion ticket could not be persisted. Free browser storage and retry.',
+        undefined,
+        'oauth-completion-persist-failed',
+      );
+    }
+    const configuredTransport = this.tokenManager.usesHttpOnlyCookie ? 'cookie' : 'body';
+    if (pending.authTransport !== configuredTransport) {
+      this.tokenManager.clearPendingOAuthCompletion(pending.ticket);
+      return null;
+    }
+    try {
+      if (pending.kind === 'link') {
+        await this.client.getAuthHeaders();
+      }
+      // Starting completion is itself an authoritative identity intent. Record
+      // its epoch before the server call so a later callback can supersede a
+      // slow earlier one deterministically (last-start wins), while retaining
+      // every ticket until one response is durably committed.
+      const completionEpoch = this.tokenManager.commitAuthoritativeAuthTransition(pending.ticket);
+      const endpoint = pending.kind === 'link'
+        ? '/api/auth/oauth/complete/link'
+        : '/api/auth/oauth/exchange';
+      const validated = await this.tokenManager.runAuthMutation(
+        () => pending.kind === 'link'
+          ? this.client.post<AuthResult>(endpoint, {
+              ticket: pending.ticket,
+              oauthRecoveryNonce: pending.recoveryNonce ?? undefined,
+            })
+          : this.client.postPublic<AuthResult>(endpoint, {
+              ticket: pending.ticket,
+              oauthRecoveryNonce: pending.recoveryNonce ?? undefined,
+            }),
+        (value) => { this.syncAuthResult(value); },
+        completionEpoch,
+      );
+      // A successful authoritative completion is the explicit winner. Older
+      // sibling callbacks must never adopt a different account on a later
+      // reload merely because they were also pending locally.
+      this.tokenManager.clearPendingOAuthRecovery();
+      const user = this.tokenManager.getCurrentUser();
+      if (!user || !validated.accessToken) return null;
+      return {
+        ...validated,
+        user,
+        accessToken: validated.accessToken,
+        refreshToken: this.tokenManager.usesHttpOnlyCookie ? '' : validated.refreshToken,
+      };
+    } catch (error) {
+      if (
+        error instanceof EdgeBaseError
+        && error.code >= 400
+        && error.code < 500
+        && error.code !== 408
+        && error.code !== 429
+        && error.slug !== 'auth-state-changed'
+      ) {
+        this.tokenManager.clearPendingOAuthCompletion(pending.ticket);
+      }
+      throw error;
+    }
+  }
+
   /**
    * Register a new user with email and password.
    * Optionally include user metadata (displayName, avatarUrl).
@@ -275,14 +426,17 @@ export class AuthClient {
     if (options.locale) {
       body.locale = options.locale;
     }
-    //: auto-acquire captcha token if not manually provided
-    const captchaToken = await resolveCaptchaToken(this.baseUrl, 'signup', options.captchaToken);
-    if (captchaToken) {
-      body.captchaToken = captchaToken;
-    }
-
-    const result = await this.corePublic.authSignup(body) as AuthResult;
-    this.syncAuthResult(result);
+    const result = await this.tokenManager.runAuthMutation(
+      () => this.runCaptchaProtected(
+        'signup',
+        options.captchaToken,
+        (captchaToken) => this.corePublic.authSignup({
+          ...body,
+          ...(captchaToken ? { captchaToken } : {}),
+        }) as Promise<AuthResult>,
+      ),
+      (value) => { this.syncAuthResult(value, true); },
+    );
     return result;
   }
 
@@ -293,22 +447,29 @@ export class AuthClient {
       email: options.email,
       password: options.password,
     };
-    //: auto-acquire captcha token if not manually provided
-    const captchaToken = await resolveCaptchaToken(this.baseUrl, 'signin', options.captchaToken);
-    if (captchaToken) {
-      body.captchaToken = captchaToken;
-    }
-    const result = await this.corePublic.authSignin(body) as SignInResult;
+    const result = await this.tokenManager.runAuthMutation(
+      () => this.runCaptchaProtected(
+        'signin',
+        options.captchaToken,
+        (captchaToken) => this.corePublic.authSignin({
+          ...body,
+          ...(captchaToken ? { captchaToken } : {}),
+        }) as Promise<SignInResult>,
+      ),
+      (value) => {
+        if (!('mfaRequired' in value && value.mfaRequired)) {
+          this.syncAuthResult(value as AuthResult, true);
+        }
+      },
+    );
     if ('mfaRequired' in result && result.mfaRequired) {
       return result;
     }
-    const authResult = result as AuthResult;
-    this.syncAuthResult(authResult);
-    return authResult;
+    return result as AuthResult;
   }
 
   /** Sign out (revokes current session) */
-  async signOut(): Promise<void> {
+  async signOut(options?: { pushDeviceId?: string }): Promise<void> {
     if (this.tokenManager.usesHttpOnlyCookie) {
       const legacyRefreshToken = this.tokenManager.getRefreshToken();
       this.pendingLegacyRevocationToken = legacyRefreshToken
@@ -317,16 +478,33 @@ export class AuthClient {
       // visible session and persistent JavaScript credentials immediately. A
       // pre-migration token is held only in this AuthClient instance long enough
       // to attempt server revocation; it is never retained in localStorage.
-      this.tokenManager.markPendingSignOut();
+      this.tokenManager.markPendingSignOut(options?.pushDeviceId);
       this.tokenManager.clearSessionForPendingSignOut();
       const refreshSettled = await this.tokenManager.waitForRefreshIdle();
       // An in-flight pre-signout refresh may have updated local state while it
       // settled. Reassert the tombstone state before sending the final revoke.
       this.tokenManager.clearSessionForPendingSignOut(false);
       try {
-        await this.client.postPublic('/api/auth/signout', this.pendingLegacyRevocationToken
-          ? { refreshToken: this.pendingLegacyRevocationToken }
-          : {});
+        const revoke = async () => {
+          this.tokenManager.clearSessionForPendingSignOut(false);
+          await this.client.postPublic('/api/auth/signout', {
+            ...(this.pendingLegacyRevocationToken
+              ? { refreshToken: this.pendingLegacyRevocationToken }
+              : {}),
+            ...(this.tokenManager.getPendingSignOutPushDeviceId()
+              ? { pushDeviceId: this.tokenManager.getPendingSignOutPushDeviceId() }
+              : {}),
+          });
+        };
+        // A well-behaved refresh settles under the shared mutation lock before
+        // revocation. At the absolute deadline, revoke immediately and retain
+        // the tombstone: a custom/hung fetch may later apply Set-Cookie, so the
+        // scheduled retry revokes once more after that refresh finally settles.
+        if (refreshSettled) {
+          await this.tokenManager.runFinalSignOutMutation(revoke);
+        } else {
+          await revoke();
+        }
         this.completeOrRetryPendingSignOut(refreshSettled);
       } catch (error) {
         if (error instanceof EdgeBaseError && error.code === 401) {
@@ -346,19 +524,56 @@ export class AuthClient {
         // Retry with bounded backoff even if the browser never transitions
         // through an `online` event.
         this.schedulePendingSignOutRetry();
+        if (options?.pushDeviceId) {
+          throw new EdgeBaseError(
+            503,
+            'Sign-out is local, but server session and push cleanup are pending retry.',
+            undefined,
+            'signout-pending',
+          );
+        }
       }
       return;
     }
 
+    const refreshToken = this.tokenManager.getRefreshToken();
+    // Body-mode sign-out is immediately authoritative locally. Advance the
+    // persisted epoch and clear visible credentials before awaiting revocation
+    // so an in-flight OAuth refresh cannot resurrect the session.
+    let localClearError: unknown;
     try {
-      const refreshToken = this.tokenManager.getRefreshToken();
-      if (refreshToken) {
-        await this.core.authSignout({ refreshToken });
-      }
-    } catch {
+      this.tokenManager.clearTokens();
+    } catch (error) {
+      localClearError = error;
+    }
+    let serverError: unknown;
+    try {
+      await this.tokenManager.runFinalSignOutMutation(async () => {
+        if (refreshToken) await this.core.authSignout({
+          refreshToken,
+          ...(options?.pushDeviceId ? { pushDeviceId: options.pushDeviceId } : {}),
+        });
+      });
+    } catch (error) {
+      serverError = error;
       // Continue even if server call fails
     }
-    this.tokenManager.clearTokens();
+    if (localClearError) {
+      throw new EdgeBaseError(
+        0,
+        'Sign-out could not be persisted locally; retry before closing the browser.',
+        undefined,
+        'signout-persistence-failed',
+      );
+    }
+    if (serverError && options?.pushDeviceId) {
+      throw new EdgeBaseError(
+        503,
+        'Sign-out is local, but server session and push cleanup could not be confirmed.',
+        undefined,
+        'signout-pending',
+      );
+    }
   }
 
   /**
@@ -452,15 +667,16 @@ export class AuthClient {
   /**
    * Start OAuth sign-in flow.
    * Constructs the OAuth redirect URL and navigates to it in browser.
-   * Returns the OAuth URL for manual handling in non-browser environments.
+   * Requires persistent browser storage so the callback can be bound across
+   * navigation; use a native SDK for non-browser deep-link flows.
    *: captchaToken is passed as query parameter for GET requests.
    *
    * NOTE: Not delegated to Generated Core — this is URL construction + redirect, not a standard HTTP call.
    */
-  signInWithOAuth(
+  async signInWithOAuth(
     providerOrOptions: string | OAuthStartOptions,
     options?: OAuthRedirectOptions & { captchaToken?: string },
-  ): { url: string } {
+  ): Promise<{ url: string }> {
     if (this.tokenManager.hasPendingSignOut()) {
       throw new EdgeBaseError(
         409,
@@ -478,9 +694,16 @@ export class AuthClient {
     let url = `${this.client.getBaseUrl()}/api/auth/oauth/${encodeURIComponent(provider)}`;
     const redirectUrl = resolveOAuthRedirectUrl(resolvedOptions);
 
-    // Append captcha token as query parameter
-    if (resolvedOptions?.captchaToken) {
-      url += `?captcha_token=${encodeURIComponent(resolvedOptions.captchaToken)}`;
+    // OAuth initiation is CAPTCHA-protected under the same automatic browser
+    // contract as the other auth actions. Acquire before navigation so release
+    // fail-closed deployments do not land on a guaranteed 403 callback path.
+    const captchaToken = await resolveCaptchaToken(
+      this.baseUrl,
+      'oauth',
+      resolvedOptions?.captchaToken,
+    );
+    if (captchaToken) {
+      url += `?captcha_token=${encodeURIComponent(captchaToken)}`;
     }
     if (this.tokenManager.usesHttpOnlyCookie) {
       const sep = url.includes('?') ? '&' : '?';
@@ -491,9 +714,21 @@ export class AuthClient {
       url += `${sep}redirect_url=${encodeURIComponent(redirectUrl)}`;
     }
 
+    // The callback URL is attacker-navigable. Bind it to a one-shot, CSPRNG
+    // browser nonce that the server carries inside its existing OAuth state and
+    // returns only after completing that flow.
+    const recoveryNonce = this.tokenManager.markPendingOAuthRecovery();
+    const sep = url.includes('?') ? '&' : '?';
+    url += `${sep}${OAUTH_RECOVERY_NONCE_PARAM}=${encodeURIComponent(recoveryNonce)}`;
+
     // Auto-redirect in browser
     if (typeof window !== 'undefined' && resolvedOptions?.navigate !== false) {
-      window.location.href = url;
+      try {
+        window.location.href = url;
+      } catch (error) {
+        this.tokenManager.clearPendingOAuthRecovery(recoveryNonce);
+        throw error;
+      }
     }
 
     return { url };
@@ -513,23 +748,52 @@ export class AuthClient {
         callbackUrl,
         typeof window !== 'undefined' ? window.location.origin : 'http://localhost',
       );
+      const shouldScrubBrowserUrl = (() => {
+        if (typeof window === 'undefined') return false;
+        if (!url) return true;
+        try {
+          return new URL(window.location.href).href === parsed.href;
+        } catch {
+          return false;
+        }
+      })();
       const fragmentParams = new URLSearchParams(parsed.hash.startsWith('#') ? parsed.hash.slice(1) : parsed.hash);
       const authCallbackKeys = [
         'access_token',
         'refresh_token',
+        'oauth_exchange_ticket',
+        'oauth_link_ticket',
         'auth_transport',
+        OAUTH_RECOVERY_NONCE_PARAM,
         'error',
         'error_description',
       ] as const;
-      const getCallbackParam = (key: typeof authCallbackKeys[number]): string | null =>
-        fragmentParams.get(key) ?? parsed.searchParams.get(key);
-      const hasCallbackParam = (key: typeof authCallbackKeys[number]): boolean =>
-        fragmentParams.has(key) || parsed.searchParams.has(key);
-      const hasAnyCallbackParam = authCallbackKeys.some((key) => hasCallbackParam(key));
-      const scrubBrowserCallbackParams = (): void => {
-        if (url || typeof window === 'undefined' || typeof window.history?.replaceState !== 'function') {
-          return;
+      type AuthCallbackKey = typeof authCallbackKeys[number];
+      const callbackValues = new Map<AuthCallbackKey, string>();
+      const presentCallbackKeys = new Set<AuthCallbackKey>();
+      for (const key of authCallbackKeys) {
+        if (fragmentParams.has(key) || parsed.searchParams.has(key)) {
+          presentCallbackKeys.add(key);
+          const value = fragmentParams.get(key) ?? parsed.searchParams.get(key);
+          if (value !== null) callbackValues.set(key, value);
         }
+      }
+      const getCallbackParam = (key: AuthCallbackKey): string | null =>
+        callbackValues.get(key) ?? null;
+      const hasCallbackParam = (key: AuthCallbackKey): boolean =>
+        presentCallbackKeys.has(key);
+      const hasAnyCallbackParam = presentCallbackKeys.size > 0;
+
+      if (!hasAnyCallbackParam) {
+        const pending = this.tokenManager.getPendingOAuthCompletion();
+        if (pending) return await this.completePendingOAuthTicket(pending);
+      }
+
+      // Bearer tokens and OAuth authority leave the current browser URL before
+      // any storage lookup/removal or network request. Preserve application
+      // history state. If History API cleanup is unavailable, navigate to the
+      // clean relative URL and stop this callback attempt immediately.
+      if (shouldScrubBrowserUrl && hasAnyCallbackParam) {
         const fragmentHasAuthParams = authCallbackKeys.some((key) => fragmentParams.has(key));
         for (const key of authCallbackKeys) {
           parsed.searchParams.delete(key);
@@ -540,59 +804,142 @@ export class AuthClient {
           parsed.hash = remainingFragment ? `#${remainingFragment}` : '';
         }
         const nextUrl = `${parsed.pathname}${parsed.search}${parsed.hash}`;
-        window.history.replaceState({}, document.title, nextUrl);
-      };
+        try {
+          if (typeof window.history?.replaceState !== 'function') throw new Error('History API unavailable');
+          window.history.replaceState(window.history.state, document.title, nextUrl);
+        } catch {
+          try {
+            if (typeof window.location?.replace !== 'function') throw new Error('Location replace unavailable');
+            window.location.replace(nextUrl);
+            return null;
+          } catch {
+            throw new EdgeBaseError(
+              0,
+              'OAuth callback credentials could not be removed from the browser URL.',
+              undefined,
+              'oauth-callback-scrub-failed',
+            );
+          }
+        }
+      }
+
+      // Any local/cross-tab sign-out or explicit auth cancellation after this
+      // point must supersede both the flow record and slow validation response.
+      const callbackEpoch = this.tokenManager.captureAuthEpoch();
 
       if (hasCallbackParam('error')) {
-        this.tokenManager.clearPendingOAuthRecovery();
-        scrubBrowserCallbackParams();
+        // Provider errors are callback attempts too: consume the flow nonce so
+        // neither the error URL nor a later attacker URL can reuse it.
+        await this.tokenManager.consumePendingOAuthRecovery(
+          getCallbackParam(OAUTH_RECOVERY_NONCE_PARAM),
+          callbackEpoch,
+        );
         return null;
+      }
+
+      const exchangeTicket = getCallbackParam('oauth_exchange_ticket');
+      const linkTicket = getCallbackParam('oauth_link_ticket');
+      if (exchangeTicket || linkTicket) {
+        if (exchangeTicket && linkTicket) return null;
+        const recoveryNonce = getCallbackParam(OAUTH_RECOVERY_NONCE_PARAM);
+        const callbackBound = await this.tokenManager.consumePendingOAuthRecovery(
+          recoveryNonce,
+          callbackEpoch,
+        );
+        if (!callbackBound) return null;
+        const ticket = linkTicket ?? exchangeTicket!;
+        const callbackTransport = getCallbackParam('auth_transport') === 'cookie'
+          ? 'cookie'
+          : 'body';
+        const pending: PendingOAuthCompletion = {
+          ticket,
+          recoveryNonce,
+          kind: linkTicket ? 'link' : 'signin',
+          authTransport: callbackTransport,
+          createdAt: Date.now(),
+          authEpoch: callbackEpoch,
+        };
+        if (!this.tokenManager.storePendingOAuthCompletion(pending)) {
+          throw new EdgeBaseError(
+            0,
+            'OAuth completion ticket could not be persisted. Free browser storage and retry.',
+            undefined,
+            'oauth-completion-persist-failed',
+          );
+        }
+        return await this.completePendingOAuthTicket(pending);
       }
 
       if (this.tokenManager.usesHttpOnlyCookie) {
         const isCookieCallback = getCallbackParam('auth_transport') === 'cookie';
         const isTransientRecovery = !hasAnyCallbackParam
-          && this.tokenManager.hasPendingOAuthRecovery();
+          && this.tokenManager.hasCookieOAuthRecovery();
         // The server marks only a successful cookie OAuth redirect this way.
         // Never turn an unrelated URL (or provider error callback) into a
         // successful login merely because an older refresh cookie exists.
         if (!isCookieCallback && !isTransientRecovery) {
-          // A rolling upgrade can land an older body-token callback in a new
-          // cookie-mode bundle. Fail closed, but remove every recognized auth
-          // field from browser history before returning.
-          scrubBrowserCallbackParams();
+          if (hasAnyCallbackParam) {
+            await this.tokenManager.consumePendingOAuthRecovery(
+              getCallbackParam(OAUTH_RECOVERY_NONCE_PARAM),
+              callbackEpoch,
+            );
+          }
           return null;
         }
         if (isCookieCallback) {
-          // The callback marker is scrubbed before network I/O. Persist only a
-          // short-lived, non-secret recovery intent so a transient first refresh
-          // can be retried after reload without probing cookies on unrelated URLs.
-          this.tokenManager.markPendingOAuthRecovery();
+          const callbackBound = await this.tokenManager.consumePendingOAuthRecovery(
+            getCallbackParam(OAUTH_RECOVERY_NONCE_PARAM),
+            callbackEpoch,
+          );
+          if (!callbackBound) return null;
+          // The flow nonce is now consumed. Persist a separate non-authorizing
+          // marker only so this verified cookie callback can survive a transient
+          // refresh failure or reload after its URL fields are scrubbed.
+          this.tokenManager.markCookieOAuthRecovery();
         }
-        // The marker itself is not secret, but clear all callback auth fields
-        // before a slow or failed refresh so no legacy token can remain in the
-        // address bar during mixed-version deployments.
-        scrubBrowserCallbackParams();
         return await this.refreshSession();
       }
+
+      // Body-token callback authority is one-shot. Remove it synchronously,
+      // before parsing credentials or making the server refresh exchange, and
+      // compare the returned nonce without a data-dependent early exit.
+      const callbackBound = await this.tokenManager.consumePendingOAuthRecovery(
+        getCallbackParam(OAUTH_RECOVERY_NONCE_PARAM),
+        callbackEpoch,
+      );
+      if (!callbackBound) return null;
       const accessToken = getCallbackParam('access_token');
       const refreshToken = getCallbackParam('refresh_token');
-      if (!accessToken || !refreshToken) {
-        if (authCallbackKeys.some((key) => hasCallbackParam(key))) {
-          scrubBrowserCallbackParams();
-        }
-        return null;
-      }
+      if (!accessToken || !refreshToken) return null;
 
-      // Bearer credentials must leave the browser URL before parsing or state
-      // adoption, including invalid-token failure paths.
-      scrubBrowserCallbackParams();
-
-      const user = this.syncAuthResult({ accessToken, refreshToken });
+      // Never trust bearer credentials merely because they appeared in a
+      // browser URL. Exchange the returned refresh token with the auth server;
+      // only the server-validated and rotated result enters local auth state.
+      const validated = await this.tokenManager.runAuthMutation(
+        () => this.corePublic.authRefresh({ refreshToken }) as Promise<AuthResult>,
+        (value) => { this.syncAuthResult(value, true); },
+      );
+      if (!validated.accessToken || !validated.refreshToken) return null;
+      const user = this.tokenManager.getCurrentUser();
       if (!user) return null;
 
-      return { user, accessToken, refreshToken };
-    } catch {
+      return {
+        ...validated,
+        user,
+        accessToken: validated.accessToken,
+        refreshToken: validated.refreshToken,
+      };
+    } catch (error) {
+      if (
+        error instanceof EdgeBaseError
+        && (error.slug === 'oauth-callback-scrub-failed'
+          || error.slug === 'oauth-completion-persist-failed'
+          || error.slug === 'auth-session-persist-failed')
+      ) {
+        throw error;
+      }
+      // A parse/network failure cannot identify a flow and therefore must not
+      // delete unrelated entries from the concurrent pending-flow registry.
       return null;
     }
   }
@@ -600,13 +947,16 @@ export class AuthClient {
   /** Sign in anonymously */
   async signInAnonymously(options?: { captchaToken?: string }): Promise<AuthResult> {
     await this.ensurePendingSignOutResolved();
-    //: auto-acquire captcha token if not manually provided
-    const captchaToken = await resolveCaptchaToken(this.baseUrl, 'anonymous', options?.captchaToken);
-    const body: Record<string, unknown> | undefined = captchaToken
-      ? { captchaToken }
-      : undefined;
-    const result = await this.corePublic.authSigninAnonymous(body) as AuthResult;
-    this.syncAuthResult(result);
+    const result = await this.tokenManager.runAuthMutation(
+      () => this.runCaptchaProtected(
+        'anonymous',
+        options?.captchaToken,
+        (captchaToken) => this.corePublic.authSigninAnonymous(
+          captchaToken ? { captchaToken } : undefined,
+        ) as Promise<AuthResult>,
+      ),
+      (value) => { this.syncAuthResult(value, true); },
+    );
     return result;
   }
 
@@ -621,13 +971,16 @@ export class AuthClient {
     state?: string;
   }): Promise<void> {
     const body: Record<string, unknown> = { email: options.email };
-    const captchaToken = await resolveCaptchaToken(this.baseUrl, 'magic-link', options.captchaToken);
-    if (captchaToken) {
-      body.captchaToken = captchaToken;
-    }
     if (options.redirectUrl) body.redirectUrl = options.redirectUrl;
     if (options.state) body.state = options.state;
-    await this.client.postPublic('/api/auth/signin/magic-link', body);
+    await this.runCaptchaProtected(
+      'magic-link',
+      options.captchaToken,
+      (captchaToken) => this.client.postPublic('/api/auth/signin/magic-link', {
+        ...body,
+        ...(captchaToken ? { captchaToken } : {}),
+      }),
+    );
   }
 
   /**
@@ -636,8 +989,10 @@ export class AuthClient {
    */
   async verifyMagicLink(token: string): Promise<AuthResult> {
     await this.ensurePendingSignOutResolved();
-    const result = await this.corePublic.authVerifyMagicLink({ token }) as AuthResult;
-    this.syncAuthResult(result);
+    const result = await this.tokenManager.runAuthMutation(
+      () => this.corePublic.authVerifyMagicLink({ token }) as Promise<AuthResult>,
+      (value) => { this.syncAuthResult(value, true); },
+    );
     return result;
   }
 
@@ -649,11 +1004,14 @@ export class AuthClient {
    */
   async signInWithPhone(options: { phone: string; captchaToken?: string }): Promise<void> {
     const body: Record<string, unknown> = { phone: options.phone };
-    const captchaToken = await resolveCaptchaToken(this.baseUrl, 'phone', options.captchaToken);
-    if (captchaToken) {
-      body.captchaToken = captchaToken;
-    }
-    await this.corePublic.authSigninPhone(body);
+    await this.runCaptchaProtected(
+      'phone',
+      options.captchaToken,
+      (captchaToken) => this.corePublic.authSigninPhone({
+        ...body,
+        ...(captchaToken ? { captchaToken } : {}),
+      }),
+    );
   }
 
   /**
@@ -662,11 +1020,13 @@ export class AuthClient {
    */
   async verifyPhone(options: { phone: string; code: string }): Promise<AuthResult> {
     await this.ensurePendingSignOutResolved();
-    const result = await this.corePublic.authVerifyPhone({
-      phone: options.phone,
-      code: options.code,
-    }) as AuthResult;
-    this.syncAuthResult(result);
+    const result = await this.tokenManager.runAuthMutation(
+      () => this.corePublic.authVerifyPhone({
+        phone: options.phone,
+        code: options.code,
+      }) as Promise<AuthResult>,
+      (value) => { this.syncAuthResult(value, true); },
+    );
     return result;
   }
 
@@ -675,29 +1035,52 @@ export class AuthClient {
     await this.core.authLinkPhone({ phone: options.phone });
   }
 
-  /** Verify phone link code. Completes phone linking for the current account. */
-  async verifyLinkPhone(options: { phone: string; code: string }): Promise<void> {
-    await this.core.authVerifyLinkPhone({
-      phone: options.phone,
-      code: options.code,
-    });
+  /** Verify phone link code. Anonymous upgrades return and adopt a replacement session. */
+  async verifyLinkPhone(options: { phone: string; code: string }): Promise<AuthResult | void> {
+    const isReplacementSession = (value: unknown): value is Partial<AuthResult> & {
+      user: TokenUser;
+      accessToken: string;
+    } => {
+      if (!value || typeof value !== 'object') return false;
+      const candidate = value as Partial<AuthResult>;
+      return typeof candidate.accessToken === 'string'
+        && candidate.accessToken.length > 0
+        && Boolean(candidate.user && typeof candidate.user === 'object')
+        && (typeof candidate.refreshToken === 'string' || this.tokenManager.usesHttpOnlyCookie);
+    };
+    const result = await this.tokenManager.runAuthMutation(
+      () => this.core.authVerifyLinkPhone({
+        phone: options.phone,
+        code: options.code,
+      }) as Promise<AuthResult | { ok: true }>,
+      (value) => {
+        if (isReplacementSession(value)) this.syncAuthResult(value, true);
+      },
+    );
+    if (!isReplacementSession(result)) return undefined;
+    return this.tokenManager.usesHttpOnlyCookie
+      ? { ...result, refreshToken: '', sessionTransport: 'cookie' }
+      : result as AuthResult;
   }
 
   /** Link anonymous account to email/password */
   async linkWithEmail(options: { email: string; password: string }): Promise<AuthResult> {
-    const result = await this.core.authLinkEmail({
-      email: options.email,
-      password: options.password,
-    }) as AuthResult;
-    this.syncAuthResult(result);
+    await this.client.getAuthHeaders();
+    const result = await this.tokenManager.runAuthMutation(
+      () => this.core.authLinkEmail({
+        email: options.email,
+        password: options.password,
+      }) as Promise<AuthResult>,
+      (value) => { this.syncAuthResult(value, true); },
+    );
     return result;
   }
 
   /**
    * Link the current account to an OAuth provider.
    *
-   * NOTE: Not delegated — Generated Core's oauthLinkStart(provider) takes no body,
-   * but we need to pass redirect and state options.
+   * The wrapper keeps ownership of callback binding and browser navigation;
+   * the generated Core now carries the documented link-start JSON body.
    */
   async linkWithOAuth(
     providerOrOptions: string | (LinkOAuthOptions & { provider: string }),
@@ -710,18 +1093,30 @@ export class AuthClient {
       ? options
       : providerOrOptions;
     const redirectUrl = resolveOAuthRedirectUrl(resolvedOptions);
-    const body: Record<string, unknown> = { redirectUrl };
+    const recoveryNonce = this.tokenManager.markPendingOAuthRecovery();
+    const body: Record<string, unknown> = {
+      redirectUrl,
+      oauthRecoveryNonce: recoveryNonce,
+    };
     if (resolvedOptions?.state) {
       body.state = resolvedOptions.state;
     }
 
-    const result = await this.client.post<{ redirectUrl: string }>(
-      `/api/auth/oauth/link/${encodeURIComponent(provider)}`,
-      body,
-    );
+    let result: { redirectUrl: string };
+    try {
+      result = await this.core.oauthLinkStart(provider, body) as { redirectUrl: string };
+    } catch (error) {
+      this.tokenManager.clearPendingOAuthRecovery(recoveryNonce);
+      throw error;
+    }
 
     if (typeof window !== 'undefined' && resolvedOptions?.navigate !== false) {
-      window.location.href = result.redirectUrl;
+      try {
+        window.location.href = result.redirectUrl;
+      } catch (error) {
+        this.tokenManager.clearPendingOAuthRecovery(recoveryNonce);
+        throw error;
+      }
     }
 
     return result;
@@ -780,8 +1175,12 @@ export class AuthClient {
 
   /** Update current user's profile */
   async updateProfile(data: UpdateProfileOptions): Promise<TokenUser> {
-    const result = await this.core.authUpdateProfile(data) as Partial<AuthResult>;
-    const user = this.syncAuthResult(result);
+    await this.client.getAuthHeaders();
+    let user: TokenUser | null = null;
+    await this.tokenManager.runAuthMutation(
+      () => this.core.authUpdateProfile(data) as Promise<Partial<AuthResult>>,
+      (value) => { user = this.syncAuthResult(value); },
+    );
     if (!user) {
       throw new EdgeBaseError(500, 'Profile update succeeded but no user data was returned.');
     }
@@ -798,8 +1197,12 @@ export class AuthClient {
    * await client.auth.updateLocale('ko'); // switch to Korean
    */
   async updateLocale(locale: string): Promise<TokenUser> {
-    const result = await this.core.authUpdateProfile({ locale }) as Partial<AuthResult>;
-    const user = this.syncAuthResult(result);
+    await this.client.getAuthHeaders();
+    let user: TokenUser | null = null;
+    await this.tokenManager.runAuthMutation(
+      () => this.core.authUpdateProfile({ locale }) as Promise<Partial<AuthResult>>,
+      (value) => { user = this.syncAuthResult(value); },
+    );
     if (!user) {
       throw new EdgeBaseError(500, 'Locale update succeeded but no user data was returned.');
     }
@@ -827,14 +1230,16 @@ export class AuthClient {
     options?: { captchaToken?: string } & EmailActionRedirectOptions,
   ): Promise<void> {
     const body: Record<string, unknown> = { email };
-    //: auto-acquire captcha token if not manually provided
-    const captchaToken = await resolveCaptchaToken(this.baseUrl, 'password-reset', options?.captchaToken);
-    if (captchaToken) {
-      body.captchaToken = captchaToken;
-    }
     if (options?.redirectUrl) body.redirectUrl = options.redirectUrl;
     if (options?.state) body.state = options.state;
-    await this.client.postPublic('/api/auth/request-password-reset', body);
+    await this.runCaptchaProtected(
+      'password-reset',
+      options?.captchaToken,
+      (captchaToken) => this.client.postPublic('/api/auth/request-password-reset', {
+        ...body,
+        ...(captchaToken ? { captchaToken } : {}),
+      }),
+    );
   }
 
   /** Reset password with token */
@@ -844,11 +1249,14 @@ export class AuthClient {
 
   /** Change password for authenticated user */
   async changePassword(options: { currentPassword: string; newPassword: string }): Promise<AuthResult> {
-    const result = await this.core.authChangePassword({
-      currentPassword: options.currentPassword,
-      newPassword: options.newPassword,
-    }) as AuthResult;
-    this.syncAuthResult(result);
+    await this.client.getAuthHeaders();
+    const result = await this.tokenManager.runAuthMutation(
+      () => this.core.authChangePassword({
+        currentPassword: options.currentPassword,
+        newPassword: options.newPassword,
+      }) as Promise<AuthResult>,
+      (value) => { this.syncAuthResult(value, true); },
+    );
     return result;
   }
 
@@ -868,11 +1276,13 @@ export class AuthClient {
    */
   async verifyEmailOtp(options: { email: string; code: string }): Promise<AuthResult> {
     await this.ensurePendingSignOutResolved();
-    const result = await this.corePublic.authVerifyEmailOtp({
-      email: options.email,
-      code: options.code,
-    }) as AuthResult;
-    this.syncAuthResult(result);
+    const result = await this.tokenManager.runAuthMutation(
+      () => this.corePublic.authVerifyEmailOtp({
+        email: options.email,
+        code: options.code,
+      }) as Promise<AuthResult>,
+      (value) => { this.syncAuthResult(value, true); },
+    );
     return result;
   }
 
@@ -921,8 +1331,10 @@ export class AuthClient {
   /** Verify a WebAuthn assertion and establish a session. */
   async passkeysAuthenticate(response: unknown): Promise<AuthResult> {
     await this.ensurePendingSignOutResolved();
-    const result = await this.corePublic.authPasskeysAuthenticate({ response }) as AuthResult;
-    this.syncAuthResult(result);
+    const result = await this.tokenManager.runAuthMutation(
+      () => this.corePublic.authPasskeysAuthenticate({ response }) as Promise<AuthResult>,
+      (value) => { this.syncAuthResult(value, true); },
+    );
     return result;
   }
 
@@ -944,6 +1356,7 @@ export class AuthClient {
     const core = this.core;
     const corePublic = this.corePublic;
     const syncAuthResult = this.syncAuthResult.bind(this);
+    const tokenManager = this.tokenManager;
     const ensurePendingSignOutResolved = this.ensurePendingSignOutResolved.bind(this);
     return {
       /** Enroll TOTP — returns secret, QR code URI, and recovery codes. */
@@ -959,22 +1372,20 @@ export class AuthClient {
       /** Verify TOTP code during MFA challenge (after signIn returns mfaRequired). */
       async verifyTotp(mfaTicket: string, code: string): Promise<AuthResult> {
         await ensurePendingSignOutResolved();
-        const result = await corePublic.authMfaVerify({
-          mfaTicket,
-          code,
-        }) as AuthResult;
-        syncAuthResult(result);
+        const result = await tokenManager.runAuthMutation(
+          () => corePublic.authMfaVerify({ mfaTicket, code }) as Promise<AuthResult>,
+          (value) => { syncAuthResult(value, true); },
+        );
         return result;
       },
 
       /** Use a recovery code during MFA challenge. */
       async useRecoveryCode(mfaTicket: string, recoveryCode: string): Promise<AuthResult> {
         await ensurePendingSignOutResolved();
-        const result = await corePublic.authMfaRecovery({
-          mfaTicket,
-          recoveryCode,
-        }) as AuthResult;
-        syncAuthResult(result);
+        const result = await tokenManager.runAuthMutation(
+          () => corePublic.authMfaRecovery({ mfaTicket, recoveryCode }) as Promise<AuthResult>,
+          (value) => { syncAuthResult(value, true); },
+        );
         return result;
       },
 
@@ -1005,12 +1416,19 @@ export class AuthClient {
     const retry = (async () => {
       refreshSettled = await this.tokenManager.waitForRefreshIdle();
       this.tokenManager.clearSessionForPendingSignOut(false);
-      return this.client.postPublic(
-        '/api/auth/signout',
-        this.pendingLegacyRevocationToken
-          ? { refreshToken: this.pendingLegacyRevocationToken }
-          : {},
-      );
+      const revoke = async () => {
+        this.tokenManager.clearSessionForPendingSignOut(false);
+        const pushDeviceId = this.tokenManager.getPendingSignOutPushDeviceId();
+        await this.client.postPublic('/api/auth/signout', {
+          ...(this.pendingLegacyRevocationToken
+            ? { refreshToken: this.pendingLegacyRevocationToken }
+            : {}),
+          ...(pushDeviceId ? { pushDeviceId } : {}),
+        });
+      };
+      return refreshSettled
+        ? this.tokenManager.runFinalSignOutMutation(revoke)
+        : revoke();
     })()
       .then(() => {
         this.completeOrRetryPendingSignOut(refreshSettled);

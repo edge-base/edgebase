@@ -26,9 +26,14 @@
 #include <edgebase/edgebase.h>
 #include <edgebase/field_ops.h>
 #include <edgebase/room_client.h>
+#include <edgebase/turnstile_provider.h>
 #include <nlohmann/json.hpp>
+#include <cctype>
 #include <memory>
+#include <set>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 // ─── Helper: dummy HttpClient + GeneratedDbApi for structure-only tests ──────
 static std::shared_ptr<client::HttpClient> dummyHttp() {
@@ -734,4 +739,414 @@ TEST_CASE("StorageBucket getUrl returns non-empty string", "[storage][structure]
   std::string url = bucket.getUrl("images/photo.jpg");
   REQUIRE(!url.empty());
   REQUIRE(url.find("images/photo.jpg") != std::string::npos);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// S. Hosted Turnstile protocol
+// ═══════════════════════════════════════════════════════════════════════════════
+
+namespace {
+std::string percentEncodeForChallengeTest(const std::string &value) {
+  static constexpr char hex[] = "0123456789ABCDEF";
+  std::string encoded;
+  for (const unsigned char ch : value) {
+    if (std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+      encoded.push_back(static_cast<char>(ch));
+    } else {
+      encoded.push_back('%');
+      encoded.push_back(hex[(ch >> 4) & 0x0f]);
+      encoded.push_back(hex[ch & 0x0f]);
+    }
+  }
+  return encoded;
+}
+} // namespace
+
+TEST_CASE("Turnstile challenge URL requires exact HTTPS origin and allowlist",
+          "[turnstile][security]") {
+  const std::string channel = "0123456789abcdef0123456789abcdef";
+  REQUIRE(client::TurnstileProvider::buildChallengeUrl(
+              "https://api.example.test/", "signin", channel) ==
+          "https://api.example.test/api/captcha/challenge?action=signin&channel=" +
+              channel + "&bridge=uri");
+
+  REQUIRE_THROWS_AS(client::TurnstileProvider::buildChallengeUrl(
+                        "http://api.example.test", "signin", channel),
+                    std::invalid_argument);
+  REQUIRE_THROWS_AS(client::TurnstileProvider::buildChallengeUrl(
+                        "https://api.example.test/path", "signin", channel),
+                    std::invalid_argument);
+  REQUIRE_THROWS_AS(client::TurnstileProvider::buildChallengeUrl(
+                        "https://user@api.example.test", "signin", channel),
+                    std::invalid_argument);
+  REQUIRE_THROWS_AS(client::TurnstileProvider::buildChallengeUrl(
+                        "https://api.example.test?next=evil", "signin", channel),
+                    std::invalid_argument);
+  REQUIRE_THROWS_AS(client::TurnstileProvider::buildChallengeUrl(
+                        "https://api.example.test:70000", "signin", channel),
+                    std::invalid_argument);
+  REQUIRE_THROWS_AS(client::TurnstileProvider::buildChallengeUrl(
+                        "https://api.example.test", "custom", channel),
+                    std::invalid_argument);
+  REQUIRE_THROWS_AS(client::TurnstileProvider::buildChallengeUrl(
+                        "https://api.example.test", "signin", "predictable"),
+                    std::invalid_argument);
+}
+
+TEST_CASE("Turnstile channels use unique 128-bit secure URL-safe values",
+          "[turnstile][security]") {
+  std::set<std::string> channels;
+  for (int i = 0; i < 64; ++i) {
+    const std::string channel =
+        client::TurnstileProvider::generateSecureChannel();
+    REQUIRE(channel.size() == 32);
+    for (const char ch : channel) {
+      REQUIRE(((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')));
+    }
+    channels.insert(channel);
+  }
+  REQUIRE(channels.size() == 64);
+}
+
+TEST_CASE("Turnstile message parser is versioned channel-bound and bounded",
+          "[turnstile][security]") {
+  const std::string channel = "0123456789abcdef0123456789abcdef";
+  std::string type;
+  std::string value;
+  const std::string tokenMessage =
+      R"({"v":1,"channel":")" + channel +
+      R"(","type":"token","value":"verified"})";
+
+  REQUIRE(client::TurnstileProvider::tryParseChallengeMessage(
+      tokenMessage, channel, type, value));
+  REQUIRE(type == "token");
+  REQUIRE(value == "verified");
+  const std::string otherChannel(32, 'f');
+  REQUIRE_FALSE(client::TurnstileProvider::tryParseChallengeMessage(
+      tokenMessage, otherChannel, type, value));
+  REQUIRE_FALSE(client::TurnstileProvider::tryParseChallengeMessage(
+      R"({"v":2,"channel":")" + channel +
+          R"(","type":"token","value":"verified"})",
+      channel, type, value));
+  REQUIRE_FALSE(client::TurnstileProvider::tryParseChallengeMessage(
+      R"({"v":1,"channel":")" + channel +
+          R"(","type":"token","value":")" + std::string(2049, 'x') +
+          R"("})",
+      channel, type, value));
+  REQUIRE_FALSE(client::TurnstileProvider::tryParseChallengeMessage(
+      R"({"v":1,"channel":")" + channel +
+          R"(","type":"error","value":")" + std::string(257, 'x') +
+          R"("})",
+      channel, type, value));
+  REQUIRE_FALSE(client::TurnstileProvider::tryParseChallengeMessage(
+      R"({"v":1,"channel":")" + channel +
+          R"(","type":"ready","value":")" + std::string(33, 'x') +
+          R"("})",
+      channel, type, value));
+  REQUIRE_FALSE(client::TurnstileProvider::tryParseChallengeMessage(
+      R"({"v":1,"channel":")" + channel +
+          R"(","type":"token","value":"verified","extra":true})",
+      channel, type, value));
+  REQUIRE_FALSE(client::TurnstileProvider::tryParseChallengeMessage(
+      std::string(4097, 'x'), channel, type, value));
+  REQUIRE_FALSE(client::TurnstileProvider::tryParseChallengeMessage(
+      std::string(9, '[') + std::string(9, ']'), channel, type, value));
+}
+
+TEST_CASE("Turnstile URI parser accepts only strict encoded v1 messages",
+          "[turnstile][security]") {
+  const std::string channel = "0123456789abcdef0123456789abcdef";
+  const std::string message =
+      R"({"v":1,"channel":")" + channel +
+      R"(","type":"interactive","value":"show"})";
+  const std::string uri =
+      "edgebase://message/" + percentEncodeForChallengeTest(message);
+  std::string type;
+  std::string value;
+  REQUIRE(client::TurnstileProvider::tryParseChallengeUri(uri, channel, type,
+                                                           value));
+  REQUIRE(type == "interactive");
+  REQUIRE(value == "show");
+  REQUIRE_FALSE(client::TurnstileProvider::tryParseChallengeUri(
+      "edgebase://token/legacy", channel, type, value));
+  REQUIRE_FALSE(client::TurnstileProvider::tryParseChallengeUri(
+      "edgebase://message/%ZZ", channel, type, value));
+  REQUIRE_FALSE(client::TurnstileProvider::tryParseChallengeUri(
+      uri + "/smuggled", channel, type, value));
+}
+
+TEST_CASE("Turnstile WebView factory runs outside provider mutex",
+          "[turnstile][concurrency]") {
+  bool invoked = false;
+  client::TurnstileProvider::setWebViewFactory(
+      [&invoked](const std::string &challengeUrl,
+                 const std::string &channel) {
+        invoked = true;
+        REQUIRE(challengeUrl ==
+                client::TurnstileProvider::buildChallengeUrl(
+                    "https://api.example.test", "signup", channel));
+        client::TurnstileProvider::setWebViewFactory(
+            [](const std::string &, const std::string &) { return ""; });
+        return "synthetic-token";
+      });
+  REQUIRE(client::TurnstileProvider::acquireCaptchaToken(
+              "https://api.example.test", "signup") == "synthetic-token");
+  REQUIRE(invoked);
+  client::TurnstileProvider::setWebViewFactory({});
+}
+
+TEST_CASE("Turnstile acquisition surfaces native adapter failures",
+          "[turnstile][diagnostics]") {
+  client::TurnstileProvider::setWebViewFactory({});
+  REQUIRE_THROWS_WITH(
+      client::TurnstileProvider::acquireCaptchaToken(
+          "https://api.example.test", "signup"),
+      Catch::Matchers::ContainsSubstring("captcha-unavailable"));
+
+  client::TurnstileProvider::setWebViewFactory(
+      [](const std::string &, const std::string &) { return ""; });
+  REQUIRE_THROWS_WITH(
+      client::TurnstileProvider::acquireCaptchaToken(
+          "https://api.example.test", "signup"),
+      Catch::Matchers::ContainsSubstring("did not return a token"));
+  client::TurnstileProvider::setWebViewFactory({});
+}
+
+TEST_CASE("Core AuthClient does not send a protected request after CAPTCHA adapter failure",
+          "[turnstile][diagnostics]") {
+  auto http = std::make_shared<client::HttpClient>("https://api.example.test");
+  auto core = std::make_shared<client::GeneratedDbApi>(*http);
+  client::AuthClient auth(http, core);
+  client::AuthClient::setCaptchaTokenProvider(
+      [](const std::shared_ptr<client::HttpClient> &, const std::string &,
+         const std::string &) -> std::string {
+        throw std::runtime_error("Unreal Game Thread is not supported");
+      });
+
+  const auto result = auth.signUp("synthetic@example.com", "SyntheticPass123!");
+  REQUIRE_FALSE(result.ok);
+  REQUIRE(result.statusCode == 0);
+  REQUIRE(result.error.find("captcha-unavailable") != std::string::npos);
+  REQUIRE(result.error.find("Game Thread") != std::string::npos);
+  client::AuthClient::setCaptchaTokenProvider({});
+}
+
+TEST_CASE("Core AuthClient invokes the registered CAPTCHA provider for OAuth",
+          "[turnstile][integration]") {
+  auto http = std::make_shared<client::HttpClient>("https://api.example.test");
+  auto core = std::make_shared<client::GeneratedDbApi>(*http);
+  client::AuthClient auth(http, core);
+  std::string observedAction;
+  client::AuthClient::setCaptchaTokenProvider(
+      [&observedAction](const std::shared_ptr<client::HttpClient> &client,
+                        const std::string &action,
+                        const std::string &manualToken) {
+        REQUIRE(client->getBaseUrl() == "https://api.example.test");
+        REQUIRE(manualToken.empty());
+        observedAction = action;
+        return "hook-token";
+      });
+  const std::string url = auth.signInWithOAuth(
+      "google", "https://app.example.test/callback?source=game");
+  REQUIRE(observedAction == "oauth");
+  REQUIRE(url.find("captcha_token=hook-token") != std::string::npos);
+  REQUIRE(url.find("redirect_url=https%3A%2F%2Fapp.example.test%2Fcallback%3Fsource%3Dgame") !=
+          std::string::npos);
+  client::AuthClient::setCaptchaTokenProvider({});
+}
+
+TEST_CASE("Turnstile manual token bypass is preserved without an HTTP client",
+          "[turnstile]") {
+  REQUIRE(client::TurnstileProvider::resolveCaptchaToken(
+              std::shared_ptr<client::HttpClient>{}, "signin", "manual-token") ==
+          "manual-token");
+  client::HttpClient http("https://api.example.test///");
+  REQUIRE(http.getBaseUrl() == "https://api.example.test");
+}
+
+TEST_CASE("Turnstile platform preflight runs before synchronous config I/O",
+          "[turnstile][diagnostics]") {
+  int transportCalls = 0;
+  auto http = std::make_shared<client::HttpClient>(
+      "https://api.example.test", "",
+      [&transportCalls](const std::string &, const std::string &,
+                        const std::string &,
+                        const std::map<std::string, std::string> &) {
+        ++transportCalls;
+        return client::Result{
+            true, 200, R"({"captcha":{"siteKey":"synthetic-site"}})", ""};
+      });
+  client::TurnstileProvider::setPreflightGuard([]() {
+    throw std::runtime_error("captcha-unavailable: Unreal Game Thread");
+  });
+
+  REQUIRE_THROWS_WITH(
+      client::TurnstileProvider::resolveCaptchaToken(http, "signin", ""),
+      Catch::Matchers::ContainsSubstring("Game Thread"));
+  REQUIRE(transportCalls == 0);
+
+  // A caller-supplied token does not need config or WebView work.
+  REQUIRE(client::TurnstileProvider::resolveCaptchaToken(
+              http, "signin", "manual-token") == "manual-token");
+  REQUIRE(transportCalls == 0);
+  client::TurnstileProvider::setPreflightGuard({});
+}
+
+TEST_CASE("Turnstile site-key cache expires after five monotonic minutes",
+          "[turnstile][rotation]") {
+  struct ResetClock {
+    ~ResetClock() { client::TurnstileProvider::setClockForTesting({}); }
+  } resetClock;
+
+  auto now = std::chrono::steady_clock::time_point(std::chrono::seconds(100));
+  client::TurnstileProvider::setClockForTesting([&now]() { return now; });
+  int transportCalls = 0;
+  auto http = std::make_shared<client::HttpClient>(
+      "https://ttl-rotation.example.test", "",
+      [&transportCalls](const std::string &, const std::string &,
+                        const std::string &,
+                        const std::map<std::string, std::string> &) {
+        ++transportCalls;
+        return client::Result{
+            true, 200,
+            std::string(R"({"captcha":{"siteKey":"site-key-)") +
+                std::to_string(transportCalls) + R"("}})",
+            ""};
+      });
+
+  REQUIRE(client::TurnstileProvider::fetchSiteKey(http) == "site-key-1");
+  now += std::chrono::minutes(4);
+  REQUIRE(client::TurnstileProvider::fetchSiteKey(http) == "site-key-1");
+  REQUIRE(transportCalls == 1);
+
+  now += std::chrono::minutes(1);
+  REQUIRE(client::TurnstileProvider::fetchSiteKey(http) == "site-key-2");
+  REQUIRE(transportCalls == 2);
+}
+
+TEST_CASE("Turnstile treats an explicit null CAPTCHA config as disabled",
+          "[turnstile][config]") {
+  struct ResetClock {
+    ~ResetClock() { client::TurnstileProvider::setClockForTesting({}); }
+  } resetClock;
+
+  client::TurnstileProvider::setClockForTesting(
+      []() { return std::chrono::steady_clock::time_point{}; });
+  int transportCalls = 0;
+  auto http = std::make_shared<client::HttpClient>(
+      "https://captcha-disabled.example.test", "",
+      [&transportCalls](const std::string &, const std::string &,
+                        const std::string &,
+                        const std::map<std::string, std::string> &) {
+        ++transportCalls;
+        return client::Result{true, 200, R"({"captcha":null})", ""};
+      });
+
+  REQUIRE(client::TurnstileProvider::resolveCaptchaToken(http, "signin", "")
+              .empty());
+  REQUIRE(transportCalls == 1);
+}
+
+TEST_CASE("Turnstile surfaces config request failures as CAPTCHA unavailable",
+          "[turnstile][config][diagnostics]") {
+  SECTION("network result") {
+    auto http = std::make_shared<client::HttpClient>(
+        "https://captcha-network-failure.example.test", "",
+        [](const std::string &, const std::string &, const std::string &,
+           const std::map<std::string, std::string> &) {
+          return client::Result{false, 0, "", "connection refused"};
+        });
+    REQUIRE_THROWS_WITH(
+        client::TurnstileProvider::fetchSiteKey(http),
+        Catch::Matchers::ContainsSubstring(
+            "captcha-unavailable: config_fetch_failed"));
+  }
+
+  SECTION("HTTP error") {
+    auto http = std::make_shared<client::HttpClient>(
+        "https://captcha-http-failure.example.test", "",
+        [](const std::string &, const std::string &, const std::string &,
+           const std::map<std::string, std::string> &) {
+          return client::Result{false, 503, "", "temporarily unavailable"};
+        });
+    REQUIRE_THROWS_WITH(
+        client::TurnstileProvider::fetchSiteKey(http),
+        Catch::Matchers::ContainsSubstring(
+            "captcha-unavailable: config_fetch_failed"));
+  }
+
+  SECTION("transport exception") {
+    auto http = std::make_shared<client::HttpClient>(
+        "https://captcha-transport-exception.example.test", "",
+        [](const std::string &, const std::string &, const std::string &,
+           const std::map<std::string, std::string> &) -> client::Result {
+          throw std::runtime_error("synthetic transport failure");
+        });
+    REQUIRE_THROWS_WITH(
+        client::TurnstileProvider::fetchSiteKey(http),
+        Catch::Matchers::ContainsSubstring(
+            "captcha-unavailable: config_fetch_failed"));
+  }
+}
+
+TEST_CASE("Turnstile surfaces malformed config instead of disabling CAPTCHA",
+          "[turnstile][config][diagnostics]") {
+  const std::vector<std::string> malformedBodies = {
+      "not-json",
+      R"({})",
+      R"({"captcha":{}})",
+      R"({"captcha":true})",
+      R"({"captcha":{"siteKey":""}})",
+      R"({"captcha":{"siteKey":42}})",
+      std::string(R"({"captcha":{"siteKey":")") +
+          std::string(513, 'x') + R"("}})",
+      std::string(65537, 'x'),
+  };
+
+  for (std::size_t index = 0; index < malformedBodies.size(); ++index) {
+    const auto body = malformedBodies[index];
+    auto http = std::make_shared<client::HttpClient>(
+        "https://captcha-malformed-" + std::to_string(index) +
+            ".example.test",
+        "", [body](const std::string &, const std::string &,
+                   const std::string &,
+                   const std::map<std::string, std::string> &) {
+          return client::Result{true, 200, body, ""};
+        });
+    INFO("malformed response index: " << index);
+    REQUIRE_THROWS_WITH(
+        client::TurnstileProvider::fetchSiteKey(http),
+        Catch::Matchers::ContainsSubstring(
+            "captcha-unavailable: config_invalid_response"));
+  }
+}
+
+TEST_CASE("Turnstile does not cache malformed site keys",
+          "[turnstile][rotation][config]") {
+  struct ResetClock {
+    ~ResetClock() { client::TurnstileProvider::setClockForTesting({}); }
+  } resetClock;
+
+  const auto now = std::chrono::steady_clock::time_point{};
+  client::TurnstileProvider::setClockForTesting([now]() { return now; });
+  int transportCalls = 0;
+  auto http = std::make_shared<client::HttpClient>(
+      "https://negative-cache.example.test", "",
+      [&transportCalls](const std::string &, const std::string &,
+                        const std::string &,
+                        const std::map<std::string, std::string> &) {
+        ++transportCalls;
+        if (transportCalls == 1) {
+          return client::Result{true, 200, R"({"captcha":{}})", ""};
+        }
+        return client::Result{
+            true, 200, R"({"captcha":{"siteKey":"recovered-site-key"}})", ""};
+      });
+
+  REQUIRE_THROWS_WITH(
+      client::TurnstileProvider::fetchSiteKey(http),
+      Catch::Matchers::ContainsSubstring("config_invalid_response"));
+  REQUIRE(client::TurnstileProvider::fetchSiteKey(http) ==
+          "recovered-site-key");
+  REQUIRE(transportCalls == 2);
 }

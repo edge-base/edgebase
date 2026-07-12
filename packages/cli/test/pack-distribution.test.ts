@@ -14,6 +14,7 @@ const tsxExecOptions = /\.cmd$/i.test(tsxCommand.command) ? { shell: true as con
 const tempDirs: string[] = [];
 const appDataDirs: string[] = [];
 const childProcesses: ChildProcessWithoutNullStreams[] = [];
+const ownedProcessGroups = new Set<number>();
 const RETRYABLE_CLEANUP_ERROR_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 const CLEANUP_RETRY_OPTIONS = {
   recursive: true,
@@ -41,35 +42,47 @@ function terminateProcessTree(pid: number | null | undefined): void {
   }
 }
 
-function readLauncherPid(dataDir: string): number | null {
+interface LauncherLock {
+  pid: number;
+  childPid?: number | null;
+  childProcessGroupId?: number | null;
+}
+
+function readLauncherLock(dataDir: string): LauncherLock | null {
   const lockPath = join(dataDir, 'launcher-lock.json');
   if (!existsSync(lockPath)) {
     return null;
   }
 
   try {
-    const lock = JSON.parse(readFileSync(lockPath, 'utf-8')) as { pid?: number };
-    return typeof lock.pid === 'number' ? lock.pid : null;
+    const lock = JSON.parse(readFileSync(lockPath, 'utf-8')) as Partial<LauncherLock>;
+    return typeof lock.pid === 'number' ? lock as LauncherLock : null;
   } catch {
     return null;
   }
 }
 
-function terminateLauncherPid(pid: number): void {
-  if (process.platform === 'win32') {
-    terminateProcessTree(pid);
+function terminateProcessGroup(processGroupId: number | null | undefined): void {
+  if (process.platform === 'win32' || !Number.isInteger(processGroupId) || (processGroupId ?? 0) <= 0) {
     return;
   }
 
   try {
-    process.kill(pid, 'SIGKILL');
-    return;
+    process.kill(-(processGroupId as number), 'SIGKILL');
   } catch {
-    // fall through
+    // best-effort cleanup
+  }
+}
+
+function terminateLauncherLock(lock: LauncherLock): void {
+  if (process.platform === 'win32') {
+    terminateProcessTree(lock.pid);
+    return;
   }
 
+  terminateProcessGroup(lock.childProcessGroupId);
   try {
-    process.kill(pid, 'SIGTERM');
+    process.kill(lock.pid, 'SIGKILL');
   } catch {
     // best-effort cleanup
   }
@@ -133,19 +146,23 @@ afterEach(() => {
     }
   }
   for (const dir of tempDirs.splice(0)) {
-    const launcherPid = readLauncherPid(dir);
-    if (launcherPid) {
-      terminateLauncherPid(launcherPid);
+    const launcherLock = readLauncherLock(dir);
+    if (launcherLock) {
+      terminateLauncherLock(launcherLock);
     }
     cleanupTemporaryDirectory(dir);
   }
   for (const dir of appDataDirs.splice(0)) {
-    const launcherPid = readLauncherPid(dir);
-    if (launcherPid) {
-      terminateLauncherPid(launcherPid);
+    const launcherLock = readLauncherLock(dir);
+    if (launcherLock) {
+      terminateLauncherLock(launcherLock);
     }
     cleanupTemporaryDirectory(dir);
   }
+  for (const processGroupId of ownedProcessGroups) {
+    terminateProcessGroup(processGroupId);
+  }
+  ownedProcessGroups.clear();
 }, 120_000);
 
 function resolveAppDataRoot(appDataDirName: string): string {
@@ -196,6 +213,84 @@ async function reservePort(): Promise<number> {
       });
     });
   });
+}
+
+async function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolveAvailability) => {
+    const server = createServer();
+    server.unref();
+    server.once('error', () => resolveAvailability(false));
+    server.listen(port, '127.0.0.1', () => {
+      server.close(() => resolveAvailability(true));
+    });
+  });
+}
+
+function isProcessAlive(pid: number | null | undefined): boolean {
+  if (!Number.isInteger(pid) || (pid ?? 0) <= 0) return false;
+  try {
+    process.kill(pid as number, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isProcessGroupAlive(processGroupId: number | null | undefined): boolean {
+  if (process.platform === 'win32' || !Number.isInteger(processGroupId) || (processGroupId ?? 0) <= 0) {
+    return false;
+  }
+  try {
+    process.kill(-(processGroupId as number), 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function stopOwnedLauncher(
+  lock: LauncherLock,
+  dataDir: string,
+  port: number,
+  timeoutMs = 20_000,
+): Promise<void> {
+  if (lock.childProcessGroupId) {
+    ownedProcessGroups.add(lock.childProcessGroupId);
+  }
+  try {
+    process.kill(lock.pid, 'SIGTERM');
+  } catch {
+    // It may already be shutting down.
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const launcherAlive = isProcessAlive(lock.pid);
+    const groupAlive = isProcessGroupAlive(lock.childProcessGroupId);
+    const lockExists = existsSync(join(dataDir, 'launcher-lock.json'));
+    const portAvailable = await isPortAvailable(port);
+    if (!launcherAlive && !groupAlive && !lockExists && portAvailable) {
+      if (lock.childProcessGroupId) {
+        ownedProcessGroups.delete(lock.childProcessGroupId);
+      }
+      return;
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+  }
+
+  terminateProcessGroup(lock.childProcessGroupId);
+  try {
+    process.kill(lock.pid, 'SIGKILL');
+  } catch {
+    // The launcher has already exited.
+  }
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+  throw new Error(
+    `Portable launcher cleanup left owned runtime state behind: launcherAlive=${isProcessAlive(lock.pid)}, `
+      + `processGroupAlive=${isProcessGroupAlive(lock.childProcessGroupId)}, `
+      + `lockExists=${existsSync(join(dataDir, 'launcher-lock.json'))}, `
+      + `portAvailable=${await isPortAvailable(port)}.`,
+  );
 }
 
 async function waitForHttp(
@@ -318,6 +413,35 @@ async function stopPortableLauncher(
       }
       reject(new Error(`Portable launcher did not exit cleanly.\n${stderr()}`));
     }, 15_000);
+
+    child.once('exit', onExit);
+    child.once('error', onError);
+  });
+}
+
+async function waitForChildExit(
+  child: ChildProcessWithoutNullStreams,
+  timeoutMs = 15_000,
+): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+
+  await new Promise<void>((resolveExit, reject) => {
+    const onExit = () => {
+      clearTimeout(timeout);
+      child.off('error', onError);
+      resolveExit();
+    };
+    const onError = (error: Error) => {
+      clearTimeout(timeout);
+      child.off('exit', onExit);
+      reject(error);
+    };
+    const timeout = setTimeout(() => {
+      child.off('exit', onExit);
+      child.off('error', onError);
+      if (child.pid) terminateProcessTree(child.pid);
+      reject(new Error(`Timed out waiting for child process ${child.pid ?? 'unknown'} to exit.`));
+    }, timeoutMs);
 
     child.once('exit', onExit);
     child.once('error', onError);
@@ -483,7 +607,7 @@ export default defineConfig({
 });
 `,
       );
-      writeFileSync(join(projectDir, 'functions', 'hello.ts'), 'export async function GET() { return Response.json({ ok: true, route: \"hello\" }); }\n');
+      writeFileSync(join(projectDir, 'functions', 'hello.ts'), 'export async function GET() { return Response.json({ ok: true, route: "hello" }); }\n');
       writeFileSync(join(projectDir, 'web', 'dist', 'index.html'), '<!doctype html><html><body>portable-open-frontend</body></html>\n');
       writeFileSync(join(projectDir, 'web', 'dist', 'assets', 'main.12345678.js'), 'console.log("portable-open-frontend");\n');
 
@@ -521,13 +645,15 @@ export default defineConfig({
         openStderr += chunk.toString();
       });
 
-      let pid: number | null = null;
+      let launcherLock: LauncherLock | null = null;
+      let cleanupError: unknown = null;
 
       try {
         for (let attempt = 0; attempt < 80; attempt += 1) {
-          const lockPid = readLauncherPid(dataDir);
-          if (lockPid) {
-            pid = lockPid;
+          const currentLock = readLauncherLock(dataDir);
+          if (currentLock?.childProcessGroupId) {
+            launcherLock = currentLock;
+            ownedProcessGroups.add(currentLock.childProcessGroupId);
             break;
           }
           await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
@@ -538,33 +664,25 @@ export default defineConfig({
           return existsSync(launcherLogPath) ? readFileSync(launcherLogPath, 'utf-8') : '';
         };
 
-        expect(pid).not.toBeNull();
+        expect(launcherLock).not.toBeNull();
         expect(await waitForText(readLauncherLog, (text) => text.includes('wrangler'))).toContain('wrangler');
       } finally {
-        if (pid) {
-          terminateLauncherPid(pid);
-        }
-        await new Promise<void>((resolveExit) => {
-          if (opened.exitCode !== null || opened.killed) {
-            resolveExit();
-            return;
+        const currentLock = launcherLock ?? readLauncherLock(dataDir);
+        if (currentLock) {
+          try {
+            await stopOwnedLauncher(currentLock, dataDir, launchPort);
+          } catch (error) {
+            cleanupError = error;
           }
-
-          const timeout = setTimeout(() => {
-            if (!opened.killed) {
-              opened.kill('SIGKILL');
-            }
-            resolveExit();
-          }, 15_000);
-
-          opened.once('exit', () => {
-            clearTimeout(timeout);
-            resolveExit();
-          });
-        });
+        }
+        await waitForChildExit(opened);
       }
+      if (cleanupError) throw cleanupError;
 
       expect(openStderr).toBe('');
+      expect(existsSync(join(dataDir, 'launcher-lock.json'))).toBe(false);
+      expect(await isPortAvailable(launchPort)).toBe(true);
+      expect(isProcessGroupAlive(launcherLock?.childProcessGroupId)).toBe(false);
     },
     120_000,
   );
@@ -592,7 +710,7 @@ export default defineConfig({
 });
 `,
     );
-    writeFileSync(join(projectDir, 'functions', 'hello.ts'), 'export async function GET() { return Response.json({ ok: true, route: \"hello\" }); }\n');
+    writeFileSync(join(projectDir, 'functions', 'hello.ts'), 'export async function GET() { return Response.json({ ok: true, route: "hello" }); }\n');
     writeFileSync(join(projectDir, 'web', 'dist', 'index.html'), '<!doctype html><html><body>portable-frontend</body></html>\n');
     writeFileSync(join(projectDir, 'web', 'dist', 'assets', 'main.12345678.js'), 'console.log("portable-frontend");\n');
 

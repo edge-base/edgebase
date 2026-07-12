@@ -29,7 +29,7 @@ import { getD1BindingName, normalizeDbInstanceId } from './do-router.js';
 import { D1AuthDb, type AuthDb } from './auth-db-adapter.js';
 import { ensureAuthSchema } from './auth-d1.js';
 import type { Env } from '../types.js';
-import { createSignedToken } from '../routes/storage.js';
+import { createSignedToken, createSignedUploadToken } from '../routes/storage.js';
 import {
   createManagedAdminUser,
   deleteManagedAdminUser,
@@ -42,6 +42,7 @@ import { DbRef, TableRef, DefaultDbApi, HttpClient, ContextManager } from '@edge
 import { InternalHttpTransport } from './internal-transport.js';
 import { executeProviderAwareSql } from './provider-aware-sql.js';
 import { createEmailProvider } from './email-provider.js';
+import { resolvePublicRequestOrigin } from './public-origin.js';
 
 // ─── Function Context Types ───
 
@@ -207,6 +208,7 @@ export interface FunctionStorageProxy {
     body: ReadableStream;
     contentType: string;
     size: number;
+    etag: string;
     customMetadata: Record<string, string>;
   } | null>;
   delete(key: string): Promise<void>;
@@ -224,6 +226,7 @@ export interface FunctionStorageProxy {
     key: string;
     size: number;
     contentType: string;
+    etag: string;
     customMetadata: Record<string, string>;
   } | null>;
 }
@@ -970,6 +973,10 @@ export function buildAdminAuthContext(options: AdminAuthOptions): AdminAuthConte
     }): Promise<{ users: Record<string, unknown>[]; cursor?: string }> {
       if (d1Database) {
         const authDb = new D1AuthDb(d1Database);
+        // First-boot safety: like createUser below, a fresh deployment may
+        // call admin.auth.listUsers() before any auth route has initialized
+        // the schema (e.g. a bootstrap function probing for existing users).
+        await ensureAuthSchema(authDb);
         const limit = opts?.limit ?? 100;
         const offset = opts?.cursor ? parseInt(opts.cursor, 10) : 0;
         const result = await authService.listUsers(authDb, limit, offset);
@@ -1130,6 +1137,8 @@ export interface BuildFunctionContextOptions {
    * Worker origin URL for context.admin internal HTTP transport.
    */
   workerUrl?: string;
+  /** Browser-facing origin used only for URLs returned to application clients. */
+  publicUrl?: string;
   /** Current call depth for inter-function calls. */
   callDepth?: number;
   /** Plugin name — when set, injects pluginConfig from config.plugins[pluginName]. */
@@ -1154,6 +1163,15 @@ export interface BuildFunctionContextOptions {
 }
 
 export function buildFunctionContext(options: BuildFunctionContextOptions): FunctionContext {
+  let publicUrl = options.publicUrl;
+  if (!publicUrl && options.env) {
+    try {
+      const requestOrigin = resolvePublicRequestOrigin(options.env, options.request);
+      if (new URL(requestOrigin).hostname !== 'internal') publicUrl = requestOrigin;
+    } catch {
+      // Internal trigger requests do not always have a browser-facing origin.
+    }
+  }
   const adminAuthContext = buildAdminAuthContext({
     authNamespace: options.authNamespace,
     databaseNamespace: options.databaseNamespace,
@@ -1285,6 +1303,7 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
           const nestedCtx = buildFunctionContext({
             ...options,
             request: nestedRequest,
+            publicUrl,
             params: matched.params,
             callDepth: currentDepth + 1,
           });
@@ -1385,7 +1404,7 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
       (options.env as unknown as Record<string, unknown>).STORAGE as R2Bucket,
       'default',
       options.env,
-      options.workerUrl,
+      publicUrl ?? options.workerUrl,
     );
   }
 
@@ -1934,6 +1953,7 @@ export function buildFunctionStorageProxy(
         body: obj.body,
         contentType: (obj.httpMetadata?.contentType as string) ?? 'application/octet-stream',
         size: obj.size,
+        etag: obj.etag,
         customMetadata: (obj.customMetadata as Record<string, string>) ?? {},
       };
     },
@@ -1948,16 +1968,24 @@ export function buildFunctionStorageProxy(
       const expiresIn = options?.expiresIn ?? 3600;
       const expiresAt = Date.now() + expiresIn * 1000;
       const obj = await r2.head(prefix(key));
-      const token = await createSignedToken(key, bucket, expiresAt, secret, obj ? {
+      if (!obj) {
+        throw new Error(`Cannot create a signed download URL for missing object '${key}'.`);
+      }
+      const token = await createSignedToken(key, bucket, expiresAt, secret, {
         file: {
           size: obj.size,
           contentType: obj.httpMetadata?.contentType || 'application/octet-stream',
           etag: obj.etag,
           uploadedAt: obj.uploaded?.toISOString(),
         },
-      } : undefined);
+      });
       const base = workerUrl ?? 'http://localhost:8787';
-      return `${base}/api/storage/${encodeURIComponent(bucket)}/${key}?token=${token}`;
+      const signedUrl = new URL(
+        `/api/storage/${encodeURIComponent(bucket)}/${encodeURIComponent(key)}`,
+        base,
+      );
+      signedUrl.searchParams.set('token', token);
+      return signedUrl.href;
     },
 
     async getSignedUploadUrl(key, options) {
@@ -1968,10 +1996,13 @@ export function buildFunctionStorageProxy(
       const maxBytes = typeof options?.maxBytes === 'number' && Number.isFinite(options.maxBytes)
         ? Math.max(0, Math.trunc(options.maxBytes))
         : null;
-      const token = await createSignedToken(key, bucket, expiresAt, secret, maxBytes);
+      const token = await createSignedUploadToken(key, bucket, expiresAt, secret, maxBytes);
       const base = workerUrl ?? 'http://localhost:8787';
+      const signedUrl = new URL(`/api/storage/${encodeURIComponent(bucket)}/upload`, base);
+      signedUrl.searchParams.set('token', token);
+      signedUrl.searchParams.set('key', key);
       return {
-        url: `${base}/api/storage/${encodeURIComponent(bucket)}/upload?token=${token}&key=${encodeURIComponent(key)}`,
+        url: signedUrl.href,
         expiresAt: new Date(expiresAt).toISOString(),
         maxBytes,
       };
@@ -2003,6 +2034,7 @@ export function buildFunctionStorageProxy(
         key,
         size: obj.size,
         contentType: (obj.httpMetadata?.contentType as string) ?? 'application/octet-stream',
+        etag: obj.etag,
         customMetadata: (obj.customMetadata as Record<string, string>) ?? {},
       };
     },

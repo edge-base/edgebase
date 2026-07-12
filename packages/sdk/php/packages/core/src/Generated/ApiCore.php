@@ -2,7 +2,7 @@
 
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 declare(strict_types=1);
 
@@ -274,27 +274,57 @@ class GeneratedDbApi
     }
 
     /** Start OAuth redirect — GET /api/auth/oauth/{provider} */
-    public function oauth_redirect(string $provider): mixed
+    public function oauth_redirect(string $provider, array $query = []): mixed
     {
-        return $this->http->get('/auth/oauth/' . rawurlencode($provider));
+        return $this->http->get('/auth/oauth/' . rawurlencode($provider), $query);
+    }
+
+    /** Atomically exchange a verified OAuth callback ticket — POST /api/auth/oauth/exchange */
+    public function oauth_exchange(mixed $body = null): mixed
+    {
+        return $this->http->post('/auth/oauth/exchange', $body);
     }
 
     /** OAuth callback — GET /api/auth/oauth/{provider}/callback */
-    public function oauth_callback(string $provider): mixed
+    public function oauth_callback(string $provider, array $query = []): mixed
     {
-        return $this->http->get('/auth/oauth/' . rawurlencode($provider) . '/callback');
+        return $this->http->get('/auth/oauth/' . rawurlencode($provider) . '/callback', $query);
+    }
+
+    /** OAuth form-post callback — POST /api/auth/oauth/{provider}/callback */
+    public function oauth_callback_post(string $provider, mixed $body = null): mixed
+    {
+        return $this->http->post('/auth/oauth/' . rawurlencode($provider) . '/callback', $body);
     }
 
     /** Start OAuth account linking — POST /api/auth/oauth/link/{provider} */
-    public function oauth_link_start(string $provider): mixed
+    public function oauth_link_start(string $provider, mixed $body = null): mixed
     {
-        return $this->http->post('/auth/oauth/link/' . rawurlencode($provider));
+        return $this->http->post('/auth/oauth/link/' . rawurlencode($provider), $body);
+    }
+
+    /** Continue OAuth account linking in the system browser — GET /api/auth/oauth/link/{provider}/continue */
+    public function oauth_link_continue(string $provider, array $query = []): mixed
+    {
+        return $this->http->get('/auth/oauth/link/' . rawurlencode($provider) . '/continue', $query);
+    }
+
+    /** Complete OAuth account linking for the current authenticated user — POST /api/auth/oauth/complete/link */
+    public function oauth_link_complete(mixed $body = null): mixed
+    {
+        return $this->http->post('/auth/oauth/complete/link', $body);
     }
 
     /** OAuth link callback — GET /api/auth/oauth/link/{provider}/callback */
-    public function oauth_link_callback(string $provider): mixed
+    public function oauth_link_callback(string $provider, array $query = []): mixed
     {
-        return $this->http->get('/auth/oauth/link/' . rawurlencode($provider) . '/callback');
+        return $this->http->get('/auth/oauth/link/' . rawurlencode($provider) . '/callback', $query);
+    }
+
+    /** OAuth link form-post callback — POST /api/auth/oauth/link/{provider}/callback */
+    public function oauth_link_callback_post(string $provider, mixed $body = null): mixed
+    {
+        return $this->http->post('/auth/oauth/link/' . rawurlencode($provider) . '/callback', $body);
     }
 
     /** Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count */
@@ -351,12 +381,6 @@ class GeneratedDbApi
         return $this->http->postWithQuery('/db/' . rawurlencode($namespace) . '/tables/' . rawurlencode($table) . '/batch-by-filter', $body, $query);
     }
 
-    /** Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact */
-    public function db_single_transact(string $namespace, mixed $body = null): mixed
-    {
-        return $this->http->post('/db/' . rawurlencode($namespace) . '/transact', $body);
-    }
-
     /** Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count */
     public function db_count_records(string $namespace, string $instance_id, string $table, array $query = []): mixed
     {
@@ -409,6 +433,12 @@ class GeneratedDbApi
     public function db_batch_by_filter(string $namespace, string $instance_id, string $table, mixed $body = null, array $query = []): mixed
     {
         return $this->http->postWithQuery('/db/' . rawurlencode($namespace) . '/' . rawurlencode($instance_id) . '/tables/' . rawurlencode($table) . '/batch-by-filter', $body, $query);
+    }
+
+    /** Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact */
+    public function db_single_transact(string $namespace, mixed $body = null): mixed
+    {
+        return $this->http->post('/db/' . rawurlencode($namespace) . '/transact', $body);
     }
 
     /** Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact */
@@ -537,6 +567,12 @@ class GeneratedDbApi
         return $this->http->get('/config');
     }
 
+    /** Render the hosted Turnstile page for native WebViews — GET /api/captcha/challenge */
+    public function get_captcha_challenge(array $query = []): mixed
+    {
+        return $this->http->get('/captcha/challenge', $query);
+    }
+
     /** Register push token — POST /api/push/register */
     public function push_register(mixed $body = null): mixed
     {
@@ -577,6 +613,18 @@ class GeneratedDbApi
     public function get_room_metadata(array $query = []): mixed
     {
         return $this->http->get('/room/metadata', $query);
+    }
+
+    /** Get room summary — GET /api/room/summary */
+    public function get_room_summary(array $query = []): mixed
+    {
+        return $this->http->get('/room/summary', $query);
+    }
+
+    /** Get summaries for multiple rooms — POST /api/room/summaries */
+    public function get_room_summaries(mixed $body = null): mixed
+    {
+        return $this->http->post('/room/summaries', $body);
     }
 
     /** Track custom events — POST /api/analytics/track */
@@ -825,6 +873,13 @@ final class ApiPaths
         return "/api/auth/oauth/{$provider}/callback";
     }
 
+    public static function oauth_callback_post(string $provider): string
+    {
+        return "/api/auth/oauth/{$provider}/callback";
+    }
+    public const OAUTH_LINK_COMPLETE = '/api/auth/oauth/complete/link';
+    public const OAUTH_EXCHANGE = '/api/auth/oauth/exchange';
+
     public static function oauth_link_start(string $provider): string
     {
         return "/api/auth/oauth/link/{$provider}";
@@ -833,6 +888,16 @@ final class ApiPaths
     public static function oauth_link_callback(string $provider): string
     {
         return "/api/auth/oauth/link/{$provider}/callback";
+    }
+
+    public static function oauth_link_callback_post(string $provider): string
+    {
+        return "/api/auth/oauth/link/{$provider}/callback";
+    }
+
+    public static function oauth_link_continue(string $provider): string
+    {
+        return "/api/auth/oauth/link/{$provider}/continue";
     }
     public const AUTH_PASSKEYS_LIST = '/api/auth/passkeys';
 
@@ -868,6 +933,7 @@ final class ApiPaths
     public const AUTH_VERIFY_LINK_PHONE = '/api/auth/verify-link-phone';
     public const AUTH_VERIFY_MAGIC_LINK = '/api/auth/verify-magic-link';
     public const AUTH_VERIFY_PHONE = '/api/auth/verify-phone';
+    public const GET_CAPTCHA_CHALLENGE = '/api/captcha/challenge';
     public const GET_CONFIG = '/api/config';
 
     public static function execute_d1_query(string $database): string
@@ -999,6 +1065,8 @@ final class ApiPaths
     public const CONNECT_ROOM = '/api/room';
     public const CHECK_ROOM_CONNECTION = '/api/room/connect-check';
     public const GET_ROOM_METADATA = '/api/room/metadata';
+    public const GET_ROOM_SUMMARIES = '/api/room/summaries';
+    public const GET_ROOM_SUMMARY = '/api/room/summary';
     public const GET_SCHEMA = '/api/schema';
     public const EXECUTE_SQL = '/api/sql';
 

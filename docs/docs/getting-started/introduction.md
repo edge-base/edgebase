@@ -69,10 +69,10 @@ MIT licensed. Export your data anytime. Run it anywhere.
 ## Architecture
 
 ```
-Client SDK ──→ Worker (Hono) ──→ Durable Objects (isolated DB blocks, subscriptions, rooms)
+Client SDK ──→ Worker (Hono) ──→ Durable Objects (isolated DB blocks, subscriptions, rooms, atomic OAuth state)
                                ──→ D1 (auth + single-instance DB blocks)
                                ──→ R2 (File Storage)
-                               ──→ KV (OAuth State, Cache)
+                               ──→ KV (ephemeral cache + legacy OAuth migration mirror)
 ```
 
 DB blocks come in two types. **Single-instance** blocks (no instance ID) default to D1 — good for globally shared data. **Dynamic** blocks (`instance: true`) create a separate Durable Object per ID — good for isolated data. The block name is just a config key you choose; there are no reserved names.

@@ -1,6 +1,6 @@
 // Auto-generated admin API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 using System;
 using System.Collections.Generic;
@@ -65,7 +65,7 @@ public class GeneratedAdminApi
     public Task<Dictionary<string, object?>> DatabaseLiveBroadcastAsync(object? body = null, CancellationToken ct = default)
         => _http.PostAsync("/api/db/broadcast", body, ct);
 
-    /// <summary>Execute SQL via DatabaseDO — POST /api/sql</summary>
+    /// <summary>Execute provider-aware raw SQL — POST /api/sql</summary>
     public Task<Dictionary<string, object?>> ExecuteSqlAsync(object? body = null, CancellationToken ct = default)
         => _http.PostAsync("/api/sql", body, ct);
 

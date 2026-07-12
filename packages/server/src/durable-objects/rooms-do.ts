@@ -244,6 +244,17 @@ export class RoomsDO extends RoomRuntimeBaseDO {
       return;
     }
 
+    // RoomsDO handles these protocol extensions before delegating to the base
+    // processor, so it must apply the same authoritative sid check here too.
+    // Otherwise a socket whose session was revoked could keep sending signals,
+    // member-state changes, or admin operations until it reconnects.
+    if (msg.type !== 'auth') {
+      const meta = this.getWSMeta(ws);
+      if (meta?.authenticated && !(await this.ensureLiveSessionAuthority(ws, meta))) {
+        return;
+      }
+    }
+
     if (msg.type === 'signal') {
       const meta = this.requireAuthenticatedMeta(ws);
       if (!meta) return;

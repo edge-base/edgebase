@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -9,6 +10,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using EdgeBase.Generated;
 using Xunit;
 // EdgeBase C# Unity SDK 단위 테스트 — EdgeBase (Unity) 클라이언트 구조 검증
 //
@@ -18,6 +20,17 @@ using Xunit;
 
 namespace EdgeBase.Tests
 {
+    internal static class GeneratedOAuthCompatibilityCompileFixture
+    {
+        internal static void Compile(GeneratedDbApi api)
+        {
+            _ = api.OauthRedirectAsync("google", default);
+            _ = api.OauthLinkStartAsync("google", default);
+            _ = api.OauthRedirectWithQueryAsync("google", null, default);
+            _ = api.OauthLinkStartWithBodyAsync("google", null, default);
+        }
+    }
+
     // ─── A. EdgeBase (Unity) 생성 ────────────────────────────────────────────
 
     public class EdgeBaseUnityConstructorTests
@@ -356,6 +369,14 @@ namespace EdgeBase.Tests
         }
 
         [Fact]
+        public void LinkWithOAuth_fails_explicitly_until_secure_callback_completion_exists()
+        {
+            using var client = new EdgeBase("https://dummy.edgebase.fun");
+            Assert.Throws<NotSupportedException>(() =>
+                client.Auth.LinkWithOAuth("google", "https://app.example.com/auth/callback"));
+        }
+
+        [Fact]
         public void UpdateProfileAsync_method_exists()
         {
             var method = typeof(AuthClient).GetMethod("UpdateProfileAsync");
@@ -449,13 +470,20 @@ namespace EdgeBase.Tests
         private readonly TcpListener _listener;
         private readonly CancellationTokenSource _cts = new();
         private readonly Task _serverTask;
-        private readonly string _siteKey;
+        private readonly string _body;
+        private readonly int _statusCode;
 
         public string BaseUrl { get; }
 
         public MiniConfigServer(string siteKey)
+            : this($"{{\"captcha\":{{\"siteKey\":\"{siteKey}\"}}}}", 200)
         {
-            _siteKey = siteKey;
+        }
+
+        public MiniConfigServer(string body, int statusCode)
+        {
+            _body = body;
+            _statusCode = statusCode;
             _listener = new TcpListener(IPAddress.Loopback, 0);
             _listener.Start();
             BaseUrl = $"http://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}";
@@ -499,13 +527,12 @@ namespace EdgeBase.Tests
                             requestBuilder.Append(Encoding.UTF8.GetString(buffer, 0, read));
                         }
 
-                        var body = $"{{\"captcha\":{{\"siteKey\":\"{_siteKey}\"}}}}";
                         var response =
-                            "HTTP/1.1 200 OK\r\n" +
+                            $"HTTP/1.1 {_statusCode} Synthetic\r\n" +
                             "Content-Type: application/json\r\n" +
-                            $"Content-Length: {Encoding.UTF8.GetByteCount(body)}\r\n" +
+                            $"Content-Length: {Encoding.UTF8.GetByteCount(_body)}\r\n" +
                             "Connection: close\r\n\r\n" +
-                            body;
+                            _body;
                         var bytes = Encoding.UTF8.GetBytes(response);
                         await stream.WriteAsync(bytes, 0, bytes.Length, _cts.Token);
                     }
@@ -552,6 +579,69 @@ namespace EdgeBase.Tests
         }
 
         [Fact]
+        public async Task FetchSiteKeyAsync_does_not_treat_config_failure_as_disabled()
+        {
+            using var server = new MiniConfigServer("{\"message\":\"synthetic outage\"}", 503);
+            var fetchMethod = typeof(TurnstileProvider).GetMethod(
+                "FetchSiteKeyAsync",
+                BindingFlags.NonPublic | BindingFlags.Static
+            );
+            Assert.NotNull(fetchMethod);
+
+            var fetch = (Task<string?>)fetchMethod!.Invoke(null, new object[] { server.BaseUrl })!;
+            var error = await Assert.ThrowsAsync<CaptchaUnavailableException>(async () => await fetch);
+
+            Assert.Equal("config_fetch_failed", error.Reason);
+        }
+
+        [Fact]
+        public async Task FetchSiteKeyAsync_preserves_explicit_disabled_config()
+        {
+            using var server = new MiniConfigServer("{\"captcha\":null}", 200);
+            var fetchMethod = typeof(TurnstileProvider).GetMethod(
+                "FetchSiteKeyAsync",
+                BindingFlags.NonPublic | BindingFlags.Static
+            );
+            Assert.NotNull(fetchMethod);
+
+            var fetch = (Task<string?>)fetchMethod!.Invoke(null, new object[] { server.BaseUrl })!;
+
+            Assert.Null(await fetch);
+        }
+
+        [Fact]
+        public async Task FetchSiteKeyAsync_rejects_missing_captcha_as_malformed()
+        {
+            using var server = new MiniConfigServer("{}", 200);
+            var fetchMethod = typeof(TurnstileProvider).GetMethod(
+                "FetchSiteKeyAsync",
+                BindingFlags.NonPublic | BindingFlags.Static
+            );
+            Assert.NotNull(fetchMethod);
+
+            var fetch = (Task<string?>)fetchMethod!.Invoke(null, new object[] { server.BaseUrl })!;
+            var error = await Assert.ThrowsAsync<CaptchaUnavailableException>(async () => await fetch);
+
+            Assert.Equal("config_invalid_response", error.Reason);
+        }
+
+        [Fact]
+        public async Task FetchSiteKeyAsync_classifies_malformed_json()
+        {
+            using var server = new MiniConfigServer("not-json", 200);
+            var fetchMethod = typeof(TurnstileProvider).GetMethod(
+                "FetchSiteKeyAsync",
+                BindingFlags.NonPublic | BindingFlags.Static
+            );
+            Assert.NotNull(fetchMethod);
+
+            var fetch = (Task<string?>)fetchMethod!.Invoke(null, new object[] { server.BaseUrl })!;
+            var error = await Assert.ThrowsAsync<CaptchaUnavailableException>(async () => await fetch);
+
+            Assert.Equal("config_invalid_response", error.Reason);
+        }
+
+        [Fact]
         public void HasWebViewFactory_tracks_manual_registration()
         {
             var providerType = typeof(TurnstileProvider);
@@ -565,6 +655,313 @@ namespace EdgeBase.Tests
             Assert.True(TurnstileProvider.HasWebViewFactory);
 
             factoryField.SetValue(null, null);
+        }
+
+        [Fact]
+        public void BuildChallengeUrl_requires_https_origin_fixed_action_and_secure_channel()
+        {
+            const string channel = "0123456789abcdef0123456789abcdef";
+            Assert.Equal(
+                "https://api.example.test/api/captcha/challenge?action=signin&channel=" +
+                    channel + "&bridge=unity",
+                TurnstileProvider.BuildChallengeUrl("https://api.example.test", "signin", channel)
+            );
+            Assert.Throws<ArgumentException>(() =>
+                TurnstileProvider.BuildChallengeUrl("http://api.example.test", "signin", channel));
+            Assert.Throws<ArgumentException>(() =>
+                TurnstileProvider.BuildChallengeUrl("https://api.example.test/path", "signin", channel));
+            Assert.Throws<ArgumentException>(() =>
+                TurnstileProvider.BuildChallengeUrl("https://api.example.test", "custom", channel));
+            Assert.Throws<ArgumentException>(() =>
+                TurnstileProvider.BuildChallengeUrl("https://api.example.test", "signin", "predictable"));
+        }
+
+        [Fact]
+        public void ChallengeBridge_and_messages_are_bound_and_bounded()
+        {
+            const string channel = "0123456789abcdef0123456789abcdef";
+            var original = TurnstileProvider.BuildChallengeUrl(
+                "https://api.example.test",
+                "signup",
+                channel
+            );
+            Assert.EndsWith("&bridge=vuplex", TurnstileProvider.WithChallengeBridge(original, "vuplex"));
+            Assert.Throws<ArgumentException>(() =>
+                TurnstileProvider.WithChallengeBridge("https://evil.test/challenge?bridge=unity", "vuplex"));
+
+            var valid = "{\"v\":1,\"channel\":\"" + channel +
+                "\",\"type\":\"token\",\"value\":\"verified\"}";
+            Assert.True(TurnstileProvider.TryParseChallengeMessage(
+                valid, channel, out var type, out var value));
+            Assert.Equal("token", type);
+            Assert.Equal("verified", value);
+            Assert.False(TurnstileProvider.TryParseChallengeMessage(
+                valid, "fedcba9876543210fedcba9876543210", out _, out _));
+            Assert.False(TurnstileProvider.TryParseChallengeMessage(
+                "{\"v\":1,\"channel\":\"" + channel +
+                    "\",\"type\":\"token\",\"value\":\"" + new string('x', 2049) + "\"}",
+                channel,
+                out _,
+                out _
+            ));
+        }
+
+        [Fact]
+        public void Captcha_unavailable_has_stable_diagnostic_contract()
+        {
+            var error = new CaptchaUnavailableException("renderer_terminated");
+            Assert.Equal("captcha-unavailable", error.Code);
+            Assert.Equal("renderer_terminated", error.Reason);
+            Assert.Equal(
+                "challenge_origin_mismatch",
+                TurnstileProvider.NormalizeFailureReason("origin mismatch")
+            );
+        }
+
+        [Fact]
+        public void Turnstile_positive_site_key_cache_expires_at_five_minutes()
+        {
+            var method = typeof(TurnstileProvider).GetMethod(
+                "IsSiteKeyCacheFresh",
+                BindingFlags.Static | BindingFlags.NonPublic
+            );
+            Assert.NotNull(method);
+            var ttl = Stopwatch.Frequency * 300L;
+
+            Assert.True((bool)method!.Invoke(null, new object[] { 0L, ttl - 1L })!);
+            Assert.False((bool)method.Invoke(null, new object[] { 0L, ttl })!);
+        }
+
+        [Fact]
+        public async Task WebGL_challenge_error_retries_once_and_exposes_second_failure()
+        {
+            var method = typeof(TurnstileProvider).GetMethod(
+                "AcquireDirectCaptchaWithSingleSiteKeyRetryAsync",
+                BindingFlags.Static | BindingFlags.NonPublic
+            );
+            Assert.NotNull(method);
+            var acquireCount = 0;
+            var refreshCount = 0;
+            Func<string, Task<string>> acquire = _ =>
+            {
+                acquireCount += 1;
+                return Task.FromException<string>(
+                    new CaptchaUnavailableException("challenge_error")
+                );
+            };
+            Func<Task<string?>> refresh = () =>
+            {
+                refreshCount += 1;
+                return Task.FromResult<string?>("site-key-v2");
+            };
+
+            var task = (Task<string?>)method!.Invoke(
+                null,
+                new object[] { "site-key-v1", acquire, refresh }
+            )!;
+            var error = await Assert.ThrowsAsync<CaptchaUnavailableException>(
+                async () => await task
+            );
+
+            Assert.Equal("challenge_error", error.Reason);
+            Assert.Equal(2, acquireCount);
+            Assert.Equal(1, refreshCount);
+        }
+    }
+
+    public class AuthTokenPersistenceTests
+    {
+        [Fact]
+        public async Task Replacement_tokens_are_persisted_before_exposure()
+        {
+            var storage = new FailingAuthTokenStorage();
+            using var client = new EdgeBase("https://api.example.test", storage);
+            client.Auth.SetAccessToken("original-access");
+
+            var apply = typeof(AuthClient).GetMethod(
+                "ApplyAuthTokensAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic
+            );
+            Assert.NotNull(apply);
+            var replacement = new Dictionary<string, object?> {
+                ["accessToken"] = "replacement-access",
+                ["refreshToken"] = "replacement-refresh",
+            };
+
+            var task = (Task)apply!.Invoke(
+                client.Auth,
+                new object[] { replacement, false })!;
+            var error = await Assert.ThrowsAsync<TokenPersistenceException>(async () => await task);
+
+            Assert.Equal("save", error.Operation);
+            Assert.Equal("original-access", client.Auth.GetAccessToken());
+            Assert.Null(storage.Tokens);
+        }
+
+        [Fact]
+        public async Task Email_link_retry_replays_checkpoint_before_adopting_replacement_tokens()
+        {
+            var requests = new List<(string Authorization, string Body)>();
+            using var http = new JbHttpClient(
+                "https://api.example.test",
+                new CheckpointHttpHandler(async request =>
+                {
+                    requests.Add((
+                        request.Headers.Authorization?.ToString() ?? "",
+                        await request.Content!.ReadAsStringAsync()
+                    ));
+                    return new System.Net.Http.HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new System.Net.Http.StringContent(
+                            "{\"sessionId\":\"permanent-session\"," +
+                            "\"accessToken\":\"permanent-access\"," +
+                            "\"refreshToken\":\"permanent-refresh\"}",
+                            Encoding.UTF8,
+                            "application/json")
+                    };
+                }));
+            var storage = new CheckpointAuthTokenStorage(
+                new AuthTokenPair("anonymous-access", "anonymous-refresh"));
+            var auth = (AuthClient)Activator.CreateInstance(
+                typeof(AuthClient),
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null,
+                args: new object?[] { http, storage },
+                culture: null
+            )!;
+            auth.SetAccessToken("anonymous-access");
+            http.SetRefreshToken("anonymous-refresh");
+
+            storage.FailWrites = true;
+            var firstError = await Assert.ThrowsAsync<TokenPersistenceException>(() =>
+                auth.LinkWithEmailAsync("user@example.test", "Exact-Pass-123!"));
+            Assert.Equal("save", firstError.Operation);
+            Assert.Equal("anonymous-access", auth.GetAccessToken());
+            Assert.Equal("anonymous-refresh", http.GetRefreshToken());
+            Assert.Equal("anonymous-refresh", storage.Tokens?.RefreshToken);
+
+            storage.FailWrites = false;
+            var replay = await auth.LinkWithEmailAsync(
+                "user@example.test",
+                "Exact-Pass-123!");
+
+            Assert.Equal("permanent-session", replay["sessionId"]?.ToString());
+            Assert.Equal("permanent-access", auth.GetAccessToken());
+            Assert.Equal("permanent-refresh", http.GetRefreshToken());
+            Assert.Equal("permanent-refresh", storage.Tokens?.RefreshToken);
+            Assert.Equal(2, requests.Count);
+            Assert.All(requests, request =>
+                Assert.Equal("Bearer anonymous-access", request.Authorization));
+            Assert.Equal(requests[0].Body, requests[1].Body);
+            using var requestBody = JsonDocument.Parse(requests[0].Body);
+            Assert.Equal(
+                "user@example.test",
+                requestBody.RootElement.GetProperty("email").GetString());
+            Assert.Equal(
+                "Exact-Pass-123!",
+                requestBody.RootElement.GetProperty("password").GetString());
+        }
+
+        [Fact]
+        public async Task Account_upgrade_fails_before_network_without_durable_storage()
+        {
+            using var client = new EdgeBase("https://network-must-not-run.example.test");
+            client.Auth.SetAccessToken("unclassifiable-anonymous-token");
+
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                client.Auth.LinkWithEmailAsync(
+                    "user@example.test",
+                    "Exact-Pass-123!"));
+
+            Assert.Contains("IDurableAuthTokenStorage", error.Message);
+        }
+
+        [Fact]
+        public async Task New_client_restores_prepopulated_durable_tokens()
+        {
+            var storage = new CheckpointAuthTokenStorage(
+                new AuthTokenPair("restored-access", "restored-refresh"));
+            using var client = new EdgeBase("https://api.example.test", storage);
+
+            Assert.True(await client.TryRestoreSessionAsync());
+            Assert.Equal("restored-access", client.Auth.GetAccessToken());
+        }
+
+        [Fact]
+        public async Task Incomplete_stored_pair_is_never_exposed()
+        {
+            var storage = new CheckpointAuthTokenStorage(
+                new AuthTokenPair("", "refresh-only"));
+            using var client = new EdgeBase("https://api.example.test", storage);
+
+            var error = await Assert.ThrowsAsync<TokenPersistenceException>(() =>
+                client.TryRestoreSessionAsync());
+
+            Assert.Equal("load", error.Operation);
+            Assert.Null(client.Auth.GetAccessToken());
+        }
+
+        private sealed class FailingAuthTokenStorage : IAuthTokenStorage
+        {
+            public AuthTokenPair? Tokens { get; private set; }
+
+            public Task<AuthTokenPair?> LoadTokensAsync() => Task.FromResult(Tokens);
+
+            public Task SaveTokensAsync(AuthTokenPair tokens) =>
+                Task.FromException(new InvalidOperationException("synthetic persistence failure"));
+
+            public Task ClearTokensAsync()
+            {
+                Tokens = null;
+                return Task.CompletedTask;
+            }
+        }
+
+        private sealed class CheckpointAuthTokenStorage : IDurableAuthTokenStorage
+        {
+            public AuthTokenPair? Tokens { get; private set; }
+            public bool FailWrites { get; set; }
+
+            public CheckpointAuthTokenStorage(AuthTokenPair initialTokens)
+            {
+                Tokens = initialTokens;
+            }
+
+            public Task<AuthTokenPair?> LoadTokensAsync() => Task.FromResult(Tokens);
+
+            public Task SaveTokensAsync(AuthTokenPair tokens)
+            {
+                if (FailWrites)
+                {
+                    return Task.FromException(
+                        new InvalidOperationException("synthetic persistence failure"));
+                }
+                Tokens = tokens;
+                return Task.CompletedTask;
+            }
+
+            public Task ClearTokensAsync()
+            {
+                Tokens = null;
+                return Task.CompletedTask;
+            }
+        }
+
+        private sealed class CheckpointHttpHandler : System.Net.Http.HttpMessageHandler
+        {
+            private readonly Func<System.Net.Http.HttpRequestMessage,
+                Task<System.Net.Http.HttpResponseMessage>> _handler;
+
+            public CheckpointHttpHandler(
+                Func<System.Net.Http.HttpRequestMessage,
+                    Task<System.Net.Http.HttpResponseMessage>> handler)
+            {
+                _handler = handler;
+            }
+
+            protected override Task<System.Net.Http.HttpResponseMessage> SendAsync(
+                System.Net.Http.HttpRequestMessage request,
+                CancellationToken cancellationToken) => _handler(request);
         }
     }
 
@@ -845,14 +1242,15 @@ namespace EdgeBase.Tests
         }
 
         [Fact]
-        public void Unified_surface_fields_exist()
+        public void Unified_surface_exposes_the_six_supported_room_namespaces()
         {
+            // Keep this list aligned with docs/docs/room/client-sdk.md and the
+            // other SDKs. Media is not a Room v2 protocol namespace.
             Assert.NotNull(typeof(RoomClient).GetField("State"));
             Assert.NotNull(typeof(RoomClient).GetField("Meta"));
             Assert.NotNull(typeof(RoomClient).GetField("Signals"));
             Assert.NotNull(typeof(RoomClient).GetField("Members"));
             Assert.NotNull(typeof(RoomClient).GetField("Admin"));
-            Assert.NotNull(typeof(RoomClient).GetField("Media"));
             Assert.NotNull(typeof(RoomClient).GetField("Session"));
         }
 

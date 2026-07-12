@@ -20,8 +20,7 @@
  */
 
 import { ApiPaths, type HttpClient, type GeneratedDbApi } from '@edge-base/core';
-import type { AsyncStorageAdapter } from './token-manager.js';
-import { PUSH_TOKEN_CACHE_KEY, PUSH_DEVICE_ID_KEY } from './token-manager.js';
+import type { AsyncStorageAdapter, SecureRandomProvider } from './token-manager.js';
 
 // ─── Types ───
 
@@ -51,6 +50,53 @@ export interface PushTopicProvider {
   unsubscribeTopic(topic: string): Promise<void>;
 }
 
+interface CachedPushRegistration {
+  version: 1;
+  token: string;
+  platform: PushPlatform;
+  deviceId: string;
+}
+
+function parseCachedRegistration(value: string | null): CachedPushRegistration | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<CachedPushRegistration>;
+    if (
+      parsed.version !== 1
+      || typeof parsed.token !== 'string'
+      || !parsed.token
+      || !['ios', 'android', 'web'].includes(parsed.platform ?? '')
+      || typeof parsed.deviceId !== 'string'
+      || !parsed.deviceId
+    ) return null;
+    return parsed as CachedPushRegistration;
+  } catch {
+    // Legacy caches stored only the token. They deliberately miss the device
+    // binding and therefore force one safe re-registration/migration.
+    return null;
+  }
+}
+
+const PUSH_DEVICE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
+const pushMutationQueues = new WeakMap<AsyncStorageAdapter, Map<string, Promise<void>>>();
+
+function enqueuePushMutation<T>(
+  storage: AsyncStorageAdapter,
+  scope: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  let queues = pushMutationQueues.get(storage);
+  if (!queues) {
+    queues = new Map();
+    pushMutationQueues.set(storage, queues);
+  }
+  const previous = queues.get(scope) ?? Promise.resolve();
+  const result = previous.then(operation, operation);
+  queues.set(scope, result.then(() => undefined, () => undefined));
+  return result;
+}
+
 // ─── PushClient ───
 
 export class PushClient {
@@ -59,12 +105,22 @@ export class PushClient {
   private topicProvider: PushTopicProvider | null = null;
   private messageListeners: PushMessageHandler[] = [];
   private openedAppListeners: PushMessageHandler[] = [];
+  private readonly tokenCacheKey: string;
+  private readonly deviceIdKey: string;
 
   constructor(
     private http: HttpClient,
     private storage: AsyncStorageAdapter,
     private core?: GeneratedDbApi,
-  ) {}
+    namespace?: string,
+    private secureRandom?: SecureRandomProvider,
+  ) {
+    const projectNamespace = namespace?.trim()
+      || (typeof http.getBaseUrl === 'function' ? http.getBaseUrl().replace(/\/$/, '') : 'default');
+    const prefix = `edgebase:${encodeURIComponent(projectNamespace)}`;
+    this.tokenCacheKey = `${prefix}:push-token-cache`;
+    this.deviceIdKey = `${prefix}:push-device-id`;
+  }
 
 
   /**
@@ -150,35 +206,49 @@ export class PushClient {
       );
     }
 
-    // Auto-request permission before token acquisition
-    const permStatus = await this.requestPermission();
-    if (permStatus === 'denied') return;
+    return enqueuePushMutation(this.storage, this.tokenCacheKey, async () => {
+      // Auto-request permission before token acquisition
+      const permStatus = await this.requestPermission();
+      if (permStatus === 'denied') return;
 
-    const { token, platform } = await this.tokenProvider();
+      const { token, platform } = await this.tokenProvider!();
 
-    // Cache check — skip network if token unchanged and no new metadata
-    const cachedToken = await this.storage.getItem(PUSH_TOKEN_CACHE_KEY);
-    if (cachedToken === token && !options?.metadata) return;
+      // Cache check — skip network if token unchanged and no new metadata
+      const cachedRaw = await this.storage.getItem(this.tokenCacheKey);
+      const cached = parseCachedRegistration(cachedRaw);
+      const storedDeviceId = await this.storage.getItem(this.deviceIdKey);
+      if (
+        cached?.token === token
+        && cached.platform === platform
+        && cached.deviceId === storedDeviceId
+        && !options?.metadata
+      ) return;
 
-    const deviceId = await this.getOrCreateDeviceId();
+      const deviceId = await this.getOrCreateDeviceId();
 
-    if (this.core) {
-      await this.core.pushRegister({
-        deviceId,
+      if (this.core) {
+        await this.core.pushRegister({
+          deviceId,
+          token,
+          platform,
+          metadata: options?.metadata,
+        });
+      } else {
+        await this.http.post(ApiPaths.PUSH_REGISTER, {
+          deviceId,
+          token,
+          platform,
+          metadata: options?.metadata,
+        });
+      }
+
+      await this.storage.setItem(this.tokenCacheKey, JSON.stringify({
+        version: 1,
         token,
         platform,
-        metadata: options?.metadata,
-      });
-    } else {
-      await this.http.post(ApiPaths.PUSH_REGISTER, {
         deviceId,
-        token,
-        platform,
-        metadata: options?.metadata,
-      });
-    }
-
-    await this.storage.setItem(PUSH_TOKEN_CACHE_KEY, token);
+      } satisfies CachedPushRegistration));
+    });
   }
 
   /**
@@ -186,13 +256,61 @@ export class PushClient {
    * Called automatically on signOut.
    */
   async unregister(deviceId?: string): Promise<void> {
-    const id = deviceId ?? (await this.getOrCreateDeviceId());
-    if (this.core) {
-      await this.core.pushUnregister({ deviceId: id });
-    } else {
-      await this.http.post(ApiPaths.PUSH_UNREGISTER, { deviceId: id });
-    }
-    await this.storage.removeItem(PUSH_TOKEN_CACHE_KEY);
+    return enqueuePushMutation(this.storage, this.tokenCacheKey, async () => {
+      const cachedRaw = await this.storage.getItem(this.tokenCacheKey);
+      const cached = parseCachedRegistration(cachedRaw);
+      const storedDeviceId = await this.storage.getItem(this.deviceIdKey);
+      const id = deviceId ?? cached?.deviceId ?? storedDeviceId;
+      if (!id) {
+        if (cachedRaw) {
+          throw new Error('[EdgeBase] Push registration cannot be removed because its scoped device ID is missing. The cached registration was retained for retry.');
+        }
+        return;
+      }
+      if (!PUSH_DEVICE_ID_PATTERN.test(id)) {
+        throw new Error('[EdgeBase] Push registration has an invalid scoped device ID. The cached registration was retained for retry.');
+      }
+      if (this.core) {
+        await this.core.pushUnregister({ deviceId: id });
+      } else {
+        await this.http.post(ApiPaths.PUSH_UNREGISTER, { deviceId: id });
+      }
+      await this.storage.removeItem(this.tokenCacheKey);
+    });
+  }
+
+  /** Whether this EdgeBase project has a cached device registration. */
+  async hasCachedRegistration(): Promise<boolean> {
+    return Boolean(await this.storage.getItem(this.tokenCacheKey));
+  }
+
+  /** @internal Resolve only an already-registered device; never creates one during sign-out. */
+  async getCachedRegistrationDeviceId(): Promise<string | null> {
+    return enqueuePushMutation(this.storage, this.tokenCacheKey, async () => {
+      const cachedRaw = await this.storage.getItem(this.tokenCacheKey);
+      if (!cachedRaw) return null;
+      const cached = parseCachedRegistration(cachedRaw);
+      const storedDeviceId = await this.storage.getItem(this.deviceIdKey);
+      const deviceId = cached?.deviceId ?? storedDeviceId;
+      if (!deviceId || !PUSH_DEVICE_ID_PATTERN.test(deviceId)) {
+        throw new Error('[EdgeBase] Push registration has no valid scoped device ID. The cached registration was retained for retry.');
+      }
+      return deviceId;
+    });
+  }
+
+  /** @internal Clear a registration cache only after combined server cleanup succeeds. */
+  async completeSignOutCleanup(deviceId: string): Promise<void> {
+    return enqueuePushMutation(this.storage, this.tokenCacheKey, async () => {
+      const cachedRaw = await this.storage.getItem(this.tokenCacheKey);
+      if (!cachedRaw) return;
+      const cached = parseCachedRegistration(cachedRaw);
+      const storedDeviceId = await this.storage.getItem(this.deviceIdKey);
+      const cachedDeviceId = cached?.deviceId ?? storedDeviceId;
+      if (cachedDeviceId === deviceId) {
+        await this.storage.removeItem(this.tokenCacheKey);
+      }
+    });
   }
 
   /** Listen for push messages while app is in foreground. */
@@ -326,11 +444,23 @@ export class PushClient {
   // ─── Private helpers ───
 
   private async getOrCreateDeviceId(): Promise<string> {
-    const existing = await this.storage.getItem(PUSH_DEVICE_ID_KEY);
+    const existing = await this.storage.getItem(this.deviceIdKey);
     if (existing) return existing;
 
-    const id = `rn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    await this.storage.setItem(PUSH_DEVICE_ID_KEY, id);
+    let bytes: Uint8Array;
+    if (this.secureRandom) {
+      bytes = await this.secureRandom(16);
+    } else if (globalThis.crypto?.getRandomValues) {
+      bytes = new Uint8Array(16);
+      globalThis.crypto.getRandomValues(bytes);
+    } else {
+      throw new Error('[EdgeBase] A cryptographically secure random provider is required to create a push device ID.');
+    }
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength !== 16) {
+      throw new Error('[EdgeBase] secureRandom must return exactly 16 bytes for a push device ID.');
+    }
+    const id = `rn-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+    await this.storage.setItem(this.deviceIdKey, id);
     return id;
   }
 }

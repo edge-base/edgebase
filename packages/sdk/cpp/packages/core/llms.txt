@@ -6,6 +6,11 @@ Use this file as a quick-reference contract for AI coding assistants working wit
 
 Use this package for native client-side C++ apps and engine integrations that need the EdgeBase client surface without Unreal-specific wrappers.
 
+Native C++ token persistence is opt-in through `AuthTokenStorage`. Its
+`saveTokens` implementation must atomically and durably replace the complete
+access/refresh pair before the SDK exposes it in memory. Anonymous
+`verifyLinkPhone` must fail before network I/O without that adapter.
+
 This package is not a privileged admin SDK. Do not assume Service Key flows, raw SQL admin helpers, admin auth management, or other trusted server-only APIs exist here. If you need privileged backend access, use an EdgeBase admin SDK in a server runtime or call your own backend.
 
 ## Source Of Truth

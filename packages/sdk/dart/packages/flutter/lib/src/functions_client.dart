@@ -4,11 +4,13 @@ class FunctionCallOptions {
   final String method;
   final Object? body;
   final Map<String, String>? query;
+  final String? captchaToken;
 
   const FunctionCallOptions({
     this.method = 'POST',
     this.body,
     this.query,
+    this.captchaToken,
   });
 }
 
@@ -17,11 +19,26 @@ class FunctionsClient {
 
   FunctionsClient(this._httpClient);
 
-  Future<dynamic> call(String path, {FunctionCallOptions options = const FunctionCallOptions()}) {
+  Future<dynamic> call(String path,
+      {FunctionCallOptions options = const FunctionCallOptions()}) {
     final normalizedMethod = options.method.toUpperCase();
+    final effectiveMethod = const {'GET', 'POST', 'PUT', 'PATCH', 'DELETE'}
+            .contains(normalizedMethod)
+        ? normalizedMethod
+        : 'POST';
     final normalizedPath = '/functions/$path';
 
-    switch (normalizedMethod) {
+    if (options.captchaToken != null) {
+      return _httpClient.requestWithCaptchaToken(
+        effectiveMethod,
+        normalizedPath,
+        body: options.body,
+        query: options.query,
+        captchaToken: options.captchaToken!,
+      );
+    }
+
+    switch (effectiveMethod) {
       case 'GET':
         return _httpClient.get(normalizedPath, options.query);
       case 'PUT':
@@ -37,7 +54,8 @@ class FunctionsClient {
   }
 
   Future<dynamic> get(String path, {Map<String, String>? query}) {
-    return call(path, options: FunctionCallOptions(method: 'GET', query: query));
+    return call(path,
+        options: FunctionCallOptions(method: 'GET', query: query));
   }
 
   Future<dynamic> post(String path, [Object? body]) {
@@ -49,7 +67,8 @@ class FunctionsClient {
   }
 
   Future<dynamic> patch(String path, [Object? body]) {
-    return call(path, options: FunctionCallOptions(method: 'PATCH', body: body));
+    return call(path,
+        options: FunctionCallOptions(method: 'PATCH', body: body));
   }
 
   Future<dynamic> delete(String path) {

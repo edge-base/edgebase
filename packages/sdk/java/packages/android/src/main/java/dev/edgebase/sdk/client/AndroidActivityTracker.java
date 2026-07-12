@@ -115,4 +115,9 @@ final class AndroidActivityTracker {
             }
         });
     }
+
+    static void clearForTest() {
+        appContext = null;
+        currentActivityRef = null;
+    }
 }

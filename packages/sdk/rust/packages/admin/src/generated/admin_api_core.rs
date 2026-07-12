@@ -1,6 +1,6 @@
 //! Auto-generated admin API Core — DO NOT EDIT.
 //! Regenerate: npx tsx tools/sdk-codegen/generate.ts
-//! Source: openapi.json (0.3.8)
+//! Source: openapi.json (0.4.0)
 
 use crate::Error;
 use crate::HttpClient;
@@ -70,7 +70,7 @@ impl<'a> GeneratedAdminApi<'a> {
         self.http.post("/api/db/broadcast", body).await
     }
 
-    /// Execute SQL via DatabaseDO — POST /api/sql
+    /// Execute provider-aware raw SQL — POST /api/sql
     pub async fn execute_sql(&self, body: &Value) -> Result<Value, Error> {
         self.http.post("/api/sql", body).await
     }

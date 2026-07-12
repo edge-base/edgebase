@@ -423,6 +423,9 @@ function resolveManagedD1DeleteName(
     if (name) return name;
   }
 
+  const recordedName = resource.metadata?.resourceName;
+  if (typeof recordedName === 'string' && recordedName) return recordedName;
+
   if (workerName) {
     return buildManagedD1DatabaseName(workerName, resource.name);
   }

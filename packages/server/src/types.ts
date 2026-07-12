@@ -13,7 +13,7 @@ export interface Env {
   // ─── R2 Storage ───
   STORAGE: R2Bucket;
 
-  // ─── KV (OAuth state, WebSocket pending) ───
+  // ─── KV (legacy OAuth fallback, WebSocket pending) ───
   KV: KVNamespace;
 
   // ─── Rate Limiting Bindings ───
@@ -66,9 +66,17 @@ export interface Env {
   TURNSTILE_SECRET?: string;
   /** Turnstile site key — public, returned to clients via GET /api/config (§34) */
   CAPTCHA_SITE_KEY?: string;
+  /** Comma-separated exact hostnames accepted from Turnstile Siteverify. */
+  CAPTCHA_HOSTNAMES?: string;
   // ─── Environment Identification ───
   /** Server environment name for Service Key constraints.env evaluation */
   ENVIRONMENT?: string;
+  /**
+   * CLI-managed trust boundary for forwarded client-IP headers.
+   * Cloudflare deploys use `cloudflare`, local CLI dev uses
+   * `local-development`, and Docker/portable runtimes use `self-hosted`.
+   */
+  EDGEBASE_RUNTIME_MODE?: 'cloudflare' | 'local-development' | 'self-hosted';
 
   // ─── Push Secrets ───
   /** FCM Service Account JSON string */

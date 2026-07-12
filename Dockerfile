@@ -1,9 +1,9 @@
-FROM node:22-slim
+FROM node:22-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf
 
-RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
-
-# Install wrangler globally (workerd requires glibc — Alpine not supported)
-RUN npm install -g wrangler@4.103.0
+# workerd requires glibc, so use Debian slim instead of Alpine. Keep npm pinned
+# to the audited release used by consumer runtime images. The container invokes
+# Wrangler directly and does not need a package-manager CLI at runtime.
+RUN npm install -g npm@12.0.1 && npm install -g wrangler@4.103.0
 
 WORKDIR /app
 
@@ -41,6 +41,9 @@ RUN { \
     echo '# specific variables are not silently dropped by the generic EdgeBase image.'; \
     echo 'rm -f /app/.dev.vars'; \
     echo 'export CLOUDFLARE_INCLUDE_PROCESS_ENV="${CLOUDFLARE_INCLUDE_PROCESS_ENV:-true}"'; \
+    echo '# Docker ingress is self-hosted. Never let an env file relabel client-supplied'; \
+    echo '# CF-Connecting-IP as a Cloudflare-authenticated header.'; \
+    echo 'export EDGEBASE_RUNTIME_MODE=self-hosted'; \
     echo ''; \
     echo 'cd /app'; \
     echo 'exec su -s /bin/sh edgebase -c '\''exec wrangler dev --config "$WRANGLER_CONFIG" --port "$PORT" --ip "$HOST" --persist-to "$PERSIST_DIR" --show-interactive-dev-session=false'\'''; \
@@ -52,6 +55,7 @@ ENV HOST=0.0.0.0
 ENV PERSIST_DIR=/data
 ENV WRANGLER_CONFIG=wrangler.toml
 ENV CLOUDFLARE_INCLUDE_PROCESS_ENV=true
+ENV EDGEBASE_RUNTIME_MODE=self-hosted
 
 EXPOSE 8787
 

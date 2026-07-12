@@ -25,16 +25,27 @@ service code, and the `:core` module provides the shared KMP runtime used by bot
 ## Public Artifacts
 
 - JitPack group: `com.github.edge-base.edgebase`
-- tags are versioned with the leading `v`, for example `v0.3.8`
-- `com.github.edge-base.edgebase:edgebase-core:v0.3.8`
-- `com.github.edge-base.edgebase:edgebase-client:v0.3.8`
-- `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.3.8`
+- tags are versioned with the leading `v`, for example `v0.4.0`
+- `com.github.edge-base.edgebase:edgebase-core:v0.4.0`
+- `com.github.edge-base.edgebase:edgebase-client:v0.4.0`
+- `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.4.0`
 - the current public JitPack route validates the JVM publications of `:core` and `:client`
 - do not recommend the root `edgebase-kotlin` artifact for public installs
 
 ## Canonical Examples
 
-### Create a client
+### Create an Android client
+
+```kotlin
+import dev.edgebase.sdk.client.AndroidEdgeBase
+
+val client = AndroidEdgeBase.client(
+    activity = activity,
+    url = "https://your-project.edgebase.fun",
+)
+```
+
+### Create an iOS, browser JS, or desktop JVM client
 
 ```kotlin
 import dev.edgebase.sdk.client.ClientEdgeBase
@@ -87,6 +98,12 @@ val rows = admin.sql(
 ## Hard Rules
 
 - keep Service Keys on trusted servers only
+- Android requires `AndroidEdgeBase.client(currentActivity, url, ...)`; the shared constructor fails fast there
+- Android's default token store is memory-only; inject `DurableTokenStorage` before anonymous email/phone upgrades
+- call `client.tryRestoreSession()` before authenticated work after launch
+- persistence and configured CAPTCHA failures are thrown, not treated as missing authority
+- CAPTCHA config fetch/malformed-response failures are typed; only an explicit captcha:null response is disabled
+- browser CAPTCHA caches positive site keys for five minutes and retries only direct `challenge_error` once
 - `admin.adminAuth` is a property, not a method
 - `db(namespace, instanceId = ...)` uses a named `instanceId` parameter in Kotlin
 - `sql(namespace = ..., instanceId = ..., query = ..., params = ...)` is the canonical form
@@ -96,6 +113,7 @@ val rows = admin.sql(
 ## Common Mistakes
 
 - do not use `edgebase-admin-kotlin` in Android UI code or browser bundles
+- do not call `ClientEdgeBase(url)` directly on Android
 - do not copy Java-style `adminAuth()` or JS-style `admin.auth`
 - do not pass instance ids positionally when the code reads better with `instanceId = ...`
 - do not call `sql("select 1")`; Kotlin expects the explicit admin entrypoint signature
@@ -105,12 +123,14 @@ val rows = admin.sql(
 
 ```text
 ClientEdgeBase(url)                                     -> ClientEdgeBase
+AndroidEdgeBase.client(activity, url, tokenStorage?)    -> ClientEdgeBase (Android)
 AdminEdgeBase(url, serviceKey, projectId?)              -> AdminEdgeBase
 client.auth                                             -> AuthClient
 client.db(namespace, instanceId?)                       -> DbRef
 client.analytics                                        -> AnalyticsClient
 client.functions                                        -> FunctionsClient
 client.storage                                          -> StorageClient
+client.tryRestoreSession()                              -> suspend Boolean
 admin.adminAuth                                         -> AdminAuthClient
 admin.db(namespace, instanceId?)                        -> DbRef
 admin.sql(namespace, instanceId?, query, params)       -> suspend List<Map<String, Any?>>

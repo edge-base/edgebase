@@ -32,6 +32,17 @@ export interface UserSessionRotation {
   rotatedAt: string;
 }
 
+export interface AtomicSessionInsert {
+  id: string;
+  userId: string;
+  refreshToken: string;
+  previousRefreshToken: string | null;
+  rotatedAt: string | null;
+  expiresAt: string;
+  createdAt: string;
+  metadata: string | null;
+}
+
 export interface AuthDb {
   /** The SQL dialect (sqlite for D1, postgres for Neon/PostgreSQL). */
   readonly dialect: AuthDbDialect;
@@ -59,11 +70,17 @@ export interface AuthDb {
    */
   batch(statements: { sql: string; params?: unknown[] }[]): Promise<void>;
 
+  /** Execute a transaction serialized by a logical lock key. */
+  batchWithLock(lockKey: string | string[], statements: { sql: string; params?: unknown[] }[]): Promise<void>;
+
   /** Atomically replace one admin session credential if it is still current. */
   compareAndSwapAdminSession(rotation: AdminSessionRotation): Promise<boolean>;
 
   /** Atomically rotate one user session credential if it is still current. */
   compareAndSwapUserSession(rotation: UserSessionRotation): Promise<boolean>;
+
+  /** Insert a session and enforce the per-user cap in the same transaction. */
+  createSessionWithLimit(session: AtomicSessionInsert, maxSessions: number): Promise<void>;
 }
 
 // ─── D1 Implementation ───
@@ -107,6 +124,13 @@ export class D1AuthDb implements AuthDb {
     );
   }
 
+  async batchWithLock(
+    _lockKey: string | string[],
+    statements: { sql: string; params?: unknown[] }[],
+  ): Promise<void> {
+    await this.batch(statements);
+  }
+
   async compareAndSwapAdminSession(rotation: AdminSessionRotation): Promise<boolean> {
     if (rotation.currentRefreshTokens.length === 0) return false;
     const placeholders = rotation.currentRefreshTokens.map(() => '?').join(', ');
@@ -141,6 +165,45 @@ export class D1AuthDb implements AuthDb {
       new Date().toISOString(),
     ).run();
     return (result.meta?.changes ?? 0) === 1;
+  }
+
+  async createSessionWithLimit(session: AtomicSessionInsert, maxSessions: number): Promise<void> {
+    const insert = this.db.prepare(
+      `INSERT INTO _sessions
+       (id, userId, refreshToken, previousRefreshToken, rotatedAt, expiresAt, createdAt, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      session.id,
+      session.userId,
+      session.refreshToken,
+      session.previousRefreshToken,
+      session.rotatedAt,
+      session.expiresAt,
+      session.createdAt,
+      session.metadata,
+    );
+
+    if (maxSessions <= 0) {
+      await insert.run();
+      return;
+    }
+
+    // D1 batch statements execute atomically and serially. Remove expired
+    // rows, insert, then retain the authoritative new session plus the newest
+    // remaining rows.
+    const cleanExpired = this.db.prepare(
+      `DELETE FROM _sessions WHERE userId = ? AND expiresAt <= ?`,
+    ).bind(session.userId, session.createdAt);
+    const prune = this.db.prepare(
+      `DELETE FROM _sessions
+       WHERE id IN (
+         SELECT id FROM _sessions
+         WHERE userId = ?
+         ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END ASC, createdAt DESC, id DESC
+         LIMIT -1 OFFSET ?
+       )`,
+    ).bind(session.userId, session.id, maxSessions);
+    await this.db.batch([cleanExpired, insert, prune]);
   }
 }
 
@@ -195,11 +258,12 @@ export function adaptSqlDialect(sql: string): string {
   );
 
   if (ignoreAdapted !== sql) {
-    let result = ignoreAdapted.trimEnd();
-    if (!result.endsWith(';')) {
-      result += ' ON CONFLICT DO NOTHING';
+    const result = ignoreAdapted.trimEnd().replace(/;\s*$/, '');
+    const returningIndex = result.search(/\sRETURNING\b/i);
+    if (returningIndex >= 0) {
+      return `${result.slice(0, returningIndex)} ON CONFLICT DO NOTHING${result.slice(returningIndex)}`;
     }
-    return result;
+    return `${result} ON CONFLICT DO NOTHING`;
   }
 
   // 2. INSERT OR REPLACE → INSERT ... ON CONFLICT (pk) DO UPDATE SET ...
@@ -209,8 +273,8 @@ export function adaptSqlDialect(sql: string): string {
   );
 
   if (replaceAdapted !== sql) {
-    // Extract column names: INSERT INTO "table" ("col1", "col2", ...) VALUES (...)
-    const colMatch = replaceAdapted.match(/INTO\s+"[^"]+"\s*\(([^)]+)\)/i);
+    // Extract column names from quoted or unquoted table/column identifiers.
+    const colMatch = replaceAdapted.match(/INTO\s+(?:"[^"]+"|[A-Za-z_][\w$]*)\s*\(([^)]+)\)/i);
     if (colMatch) {
       const cols = colMatch[1].split(',').map(c => c.trim().replace(/"/g, ''));
       // First column is the PK (id, email, token, key, etc.)
@@ -218,11 +282,14 @@ export function adaptSqlDialect(sql: string): string {
       const updateCols = cols.filter(c => c !== pk);
 
       let result = replaceAdapted.trimEnd().replace(/;\s*$/, '');
+      const returningIndex = result.search(/\sRETURNING\b/i);
+      const returningClause = returningIndex >= 0 ? result.slice(returningIndex) : '';
+      if (returningIndex >= 0) result = result.slice(0, returningIndex);
       if (updateCols.length > 0) {
-        const setClause = updateCols.map(c => `"${c}" = EXCLUDED."${c}"`).join(', ');
-        result += ` ON CONFLICT ("${pk}") DO UPDATE SET ${setClause}`;
+        const setClause = updateCols.map(c => `${c} = EXCLUDED.${c}`).join(', ');
+        result += ` ON CONFLICT (${pk}) DO UPDATE SET ${setClause}${returningClause}`;
       } else {
-        result += ' ON CONFLICT DO NOTHING';
+        result += ` ON CONFLICT DO NOTHING${returningClause}`;
       }
       return result;
     }
@@ -230,6 +297,55 @@ export function adaptSqlDialect(sql: string): string {
   }
 
   return sql;
+}
+
+const PG_CANONICAL_COLUMNS: Record<string, string> = {
+  userid: 'userId',
+  shardid: 'shardId',
+  provideruserid: 'providerUserId',
+  reservationid: 'reservationId',
+  passwordhash: 'passwordHash',
+  displayname: 'displayName',
+  avatarurl: 'avatarUrl',
+  emailvisibility: 'emailVisibility',
+  customclaims: 'customClaims',
+  isanonymous: 'isAnonymous',
+  phoneverified: 'phoneVerified',
+  appmetadata: 'appMetadata',
+  lastsigninat: 'lastSignInAt',
+  lastsignedinat: 'lastSignedInAt',
+  banneduntil: 'bannedUntil',
+  authrevision: 'authRevision',
+  authmutationid: 'authMutationId',
+  createdat: 'createdAt',
+  updatedat: 'updatedAt',
+  adminid: 'adminId',
+  refreshtoken: 'refreshToken',
+  previousrefreshtoken: 'previousRefreshToken',
+  rotatedat: 'rotatedAt',
+  expiresat: 'expiresAt',
+  deviceid: 'deviceId',
+  deviceinfo: 'deviceInfo',
+  credentialid: 'credentialId',
+  consumptionid: 'consumptionId',
+  secrethash: 'secretHash',
+  maxattempts: 'maxAttempts',
+  consumedat: 'consumedAt',
+  codehash: 'codeHash',
+  credentialpublickey: 'credentialPublicKey',
+};
+
+function canonicalizePgRow<T>(row: Record<string, unknown>): T {
+  const canonical: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    const canonicalKey = PG_CANONICAL_COLUMNS[key] ?? key;
+    canonical[canonicalKey] = (canonicalKey === 'count' || canonicalKey === 'cnt' || canonicalKey === 'counter')
+      && typeof value === 'string'
+      && /^-?\d+$/.test(value)
+      ? Number(value)
+      : value;
+  }
+  return canonical as T;
 }
 
 export class PgAuthDb implements AuthDb {
@@ -254,14 +370,14 @@ export class PgAuthDb implements AuthDb {
   async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> {
     return this.withClient(async (client) => {
       const result = await client.query(this.adaptSql(sql), params ?? []);
-      return result.rows as T[];
+      return result.rows.map((row) => canonicalizePgRow<T>(row));
     });
   }
 
   async first<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | null> {
     return this.withClient(async (client) => {
       const result = await client.query(this.adaptSql(sql), params ?? []);
-      return (result.rows[0] ?? null) as T | null;
+      return result.rows[0] ? canonicalizePgRow<T>(result.rows[0]) : null;
     });
   }
 
@@ -276,6 +392,29 @@ export class PgAuthDb implements AuthDb {
     await this.withClient(async (client) => {
       await client.query('BEGIN');
       try {
+        for (const stmt of statements) {
+          await client.query(this.adaptSql(stmt.sql), stmt.params ?? []);
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      }
+    });
+  }
+
+  async batchWithLock(
+    lockKey: string | string[],
+    statements: { sql: string; params?: unknown[] }[],
+  ): Promise<void> {
+    if (statements.length === 0) return;
+    await this.withClient(async (client) => {
+      await client.query('BEGIN');
+      try {
+        const lockKeys = [...new Set(Array.isArray(lockKey) ? lockKey : [lockKey])].sort();
+        for (const key of lockKeys) {
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [key]);
+        }
         for (const stmt of statements) {
           await client.query(this.adaptSql(stmt.sql), stmt.params ?? []);
         }
@@ -311,9 +450,9 @@ export class PgAuthDb implements AuthDb {
     return this.withClient(async (client) => {
       const result = await client.query(this.adaptSql(
         `UPDATE _sessions
-         SET "refreshToken" = ?, "previousRefreshToken" = ?, "rotatedAt" = ?, "expiresAt" = ?,
+         SET refreshToken = ?, previousRefreshToken = ?, rotatedAt = ?, expiresAt = ?,
              metadata = jsonb_set(COALESCE(metadata::jsonb, '{}'), '{lastActiveAt}', to_jsonb(?::text))::text
-         WHERE id = ? AND "refreshToken" = ? AND "expiresAt" > ?
+         WHERE id = ? AND refreshToken = ? AND expiresAt > ?
          RETURNING id`,
       ), [
         rotation.nextRefreshToken,
@@ -326,6 +465,55 @@ export class PgAuthDb implements AuthDb {
         new Date().toISOString(),
       ]);
       return result.rowCount === 1;
+    });
+  }
+
+  async createSessionWithLimit(session: AtomicSessionInsert, maxSessions: number): Promise<void> {
+    await this.withClient(async (client) => {
+      await client.query('BEGIN');
+      try {
+        // Serialize all session-cap transitions for one user. Hash collisions
+        // only reduce concurrency; they cannot weaken the cap invariant.
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [session.userId]);
+        if (maxSessions > 0) {
+          await client.query(
+            'DELETE FROM _sessions WHERE userId = $1 AND expiresAt <= $2',
+            [session.userId, session.createdAt],
+          );
+        }
+        await client.query(
+          `INSERT INTO _sessions
+           (id, userId, refreshToken, previousRefreshToken, rotatedAt, expiresAt, createdAt, metadata)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            session.id,
+            session.userId,
+            session.refreshToken,
+            session.previousRefreshToken,
+            session.rotatedAt,
+            session.expiresAt,
+            session.createdAt,
+            session.metadata,
+          ],
+        );
+
+        if (maxSessions > 0) {
+          await client.query(
+            `DELETE FROM _sessions
+             WHERE id IN (
+               SELECT id FROM _sessions
+               WHERE userId = $1
+               ORDER BY CASE WHEN id = $2 THEN 0 ELSE 1 END ASC, createdAt DESC, id DESC
+               OFFSET $3
+             )`,
+            [session.userId, session.id, maxSessions],
+          );
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      }
     });
   }
 }

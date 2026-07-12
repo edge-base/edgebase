@@ -25,6 +25,29 @@ function makeJwt(userId: string, extra: Record<string, unknown> = {}): string {
   return `${header}.${payload}.signature`;
 }
 
+const DEFAULT_COOKIE_PREFIX = `edgebase:${encodeURIComponent('https://api.example.com')}`;
+
+class DefaultAuthAliasedStore extends Map<string, string> {
+  private normalize(key: string): string {
+    const defaultSuffixes = [
+      'refresh-token', 'refresh-lock', 'refresh-result', 'cookie-session',
+      'cookie-oauth-recovery', 'pending-signout', 'auth-epoch',
+    ];
+    if (defaultSuffixes.some((suffix) => key === `edgebase:${suffix}`)) {
+      return `${DEFAULT_COOKIE_PREFIX}:${key.slice('edgebase:'.length)}`;
+    }
+    if (key.startsWith('edgebase:oauth-pending:')) {
+      return `${DEFAULT_COOKIE_PREFIX}:${key.slice('edgebase:'.length)}`;
+    }
+    return key;
+  }
+
+  override get(key: string): string | undefined { return super.get(this.normalize(key)); }
+  override set(key: string, value: string): this { return super.set(this.normalize(key), value); }
+  override has(key: string): boolean { return super.has(this.normalize(key)); }
+  override delete(key: string): boolean { return super.delete(this.normalize(key)); }
+}
+
 class MockBroadcastChannel {
   static instances: MockBroadcastChannel[] = [];
   static messages: unknown[] = [];
@@ -70,14 +93,14 @@ interface BrowserHarness {
 }
 
 function installBrowserMocks(withBroadcastChannel = true): BrowserHarness {
-  const store = new Map<string, string>();
+  const store = new DefaultAuthAliasedStore();
   const listeners = new Map<string, Set<(event?: Event) => void>>();
   const windowMock = {
     location: {
       origin: 'https://app.example.com',
       href: 'https://app.example.com/auth/callback',
     },
-    history: { replaceState: vi.fn() },
+    history: { state: { screen: 'auth' }, replaceState: vi.fn() },
     addEventListener: vi.fn((type: string, listener: (event?: Event) => void) => {
       const entries = listeners.get(type) ?? new Set();
       entries.add(listener);
@@ -146,6 +169,38 @@ describe('HttpOnly-cookie TokenManager', () => {
     expect(persistedValues).not.toContain('must-not-broadcast');
 
     manager.destroy();
+  });
+
+  it('keeps same-principal peer refreshes from invalidating or re-emitting auth state', async () => {
+    installBrowserMocks();
+    const leader = new TokenManager('https://api.example.com', {
+      refreshTokenTransport: 'httpOnlyCookie',
+    });
+    const follower = new TokenManager('https://api.example.com', {
+      refreshTokenTransport: 'httpOnlyCookie',
+    });
+    leader.setTokens({ accessToken: makeJwt('shared-user', { exp: 1 }), refreshToken: '' });
+    const followerAccess = makeJwt('shared-user');
+    follower.setTokens({ accessToken: followerAccess, refreshToken: '' });
+    const followerStates: Array<string | null> = [];
+    follower.onAuthStateChange((user) => followerStates.push(user?.id ?? null));
+
+    await leader.forceRefresh(async () => ({
+      accessToken: makeJwt('shared-user'),
+      refreshToken: '',
+    }));
+
+    expect(follower.currentAccessToken).toBe(followerAccess);
+    expect(followerStates).toEqual(['shared-user']);
+    const followerRefresh = vi.fn(async () => ({
+      accessToken: makeJwt('shared-user'),
+      refreshToken: '',
+    }));
+    await expect(follower.getAccessToken(followerRefresh)).resolves.toBe(followerAccess);
+    expect(followerRefresh).not.toHaveBeenCalled();
+
+    leader.destroy();
+    follower.destroy();
   });
 
   it('restores no online identity from a forged marker and only an id hint while explicitly offline', async () => {
@@ -330,7 +385,7 @@ describe('HttpOnly-cookie TokenManager', () => {
     store.set('edgebase:cookie-session', markerB);
     const oldTabStorageListener = [...(listeners.get('storage') ?? [])][0];
     oldTabStorageListener?.({
-      key: 'edgebase:cookie-session',
+      key: `${DEFAULT_COOKIE_PREFIX}:cookie-session`,
       oldValue: JSON.stringify({ version: 1, userId: 'account-a' }),
       newValue: markerB,
     } as StorageEvent);
@@ -370,7 +425,7 @@ describe('HttpOnly-cookie TokenManager', () => {
     store.set('edgebase:cookie-session', marker);
     const storageListener = [...(listeners.get('storage') ?? [])][0];
     storageListener?.({
-      key: 'edgebase:cookie-session',
+      key: `${DEFAULT_COOKIE_PREFIX}:cookie-session`,
       oldValue: null,
       newValue: marker,
     } as StorageEvent);
@@ -394,13 +449,13 @@ describe('HttpOnly-cookie TokenManager', () => {
     const refresh = manager.getAccessToken(() => new Promise((resolve) => {
       resolveRefresh = resolve;
     }));
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => setTimeout(resolve, 45));
 
     const markerB = JSON.stringify({ version: 1, userId: 'account-b' });
     store.set('edgebase:cookie-session', markerB);
     const storageListener = [...(listeners.get('storage') ?? [])][0];
     storageListener?.({
-      key: 'edgebase:cookie-session',
+      key: `${DEFAULT_COOKIE_PREFIX}:cookie-session`,
       oldValue: JSON.stringify({ version: 1, userId: 'account-a' }),
       newValue: markerB,
     } as StorageEvent);
@@ -416,7 +471,7 @@ describe('HttpOnly-cookie TokenManager', () => {
     manager.destroy();
   });
 
-  it('rejects a peer success that arrives after another tab definitively loses cookie auth', async () => {
+  it('serializes a peer definitive cookie rejection after an in-flight refresh', async () => {
     const { store } = installBrowserMocks();
     const lateManager = new TokenManager('https://api.example.com', {
       refreshTokenTransport: 'httpOnlyCookie',
@@ -431,22 +486,20 @@ describe('HttpOnly-cookie TokenManager', () => {
     const lateRefresh = lateManager.getAccessToken(() => new Promise((resolve) => {
       resolveLate = resolve;
     }));
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => setTimeout(resolve, 45));
 
-    // Simulate the first tab becoming unreachable immediately after its fetch
-    // was sent, allowing the peer to acquire the shared lock and receive the
-    // server's definitive denial first.
+    // The shared auth-mutation lock prevents a second tab from racing a
+    // definitive rejection against an already-sent refresh. Queue it, allow
+    // the first response to settle, then verify the denial becomes final for
+    // both tabs.
     store.delete('edgebase:refresh-lock');
-    await expect(rejectedManager.getAccessToken(async () => {
+    const rejectedRefresh = rejectedManager.getAccessToken(async () => {
       throw new EdgeBaseError(401, 'Cookie session revoked.', undefined, 'invalid-refresh-token');
-    })).rejects.toMatchObject({ code: 401 });
-    expect(store.has('edgebase:cookie-session')).toBe(false);
+    });
 
     resolveLate({ accessToken: makeJwt('revoked-user'), refreshToken: '' });
-    await expect(lateRefresh).rejects.toMatchObject({
-      code: 401,
-      slug: 'auth-state-changed',
-    });
+    await expect(lateRefresh).resolves.toBeTypeOf('string');
+    await expect(rejectedRefresh).rejects.toMatchObject({ code: 401 });
     expect(lateManager.getCurrentUser()).toBeNull();
     expect(rejectedManager.getCurrentUser()).toBeNull();
     expect(store.has('edgebase:cookie-session')).toBe(false);
@@ -595,6 +648,12 @@ describe('HttpOnly-cookie AuthClient', () => {
     const accessToken = makeJwt('oauth-cookie-user', { sid: 'session-1' });
     const fetchMock = vi.fn(async (input: string | URL) => {
       const url = String(input);
+      if (url.endsWith('/api/config')) {
+        return new Response(JSON.stringify({ captcha: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (url.endsWith('/api/auth/refresh')) {
         return new Response(JSON.stringify({
           user: { id: 'oauth-cookie-user', email: 'oauth@example.com' },
@@ -613,8 +672,11 @@ describe('HttpOnly-cookie AuthClient', () => {
       refreshTokenTransport: 'httpOnlyCookie',
     });
 
-    const start = client.auth.signInWithOAuth('github', { navigate: false });
+    const start = await client.auth.signInWithOAuth('github', { navigate: false });
     expect(start.url).toContain('auth_transport=cookie');
+    const recoveryNonce = new URL(start.url).searchParams.get('oauth_recovery_nonce')!;
+    (window as unknown as { location: { href: string } }).location.href =
+      `https://app.example.com/auth/callback?keep=query&auth_transport=stale#auth_transport=cookie&oauth_recovery_nonce=${recoveryNonce}&state=keep-fragment`;
     const result = await client.auth.handleOAuthCallback();
 
     expect(result).toMatchObject({
@@ -624,27 +686,28 @@ describe('HttpOnly-cookie AuthClient', () => {
       sessionId: 'session-1',
     });
     expect(result?.refreshToken).toBe('');
-    const refreshInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const refreshCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/api/auth/refresh'));
+    const refreshInit = refreshCall?.[1] as RequestInit;
     expect(refreshInit.credentials).toBe('include');
     expect(new Headers(refreshInit.headers).get('X-EdgeBase-Auth-Transport')).toBe('cookie');
     expect(refreshInit.body).toBe('{}');
     expect(window.history.replaceState).toHaveBeenCalledWith(
-      {},
+      { screen: 'auth' },
       'Test',
       '/auth/callback?keep=query#state=keep-fragment',
     );
 
-    // Query callbacks remain compatible with older servers/redirect handlers.
+    // Replaying the callback after the pending flow was consumed is rejected.
     await expect(client.auth.handleOAuthCallback(
       'https://app.example.com/auth/callback?auth_transport=cookie',
-    )).resolves.toMatchObject({ user: { id: 'oauth-cookie-user' } });
+    )).resolves.toBeNull();
 
     const callsAfterSuccess = fetchMock.mock.calls.length;
     (window as unknown as { location: { href: string } }).location.href =
       'https://app.example.com/auth/callback?keep=query&error_description=Denied#auth_transport=cookie&error=access_denied&state=keep-fragment';
     await expect(client.auth.handleOAuthCallback()).resolves.toBeNull();
     expect(window.history.replaceState).toHaveBeenLastCalledWith(
-      {},
+      { screen: 'auth' },
       'Test',
       '/auth/callback?keep=query#state=keep-fragment',
     );
@@ -653,6 +716,61 @@ describe('HttpOnly-cookie AuthClient', () => {
     )).resolves.toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(callsAfterSuccess);
 
+    client.destroy();
+  });
+
+  it('keeps a concurrent cookie OAuth flow after nonce mismatch and isolates it from old-tab cleanup', async () => {
+    const { store } = installBrowserMocks();
+    const apiOrigin = `https://api-nonce-${crypto.randomUUID()}.example`;
+    const callbackAccess = makeJwt('cookie-bound-user', { sid: 'cookie-bound-session' });
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      if (String(input).endsWith('/api/config')) {
+        return new Response(JSON.stringify({ captcha: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        user: { id: 'cookie-bound-user' },
+        accessToken: callbackAccess,
+        sessionTransport: 'cookie',
+        sessionId: 'cookie-bound-session',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createClient(apiOrigin, {
+      refreshTokenTransport: 'httpOnlyCookie',
+    });
+
+    const start = await client.auth.signInWithOAuth('github', { navigate: false });
+    const callsAfterStart = fetchMock.mock.calls.length;
+    const legitimateNonce = new URL(start.url).searchParams.get('oauth_recovery_nonce')!;
+    const storagePrefix = `edgebase:${encodeURIComponent(apiOrigin)}`;
+    const pendingKey = `${storagePrefix}:oauth-pending:${legitimateNonce}`;
+    const legacyRecoveryKey = `${storagePrefix}:cookie-oauth-recovery`;
+    expect(store.has(pendingKey)).toBe(true);
+    // A 0.3.8 tab knows only the legacy cookie-recovery key. Its cleanup must
+    // not cancel the new pending-flow registry.
+    store.delete(legacyRecoveryKey);
+    expect(store.has(pendingKey)).toBe(true);
+    const wrongNonce = legitimateNonce === '0'.repeat(64) ? '1'.repeat(64) : '0'.repeat(64);
+    (window as unknown as { location: { href: string } }).location.href =
+      `https://app.example.com/auth/callback#auth_transport=cookie&oauth_recovery_nonce=${wrongNonce}`;
+
+    await expect(client.auth.handleOAuthCallback()).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(callsAfterStart);
+    expect(store.has(legacyRecoveryKey)).toBe(false);
+    expect(store.has(pendingKey)).toBe(true);
+    expect(client.auth.currentUser).toBeNull();
+
+    // The original bound callback remains usable and consumes only its entry.
+    (window as unknown as { location: { href: string } }).location.href =
+      `https://app.example.com/auth/callback#auth_transport=cookie&oauth_recovery_nonce=${legitimateNonce}`;
+    await expect(client.auth.handleOAuthCallback()).resolves.toMatchObject({
+      user: { id: 'cookie-bound-user' },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(callsAfterStart + 1);
+    expect(store.has(pendingKey)).toBe(false);
     client.destroy();
   });
 
@@ -671,20 +789,22 @@ describe('HttpOnly-cookie AuthClient', () => {
       refreshTokenTransport: 'httpOnlyCookie',
     });
 
-    const results = await Promise.all([
-      client.auth.signUp({ email: 'compat@example.com', password: 'password', captchaToken: 'captcha' }),
-      client.auth.signIn({ email: 'compat@example.com', password: 'password', captchaToken: 'captcha' }),
-      client.auth.signInAnonymously({ captchaToken: 'captcha' }),
-      client.auth.verifyMagicLink('magic-token'),
-      client.auth.verifyPhone({ phone: '+15555550123', code: '123456' }),
-      client.auth.linkWithEmail({ email: 'compat@example.com', password: 'password' }),
-      client.auth.changePassword({ currentPassword: 'password', newPassword: 'new-password' }),
-      client.auth.verifyEmailOtp({ email: 'compat@example.com', code: '123456' }),
-      client.auth.passkeysAuthenticate({ assertion: true }),
-      client.auth.mfa.verifyTotp('mfa-ticket', '123456'),
-      client.auth.mfa.useRecoveryCode('mfa-ticket', 'recovery-code'),
-      client.auth.refreshSession(),
-    ]);
+    // Exercise the public result contract one operation at a time. Concurrent
+    // identity mutations are intentionally serialized and a refresh that began
+    // before a newer sign-in is rejected instead of rotating the new session.
+    const results = [];
+    results.push(await client.auth.signUp({ email: 'compat@example.com', password: 'password', captchaToken: 'captcha' }));
+    results.push(await client.auth.signIn({ email: 'compat@example.com', password: 'password', captchaToken: 'captcha' }));
+    results.push(await client.auth.signInAnonymously({ captchaToken: 'captcha' }));
+    results.push(await client.auth.verifyMagicLink('magic-token'));
+    results.push(await client.auth.verifyPhone({ phone: '+15555550123', code: '123456' }));
+    results.push(await client.auth.linkWithEmail({ email: 'compat@example.com', password: 'password' }));
+    results.push(await client.auth.changePassword({ currentPassword: 'password', newPassword: 'new-password' }));
+    results.push(await client.auth.verifyEmailOtp({ email: 'compat@example.com', code: '123456' }));
+    results.push(await client.auth.passkeysAuthenticate({ assertion: true }));
+    results.push(await client.auth.mfa.verifyTotp('mfa-ticket', '123456'));
+    results.push(await client.auth.mfa.useRecoveryCode('mfa-ticket', 'recovery-code'));
+    results.push(await client.auth.refreshSession());
 
     for (const result of results) {
       expect(isAuthResult(result)).toBe(true);
@@ -704,6 +824,12 @@ describe('HttpOnly-cookie AuthClient', () => {
     let refreshAttempts = 0;
     const recoveredAccess = makeJwt('oauth-recovered-user', { sid: 'oauth-recovered-session' });
     const fetchMock = vi.fn(async (input: string | URL) => {
+      if (String(input).endsWith('/api/config')) {
+        return new Response(JSON.stringify({ captcha: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (!String(input).endsWith('/api/auth/refresh')) {
         throw new Error(`Unexpected request: ${String(input)}`);
       }
@@ -723,9 +849,20 @@ describe('HttpOnly-cookie AuthClient', () => {
     const first = createClient('https://api.example.com', {
       refreshTokenTransport: 'httpOnlyCookie',
     });
+    const start = await first.auth.signInWithOAuth('github', { navigate: false });
+    const recoveryNonce = new URL(start.url).searchParams.get('oauth_recovery_nonce')!;
+    (window as unknown as { location: { href: string } }).location.href =
+      `https://app.example.com/auth/callback#auth_transport=cookie&oauth_recovery_nonce=${recoveryNonce}`;
     await expect(first.auth.handleOAuthCallback()).resolves.toBeNull();
-    expect(window.history.replaceState).toHaveBeenCalledWith({}, 'Test', '/auth/callback');
+    expect(window.history.replaceState).toHaveBeenCalledWith(
+      { screen: 'auth' },
+      'Test',
+      '/auth/callback',
+    );
     expect(store.has('edgebase:cookie-oauth-recovery')).toBe(true);
+    expect(JSON.parse(store.get('edgebase:cookie-oauth-recovery')!)).toMatchObject({
+      version: 1,
+    });
     expect(store.has('edgebase:cookie-session')).toBe(false);
     first.destroy();
 
@@ -746,6 +883,36 @@ describe('HttpOnly-cookie AuthClient', () => {
     reloaded.destroy();
   });
 
+  it('retains parameterless recovery for a verified version-1 cookie callback during SDK upgrade', async () => {
+    const { store } = installBrowserMocks();
+    store.set('edgebase:cookie-oauth-recovery', JSON.stringify({
+      version: 1,
+      createdAt: Date.now(),
+    }));
+    (window as unknown as { location: { href: string } }).location.href =
+      'https://app.example.com/auth/callback';
+    const accessToken = makeJwt('legacy-cookie-recovery', { sid: 'legacy-session' });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      user: { id: 'legacy-cookie-recovery' },
+      accessToken,
+      sessionTransport: 'cookie',
+      sessionId: 'legacy-session',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = createClient('https://api.example.com', {
+      refreshTokenTransport: 'httpOnlyCookie',
+    });
+    await expect(client.auth.handleOAuthCallback()).resolves.toMatchObject({
+      user: { id: 'legacy-cookie-recovery' },
+      accessToken,
+      sessionTransport: 'cookie',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(store.has('edgebase:cookie-oauth-recovery')).toBe(false);
+    client.destroy();
+  });
+
   it('fails closed and scrubs legacy OAuth bearer tokens in a cookie-mode rolling upgrade', async () => {
     const { store } = installBrowserMocks();
     (window as unknown as { location: { href: string } }).location.href =
@@ -763,7 +930,7 @@ describe('HttpOnly-cookie AuthClient', () => {
     expect(store.has('edgebase:cookie-session')).toBe(false);
     expect(store.has('edgebase:refresh-token')).toBe(false);
     expect(window.history.replaceState).toHaveBeenCalledWith(
-      {},
+      { screen: 'auth' },
       'Test',
       '/auth/callback?keep=query#state=keep-fragment',
     );
@@ -1181,7 +1348,7 @@ describe('HttpOnly-cookie AuthClient', () => {
         () => null,
         (error: unknown) => error,
       );
-      await vi.advanceTimersByTimeAsync(20);
+      await vi.advanceTimersByTimeAsync(40);
       expect(requests).toEqual(['refresh-start']);
       const signOut = signOutClient.auth.signOut();
 
@@ -1250,7 +1417,7 @@ describe('HttpOnly-cookie AuthClient', () => {
         () => null,
         (error: unknown) => error,
       );
-      await vi.advanceTimersByTimeAsync(20);
+      await vi.advanceTimersByTimeAsync(40);
       expect(requests).toEqual(['refresh-start']);
       const signOut = client.auth.signOut();
 
@@ -1258,6 +1425,7 @@ describe('HttpOnly-cookie AuthClient', () => {
       expect(requests).toEqual(['refresh-start']);
       await vi.advanceTimersByTimeAsync(101);
       await expect(refreshOutcome).resolves.toMatchObject({ code: 0 });
+      await vi.advanceTimersByTimeAsync(40);
       await signOut;
 
       expect(requests).toEqual(['refresh-start', 'refresh-abort', 'signout']);
@@ -1304,9 +1472,10 @@ describe('HttpOnly-cookie AuthClient', () => {
         () => null,
         (error: unknown) => error,
       );
-      await vi.advanceTimersByTimeAsync(20);
+      await vi.advanceTimersByTimeAsync(40);
       const signOut = client.auth.signOut();
       await vi.advanceTimersByTimeAsync(20_001);
+      await vi.advanceTimersByTimeAsync(20);
       await signOut;
 
       expect(requests).toEqual(['signout']);

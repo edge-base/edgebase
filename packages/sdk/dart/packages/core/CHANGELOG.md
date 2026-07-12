@@ -1,3 +1,8 @@
+## 0.4.0
+
+- Synchronized package metadata and install guidance with EdgeBase 0.3.9
+- No public Dart API compatibility break is introduced
+
 ## 0.3.8
 
 - Synchronized package metadata and install guidance with EdgeBase 0.3.8

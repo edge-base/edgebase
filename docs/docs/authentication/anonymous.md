@@ -14,7 +14,7 @@ This feature is in **beta**. Core behavior is stable and ready to try, but some 
 Let users explore your app without registration. Anonymous accounts can be converted to permanent accounts later.
 
 :::tip Captcha Protection
-When [captcha is enabled](/docs/authentication/captcha), anonymous sign-in is automatically protected by Cloudflare Turnstile. All client SDKs handle token acquisition transparently — no code changes needed.
+When [CAPTCHA is enabled](/docs/authentication/captcha), anonymous sign-in is protected by Turnstile. Supported UI runtimes can acquire the token automatically; headless runtimes and custom UI must provide it explicitly.
 :::
 
 ## Enable
@@ -140,6 +140,13 @@ client.auth().linkWithEmail("user@example.com", "securePassword");
 
 </TabItem>
 </Tabs>
+
+Conversion atomically revokes every anonymous session and replaces them with
+one permanent-account session. If the network response or local credential
+write fails after the request was sent, retry within five minutes using the
+same email (case and surrounding whitespace are normalized) and exact
+password. EdgeBase returns the original replacement pair; a different user,
+email, password, or non-initiating session cannot recover it.
 
 ## Convert to OAuth Account
 

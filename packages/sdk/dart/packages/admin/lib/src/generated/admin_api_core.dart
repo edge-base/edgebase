@@ -1,6 +1,6 @@
 // Auto-generated admin API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 import 'package:edgebase_core/src/http_client.dart';
 
@@ -63,7 +63,7 @@ class GeneratedAdminApi {
     return _http.post('/db/broadcast', body);
   }
 
-  /// Execute SQL via DatabaseDO — POST /api/sql
+  /// Execute provider-aware raw SQL — POST /api/sql
   Future<dynamic> executeSql(Object? body) async {
     return _http.post('/sql', body);
   }

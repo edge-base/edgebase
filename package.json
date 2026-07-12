@@ -1,6 +1,6 @@
 {
     "name": "edgebase",
-    "version": "0.3.8",
+    "version": "0.4.0",
     "type": "module",
     "private": true,
     "scripts": {
@@ -22,7 +22,7 @@
         "skills:verify-export": "node ./tools/agent-skill-gen/verify-export.mjs",
         "release:sync": "node ./scripts/sync-release-versions.mjs",
         "release:check": "node ./scripts/check-release-versions.mjs",
-        "release:test": "node --test ./scripts/release-version.test.mjs",
+        "release:test": "node --test ./scripts/release-version.test.mjs ./scripts/supply-chain-config.test.mjs",
         "release:preflight": "pnpm release:test && pnpm release:check && pnpm security:audit",
         "release:set": "node ./scripts/set-release-version.mjs",
         "release:npm": "node ./dev/release/publish-npm-release.mjs",

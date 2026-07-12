@@ -20,9 +20,9 @@ This package is one part of the wider EdgeBase platform. For the full platform, 
 
 | Module | Artifact | Targets |
 | --- | --- | --- |
-| `:core` | `com.github.edge-base.edgebase:edgebase-core:v0.3.8` | current JitPack route publishes the JVM variant of the shared runtime |
-| `:client` | `com.github.edge-base.edgebase:edgebase-client:v0.3.8` | current JitPack route publishes the JVM variant of the client runtime |
-| `:admin` | `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.3.8` | JVM only |
+| `:core` | `com.github.edge-base.edgebase:edgebase-core:v0.4.0` | current JitPack route publishes the JVM variant of the shared runtime |
+| `:client` | `com.github.edge-base.edgebase:edgebase-client:v0.4.0` | current JitPack route publishes the JVM variant of the client runtime |
+| `:admin` | `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.4.0` | JVM only |
 
 If you build from the monorepo directly, depend on the Gradle modules under
 `packages/sdk/kotlin`. That path remains the way to consume the full Android, iOS,
@@ -38,13 +38,42 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-core:v0.3.8")
-    implementation("com.github.edge-base.edgebase:edgebase-client:v0.3.8")
-    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.3.8")
+    implementation("com.github.edge-base.edgebase:edgebase-core:v0.4.0")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.4.0")
+    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.4.0")
 }
 ```
 
 ## Quick Start
+
+On Android, create the client from the current `Activity`. Calling the shared
+constructor directly on Android fails fast because CAPTCHA and permission UI need
+an immediately valid UI host.
+
+```kotlin
+import dev.edgebase.sdk.client.AndroidEdgeBase
+
+val client = AndroidEdgeBase.client(
+    activity = this,
+    url = "https://your-project.edgebase.fun",
+    tokenStorage = appSecureDurableTokenStorage,
+)
+```
+
+Android's no-storage overload is memory-only. Supply a platform-secure
+`DurableTokenStorage` before anonymous `linkWithEmail` or `verifyLinkPhone`;
+otherwise those irreversible upgrade calls fail before the network. Durable
+stores must atomically persist the full access/refresh pair and report errors.
+Call `client.tryRestoreSession()` before authenticated work after launch.
+
+Token persistence and configured CAPTCHA failures are thrown. Browser CAPTCHA
+uses a bounded shared loader, caches only positive site keys for five minutes,
+and retries once only for direct `challenge_error` failures. Config transport
+or malformed-response failures use `config_fetch_failed` or
+`config_invalid_response`; only an explicit `captcha: null` response means
+disabled.
+
+On iOS, browser JS, and desktop JVM, use the shared constructor:
 
 ```kotlin
 import dev.edgebase.sdk.client.*
@@ -86,7 +115,7 @@ client.destroy()
 
 ## Publication Notes
 
-- JitPack versions use the repository tag, for example `v0.3.8`
+- JitPack versions use the repository tag, for example `v0.4.0`
 - the public JitPack route validates the JVM publications of `:core` and `:client`
 - the umbrella root artifact `edgebase-kotlin` is intentionally excluded from public installs
 

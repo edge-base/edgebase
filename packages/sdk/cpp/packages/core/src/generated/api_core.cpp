@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 #include "edgebase/generated/api_core.h"
 #include "edgebase/edgebase.h"
@@ -197,16 +197,44 @@ Result GeneratedDbApi::oauth_redirect(const std::string& provider) const {
   return http_.get("/api/auth/oauth/" + edgebase_encode_path_param(provider));
 }
 
-Result GeneratedDbApi::oauth_callback(const std::string& provider) const {
-  return http_.get("/api/auth/oauth/" + edgebase_encode_path_param(provider) + "/callback");
+Result GeneratedDbApi::oauth_redirect(const std::string& provider, const std::map<std::string, std::string>& query) const {
+  return http_.get("/api/auth/oauth/" + edgebase_encode_path_param(provider), query);
+}
+
+Result GeneratedDbApi::oauth_exchange(const std::string& json_body) const {
+  return http_.post("/api/auth/oauth/exchange", json_body);
+}
+
+Result GeneratedDbApi::oauth_callback(const std::string& provider, const std::map<std::string, std::string>& query) const {
+  return http_.get("/api/auth/oauth/" + edgebase_encode_path_param(provider) + "/callback", query);
+}
+
+Result GeneratedDbApi::oauth_callback_post(const std::string& provider, const std::string& json_body) const {
+  return http_.post("/api/auth/oauth/" + edgebase_encode_path_param(provider) + "/callback", json_body);
 }
 
 Result GeneratedDbApi::oauth_link_start(const std::string& provider) const {
   return http_.post("/api/auth/oauth/link/" + edgebase_encode_path_param(provider), "{}");
 }
 
-Result GeneratedDbApi::oauth_link_callback(const std::string& provider) const {
-  return http_.get("/api/auth/oauth/link/" + edgebase_encode_path_param(provider) + "/callback");
+Result GeneratedDbApi::oauth_link_start(const std::string& provider, const std::string& json_body) const {
+  return http_.post("/api/auth/oauth/link/" + edgebase_encode_path_param(provider), json_body);
+}
+
+Result GeneratedDbApi::oauth_link_continue(const std::string& provider, const std::map<std::string, std::string>& query) const {
+  return http_.get("/api/auth/oauth/link/" + edgebase_encode_path_param(provider) + "/continue", query);
+}
+
+Result GeneratedDbApi::oauth_link_complete(const std::string& json_body) const {
+  return http_.post("/api/auth/oauth/complete/link", json_body);
+}
+
+Result GeneratedDbApi::oauth_link_callback(const std::string& provider, const std::map<std::string, std::string>& query) const {
+  return http_.get("/api/auth/oauth/link/" + edgebase_encode_path_param(provider) + "/callback", query);
+}
+
+Result GeneratedDbApi::oauth_link_callback_post(const std::string& provider, const std::string& json_body) const {
+  return http_.post("/api/auth/oauth/link/" + edgebase_encode_path_param(provider) + "/callback", json_body);
 }
 
 Result GeneratedDbApi::db_single_count_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query) const {
@@ -245,10 +273,6 @@ Result GeneratedDbApi::db_single_batch_by_filter(const std::string& namespace_, 
   return http_.post_with_query("/api/db/" + edgebase_encode_path_param(namespace_) + "/tables/" + edgebase_encode_path_param(table) + "/batch-by-filter", json_body, query);
 }
 
-Result GeneratedDbApi::db_single_transact(const std::string& namespace_, const std::string& json_body) const {
-  return http_.post("/api/db/" + edgebase_encode_path_param(namespace_) + "/transact", json_body);
-}
-
 Result GeneratedDbApi::db_count_records(const std::string& namespace_, const std::string& instance_id, const std::string& table, const std::map<std::string, std::string>& query) const {
   return http_.get("/api/db/" + edgebase_encode_path_param(namespace_) + "/" + edgebase_encode_path_param(instance_id) + "/tables/" + edgebase_encode_path_param(table) + "/count", query);
 }
@@ -283,6 +307,10 @@ Result GeneratedDbApi::db_batch_records(const std::string& namespace_, const std
 
 Result GeneratedDbApi::db_batch_by_filter(const std::string& namespace_, const std::string& instance_id, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query) const {
   return http_.post_with_query("/api/db/" + edgebase_encode_path_param(namespace_) + "/" + edgebase_encode_path_param(instance_id) + "/tables/" + edgebase_encode_path_param(table) + "/batch-by-filter", json_body, query);
+}
+
+Result GeneratedDbApi::db_single_transact(const std::string& namespace_, const std::string& json_body) const {
+  return http_.post("/api/db/" + edgebase_encode_path_param(namespace_) + "/transact", json_body);
 }
 
 Result GeneratedDbApi::db_transact(const std::string& namespace_, const std::string& instance_id, const std::string& json_body) const {
@@ -369,6 +397,10 @@ Result GeneratedDbApi::get_config() const {
   return http_.get("/api/config");
 }
 
+Result GeneratedDbApi::get_captcha_challenge(const std::map<std::string, std::string>& query) const {
+  return http_.get("/api/captcha/challenge", query);
+}
+
 Result GeneratedDbApi::push_register(const std::string& json_body) const {
   return http_.post("/api/push/register", json_body);
 }
@@ -395,6 +427,14 @@ Result GeneratedDbApi::connect_room(const std::map<std::string, std::string>& qu
 
 Result GeneratedDbApi::get_room_metadata(const std::map<std::string, std::string>& query) const {
   return http_.get("/api/room/metadata", query);
+}
+
+Result GeneratedDbApi::get_room_summary(const std::map<std::string, std::string>& query) const {
+  return http_.get("/api/room/summary", query);
+}
+
+Result GeneratedDbApi::get_room_summaries(const std::string& json_body) const {
+  return http_.post("/api/room/summaries", json_body);
 }
 
 Result GeneratedDbApi::track_events(const std::string& json_body) const {

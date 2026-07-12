@@ -21,7 +21,7 @@ code. For backend code, prefer `edgebase-admin-java`.
 
 ## Public Artifact
 
-- `com.github.edge-base.edgebase:edgebase-android-java:v0.3.8`
+- `com.github.edge-base.edgebase:edgebase-android-java:v0.4.0`
 
 ## Canonical Examples
 
@@ -32,10 +32,13 @@ import java.util.List;
 import java.util.Map;
 
 import dev.edgebase.sdk.core.EdgeBaseFieldOps;
+import dev.edgebase.sdk.client.AndroidEdgeBase;
 import dev.edgebase.sdk.client.ClientEdgeBase;
-import dev.edgebase.sdk.client.EdgeBase;
 
-ClientEdgeBase client = EdgeBase.client("https://your-project.edgebase.fun");
+ClientEdgeBase client = AndroidEdgeBase.client(
+    activity,
+    "https://your-project.edgebase.fun"
+);
 ```
 
 ### Query a table
@@ -56,7 +59,11 @@ client.db("shared").table("posts").update("id", java.util.Map.of(
 
 ## Hard Rules
 
-- use `EdgeBase.client(...)` for app-side work
+- use `AndroidEdgeBase.client(currentActivity, url, ...)` for Android app-side work
+- do not call `EdgeBase.client(...)` on Android; it fails fast without the Activity contract
+- inject platform-secure `DurableTokenStorage` before anonymous email/phone upgrades; the memory default is rejected before network
+- call `client.tryRestoreSession()` before authenticated work after launch
+- token persistence and configured CAPTCHA failures are thrown
 - do not expose Service Keys through this package
 - prefer the admin package for trusted server-side operations
 - use `dev.edgebase.sdk.core.EdgeBaseFieldOps` for atomic field updates
@@ -64,12 +71,13 @@ client.db("shared").table("posts").update("id", java.util.Map.of(
 ## Quick Reference
 
 ```text
-EdgeBase.client(url)               -> ClientEdgeBase
+AndroidEdgeBase.client(activity, url) -> ClientEdgeBase
 client.auth()                      -> AuthClient
 client.db(namespace)               -> DbRef
 client.storage()                   -> StorageClient
 client.functions()                 -> FunctionsClient
 client.analytics()                 -> AnalyticsClient
 client.push()                      -> PushClient
+client.tryRestoreSession()         -> boolean
 client.destroy()                   -> void
 ```

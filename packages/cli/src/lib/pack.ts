@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   createAppBundle,
   findAppProjectRoot,
@@ -8,7 +8,10 @@ import {
   type EdgeBaseAppManifest,
 } from './app-bundle.js';
 import { loadConfigSafe } from './load-config.js';
-import { generateTempWranglerToml } from './deploy-shared.js';
+import {
+  generateTempWranglerToml,
+  RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS,
+} from './deploy-shared.js';
 import { resolveLocalDevBindings } from './project-runtime.js';
 
 const EDGEBASE_CONFIG_FILES = ['edgebase.config.ts', 'edgebase.config.js'];
@@ -87,13 +90,94 @@ export interface CreatePortablePackArtifactOptions extends CreateAppBundleOption
 // output path. Used to decide whether an existing directory is safe to
 // recursively overwrite.
 const PACK_ARTIFACT_MARKERS = [
-  'edgebase-portable.json',
-  join('Contents', 'Resources', 'edgebase-portable.json'),
-  'edgebase-pack.json',
-];
+  { path: 'edgebase-portable.json', format: 'portable' },
+  { path: join('Contents', 'Resources', 'edgebase-portable.json'), format: 'portable' },
+  { path: 'edgebase-pack.json', format: 'dir' },
+] as const;
+
+function isPathWithinRoot(rootPath: string, targetPath: string): boolean {
+  const relativePath = relative(rootPath, targetPath);
+  return relativePath === '' || (!relativePath.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)
+    && relativePath !== '..'
+    && !isAbsolute(relativePath));
+}
 
 function isPriorPackArtifactDir(dir: string): boolean {
-  return PACK_ARTIFACT_MARKERS.some((marker) => existsSync(join(dir, marker)));
+  let artifactRoot: string;
+  try {
+    artifactRoot = realpathSync(dir);
+  } catch {
+    return false;
+  }
+
+  return PACK_ARTIFACT_MARKERS.some((marker) => {
+    const markerPath = join(dir, marker.path);
+    try {
+      const markerStat = lstatSync(markerPath);
+      if (markerStat.isSymbolicLink() || !markerStat.isFile()) return false;
+      if (!isPathWithinRoot(artifactRoot, realpathSync(markerPath))) return false;
+
+      const parsed = JSON.parse(readFileSync(markerPath, 'utf-8')) as {
+        schemaVersion?: unknown;
+        format?: unknown;
+      };
+      return parsed.schemaVersion === 1 && parsed.format === marker.format;
+    } catch {
+      return false;
+    }
+  });
+}
+
+function assertArtifactSymlinksContained(artifactRoot: string): void {
+  const rootStat = lstatSync(artifactRoot);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw new Error(`Portable artifact root must be a real directory: ${artifactRoot}`);
+  }
+
+  const canonicalRoot = realpathSync(artifactRoot);
+  const symlinkTraversalStaysWithinRoot = (linkPath: string, linkTarget: string): boolean => {
+    if (isAbsolute(linkTarget)) return false;
+    const parentRelative = relative(canonicalRoot, dirname(linkPath));
+    let depth = parentRelative === '' ? 0 : parentRelative.split(/[\\/]+/).length;
+    for (const segment of linkTarget.split(/[\\/]+/)) {
+      if (!segment || segment === '.') continue;
+      if (segment === '..') {
+        depth -= 1;
+        if (depth < 0) return false;
+      } else {
+        depth += 1;
+      }
+    }
+    return true;
+  };
+
+  const visit = (currentDir: string): void => {
+    for (const entry of readdirSync(currentDir)) {
+      const entryPath = join(currentDir, entry);
+      const entryStat = lstatSync(entryPath);
+      if (entryStat.isSymbolicLink()) {
+        const linkTarget = readlinkSync(entryPath);
+        if (!symlinkTraversalStaysWithinRoot(entryPath, linkTarget)) {
+          throw new Error(`Portable artifact contains a non-portable symbolic link outside its root: ${entryPath}`);
+        }
+        let canonicalTarget: string;
+        try {
+          canonicalTarget = realpathSync(entryPath);
+        } catch {
+          throw new Error(`Portable artifact contains a broken symbolic link: ${entryPath}`);
+        }
+        if (!isPathWithinRoot(canonicalRoot, canonicalTarget)) {
+          throw new Error(`Portable artifact contains a symbolic link outside its root: ${entryPath}`);
+        }
+        continue;
+      }
+      if (entryStat.isDirectory()) {
+        visit(entryPath);
+      }
+    }
+  };
+
+  visit(canonicalRoot);
 }
 
 /**
@@ -104,7 +188,8 @@ function isPriorPackArtifactDir(dir: string): boolean {
  */
 function assertSafePackOutputPath(outputPath: string, force = false): void {
   if (!existsSync(outputPath)) return;
-  if (!statSync(outputPath).isDirectory()) return;
+  const outputStat = lstatSync(outputPath);
+  if (outputStat.isSymbolicLink() || !outputStat.isDirectory()) return;
   if (readdirSync(outputPath).length === 0) return;
   if (isPriorPackArtifactDir(outputPath)) return;
   if (force) return;
@@ -551,6 +636,7 @@ function copyPortableNodeRuntime(
 }
 
 export function createArchiveFromPortableArtifact(sourcePath: string, archivePath: string): EdgeBaseArchiveManifest['archiveType'] {
+  assertArtifactSymlinksContained(sourcePath);
   rmSync(archivePath, { force: true, recursive: true });
   mkdirSync(dirname(archivePath), { recursive: true });
 
@@ -594,6 +680,8 @@ function finalizePackWrangler(projectDir: string, outputDir: string): void {
   const generatedPath = generateTempWranglerToml(wranglerPath, {
     bindings: resolveLocalDevBindings(config),
     triggerMode: 'preserve',
+    runtimeMode: 'self-hosted',
+    requiredCompatibilityFlags: RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS,
   });
 
   if (!generatedPath) return;
@@ -604,7 +692,8 @@ function finalizePackWrangler(projectDir: string, outputDir: string): void {
 
 function buildLauncherSource(manifest: EdgeBasePackManifest): string {
   return `#!/usr/bin/env node
-import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { createWriteStream, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
@@ -619,6 +708,37 @@ const DEFAULT_STATE_DIR = ${JSON.stringify(manifest.launcher.stateDir)};
 const DEFAULT_RUNTIME_DIR = ${JSON.stringify(manifest.launcher.runtimeDir)};
 const SINGLE_INSTANCE = ${manifest.launcher.singleInstance ? 'true' : 'false'};
 const PORT_SEARCH_LIMIT = ${manifest.launcher.portSearchLimit};
+const RUNTIME_ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const RUNTIME_ENV_ALLOWLIST_KEY = 'EDGEBASE_RUNTIME_ENV_ALLOWLIST';
+const NEVER_FORWARD_PROCESS_ENV_KEYS = new Set([
+  'CLOUDFLARE_INCLUDE_PROCESS_ENV',
+  'EDGEBASE_CONFIG_ENV_ALLOWLIST',
+  'EDGEBASE_DATA_DIR',
+  'EDGEBASE_ENV_FILE',
+  'EDGEBASE_HOST',
+  'EDGEBASE_OPEN',
+  'EDGEBASE_PORT',
+  'HOST',
+  'PERSIST_DIR',
+  'PORT',
+  RUNTIME_ENV_ALLOWLIST_KEY,
+]);
+const DEFAULT_APPLICATION_PROCESS_ENV_KEYS = new Set([
+  'AUTH_POSTGRES_URL',
+  'DATABASE_URL',
+  'JWT_ADMIN_SECRET',
+  'JWT_USER_SECRET',
+  'NODE_ENV',
+  'POSTGRES_URL',
+  'SERVICE_KEY',
+  'TURNSTILE_SECRET',
+  'TZ',
+]);
+const DEFAULT_APPLICATION_PROCESS_ENV_PREFIXES = [
+  'EDGEBASE_',
+  'JWT_',
+  'SERVICE_KEY_',
+];
 
 function parseArgs(argv) {
   const options = {
@@ -729,7 +849,90 @@ function parseEnvFile(filePath) {
 }
 
 function serializeEnvValue(value) {
-  return /^[A-Za-z0-9_./:@+-]+$/.test(value) ? value : JSON.stringify(value);
+  const encoded = /^[A-Za-z0-9_./:@+-]+$/.test(value) ? value : JSON.stringify(value);
+  // Wrangler's dotenv expansion treats unescaped dollar signs as variable
+  // references. Preserve application secrets and URLs byte-for-byte.
+  return encoded.replaceAll('$', String.fromCharCode(92) + '$');
+}
+
+function collectRuntimeEnvAllowlist(fileEnv, processEnv) {
+  const allowlist = new Set();
+  for (const raw of [fileEnv[RUNTIME_ENV_ALLOWLIST_KEY], processEnv[RUNTIME_ENV_ALLOWLIST_KEY]]) {
+    if (typeof raw !== 'string') continue;
+    for (const key of raw.split(',').map((entry) => entry.trim())) {
+      if (RUNTIME_ENV_KEY_PATTERN.test(key)) {
+        allowlist.add(key.toUpperCase());
+      }
+    }
+  }
+  return allowlist;
+}
+
+function isApplicationProcessEnvKey(key, explicitFileKeys, allowlist) {
+  if (!RUNTIME_ENV_KEY_PATTERN.test(key)) return false;
+  const normalized = key.toUpperCase();
+  if (NEVER_FORWARD_PROCESS_ENV_KEYS.has(normalized)) return false;
+  return explicitFileKeys.has(normalized)
+    || allowlist.has(normalized)
+    || DEFAULT_APPLICATION_PROCESS_ENV_KEYS.has(normalized)
+    || DEFAULT_APPLICATION_PROCESS_ENV_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+function collectApplicationProcessEnv(source, fileEnv) {
+  const explicitFileKeys = new Set(Object.keys(fileEnv).map((key) => key.toUpperCase()));
+  const allowlist = collectRuntimeEnvAllowlist(fileEnv, source);
+  return Object.fromEntries(
+    Object.entries(source).filter(
+      ([key, value]) => (
+        typeof value === 'string'
+        && isApplicationProcessEnvKey(key, explicitFileKeys, allowlist)
+      ),
+    ),
+  );
+}
+
+function removeOwnedEnvFile(filePath, ownerMarker) {
+  if (!ownerMarker) return;
+  try {
+    const firstLine = readFileSync(filePath, 'utf-8').split(/\\r?\\n/, 1)[0];
+    if (firstLine === ownerMarker) {
+      removeFileIfExists(filePath);
+    }
+  } catch {
+    // The file was already removed or replaced by another launcher.
+  }
+}
+
+function writePrivateEnvFileAtomic(filePath, values) {
+  const ownerMarker = '# edgebase-pack-runtime-env:' + process.pid + ':' + randomBytes(12).toString('hex');
+  const tempPath = filePath + '.' + process.pid + '.' + randomBytes(8).toString('hex') + '.tmp';
+  const content = [
+    ownerMarker,
+    ...Object.keys(values)
+      .sort()
+      .map((key) => key + '=' + serializeEnvValue(String(values[key]))),
+    '',
+  ].join('\\n');
+
+  try {
+    writeFileSync(tempPath, content, {
+      encoding: 'utf-8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+    chmodSync(tempPath, 0o600);
+    renameSync(tempPath, filePath);
+    chmodSync(filePath, 0o600);
+    return {
+      ownerMarker,
+      mode: statSync(filePath).mode & 0o777,
+    };
+  } catch (error) {
+    removeOwnedEnvFile(filePath, ownerMarker);
+    throw error;
+  } finally {
+    removeFileIfExists(tempPath);
+  }
 }
 
 function saveJson(filePath, payload) {
@@ -914,22 +1117,29 @@ const envFileCandidates = [
   join(artifactRoot, '.env.local'),
   options.envFile ? resolve(process.cwd(), options.envFile) : '',
 ].filter(Boolean);
-const mergedEnv = Object.assign(
+// Files named by the operator are explicit application configuration. Ambient
+// process values are limited to EdgeBase's runtime keys, standard secrets,
+// file-declared keys, and EDGEBASE_RUNTIME_ENV_ALLOWLIST. This keeps unrelated
+// shell/tooling credentials out without preventing custom application env.
+const fileEnv = Object.assign(
   {},
   ...envFileCandidates.map((filePath) => parseEnvFile(filePath)),
-  Object.fromEntries(Object.entries(process.env).filter(([, value]) => typeof value === 'string')),
 );
+const mergedEnv = Object.assign(
+  {},
+  fileEnv,
+  collectApplicationProcessEnv(process.env, fileEnv),
+);
+for (const key of Object.keys(mergedEnv)) {
+  if (NEVER_FORWARD_PROCESS_ENV_KEYS.has(key.toUpperCase())) {
+    delete mergedEnv[key];
+  }
+}
+// This launcher always runs locally. Do not let an env file relabel a
+// self-hosted ingress as Cloudflare and make client-supplied CF headers trusted.
+mergedEnv.EDGEBASE_RUNTIME_MODE = 'self-hosted';
 
 const devVarsPath = join(workDir, '.dev.vars');
-writeFileSync(
-  devVarsPath,
-  Object.keys(mergedEnv)
-    .sort()
-    .map((key) => \`\${key}=\${serializeEnvValue(String(mergedEnv[key]))}\`)
-    .join('\\n') + '\\n',
-  'utf-8',
-);
-
 const wranglerBin = resolveWranglerBin(runtimeNodeModules);
 const existingInstance = readActiveInstance(lockPath, options.host);
 const selectedPort = existingInstance && !options.port
@@ -955,6 +1165,22 @@ const wranglerArgs = [
   persistDir,
 ];
 const openUrl = \`http://\${options.host}:\${selectedPort.port}\${DEFAULT_OPEN_PATH}\`;
+let devVarsOwnerMarker = '';
+let devVarsMode = null;
+
+const cleanupRuntimeEnv = () => {
+  removeOwnedEnvFile(devVarsPath, devVarsOwnerMarker);
+  devVarsOwnerMarker = '';
+};
+
+// A second launcher that only focuses an already-running instance must not
+// replace that instance's transient binding file.
+if (!(existingInstance && !options.port)) {
+  const written = writePrivateEnvFileAtomic(devVarsPath, mergedEnv);
+  devVarsOwnerMarker = written.ownerMarker;
+  devVarsMode = written.mode;
+  process.once('exit', cleanupRuntimeEnv);
+}
 
 if (options.dryRun) {
   const payload = {
@@ -970,6 +1196,7 @@ if (options.dryRun) {
     port: selectedPort.port,
     persistDir,
     devVarsPath,
+    devVarsMode,
     statePath,
     lockPath,
     existingInstance: Boolean(existingInstance && !options.port),
@@ -984,16 +1211,13 @@ if (existingInstance && !options.port) {
   process.exit(0);
 }
 
-saveJson(lockPath, {
-  pid: process.pid,
-  host: options.host,
-  port: selectedPort.port,
-  createdAt: new Date().toISOString(),
-});
-
 const wranglerEnv = {
   ...process.env,
   ...mergedEnv,
+  // The private env file is the sole Worker binding source. Keep arbitrary
+  // parent-shell values available to Node/Wrangler itself, but never let
+  // Wrangler mirror them wholesale into the Worker.
+  CLOUDFLARE_INCLUDE_PROCESS_ENV: 'false',
 };
 if (process.platform === 'win32' && !wranglerEnv.CHOKIDAR_USEPOLLING) {
   wranglerEnv.CHOKIDAR_USEPOLLING = '1';
@@ -1043,11 +1267,50 @@ const forward = (signal) => {
     terminateProcessTree(child.pid);
     return;
   }
-  child.kill(signal);
+  try {
+    // Wrangler is deliberately launched as a new process-group leader. Signal
+    // the whole owned group so esbuild/workerd cannot outlive the launcher.
+    process.kill(-child.pid, signal);
+  } catch {
+    child.kill(signal);
+  }
 };
 
-process.on('SIGINT', () => forward('SIGINT'));
-process.on('SIGTERM', () => forward('SIGTERM'));
+let shutdownStarted = false;
+let shutdownTimer = null;
+const beginShutdown = (signal) => {
+  if (shutdownStarted) {
+    forward('SIGKILL');
+    return;
+  }
+  shutdownStarted = true;
+  // Stop advertising this instance before forwarding the signal. This keeps a
+  // stale lock from surviving if the OS terminates the app while descendants
+  // are still unwinding.
+  cleanupLock();
+  cleanupRuntimeEnv();
+  forward(signal);
+  shutdownTimer = setTimeout(() => {
+    forward('SIGKILL');
+    cleanupLock();
+    cleanupRuntimeEnv();
+    process.exit(1);
+  }, 10_000);
+};
+
+process.on('SIGINT', () => beginShutdown('SIGINT'));
+process.on('SIGTERM', () => beginShutdown('SIGTERM'));
+
+// Publish the single-instance lock only after shutdown handlers are installed.
+// A controller that observes this file may immediately ask the app to stop.
+saveJson(lockPath, {
+  pid: process.pid,
+  childPid: child.pid ?? null,
+  childProcessGroupId: process.platform === 'win32' ? null : (child.pid ?? null),
+  host: options.host,
+  port: selectedPort.port,
+  createdAt: new Date().toISOString(),
+});
 
 child.on('error', (error) => {
   cleanupLock();
@@ -1057,7 +1320,32 @@ child.on('error', (error) => {
   process.exit(1);
 });
 
-child.on('exit', (code, signal) => {
+child.on('exit', async (code, signal) => {
+  if (process.platform !== 'win32' && child.pid) {
+    try {
+      // The group can briefly retain Wrangler descendants after the leader
+      // exits. Give every owned descendant a final graceful signal, then
+      // escalate before the launcher releases its lock and exits.
+      process.kill(-child.pid, 'SIGTERM');
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+        try {
+          process.kill(-child.pid, 0);
+        } catch {
+          break;
+        }
+      }
+      try {
+        process.kill(-child.pid, 0);
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // The complete owned process group has exited.
+      }
+    } catch {
+      // The complete owned process group has already exited.
+    }
+  }
+  if (shutdownTimer) clearTimeout(shutdownTimer);
   cleanupLock();
   logStream.end();
   if (signal) {
@@ -1179,6 +1467,7 @@ exec "$SCRIPT_DIR/node" "$APP_DIR/launcher.mjs" "$@"
   });
   const manifestPath = join(resourcesDir, 'edgebase-portable.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+  assertArtifactSymlinksContained(outputPath);
   signMacPortableBundle(outputPath);
 
   return {
@@ -1258,6 +1547,7 @@ ${libraryEnvExport}exec "$SCRIPT_DIR/bin/${embeddedNodeName}" "$SCRIPT_DIR/app/l
   });
   const manifestPath = join(outputPath, 'edgebase-portable.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+  assertArtifactSymlinksContained(outputPath);
 
   return {
     format: 'portable',
@@ -1288,6 +1578,7 @@ export function createDirPackArtifact(
   const manifestPath = join(appBundle.outputDir, 'edgebase-pack.json');
   writePackManifest(manifestPath, manifest);
   writeLauncherFiles(appBundle.outputDir, manifest);
+  assertArtifactSymlinksContained(appBundle.outputDir);
 
   return {
     format: 'dir',
@@ -1374,6 +1665,12 @@ export function createArchivePackArtifact(
     packManifest: portableArtifact.packManifest,
   };
 }
+
+export const __packTestUtils = {
+  assertArtifactSymlinksContained,
+  assertSafePackOutputPath,
+  isPriorPackArtifactDir,
+};
 
 function writePackManifest(path: string, manifest: EdgeBasePackManifest): void {
   writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');

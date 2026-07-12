@@ -11,7 +11,9 @@
 - `packages/core`: pure C++17 client SDK
 - `Source/EdgeBase`: Unreal `UCLASS` / Blueprint wrapper
 - `EdgeBase.uplugin`: plugin descriptor
-- `scripts/sync-thirdparty.sh`: builds and syncs the core library into `ThirdParty/`
+- `scripts/sync-thirdparty.sh` / `scripts/sync-thirdparty.ps1`: build and sync
+  the platform core and IXWebSocket libraries into `ThirdParty/`, then link a
+  metadata-free standalone consumer against the copied artifacts
 
 EdgeBase is the open-source edge-native BaaS that runs on Edge, Docker, and Node.js.
 
@@ -22,16 +24,34 @@ This package is one part of the wider EdgeBase platform. For the full platform, 
 - Unreal Engine 5.x
 - C++17
 - CMake toolchain for building the bundled core library
+- Win64, macOS, or Linux for the Unreal plugin. Android, iOS, and console
+  plugin artifacts are not currently shipped and fail fast instead of
+  packaging an `EDGEBASE_HAS_CORE=0` stub.
 
 ## Install
 
 1. Copy or symlink this folder into your Unreal project as `Plugins/EdgeBase`.
-2. Sync the bundled core library into `ThirdParty/`:
+2. Sync the bundled core and IXWebSocket libraries into `ThirdParty/`:
+
+macOS/Linux:
 
 ```bash
 cd Plugins/EdgeBase
 ./scripts/sync-thirdparty.sh
 ```
+
+Windows PowerShell:
+
+```powershell
+cd Plugins\EdgeBase
+powershell -ExecutionPolicy Bypass -File .\scripts\sync-thirdparty.ps1
+```
+
+The Unreal build fails immediately with the expected artifact path when this
+step has not been run; it requires both the EdgeBase core and IXWebSocket
+archives and never silently packages a no-core plugin. The sync command also
+links a standalone executable using only the copied `ThirdParty/` headers and
+archives, so missing transitive native dependencies are caught before UBT.
 
 3. Enable the `EdgeBase` plugin in your `.uproject` or from the Plugins UI.
 
@@ -44,6 +64,12 @@ The plugin descriptor lives at [EdgeBase.uplugin](./EdgeBase.uplugin).
 Use `Get Game Instance -> Get Subsystem (EdgeBaseSubsystem)` and call the `EdgeBase|Auth`, `EdgeBase|Collection`, or `EdgeBase|Storage` nodes.
 
 ### C++
+
+Protected auth uses an interactive `SWebBrowser`. Call the synchronous core
+`client::EdgeBase::auth()` API only from a background thread. Calling it on the
+Unreal Game Thread now returns an explicit `captcha-unavailable` error instead
+of sending an unprotected request. The Blueprint/subsystem methods already
+dispatch their work off the Game Thread.
 
 ```cpp
 #include "EdgeBaseSubsystem.h"
@@ -151,6 +177,32 @@ auto insertResult = core.db("shared")
 auto url = core.storage().bucket("avatars").getUrl("user123.png");
 ```
 
+### Durable native auth tokens
+
+Pure C++ has no portable secure credential vault. Supply an
+`AuthTokenStorage` backed by the platform vault when a native application must
+survive restarts or upgrade an anonymous account. `saveTokens` must atomically
+and durably replace the complete pair or throw without modifying the previous
+pair.
+
+```cpp
+class PlatformTokenStorage final : public client::AuthTokenStorage {
+public:
+  std::optional<client::AuthTokenPair> loadTokens() override;
+  void saveTokens(const client::AuthTokenPair& tokens) override;
+  void clearTokens() override;
+};
+
+auto tokenStorage = std::make_shared<PlatformTokenStorage>();
+client::EdgeBase core("https://your-project.edgebase.fun", tokenStorage);
+```
+
+An anonymous `verifyLinkPhone` call is rejected before network I/O when no
+durable storage is configured (or the current JWT cannot be classified). If
+durable persistence fails after the server upgrade, the SDK keeps the old
+in-memory pair and returns `token-persistence-failed`; retry the same phone and
+code within the server's five-minute encrypted completion-checkpoint window.
+
 ## Build The Core Library
 
 ```bash
@@ -159,4 +211,5 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-Then run `./scripts/sync-thirdparty.sh` from the plugin root to refresh `ThirdParty/`.
+Then run `./scripts/sync-thirdparty.sh` from the plugin root to refresh and
+standalone-link-verify both native archives in `ThirdParty/`.

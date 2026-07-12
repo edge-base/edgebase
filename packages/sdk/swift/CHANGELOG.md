@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- Defaulted client tokens to Keychain and made every Keychain/storage failure
+  visible before in-memory adoption.
+- Added `tryRestoreSession()`, complete-pair validation, and
+  `DurableTokenStorage` preflight for anonymous email/phone upgrades.
+- Authenticated HTTP and `HEAD` calls now propagate refresh persistence errors;
+  storage existence APIs are correspondingly `async throws`.
+- Added typed CAPTCHA availability errors and a five-minute positive site-key
+  cache without negative caching.
+- CAPTCHA config fetch/malformed-response failures now fail closed; the public
+  `fetchSiteKey` API is correspondingly `async throws`.
+
+## 0.4.0
+
+- Synchronized Swift split-package install guidance and realtime wire-version
+  reporting with EdgeBase 0.3.9
+- No public Swift API compatibility break is introduced
+
 ## 0.3.8
 
 - Synchronized Swift split-package install guidance and realtime wire-version

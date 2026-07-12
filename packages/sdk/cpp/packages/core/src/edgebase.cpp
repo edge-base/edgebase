@@ -12,13 +12,23 @@
 
 namespace client {
 
-EdgeBase::EdgeBase(std::string url) {
+EdgeBase::EdgeBase(std::string url) : EdgeBase(std::move(url), nullptr) {}
+
+EdgeBase::EdgeBase(std::string url,
+                   std::shared_ptr<AuthTokenStorage> tokenStorage) {
   while (!url.empty() && url.back() == '/')
     url.pop_back();
   baseUrl_ = url;
   http_ = std::make_shared<HttpClient>(baseUrl_);
   // Create the generated core, which wraps HttpClient for all API calls.
   core_ = std::make_shared<GeneratedDbApi>(*http_);
+  // A configured durable store must be restored before any database, room, or
+  // storage client can observe the shared HttpClient. Construct AuthClient
+  // eagerly only in that case; the no-storage path remains lazy as before.
+  if (tokenStorage) {
+    authClient_ =
+        std::make_shared<AuthClient>(http_, core_, std::move(tokenStorage));
+  }
   // database-live transport is lazy-initialized on first db().table().onSnapshot() call.
 }
 
@@ -198,16 +208,27 @@ Result FunctionsClient::call(
     const std::string &path, const std::string &method,
     const std::string &jsonBody,
     const std::map<std::string, std::string> &query) const {
+  return call(path, FunctionCallOptions{method, jsonBody, query, std::nullopt});
+}
+
+Result FunctionsClient::call(
+    const std::string &path, const FunctionCallOptions &options) const {
+  if (options.captchaToken.has_value() &&
+      (options.captchaToken->empty() || options.captchaToken->size() > 2048))
+    return {false, 0, "",
+            "captchaToken must be non-empty and at most 2048 characters"};
+
   const std::string normalizedPath = "/functions/" + path;
-  if (method == "GET")
-    return http_->get(normalizedPath, query);
-  if (method == "PUT")
-    return http_->put(normalizedPath, jsonBody);
-  if (method == "PATCH")
-    return http_->patch(normalizedPath, jsonBody);
-  if (method == "DELETE")
-    return http_->del(normalizedPath);
-  return http_->post(normalizedPath, jsonBody);
+  const HttpRequestOptions requestOptions{options.captchaToken};
+  if (options.method == "GET")
+    return http_->get(normalizedPath, options.query, requestOptions);
+  if (options.method == "PUT")
+    return http_->put(normalizedPath, options.jsonBody, requestOptions);
+  if (options.method == "PATCH")
+    return http_->patch(normalizedPath, options.jsonBody, requestOptions);
+  if (options.method == "DELETE")
+    return http_->delWithOptions(normalizedPath, requestOptions);
+  return http_->post(normalizedPath, options.jsonBody, requestOptions);
 }
 
 Result FunctionsClient::get(

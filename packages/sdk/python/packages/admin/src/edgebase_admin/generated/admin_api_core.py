@@ -1,7 +1,7 @@
 """Auto-generated admin API Core — DO NOT EDIT.
 
 Regenerate: npx tsx tools/sdk-codegen/generate.ts
-Source: openapi.json (0.3.8)
+Source: openapi.json (0.4.0)
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ class GeneratedAdminApi:
         return self._http.post("/db/broadcast", body)
 
     def execute_sql(self, body: Any) -> Any:
-        """Execute SQL via DatabaseDO — POST /api/sql"""
+        """Execute provider-aware raw SQL — POST /api/sql"""
         return self._http.post("/sql", body)
 
     def kv_operation(self, namespace: str, body: Any) -> Any:

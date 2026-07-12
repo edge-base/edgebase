@@ -90,6 +90,8 @@ EdgeBase->StorageUpload(
 - Blueprint-friendly collection APIs are flat methods like `CollectionInsert`, `CollectionGetOne`, and `CollectionUpdate`
 - if you need the richer query builder, use the pure C++ core SDK directly instead of the Blueprint wrapper
 - the plugin links the pure C++ core through `ThirdParty/`; keep `scripts/sync-thirdparty.sh` and `EdgeBase.Build.cs` in sync with packaged binaries
+- the Unreal plugin supports only Win64, macOS, and Linux until matching native archives are shipped; never allow another platform to fall through as `EDGEBASE_HAS_CORE=0`
+- `ThirdParty/` must contain and link both EdgeBase core and IXWebSocket archives, and the metadata-free standalone consumer gate must remain green
 
 ## Common Mistakes
 

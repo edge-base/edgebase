@@ -3,7 +3,7 @@
 # Auto-generated core API Core — DO NOT EDIT.
 #
 # Regenerate: npx tsx tools/sdk-codegen/generate.ts
-# Source: openapi.json (0.3.8)
+# Source: openapi.json (0.4.0)
 
 require "cgi"
 
@@ -223,23 +223,48 @@ module EdgebaseCore
     end
 
     # Start OAuth redirect — GET /api/auth/oauth/{provider}
-    def oauth_redirect(provider)
-      @http.get("/auth/oauth/#{CGI.escape(provider).gsub('+', '%20')}")
+    def oauth_redirect(provider, query: nil)
+      @http.get("/auth/oauth/#{CGI.escape(provider).gsub('+', '%20')}", params: query)
+    end
+
+    # Atomically exchange a verified OAuth callback ticket — POST /api/auth/oauth/exchange
+    def oauth_exchange(body = nil)
+      @http.post("/auth/oauth/exchange", body)
     end
 
     # OAuth callback — GET /api/auth/oauth/{provider}/callback
-    def oauth_callback(provider)
-      @http.get("/auth/oauth/#{CGI.escape(provider).gsub('+', '%20')}/callback")
+    def oauth_callback(provider, query: nil)
+      @http.get("/auth/oauth/#{CGI.escape(provider).gsub('+', '%20')}/callback", params: query)
+    end
+
+    # OAuth form-post callback — POST /api/auth/oauth/{provider}/callback
+    def oauth_callback_post(provider, body = nil)
+      @http.post("/auth/oauth/#{CGI.escape(provider).gsub('+', '%20')}/callback", body)
     end
 
     # Start OAuth account linking — POST /api/auth/oauth/link/{provider}
-    def oauth_link_start(provider)
-      @http.post("/auth/oauth/link/#{CGI.escape(provider).gsub('+', '%20')}")
+    def oauth_link_start(provider, body = nil)
+      @http.post("/auth/oauth/link/#{CGI.escape(provider).gsub('+', '%20')}", body)
+    end
+
+    # Continue OAuth account linking in the system browser — GET /api/auth/oauth/link/{provider}/continue
+    def oauth_link_continue(provider, query: nil)
+      @http.get("/auth/oauth/link/#{CGI.escape(provider).gsub('+', '%20')}/continue", params: query)
+    end
+
+    # Complete OAuth account linking for the current authenticated user — POST /api/auth/oauth/complete/link
+    def oauth_link_complete(body = nil)
+      @http.post("/auth/oauth/complete/link", body)
     end
 
     # OAuth link callback — GET /api/auth/oauth/link/{provider}/callback
-    def oauth_link_callback(provider)
-      @http.get("/auth/oauth/link/#{CGI.escape(provider).gsub('+', '%20')}/callback")
+    def oauth_link_callback(provider, query: nil)
+      @http.get("/auth/oauth/link/#{CGI.escape(provider).gsub('+', '%20')}/callback", params: query)
+    end
+
+    # OAuth link form-post callback — POST /api/auth/oauth/link/{provider}/callback
+    def oauth_link_callback_post(provider, body = nil)
+      @http.post("/auth/oauth/link/#{CGI.escape(provider).gsub('+', '%20')}/callback", body)
     end
 
     # Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
@@ -287,11 +312,6 @@ module EdgebaseCore
       @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/batch-by-filter", body, params: query)
     end
 
-    # Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
-    def db_single_transact(namespace, body = nil)
-      @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/transact", body)
-    end
-
     # Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
     def db_count_records(namespace, instance_id, table, query: nil)
       @http.get("/db/#{CGI.escape(namespace).gsub('+', '%20')}/#{CGI.escape(instance_id).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/count", params: query)
@@ -335,6 +355,11 @@ module EdgebaseCore
     # Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter
     def db_batch_by_filter(namespace, instance_id, table, body = nil, query: nil)
       @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/#{CGI.escape(instance_id).gsub('+', '%20')}/tables/#{CGI.escape(table).gsub('+', '%20')}/batch-by-filter", body, params: query)
+    end
+
+    # Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
+    def db_single_transact(namespace, body = nil)
+      @http.post("/db/#{CGI.escape(namespace).gsub('+', '%20')}/transact", body)
     end
 
     # Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact
@@ -442,6 +467,11 @@ module EdgebaseCore
       @http.get("/config")
     end
 
+    # Render the hosted Turnstile page for native WebViews — GET /api/captcha/challenge
+    def get_captcha_challenge(query: nil)
+      @http.get("/captcha/challenge", params: query)
+    end
+
     # Register push token — POST /api/push/register
     def push_register(body = nil)
       @http.post("/push/register", body)
@@ -475,6 +505,16 @@ module EdgebaseCore
     # Get room metadata — GET /api/room/metadata
     def get_room_metadata(query: nil)
       @http.get("/room/metadata", params: query)
+    end
+
+    # Get room summary — GET /api/room/summary
+    def get_room_summary(query: nil)
+      @http.get("/room/summary", params: query)
+    end
+
+    # Get summaries for multiple rooms — POST /api/room/summaries
+    def get_room_summaries(body = nil)
+      @http.post("/room/summaries", body)
     end
 
     # Track custom events — POST /api/analytics/track
@@ -559,6 +599,8 @@ module EdgebaseCore
     AUTH_MFA_TOTP_ENROLL = "/api/auth/mfa/totp/enroll"
     AUTH_MFA_TOTP_VERIFY = "/api/auth/mfa/totp/verify"
     AUTH_MFA_VERIFY = "/api/auth/mfa/verify"
+    OAUTH_LINK_COMPLETE = "/api/auth/oauth/complete/link"
+    OAUTH_EXCHANGE = "/api/auth/oauth/exchange"
     AUTH_PASSKEYS_LIST = "/api/auth/passkeys"
     AUTH_PASSKEYS_AUTH_OPTIONS = "/api/auth/passkeys/auth-options"
     AUTH_PASSKEYS_AUTHENTICATE = "/api/auth/passkeys/authenticate"
@@ -583,6 +625,7 @@ module EdgebaseCore
     AUTH_VERIFY_LINK_PHONE = "/api/auth/verify-link-phone"
     AUTH_VERIFY_MAGIC_LINK = "/api/auth/verify-magic-link"
     AUTH_VERIFY_PHONE = "/api/auth/verify-phone"
+    GET_CAPTCHA_CHALLENGE = "/api/captcha/challenge"
     GET_CONFIG = "/api/config"
     DATABASE_LIVE_BROADCAST = "/api/db/broadcast"
     CHECK_DATABASE_SUBSCRIPTION_CONNECTION = "/api/db/connect-check"
@@ -604,6 +647,8 @@ module EdgebaseCore
     CONNECT_ROOM = "/api/room"
     CHECK_ROOM_CONNECTION = "/api/room/connect-check"
     GET_ROOM_METADATA = "/api/room/metadata"
+    GET_ROOM_SUMMARIES = "/api/room/summaries"
+    GET_ROOM_SUMMARY = "/api/room/summary"
     GET_SCHEMA = "/api/schema"
     EXECUTE_SQL = "/api/sql"
 
@@ -735,12 +780,24 @@ module EdgebaseCore
       "/api/auth/oauth/#{provider}/callback"
     end
 
+    def self.oauth_callback_post(provider)
+      "/api/auth/oauth/#{provider}/callback"
+    end
+
     def self.oauth_link_start(provider)
       "/api/auth/oauth/link/#{provider}"
     end
 
     def self.oauth_link_callback(provider)
       "/api/auth/oauth/link/#{provider}/callback"
+    end
+
+    def self.oauth_link_callback_post(provider)
+      "/api/auth/oauth/link/#{provider}/callback"
+    end
+
+    def self.oauth_link_continue(provider)
+      "/api/auth/oauth/link/#{provider}/continue"
     end
 
     def self.auth_passkeys_delete(credential_id)

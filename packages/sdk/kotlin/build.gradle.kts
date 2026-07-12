@@ -13,7 +13,7 @@ plugins {
     id("com.android.library") version "8.2.0" apply false
 }
 
-val edgebaseReleaseVersion = "0.3.8"
+val edgebaseReleaseVersion = "0.4.0"
 val edgebaseGroup = if (System.getenv("JITPACK").isNullOrBlank()) {
     "dev.edgebase"
 } else {

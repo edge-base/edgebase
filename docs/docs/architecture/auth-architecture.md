@@ -8,9 +8,11 @@ How EdgeBase handles sign-up, sign-in, sessions, and token lifecycle — with ze
 
 ## Design Goals
 
-Traditional BaaS platforms manage sessions per user in a centralized database, leading to per-MAU pricing that scales linearly. EdgeBase stores all auth data in a single **D1 database (AUTH_DB)** — Cloudflare's serverless SQL — giving transactional SQL on the primary database and zero per-MAU cost.
+Traditional BaaS platforms often charge a per-MAU product fee. EdgeBase stores
+durable auth data in **D1 (AUTH_DB)** and does not add a per-MAU license fee;
+normal Cloudflare or self-hosted infrastructure usage still applies.
 
-## D1-First Auth Architecture
+## D1-First Auth Architecture With Atomic OAuth Coordination
 
 ```
 Client → Worker → D1 (AUTH_DB)
@@ -26,18 +28,25 @@ Client → Worker → D1 (AUTH_DB)
                     └─ _phone_index      (phone uniqueness)
 ```
 
-All auth operations go directly to D1 via `auth-d1-service.ts` (~61 exported functions). No Durable Objects are involved in any auth path.
+Durable user, identity, and session records go directly to D1 through the auth
+service. Short-lived OAuth state and account-link continuations use a
+key-sharded `AUTH` Durable Object so callback authority can be atomically
+consumed exactly once.
 
 | Layer | Storage | Responsibility |
 |---|---|---|
 | **AUTH_DB (D1)** | Cloudflare D1 | All auth data: users, sessions, OAuth, email tokens, MFA, passkeys, public profiles, uniqueness indexes |
+| **AUTH Durable Objects** | Durable Object storage | Five-minute OAuth state, one-minute account-link continuations, atomic consume/replay prevention |
 
 ### Why D1?
 
 - **Transactional writes**: D1 gives EdgeBase a simple SQL transaction model for sign-up, session issuance, and token flows.
 - **Atomic transactions**: `db.batch()` enables atomic multi-table operations (e.g., cascade delete user + sessions + OAuth accounts in one transaction).
-- **Zero DO overhead**: No Durable Object request costs. D1 works on both Free and Paid plans; Paid raises limits to 25B reads and 50M writes/month.
-- **Simplified architecture**: No shard routing, no cross-DO coordination, no compensation transactions.
+- **Targeted coordination**: Normal auth and access-token verification do not
+  pay a Durable Object hop; only short-lived OAuth callback authority uses the
+  key-sharded coordinator.
+- **Simple durable data model**: User, identity, and session records remain in
+  one transactional database; OAuth coordination stores no durable user data.
 - **Seamless scale-up**: If your platform outgrows D1 limits on Workers Paid (10 GB per database, 50M writes/month), switch the auth provider to **Neon PostgreSQL** with a single config change — zero code modifications. Storage and throughput limits are effectively removed.
 
 ## Request Flow
@@ -95,6 +104,16 @@ Client → Worker → D1 query: SELECT FROM _email_tokens WHERE token = ?
 
 Token creation inserts into `_email_tokens` with an expiration timestamp. Verification queries by token value and checks expiration. KV may additionally cache token-to-userId mappings for fast lookup.
 
+### OAuth State Operations
+
+OAuth sign-in state, account-link state, and one-time browser continuations are
+written to a Durable Object shard selected by their random key. Callback
+handling performs an atomic read-and-terminal-consume in that same shard before
+provider exchange or account mutation. Expired and consumed records cannot be
+replayed concurrently. Cloudflare KV is retained only as a best-effort
+rolling-upgrade mirror and one-time legacy fallback; new flows never treat KV
+as callback authority.
+
 ## D1 Consistency
 
 Auth paths run directly against D1. By default, D1 queries execute on the primary database. If you enable D1 read replication in Cloudflare and need sequential consistency across multiple reads, use the D1 Sessions API in lower-level Worker code.
@@ -130,7 +149,9 @@ Access tokens are delivered to the client and used through
   compatibility. The client stores and submits the rotating refresh token.
 - **HttpOnly cookie transport (opt-in for Web)** — EdgeBase keeps the rotating
   refresh token in a host-only cookie and returns only the access token to
-  JavaScript. The Web SDK opts in explicitly and keeps access tokens in memory.
+  JavaScript. HTTPS uses `__Host-{configuredName}; Secure; Path=/`; plain-HTTP
+  development uses the unprefixed name at `/api/auth`. The Web SDK opts in
+  explicitly and keeps access tokens in memory.
 
 Cookie transport does not make access-token requests cookie-authenticated. It
 only protects the durable refresh credential. EdgeBase requires the custom
@@ -179,7 +200,10 @@ Refresh request arrives with token T1:
 4. No match → 401 Unauthorized
 ```
 
-The grace period handles race conditions when multiple browser tabs or network retries submit the same Refresh Token simultaneously.
+The grace period handles retries of the previous token by returning the
+already-winning current replacement. It never performs another rotation from
+the previous token. The Web SDK additionally serializes refresh and all other
+credential-creating auth mutations across tabs.
 
 ### Multi-Tab Coordination
 
@@ -188,7 +212,8 @@ When multiple browser tabs have an expired Access Token, they coordinate using *
 1. All tabs detect Access Token expiration
 2. BroadcastChannel + localStorage mutex elects a single leader
 3. Leader tab sends the refresh request
-4. Leader broadcasts new tokens to all tabs
+4. Body transport broadcasts the winning token result; cookie transport sends
+   only a non-secret signal and each follower performs its own cookie refresh
 5. If the leader doesn't respond within 10 seconds, another tab takes over
 
 For browsers without BroadcastChannel, a `window.storage` event fallback provides equivalent coordination.
@@ -202,12 +227,20 @@ All SDKs (JavaScript, Dart, Swift, Kotlin, Python) proactively refresh the Acces
 | Platform | Access Token | Refresh Token |
 |---|---|---|
 | Web (JavaScript, default) | Memory | localStorage (with BroadcastChannel tab sync) |
-| Web (HttpOnly cookie opt-in) | Memory | Host-only HttpOnly cookie managed by EdgeBase |
+| Web (HttpOnly cookie opt-in) | Memory | EdgeBase-managed `__Host-` HttpOnly cookie on HTTPS |
+| React Native | Memory | App-provided Keychain/Keystore `secureStorage`, isolated by base URL or `authNamespace` |
 | Node.js | Memory | Memory |
 | Flutter (Dart) | Memory | `shared_preferences` by default, or custom `TokenStorage` |
 | Swift (iOS) | Memory | Keychain Services |
 | Kotlin (Android) | Memory | EncryptedSharedPreferences |
 | Python | Memory | Memory (optional file storage) |
+
+React Native's public `TokenManager.setTokens()` is asynchronous and must be
+awaited. It persists the refresh credential to the configured secure storage
+before exposing the access token, current user, or auth-state event. A storage
+failure rejects with `auth-token-persistence-failed` and never exposes the
+uncommitted session. The call is an authoritative identity transition and
+invalidates older queued refresh/OAuth work through the durable auth epoch.
 
 ## Session Cleanup
 

@@ -37,6 +37,8 @@ public sealed class AuthClient
     private readonly JbHttpClient _http;
     private readonly GeneratedDbApi _core;
     private readonly GeneratedAuthMethods _authMethods;
+    private readonly IAuthTokenStorage _tokenStorage;
+    private readonly bool _hasDurableTokenStorage;
     private static readonly JsonSerializerOptions JsonOpts =
         new JsonSerializerOptions(JsonSerializerDefaults.Web);
 
@@ -49,11 +51,13 @@ public sealed class AuthClient
     /// </summary>
     public event Action<Dictionary<string, object?>?>? OnAuthStateChange;
 
-    internal AuthClient(JbHttpClient http)
+    internal AuthClient(JbHttpClient http, IAuthTokenStorage? tokenStorage = null)
     {
         _http = http;
         _core = new GeneratedDbApi(http);
         _authMethods = new GeneratedAuthMethods(_core);
+        _tokenStorage = tokenStorage ?? new MemoryAuthTokenStorage();
+        _hasDurableTokenStorage = _tokenStorage is IDurableAuthTokenStorage;
     }
 
     // ── 내부 토큰 적용 ────────────────────────────────────────────
@@ -64,10 +68,33 @@ public sealed class AuthClient
         OnAuthStateChange?.Invoke(user);
     }
 
-    private void ApplyAuthTokens(Dictionary<string, object?> result)
+    private async System.Threading.Tasks.Task ApplyAuthTokensAsync(
+        Dictionary<string, object?> result,
+        bool allowExistingRefreshToken = false)
     {
-        ApplyToken(result.TryGetValue("accessToken", out var t) ? t?.ToString() : null, result);
-        _http.SetRefreshToken(result.TryGetValue("refreshToken", out var rt) ? rt?.ToString() : null);
+        var accessToken = result.TryGetValue("accessToken", out var t) ? t?.ToString() : null;
+        var hasRefreshToken = result.TryGetValue("refreshToken", out var rt);
+        var refreshToken = hasRefreshToken ? rt?.ToString() : null;
+        if (!hasRefreshToken && allowExistingRefreshToken)
+        {
+            refreshToken = _http.GetRefreshToken();
+        }
+        if (string.IsNullOrEmpty(accessToken) || string.IsNullOrEmpty(refreshToken))
+        {
+            throw new InvalidOperationException("EdgeBase auth response contained an incomplete token pair.");
+        }
+        try
+        {
+            await _tokenStorage.SaveTokensAsync(new AuthTokenPair(accessToken!, refreshToken!));
+        }
+        catch (Exception error)
+        {
+            throw new TokenPersistenceException("save", error);
+        }
+        // Persist-before-expose: only publish the pair after durable storage
+        // accepts both values.
+        _http.SetRefreshToken(refreshToken);
+        ApplyToken(accessToken, result);
     }
 
     // ── Sign Up / In / Out ────────────────────────────────────────
@@ -85,7 +112,7 @@ public sealed class AuthClient
         var resolved = await TurnstileProvider.ResolveCaptchaTokenAsync(_http.BaseUrl, "signup", captchaToken);
         if (resolved != null) body["captchaToken"] = resolved;
         var result = await _core.AuthSignupAsync(body);
-        ApplyAuthTokens(result);
+        await ApplyAuthTokensAsync(result);
         return result;
     }
 
@@ -102,7 +129,7 @@ public sealed class AuthClient
         // If MFA is required, return result without setting tokens
         if (result.TryGetValue("mfaRequired", out var mfa) && mfa is true)
             return result;
-        ApplyAuthTokens(result);
+        await ApplyAuthTokensAsync(result);
         return result;
     }
 
@@ -115,7 +142,7 @@ public sealed class AuthClient
             ? null
             : new Dictionary<string, object?> { ["refreshToken"] = refreshToken };
         var result = await _core.AuthRefreshAsync(body, ct);
-        ApplyAuthTokens(result);
+        await ApplyAuthTokensAsync(result);
         return result;
     }
 
@@ -137,6 +164,14 @@ public sealed class AuthClient
         }
         finally
         {
+            try
+            {
+                await _tokenStorage.ClearTokensAsync();
+            }
+            catch (Exception error)
+            {
+                throw new TokenPersistenceException("clear", error);
+            }
             ApplyToken(null, null);
             _http.SetRefreshToken(null);
         }
@@ -152,7 +187,7 @@ public sealed class AuthClient
         var resolved = await TurnstileProvider.ResolveCaptchaTokenAsync(_http.BaseUrl, "anonymous", captchaToken);
         if (resolved != null) body["captchaToken"] = resolved;
         var result = await _core.AuthSigninAnonymousAsync(body.Count > 0 ? body : null);
-        ApplyAuthTokens(result);
+        await ApplyAuthTokensAsync(result);
         return result;
     }
 
@@ -170,8 +205,8 @@ public sealed class AuthClient
         // URL construction only — no HTTP call, so no delegation needed.
         var qs = string.IsNullOrEmpty(redirectUrl)
             ? ""
-            : $"?redirectUrl={System.Uri.EscapeDataString(redirectUrl)}";
-        var url = $"{_http.BaseUrl}/api/auth/oauth/{provider}{qs}";
+            : $"?redirect_url={System.Uri.EscapeDataString(redirectUrl)}";
+        var url = $"{_http.BaseUrl}/api/auth/oauth/{System.Uri.EscapeDataString(provider)}{qs}";
         if (captchaToken != null)
         {
             var sep = string.IsNullOrEmpty(qs) ? "?" : "&";
@@ -211,7 +246,7 @@ public sealed class AuthClient
         VerifyMagicLinkAsync(string token)
     {
         var result = await _core.AuthVerifyMagicLinkAsync(new { token });
-        ApplyAuthTokens(result);
+        await ApplyAuthTokensAsync(result);
         return result;
     }
 
@@ -233,7 +268,7 @@ public sealed class AuthClient
     {
         var body = new Dictionary<string, object?> { ["phone"] = phone, ["code"] = code };
         var result = await _core.AuthVerifyPhoneAsync(body);
-        ApplyAuthTokens(result);
+        await ApplyAuthTokensAsync(result);
         return result;
     }
 
@@ -248,7 +283,7 @@ public sealed class AuthClient
     {
         var result = await _authMethods.VerifyEmailOtpAsync(
             new Dictionary<string, object?> { ["email"] = email, ["code"] = code }, ct);
-        ApplyAuthTokens(result);
+        await ApplyAuthTokensAsync(result);
         return result;
     }
 
@@ -264,27 +299,31 @@ public sealed class AuthClient
     public async System.Threading.Tasks.Task<System.Collections.Generic.Dictionary<string, object?>>
         VerifyLinkPhoneAsync(string phone, string code)
     {
+        RequireDurableStorageForPotentialSessionReplacement();
         var body = new Dictionary<string, object?> { ["phone"] = phone, ["code"] = code };
-        return await _core.AuthVerifyLinkPhoneAsync(body);
+        var result = await _core.AuthVerifyLinkPhoneAsync(body);
+        // Anonymous upgrades revoke the provisional session atomically and
+        // return its authoritative replacement token pair.
+        if (result.ContainsKey("accessToken")) await ApplyAuthTokensAsync(result);
+        return result;
     }
 
     /// <summary>익명 계정을 이메일/비밀번호 계정으로 연결합니다.</summary>
     public async System.Threading.Tasks.Task<System.Collections.Generic.Dictionary<string, object?>>
         LinkWithEmailAsync(string email, string password)
     {
+        RequireDurableStorageForPotentialSessionReplacement();
         var result = await _core.AuthLinkEmailAsync(new { email, password });
-        if (result.ContainsKey("accessToken")) ApplyAuthTokens(result);
+        if (result.ContainsKey("accessToken")) await ApplyAuthTokensAsync(result);
         return result;
     }
 
     /// <summary>익명 계정을 OAuth 제공자에 연결합니다. 리다이렉트 URL 반환.</summary>
     public string LinkWithOAuth(string provider, string redirectUrl = "")
     {
-        // URL construction only — no HTTP call, so no delegation needed.
-        var qs = string.IsNullOrEmpty(redirectUrl)
-            ? ""
-            : $"?redirectUrl={System.Uri.EscapeDataString(redirectUrl)}";
-        return $"{_http.BaseUrl}/api/auth/link/oauth/{provider}{qs}";
+        throw new System.NotSupportedException(
+            "Unity OAuth account linking requires secure callback completion, which is not implemented. " +
+            "Do not open a generated GET URL for the POST-only link endpoint.");
     }
 
     /// <summary>OAuth 연결 시작 URL을 객체 형태로 반환합니다.</summary>
@@ -303,10 +342,11 @@ public sealed class AuthClient
 
     /// <summary>프로필(displayName 또는 avatarUrl)을 수정합니다.</summary>
     public async System.Threading.Tasks.Task<System.Collections.Generic.Dictionary<string, object?>>
-        UpdateProfileAsync(System.Collections.Generic.Dictionary<string, object?> data)
+    UpdateProfileAsync(System.Collections.Generic.Dictionary<string, object?> data)
     {
         var result = await _core.AuthUpdateProfileAsync(data);
-        if (result.ContainsKey("accessToken")) ApplyAuthTokens(result);
+        if (result.ContainsKey("accessToken"))
+            await ApplyAuthTokensAsync(result, allowExistingRefreshToken: true);
         return result;
     }
 
@@ -380,7 +420,7 @@ public sealed class AuthClient
     {
         var result = await _core.AuthChangePasswordAsync(
             new { currentPassword, newPassword });
-        if (result.ContainsKey("accessToken")) ApplyAuthTokens(result);
+        if (result.ContainsKey("accessToken")) await ApplyAuthTokensAsync(result);
         return result;
     }
 
@@ -416,7 +456,7 @@ public sealed class AuthClient
         PasskeysAuthenticateAsync(object response, System.Threading.CancellationToken ct = default)
     {
         var result = await _authMethods.PasskeysAuthenticateAsync(new { response }, ct);
-        ApplyAuthTokens(result);
+        await ApplyAuthTokensAsync(result);
         return result;
     }
 
@@ -446,8 +486,7 @@ public sealed class AuthClient
     {
         var result = await _core.AuthMfaVerifyAsync(
             new { mfaTicket, code });
-        ApplyToken(result.TryGetValue("accessToken", out var t) ? t?.ToString() : null, result);
-        _http.SetRefreshToken(result.TryGetValue("refreshToken", out var rt) ? rt?.ToString() : null);
+        await ApplyAuthTokensAsync(result);
         return result;
     }
 
@@ -457,8 +496,7 @@ public sealed class AuthClient
     {
         var result = await _core.AuthMfaRecoveryAsync(
             new { mfaTicket, recoveryCode });
-        ApplyToken(result.TryGetValue("accessToken", out var t) ? t?.ToString() : null, result);
-        _http.SetRefreshToken(result.TryGetValue("refreshToken", out var rt) ? rt?.ToString() : null);
+        await ApplyAuthTokensAsync(result);
         return result;
     }
 
@@ -482,8 +520,64 @@ public sealed class AuthClient
     /// <summary>현재 엑세스 토큰 반환 (미로그인 시 null).</summary>
     public string? GetAccessToken() => CurrentToken;
 
-    /// <summary>앱 재시작 시 저장된 토큰으로 복원 (Unity PlayerPrefs 활용 가능).</summary>
+    /// <summary>Restore a previously persisted session before authenticated calls.</summary>
+    public async System.Threading.Tasks.Task<bool> TryRestoreSessionAsync()
+    {
+        AuthTokenPair? tokens;
+        try
+        {
+            tokens = await _tokenStorage.LoadTokensAsync();
+        }
+        catch (Exception error)
+        {
+            throw new TokenPersistenceException("load", error);
+        }
+        if (tokens == null) return false;
+        if (string.IsNullOrEmpty(tokens.Value.AccessToken)
+            || string.IsNullOrEmpty(tokens.Value.RefreshToken))
+        {
+            throw new TokenPersistenceException(
+                "load",
+                new InvalidOperationException("Stored EdgeBase token pair is incomplete."));
+        }
+        _http.SetRefreshToken(tokens.Value.RefreshToken);
+        ApplyToken(tokens.Value.AccessToken);
+        return true;
+    }
+
+    /// <summary>
+    /// Set a volatile caller-owned bearer token. This does not persist a refresh
+    /// pair and is not valid for anonymous account upgrades; use
+    /// TryRestoreSessionAsync for stored EdgeBase sessions.
+    /// </summary>
     public void SetAccessToken(string? token) => ApplyToken(token);
+
+    private void RequireDurableStorageForPotentialSessionReplacement()
+    {
+        if (_hasDurableTokenStorage || HasKnownNonAnonymousSession()) return;
+        throw new InvalidOperationException(
+            "Anonymous account upgrades require an IDurableAuthTokenStorage so " +
+            "replacement tokens survive response loss or process termination.");
+    }
+
+    private bool HasKnownNonAnonymousSession()
+    {
+        if (string.IsNullOrEmpty(CurrentToken)) return false;
+        try
+        {
+            var parts = CurrentToken!.Split('.');
+            if (parts.Length < 2) return false;
+            var payload = parts[1].Replace('-', '+').Replace('_', '/');
+            payload = payload.PadRight(payload.Length + ((4 - payload.Length % 4) % 4), '=');
+            using var document = JsonDocument.Parse(Convert.FromBase64String(payload));
+            return document.RootElement.TryGetProperty("isAnonymous", out var anonymous)
+                && anonymous.ValueKind == JsonValueKind.False;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private static Dictionary<string, object?> ExtractNested(Dictionary<string, object?> dict, string key)
     {

@@ -64,6 +64,10 @@ describe('scheduled handler', () => {
   it('runs system cleanup even when no user schedule functions are registered', async () => {
     const worker = (await import('../index.js')).default;
     const pending: Promise<unknown>[] = [];
+    const storage = {
+      list: vi.fn().mockResolvedValue({ objects: [], truncated: false }),
+      delete: vi.fn(),
+    };
     const ctx = {
       waitUntil: vi.fn((promise: Promise<unknown>) => {
         pending.push(Promise.resolve(promise));
@@ -72,7 +76,7 @@ describe('scheduled handler', () => {
 
     await worker.scheduled(
       { scheduledTime: Date.parse('2026-03-07T03:00:00Z') } as never,
-      {} as never,
+      { STORAGE: storage } as never,
       ctx as never,
     );
 
@@ -83,6 +87,11 @@ describe('scheduled handler', () => {
     expect(cleanExpiredSessionsMock).toHaveBeenCalledWith({ kind: 'auth-db' });
     expect(cleanStaleAnonymousAccountsMock.mock.calls[0]?.[0]).toEqual({ kind: 'auth-db' });
     expect(deleteAnonMock).not.toHaveBeenCalled();
+    expect(storage.list).toHaveBeenCalledWith({
+      prefix: '__edgebase_internal__/signed-upload-grants/',
+      limit: 1000,
+    });
+    expect(storage.delete).not.toHaveBeenCalled();
   }, 15_000);
 
   it('runs plugin migration reconciliation before scheduled work when plugins are configured', async () => {

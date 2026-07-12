@@ -60,8 +60,8 @@ function createMockKV(): KVNamespace & { _store: MockKVStore } {
 function createMockAuthDb(): AuthDb & { _pushDevices: Map<string, Array<Record<string, unknown>>> } {
   const pushDevices = new Map<string, Array<Record<string, unknown>>>();
 
-  return {
-    dialect: 'sqlite',
+  const db = {
+    dialect: 'sqlite' as const,
     async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> {
       if (sql.includes('FROM _push_devices')) {
         const userId = String(params?.[0] ?? '');
@@ -85,6 +85,7 @@ function createMockAuthDb(): AuthDb & { _pushDevices: Map<string, Array<Record<s
     async compareAndSwapUserSession(): Promise<boolean> {
       return false;
     },
+    async createSessionWithLimit(): Promise<void> {},
     async batch(statements: { sql: string; params?: unknown[] }[]): Promise<void> {
       for (const statement of statements) {
         if (statement.sql.startsWith('DELETE FROM _push_devices WHERE userId = ?')) {
@@ -110,8 +111,12 @@ function createMockAuthDb(): AuthDb & { _pushDevices: Map<string, Array<Record<s
         throw new Error(`Unsupported batch statement in mock auth db: ${statement.sql}`);
       }
     },
+    async batchWithLock(_lockKey: string | string[], statements: { sql: string; params?: unknown[] }[]): Promise<void> {
+      await db.batch(statements);
+    },
     _pushDevices: pushDevices,
   };
+  return db;
 }
 
 // ─── registerToken ───────────────────────────────────────────────────────────

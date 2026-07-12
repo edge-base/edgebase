@@ -31,6 +31,8 @@ struct HttpClient::Impl {
   std::string refreshToken;
   std::string locale;
   std::map<std::string, std::string> context;
+  HttpClient::Transport transport;
+  mutable std::mutex stateMutex;
 
   std::string buildUrl(const std::string &path) const {
     if (path.rfind("/api", 0) == 0)
@@ -47,37 +49,54 @@ struct HttpClient::Impl {
 
   Result perform(const std::string &method, const std::string &url,
                  const std::string &body,
-                 const struct curl_slist *extraHeaders) const {
+                 const std::map<std::string, std::string> &extraHeaders) const {
+    std::string tokenSnapshot;
+    std::string localeSnapshot;
+    {
+      std::lock_guard<std::mutex> lock(stateMutex);
+      tokenSnapshot = token;
+      localeSnapshot = locale;
+    }
+    std::map<std::string, std::string> requestHeaders = {
+        {"Content-Type", "application/json"},
+        {"Accept", "application/json"},
+    };
+    if (!tokenSnapshot.empty())
+      requestHeaders["Authorization"] = "Bearer " + tokenSnapshot;
+    if (!serviceKey.empty()) {
+      requestHeaders["X-EdgeBase-Service-Key"] = serviceKey;
+      requestHeaders["Authorization"] = "Bearer " + serviceKey;
+    }
+    if (!localeSnapshot.empty())
+      requestHeaders["Accept-Language"] = localeSnapshot;
+    requestHeaders.insert(extraHeaders.begin(), extraHeaders.end());
+
+    if (transport)
+      return transport(method, url, body, requestHeaders);
+
     CURL *curl = curl_easy_init();
     if (!curl)
       return {false, 0, "", "curl_easy_init failed"};
 
     std::string response;
     long statusCode = 0;
-
     struct curl_slist *headers = nullptr;
     headers = curl_slist_append(headers, "Content-Type: application/json");
     headers = curl_slist_append(headers, "Accept: application/json");
-
-    if (!token.empty())
+    if (!tokenSnapshot.empty())
       headers = curl_slist_append(headers,
-                                  ("Authorization: Bearer " + token).c_str());
+                                  ("Authorization: Bearer " + tokenSnapshot).c_str());
     if (!serviceKey.empty()) {
       headers = curl_slist_append(
           headers, ("X-EdgeBase-Service-Key: " + serviceKey).c_str());
       headers = curl_slist_append(
           headers, ("Authorization: Bearer " + serviceKey).c_str());
     }
-    if (!locale.empty()) {
+    if (!localeSnapshot.empty())
       headers = curl_slist_append(headers,
-                                  ("Accept-Language: " + locale).c_str());
-    }
-    // Copy extra headers (for multipart)
-    const struct curl_slist *eh = extraHeaders;
-    while (eh) {
-      headers = curl_slist_append(headers, eh->data);
-      eh = eh->next;
-    }
+                                  ("Accept-Language: " + localeSnapshot).c_str());
+    for (const auto &[name, value] : extraHeaders)
+      headers = curl_slist_append(headers, (name + ": " + value).c_str());
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -117,10 +136,12 @@ struct HttpClient::Impl {
 
   Result performWithRetry(const std::string &method, const std::string &url,
                    const std::string &body,
-                   const struct curl_slist *extraHeaders) const {
-    for (int attempt = 0; attempt <= 3; ++attempt) {
+                   const std::map<std::string, std::string> &extraHeaders,
+                   bool allowRetry = true) const {
+    const int maxAttempts = allowRetry ? 3 : 0;
+    for (int attempt = 0; attempt <= maxAttempts; ++attempt) {
       Result result = perform(method, url, body, extraHeaders);
-      if (result.statusCode == 429 && attempt < 3) {
+      if (allowRetry && result.statusCode == 429 && attempt < 3) {
         int baseDelayMs = 1000 * (1 << attempt);
         static thread_local std::mt19937 rng{std::random_device{}()};
         int jitter = std::uniform_int_distribution<int>(0, baseDelayMs / 4)(rng);
@@ -128,7 +149,7 @@ struct HttpClient::Impl {
         std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
         continue;
       }
-      if (!result.ok && result.statusCode == 0 && attempt < 2) {
+      if (allowRetry && !result.ok && result.statusCode == 0 && attempt < 2) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50 * (attempt + 1)));
         continue;
       }
@@ -140,6 +161,11 @@ struct HttpClient::Impl {
   Result uploadMultipart(const std::string &url, const std::string &key,
                          const std::vector<uint8_t> &data,
                          const std::string &contentType) const {
+    std::string tokenSnapshot;
+    {
+      std::lock_guard<std::mutex> lock(stateMutex);
+      tokenSnapshot = token;
+    }
     CURL *curl = curl_easy_init();
     if (!curl)
       return {false, 0, "", "curl_easy_init failed"};
@@ -164,9 +190,9 @@ struct HttpClient::Impl {
     curl_mime_filename(field, key.c_str());
 
     struct curl_slist *headers = nullptr;
-    if (!token.empty())
+    if (!tokenSnapshot.empty())
       headers = curl_slist_append(headers,
-                                  ("Authorization: Bearer " + token).c_str());
+                                  ("Authorization: Bearer " + tokenSnapshot).c_str());
     if (!serviceKey.empty()) {
       headers = curl_slist_append(
           headers, ("X-EdgeBase-Service-Key: " + serviceKey).c_str());
@@ -205,12 +231,17 @@ struct HttpClient::Impl {
 static std::once_flag s_curlInitFlag;
 
 HttpClient::HttpClient(std::string baseUrl, std::string serviceKey)
+    : HttpClient(std::move(baseUrl), std::move(serviceKey), {}) {}
+
+HttpClient::HttpClient(std::string baseUrl, std::string serviceKey,
+                       Transport transport)
     : impl_(std::make_unique<Impl>()) {
   // Trim trailing slash
   while (!baseUrl.empty() && baseUrl.back() == '/')
     baseUrl.pop_back();
   impl_->baseUrl = std::move(baseUrl);
   impl_->serviceKey = std::move(serviceKey);
+  impl_->transport = std::move(transport);
   std::call_once(s_curlInitFlag,
                  []() { curl_global_init(CURL_GLOBAL_DEFAULT); });
 }
@@ -222,8 +253,16 @@ HttpClient::~HttpClient() {
   // up. The OS reclaims all resources at process exit anyway.
 }
 
+std::string HttpClient::getBaseUrl() const { return impl_->baseUrl; }
+
 Result HttpClient::get(const std::string &path,
                        const std::map<std::string, std::string> &query) const {
+  return get(path, query, {});
+}
+
+Result HttpClient::get(const std::string &path,
+                       const std::map<std::string, std::string> &query,
+                       const HttpRequestOptions &options) const {
   std::string url = impl_->buildUrl(path);
   if (!query.empty()) {
     CURL *tmp = curl_easy_init();
@@ -237,17 +276,41 @@ Result HttpClient::get(const std::string &path,
     }
     curl_easy_cleanup(tmp);
   }
-  return impl_->performWithRetry("GET", url, "", nullptr);
+  std::map<std::string, std::string> headers;
+  if (options.captchaToken.has_value())
+    headers["X-EdgeBase-Captcha-Token"] = *options.captchaToken;
+  return impl_->performWithRetry("GET", url, "", headers,
+                                 !options.captchaToken.has_value());
 }
 
 Result HttpClient::post(const std::string &path,
                         const std::string &jsonBody) const {
-  return impl_->performWithRetry("POST", impl_->buildUrl(path), jsonBody, nullptr);
+  return post(path, jsonBody, {});
+}
+
+Result HttpClient::post(const std::string &path,
+                        const std::string &jsonBody,
+                        const HttpRequestOptions &options) const {
+  std::map<std::string, std::string> headers;
+  if (options.captchaToken.has_value())
+    headers["X-EdgeBase-Captcha-Token"] = *options.captchaToken;
+  return impl_->performWithRetry("POST", impl_->buildUrl(path), jsonBody,
+                                 headers, !options.captchaToken.has_value());
 }
 
 Result HttpClient::put(const std::string &path,
                        const std::string &jsonBody) const {
-  return impl_->performWithRetry("PUT", impl_->buildUrl(path), jsonBody, nullptr);
+  return put(path, jsonBody, {});
+}
+
+Result HttpClient::put(const std::string &path,
+                       const std::string &jsonBody,
+                       const HttpRequestOptions &options) const {
+  std::map<std::string, std::string> headers;
+  if (options.captchaToken.has_value())
+    headers["X-EdgeBase-Captcha-Token"] = *options.captchaToken;
+  return impl_->performWithRetry("PUT", impl_->buildUrl(path), jsonBody,
+                                 headers, !options.captchaToken.has_value());
 }
 
 Result HttpClient::post_with_query(const std::string &path,
@@ -266,7 +329,7 @@ Result HttpClient::post_with_query(const std::string &path,
     }
     curl_easy_cleanup(tmp);
   }
-  return impl_->performWithRetry("POST", url, jsonBody, nullptr);
+  return impl_->performWithRetry("POST", url, jsonBody, {});
 }
 
 Result HttpClient::post_bytes_with_query(
@@ -293,23 +356,30 @@ Result HttpClient::post_bytes_with_query(
 
   std::string response;
   long statusCode = 0;
+  std::string tokenSnapshot;
+  std::string localeSnapshot;
+  {
+    std::lock_guard<std::mutex> lock(impl_->stateMutex);
+    tokenSnapshot = impl_->token;
+    localeSnapshot = impl_->locale;
+  }
 
   struct curl_slist *headers = nullptr;
   headers = curl_slist_append(headers, ("Content-Type: " + contentType).c_str());
   headers = curl_slist_append(headers, "Accept: application/json");
 
-  if (!impl_->token.empty())
+  if (!tokenSnapshot.empty())
     headers = curl_slist_append(headers,
-                                ("Authorization: Bearer " + impl_->token).c_str());
+                                ("Authorization: Bearer " + tokenSnapshot).c_str());
   if (!impl_->serviceKey.empty()) {
     headers = curl_slist_append(
         headers, ("X-EdgeBase-Service-Key: " + impl_->serviceKey).c_str());
     headers = curl_slist_append(
         headers, ("Authorization: Bearer " + impl_->serviceKey).c_str());
   }
-  if (!impl_->locale.empty()) {
+  if (!localeSnapshot.empty()) {
     headers = curl_slist_append(headers,
-                                ("Accept-Language: " + impl_->locale).c_str());
+                                ("Accept-Language: " + localeSnapshot).c_str());
   }
 
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
@@ -338,16 +408,35 @@ Result HttpClient::post_bytes_with_query(
 
 Result HttpClient::patch(const std::string &path,
                          const std::string &jsonBody) const {
-  return impl_->performWithRetry("PATCH", impl_->buildUrl(path), jsonBody, nullptr);
+  return patch(path, jsonBody, {});
+}
+
+Result HttpClient::patch(const std::string &path,
+                         const std::string &jsonBody,
+                         const HttpRequestOptions &options) const {
+  std::map<std::string, std::string> headers;
+  if (options.captchaToken.has_value())
+    headers["X-EdgeBase-Captcha-Token"] = *options.captchaToken;
+  return impl_->performWithRetry("PATCH", impl_->buildUrl(path), jsonBody,
+                                 headers, !options.captchaToken.has_value());
 }
 
 Result HttpClient::del(const std::string &path) const {
-  return impl_->performWithRetry("DELETE", impl_->buildUrl(path), "", nullptr);
+  return delWithOptions(path, {});
+}
+
+Result HttpClient::delWithOptions(const std::string &path,
+                                  const HttpRequestOptions &options) const {
+  std::map<std::string, std::string> headers;
+  if (options.captchaToken.has_value())
+    headers["X-EdgeBase-Captcha-Token"] = *options.captchaToken;
+  return impl_->performWithRetry("DELETE", impl_->buildUrl(path), "", headers,
+                                 !options.captchaToken.has_value());
 }
 
 Result HttpClient::del(const std::string &path,
                        const std::string &jsonBody) const {
-  return impl_->performWithRetry("DELETE", impl_->buildUrl(path), jsonBody, nullptr);
+  return impl_->performWithRetry("DELETE", impl_->buildUrl(path), jsonBody, {});
 }
 
 bool HttpClient::head(const std::string &path) const {
@@ -357,11 +446,16 @@ bool HttpClient::head(const std::string &path) const {
 
   std::string url = impl_->buildUrl(path);
   long statusCode = 0;
+  std::string tokenSnapshot;
+  {
+    std::lock_guard<std::mutex> lock(impl_->stateMutex);
+    tokenSnapshot = impl_->token;
+  }
 
   struct curl_slist *headers = nullptr;
-  if (!impl_->token.empty())
+  if (!tokenSnapshot.empty())
     headers = curl_slist_append(headers,
-                                ("Authorization: Bearer " + impl_->token).c_str());
+                                ("Authorization: Bearer " + tokenSnapshot).c_str());
   if (!impl_->serviceKey.empty()) {
     headers = curl_slist_append(
         headers, ("X-EdgeBase-Service-Key: " + impl_->serviceKey).c_str());
@@ -393,22 +487,57 @@ Result HttpClient::uploadMultipart(const std::string &path,
   return impl_->uploadMultipart(impl_->buildUrl(path), key, data, contentType);
 }
 
-void HttpClient::setToken(const std::string &token) { impl_->token = token; }
-void HttpClient::clearToken() { impl_->token.clear(); }
-std::string HttpClient::getToken() const { return impl_->token; }
+void HttpClient::setToken(const std::string &token) {
+  std::lock_guard<std::mutex> lock(impl_->stateMutex);
+  impl_->token = token;
+}
+void HttpClient::setTokens(const std::string &accessToken,
+                           const std::string &refreshToken) {
+  std::lock_guard<std::mutex> lock(impl_->stateMutex);
+  impl_->token = accessToken;
+  impl_->refreshToken = refreshToken;
+}
+void HttpClient::clearToken() {
+  std::lock_guard<std::mutex> lock(impl_->stateMutex);
+  impl_->token.clear();
+}
+std::string HttpClient::getToken() const {
+  std::lock_guard<std::mutex> lock(impl_->stateMutex);
+  return impl_->token;
+}
 void HttpClient::setRefreshToken(const std::string &token) {
+  std::lock_guard<std::mutex> lock(impl_->stateMutex);
   impl_->refreshToken = token;
 }
-void HttpClient::clearRefreshToken() { impl_->refreshToken.clear(); }
-std::string HttpClient::getRefreshToken() const { return impl_->refreshToken; }
+void HttpClient::clearRefreshToken() {
+  std::lock_guard<std::mutex> lock(impl_->stateMutex);
+  impl_->refreshToken.clear();
+}
+std::string HttpClient::getRefreshToken() const {
+  std::lock_guard<std::mutex> lock(impl_->stateMutex);
+  return impl_->refreshToken;
+}
+void HttpClient::clearTokens() {
+  std::lock_guard<std::mutex> lock(impl_->stateMutex);
+  impl_->token.clear();
+  impl_->refreshToken.clear();
+}
 
 void HttpClient::setContext(const std::map<std::string, std::string> &ctx) {
+  std::lock_guard<std::mutex> lock(impl_->stateMutex);
   impl_->context = ctx;
 }
 std::map<std::string, std::string> HttpClient::getContext() const {
+  std::lock_guard<std::mutex> lock(impl_->stateMutex);
   return impl_->context;
 }
-void HttpClient::setLocale(const std::string &locale) { impl_->locale = locale; }
-std::string HttpClient::getLocale() const { return impl_->locale; }
+void HttpClient::setLocale(const std::string &locale) {
+  std::lock_guard<std::mutex> lock(impl_->stateMutex);
+  impl_->locale = locale;
+}
+std::string HttpClient::getLocale() const {
+  std::lock_guard<std::mutex> lock(impl_->stateMutex);
+  return impl_->locale;
+}
 
 } // namespace client

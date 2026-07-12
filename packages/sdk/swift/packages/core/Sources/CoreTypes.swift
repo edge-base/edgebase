@@ -56,7 +56,7 @@ public protocol TokenManageable: Sendable {
     /// retry does not re-send a token the server has already rejected).
     func getAccessToken(forceRefresh: Bool) async throws -> String?
     func getRefreshToken() async -> String?
-    func clearTokens() async
+    func clearTokens() async throws
 }
 
 public extension TokenManageable {

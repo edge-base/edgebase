@@ -32,38 +32,38 @@ public actor HttpClient {
     // MARK: - Public Methods
 
     /// GET request.
-    public func get(_ path: String, queryParams: [String: String]? = nil) async throws -> Any {
-        return try await request(method: "GET", path: path, queryParams: queryParams)
+    public func get(_ path: String, queryParams: [String: String]? = nil, captchaToken: String? = nil) async throws -> Any {
+        return try await request(method: "GET", path: path, queryParams: queryParams, captchaToken: captchaToken)
     }
 
     /// POST request.
     @discardableResult
-    public func post(_ path: String, _ body: [String: Any]? = nil, queryParams: [String: String]? = nil) async throws -> Any {
-        return try await request(method: "POST", path: path, body: body, queryParams: queryParams)
+    public func post(_ path: String, _ body: [String: Any]? = nil, queryParams: [String: String]? = nil, captchaToken: String? = nil) async throws -> Any {
+        return try await request(method: "POST", path: path, body: body, queryParams: queryParams, captchaToken: captchaToken)
     }
 
     /// PATCH request.
     @discardableResult
-    public func patch(_ path: String, _ body: [String: Any]) async throws -> Any {
-        return try await request(method: "PATCH", path: path, body: body)
+    public func patch(_ path: String, _ body: [String: Any], captchaToken: String? = nil) async throws -> Any {
+        return try await request(method: "PATCH", path: path, body: body, captchaToken: captchaToken)
     }
 
     /// PUT request.
     @discardableResult
-    public func put(_ path: String, _ body: [String: Any], queryParams: [String: String]? = nil) async throws -> Any {
-        return try await request(method: "PUT", path: path, body: body, queryParams: queryParams)
+    public func put(_ path: String, _ body: [String: Any], queryParams: [String: String]? = nil, captchaToken: String? = nil) async throws -> Any {
+        return try await request(method: "PUT", path: path, body: body, queryParams: queryParams, captchaToken: captchaToken)
     }
 
     /// DELETE request.
     @discardableResult
-    public func delete(_ path: String) async throws -> Any {
-        return try await request(method: "DELETE", path: path)
+    public func delete(_ path: String, captchaToken: String? = nil) async throws -> Any {
+        return try await request(method: "DELETE", path: path, captchaToken: captchaToken)
     }
 
     /// DELETE request with body.
     @discardableResult
-    public func delete(_ path: String, _ body: [String: Any]) async throws -> Any {
-        return try await request(method: "DELETE", path: path, body: body)
+    public func delete(_ path: String, _ body: [String: Any], captchaToken: String? = nil) async throws -> Any {
+        return try await request(method: "DELETE", path: path, body: body, captchaToken: captchaToken)
     }
 
     /// POST without auth (for signUp/signIn etc).
@@ -225,7 +225,8 @@ public actor HttpClient {
         queryParams: [String: String]? = nil,
         skipAuth: Bool = false,
         isRetry: Bool = false,
-        rateLimitAttempt: Int = 0
+        rateLimitAttempt: Int = 0,
+        captchaToken: String? = nil
     ) async throws -> Any {
         let url = buildURL(path: "/api\(path)", queryParams: queryParams)
         var req = URLRequest(url: url)
@@ -233,6 +234,9 @@ public actor HttpClient {
 
         if !skipAuth {
             try await addAuthHeaders(&req)
+        }
+        if let captchaToken {
+            req.setValue(captchaToken, forHTTPHeaderField: "X-EdgeBase-Captcha-Token")
         }
 
         // #133/#136: X-EdgeBase-Context header removed. namespace+id are in the URL path.
@@ -249,9 +253,9 @@ public actor HttpClient {
         } catch {
             // Only auto-retry idempotent methods on ambiguous transport errors. A
             // POST/PATCH that failed after the server committed would double-execute.
-            if rateLimitAttempt < 2 && isIdempotentMethod(method) && isRetryableTransportError(error) {
+            if captchaToken == nil && rateLimitAttempt < 2 && isIdempotentMethod(method) && isRetryableTransportError(error) {
                 try await Task.sleep(nanoseconds: UInt64(50_000_000 * (rateLimitAttempt + 1)))
-                return try await request(method: method, path: path, body: body, queryParams: queryParams, skipAuth: skipAuth, isRetry: isRetry, rateLimitAttempt: rateLimitAttempt + 1)
+                return try await request(method: method, path: path, body: body, queryParams: queryParams, skipAuth: skipAuth, isRetry: isRetry, rateLimitAttempt: rateLimitAttempt + 1, captchaToken: captchaToken)
             }
             throw error
         }
@@ -261,23 +265,24 @@ public actor HttpClient {
         }
 
         // 429 retry with Retry-After
-        if httpResponse.statusCode == 429 && rateLimitAttempt < 3 {
+        if captchaToken == nil && httpResponse.statusCode == 429 && rateLimitAttempt < 3 {
             let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
             let delay = retryDelay(retryAfterHeader: retryAfter, attempt: rateLimitAttempt)
             try await Task.sleep(nanoseconds: delay)
-            return try await request(method: method, path: path, body: body, queryParams: queryParams, skipAuth: skipAuth, isRetry: isRetry, rateLimitAttempt: rateLimitAttempt + 1)
+            return try await request(method: method, path: path, body: body, queryParams: queryParams, skipAuth: skipAuth, isRetry: isRetry, rateLimitAttempt: rateLimitAttempt + 1, captchaToken: captchaToken)
         }
 
         // 401 auto-retry with token refresh.
         // Force a refresh (bypass the local-expiry short-circuit) so the retry uses a
         // freshly minted token instead of re-sending the token the server just rejected
-        // (server-side revocation / clock skew). Swallow refresh errors here: if the
-        // refresh fails the retry proceeds unauthenticated and surfaces the real 401.
-        if httpResponse.statusCode == 401 && !isRetry && !skipAuth {
-            _ = try? await tokenManager.getAccessToken(forceRefresh: true)
+        // (server-side revocation / clock skew). Refresh/persistence failures must
+        // remain visible; retrying without authority can lose a rotated session.
+        if captchaToken == nil && httpResponse.statusCode == 401 && !isRetry && !skipAuth {
+            _ = try await tokenManager.getAccessToken(forceRefresh: true)
             return try await request(
                 method: method, path: path, body: body,
-                queryParams: queryParams, skipAuth: skipAuth, isRetry: true
+                queryParams: queryParams, skipAuth: skipAuth, isRetry: true,
+                captchaToken: captchaToken
             )
         }
 
@@ -321,22 +326,18 @@ public actor HttpClient {
     }
 
     /// HEAD request — returns true if resource exists (2xx).
-    public func head(_ path: String) async -> Bool {
+    public func head(_ path: String) async throws -> Bool {
         let url = buildURL(path: "/api\(path)")
         var req = URLRequest(url: url)
         req.httpMethod = "HEAD"
-        do {
-            try await addAuthHeaders(&req)
-            let (_, response) = try await session.data(for: req)
-            guard let httpResponse = response as? HTTPURLResponse else { return false }
-            return httpResponse.statusCode >= 200 && httpResponse.statusCode < 300
-        } catch {
-            return false
-        }
+        try await addAuthHeaders(&req)
+        let (_, response) = try await session.data(for: req)
+        guard let httpResponse = response as? HTTPURLResponse else { return false }
+        return httpResponse.statusCode >= 200 && httpResponse.statusCode < 300
     }
 
     private func addAuthHeaders(_ request: inout URLRequest) async throws {
-        if let token = try? await tokenManager.getAccessToken() {
+        if let token = try await tokenManager.getAccessToken() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         if let projectId = projectId {

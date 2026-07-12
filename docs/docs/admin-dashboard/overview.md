@@ -82,8 +82,17 @@ For the current page-by-page route map, see [Navigation Map](/docs/admin-dashboa
 Starting with EdgeBase 0.3.6, the browser dashboard never persists admin
 access or refresh tokens in `localStorage` or `sessionStorage`. The short-lived
 15-minute admin access token exists only in page memory. The rotating refresh token is a
-host-only `HttpOnly` cookie scoped to `/admin/api/auth`; it is `Secure` on
-HTTPS, and same-origin deployments use `SameSite=Strict`.
+host-only `HttpOnly` cookie. HTTPS uses
+`__Host-edgebase-admin-refresh; Secure; Path=/`; plain-HTTP local development
+uses the unprefixed name with `Path=/admin/api/auth`. Same-origin deployments
+use `SameSite=Strict`, and release mode rejects plain-HTTP cookie auth except on
+an explicit CLI-owned `local-development` loopback request. Cloudflare and
+self-hosted release runtimes never receive that exception.
+
+Secure deployments expire but never read or migrate the predecessor
+`__Secure-` and unprefixed path-scoped cookies. Users with one of those older
+cookies must sign in again; this avoids silently promoting a less strictly
+scoped credential.
 
 The dashboard explicitly negotiates this transport with
 `X-EdgeBase-Auth-Transport: cookie` and credentialed requests. The server does

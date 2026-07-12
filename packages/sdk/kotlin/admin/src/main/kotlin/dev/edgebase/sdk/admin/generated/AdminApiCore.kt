@@ -1,6 +1,6 @@
 // Auto-generated admin API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 package dev.edgebase.sdk.admin.generated
 
@@ -62,7 +62,7 @@ class GeneratedAdminApi(private val http: HttpClient) {
     suspend fun databaseLiveBroadcast(body: Map<String, Any?> = emptyMap()): Any? =
         http.post("/db/broadcast", body)
 
-    /** Execute SQL via DatabaseDO — POST /api/sql */
+    /** Execute provider-aware raw SQL — POST /api/sql */
     @Suppress("UNCHECKED_CAST")
     suspend fun executeSql(body: Map<String, Any?> = emptyMap()): Any? =
         http.post("/sql", body)

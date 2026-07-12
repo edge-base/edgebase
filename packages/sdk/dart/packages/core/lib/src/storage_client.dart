@@ -295,11 +295,11 @@ class StorageBucket {
         .toList();
   }
 
-  /// Create a signed upload URL (client-side direct upload).
+  /// Create a single-use signed URL for uploading through EdgeBase without auth headers.
   ///
   /// ```dart
   /// final signed = await bucket.createSignedUploadUrl('uploads/large-file.zip');
-  /// // Use signed.url to upload directly from client
+  /// // POST the upload form to signed.url once
   /// ```
   Future<SignedUrlResult> createSignedUploadUrl(
     String key, {

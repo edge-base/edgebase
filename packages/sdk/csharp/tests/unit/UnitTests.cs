@@ -16,8 +16,12 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 using EdgeBase;
@@ -25,6 +29,104 @@ using EdgeBase.Generated;
 
 namespace EdgeBase.Tests.Unit
 {
+    public class TurnstileChallengeUnitTests
+    {
+        private const string Channel = "0123456789abcdef0123456789abcdef";
+
+        [Fact]
+        public void HostedChallengeUrl_IsBoundToOriginActionChannelAndBridge()
+        {
+            var url = TurnstileProvider.BuildChallengeUrl(
+                "https://api.example.test",
+                "signin",
+                Channel
+            );
+            Assert.Equal(
+                "https://api.example.test/api/captcha/challenge?action=signin&channel=" +
+                    Channel + "&bridge=unity",
+                url
+            );
+            Assert.EndsWith(
+                "&bridge=vuplex",
+                TurnstileProvider.WithChallengeBridge(url, "vuplex")
+            );
+            Assert.Throws<ArgumentException>(() =>
+                TurnstileProvider.BuildChallengeUrl("http://api.example.test", "signin", Channel));
+            Assert.Throws<ArgumentException>(() =>
+                TurnstileProvider.BuildChallengeUrl("https://api.example.test/path", "signin", Channel));
+            Assert.Throws<ArgumentException>(() =>
+                TurnstileProvider.BuildChallengeUrl("https://api.example.test", "custom", Channel));
+            Assert.Throws<ArgumentException>(() =>
+                TurnstileProvider.WithChallengeBridge(
+                    "https://evil.example/challenge?bridge=unity",
+                    "vuplex"
+                ));
+        }
+
+        [Fact]
+        public void HostedChallengeMessages_AreVersionedBoundAndBounded()
+        {
+            var valid = "{\"v\":1,\"channel\":\"" + Channel +
+                "\",\"type\":\"token\",\"value\":\"verified\"}";
+            Assert.True(TurnstileProvider.TryParseChallengeMessage(
+                valid,
+                Channel,
+                out var type,
+                out var value
+            ));
+            Assert.Equal("token", type);
+            Assert.Equal("verified", value);
+            Assert.False(TurnstileProvider.TryParseChallengeMessage(
+                valid,
+                "fedcba9876543210fedcba9876543210",
+                out _,
+                out _
+            ));
+            Assert.False(TurnstileProvider.TryParseChallengeMessage(
+                "{\"v\":1,\"channel\":\"" + Channel +
+                    "\",\"type\":\"token\",\"value\":\"" + new string('x', 2049) + "\"}",
+                Channel,
+                out _,
+                out _
+            ));
+        }
+
+        [Fact]
+        public void UnityNativeBridgeAssets_UseTheSameHostedFourArgumentAbi()
+        {
+            var csharpRoot = Path.GetFullPath(Path.Combine(
+                AppContext.BaseDirectory,
+                "..", "..", "..", ".."
+            ));
+            var unityRoot = Path.Combine(csharpRoot, "packages", "unity");
+            var adapters = File.ReadAllText(Path.Combine(unityRoot, "TurnstileAdapters.cs"));
+            var project = File.ReadAllText(Path.Combine(unityRoot, "EdgeBase.Unity.csproj"));
+            var android = File.ReadAllText(Path.Combine(
+                unityRoot,
+                "Assets", "Plugins", "Android", "dev", "edgebase", "unity",
+                "EdgeBaseTurnstileBridge.java"
+            ));
+            var ios = File.ReadAllText(Path.Combine(
+                unityRoot,
+                "Assets", "Plugins", "iOS", "EdgeBaseTurnstileBridge.mm"
+            ));
+
+            Assert.DoesNotContain("GetTurnstileHtml", adapters);
+            Assert.Contains("requestToken\", gameObjectName, requestId, challengeUrl, channel", adapters);
+            Assert.Contains("String challengeUrl", android);
+            Assert.Contains("String channel", android);
+            Assert.Contains("webView.loadUrl(challengeUrl)", android);
+            Assert.DoesNotContain("loadDataWithBaseURL", android);
+            Assert.Contains("const char* challengeURL", ios);
+            Assert.Contains("const char* channel", ios);
+            Assert.Contains("loadRequest:request", ios);
+            Assert.DoesNotContain("loadHTMLString", ios);
+            Assert.Contains("content/Assets/EdgeBase/Runtime/TurnstileAdapters.cs", project);
+            Assert.Contains("Assets/**/*", project);
+            Assert.Contains("PackagePath=\"content/%(RecursiveDir)", project);
+        }
+    }
+
     public class UnityAuthClientCompatibilityTests
     {
         [Fact]
@@ -46,17 +148,16 @@ namespace EdgeBase.Tests.Unit
         }
 
         [Fact]
-        public async Task OAuthCompatibilityHelpers_ReturnRedirectPayload()
+        public async Task OAuthCompatibilityHelpers_ReturnSignInAndRejectUnsafeLinking()
         {
             using var client = new EdgeBase("http://localhost:8789");
 
             var signIn = await client.Auth.SignInWithOAuthAsync("mock-oidc");
-            var link = await client.Auth.LinkOAuthAsync("mock-oidc");
+            await Assert.ThrowsAsync<NotSupportedException>(() =>
+                client.Auth.LinkOAuthAsync("mock-oidc"));
 
             Assert.Equal(signIn["redirectUrl"], signIn["url"]);
-            Assert.Equal(link["redirectUrl"], link["url"]);
             Assert.Contains("/api/auth/oauth/mock-oidc", signIn["url"]?.ToString());
-            Assert.Contains("/api/auth/link/oauth/mock-oidc", link["url"]?.ToString());
         }
 
         [Fact]
@@ -653,6 +754,110 @@ namespace EdgeBase.Tests.Unit
         public void Implements_IDisposable()
         {
             Assert.IsAssignableFrom<IDisposable>(_http);
+        }
+    }
+
+    public class FunctionsCaptchaTransportTests
+    {
+        [Fact]
+        public async Task CaptchaHeader_IsSentForGetPostAndDelete()
+        {
+            var requests = new List<(string Method, string? Token, string Uri)>();
+            var handler = new CaptchaFunctionHandler(request =>
+            {
+                requests.Add((
+                    request.Method.Method,
+                    request.Headers.TryGetValues("X-EdgeBase-Captcha-Token", out var values)
+                        ? values.Single()
+                        : null,
+                    request.RequestUri!.ToString()));
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{}")
+                };
+            });
+            using var http = new JbHttpClient("https://api.example.test", handler);
+            var functions = new FunctionsClient(http);
+
+            foreach (var method in new[] { "GET", "POST", "DELETE" })
+            {
+                await functions.CallAsync(
+                    $"protected-{method.ToLowerInvariant()}",
+                    new FunctionCallOptions
+                    {
+                        Method = method,
+                        Body = method == "POST" ? new { ok = true } : null,
+                        Query = method == "GET"
+                            ? new Dictionary<string, string> { ["page"] = "1" }
+                            : null,
+                        CaptchaToken = $"captcha-{method}"
+                    });
+            }
+
+            Assert.Equal(new[] { "GET", "POST", "DELETE" }, requests.Select(x => x.Method));
+            Assert.Equal(
+                new[] { "captcha-GET", "captcha-POST", "captcha-DELETE" },
+                requests.Select(x => x.Token));
+            Assert.EndsWith("/api/functions/protected-get?page=1", requests[0].Uri);
+        }
+
+        [Fact]
+        public async Task CaptchaRequest_NeverReplaysNetwork401Or429Failures()
+        {
+            var attempts = new Dictionary<string, int>();
+            var handler = new CaptchaFunctionHandler(request =>
+            {
+                var name = request.RequestUri!.Segments.Last().TrimEnd('/');
+                attempts[name] = attempts.TryGetValue(name, out var count) ? count + 1 : 1;
+                if (name == "network")
+                    throw new HttpRequestException("synthetic connection reset");
+
+                return new HttpResponseMessage(
+                    name == "unauthorized"
+                        ? HttpStatusCode.Unauthorized
+                        : HttpStatusCode.TooManyRequests)
+                {
+                    Content = new StringContent("{\"message\":\"synthetic failure\"}")
+                };
+            });
+            using var http = new JbHttpClient("https://api.example.test", handler);
+            var functions = new FunctionsClient(http);
+
+            foreach (var name in new[] { "network", "unauthorized", "rate-limited" })
+            {
+                await Assert.ThrowsAsync<EdgeBaseException>(() =>
+                    functions.CallAsync(
+                        name,
+                        new FunctionCallOptions { CaptchaToken = "single-use-token" }));
+            }
+
+            Assert.Equal(1, attempts["network"]);
+            Assert.Equal(1, attempts["unauthorized"]);
+            Assert.Equal(1, attempts["rate-limited"]);
+        }
+
+        private sealed class CaptchaFunctionHandler : HttpMessageHandler
+        {
+            private readonly Func<HttpRequestMessage, HttpResponseMessage> _handler;
+
+            public CaptchaFunctionHandler(Func<HttpRequestMessage, HttpResponseMessage> handler)
+            {
+                _handler = handler;
+            }
+
+            protected override Task<HttpResponseMessage> SendAsync(
+                HttpRequestMessage request,
+                CancellationToken cancellationToken)
+            {
+                try
+                {
+                    return Task.FromResult(_handler(request));
+                }
+                catch (Exception error)
+                {
+                    return Task.FromException<HttpResponseMessage>(error);
+                }
+            }
         }
     }
 

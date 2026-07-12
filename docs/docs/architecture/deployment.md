@@ -94,7 +94,7 @@ This means:
 | Binding Name | Class        | Role                                                          |
 | ------------ | ------------ | ------------------------------------------------------------- |
 | `DATABASE`   | `DatabaseDO` | Business data (static, per-user, per-workspace, etc.)         |
-| `AUTH`       | `AuthDO`     | Legacy empty shell (returns 410 Gone; all auth handled by D1) |
+| `AUTH`       | `AuthDO`     | Key-sharded, atomically consumed OAuth state and link continuations; legacy backup routes remain compatibility no-ops |
 | `DATABASE_LIVE` | `DatabaseLiveDO` | DB subscription streaming and server broadcast                |
 | `ROOMS`      | `RoomsDO`    | Room state, presence, broadcast channels                      |
 | `LOGS`       | `LogsDO`     | Analytics log aggregation (Docker/self-hosted)                |
@@ -112,7 +112,7 @@ The deploy process:
 1. Bundle `edgebase.config.ts` into the Worker
 2. Provision internal D1 bindings (`AUTH_DB`, `CONTROL_DB`) plus any user-defined native resources (`config.kv`, `config.d1`, `config.vectorize`) via Wrangler CLI
 3. For DB blocks or auth configured with `provider: 'postgres'`, provision or reuse the matching Hyperdrive bindings automatically (legacy `provider: 'neon'` configs are still accepted during transition)
-4. If `captcha: true`, auto-provision a Cloudflare Turnstile widget and store the secret
+4. If `captcha: true`, acquire an expiring remote `CONTROL_DB` lease, re-read authoritative Worker state, keep the live Turnstile site-key/secret tuple, stage `old∪new` hostnames with pre/post live-version checks, publish the version-bound Worker secret and exact runtime policy, renew the lease after Wrangler and immediately before the final PUT, verify the reported version alone serves 100% of traffic, finalize exact widget hostnames, and release the lease
 5. Generate temporary `wrangler.toml` with all bindings
 6. Run `wrangler deploy`
 7. Generate Cloudflare Cron Triggers from the managed cron set (system cron `0 3 * * *` + user schedule crons + `cloudflare.extraCrons`)
@@ -128,9 +128,9 @@ Infrastructure services:
 
 - **D1**: Cloudflare's distributed SQLite (AUTH_DB — all auth data, CONTROL_DB — internal operational metadata)
 - **Hyperdrive**: Auto-managed PostgreSQL connectivity for `provider: 'postgres'` blocks and auth (legacy `provider: 'neon'` configs still map here)
-- **KV**: Cloudflare KV (ephemeral state: OAuth, WebSocket pending, push tokens)
+- **KV**: Cloudflare KV (ephemeral caches, WebSocket pending, push tokens, and a best-effort legacy OAuth migration mirror)
 - **R2**: Cloudflare R2 (file storage, $0 egress)
-- **DO Storage**: Managed by Cloudflare (automatic replication and durability)
+- **DO Storage**: Managed by Cloudflare (database/room state plus key-sharded, atomically consumed OAuth callback authority)
 
 ### Post-Deploy Verification
 
@@ -144,6 +144,27 @@ After `edgebase deploy`, verify both:
 This catches broken D1/KV/resource wiring that a public-only smoke test can miss.
 
 Deploy also writes `.edgebase/cloudflare-deploy-manifest.json`. That manifest is the project-scoped source of truth for managed Cloudflare resources and is used later by cleanup and destroy flows.
+
+Account-global auto-provisioned resources are isolated by Worker. KV namespace,
+D1 database, default R2 bucket, Vectorize index, and Hyperdrive config names
+include a deterministic, length-bounded Worker identity; newly provisioned
+resources for two Workers in the same Cloudflare account do not collide merely
+because their config bindings or database names match. Older EdgeBase releases
+used account-global or truncation-only legacy names. Deploy
+reuses a legacy resource only when the previous local deploy manifest belongs
+to the current Cloudflare account and proves the same binding (and, when
+recorded, the same resource ID). Without that
+proof, a new project creates its own Worker-scoped resource instead of adopting
+another project's legacy resource.
+
+Provisioning is fail-closed. EdgeBase must successfully list and validate the
+current resource inventory, create or resolve every requested binding, and
+parse every returned resource ID before Wrangler can publish the Worker. An
+authentication error, timeout, malformed Wrangler response, missing PostgreSQL
+connection string, unsupported plan, or failed resource create aborts the
+deployment rather than publishing a Worker with partial bindings. Preserve
+`.edgebase/cloudflare-deploy-manifest.json` when migrating an older deployment
+that must keep using its legacy resources.
 
 ### Worker Bundle Size
 
@@ -165,8 +186,8 @@ All state persists under a single `/data` directory, which maps to a Docker Name
 | ----------------- | -------------- | ------------------------------------------------- |
 | D1 (Auth)         | `/data/v3/d1/` | AUTH_DB: auth data and indexes                    |
 | D1 (Control)      | `/data/v3/d1/` | CONTROL_DB: plugin versions and internal metadata |
-| DO SQLite         | `/data/v3/do/` | All DatabaseDO instances                          |
-| KV (internal)     | `/data/v3/kv/` | OAuth state, WebSocket pending, push tokens       |
+| DO SQLite         | `/data/v3/do/` | Database/room instances and atomic OAuth state    |
+| KV (internal)     | `/data/v3/kv/` | Caches, WebSocket pending, push tokens, legacy OAuth mirror |
 | R2 (files)        | `/data/v3/r2/` | Uploaded files                                    |
 | KV (user-defined) | `/data/v3/kv/` | User-defined KV namespaces                        |
 | D1 (user-defined) | `/data/v3/d1/` | User-defined D1 databases                         |

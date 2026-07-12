@@ -74,6 +74,11 @@ import * as authService from '../lib/auth-d1-service.js';
 import { resolveAuthDb, type AuthDb } from '../lib/auth-db-adapter.js';
 import { getPublicProfileWithCache } from './users.js';
 import { createSignedToken, parseDuration } from './storage.js';
+import {
+  applyStorageContentSecurityHeaders,
+  normalizeStorageContentType,
+} from '../lib/storage-content-security.js';
+import { resolvePublicRequestOrigin } from '../lib/public-origin.js';
 import { getDevicesForUser, getPushLogs } from '../lib/push-token.js';
 import { RATE_LIMIT_DEFAULTS, counter, getLimit } from '../middleware/rate-limit.js';
 import { getTrustedClientIp } from '../lib/client-ip.js';
@@ -1612,7 +1617,7 @@ api.openapi(adminGetBucketObject, async (c) => {
   const obj = await c.env.STORAGE.get(fullKey);
   if (!obj) throw new EdgeBaseError(404, 'Object not found.', undefined, 'not-found');
   const headers = new Headers();
-  if (obj.httpMetadata?.contentType) headers.set('Content-Type', obj.httpMetadata.contentType);
+  applyStorageContentSecurityHeaders(headers, key, obj.httpMetadata?.contentType);
   headers.set('Cache-Control', 'private, max-age=3600');
   return new Response(obj.body, { headers });
 });
@@ -1737,11 +1742,14 @@ api.openapi(adminCreateSignedUrl, async (c) => {
   });
 
   // Build signed URL using the public storage endpoint
-  const url = new URL(c.req.url);
-  const signedUrl = `${url.protocol}//${url.host}/api/storage/${bucketName}/${body.key}?token=${token}`;
+  const signedUrl = new URL(
+    `/api/storage/${encodeURIComponent(bucketName)}/${encodeURIComponent(body.key)}`,
+    resolvePublicRequestOrigin(c.env, c.req),
+  );
+  signedUrl.searchParams.set('token', token);
 
   return c.json({
-    url: signedUrl,
+    url: signedUrl.href,
     expiresAt: new Date(expiresAt).toISOString(),
   });
 });
@@ -2957,10 +2965,11 @@ api.openapi(adminUploadFile, async (c) => {
 
   const key = (formData.get('key') as string) || file.name;
   if (!key) throw new EdgeBaseError(400, 'File key is required.', undefined, 'validation-failed');
+  const contentType = normalizeStorageContentType(file.type);
 
   const fullKey = `${bucketName}/${key}`;
   const result = await c.env.STORAGE.put(fullKey, file.stream(), {
-    httpMetadata: { contentType: file.type || 'application/octet-stream' },
+    httpMetadata: { contentType },
     customMetadata: { uploadedBy: 'admin', originalName: file.name },
   });
 
@@ -2970,7 +2979,7 @@ api.openapi(adminUploadFile, async (c) => {
     ok: true,
     key,
     size: file.size,
-    contentType: file.type || 'application/octet-stream',
+    contentType,
   }, 201);
 });
 

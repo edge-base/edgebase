@@ -11,15 +11,22 @@ public class FunctionsClient {
         public final String method;
         public final Map<String, ?> body;
         public final Map<String, String> query;
+        public final String captchaToken;
 
         public FunctionCallOptions() {
-            this("POST", Collections.emptyMap(), null);
+            this("POST", Collections.emptyMap(), null, null);
         }
 
         public FunctionCallOptions(String method, Map<String, ?> body, Map<String, String> query) {
+            this(method, body, query, null);
+        }
+
+        public FunctionCallOptions(String method, Map<String, ?> body, Map<String, String> query,
+                String captchaToken) {
             this.method = method != null ? method : "POST";
             this.body = body != null ? body : Collections.emptyMap();
             this.query = query;
+            this.captchaToken = captchaToken;
         }
     }
 
@@ -38,19 +45,25 @@ public class FunctionsClient {
         String method = options != null ? options.method.toUpperCase() : "POST";
         Map<String, ?> body = options != null && options.body != null ? options.body : Collections.emptyMap();
         Map<String, String> query = options != null ? options.query : null;
+        String captchaToken = options != null ? options.captchaToken : null;
+        if (captchaToken != null && (captchaToken.isEmpty() || captchaToken.length() > 2048)) {
+            throw new IllegalArgumentException("captchaToken must be non-empty and at most 2048 characters");
+        }
 
         switch (method) {
             case "GET":
-                return httpClient.get(normalizedPath, query);
+                return httpClient.get(normalizedPath, query, captchaToken);
             case "PUT":
-                return httpClient.put(normalizedPath, body);
+                return httpClient.put(normalizedPath, body, captchaToken);
             case "PATCH":
-                return httpClient.patch(normalizedPath, body);
+                return httpClient.patch(normalizedPath, body, captchaToken);
             case "DELETE":
-                return httpClient.delete(normalizedPath);
+                return captchaToken == null
+                        ? httpClient.delete(normalizedPath)
+                        : httpClient.deleteWithCaptchaToken(normalizedPath, captchaToken);
             case "POST":
             default:
-                return httpClient.post(normalizedPath, body);
+                return httpClient.post(normalizedPath, body, captchaToken);
         }
     }
 

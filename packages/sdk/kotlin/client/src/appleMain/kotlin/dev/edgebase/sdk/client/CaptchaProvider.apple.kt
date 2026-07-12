@@ -12,128 +12,201 @@
 
 package dev.edgebase.sdk.client
 
-import kotlinx.cinterop.ObjCAction
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.ObjCSignatureOverride
+import kotlinx.cinterop.usePinned
 import platform.Foundation.NSError
 import platform.Foundation.NSURL
+import platform.Foundation.NSURLRequest
 import platform.WebKit.WKNavigation
+import platform.WebKit.WKNavigationAction
+import platform.WebKit.WKNavigationActionPolicy
 import platform.WebKit.WKNavigationDelegateProtocol
+import platform.WebKit.WKNavigationResponse
+import platform.WebKit.WKNavigationResponsePolicy
 import platform.WebKit.WKScriptMessage
 import platform.WebKit.WKScriptMessageHandlerProtocol
 import platform.WebKit.WKUserContentController
 import platform.WebKit.WKWebView
 import platform.WebKit.WKWebViewConfiguration
+import platform.WebKit.WKWebsiteDataStore
 import platform.CoreGraphics.CGRectMake
+import platform.Security.SecRandomCopyBytes
+import platform.Security.errSecSuccess
+import platform.Security.kSecRandomDefault
 import platform.darwin.NSObject
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+internal actual val usesDirectCaptchaSiteKey: Boolean = false
 
 internal expect fun attachCaptchaOverlay(webView: WKWebView): Boolean
 
-actual suspend fun acquireCaptchaToken(siteKey: String, action: String): String? {
-    return suspendCancellableCoroutine { cont ->
+@Suppress("UNUSED_PARAMETER")
+actual suspend fun acquireCaptchaToken(baseUrl: String, siteKey: String, action: String): String? {
+    val randomBytes = ByteArray(16)
+    val randomStatus = randomBytes.usePinned {
+        SecRandomCopyBytes(kSecRandomDefault, randomBytes.size.toULong(), it.addressOf(0))
+    }
+    if (randomStatus != errSecSuccess) {
+        throw CaptchaUnavailableException("secure_random_unavailable")
+    }
+    val channel = randomBytes.joinToString("") { byte ->
+        (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+    }
+    val challengeUrl = buildHostedCaptchaChallengeUrl(baseUrl, action, channel, "webkit")
+    return try {
+      withTimeout(30_000L) {
+       withContext(Dispatchers.Main) {
+        suspendCancellableCoroutine { cont ->
         var resumed = false
-
         val userContentController = WKUserContentController()
+        lateinit var webView: WKWebView
+        val expected = NSURL(string = challengeUrl)
 
-        val messageHandler = object : NSObject(), WKScriptMessageHandlerProtocol {
-            var webView: WKWebView? = null
+        fun cleanup() {
+            userContentController.removeScriptMessageHandlerForName("edgebaseCaptcha")
+            webView.stopLoading()
+            webView.removeFromSuperview()
+        }
 
+        fun finish(token: String) {
+            if (!resumed) {
+                resumed = true
+                cleanup()
+                if (cont.isActive) cont.resume(token)
+            }
+        }
+
+        fun fail(reason: String) {
+            if (!resumed) {
+                resumed = true
+                cleanup()
+                if (cont.isActive) {
+                    cont.resumeWithException(CaptchaUnavailableException(reason))
+                }
+            }
+        }
+
+        val messageHandler = object : NSObject(),
+            WKScriptMessageHandlerProtocol,
+            WKNavigationDelegateProtocol {
             override fun userContentController(
                 userContentController: WKUserContentController,
                 didReceiveScriptMessage: WKScriptMessage
             ) {
                 if (resumed) return
-                val name = didReceiveScriptMessage.name
-                val body = didReceiveScriptMessage.body as? String
-
-                when (name) {
-                    "onToken" -> {
-                        if (body != null && body.isNotEmpty()) {
-                            resumed = true
-                            removeWebViewOverlay()
-                            cont.resume(body)
-                        }
-                    }
-                    "onError" -> {
-                        resumed = true
-                        removeWebViewOverlay()
-                        cont.resume(null)
-                    }
-                    "onInteractive" -> {
-                        when (body) {
-                            "show" -> showWebViewOverlay()
-                            "hide" -> removeWebViewOverlay()
-                        }
+                if (didReceiveScriptMessage.name != "edgebaseCaptcha") return
+                if (!didReceiveScriptMessage.frameInfo.mainFrame) {
+                    fail("origin_frame_mismatch")
+                    return
+                }
+                val origin = didReceiveScriptMessage.frameInfo.securityOrigin
+                if (!origin.protocol.equals(expected.scheme, ignoreCase = true) ||
+                    !origin.host.equals(expected.host, ignoreCase = true) ||
+                    origin.port != (expected.port?.longValue ?: 0L)) {
+                    fail("origin_mismatch")
+                    return
+                }
+                val body = didReceiveScriptMessage.body as? String ?: return
+                val message = parseHostedCaptchaMessage(body, channel) ?: return
+                when (message.type) {
+                    "token" -> finish(message.value)
+                    "error" -> fail(captchaBridgeFailureReason(message.value))
+                    "interactive" -> when (message.value) {
+                        "show" -> if (!attachCaptchaOverlay(webView)) fail("activity_unavailable")
+                        "hide" -> webView.removeFromSuperview()
                     }
                 }
             }
 
-            private fun showWebViewOverlay() {
-                val wv = webView ?: return
-                attachCaptchaOverlay(wv)
+            override fun webView(
+                webView: WKWebView,
+                decidePolicyForNavigationAction: WKNavigationAction,
+                decisionHandler: (platform.WebKit.WKNavigationActionPolicy) -> Unit
+            ) {
+                val mainFrame = decidePolicyForNavigationAction.targetFrame?.mainFrame != false
+                val next = decidePolicyForNavigationAction.request.URL?.absoluteString
+                if (mainFrame && next != challengeUrl) {
+                    decisionHandler(WKNavigationActionPolicy.WKNavigationActionPolicyCancel)
+                    fail("unexpected_navigation")
+                } else {
+                    decisionHandler(WKNavigationActionPolicy.WKNavigationActionPolicyAllow)
+                }
             }
 
-            private fun removeWebViewOverlay() {
-                webView?.removeFromSuperview()
+            override fun webView(
+                webView: WKWebView,
+                decidePolicyForNavigationResponse: WKNavigationResponse,
+                decisionHandler: (platform.WebKit.WKNavigationResponsePolicy) -> Unit
+            ) {
+                val response = decidePolicyForNavigationResponse.response as? platform.Foundation.NSHTTPURLResponse
+                if (decidePolicyForNavigationResponse.forMainFrame &&
+                    response != null && response.statusCode !in 200L..299L) {
+                    decisionHandler(WKNavigationResponsePolicy.WKNavigationResponsePolicyCancel)
+                    fail("challenge_http_${response.statusCode}")
+                } else {
+                    decisionHandler(WKNavigationResponsePolicy.WKNavigationResponsePolicyAllow)
+                }
             }
+
+            @ObjCSignatureOverride
+            override fun webView(
+                webView: WKWebView,
+                didFailProvisionalNavigation: WKNavigation?,
+                withError: NSError
+            ) = fail("challenge_load_failed")
+
+            @ObjCSignatureOverride
+            override fun webView(
+                webView: WKWebView,
+                didFailNavigation: WKNavigation?,
+                withError: NSError
+            ) = fail("challenge_load_failed")
+
+            override fun webViewWebContentProcessDidTerminate(webView: WKWebView) =
+                fail("renderer_terminated")
         }
 
-        userContentController.addScriptMessageHandler(messageHandler, name = "onToken")
-        userContentController.addScriptMessageHandler(messageHandler, name = "onError")
-        userContentController.addScriptMessageHandler(messageHandler, name = "onInteractive")
+        userContentController.addScriptMessageHandler(messageHandler, name = "edgebaseCaptcha")
 
         val config = WKWebViewConfiguration().apply {
             this.userContentController = userContentController
+            websiteDataStore = WKWebsiteDataStore.defaultDataStore()
         }
 
-        val webView = WKWebView(frame = CGRectMake(0.0, 0.0, 1.0, 1.0), configuration = config)
-        messageHandler.webView = webView
-
-        val html = buildTurnstileHtml(siteKey, action)
-        webView.loadHTMLString(html, baseURL = NSURL(string = "https://challenges.cloudflare.com"))
+        webView = WKWebView(frame = CGRectMake(0.0, 0.0, 1.0, 1.0), configuration = config)
+        webView.navigationDelegate = messageHandler
+        val url = NSURL(string = challengeUrl)
+        webView.loadRequest(NSURLRequest.requestWithURL(url))
 
         cont.invokeOnCancellation {
-            webView.stopLoading()
-            userContentController.removeScriptMessageHandlerForName("onToken")
-            userContentController.removeScriptMessageHandlerForName("onError")
-            userContentController.removeScriptMessageHandlerForName("onInteractive")
-            messageHandler.webView?.removeFromSuperview()
+            CoroutineScope(Dispatchers.Main).launch {
+              if (!resumed) {
+                  resumed = true
+                  cleanup()
+              }
+            }
         }
+        }
+       }
+      }
+    } catch (timeout: TimeoutCancellationException) {
+        throw CaptchaUnavailableException("timeout", timeout)
     }
 }
 
-/**
- * Build the Turnstile HTML page for WKWebView rendering.
- * Uses appearance: 'interaction-only' so it's invisible for 99% of users.
- * Includes before/after interactive callbacks for the 1% who need to solve a challenge.
- */
-private fun buildTurnstileHtml(siteKey: String, action: String): String = """
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async></script>
-  <style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:transparent}</style>
-</head>
-<body>
-  <div id="cf-turnstile"></div>
-  <script>
-    function init(){
-      if(window.turnstile){
-        window.turnstile.render('#cf-turnstile',{
-          sitekey:'$siteKey',
-          action:'$action',
-          appearance:'interaction-only',
-          callback:function(t){window.webkit.messageHandlers.onToken.postMessage(t)},
-          'error-callback':function(e){window.webkit.messageHandlers.onError.postMessage(String(e))},
-          'before-interactive-callback':function(){window.webkit.messageHandlers.onInteractive.postMessage('show')},
-          'after-interactive-callback':function(){window.webkit.messageHandlers.onInteractive.postMessage('hide')},
-          'timeout-callback':function(){window.webkit.messageHandlers.onError.postMessage('timeout')}
-        });
-      }else{setTimeout(init,50)}
-    }
-    init();
-  </script>
-</body>
-</html>
-""".trimIndent()
+private fun captchaBridgeFailureReason(value: String): String {
+    val normalized = value.lowercase()
+        .map { if (it.isLetterOrDigit() || it == '_' || it == '-') it else '_' }
+        .joinToString("")
+        .take(128)
+    return if (normalized.isBlank()) "challenge_error" else "challenge_$normalized"
+}

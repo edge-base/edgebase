@@ -13,8 +13,10 @@ import {
   parseAppleIdToken,
   getOAuthProviderConfig,
   getAllowedOAuthProviders,
+  isOAuthEmailVerified,
   type SupportedProvider,
 } from '../lib/oauth-providers.js';
+import { parseAppleFormDisplayName } from '../routes/oauth.js';
 
 const FAKE_CONFIG = { clientId: 'test-client', clientSecret: 'test-secret' };
 
@@ -192,6 +194,22 @@ describe('getAuthorizationUrl', () => {
   });
 });
 
+describe('Apple form_post user profile', () => {
+  it('preserves the one-time first and last name', () => {
+    expect(parseAppleFormDisplayName(JSON.stringify({
+      name: { firstName: 'June', lastName: 'Example' },
+    }))).toBe('June Example');
+  });
+
+  it('rejects malformed, invalid, and oversized payloads', () => {
+    expect(() => parseAppleFormDisplayName('{bad json')).toThrow('Invalid Apple user payload');
+    expect(() => parseAppleFormDisplayName(JSON.stringify({ name: { firstName: 42 } }))).toThrow(
+      'Invalid Apple user payload',
+    );
+    expect(() => parseAppleFormDisplayName('x'.repeat(8193))).toThrow('too large');
+  });
+});
+
 // ─── D. generatePKCE ─────────────────────────────────────────────────────────
 
 describe('generatePKCE', () => {
@@ -270,6 +288,27 @@ describe('parseAppleIdToken', () => {
 
   it('throws on invalid JWT format', () => {
     expect(() => parseAppleIdToken('not-a-jwt')).toThrow();
+  });
+});
+
+describe('strict OAuth email verification claims', () => {
+  it.each([
+    [true, true],
+    ['true', true],
+    [false, false],
+    ['false', false],
+    [1, false],
+    ['yes', false],
+    [undefined, false],
+  ])('maps %p to %p without truthy-string escalation', (claim, expected) => {
+    expect(isOAuthEmailVerified(claim)).toBe(expected);
+  });
+
+  it('does not treat Apple string false as verified', () => {
+    const payload = Buffer.from(JSON.stringify({
+      sub: 'apple-user', email: 'apple@example.com', email_verified: 'false',
+    })).toString('base64url');
+    expect(parseAppleIdToken(`header.${payload}.signature`).emailVerified).toBe(false);
   });
 });
 

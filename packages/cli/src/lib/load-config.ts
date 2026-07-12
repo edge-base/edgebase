@@ -73,7 +73,12 @@ function summarizeLoadConfigError(error: unknown): string {
 export function loadConfigSafe(
   configPath: string,
   cwd: string,
-  options?: { stripFunctions?: boolean; allowRegexFallback?: boolean },
+  options?: {
+    stripFunctions?: boolean;
+    allowRegexFallback?: boolean;
+    /** Exact environment exposed to config evaluation subprocesses. */
+    env?: NodeJS.ProcessEnv;
+  },
 ): Record<string, unknown> {
   const stripFns = options?.stripFunctions !== false;
   const allowRegexFallback = options?.allowRegexFallback !== false;
@@ -109,6 +114,7 @@ export function loadConfigSafe(
         encoding: 'utf-8',
         timeout: 15000,
         stdio: ['pipe', 'pipe', 'pipe'],
+        ...(options?.env ? { env: options.env } : {}),
       });
       const result = extractConfigFromOutput(raw, sentinel);
       return JSON.parse(result);
@@ -148,6 +154,7 @@ export function loadConfigSafe(
         encoding: 'utf-8',
         timeout: 10000,
         stdio: ['pipe', 'pipe', 'pipe'],
+        ...(options?.env ? { env: options.env } : {}),
       });
       const result = extractConfigFromOutput(raw, sentinel);
       return JSON.parse(result);

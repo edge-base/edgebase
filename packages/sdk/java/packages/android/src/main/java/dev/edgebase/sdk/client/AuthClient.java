@@ -243,15 +243,23 @@ public class AuthClient {
      * @param phone the phone number
      * @param code  the verification code received via SMS
      */
+    @SuppressWarnings("unchecked")
     public void verifyLinkPhone(String phone, String code) {
+        tokenManager.requireDurableStorageForAccountUpgrade();
         Map<String, Object> body = new HashMap<>();
         body.put("phone", phone);
         body.put("code", code);
-        client.post("/auth/verify-link-phone", body);
+        Object response = client.post("/auth/verify-link-phone", body);
+        if (response instanceof Map) {
+            // Anonymous upgrades revoke the provisional session atomically and
+            // return the only authoritative replacement token pair.
+            handleAuthResponse((Map<String, Object>) response);
+        }
     }
 
     @SuppressWarnings("unchecked")
     public Map<String, Object> linkWithEmail(String email, String password) {
+        tokenManager.requireDurableStorageForAccountUpgrade();
         Map<String, Object> body = new HashMap<>();
         body.put("email", email);
         body.put("password", password);
@@ -353,7 +361,7 @@ public class AuthClient {
     @SuppressWarnings("unchecked")
     public Map<String, Object> updateProfile(Map<String, Object> data) {
         Map<String, Object> result = (Map<String, Object>) client.patch("/auth/profile", data);
-        handleAuthResponse(result);
+        handleAuthResponse(result, true);
         return result;
     }
 
@@ -588,13 +596,27 @@ public class AuthClient {
     // ─── Internal ───
 
     private void handleAuthResponse(Map<String, Object> result) {
+        handleAuthResponse(result, false);
+    }
+
+    private void handleAuthResponse(Map<String, Object> result, boolean allowExistingRefreshToken) {
         if (result == null)
             return;
-        String accessToken = (String) result.get("accessToken");
-        String refreshToken = (String) result.get("refreshToken");
-        if (accessToken != null && refreshToken != null) {
-            tokenManager.setTokens(new TokenPair(accessToken, refreshToken));
+        if (!result.containsKey("accessToken") && !result.containsKey("refreshToken")) {
+            return;
         }
+        Object accessValue = result.get("accessToken");
+        Object refreshValue = result.get("refreshToken");
+        String accessToken = accessValue instanceof String ? (String) accessValue : null;
+        String refreshToken = refreshValue instanceof String ? (String) refreshValue : null;
+        if (!result.containsKey("refreshToken") && allowExistingRefreshToken) {
+            refreshToken = tokenManager.getRefreshToken();
+        }
+        if (accessToken == null || accessToken.isBlank()
+                || refreshToken == null || refreshToken.isBlank()) {
+            throw new InvalidTokenPairException("response");
+        }
+        tokenManager.setTokens(new TokenPair(accessToken, refreshToken));
     }
 
     private String resolveCaptchaToken(String action, String manualToken) {
@@ -610,6 +632,8 @@ public class AuthClient {
         }
         try {
             return TurnstileProvider.resolveCaptchaToken(client.baseUrl, action, null);
+        } catch (IllegalStateException programmingError) {
+            throw programmingError;
         } catch (Throwable ignored) {
             return null;
         }

@@ -23,6 +23,10 @@ import {
 } from '../lib/service-key.js';
 import { parseConfig } from '../lib/do-router.js';
 import { usesCustomBearerAuth } from '../lib/functions.js';
+import {
+  AuthSessionAuthorityUnavailableError,
+  isAuthSessionActive,
+} from '../lib/auth-session-authority.js';
 
 // Extend Hono context variables
 declare module 'hono' {
@@ -83,6 +87,7 @@ export async function resolveAuthContextFromToken(
   env: AuthResolutionEnv,
   token: string,
   request: Request,
+  options: { skipSessionValidation?: boolean } = {},
 ): Promise<AuthContext> {
   const secret = env.JWT_USER_SECRET;
   if (!secret) {
@@ -91,6 +96,14 @@ export async function resolveAuthContextFromToken(
 
   const payload = await verifyAccessToken(token, secret);
   const auth = buildAuthContextFromPayload(payload as Record<string, unknown>);
+  if (auth.sessionId && !options.skipSessionValidation) {
+    const active = await isAuthSessionActive(
+      env as Record<string, unknown>,
+      auth.id,
+      auth.sessionId,
+    );
+    if (!active) throw new TokenInvalidError('Session was revoked or expired.');
+  }
   return enrichAuthContext(env, auth, request);
 }
 
@@ -157,10 +170,40 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next):
       );
     }
 
-    const auth = await resolveAuthContextFromToken(c.env, token, c.req.raw);
+    const pathname = new URL(c.req.url).pathname;
+    const skipSessionValidation = c.req.method === 'POST' && (
+      pathname === '/api/auth/oauth/complete/link' ||
+      // The anonymous phone-upgrade transaction revokes the initiating sid.
+      // This exact endpoint must be able to recover its encrypted completion
+      // checkpoint after a lost response. The route revalidates the sid before
+      // any fresh mutation and permits a revoked sid only for a matching,
+      // already-committed phone/code checkpoint.
+      pathname === '/api/auth/verify-link-phone' ||
+      // Email/password anonymous upgrades have the same response-loss shape:
+      // the route permits a revoked sid only to replay an exact bounded
+      // initiating-sid/user/email/password checkpoint, then revalidates the
+      // sid before any fresh mutation.
+      pathname === '/api/auth/link/email'
+    );
+    const auth = await resolveAuthContextFromToken(
+      c.env,
+      token,
+      c.req.raw,
+      { skipSessionValidation },
+    );
     c.set('auth', auth);
     return next();
   } catch (err) {
+    if (err instanceof AuthSessionAuthorityUnavailableError) {
+      return c.json(
+        {
+          code: 503,
+          message: 'Authentication session validation is temporarily unavailable.',
+          error: 'AUTH_AUTHORITY_UNAVAILABLE',
+        },
+        503,
+      );
+    }
     // In non-release (dev) mode, treat invalid/expired tokens as anonymous
     // instead of hard-rejecting. This prevents stale tokens from blocking
     // the demo/dev experience while still validating in production.

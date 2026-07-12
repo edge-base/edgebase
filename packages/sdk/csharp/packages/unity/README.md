@@ -69,7 +69,11 @@ If you are working inside this repository, reference the project directly:
 </ItemGroup>
 ```
 
-The NuGet package id declared by the project is `dev.edgebase.unity`.
+The NuGet package id is `dev.edgebase.unity`. The package includes the managed
+assembly, `Assets/EdgeBase/Runtime/TurnstileAdapters.cs`, and the Android, iOS,
+and WebGL native bridge assets under `Assets/Plugins`. Keep those content files
+when importing the package; authentication can fail closed when CAPTCHA is
+enabled if only the DLL is copied.
 
 If you are importing the SDK into a Unity project directly, place the package source or compiled assembly under your `Assets/Plugins` path as appropriate.
 
@@ -97,6 +101,31 @@ Console.WriteLine(user["accessToken"]);
 Console.WriteLine(posts.Total);
 ```
 
+## Token Persistence And Restore
+
+The default `MemoryAuthTokenStorage` is process-only. Inject an
+`IDurableAuthTokenStorage` backed by the platform's secure storage when sessions
+must survive restart, then restore before authenticated work:
+
+```csharp
+var client = new EdgeBase.EdgeBase(baseUrl, secureDurableTokenStorage);
+var restored = await client.TryRestoreSessionAsync();
+```
+
+The durable implementation must atomically save the complete `AuthTokenPair`,
+survive process termination, and report failures. Anonymous
+`LinkWithEmailAsync` and `VerifyLinkPhoneAsync` fail before the network without
+that capability (unless the current JWT is known to be non-anonymous). New auth
+state is exposed only after persistence succeeds; incomplete stored pairs are
+rejected.
+
+Configured native/WebGL CAPTCHA failures throw `CaptchaUnavailableException`
+with code `captcha-unavailable`. Positive site keys are cached for five minutes;
+missing keys are not cached. Only direct WebGL `challenge_error` receives one
+fresh-key retry, and each widget/overlay is cleaned up. Config transport or
+malformed-response failures are typed; only an explicit `captcha: null`
+response is treated as disabled.
+
 ## Core API
 
 Once you create a client, these are the main surfaces you will use:
@@ -121,6 +150,8 @@ Once you create a client, these are the main surfaces you will use:
   Request context and locale helpers
 - `client.Destroy()`
   Close network resources when the client is no longer needed
+- `client.TryRestoreSessionAsync()`
+  Restore a complete persisted auth pair before authenticated work
 
 ## Choose The Right Package
 

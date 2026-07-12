@@ -153,6 +153,20 @@ class ClientEdgeBase {
   /// Get current legacy isolateBy context state.
   Map<String, dynamic> getContext() => _contextManager.getContext();
 
+  /// Restore the persisted initiating access/refresh pair before authenticated
+  /// calls. Legacy refresh-only storage is migrated through one refresh.
+  Future<bool> tryRestoreSession() => _tokenManager.tryRestoreSession(
+        (refreshToken) async {
+          final response = await _httpClient.postPublic('/auth/refresh', {
+            'refreshToken': refreshToken,
+          }) as Map<String, dynamic>;
+          return TokenPair(
+            accessToken: response['accessToken'] as String,
+            refreshToken: response['refreshToken'] as String,
+          );
+        },
+      );
+
   /// Destroy the client, cleaning up resources.
   void destroy() {
     _databaseLive.disconnect();

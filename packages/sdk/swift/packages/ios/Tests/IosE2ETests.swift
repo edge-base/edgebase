@@ -103,7 +103,7 @@ final class EdgeBaseClientIosE2ETests: EdgeBaseIosE2ETestCase {
         let client = EdgeBaseClient(baseUrl)
         let email = "\(prefix)-signout@test.com"
         try await client.auth.signUp(email: email, password: "SwiftIos123!")
-        await client.auth.signOut()
+        try await client.auth.signOut()
         await client.destroy()
     }
 
@@ -267,7 +267,7 @@ final class IosAuthExtendedE2ETests: EdgeBaseIosE2ETestCase {
         let signInResult = try await client.auth.signIn(email: email, password: "ChainTest123!")
         XCTAssertNotNil(signInResult["accessToken"])
 
-        await client.auth.signOut()
+        try await client.auth.signOut()
         await client.destroy()
     }
 

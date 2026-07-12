@@ -145,6 +145,11 @@ The SDK automatically:
 3. Reports combined progress
 4. Completes the multipart upload on the server
 
+The multipart `contentType` is normalized before it is stored. Completed files
+use the same download safety policy as single-request uploads: active or
+unknown types are forced to opaque sandboxed attachments, while explicitly
+passive media can render inline.
+
 ## Resume Support
 
 If a multipart upload fails mid-way, the SDK throws a `ResumableUploadError` containing the `uploadId` and `key` needed to resume:
@@ -339,6 +344,28 @@ const { parts } = await bucket.getUploadParts('large-video.mp4', uploadId);
 Part tracking data is stored in KV with a 7-day TTL (synced with R2's auto-abort window).
 
 Signed upload URLs can authorize multipart requests too. Pass the signed URL's `token` and `key` query parameters to `multipart/create`, `multipart/upload-part`, `multipart/complete`, `multipart/abort`, and `uploads/:uploadId/parts` when the client should continue without auth headers after the original `write` rule check.
+
+Before EdgeBase asks R2 to create a session, it atomically claims the token's
+single-use grant. Only the winning request can create an R2 session; competing
+or repeated creates cannot fan out abandoned sessions. EdgeBase then
+compare-and-swap binds that claim to the returned upload ID. The same token can
+list and upload parts, complete, or abort only that bound upload ID; switching
+upload IDs and using the token for a single-file upload are rejected. A create,
+bind, abort, or later session failure does not return the grant because storage
+failures can be ambiguous. Request a new signed upload URL before starting over.
+
+If the signed URL sets `maxFileSize`, every part must include a positive `Content-Length`.
+EdgeBase atomically reserves each declared part length against one aggregate
+grant budget before the R2 part write. Parallel requests cannot push the
+reservation above the limit; an over-budget attempt terminally closes and
+aborts the session. Retries and part replacements reserve bytes again, so use a
+new signed upload URL after an ambiguous part failure.
+
+For signed multipart uploads, the token must be valid when EdgeBase authorizes
+`multipart/complete`. A completion admitted before `expiresAt` may finish
+afterward; a new continuation request at or after the boundary is rejected.
+EdgeBase does not perform a racy post-commit delete that could remove a newer
+trusted write to the same key.
 
 ## Cancel Upload
 

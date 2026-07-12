@@ -121,11 +121,11 @@ All data is stored in the `/data` volume:
 
 | Data                      | Path           | Description                                                              |
 | ------------------------- | -------------- | ------------------------------------------------------------------------ |
-| DO SQLite                 | `/data/v3/do/` | Database DO state (isolated namespaces, Room/DatabaseLive support data)  |
+| DO SQLite                 | `/data/v3/do/` | Database/room state plus key-sharded atomic OAuth callback state         |
 | D1 Auth (`AUTH_DB`)       | `/data/v3/d1/` | Auth control plane (users, sessions, OAuth, MFA, admin data)             |
 | D1 Control (`CONTROL_DB`) | `/data/v3/d1/` | Internal operational metadata (plugin versions, cleanup/backup metadata) |
 | R2 Files                  | `/data/v3/r2/` | Uploaded files                                                           |
-| KV Data                   | `/data/v3/kv/` | OAuth state, membership cache                                            |
+| KV Data                   | `/data/v3/kv/` | Ephemeral caches and best-effort legacy OAuth migration mirror           |
 
 `AUTH_DB` and `CONTROL_DB` are separate internal D1 databases that share the same persisted base directory. Keeping plugin/control-plane metadata in `CONTROL_DB` avoids mixing operational state into the auth hot path.
 
@@ -144,12 +144,19 @@ cd my-project
 npx edgebase dev --port 8787
 
 # Advanced/manual: only when you provide a complete Wrangler config yourself
-npx wrangler dev --config ./wrangler.toml --port 8787 --persist-to ./data
+npx wrangler dev --config ./wrangler.toml --port 8787 --persist-to ./data \
+  --var EDGEBASE_RUNTIME_MODE:self-hosted
 ```
 
 `npx edgebase dev` is the recommended path. It evaluates `edgebase.config.ts` and injects the managed bindings needed for local development before starting Wrangler.
 
 Use raw `wrangler dev` only for explicit manual setups, such as a dedicated test config, or when your `wrangler.toml` already includes every binding your project needs.
+
+The EdgeBase CLI owns an internal `EDGEBASE_RUNTIME_MODE` binding: Cloudflare
+deploys use `cloudflare`, CLI development uses `local-development`, and
+Docker/packaged runtimes use `self-hosted`. Raw Wrangler self-hosting must set
+`self-hosted` as shown above. Missing or invalid modes deliberately trust no
+forwarded client-IP header.
 
 If `frontend` is configured, the local runtime can also serve that prebuilt bundle.
 
@@ -176,11 +183,14 @@ pm2 save
 HTTPS is required for production. Use Caddy or Nginx as a reverse proxy.
 
 :::danger Security: Reverse Proxy Required
-EdgeBase uses the client IP address for **rate limiting** and **brute-force protection**. On Cloudflare Edge, it trusts `CF-Connecting-IP`. In self-hosted environments (Docker / Direct), it only trusts `X-Forwarded-For` when you set `trustSelfHostedProxy: true` in `edgebase.config.ts`.
+EdgeBase uses the client IP address for **rate limiting** and **brute-force protection**. On a CLI-declared Cloudflare runtime, it trusts `CF-Connecting-IP`. Docker and packaged runtimes ignore client-supplied `CF-Connecting-IP` and only trust `X-Forwarded-For` when you set `trustSelfHostedProxy: true` in `edgebase.config.ts`.
 
 **If EdgeBase is exposed directly to the internet without a reverse proxy**, leave `trustSelfHostedProxy: false` so spoofed `X-Forwarded-For` headers are ignored. **If you do run behind Nginx or Caddy**, enable `trustSelfHostedProxy: true` and make sure the proxy overwrites `X-Forwarded-For`.
 
-Without `trustSelfHostedProxy: true`, self-hosted deployments will treat requests as coming from the proxy itself for IP-based features. That is safer by default, but less precise operationally.
+Without `trustSelfHostedProxy: true`, self-hosted deployments collapse requests
+into a fail-closed unknown-client bucket for IP-based features. That prevents a
+client from rotating forged forwarding headers to evade limits or satisfy a
+Service Key CIDR constraint, but it is less precise operationally.
 :::
 
 ```typescript title="edgebase.config.ts"
@@ -346,7 +356,7 @@ echo "0 3 * * * docker run --rm -v edgebase-data:/data -v /backups:/backup alpin
 
 ```bash
 curl http://localhost:8787/api/health
-# → {"status":"ok","version":"0.3.8","timestamp":"2026-03-17T12:00:00.000Z"}
+# → {"status":"ok","version":"0.4.0","timestamp":"2026-03-17T12:00:00.000Z"}
 ```
 
 ### Docker Logs

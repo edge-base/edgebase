@@ -22,6 +22,7 @@ export {
   getRoomTimerHandlers,
   normalizeFrontendMountPath,
   materializeConfig,
+  resolveCaptchaHostnames,
 } from './config.js';
 export type {
   // ─── Core Config ───

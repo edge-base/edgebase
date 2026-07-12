@@ -133,68 +133,57 @@ auto result = client.auth().linkWithEmail(
 </TabItem>
 </Tabs>
 
+Email/password conversion is one atomic security-boundary transition. EdgeBase
+confirms the email identity, removes the anonymous index, revokes every
+provisional session, inserts the sole replacement session, and stores a
+five-minute encrypted completion checkpoint in the same transaction. The
+checkpoint contains only a server-keyed password proof plus encrypted response
+data; it does not store the submitted password or a plaintext refresh token.
+
+If the request was sent but the response was lost (including a local token
+storage failure), retry `linkWithEmail` promptly with the same normalized email
+and exact password. The now-revoked initiating access token is accepted only
+for that exact completed upgrade, and the server returns the original session
+and token pair rather than creating another one. A different user, email, or
+password cannot replay the checkpoint, and another anonymous session belonging
+to the same user cannot substitute for the initiating session. Do not start a
+different link operation with the stale anonymous session.
+
 ### Link OAuth
 
 **Endpoint:** `POST /api/auth/oauth/link/:provider`
 
 <Tabs groupId="sdk-language">
-<TabItem value="js" label="JavaScript" default>
+<TabItem value="js" label="Web" default>
 
 ```typescript
-await client.auth.linkWithOAuth('google');
-// Anonymous account becomes permanent after callback
+await client.auth.linkWithOAuth('google', {
+  redirectUrl: `${window.location.origin}/auth/callback`,
+});
+// The browser navigates to a one-time EdgeBase continuation. On the callback
+// route, complete the bound flow with:
+await client.auth.handleOAuthCallback();
 ```
 
 </TabItem>
-<TabItem value="dart" label="Dart/Flutter">
+<TabItem value="react-native" label="React Native">
 
-```dart
-final url = await client.auth.linkWithOAuth('google');
-await launchUrl(Uri.parse(url));
-```
-
-</TabItem>
-<TabItem value="swift" label="Swift">
-
-```swift
-let url = try await client.auth.linkWithOAuth(provider: "google")
-// Open in SFSafariViewController or ASWebAuthenticationSession
-```
-
-</TabItem>
-<TabItem value="kotlin" label="Kotlin">
-
-```kotlin
-val url = client.auth.linkWithOAuth("google")
-// Open in Custom Tabs or the system browser
-```
-
-</TabItem>
-<TabItem value="java" label="Java">
-
-```java
-String url = client.auth().linkWithOAuth("google");
-// Open in a browser or Custom Tab
-```
-
-</TabItem>
-<TabItem value="csharp" label="C#">
-
-```csharp
-var url = client.Auth.LinkWithOAuth("google");
-// Open the returned URL in the system browser
-```
-
-</TabItem>
-<TabItem value="cpp" label="C++">
-
-```cpp
-auto url = client.auth().linkWithOAuth("google");
-// Open the returned URL in the system browser
+```typescript
+await client.auth.linkWithOAuth('google', {
+  redirectUrl: 'https://app.example.com/auth/callback',
+});
+// Linking.openURL() is used when the Linking adapter was configured.
+// Complete live and cold-start callbacks with handleOAuthCallback(url) and
+// handleInitialOAuthCallback(), respectively.
 ```
 
 </TabItem>
 </Tabs>
+
+Only the Web and React Native SDKs currently implement the complete bound
+account-link callback. Other native SDKs may expose URL-construction methods,
+but they do not yet bind, validate, rotate, and persist the app callback; do not
+use those methods for a production OAuth link flow.
 
 ### Link Phone
 
@@ -209,11 +198,10 @@ auto url = client.auth().linkWithOAuth("google");
 ```typescript
 await client.auth.linkWithPhone({ phone: '+1234567890' });
 
-const result = await client.auth.verifyPhoneLink({
+await client.auth.verifyLinkPhone({
   phone: '+1234567890',
   code: '123456',
 });
-// result.user.isAnonymous === false
 ```
 
 </TabItem>
@@ -270,99 +258,73 @@ client.auth().verifyLinkPhone("+1234567890", "123456");
 </TabItem>
 </Tabs>
 
+For an anonymous account, verification is a security-boundary transition: the
+server revokes every provisional session and returns one new permanent-account
+session atomically. Current high-level SDKs persist that replacement token pair
+before `verifyLinkPhone` resolves. Any other device still holding the anonymous
+session is rejected on its next HTTP or realtime operation.
+
 ## Attach Another OAuth Provider To An Existing Account
 
 Use `linkWithOAuth()` while already signed in:
 
 <Tabs groupId="sdk-language">
-<TabItem value="js" label="JavaScript" default>
+<TabItem value="js" label="Web" default>
 
 ```typescript
 await client.auth.linkWithOAuth('github', {
   redirectUrl: `${window.location.origin}/settings/connections/callback`,
   state: 'settings-connections',
 });
+
+// In the callback route:
+await client.auth.handleOAuthCallback();
 ```
 
 </TabItem>
-<TabItem value="dart" label="Dart/Flutter">
+<TabItem value="react-native" label="React Native">
 
-```dart
-final url = await client.auth.linkWithOAuth(
-  'github',
-  redirectUrl: 'myapp://settings/connections/callback',
-);
-await launchUrl(Uri.parse(url));
-```
-
-</TabItem>
-<TabItem value="swift" label="Swift">
-
-```swift
-let url = try await client.auth.linkWithOAuth(
-    provider: "github",
-    redirectUrl: "myapp://settings/connections/callback"
-)
-```
-
-</TabItem>
-<TabItem value="kotlin" label="Kotlin">
-
-```kotlin
-val url = client.auth.linkWithOAuth(
-    "github",
-    redirectUrl = "myapp://settings/connections/callback"
-)
-```
-
-</TabItem>
-<TabItem value="java" label="Java">
-
-```java
-String url = client.auth().linkWithOAuth(
-    "github",
-    "myapp://settings/connections/callback"
-);
-```
-
-</TabItem>
-<TabItem value="csharp" label="C#">
-
-```csharp
-var url = client.Auth.LinkWithOAuth(
-    "github",
-    "myapp://settings/connections/callback"
-);
-```
-
-</TabItem>
-<TabItem value="cpp" label="C++">
-
-```cpp
-auto url = client.auth().linkWithOAuth(
-    "github",
-    "myapp://settings/connections/callback"
-);
+```typescript
+await client.auth.linkWithOAuth('github', {
+  redirectUrl: 'https://app.example.com/settings/connections/callback',
+});
 ```
 
 </TabItem>
 </Tabs>
 
-EdgeBase redirects to the provider, then back to your app. On success, the provider is attached to the same user account and the callback includes fresh `access_token`, `refresh_token`, and your optional `state`.
+EdgeBase returns a short-lived one-time continuation URL, redirects from that
+URL to the provider, then returns to your allowlisted app callback. The provider
+callback does not mutate the account and places no bearer credential in the app
+URL. It stores a five-minute completion record and returns only
+`oauth_link_ticket`, transport, optional `state`, and the SDK binding nonce in
+the fragment.
+
+The supported SDK scrubs and consumes that callback, then sends the current
+Bearer session to `POST /api/auth/oauth/complete/link`. Completion must match
+the exact initiating `userId`, session ID, and anonymous/permanent account mode
+captured at link start. A sign-out, account switch, session rotation to a
+different session, disabled/deleted account, or changed account mode fails
+closed before linking. Only that authenticated completion endpoint mutates the
+account and returns the refreshed session (or sets the HttpOnly refresh cookie).
+The SDK persists the exact link ticket before completion. An ambiguous network
+failure may safely retry that same ticket: EdgeBase returns the cached exact
+result and does not attach the identity or create a session twice.
 
 If the OAuth identity already belongs to another user, the request fails with `409 Conflict`.
 
 ## Manage Linked Identities
 
-The convenience helpers below are available on the Web SDK today for account-settings UIs.
+The convenience helpers below are available on the Web and React Native SDKs
+for account-settings UIs.
 
 ```typescript
 const { identities, methods } = await client.auth.listIdentities();
 
 console.log(identities);
 // [
-//   { id: 'oauthacc_x', type: 'oauth', provider: 'google', providerUserId: '123' },
-//   { id: 'oauthacc_y', type: 'oauth', provider: 'github', providerUserId: '456' },
+//   { id: 'oauthacc_x', kind: 'oauth', provider: 'google', providerUserId: '123' },
+//   { id: 'oauthacc_y', kind: 'oauth', provider: 'github', providerUserId: '456' },
 // ]
 
 console.log(methods);
@@ -394,7 +356,9 @@ EdgeBase refuses to unlink the final remaining sign-in method for a user. That p
 Explicit linking never merges into a different account. If the OAuth identity is already attached elsewhere, the request fails.
 
 :::note Redirects And State
-`linkWithOAuth()` accepts `redirectUrl` plus an optional `state` string. The callback appends `state` back to your app redirect so you can resume the exact UI flow.
+Web `linkWithOAuth()` accepts `redirectUrl` plus an optional `state` string. The
+callback appends `state` beside the one-time completion ticket so you can resume
+the exact UI flow; `state` is application routing data, not account authority.
 :::
 
 ## Access Rules After Linking

@@ -18,6 +18,22 @@ jobs:
   server-unit:
     name: Server Unit Tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_USER: edgebase_test
+          POSTGRES_PASSWORD: edgebase_test
+          POSTGRES_DB: edgebase_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U edgebase_test -d edgebase_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      EDGEBASE_TEST_POSTGRES_URL: postgresql://edgebase_test:edgebase_test@127.0.0.1:5432/edgebase_test
     defaults:
       run:
         working-directory: packages/server
@@ -43,6 +59,20 @@ jobs:
       - name: Build JS SDK core package
         run: pnpm --dir packages/sdk/js/packages/core build
         working-directory: .
+
+      - name: Require PostgreSQL atomicity test authority
+        run: |
+          test -n "${EDGEBASE_TEST_POSTGRES_URL:-}" || {
+            echo "EDGEBASE_TEST_POSTGRES_URL is required; PostgreSQL auth tests must not be skipped in CI."
+            exit 1
+          }
+          node --input-type=module -e '
+            import { Client } from "pg";
+            const client = new Client({ connectionString: process.env.EDGEBASE_TEST_POSTGRES_URL });
+            await client.connect();
+            await client.query("SELECT 1");
+            await client.end();
+          '
 
       - name: Run server unit tests (src/__tests__)
         run: pnpm vitest run --config vitest.unit.config.ts --coverage
@@ -227,11 +257,19 @@ jobs:
           gradle-version: '8.13'
       - name: Kotlin unit tests (Unix)
         if: runner.os != 'Windows'
-        run: ./gradlew :core:test
+        run: ./gradlew :core:test :client:jvmTest
         working-directory: packages/sdk/kotlin
       - name: Kotlin unit tests (Windows)
         if: runner.os == 'Windows'
-        run: .\gradlew.bat :core:test
+        run: .\gradlew.bat :core:test :client:jvmTest
+        working-directory: packages/sdk/kotlin
+      - name: Kotlin Android compile and unit tests
+        if: runner.os == 'Linux'
+        run: ./gradlew :client:compileDebugKotlinAndroid :client:testDebugUnitTest
+        working-directory: packages/sdk/kotlin
+      - name: Kotlin Apple client compile
+        if: runner.os == 'macOS'
+        run: ./gradlew :client:compileKotlinMacosArm64 -Pkotlin.apple.frameworks=false
         working-directory: packages/sdk/kotlin
 
   # ─── 7. Java SDK 단위 테스트 ────────────────────────────────────────────────
@@ -791,6 +829,7 @@ jobs:
   sdk-cpp-e2e:
     name: C++ SDK E2E
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [server-unit]
     env:
       EDGEBASE_E2E_REQUIRED: '1'
@@ -805,6 +844,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install native build dependencies
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev ninja-build
+      - name: Build and link-check Unreal ThirdParty archives
+        run: packages/sdk/cpp/scripts/sync-thirdparty.sh
       - name: Start EdgeBase test server and run C++ E2E
         run: |
           node ./scripts/run-with-services.mjs --server --mock-fcm -- \
@@ -819,6 +860,30 @@ jobs:
               cmake --build "$UNREAL_BUILD_DIR" --parallel
               "$UNREAL_BUILD_DIR/unit_test"
               "$UNREAL_BUILD_DIR/e2e_test"'
+
+  # Win64 is a separate release artifact path in EdgeBase.Build.cs. Build and
+  # sync it on a real Windows toolchain so the documented PowerShell install
+  # path cannot silently drift while Linux CMake remains green.
+  sdk-cpp-win64-thirdparty:
+    name: C++ Unreal Win64 ThirdParty package
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install native dependencies
+        shell: pwsh
+        run: vcpkg install curl:x64-windows openssl:x64-windows
+      - name: Build and sync Win64 Unreal core
+        shell: pwsh
+        run: packages/sdk/cpp/scripts/sync-thirdparty.ps1
+      - name: Verify packaged artifacts
+        shell: pwsh
+        run: |
+          if (-not (Test-Path packages/sdk/cpp/ThirdParty/lib/win64/edgebase_core.lib)) { throw "Missing Win64 core library" }
+          if (-not (Test-Path packages/sdk/cpp/ThirdParty/lib/win64/ixwebsocket.lib)) { throw "Missing Win64 IXWebSocket library" }
+          if (-not (Test-Path packages/sdk/cpp/ThirdParty/include/edgebase/edgebase.h)) { throw "Missing core headers" }
+          if (-not (Test-Path packages/sdk/cpp/ThirdParty/include/nlohmann/json.hpp)) { throw "Missing JSON headers" }
+          if (-not (Test-Path packages/sdk/cpp/packages/core/build-win64/thirdparty-consumer/Release/edgebase_thirdparty_consumer.exe)) { throw "Missing standalone packaged consumer" }
 
   # ─── Role Contract Catalog ──────────────────────────────────────────────────
   sdk-role-contract-catalog:
@@ -1127,6 +1192,7 @@ jobs:
       - sdk-scala-e2e
       - sdk-ruby-e2e
       - sdk-cpp-e2e
+      - sdk-cpp-win64-thirdparty
       - sdk-role-contract-catalog
       - sdk-admin-contract
       - sdk-core-contract
@@ -1164,8 +1230,23 @@ jobs:
           echo "Scala E2E: ${{ needs.sdk-scala-e2e.result }}"
           echo "Ruby E2E: ${{ needs.sdk-ruby-e2e.result }}"
           echo "C++ E2E: ${{ needs.sdk-cpp-e2e.result }}"
+          echo "C++ Unreal Win64 ThirdParty: ${{ needs.sdk-cpp-win64-thirdparty.result }}"
           echo "Role Contract Catalog: ${{ needs.sdk-role-contract-catalog.result }}"
           echo "Admin Contract: ${{ needs.sdk-admin-contract.result }}"
           echo "Core Contract: ${{ needs.sdk-core-contract.result }}"
           echo "Client Contract: ${{ needs.sdk-client-contract.result }}"
           echo "Client Auth Verify Contract: ${{ needs.sdk-client-auth-verify-contract.result }}"
+      - name: Enforce every required result
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          node -e '
+            const needs = JSON.parse(process.env.NEEDS_JSON || "{}");
+            const failed = Object.entries(needs)
+              .filter(([, value]) => value.result !== "success")
+              .map(([name, value]) => `${name}=${value.result}`);
+            if (failed.length) {
+              console.error(`Required CI jobs did not succeed: ${failed.join(", ")}`);
+              process.exit(1);
+            }
+          '

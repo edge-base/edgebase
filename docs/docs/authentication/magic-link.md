@@ -14,7 +14,7 @@ This feature is in **beta**. Core behavior is stable and ready to try, but some 
 Passwordless email login — users click a link to sign in, no password required.
 
 :::tip Captcha Protection
-When [captcha is enabled](/docs/authentication/captcha), the Magic Link endpoint is automatically protected by Cloudflare Turnstile. All client SDKs handle token acquisition transparently — no code changes needed.
+When [CAPTCHA is enabled](/docs/authentication/captcha), Magic Link initiation is protected by Turnstile. Supported UI runtimes can acquire the token automatically; headless runtimes and custom UI must provide it explicitly.
 :::
 
 ## How It Works
@@ -123,13 +123,17 @@ On the Web SDK, `signInWithMagicLink()` also accepts:
 - `redirectUrl`
 - `state`
 
-If you pass them, EdgeBase uses that redirect for this request instead of the static `email.magicLinkUrl` template. The clicked link includes:
+If you pass them, EdgeBase uses that redirect for this request instead of the
+static `email.magicLinkUrl` template. The clicked link includes these values in
+its URL fragment:
 
 - `token`
 - `type=magic-link`
 - `state` if provided
 
-If your project sets `auth.allowedRedirectUrls`, the redirect must match that allowlist.
+In release, a request-specific redirect requires a non-empty
+`auth.allowedRedirectUrls`, must use HTTPS, and must match an explicitly
+approved URL, origin-wide entry, or path-prefix `*` entry.
 
 ## Verify Magic Link
 
@@ -139,10 +143,15 @@ After the user clicks the link, extract the token from the URL and verify it:
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
-// Extract token from URL (e.g., https://yourapp.com/auth/magic?token=abc123)
-const params = new URLSearchParams(window.location.search);
+// Request-specific redirects use the fragment. A static email.magicLinkUrl
+// template may still place {token} in its configured query string.
+const callbackUrl = new URL(window.location.href);
+const params = callbackUrl.hash
+  ? new URLSearchParams(callbackUrl.hash.slice(1))
+  : callbackUrl.searchParams;
 const token = params.get('token');
 const state = params.get('state');
+history.replaceState(null, '', callbackUrl.pathname);
 
 const { user, accessToken, refreshToken } = await client.auth.verifyMagicLink(token);
 console.log('Signed in as:', user.email);
@@ -255,9 +264,13 @@ function MagicLinkLogin() {
 // Callback page — handles the magic link redirect
 function MagicLinkCallback() {
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const callbackUrl = new URL(window.location.href);
+    const params = callbackUrl.hash
+      ? new URLSearchParams(callbackUrl.hash.slice(1))
+      : callbackUrl.searchParams;
     const token = params.get('token');
     const state = params.get('state');
+    history.replaceState(null, '', callbackUrl.pathname);
     if (token) {
       client.auth.verifyMagicLink(token).then(({ user }) => {
         window.location.href = state === 'dashboard' ? '/dashboard' : '/';
@@ -276,7 +289,8 @@ function MagicLinkCallback() {
 - **No email enumeration** — The server returns the same response whether or not the email exists.
 - **Rate limiting** — Auth rate limits apply to prevent abuse.
 - **Auth hooks** — `beforeSignIn` and `afterSignIn` hooks fire during magic link verification.
-- **Redirect allowlist** — If `auth.allowedRedirectUrls` is set, only approved redirect URLs can be used for per-request links.
+- **Redirect allowlist** — Release per-request links require a non-empty
+  `auth.allowedRedirectUrls`, HTTPS, and a match within its approved scope.
 
 ## Compatibility
 

@@ -532,10 +532,10 @@ export default defineConfig({
     anonymousAuth: true,
     allowedRedirectUrls: [
       'https://app.example.com/auth/*',
-      'http://localhost:3000/auth/*',
+      'https://app.example.com/settings/connections/callback',
     ],
   },
-  captcha: true, // Auto-provisions Cloudflare Turnstile on deploy
+  captcha: true, // Provisions exact hostnames; release deploy stores TURNSTILE_SECRET
   // ...
 });
 ```
@@ -557,12 +557,19 @@ Google, GitHub, Apple, Discord, Microsoft, Facebook, Kakao, Naver, X (Twitter), 
 | `phoneAuth`              | `boolean`  | `false` | Enable phone/SMS OTP authentication                                             |
 | `allowedOAuthProviders`  | `string[]` | `[]`    | List of enabled OAuth provider names                                             |
 | `oauth`                  | `object`   | `--`    | Provider credentials keyed by provider name, plus `auth.oauth.oidc.{name}`       |
-| `allowedRedirectUrls`    | `string[]` | `[]`    | Allowlist for OAuth and email-action `redirectUrl` overrides                     |
+| `allowedRedirectUrls`    | `string[]` | `[]`    | Allowlist for OAuth and email-action app redirects; required for redirect overrides in release |
 | `anonymousRetentionDays` | `number`   | `30`    | Days before inactive anonymous accounts are cleaned up                          |
 | `cleanupOrphanData`      | `boolean`  | --      | Delete user DB (`user:{id}`) when a user is deleted                             |
-| `captcha`                | `boolean`  | --      | Enable Cloudflare Turnstile CAPTCHA on auth endpoints (top-level config option) |
+| `captcha`                | `boolean \| object` | -- | Top-level Turnstile config. Use `true` for managed deploy or `{ siteKey, hostnames, failMode?, siteverifyTimeout? }`; inject the secret at runtime |
 
-Use `allowedRedirectUrls` if your app passes request-specific redirect targets for OAuth, magic link, password reset, or email change flows.
+Use `allowedRedirectUrls` whenever your app passes request-specific redirect
+targets for OAuth, magic link, password reset, or email change flows. Release
+mode fails closed if the list is absent or empty and accepts only HTTPS
+destinations matching an explicitly approved exact URL, HTTPS origin-wide
+entry, or HTTPS path-prefix entry ending in `*`. Keep HTTP localhost entries in
+development-only configuration; custom URL schemes are never accepted in
+release. Mobile apps should use claimed HTTPS Universal Links or Android App
+Links.
 
 ### Session
 
@@ -585,6 +592,13 @@ auth: {
 for HTTPS requests (or a trusted TLS-terminating proxy); cookie-auth requests
 over insecure HTTP are rejected because browsers would discard the required
 `Secure` cookie.
+
+On HTTPS, the refresh cookie is named `__Host-{name}` and uses `Path=/`. On
+plain-HTTP local development, it uses the configured base name with
+`Path=/api/auth`. Release mode requires HTTPS for cookie transport.
+The only exception is an HTTP `localhost`/`127.0.0.1`/`[::1]` request owned by
+the CLI's explicit `local-development` runtime; deployed and self-hosted
+release modes still fail closed, and `SameSite=None` always requires HTTPS.
 
 ### Magic Link
 
@@ -974,7 +988,7 @@ Treat these values as **abuse-protection knobs**, not billing or hard quota sett
 
 | Group        | Default          | Key   | Description                    |
 | ------------ | ---------------- | ----- | ------------------------------ |
-| `global`     | 10,000,000 / 60s | IP    | Overall safety net             |
+| `global`     | 10,000,000 / 60s | IP    | API/control safety net         |
 | `db`         | 100 / 60s        | IP    | Database operations            |
 | `storage`    | 50 / 60s         | IP    | File uploads/downloads         |
 | `functions`  | 50 / 60s         | IP    | Function invocations           |

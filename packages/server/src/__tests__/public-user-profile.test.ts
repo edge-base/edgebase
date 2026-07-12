@@ -57,12 +57,16 @@ function createMockAuthDb(
     async compareAndSwapUserSession(): Promise<boolean> {
       return false;
     },
+    async createSessionWithLimit(): Promise<void> {},
     async batch(statements: { sql: string; params?: unknown[] }[]): Promise<void> {
       for (const statement of statements) {
         if (statement.sql.includes('DELETE FROM _users_public WHERE id = ?')) {
           profiles.delete(String(statement.params?.[0] ?? ''));
         }
       }
+    },
+    async batchWithLock(_lockKey: string | string[], statements: { sql: string; params?: unknown[] }[]): Promise<void> {
+      await db.batch(statements);
     },
     _profiles: profiles,
     get _firstCalls() {

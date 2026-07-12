@@ -274,21 +274,26 @@ const EXCLUDED_OPS: Record<string, string> = {
   downloadFile: 'binary download via StorageClient',
   listFiles: 'StorageClient.list()',
   getUploadParts: 'multipart via StorageClient',
-  createMultipartUpload: 'multipart via StorageClient',
   uploadPart: 'multipart via StorageClient',
-  completeMultipartUpload: 'multipart via StorageClient',
-  abortMultipartUpload: 'multipart via StorageClient',
   // ── Client: OAuth — redirect-based ──
   oauthRedirect: 'browser redirect flow',
   oauthCallback: 'browser redirect flow',
+  oauthCallbackPost: 'OAuth provider form_post callback',
+  oauthExchange: 'auth SDK atomic callback-ticket exchange',
   oauthLinkStart: 'browser redirect flow',
   oauthLinkCallback: 'browser redirect flow',
+  oauthLinkCallbackPost: 'OAuth provider form_post link callback',
+  oauthLinkContinue: 'browser redirect flow continuation',
+  oauthLinkComplete: 'auth SDK atomic link-ticket completion',
+  getCaptchaChallenge: 'hosted native WebView challenge document',
   // ── Client: Realtime/Room — WebSocket protocol ──
   connectDatabaseSubscription: 'WebSocket protocol',
   checkDatabaseSubscriptionConnection: 'WebSocket readiness check',
   connectRoom: 'WebSocket protocol',
   checkRoomConnection: 'WebSocket readiness check',
   getRoomMetadata: 'Room SDK',
+  getRoomSummary: 'Room SDK',
+  getRoomSummaries: 'Room SDK',
   // ── Client: Auth — internal token ops ──
   authRefresh: 'internal token refresh',
   authGetIdentities: 'auth SDK direct HTTP',
@@ -437,6 +442,12 @@ assert(
   `all operationIds covered — uncovered: [${uncovered.join(', ')}]`,
 );
 
+const multiplyAccounted = Object.keys(EXCLUDED_OPS).filter((opId) => wrappedOps.has(opId));
+assert(
+  multiplyAccounted.length === 0,
+  `operationIds must be either wrapped or excluded, never both — duplicates: [${multiplyAccounted.join(', ')}]`,
+);
+
 // Also verify excluded ops are real operationIds (catch stale entries)
 for (const opId of Object.keys(EXCLUDED_OPS)) {
   assert(
@@ -511,6 +522,128 @@ for (const check of sdkIntegrationChecks) {
     matched,
     `${check.lang}: ${check.file} uses one of [${check.patterns.join(', ')}]`,
   );
+}
+
+// ─── Test 9: OAuth inputless-call compatibility ─────────────────────────────
+
+console.log('🧪 Test 9: OAuth generated Core preserves legacy inputless calls');
+
+const languageConfig = config.languages as Record<string, { core?: string; core_header?: string }>;
+function readGeneratedCore(language: string): string {
+  const entry = languageConfig[language];
+  const relativePath = entry.core ?? entry.core_header;
+  if (!relativePath) return '';
+  return readFileSync(resolve(ROOT, relativePath), 'utf-8');
+}
+
+const oauthCompatChecks: Array<{ language: string; patterns: string[] }> = [
+  {
+    language: 'typescript',
+    patterns: [
+      'oauthRedirect(provider: string, query?: Record<string, string>)',
+      'oauthLinkStart(provider: string, body?: unknown)',
+      "query === undefined",
+      "body === undefined",
+    ],
+  },
+  {
+    language: 'python',
+    patterns: [
+      'def oauth_redirect(self, provider: str, query: dict[str, str] | None = None)',
+      'def oauth_link_start(self, provider: str, body: Any = None)',
+    ],
+  },
+  {
+    language: 'go',
+    patterns: [
+      'OauthRedirect(ctx context.Context, provider string)',
+      'OauthRedirectWithQuery(ctx context.Context, provider string, query map[string]string)',
+      'OauthLinkStart(ctx context.Context, provider string)',
+      'OauthLinkStartWithBody(ctx context.Context, provider string, body interface{})',
+    ],
+  },
+  {
+    language: 'rust',
+    patterns: [
+      'oauth_redirect(&self, provider: &str)',
+      'oauth_redirect_with_query(&self, provider: &str, query:',
+      'oauth_link_start(&self, provider: &str)',
+      'oauth_link_start_with_body(&self, provider: &str, body:',
+    ],
+  },
+  {
+    language: 'dart',
+    patterns: [
+      'oauthRedirect(String provider, [Map<String, String>? query])',
+      'oauthLinkStart(String provider, [Object? body])',
+    ],
+  },
+  {
+    language: 'swift',
+    patterns: [
+      'oauthRedirect(_ provider: String) async throws',
+      'oauthRedirect(_ provider: String, query: [String: String]?)',
+      'oauthLinkStart(_ provider: String) async throws',
+      'oauthLinkStart(_ provider: String, _ body: [String: Any])',
+    ],
+  },
+  {
+    language: 'kotlin',
+    patterns: [
+      'suspend fun oauthRedirect(provider: String): Any?',
+      'suspend fun oauthRedirect(provider: String, query: Map<String, String>?): Any?',
+      'suspend fun oauthLinkStart(provider: String): Any?',
+      'suspend fun oauthLinkStart(provider: String, body: Map<String, Any?>): Any?',
+    ],
+  },
+  {
+    language: 'java',
+    patterns: [
+      'Object oauthRedirect(String provider)',
+      'Object oauthRedirect(String provider, Map<String, String> query)',
+      'Object oauthLinkStart(String provider)',
+      'Object oauthLinkStart(String provider, Map<String, ?> body)',
+    ],
+  },
+  {
+    language: 'php',
+    patterns: [
+      'oauth_redirect(string $provider, array $query = [])',
+      'oauth_link_start(string $provider, mixed $body = null)',
+    ],
+  },
+  {
+    language: 'csharp',
+    patterns: [
+      'OauthRedirectAsync(string provider, CancellationToken ct = default)',
+      'OauthRedirectWithQueryAsync(string provider, Dictionary<string, string>? query, CancellationToken ct = default)',
+      'OauthLinkStartAsync(string provider, CancellationToken ct = default)',
+      'OauthLinkStartWithBodyAsync(string provider, object? body, CancellationToken ct = default)',
+    ],
+  },
+  {
+    language: 'ruby',
+    patterns: [
+      'def oauth_redirect(provider, query: nil)',
+      'def oauth_link_start(provider, body = nil)',
+    ],
+  },
+  {
+    language: 'cpp',
+    patterns: [
+      'Result oauth_redirect(const std::string& provider) const;',
+      'Result oauth_redirect(const std::string& provider, const std::map<std::string, std::string>& query) const;',
+      'Result oauth_link_start(const std::string& provider) const;',
+      'Result oauth_link_start(const std::string& provider, const std::string& json_body) const;',
+    ],
+  },
+];
+
+for (const check of oauthCompatChecks) {
+  const content = readGeneratedCore(check.language);
+  for (const pattern of check.patterns) {
+    assert(content.includes(pattern), `${check.language}: generated Core contains '${pattern}'`);
+  }
 }
 
 // ─── Summary ────────────────────────────────────────────────────────────────

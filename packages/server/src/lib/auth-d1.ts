@@ -18,6 +18,14 @@ import type { AuthDb } from './auth-db-adapter.js';
 export const AUTH_SHARD_COUNT = 16;
 const PENDING_EXPIRY_MINUTES = 5;
 
+function generateReservationId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
 // ─── Schema ───
 
 export const AUTH_D1_SCHEMA = `
@@ -26,6 +34,7 @@ CREATE TABLE IF NOT EXISTS _email_index (
   userId TEXT NOT NULL,
   shardId INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  reservationId TEXT,
   createdAt TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -35,6 +44,7 @@ CREATE TABLE IF NOT EXISTS _oauth_index (
   userId TEXT NOT NULL,
   shardId INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  reservationId TEXT,
   createdAt TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (provider, providerUserId)
 );
@@ -80,6 +90,7 @@ CREATE TABLE IF NOT EXISTS _phone_index (
   userId TEXT NOT NULL,
   shardId INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  reservationId TEXT,
   createdAt TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -126,6 +137,8 @@ CREATE TABLE IF NOT EXISTS _users (
   status TEXT DEFAULT 'active',
   locale TEXT DEFAULT 'en',
   lastSignedInAt TEXT,
+  authRevision INTEGER NOT NULL DEFAULT 0,
+  authMutationId TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
@@ -203,6 +216,36 @@ CREATE TABLE IF NOT EXISTS _webauthn_credentials (
 CREATE INDEX IF NOT EXISTS idx_webauthn_userId ON _webauthn_credentials(userId);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_webauthn_credentialId ON _webauthn_credentials(credentialId);
 
+CREATE TABLE IF NOT EXISTS _webauthn_challenges (
+  challenge TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  userId TEXT,
+  expiresAt TEXT NOT NULL,
+  consumptionId TEXT,
+  createdAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_webauthn_challenges_user
+  ON _webauthn_challenges(kind, userId, createdAt);
+CREATE INDEX IF NOT EXISTS idx_webauthn_challenges_expiry
+  ON _webauthn_challenges(expiresAt);
+
+CREATE TABLE IF NOT EXISTS _auth_challenges (
+  key TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  userId TEXT,
+  subject TEXT,
+  secretHash TEXT,
+  payload TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  maxAttempts INTEGER NOT NULL DEFAULT 5,
+  expiresAt TEXT NOT NULL,
+  consumedAt TEXT,
+  consumptionId TEXT,
+  createdAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_challenges_expiry ON _auth_challenges(expiresAt);
+CREATE INDEX IF NOT EXISTS idx_auth_challenges_user ON _auth_challenges(userId, kind);
+
 `;
 
 export const AUTH_PG_SCHEMA = `
@@ -211,6 +254,7 @@ CREATE TABLE IF NOT EXISTS _email_index (
   userId TEXT NOT NULL,
   shardId INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  reservationId TEXT,
   createdAt TEXT NOT NULL DEFAULT NOW()
 );
 
@@ -220,6 +264,7 @@ CREATE TABLE IF NOT EXISTS _oauth_index (
   userId TEXT NOT NULL,
   shardId INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  reservationId TEXT,
   createdAt TEXT NOT NULL DEFAULT NOW(),
   PRIMARY KEY (provider, providerUserId)
 );
@@ -265,6 +310,7 @@ CREATE TABLE IF NOT EXISTS _phone_index (
   userId TEXT NOT NULL,
   shardId INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  reservationId TEXT,
   createdAt TEXT NOT NULL DEFAULT NOW()
 );
 
@@ -311,6 +357,8 @@ CREATE TABLE IF NOT EXISTS _users (
   status TEXT DEFAULT 'active',
   locale TEXT DEFAULT 'en',
   lastSignedInAt TEXT,
+  authRevision INTEGER NOT NULL DEFAULT 0,
+  authMutationId TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
@@ -380,7 +428,7 @@ CREATE TABLE IF NOT EXISTS _webauthn_credentials (
   userId TEXT NOT NULL,
   credentialId TEXT NOT NULL,
   credentialPublicKey TEXT NOT NULL,
-  counter INTEGER DEFAULT 0,
+  counter BIGINT DEFAULT 0,
   transports TEXT,
   createdAt TEXT NOT NULL,
   FOREIGN KEY (userId) REFERENCES _users(id)
@@ -388,11 +436,49 @@ CREATE TABLE IF NOT EXISTS _webauthn_credentials (
 CREATE INDEX IF NOT EXISTS idx_webauthn_userId ON _webauthn_credentials(userId);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_webauthn_credentialId ON _webauthn_credentials(credentialId);
 
+CREATE TABLE IF NOT EXISTS _webauthn_challenges (
+  challenge TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  userId TEXT,
+  expiresAt TEXT NOT NULL,
+  consumptionId TEXT,
+  createdAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_webauthn_challenges_user
+  ON _webauthn_challenges(kind, userId, createdAt);
+CREATE INDEX IF NOT EXISTS idx_webauthn_challenges_expiry
+  ON _webauthn_challenges(expiresAt);
+
+CREATE TABLE IF NOT EXISTS _auth_challenges (
+  key TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  userId TEXT,
+  subject TEXT,
+  secretHash TEXT,
+  payload TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  maxAttempts INTEGER NOT NULL DEFAULT 5,
+  expiresAt TEXT NOT NULL,
+  consumedAt TEXT,
+  consumptionId TEXT,
+  createdAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_challenges_expiry ON _auth_challenges(expiresAt);
+CREATE INDEX IF NOT EXISTS idx_auth_challenges_user ON _auth_challenges(userId, kind);
+
 `;
 
 // ─── Schema Initialization ───
 
 let schemaInitialized = false;
+
+function isDuplicateColumnError(error: unknown): boolean {
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code?: unknown }).code ?? '')
+    : '';
+  const message = error instanceof Error ? error.message : String(error);
+  return code === '42701' || /duplicate column|already exists/i.test(message);
+}
 
 export async function ensureAuthSchema(db: AuthDb): Promise<void> {
   if (schemaInitialized) return;
@@ -409,8 +495,37 @@ export async function ensureAuthSchema(db: AuthDb): Promise<void> {
   // Migrate existing _users tables: add lastSignedInAt if missing
   try {
     await db.run('ALTER TABLE _users ADD COLUMN lastSignedInAt TEXT', []);
-  } catch {
-    // Column already exists — safe to ignore
+  } catch (error) {
+    if (!isDuplicateColumnError(error)) throw error;
+  }
+
+  for (const migration of [
+    'ALTER TABLE _email_index ADD COLUMN reservationId TEXT',
+    'ALTER TABLE _oauth_index ADD COLUMN reservationId TEXT',
+    'ALTER TABLE _phone_index ADD COLUMN reservationId TEXT',
+    'ALTER TABLE _users ADD COLUMN authRevision INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE _users ADD COLUMN authMutationId TEXT',
+  ]) {
+    try {
+      await db.run(migration, []);
+    } catch (error) {
+      if (!isDuplicateColumnError(error)) throw error;
+    }
+  }
+
+  if (db.dialect === 'postgres') {
+    const counterColumn = await db.first<{ data_type: string }>(
+      `SELECT data_type FROM information_schema.columns
+       WHERE table_schema = current_schema()
+         AND table_name = '_webauthn_credentials' AND column_name = 'counter'`,
+      [],
+    );
+    if (counterColumn?.data_type !== 'bigint') {
+      await db.run(
+        'ALTER TABLE _webauthn_credentials ALTER COLUMN counter TYPE BIGINT',
+        [],
+      );
+    }
   }
 
   schemaInitialized = true;
@@ -435,7 +550,11 @@ export async function lookupEmail(
   );
   // Also clean up to 10 stale records for other emails
   await db.run(
-    `DELETE FROM _email_index WHERE status = 'pending' AND createdAt < ? LIMIT 10`,
+    `DELETE FROM _email_index WHERE email IN (
+       SELECT email FROM _email_index
+       WHERE status = 'pending' AND createdAt < ?
+       ORDER BY createdAt ASC LIMIT 10
+     )`,
     [pendingCutoff],
   );
 
@@ -451,50 +570,71 @@ export async function registerEmailPending(
   db: AuthDb,
   email: string,
   userId: string,
-): Promise<void> {
-  // Check for existing confirmed
-  const existing = await db.first<{ email: string; status: string }>(
-    `SELECT email, status FROM _email_index WHERE email = ?`,
+  reservationId: string = generateReservationId(),
+): Promise<string> {
+  const now = new Date().toISOString();
+  const pendingCutoff = new Date(Date.now() - PENDING_EXPIRY_MINUTES * 60000).toISOString();
+  const reserved = await db.first<{ email: string }>(
+    `INSERT INTO _email_index (email, userId, shardId, status, reservationId, createdAt)
+     VALUES (?, ?, ?, 'pending', ?, ?)
+     ON CONFLICT (email) DO UPDATE SET
+       userId = excluded.userId,
+       shardId = excluded.shardId,
+       status = 'pending',
+       reservationId = excluded.reservationId,
+       createdAt = excluded.createdAt
+     WHERE (_email_index.status = 'pending' AND _email_index.createdAt < ?)
+        OR (_email_index.status = 'pending'
+            AND _email_index.userId = excluded.userId
+            AND _email_index.reservationId = excluded.reservationId)
+     RETURNING email`,
+    [email, userId, 0, reservationId, now, pendingCutoff],
+  );
+  if (reserved) return reservationId;
+
+  const existing = await db.first<{ status: string }>(
+    `SELECT status FROM _email_index WHERE email = ?`,
     [email],
   );
-
-  if (existing) {
-    if (existing.status === 'confirmed') {
-      throw new Error('EMAIL_ALREADY_REGISTERED');
-    }
-    // Still pending — clean it and proceed
-    await db.run(
-      `DELETE FROM _email_index WHERE email = ? AND status = 'pending'`,
-      [email],
-    );
-  }
-
-  const now = new Date().toISOString();
-  await db.run(
-    `INSERT INTO _email_index (email, userId, shardId, status, createdAt) VALUES (?, ?, ?, 'pending', ?)`,
-    [email, userId, 0, now],
-  );
+  if (existing?.status === 'confirmed') throw new Error('EMAIL_ALREADY_REGISTERED');
+  throw new Error('EMAIL_RESERVATION_CONFLICT');
 }
 
 export async function confirmEmail(
   db: AuthDb,
   email: string,
   userId: string,
+  reservationId: string,
 ): Promise<void> {
-  await db.run(
-    `UPDATE _email_index SET status = 'confirmed' WHERE email = ? AND userId = ?`,
-    [email, userId],
+  const confirmed = await db.first<{ email: string }>(
+    `UPDATE _email_index SET status = 'confirmed', reservationId = NULL
+     WHERE email = ? AND userId = ? AND status = 'pending' AND reservationId = ?
+     RETURNING email`,
+    [email, userId, reservationId],
   );
+  if (confirmed) return;
+
+  const existing = await db.first<{ userId: string; status: string }>(
+    `SELECT userId, status FROM _email_index WHERE email = ?`,
+    [email],
+  );
+  if (existing?.status === 'confirmed' && existing.userId === userId) return;
+  throw new Error('EMAIL_RESERVATION_LOST');
 }
 
 export async function deleteEmailPending(
   db: AuthDb,
   email: string,
-): Promise<void> {
-  await db.run(
-    `DELETE FROM _email_index WHERE email = ? AND status = 'pending'`,
-    [email],
+  userId: string,
+  reservationId: string,
+): Promise<boolean> {
+  const deleted = await db.first<{ email: string }>(
+    `DELETE FROM _email_index
+     WHERE email = ? AND userId = ? AND status = 'pending' AND reservationId = ?
+     RETURNING email`,
+    [email, userId, reservationId],
   );
+  return deleted !== null;
 }
 
 export async function deleteEmail(
@@ -504,6 +644,17 @@ export async function deleteEmail(
   await db.run(
     `DELETE FROM _email_index WHERE email = ?`,
     [email],
+  );
+}
+
+export async function deleteEmailForUser(
+  db: AuthDb,
+  email: string,
+  userId: string,
+): Promise<void> {
+  await db.run(
+    `DELETE FROM _email_index WHERE email = ? AND userId = ?`,
+    [email, userId],
   );
 }
 
@@ -534,48 +685,84 @@ export async function registerOAuthPending(
   provider: string,
   providerUserId: string,
   userId: string,
-): Promise<void> {
-  // Clean stale pending (5 min)
+  reservationId: string = generateReservationId(),
+): Promise<string> {
   const pendingCutoff = new Date(Date.now() - PENDING_EXPIRY_MINUTES * 60000).toISOString();
   await db.run(
-    `DELETE FROM _oauth_index WHERE provider = ? AND providerUserId = ? AND status = 'pending' AND createdAt < ?`,
-    [provider, providerUserId, pendingCutoff],
-  );
-  // Also clean other stale pending (max 10)
-  await db.run(
-    `DELETE FROM _oauth_index WHERE status = 'pending' AND createdAt < ? LIMIT 10`,
+    `DELETE FROM _oauth_index WHERE (provider, providerUserId) IN (
+       SELECT provider, providerUserId FROM _oauth_index
+       WHERE status = 'pending' AND createdAt < ?
+       ORDER BY createdAt ASC LIMIT 10
+     )`,
     [pendingCutoff],
   );
-  const existing = await db.first<{ userId: string; status: string }>(
-    `SELECT userId, status FROM _oauth_index WHERE provider = ? AND providerUserId = ?`,
+  const now = new Date().toISOString();
+  const reserved = await db.first<{ provider: string }>(
+    `INSERT INTO _oauth_index
+       (provider, providerUserId, userId, shardId, status, reservationId, createdAt)
+     VALUES (?, ?, ?, ?, 'pending', ?, ?)
+     ON CONFLICT (provider, providerUserId) DO UPDATE SET
+       userId = excluded.userId,
+       shardId = excluded.shardId,
+       status = 'pending',
+       reservationId = excluded.reservationId,
+       createdAt = excluded.createdAt
+     WHERE (_oauth_index.status = 'pending' AND _oauth_index.createdAt < ?)
+        OR (_oauth_index.status = 'pending'
+            AND _oauth_index.userId = excluded.userId
+            AND _oauth_index.reservationId = excluded.reservationId)
+     RETURNING provider`,
+    [provider, providerUserId, userId, 0, reservationId, now, pendingCutoff],
+  );
+  if (reserved) return reservationId;
+
+  const existing = await db.first<{ status: string }>(
+    `SELECT status FROM _oauth_index WHERE provider = ? AND providerUserId = ?`,
     [provider, providerUserId],
   );
-  if (existing) {
-    if (existing.status === 'confirmed') {
-      throw new Error('OAUTH_ALREADY_LINKED');
-    }
-    // Allow immediate retry after a partially failed OAuth signup/link flow.
-    await db.run(
-      `DELETE FROM _oauth_index WHERE provider = ? AND providerUserId = ? AND status = 'pending'`,
-      [provider, providerUserId],
-    );
-  }
-  const now = new Date().toISOString();
-  await db.run(
-    `INSERT INTO _oauth_index (provider, providerUserId, userId, shardId, status, createdAt) VALUES (?, ?, ?, ?, 'pending', ?)`,
-    [provider, providerUserId, userId, 0, now],
-  );
+  if (existing?.status === 'confirmed') throw new Error('OAUTH_ALREADY_LINKED');
+  throw new Error('OAUTH_RESERVATION_CONFLICT');
 }
 
 export async function confirmOAuth(
   db: AuthDb,
   provider: string,
   providerUserId: string,
+  userId: string,
+  reservationId: string,
 ): Promise<void> {
-  await db.run(
-    `UPDATE _oauth_index SET status = 'confirmed' WHERE provider = ? AND providerUserId = ?`,
+  const confirmed = await db.first<{ provider: string }>(
+    `UPDATE _oauth_index SET status = 'confirmed', reservationId = NULL
+     WHERE provider = ? AND providerUserId = ? AND userId = ?
+       AND status = 'pending' AND reservationId = ?
+     RETURNING provider`,
+    [provider, providerUserId, userId, reservationId],
+  );
+  if (confirmed) return;
+
+  const existing = await db.first<{ userId: string; status: string }>(
+    `SELECT userId, status FROM _oauth_index WHERE provider = ? AND providerUserId = ?`,
     [provider, providerUserId],
   );
+  if (existing?.status === 'confirmed' && existing.userId === userId) return;
+  throw new Error('OAUTH_RESERVATION_LOST');
+}
+
+export async function deleteOAuthPending(
+  db: AuthDb,
+  provider: string,
+  providerUserId: string,
+  userId: string,
+  reservationId: string,
+): Promise<boolean> {
+  const deleted = await db.first<{ provider: string }>(
+    `DELETE FROM _oauth_index
+     WHERE provider = ? AND providerUserId = ? AND userId = ?
+       AND status = 'pending' AND reservationId = ?
+     RETURNING provider`,
+    [provider, providerUserId, userId, reservationId],
+  );
+  return deleted !== null;
 }
 
 export async function deleteOAuth(
@@ -598,7 +785,11 @@ export async function registerAnonPending(
   // Clean stale anon pending records
   const pendingCutoff = new Date(Date.now() - PENDING_EXPIRY_MINUTES * 60000).toISOString();
   await db.run(
-    `DELETE FROM _anon_index WHERE status = 'pending' AND createdAt < ? LIMIT 10`,
+    `DELETE FROM _anon_index WHERE userId IN (
+       SELECT userId FROM _anon_index
+       WHERE status = 'pending' AND createdAt < ?
+       ORDER BY createdAt ASC LIMIT 10
+     )`,
     [pendingCutoff],
   );
 
@@ -907,38 +1098,71 @@ export async function registerPhonePending(
   db: AuthDb,
   phone: string,
   userId: string,
-): Promise<void> {
-  const existing = await db.first<{ phone: string; status: string }>(
-    `SELECT phone, status FROM _phone_index WHERE phone = ?`,
+  reservationId: string = generateReservationId(),
+): Promise<string> {
+  const now = new Date().toISOString();
+  const pendingCutoff = new Date(Date.now() - PENDING_EXPIRY_MINUTES * 60000).toISOString();
+  const reserved = await db.first<{ phone: string }>(
+    `INSERT INTO _phone_index (phone, userId, shardId, status, reservationId, createdAt)
+     VALUES (?, ?, ?, 'pending', ?, ?)
+     ON CONFLICT (phone) DO UPDATE SET
+       userId = excluded.userId,
+       shardId = excluded.shardId,
+       status = 'pending',
+       reservationId = excluded.reservationId,
+       createdAt = excluded.createdAt
+     WHERE (_phone_index.status = 'pending' AND _phone_index.createdAt < ?)
+        OR (_phone_index.status = 'pending'
+            AND _phone_index.userId = excluded.userId
+            AND _phone_index.reservationId = excluded.reservationId)
+     RETURNING phone`,
+    [phone, userId, 0, reservationId, now, pendingCutoff],
+  );
+  if (reserved) return reservationId;
+
+  const existing = await db.first<{ status: string }>(
+    `SELECT status FROM _phone_index WHERE phone = ?`,
     [phone],
   );
-
-  if (existing) {
-    if (existing.status === 'confirmed') {
-      throw new Error('PHONE_ALREADY_REGISTERED');
-    }
-    await db.run(
-      `DELETE FROM _phone_index WHERE phone = ? AND status = 'pending'`,
-      [phone],
-    );
-  }
-
-  const now = new Date().toISOString();
-  await db.run(
-    `INSERT INTO _phone_index (phone, userId, shardId, status, createdAt) VALUES (?, ?, ?, 'pending', ?)`,
-    [phone, userId, 0, now],
-  );
+  if (existing?.status === 'confirmed') throw new Error('PHONE_ALREADY_REGISTERED');
+  throw new Error('PHONE_RESERVATION_CONFLICT');
 }
 
 export async function confirmPhone(
   db: AuthDb,
   phone: string,
   userId: string,
+  reservationId: string,
 ): Promise<void> {
-  await db.run(
-    `UPDATE _phone_index SET status = 'confirmed' WHERE phone = ? AND userId = ?`,
-    [phone, userId],
+  const confirmed = await db.first<{ phone: string }>(
+    `UPDATE _phone_index SET status = 'confirmed', reservationId = NULL
+     WHERE phone = ? AND userId = ? AND status = 'pending' AND reservationId = ?
+     RETURNING phone`,
+    [phone, userId, reservationId],
   );
+  if (confirmed) return;
+
+  const existing = await db.first<{ userId: string; status: string }>(
+    `SELECT userId, status FROM _phone_index WHERE phone = ?`,
+    [phone],
+  );
+  if (existing?.status === 'confirmed' && existing.userId === userId) return;
+  throw new Error('PHONE_RESERVATION_LOST');
+}
+
+export async function deletePhonePending(
+  db: AuthDb,
+  phone: string,
+  userId: string,
+  reservationId: string,
+): Promise<boolean> {
+  const deleted = await db.first<{ phone: string }>(
+    `DELETE FROM _phone_index
+     WHERE phone = ? AND userId = ? AND status = 'pending' AND reservationId = ?
+     RETURNING phone`,
+    [phone, userId, reservationId],
+  );
+  return deleted !== null;
 }
 
 export async function deletePhone(
@@ -948,6 +1172,17 @@ export async function deletePhone(
   await db.run(
     `DELETE FROM _phone_index WHERE phone = ?`,
     [phone],
+  );
+}
+
+export async function deletePhoneForUser(
+  db: AuthDb,
+  phone: string,
+  userId: string,
+): Promise<void> {
+  await db.run(
+    `DELETE FROM _phone_index WHERE phone = ? AND userId = ?`,
+    [phone, userId],
   );
 }
 

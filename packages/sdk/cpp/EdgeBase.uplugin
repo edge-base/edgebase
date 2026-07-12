@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
   "Version": 1,
-  "VersionName": "0.3.8",
+  "VersionName": "0.4.0",
   "FriendlyName": "EdgeBase",
   "Description": "EdgeBase client SDK plugin for Unreal Engine 5.",
   "Category": "Online",
@@ -13,7 +13,12 @@
     {
       "Name": "EdgeBase",
       "Type": "Runtime",
-      "LoadingPhase": "Default"
+      "LoadingPhase": "Default",
+      "PlatformAllowList": [
+        "Win64",
+        "Mac",
+        "Linux"
+      ]
     }
   ]
 }

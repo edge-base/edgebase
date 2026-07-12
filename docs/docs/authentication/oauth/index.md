@@ -20,7 +20,7 @@ Before using any OAuth provider, you must register an OAuth application in the p
 :::
 
 :::tip Captcha Protection
-When [captcha is enabled](/docs/authentication/captcha), OAuth initiation (`GET /auth/oauth/:provider`) is automatically protected by Cloudflare Turnstile. Client SDKs attach the captcha token as a query parameter — no code changes needed.
+When [CAPTCHA is enabled](/docs/authentication/captcha), OAuth initiation (`GET /auth/oauth/:provider`) is protected by Turnstile. Acquire a token through the SDK's UI adapter and pass it to the OAuth-start helper; the SDK encodes it in the dedicated `captcha_token` parameter. Do not assume headless or URL-only OAuth helpers can display a challenge.
 :::
 
 ## Configuration
@@ -34,6 +34,10 @@ Add the providers you want to use in your config:
 export default defineConfig({
   auth: {
     allowedOAuthProviders: ['google', 'github', 'apple', 'discord'],
+    allowedRedirectUrls: [
+      'https://app.example.com/auth/callback',
+      'https://app.example.com/settings/connections/callback',
+    ],
   },
 });
 ```
@@ -79,7 +83,10 @@ http://localhost:8787/api/auth/oauth/google/callback
 :::caution Provider callback vs app callback
 The URI you register in the provider console is the **EdgeBase server callback** such as `http://localhost:8787/api/auth/oauth/google/callback`.
 
-That is different from your browser or mobile app callback such as `http://localhost:4173/auth/callback` or `myapp://auth/callback`, which is passed from the SDK as `redirectUrl`.
+That is different from your browser or mobile app callback such as
+`http://localhost:4173/auth/callback` during local development or the claimed
+HTTPS link `https://app.example.com/auth/callback` in release, which is passed
+from the SDK as `redirectUrl`.
 :::
 
 ## Common Setup Pitfalls
@@ -88,6 +95,11 @@ That is different from your browser or mobile app callback such as `http://local
 - Providers often show multiple credential types. EdgeBase needs the OAuth client credentials for the provider flow, not unrelated API keys, bearer tokens, user tokens, or installation tokens.
 - Some providers do not return a verified email, or do not return email at all. That affects automatic account linking and also explains why local validation harnesses may show `skipped` checks for password, email, or TOTP paths.
 - In the JavaScript web SDK, use `redirectUrl` for the app callback.
+- Release mode requires a non-empty `auth.allowedRedirectUrls` whenever an app
+  redirect is used and accepts only HTTPS destinations within an explicitly
+  approved exact URL, origin-wide entry, or path-prefix `*` entry.
+- React Native production callbacks must be claimed HTTPS Universal Links or
+  Android App Links. EdgeBase does not accept custom URL schemes in release.
 
 ## Supported Providers
 
@@ -114,6 +126,13 @@ That is different from your browser or mobile app callback such as `http://local
 
 ## Usage
 
+:::caution Native callback support
+Only `@edge-base/web` and `@edge-base/react-native` currently complete a bound
+app callback. The Dart, Swift, Kotlin, Java, C#, and C++ client methods on this
+page construct the provider-start URL only; do not treat them as a production
+end-to-end OAuth completion flow.
+:::
+
 <Tabs groupId="sdk-language">
 <TabItem value="js" label="JavaScript" default>
 
@@ -131,14 +150,14 @@ client.auth.signInWithOAuth('github', {
 <TabItem value="dart" label="Dart/Flutter">
 
 ```dart
-await client.auth.signInWithOAuth('google');
+final url = client.auth.signInWithOAuth('google');
 ```
 
 </TabItem>
 <TabItem value="swift" label="Swift">
 
 ```swift
-let url = client.auth.signInWithOAuth(provider: "google")
+let url = await client.auth.signInWithOAuth(provider: "google")
 // Open url in SFSafariViewController or ASWebAuthenticationSession
 ```
 
@@ -146,7 +165,7 @@ let url = client.auth.signInWithOAuth(provider: "google")
 <TabItem value="kotlin" label="Kotlin">
 
 ```kotlin
-client.auth().signInWithOAuth("google");
+val url = client.auth.signInWithOAuth("google")
 ```
 
 </TabItem>

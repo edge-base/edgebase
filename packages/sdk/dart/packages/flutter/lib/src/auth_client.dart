@@ -329,7 +329,7 @@ class AuthClient {
     } catch (_) {}
 
     try {
-      final refreshToken = await _tokenManager.storage.getRefreshToken();
+      final refreshToken = await _tokenManager.getRefreshToken();
       if (refreshToken != null) {
         await _client.post('/auth/signout', {'refreshToken': refreshToken});
       }
@@ -435,10 +435,21 @@ class AuthClient {
     required String phone,
     required String code,
   }) async {
-    await _client.post('/auth/verify-link-phone', {
+    _tokenManager.requireDurableStorageForAccountUpgrade();
+    final response = await _client.post('/auth/verify-link-phone', {
       'phone': phone,
       'code': code,
     });
+    if (response is Map<String, dynamic> &&
+        response['accessToken'] is String &&
+        response['refreshToken'] is String) {
+      // Anonymous upgrades revoke the provisional session atomically and
+      // return its authoritative replacement token pair.
+      await _tokenManager.setTokens(
+        response['accessToken'] as String,
+        response['refreshToken'] as String,
+      );
+    }
   }
 
   /// Link anonymous account to email/password.
@@ -446,6 +457,7 @@ class AuthClient {
     required String email,
     required String password,
   }) async {
+    _tokenManager.requireDurableStorageForAccountUpgrade();
     final json = await _client.post('/auth/link/email', {
       'email': email,
       'password': password,
@@ -510,7 +522,7 @@ class AuthClient {
       // Server returns new accessToken when displayName changes (included in JWT).
       // refreshToken may not be returned — keep existing one.
       final newRefresh = json['refreshToken'] as String?
-          ?? await _tokenManager.storage.getRefreshToken()
+          ?? await _tokenManager.getRefreshToken()
           ?? '';
       await _tokenManager.setTokens(
         json['accessToken'] as String,
@@ -521,7 +533,7 @@ class AuthClient {
   }
 
   Future<AuthResult> refreshToken() async {
-    final refreshToken = await _tokenManager.storage.getRefreshToken();
+    final refreshToken = await _tokenManager.getRefreshToken();
     if (refreshToken == null || refreshToken.isEmpty) {
       throw StateError('No refresh token available.');
     }

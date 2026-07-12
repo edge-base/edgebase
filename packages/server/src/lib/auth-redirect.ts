@@ -1,6 +1,7 @@
 import { EdgeBaseError } from '@edge-base/shared';
 import { parseConfig } from './do-router.js';
 import type { Env } from '../types.js';
+import { getTrustedClientIp } from './client-ip.js';
 
 export interface ClientRedirectInput {
   redirectUrl?: string | null;
@@ -12,9 +13,24 @@ export interface ParsedClientRedirect {
   state: string | null;
 }
 
+const FORBIDDEN_REDIRECT_PROTOCOLS = new Set([
+  'javascript:', 'data:', 'file:', 'blob:', 'vbscript:', 'about:',
+  'view-source:', 'filesystem:', 'intent:', 'chrome:', 'chrome-extension:',
+  'moz-extension:', 'safari-extension:', 'edge:', 'resource:', 'content:',
+  'ws:', 'wss:', 'ftp:', 'mailto:', 'tel:', 'sms:',
+]);
+
+function isSafeRedirectUrl(url: URL): boolean {
+  return !FORBIDDEN_REDIRECT_PROTOCOLS.has(url.protocol)
+    && !url.username
+    && !url.password;
+}
+
 function normalizeUrl(value: string): string {
   try {
-    return new URL(value).toString();
+    const url = new URL(value);
+    if (!isSafeRedirectUrl(url)) throw new Error('unsafe');
+    return url.toString();
   } catch {
     throw new EdgeBaseError(400, 'Invalid redirect_url.');
   }
@@ -37,6 +53,12 @@ function isAllowedRedirect(candidate: string, pattern: string): boolean {
     } catch {
       return false;
     }
+    if (!isSafeRedirectUrl(prefixUrl) || !isSafeRedirectUrl(candidateUrl)) return false;
+    // Custom schemes have the opaque origin string "null" in the URL API, so
+    // origin comparison would make unrelated schemes/hosts equivalent. Deep
+    // links must be registered as exact URLs; wildcard matching is reserved
+    // for HTTP(S) origins whose authority can be compared safely.
+    if (!['http:', 'https:'].includes(prefixUrl.protocol)) return false;
     if (prefixUrl.origin !== candidateUrl.origin) return false;
     const prefixPath = prefixUrl.pathname + prefixUrl.search;
     const candidatePath = candidateUrl.pathname + candidateUrl.search;
@@ -51,9 +73,16 @@ function isAllowedRedirect(candidate: string, pattern: string): boolean {
   } catch {
     return false;
   }
+  if (!isSafeRedirectUrl(allowedUrl) || !isSafeRedirectUrl(candidateUrl)) return false;
 
-  // Origin-wide allowlist entry: https://app.example.com
-  if (allowedUrl.pathname === '/' && !allowedUrl.search && !allowedUrl.hash) {
+  // Origin-wide entries are safe only for HTTP(S). Custom schemes intentionally
+  // require an exact URL match because URL.origin is "null" for all of them.
+  if (
+    ['http:', 'https:'].includes(allowedUrl.protocol)
+    && allowedUrl.pathname === '/'
+    && !allowedUrl.search
+    && !allowedUrl.hash
+  ) {
     return allowedUrl.origin === candidateUrl.origin;
   }
 
@@ -87,33 +116,68 @@ export function appendRedirectParams(
 
 const redirectAllowlistWarned = new Set<string>();
 
-export function parseClientRedirectUrl(env: Env, value: string | null | undefined): string | null {
+function isLocalDevelopmentLoopbackRedirect(env: Env, request: Request | undefined, candidate: URL): boolean {
+  if (!request || env.EDGEBASE_RUNTIME_MODE !== 'local-development') return false;
+  const requestUrl = new URL(request.url);
+  const ip = getTrustedClientIp(env, request);
+  const loopbackPeer = ip === '::1' || ip === '[::1]' || ip?.startsWith('127.') === true;
+  const requestLoopback = ['localhost', '127.0.0.1', '[::1]'].includes(requestUrl.hostname);
+  const candidateLoopback = ['localhost', '127.0.0.1', '[::1]'].includes(candidate.hostname);
+  return loopbackPeer
+    && requestUrl.protocol === 'http:'
+    && requestLoopback
+    && candidate.protocol === 'http:'
+    && candidateLoopback;
+}
+
+export function parseClientRedirectUrl(
+  env: Env,
+  value: string | null | undefined,
+  request?: Request,
+): string | null {
   if (!value) return null;
   const normalized = normalizeUrl(value);
   const allowed = getAllowedRedirectUrls(env);
-  if (allowed.length > 0) {
-    if (!allowed.some((pattern) => isAllowedRedirect(normalized, pattern))) {
-      throw new EdgeBaseError(400, 'redirect_url is not allowed.');
-    }
-    return normalized;
-  }
-  // No allowlist configured. OAuth and email flows append access/refresh tokens
-  // to this redirect, so accepting an arbitrary URL is a token-exfiltration
-  // vector. For backward compatibility the redirect is still honored when no
-  // allowlist is set, but in release mode we warn (once) so operators know to
-  // lock this down with auth.allowedRedirectUrls.
   let release = false;
   try {
     release = !!parseConfig(env)?.release;
   } catch {
     release = false;
   }
-  if (release && !redirectAllowlistWarned.has('missing-redirect-allowlist')) {
+  const normalizedUrl = new URL(normalized);
+  if (
+    release
+    && normalizedUrl.protocol !== 'https:'
+    && !isLocalDevelopmentLoopbackRedirect(env, request, normalizedUrl)
+  ) {
+    throw new EdgeBaseError(
+      400,
+      'redirect_url must use HTTPS in release mode.',
+      undefined,
+      'validation-failed',
+    );
+  }
+  if (allowed.length > 0) {
+    if (!allowed.some((pattern) => isAllowedRedirect(normalized, pattern))) {
+      throw new EdgeBaseError(400, 'redirect_url is not allowed.');
+    }
+    return normalized;
+  }
+  // No allowlist configured. OAuth and email flows append bearer credentials
+  // to this redirect, so release deployments must fail closed.
+  if (release) {
+    throw new EdgeBaseError(
+      400,
+      'redirect_url requires auth.allowedRedirectUrls in release mode.',
+      undefined,
+      'validation-failed',
+    );
+  }
+  if (!redirectAllowlistWarned.has('missing-redirect-allowlist')) {
     redirectAllowlistWarned.add('missing-redirect-allowlist');
     console.warn(
-      '[Auth] A redirect_url was accepted without auth.allowedRedirectUrls configured. '
-      + 'OAuth/email flows append access & refresh tokens to the redirect target, so set '
-      + 'auth.allowedRedirectUrls to restrict where tokens can be sent.',
+      '[Auth] Development mode accepted redirect_url without auth.allowedRedirectUrls. '
+      + 'Release mode rejects this; configure an explicit allowlist before deployment.',
     );
   }
   return normalized;
@@ -130,9 +194,13 @@ export function parseClientRedirectState(value: string | null | undefined): stri
   return value;
 }
 
-export function parseClientRedirectInput(env: Env, input: ClientRedirectInput | null | undefined): ParsedClientRedirect {
+export function parseClientRedirectInput(
+  env: Env,
+  input: ClientRedirectInput | null | undefined,
+  request?: Request,
+): ParsedClientRedirect {
   return {
-    redirectUrl: parseClientRedirectUrl(env, input?.redirectUrl),
+    redirectUrl: parseClientRedirectUrl(env, input?.redirectUrl, request),
     state: parseClientRedirectState(input?.state),
   };
 }

@@ -28,11 +28,18 @@ Signed URL:   https://project.edgebase.fun/api/storage/private/report.pdf?token=
 |----------|-----|
 | Display a private image in `<img>` | **Signed download URL** |
 | Share a temporary download link with someone | **Signed download URL** (set a short expiry) |
-| Let the client upload a large file directly to R2 | **Signed upload URL** (bypasses Worker memory limits) |
+| Let the client upload without sending an auth header | **Signed upload URL** (use multipart for large files) |
 | Show a public file in `<img>` | `bucket.getUrl()` — no signing needed |
 
 :::info Access Rule Check
-Signed download URLs check the `read` rule at **URL creation time**. Signed upload URLs check the `write` rule at **URL creation time**. After that, anyone with the URL can access the file until it expires.
+Signed download URLs check the `read` rule at **URL creation time** and remain usable until expiry. Signed upload URLs check the `write` rule at **URL creation time**, but the upload grant is single-use: it can authorize one single-file upload or be bound to one multipart session.
+:::
+
+:::warning Active Content Is Downloaded
+Signing does not bypass storage content safety. HTML, XHTML, SVG, XML,
+JavaScript, CSS, PDF, binary, unknown, and malformed types are returned as
+opaque sandboxed attachments, including byte-range responses. Only explicitly
+passive media types render inline at the application origin.
 :::
 
 ---
@@ -475,9 +482,47 @@ Signed upload URLs validate `write` rules when the URL is created.
 
 Signed upload tokens can also be sent to multipart upload endpoints as `token` and `key` query parameters. This lets browser clients create, upload, complete, abort, and resume multipart uploads after the initial `write` rule check.
 
-When `maxFileSize` is set, single uploads are rejected if the file is too large. Multipart uploads require `Content-Length` on each part and validate the completed tracked part sizes before finalizing.
+Each signed upload URL contains a random single-use grant. EdgeBase atomically
+consumes it immediately after token validation and before parsing a single-file
+request body. Malformed, oversized, or hook-rejected attempts therefore burn
+the grant instead of letting one URL replay expensive body processing. For multipart, EdgeBase
+claims the grant before asking R2 to create a session, then compare-and-swap
+binds the winning claim to the returned upload ID. Thus competing requests can
+create at most one R2 session. A bound token can upload, list, complete, or
+abort only that multipart session. Different upload IDs and switching between
+multipart and single-file upload are rejected. Replaying the URL is rejected
+even if the application deletes the first uploaded object while the URL's
+original TTL is still running. Create or bind failures are terminal because a
+storage failure can be ambiguous; an aborted or failed multipart session also
+does not return the grant. Request a new signed upload URL before starting over.
+
+When `maxFileSize` is set, single uploads are rejected if the file is too large.
+Multipart uploads require a positive `Content-Length` on every part. Before writing a part
+to R2, EdgeBase atomically reserves that declared length against the grant's
+aggregate byte budget; concurrent parts cannot reserve more than
+`maxFileSize`. The first over-budget request terminally closes and aborts the
+session. Reservations are monotonic, so retries and replacements consume the
+budget again; request a new signed upload URL after an ambiguous part failure.
+Completion also verifies the tracked sizes as a final fail-closed check.
+
+The grant must be valid when EdgeBase atomically consumes a single-upload
+attempt or authorizes a multipart continuation. A request that starts while the
+grant is valid may finish after `expiresAt`; new requests at or after that
+boundary are rejected. This request-start boundary avoids a non-atomic
+post-commit delete racing with and removing a newer trusted write to the same
+key.
 
 Signed download URLs carry signed file metadata such as size, type, and ETag. This lets byte-range media playback seek directly to the requested range without a second metadata lookup on each seek, and range responses are marked `Cache-Control: private` for the remaining signed URL lifetime so the same browser can reuse cached segments.
+
+Before issuing a single or batch signed download URL, EdgeBase evaluates the
+bucket `read` rule against the corresponding stored object's metadata. Batch
+requests authorize each existing key independently; permission to list a
+bucket does not by itself grant signed access to every object.
+
+That metadata also binds the URL to the object version that existed when the
+URL was created. If a trusted writer overwrites the same key, both full and
+range requests using the old URL fail with `412 failed-precondition`; create a
+new signed URL for the new object version.
 
 ## REST API
 

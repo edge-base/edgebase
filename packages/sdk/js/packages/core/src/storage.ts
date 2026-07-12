@@ -295,7 +295,7 @@ export class StorageBucket {
   }
 
   /**
-   * Create a signed upload URL for direct R2 upload.
+   * Create a single-use signed URL for uploading through EdgeBase without auth headers.
    */
   async createSignedUploadUrl(key: string, options?: SignedUploadUrlOptions): Promise<SignedUploadUrlResult> {
     const body = { key, expiresIn: options?.expiresIn || '30m', maxFileSize: options?.maxFileSize };

@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 using System;
 using System.Collections.Generic;
@@ -193,17 +193,45 @@ public class GeneratedDbApi
     public Task<Dictionary<string, object?>> OauthRedirectAsync(string provider, CancellationToken ct = default)
         => _http.GetAsync($"/api/auth/oauth/{EncodePathParam(provider)}", ct);
 
+    /// <summary>Start OAuth redirect with optional request input.</summary>
+    public Task<Dictionary<string, object?>> OauthRedirectWithQueryAsync(string provider, Dictionary<string, string>? query, CancellationToken ct = default)
+        => _http.GetWithQueryAsync($"/api/auth/oauth/{EncodePathParam(provider)}", query, ct);
+
+    /// <summary>Atomically exchange a verified OAuth callback ticket — POST /api/auth/oauth/exchange</summary>
+    public Task<Dictionary<string, object?>> OauthExchangeAsync(object? body = null, CancellationToken ct = default)
+        => _http.PostAsync("/api/auth/oauth/exchange", body, ct);
+
     /// <summary>OAuth callback — GET /api/auth/oauth/{provider}/callback</summary>
-    public Task<Dictionary<string, object?>> OauthCallbackAsync(string provider, CancellationToken ct = default)
-        => _http.GetAsync($"/api/auth/oauth/{EncodePathParam(provider)}/callback", ct);
+    public Task<Dictionary<string, object?>> OauthCallbackAsync(string provider, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.GetWithQueryAsync($"/api/auth/oauth/{EncodePathParam(provider)}/callback", query, ct);
+
+    /// <summary>OAuth form-post callback — POST /api/auth/oauth/{provider}/callback</summary>
+    public Task<Dictionary<string, object?>> OauthCallbackPostAsync(string provider, object? body = null, CancellationToken ct = default)
+        => _http.PostAsync($"/api/auth/oauth/{EncodePathParam(provider)}/callback", body, ct);
 
     /// <summary>Start OAuth account linking — POST /api/auth/oauth/link/{provider}</summary>
     public Task<Dictionary<string, object?>> OauthLinkStartAsync(string provider, CancellationToken ct = default)
         => _http.PostAsync($"/api/auth/oauth/link/{EncodePathParam(provider)}", null, ct);
 
+    /// <summary>Start OAuth account linking with optional request input.</summary>
+    public Task<Dictionary<string, object?>> OauthLinkStartWithBodyAsync(string provider, object? body, CancellationToken ct = default)
+        => _http.PostAsync($"/api/auth/oauth/link/{EncodePathParam(provider)}", body, ct);
+
+    /// <summary>Continue OAuth account linking in the system browser — GET /api/auth/oauth/link/{provider}/continue</summary>
+    public Task<Dictionary<string, object?>> OauthLinkContinueAsync(string provider, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.GetWithQueryAsync($"/api/auth/oauth/link/{EncodePathParam(provider)}/continue", query, ct);
+
+    /// <summary>Complete OAuth account linking for the current authenticated user — POST /api/auth/oauth/complete/link</summary>
+    public Task<Dictionary<string, object?>> OauthLinkCompleteAsync(object? body = null, CancellationToken ct = default)
+        => _http.PostAsync("/api/auth/oauth/complete/link", body, ct);
+
     /// <summary>OAuth link callback — GET /api/auth/oauth/link/{provider}/callback</summary>
-    public Task<Dictionary<string, object?>> OauthLinkCallbackAsync(string provider, CancellationToken ct = default)
-        => _http.GetAsync($"/api/auth/oauth/link/{EncodePathParam(provider)}/callback", ct);
+    public Task<Dictionary<string, object?>> OauthLinkCallbackAsync(string provider, Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.GetWithQueryAsync($"/api/auth/oauth/link/{EncodePathParam(provider)}/callback", query, ct);
+
+    /// <summary>OAuth link form-post callback — POST /api/auth/oauth/link/{provider}/callback</summary>
+    public Task<Dictionary<string, object?>> OauthLinkCallbackPostAsync(string provider, object? body = null, CancellationToken ct = default)
+        => _http.PostAsync($"/api/auth/oauth/link/{EncodePathParam(provider)}/callback", body, ct);
 
     /// <summary>Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count</summary>
     public Task<Dictionary<string, object?>> DbSingleCountRecordsAsync(string @namespace, string table, Dictionary<string, string>? query = null, CancellationToken ct = default)
@@ -241,10 +269,6 @@ public class GeneratedDbApi
     public Task<Dictionary<string, object?>> DbSingleBatchByFilterAsync(string @namespace, string table, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
         => _http.PostAsyncWithQuery($"/api/db/{EncodePathParam(@namespace)}/tables/{EncodePathParam(table)}/batch-by-filter", body, query, ct);
 
-    /// <summary>Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact</summary>
-    public Task<Dictionary<string, object?>> DbSingleTransactAsync(string @namespace, object? body = null, CancellationToken ct = default)
-        => _http.PostAsync($"/api/db/{EncodePathParam(@namespace)}/transact", body, ct);
-
     /// <summary>Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count</summary>
     public Task<Dictionary<string, object?>> DbCountRecordsAsync(string @namespace, string instanceId, string table, Dictionary<string, string>? query = null, CancellationToken ct = default)
         => _http.GetWithQueryAsync($"/api/db/{EncodePathParam(@namespace)}/{EncodePathParam(instanceId)}/tables/{EncodePathParam(table)}/count", query, ct);
@@ -280,6 +304,10 @@ public class GeneratedDbApi
     /// <summary>Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter</summary>
     public Task<Dictionary<string, object?>> DbBatchByFilterAsync(string @namespace, string instanceId, string table, object? body = null, Dictionary<string, string>? query = null, CancellationToken ct = default)
         => _http.PostAsyncWithQuery($"/api/db/{EncodePathParam(@namespace)}/{EncodePathParam(instanceId)}/tables/{EncodePathParam(table)}/batch-by-filter", body, query, ct);
+
+    /// <summary>Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact</summary>
+    public Task<Dictionary<string, object?>> DbSingleTransactAsync(string @namespace, object? body = null, CancellationToken ct = default)
+        => _http.PostAsync($"/api/db/{EncodePathParam(@namespace)}/transact", body, ct);
 
     /// <summary>Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact</summary>
     public Task<Dictionary<string, object?>> DbTransactAsync(string @namespace, string instanceId, object? body = null, CancellationToken ct = default)
@@ -365,6 +393,10 @@ public class GeneratedDbApi
     public Task<Dictionary<string, object?>> GetConfigAsync(CancellationToken ct = default)
         => _http.GetAsync("/api/config", ct);
 
+    /// <summary>Render the hosted Turnstile page for native WebViews — GET /api/captcha/challenge</summary>
+    public Task<Dictionary<string, object?>> GetCaptchaChallengeAsync(Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.GetWithQueryAsync("/api/captcha/challenge", query, ct);
+
     /// <summary>Register push token — POST /api/push/register</summary>
     public Task<Dictionary<string, object?>> PushRegisterAsync(object? body = null, CancellationToken ct = default)
         => _http.PostAsync("/api/push/register", body, ct);
@@ -392,6 +424,14 @@ public class GeneratedDbApi
     /// <summary>Get room metadata — GET /api/room/metadata</summary>
     public Task<Dictionary<string, object?>> GetRoomMetadataAsync(Dictionary<string, string>? query = null, CancellationToken ct = default)
         => _http.GetWithQueryAsync("/api/room/metadata", query, ct);
+
+    /// <summary>Get room summary — GET /api/room/summary</summary>
+    public Task<Dictionary<string, object?>> GetRoomSummaryAsync(Dictionary<string, string>? query = null, CancellationToken ct = default)
+        => _http.GetWithQueryAsync("/api/room/summary", query, ct);
+
+    /// <summary>Get summaries for multiple rooms — POST /api/room/summaries</summary>
+    public Task<Dictionary<string, object?>> GetRoomSummariesAsync(object? body = null, CancellationToken ct = default)
+        => _http.PostAsync("/api/room/summaries", body, ct);
 
     /// <summary>Track custom events — POST /api/analytics/track</summary>
     public Task<Dictionary<string, object?>> TrackEventsAsync(object? body = null, CancellationToken ct = default)
@@ -509,8 +549,13 @@ public static class ApiPaths
     public const string AUTH_MFA_VERIFY = "/api/auth/mfa/verify";
     public static string OauthRedirect(string provider) => $"/api/auth/oauth/{provider}";
     public static string OauthCallback(string provider) => $"/api/auth/oauth/{provider}/callback";
+    public static string OauthCallbackPost(string provider) => $"/api/auth/oauth/{provider}/callback";
+    public const string OAUTH_LINK_COMPLETE = "/api/auth/oauth/complete/link";
+    public const string OAUTH_EXCHANGE = "/api/auth/oauth/exchange";
     public static string OauthLinkStart(string provider) => $"/api/auth/oauth/link/{provider}";
     public static string OauthLinkCallback(string provider) => $"/api/auth/oauth/link/{provider}/callback";
+    public static string OauthLinkCallbackPost(string provider) => $"/api/auth/oauth/link/{provider}/callback";
+    public static string OauthLinkContinue(string provider) => $"/api/auth/oauth/link/{provider}/continue";
     public const string AUTH_PASSKEYS_LIST = "/api/auth/passkeys";
     public static string AuthPasskeysDelete(string credentialId) => $"/api/auth/passkeys/{credentialId}";
     public const string AUTH_PASSKEYS_AUTH_OPTIONS = "/api/auth/passkeys/auth-options";
@@ -537,6 +582,7 @@ public static class ApiPaths
     public const string AUTH_VERIFY_LINK_PHONE = "/api/auth/verify-link-phone";
     public const string AUTH_VERIFY_MAGIC_LINK = "/api/auth/verify-magic-link";
     public const string AUTH_VERIFY_PHONE = "/api/auth/verify-phone";
+    public const string GET_CAPTCHA_CHALLENGE = "/api/captcha/challenge";
     public const string GET_CONFIG = "/api/config";
     public static string ExecuteD1Query(string database) => $"/api/d1/{database}";
     public static string DbListRecords(string @namespace, string instanceId, string table) => $"/api/db/{@namespace}/{instanceId}/tables/{table}";
@@ -580,6 +626,8 @@ public static class ApiPaths
     public const string CONNECT_ROOM = "/api/room";
     public const string CHECK_ROOM_CONNECTION = "/api/room/connect-check";
     public const string GET_ROOM_METADATA = "/api/room/metadata";
+    public const string GET_ROOM_SUMMARIES = "/api/room/summaries";
+    public const string GET_ROOM_SUMMARY = "/api/room/summary";
     public const string GET_SCHEMA = "/api/schema";
     public const string EXECUTE_SQL = "/api/sql";
     public static string ListFiles(string bucket) => $"/api/storage/{bucket}";

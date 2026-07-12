@@ -120,7 +120,7 @@ final admin = AdminEdgeBase(
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.3.8")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.4.0")
 ]
 ```
 
@@ -144,7 +144,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-client:v0.3.8")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.4.0")
 }
 ```
 
@@ -164,7 +164,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.3.8")
+    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.4.0")
 }
 ```
 
@@ -192,7 +192,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.3.8'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.4.0'
 }
 ```
 
@@ -212,7 +212,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.edge-base.edgebase:edgebase-admin-java:v0.3.8'
+    implementation 'com.github.edge-base.edgebase:edgebase-admin-java:v0.4.0'
 }
 ```
 
@@ -236,7 +236,7 @@ AdminEdgeBase admin = EdgeBase.admin(
 // build.sbt
 resolvers += "jitpack" at "https://jitpack.io"
 
-libraryDependencies += "com.github.edge-base.edgebase" % "edgebase-admin-scala" % "v0.3.8"
+libraryDependencies += "com.github.edge-base.edgebase" % "edgebase-admin-scala" % "v0.4.0"
 ```
 
 ```scala
@@ -250,20 +250,40 @@ val admin = AdminEdgeBase(
 
 ### JavaScript — React Native
 
-> For React Native apps, use the dedicated `@edge-base/react-native` package instead of `@edge-base/web`. It keeps the same mental model, but requires explicit async storage wiring and uses React Native lifecycle integrations.
+> For React Native apps, use the dedicated `@edge-base/react-native` package instead of `@edge-base/web`. It requires ordinary async storage for non-secret caches plus a Keychain/Keystore-backed auth adapter.
 
 ```bash
-npm install @edge-base/react-native @react-native-async-storage/async-storage
+npm install @edge-base/react-native @react-native-async-storage/async-storage react-native-keychain react-native-get-random-values
 ```
 
 ```typescript
+import 'react-native-get-random-values';
 import { createClient } from '@edge-base/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Keychain from 'react-native-keychain';
+
+const secureStorage = {
+  async getItem(key: string) {
+    const value = await Keychain.getGenericPassword({ service: key });
+    return value ? value.password : null;
+  },
+  async setItem(key: string, value: string) {
+    await Keychain.setGenericPassword('edgebase', value, { service: key });
+  },
+  async removeItem(key: string) {
+    await Keychain.resetGenericPassword({ service: key });
+  },
+};
 
 const client = createClient('https://your-project.edgebase.fun', {
   storage: AsyncStorage,
+  secureStorage,
 });
 ```
+
+`secureStorage` is required unless the app explicitly enables the
+local-development-only insecure-storage escape hatch. See the package README
+for claimed HTTPS OAuth callbacks and cold-start handling.
 
 ### Python
 
@@ -321,7 +341,7 @@ $admin = new AdminClient('https://your-project.edgebase.fun', getenv('EDGEBASE_S
 ```toml
 # Cargo.toml
 [dependencies]
-edgebase-admin = "0.3.8"
+edgebase-admin = "0.4.0"
 tokio = "1"
 serde_json = "1"
 ```
@@ -413,7 +433,7 @@ admin = EdgebaseAdmin::AdminClient.new(
 # mix.exs
 defp deps do
   [
-    {:edgebase_admin, "~> 0.3.8"}
+    {:edgebase_admin, "~> 0.4.0"}
   ]
 end
 ```
@@ -436,7 +456,8 @@ admin =
 | Feature | JS/RN | Dart | Swift | Kotlin | Java | Scala | Python | Go | PHP | Rust | C# | C++ *(alpha)* | Ruby | Elixir |
 |---------|:-----:|:----:|:-----:|:------:|:----:|:-----:|:------:|:--:|:---:|:----:|:--:|:---:|:----:|:------:|
 | **Auth (signUp/signIn)** | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — | — | ✅ | ✅ | — | — |
-| **OAuth** | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — | — | ✅ | ✅ | — | — |
+| **OAuth URL construction / start** | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — | — | ✅ | ✅ | — | — |
+| **Bound OAuth app-callback completion** | ✅ | — | — | — | — | — | — | — | — | — | — | — | — | — |
 | **Collection CRUD** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Batch Operations** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Queries & Filters** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -452,6 +473,13 @@ admin =
 | **Multi-tenancy (db namespace)** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Captcha (auto)** | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — | — | ✅ | ✅ | — | — |
 | **KV / D1 / Vectorize** | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+
+The combined `JS/RN` callback cell means `@edge-base/web` and
+`@edge-base/react-native` both expose `handleOAuthCallback()`; React Native also
+exposes `handleInitialOAuthCallback()` for a cold start. Other client SDKs may
+construct the provider URL, but do not yet provide the callback binding,
+validation, server rotation, and durable adoption required for a production
+OAuth completion flow.
 
 ---
 

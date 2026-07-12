@@ -34,7 +34,14 @@ class TokenManager {
 
     TokenManager(TokenStorage storage) {
         this.storage = storage;
-        this.currentTokens = storage.getTokens();
+        try {
+            this.currentTokens = storage.getTokens();
+        } catch (RuntimeException error) {
+            throw new TokenPersistenceException("load", error);
+        }
+        if (this.currentTokens != null) {
+            validateStoredTokenPair(this.currentTokens, "restore");
+        }
     }
 
     void setRefreshCallback(Function<String, TokenPair> callback) {
@@ -46,9 +53,14 @@ class TokenManager {
     }
 
     void setTokens(TokenPair pair) {
+        validateTokenPair(pair, "save");
         synchronized (lock) {
+            try {
+                storage.saveTokens(pair);
+            } catch (RuntimeException error) {
+                throw new TokenPersistenceException("save", error);
+            }
             this.currentTokens = pair;
-            storage.saveTokens(pair);
         }
         if (onAuthStateChange != null) {
             onAuthStateChange.accept(decodeJwtPayload(pair.getAccessToken()));
@@ -69,18 +81,33 @@ class TokenManager {
                 if (refreshCallback != null) {
                     try {
                         TokenPair newTokens = refreshCallback.apply(currentTokens.getRefreshToken());
+                        validateTokenPair(newTokens, "refresh");
+                        try {
+                            storage.saveTokens(newTokens);
+                        } catch (RuntimeException error) {
+                            throw new TokenPersistenceException("save", error);
+                        }
                         currentTokens = newTokens;
-                        storage.saveTokens(newTokens);
                         if (onAuthStateChange != null) {
                             onAuthStateChange.accept(decodeJwtPayload(newTokens.getAccessToken()));
                         }
                         return newTokens.getAccessToken();
                     } catch (Exception e) {
+                        if (e instanceof TokenPersistenceException) {
+                            throw (TokenPersistenceException) e;
+                        }
+                        if (e instanceof InvalidTokenPairException) {
+                            throw (InvalidTokenPairException) e;
+                        }
                         // 401 means token revoked/expired — clear session (matches JS SDK).
                         // Other errors (network, 5xx) keep session for retry.
                         if (e instanceof EdgeBaseError && ((EdgeBaseError) e).getStatusCode() == 401) {
+                            try {
+                                storage.clearTokens();
+                            } catch (RuntimeException storageError) {
+                                throw new TokenPersistenceException("clear", storageError);
+                            }
                             currentTokens = null;
-                            storage.clearTokens();
                             if (onAuthStateChange != null) {
                                 onAuthStateChange.accept(null);
                             }
@@ -108,10 +135,28 @@ class TokenManager {
         }
     }
 
+    void requireDurableStorageForAccountUpgrade() {
+        if (storage instanceof DurableTokenStorage) {
+            return;
+        }
+        Map<String, Object> user = currentUser();
+        if (user != null && Boolean.FALSE.equals(user.get("isAnonymous"))) {
+            return;
+        }
+        throw new IllegalStateException(
+            "Anonymous account upgrades require a DurableTokenStorage so replacement " +
+            "tokens survive response loss or process termination."
+        );
+    }
+
     void clearTokens() {
         synchronized (lock) {
+            try {
+                storage.clearTokens();
+            } catch (RuntimeException error) {
+                throw new TokenPersistenceException("clear", error);
+            }
             currentTokens = null;
-            storage.clearTokens();
         }
         if (onAuthStateChange != null) {
             onAuthStateChange.accept(null);
@@ -120,11 +165,38 @@ class TokenManager {
 
     boolean tryRestoreSession() {
         synchronized (lock) {
-            TokenPair stored = storage.getTokens();
+            TokenPair stored;
+            try {
+                stored = storage.getTokens();
+            } catch (RuntimeException error) {
+                throw new TokenPersistenceException("load", error);
+            }
             if (stored == null)
                 return false;
+            validateStoredTokenPair(stored, "restore");
             currentTokens = stored;
             return true;
+        }
+    }
+
+    private static void validateTokenPair(TokenPair pair, String operation) {
+        if (pair == null || pair.getAccessToken() == null || pair.getAccessToken().isBlank()
+                || pair.getRefreshToken() == null || pair.getRefreshToken().isBlank()) {
+            throw new InvalidTokenPairException(operation);
+        }
+    }
+
+    private void validateStoredTokenPair(TokenPair pair, String operation) {
+        if (pair == null || pair.getRefreshToken() == null
+                || pair.getRefreshToken().isBlank()) {
+            throw new InvalidTokenPairException(operation);
+        }
+        // Legacy/custom refresh-only storage may refresh before exposing a
+        // session. A store that claims durable replacement authority must
+        // always preserve the initiating access token as well.
+        if (storage instanceof DurableTokenStorage
+                && (pair.getAccessToken() == null || pair.getAccessToken().isBlank())) {
+            throw new InvalidTokenPairException(operation);
         }
     }
 

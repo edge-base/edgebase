@@ -203,4 +203,54 @@ describe('frontend routing', () => {
     expect(api.status).toBe(200);
     expect(assetsFetch).toHaveBeenCalledTimes(1);
   });
+
+  it('serves frontend and admin assets without charging the API global binding', async () => {
+    const assetsFetch = vi.fn(async (request: Request) => (
+      new Response(`asset:${new URL(request.url).pathname}`, { status: 200 })
+    ));
+    const globalBindingLimit = vi.fn().mockResolvedValue({ success: false });
+    const worker = await loadWorker();
+    const env = createEnv({
+      EDGEBASE_CONFIG: {
+        release: true,
+        frontend: {
+          directory: './web/dist',
+          spaFallback: true,
+        },
+        rateLimiting: {
+          global: { requests: 100, window: '60s' },
+        },
+      },
+      ASSETS: { fetch: assetsFetch },
+      GLOBAL_RATE_LIMITER: { limit: globalBindingLimit },
+    }) as never;
+
+    for (const path of [
+      '/',
+      '/assets/app-abc123def456.js',
+      '/manifest.webmanifest',
+      '/mark-128.png',
+      '/admin',
+    ]) {
+      const response = await worker.fetch(
+        new Request(`http://localhost:8787${path}`, {
+          headers: { accept: 'text/html', 'cf-connecting-ip': '198.51.100.20' },
+        }),
+        env,
+        createExecutionContext(),
+      );
+      expect(response.status).toBe(200);
+    }
+    expect(globalBindingLimit).not.toHaveBeenCalled();
+
+    const api = await worker.fetch(
+      new Request('http://localhost:8787/api/health', {
+        headers: { 'cf-connecting-ip': '198.51.100.20' },
+      }),
+      env,
+      createExecutionContext(),
+    );
+    expect(api.status).toBe(429);
+    expect(globalBindingLimit).toHaveBeenCalledTimes(1);
+  });
 });

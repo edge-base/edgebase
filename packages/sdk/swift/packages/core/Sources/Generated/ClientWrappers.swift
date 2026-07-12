@@ -1,6 +1,6 @@
 // Auto-generated client wrapper methods — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: wrapper-config.json + openapi.json (0.3.8)
+// Source: wrapper-config.json + openapi.json (0.4.0)
 
 import Foundation
 
@@ -207,8 +207,8 @@ public struct GeneratedStorageMethods {
     }
 
     /// Check if file exists
-    public func exists(_ bucket: String, _ key: String) async -> Bool {
-        return await core.checkFileExists(bucket, key)
+    public func exists(_ bucket: String, _ key: String) async throws -> Bool {
+        return try await core.checkFileExists(bucket, key)
     }
 
     /// Get file metadata

@@ -39,6 +39,28 @@ struct Result {
   std::string error;
 };
 
+/// Access/refresh tokens are one indivisible session credential. Platform
+/// integrations must never persist or restore only one member of the pair.
+struct AuthTokenPair {
+  std::string accessToken;
+  std::string refreshToken;
+};
+
+/// User-provided durable token storage for native C++ applications.
+///
+/// saveTokens() must atomically and durably replace the complete pair, or
+/// throw without changing the previously stored pair. Implementations should
+/// use the platform credential vault (for example Keychain or Credential
+/// Manager), not plaintext files. The SDK persists through this interface
+/// before exposing replacement tokens in memory.
+class AuthTokenStorage {
+public:
+  virtual ~AuthTokenStorage() = default;
+  virtual std::optional<AuthTokenPair> loadTokens() = 0;
+  virtual void saveTokens(const AuthTokenPair &tokens) = 0;
+  virtual void clearTokens() = 0;
+};
+
 // ── Filter / Sort
 // ─────────────────────────────────────────────────────────────
 
@@ -93,15 +115,34 @@ struct FileInfo {
 // ── HttpClient (internal)
 // ─────────────────────────────────────────────────────
 
+struct HttpRequestOptions {
+  /// Turnstile token for a Function declared with captcha: true.
+  std::optional<std::string> captchaToken;
+};
+
 class HttpClient {
 public:
+  using Transport = std::function<Result(
+      const std::string &method, const std::string &url,
+      const std::string &body,
+      const std::map<std::string, std::string> &headers)>;
+
   explicit HttpClient(std::string baseUrl, std::string serviceKey = "");
+  HttpClient(std::string baseUrl, std::string serviceKey,
+             Transport transport);
   ~HttpClient();
 
   Result get(const std::string &path,
              const std::map<std::string, std::string> &query = {}) const;
+  Result get(const std::string &path,
+             const std::map<std::string, std::string> &query,
+             const HttpRequestOptions &options) const;
   Result post(const std::string &path, const std::string &jsonBody) const;
+  Result post(const std::string &path, const std::string &jsonBody,
+              const HttpRequestOptions &options) const;
   Result put(const std::string &path, const std::string &jsonBody) const;
+  Result put(const std::string &path, const std::string &jsonBody,
+             const HttpRequestOptions &options) const;
   Result post_with_query(const std::string &path, const std::string &jsonBody,
                          const std::map<std::string, std::string> &query) const;
   Result post_bytes_with_query(const std::string &path,
@@ -109,7 +150,11 @@ public:
                                const std::string &contentType,
                                const std::map<std::string, std::string> &query) const;
   Result patch(const std::string &path, const std::string &jsonBody) const;
+  Result patch(const std::string &path, const std::string &jsonBody,
+               const HttpRequestOptions &options) const;
   Result del(const std::string &path) const;
+  Result delWithOptions(const std::string &path,
+                        const HttpRequestOptions &options) const;
   /// DELETE request with body.
   Result del(const std::string &path, const std::string &jsonBody) const;
 
@@ -122,11 +167,19 @@ public:
                          const std::string &contentType) const;
 
   void setToken(const std::string &token);
+  /// Replace both session tokens together after durable persistence succeeds.
+  void setTokens(const std::string &accessToken,
+                 const std::string &refreshToken);
   void clearToken();
   std::string getToken() const;
   void setRefreshToken(const std::string &token);
   void clearRefreshToken();
+  /// Clear the complete in-memory session pair together.
+  void clearTokens();
   std::string getRefreshToken() const;
+  /// Absolute server base URL supplied when this client was constructed.
+  /// Platform adapters use this to build same-origin hosted challenge URLs.
+  std::string getBaseUrl() const;
 
   void setContext(const std::map<std::string, std::string> &ctx);
   std::map<std::string, std::string> getContext() const;
@@ -296,9 +349,18 @@ class FunctionsClient {
 public:
   explicit FunctionsClient(std::shared_ptr<HttpClient> http);
 
+  struct FunctionCallOptions {
+    std::string method = "POST";
+    std::string jsonBody = "{}";
+    std::map<std::string, std::string> query;
+    std::optional<std::string> captchaToken;
+  };
+
   Result call(const std::string &path, const std::string &method = "POST",
               const std::string &jsonBody = "{}",
               const std::map<std::string, std::string> &query = {}) const;
+  Result call(const std::string &path,
+              const FunctionCallOptions &options) const;
   Result get(const std::string &path,
              const std::map<std::string, std::string> &query = {}) const;
   Result post(const std::string &path,
@@ -338,8 +400,20 @@ private:
 
 class AuthClient {
 public:
+  using CaptchaTokenProvider = std::function<std::string(
+      const std::shared_ptr<HttpClient> &http,
+      const std::string &action,
+      const std::string &manualToken)>;
+
   explicit AuthClient(std::shared_ptr<HttpClient> http,
                       std::shared_ptr<GeneratedDbApi> core = nullptr);
+  AuthClient(std::shared_ptr<HttpClient> http,
+             std::shared_ptr<GeneratedDbApi> core,
+             std::shared_ptr<AuthTokenStorage> tokenStorage);
+
+  /// Register the platform CAPTCHA provider used by protected auth methods.
+  /// The provider is copied under a lock and invoked outside that lock.
+  static void setCaptchaTokenProvider(CaptchaTokenProvider provider);
 
   Result signUp(const std::string &email, const std::string &password,
                 const std::string &displayName = "",
@@ -375,10 +449,14 @@ public:
   Result linkWithPhone(const std::string &phone) const;
 
   /// Verify phone link code. Completes phone linking for the current account.
+  /// Anonymous upgrades require a durable AuthTokenStorage because the server
+  /// revokes the provisional session and returns a replacement token pair.
   Result verifyLinkPhone(const std::string &phone,
                          const std::string &code) const;
 
   /// Link anonymous account to email/password.
+  /// Requires a durable AuthTokenStorage because the provisional session is
+  /// replaced on success.
   Result linkWithEmail(const std::string &email,
                        const std::string &password) const;
 
@@ -463,8 +541,11 @@ public:
 private:
   std::shared_ptr<HttpClient> http_;
   std::shared_ptr<GeneratedDbApi> core_;
+  std::shared_ptr<AuthTokenStorage> tokenStorage_;
   struct State;
   std::shared_ptr<State> state_;
+  Result adoptAuthTokens(Result result,
+                         const std::string &retryHint = "") const;
   void notifyAuthChange(const std::string &userJson) const;
 };
 
@@ -651,6 +732,8 @@ private:
 class EdgeBase {
 public:
   explicit EdgeBase(std::string url);
+  EdgeBase(std::string url,
+           std::shared_ptr<AuthTokenStorage> tokenStorage);
   ~EdgeBase();
 
   AuthClient auth() const;

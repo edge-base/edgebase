@@ -2,11 +2,21 @@
  * Tests for CLI deploy command — validateConfig, scanFunctions, generateFunctionRegistry, mergePluginTables, extractDatabases.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { validateConfig, _internals } from '../src/commands/deploy.js';
 import { resolveRateLimitBindings } from '../src/lib/rate-limit-bindings.js';
+import type {
+  CloudflareDeployManifest,
+  CloudflareResourceRecord,
+} from '../src/lib/cloudflare-deploy-manifest.js';
+import {
+  buildLegacyManagedR2BucketName,
+  buildLegacyWorkerScopedD1DatabaseName,
+  buildManagedD1DatabaseName,
+  buildManagedR2BucketName,
+} from '../src/lib/managed-resource-names.js';
 
 const {
   scanFunctions,
@@ -18,13 +28,50 @@ const {
   copyDevelopmentAuthProviderToRelease,
   isPostgresProvider,
   isHyperdriveAlreadyExistsError,
+  parseKvNamespaceListOutput,
+  parseD1DatabaseListOutput,
+  parseVectorizeIndexListOutput,
   parseHyperdriveListOutput,
+  listHyperdriveConfigs,
+  provisionR2Buckets,
+  provisionKvNamespaces,
+  provisionD1Databases,
+  provisionVectorizeIndexes,
+  provisionProviderHyperdrives,
+  provisionAuthPostgresHyperdrive,
+  createHyperdriveConfigViaApi,
+  assertRequiredBindingCoverage,
+  buildManagedWorkerResourceName,
+  scopePreviousManifestToAccount,
   resolveAdminUrlFromRuntime,
   resolveReleaseSecretVars,
   resolveExistingR2BucketRecord,
+  isValidCloudflareAccountId,
+  isValidHyperdriveConfigName,
+  classifyRemoteWorkerLookupFailure,
+  remoteWorkerExists,
+  scavengeStaleDeploySecrets,
+  registerDeploySecretCleanup,
+  registerDeploySubprocessTimeout,
+  prepareAtomicDeploySecrets,
+  extractWorkerVersionIdFromWranglerDeployOutput,
+  runProjectPostScaffoldHook,
 } = _internals;
 
 let tmpDir: string;
+
+function manifestWithResource(
+  resource: CloudflareResourceRecord,
+  workerName = 'synthetic-worker',
+): CloudflareDeployManifest {
+  return {
+    version: 2,
+    deployedAt: '2026-01-01T00:00:00.000Z',
+    accountId: '9def174e0c9c444685b8c773d076ce4b',
+    worker: { name: workerName, url: `https://${workerName}.example.test` },
+    resources: [resource],
+  };
+}
 
 beforeEach(() => {
   tmpDir = join(tmpdir(), `eb-deploy-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -32,6 +79,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -40,6 +88,39 @@ afterEach(() => {
 // ======================================================================
 
 describe('validateConfig — Edge cases', () => {
+  it('rejects inline CAPTCHA secrets in release config so they cannot enter the bundle', () => {
+    const warnings: string[] = [];
+    const errors: string[] = [];
+
+    validateConfig({
+      release: true,
+      baseUrl: 'https://api.example.test',
+      captcha: {
+        siteKey: 'synthetic-site-key',
+        secretKey: 'must-not-be-bundled',
+        hostnames: ['api.example.test'],
+      },
+    }, warnings, errors);
+
+    expect(errors).toContainEqual(expect.stringMatching(/must not embed captcha\.secretKey/i));
+  });
+
+  it('rejects CAPTCHA fail-open for a cloud deployment', () => {
+    const warnings: string[] = [];
+    const errors: string[] = [];
+
+    validateConfig({
+      release: false,
+      captcha: {
+        siteKey: 'synthetic-site-key',
+        hostnames: ['api.example.test'],
+        failMode: 'open',
+      },
+    }, warnings, errors);
+
+    expect(errors).toContainEqual(expect.stringMatching(/trusted local-development runtime/i));
+  });
+
   it('empty tables object', () => {
     const warnings: string[] = [];
     const errors: string[] = [];
@@ -94,7 +175,161 @@ describe('validateConfig — Edge cases', () => {
   });
 });
 
+describe('version-bound deploy secrets', () => {
+  it('bounds a project post-scaffold hook and reports an actionable timeout', () => {
+    const scriptsDir = join(tmpDir, 'scripts');
+    mkdirSync(scriptsDir, { recursive: true });
+    writeFileSync(join(scriptsDir, 'edgebase-post-scaffold.mjs'), '// synthetic hook\n');
+    const runner = vi.fn(() => {
+      throw Object.assign(new Error('spawnSync node ETIMEDOUT'), { code: 'ETIMEDOUT' });
+    });
+
+    expect(() => runProjectPostScaffoldHook(tmpDir, runner)).toThrow(
+      /post-scaffold hook exceeded 5 minutes.*bounded and non-interactive/i,
+    );
+    expect(runner).toHaveBeenCalledWith(
+      process.execPath,
+      [join(scriptsDir, 'edgebase-post-scaffold.mjs'), '--project-dir', tmpDir],
+      { cwd: tmpDir, stdio: 'inherit', timeout: 5 * 60_000 },
+    );
+  });
+
+  it('skips the post-scaffold runner when the project hook is absent', () => {
+    const runner = vi.fn();
+    expect(() => runProjectPostScaffoldHook(tmpDir, runner)).not.toThrow();
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('extracts only a canonical Wrangler Worker version id for finalization ownership', () => {
+    expect(extractWorkerVersionIdFromWranglerDeployOutput([
+      'Uploaded synthetic-worker',
+      'Current Version ID: 11111111-2222-4333-8444-555555555555',
+    ].join('\n'))).toBe('11111111-2222-4333-8444-555555555555');
+    expect(extractWorkerVersionIdFromWranglerDeployOutput(
+      'Worker Version ID: 11111111-2222-3333-4444-not-a-uuid',
+    )).toBeNull();
+  });
+
+  it('terminates a hung Wrangler deploy before the Turnstile in-flight grace expires', async () => {
+    vi.useFakeTimers();
+    const kill = vi.fn(() => true);
+    const onTimeout = vi.fn();
+    const dispose = registerDeploySubprocessTimeout({ kill }, onTimeout);
+
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith('SIGTERM');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(kill).toHaveBeenLastCalledWith('SIGKILL');
+
+    dispose();
+    vi.useRealTimers();
+  });
+
+  it('scavenges dead-owner files and registers signal/exit cleanup for the live file', () => {
+    const edgebaseDir = join(tmpDir, '.edgebase');
+    mkdirSync(edgebaseDir, { recursive: true });
+    const stale = join(edgebaseDir, '.deploy-secrets-99999999-aaaaaaaaaaaa.json');
+    const live = join(edgebaseDir, `.deploy-secrets-${process.pid}-bbbbbbbbbbbb.json`);
+    writeFileSync(stale, '{"secret":"synthetic"}', { mode: 0o600 });
+    writeFileSync(live, '{"secret":"synthetic"}', { mode: 0o600 });
+
+    expect(scavengeStaleDeploySecrets(edgebaseDir)).toContain(stale);
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(live)).toBe(true);
+
+    const beforeExit = process.listenerCount('exit');
+    const beforeSigint = process.listenerCount('SIGINT');
+    const beforeSigterm = process.listenerCount('SIGTERM');
+    const dispose = registerDeploySecretCleanup(live);
+    expect(process.listenerCount('exit')).toBe(beforeExit + 1);
+    expect(process.listenerCount('SIGINT')).toBe(beforeSigint + 1);
+    expect(process.listenerCount('SIGTERM')).toBe(beforeSigterm + 1);
+    dispose();
+    expect(existsSync(live)).toBe(false);
+    expect(process.listenerCount('exit')).toBe(beforeExit);
+    expect(process.listenerCount('SIGINT')).toBe(beforeSigint);
+    expect(process.listenerCount('SIGTERM')).toBe(beforeSigterm);
+  });
+
+  it('uses remote Worker authority so a fresh CI checkout preserves deployed secrets', () => {
+    const calls: string[][] = [];
+    const runner = (_command: string, args: string[]) => {
+      calls.push(args);
+      return JSON.stringify({ id: 'synthetic-deployment' });
+    };
+
+    expect(remoteWorkerExists(tmpDir, 'synthetic-worker', runner)).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(expect.arrayContaining([
+      'deployments', 'status', '--name', 'synthetic-worker', '--json',
+    ]));
+  });
+
+  it('distinguishes an absent Worker from transient/auth lookup failures', () => {
+    expect(classifyRemoteWorkerLookupFailure(
+      Object.assign(new Error('Worker "synthetic-worker" not found.'), { stderr: '[code: 10090]' }),
+    )).toBe('absent');
+    expect(classifyRemoteWorkerLookupFailure(
+      new Error('The Worker synthetic-worker has no deployments.'),
+    )).toBe('exists-without-deployment');
+    expect(classifyRemoteWorkerLookupFailure(new Error('network timeout'))).toBe('unknown');
+
+    const absentRunner = () => {
+      throw Object.assign(new Error('Worker not found'), { stderr: '[code: 10092]' });
+    };
+    const outageRunner = () => { throw new Error('network timeout'); };
+    expect(remoteWorkerExists(tmpDir, 'synthetic-worker', absentRunner)).toBe(false);
+    expect(() => remoteWorkerExists(tmpDir, 'synthetic-worker', outageRunner))
+      .toThrow(/Cannot determine whether Worker/i);
+  });
+
+  it('prepares first-deploy secrets in one mode-0600 file without persisting Turnstile', () => {
+    writeFileSync(join(tmpDir, '.env.release'), [
+      'SYNTHETIC_SECRET=from-release-env',
+      'SERVICE_KEY=must-be-ignored',
+      'EDGEBASE_RUNTIME_MODE=must-not-be-secret',
+    ].join('\n'));
+
+    const secretsPath = prepareAtomicDeploySecrets(
+      tmpDir,
+      '0123456789abcdef0123456789abcdef',
+      false,
+      {
+        storeCfCredentials: false,
+        turnstileSecret: 'synthetic-turnstile-secret',
+      },
+    );
+
+    expect(secretsPath).toBeTruthy();
+    const payload = JSON.parse(readFileSync(secretsPath!, 'utf8')) as Record<string, string>;
+    expect(payload).toMatchObject({
+      SYNTHETIC_SECRET: 'from-release-env',
+      TURNSTILE_SECRET: 'synthetic-turnstile-secret',
+    });
+    expect(payload.SERVICE_KEY).not.toBe('must-be-ignored');
+    expect(payload.SERVICE_KEY).toHaveLength(64);
+    expect(payload.JWT_USER_SECRET).toHaveLength(64);
+    expect(payload.JWT_ADMIN_SECRET).toHaveLength(64);
+    expect(payload).not.toHaveProperty('EDGEBASE_RUNTIME_MODE');
+    expect(statSync(secretsPath!).mode & 0o777).toBe(0o600);
+
+    const persisted = JSON.parse(
+      readFileSync(join(tmpDir, '.edgebase', 'secrets.json'), 'utf8'),
+    ) as Record<string, string>;
+    expect(persisted.SERVICE_KEY).toBe(payload.SERVICE_KEY);
+    expect(persisted).not.toHaveProperty('TURNSTILE_SECRET');
+  });
+
+});
+
 describe('provider classification', () => {
+  const emptyHyperdriveTable = [
+    '┌────┬────┐',
+    '│ id │ name │',
+    '└────┴────┘',
+  ].join('\n');
+
   it('treats only neon/postgres as Hyperdrive-backed providers', () => {
     expect(isPostgresProvider('neon')).toBe(true);
     expect(isPostgresProvider('postgres')).toBe(true);
@@ -126,6 +361,631 @@ describe('provider classification', () => {
       { id: '9def174e0c9c444685b8c773d076ce4b', name: 'edgebase-db-shared' },
       { id: '0ee0b621f3ab4b9dae1734f95c27ef8a', name: 'edgebase-auth' },
     ]);
+  });
+
+  it('accepts only bounded Cloudflare account ids and Hyperdrive names', () => {
+    expect(isValidCloudflareAccountId('9def174e0c9c444685b8c773d076ce4b')).toBe(true);
+    expect(isValidCloudflareAccountId('../accounts/attacker')).toBe(false);
+    expect(isValidCloudflareAccountId('9def174e0c9c444685b8c773d076ce4b/extra')).toBe(false);
+    expect(isValidHyperdriveConfigName('edgebase-db-shared_1')).toBe(true);
+    expect(isValidHyperdriveConfigName('../edgebase-db')).toBe(false);
+    expect(isValidHyperdriveConfigName(`edgebase-${'x'.repeat(64)}`)).toBe(false);
+  });
+
+  it('fails closed when Hyperdrive listing cannot be verified', () => {
+    expect(parseHyperdriveListOutput([
+      '⛅️ wrangler 4.103.0',
+      '-------------------',
+      '📋 Listing Hyperdrive configs',
+    ].join('\n'))).toEqual([]);
+    expect(() => listHyperdriveConfigs(tmpDir, () => {
+      throw new Error('synthetic network timeout');
+    })).toThrow(/could not be verified.*network timeout/i);
+    expect(() => parseHyperdriveListOutput('')).toThrow(/empty/i);
+    expect(() => parseHyperdriveListOutput('{}')).toThrow(/list JSON shape/i);
+  });
+
+  it('requires provider and auth PostgreSQL connection strings before deploy', async () => {
+    const runner = () => emptyHyperdriveTable;
+    await expect(provisionProviderHyperdrives(
+      { primary: { provider: 'postgres' } },
+      tmpDir,
+      '9def174e0c9c444685b8c773d076ce4b',
+      { runner },
+    )).rejects.toThrow(/DB_POSTGRES_PRIMARY.*missing connection string/i);
+    await expect(provisionAuthPostgresHyperdrive(
+      { provider: 'neon' },
+      tmpDir,
+      '9def174e0c9c444685b8c773d076ce4b',
+      { runner },
+    )).rejects.toThrow(/AUTH_POSTGRES.*missing connection string/i);
+  });
+
+  it('aborts when Hyperdrive create fails or an already-exists result cannot be resolved', async () => {
+    writeFileSync(join(tmpDir, '.env.release'), [
+      'DB_POSTGRES_PRIMARY_URL=postgres://user:password@db.example.test/app',
+      'AUTH_POSTGRES_URL=postgres://user:password@db.example.test/auth',
+    ].join('\n'));
+    const runner = () => emptyHyperdriveTable;
+
+    await expect(provisionProviderHyperdrives(
+      { primary: { provider: 'postgres' } },
+      tmpDir,
+      '9def174e0c9c444685b8c773d076ce4b',
+      {
+        runner,
+        createConfig: async () => ({ status: 'error', message: 'synthetic API outage' }),
+      },
+    )).rejects.toThrow(/DB_POSTGRES_PRIMARY.*API outage/i);
+
+    await expect(provisionAuthPostgresHyperdrive(
+      { provider: 'postgres' },
+      tmpDir,
+      '9def174e0c9c444685b8c773d076ce4b',
+      {
+        runner,
+        createConfig: async () => ({ status: 'exists', message: 'already exists [code: 2017]' }),
+      },
+    )).rejects.toThrow(/AUTH_POSTGRES.*already exists/i);
+  });
+
+  it('bounds the secret-bearing Hyperdrive request and forbids redirects', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      success: true,
+      result: { id: '9def174e0c9c444685b8c773d076ce4b' },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    await expect(createHyperdriveConfigViaApi(
+      'edgebase-db-primary',
+      'postgres://user:synthetic-password@db.example.test/app',
+      '9def174e0c9c444685b8c773d076ce4b',
+      { fetchImpl, apiToken: 'synthetic-api-token' },
+    )).resolves.toEqual({
+      status: 'created',
+      id: '9def174e0c9c444685b8c773d076ce4b',
+    });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(String(url)).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/9def174e0c9c444685b8c773d076ce4b/hyperdrive/configs',
+    );
+    expect(String(url)).not.toContain('synthetic-password');
+    expect(init?.redirect).toBe('error');
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('rejects oversized Hyperdrive API responses', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ padding: 'x'.repeat(128) }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+
+    await expect(createHyperdriveConfigViaApi(
+      'edgebase-db-primary',
+      'postgres://user:synthetic-password@db.example.test/app',
+      '9def174e0c9c444685b8c773d076ce4b',
+      {
+        fetchImpl,
+        apiToken: 'synthetic-api-token',
+        maxResponseBytes: 32,
+      },
+    )).resolves.toMatchObject({
+      status: 'error',
+      message: expect.stringMatching(/exceeded 32 bytes/i),
+    });
+  });
+
+  it('aborts a hung Hyperdrive API request at the configured deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn<typeof fetch>((_input, init) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(init.signal?.reason ?? new Error('aborted'));
+        }, { once: true });
+      }));
+      const result = createHyperdriveConfigViaApi(
+        'edgebase-db-primary',
+        'postgres://user:synthetic-password@db.example.test/app',
+        '9def174e0c9c444685b8c773d076ce4b',
+        { fetchImpl, apiToken: 'synthetic-api-token', timeoutMs: 25 },
+      );
+
+      await vi.advanceTimersByTimeAsync(25);
+      await expect(result).resolves.toMatchObject({
+        status: 'error',
+        message: expect.stringMatching(/timed out after 25ms/i),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('Cloudflare resource provisioning fail-closed', () => {
+  it('builds stable, bounded, character-safe names that isolate Workers', () => {
+    const longWorker = `worker-${'a'.repeat(100)}`;
+    const longResource = `resource_${'b'.repeat(100)}`;
+    const first = buildManagedWorkerResourceName(longWorker, 'hyperdrive', longResource);
+    const repeated = buildManagedWorkerResourceName(longWorker, 'hyperdrive', longResource);
+    const otherWorker = buildManagedWorkerResourceName(
+      `${longWorker}-other`,
+      'hyperdrive',
+      longResource,
+    );
+
+    expect(first).toBe(repeated);
+    expect(first).not.toBe(otherWorker);
+    expect(first.length).toBeLessThanOrEqual(63);
+    expect(first).toMatch(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/);
+    expect(buildManagedWorkerResourceName('worker', 'kv', 'cache', 18)).toHaveLength(18);
+    expect(() => buildManagedWorkerResourceName('worker', 'kv', 'cache', 17))
+      .toThrow(/maximum length of at least 18/);
+
+    const longPrefix = `worker-${'x'.repeat(80)}`;
+    const d1First = buildManagedD1DatabaseName(`${longPrefix}-one`, 'auth');
+    const d1Second = buildManagedD1DatabaseName(`${longPrefix}-two`, 'auth');
+    const r2First = buildManagedR2BucketName(`${longPrefix}-one`);
+    const r2Second = buildManagedR2BucketName(`${longPrefix}-two`);
+    expect(d1First).not.toBe(d1Second);
+    expect(r2First).not.toBe(r2Second);
+    for (const name of [d1First, d1Second, r2First, r2Second]) {
+      expect(name).toMatch(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/);
+      expect(name.length).toBeLessThanOrEqual(63);
+    }
+  });
+
+  it('does not let a deploy manifest from another Cloudflare account prove legacy ownership', () => {
+    const manifest = manifestWithResource({
+      type: 'kv_namespace',
+      name: 'cache',
+      binding: 'CACHE_KV',
+      id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
+    expect(scopePreviousManifestToAccount(
+      manifest,
+      '9def174e0c9c444685b8c773d076ce4b',
+    )).toBe(manifest);
+    expect(scopePreviousManifestToAccount(
+      manifest,
+      'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+    )).toBeNull();
+  });
+
+  it('isolates new KV namespaces and reuses a legacy namespace only with manifest proof', () => {
+    writeFileSync(join(tmpDir, 'wrangler.toml'), 'name = "worker-alpha"\n');
+    const legacyId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const createdId = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const listOutput = JSON.stringify([{ title: 'CACHE_KV', id: legacyId }]);
+    const freshCalls: string[][] = [];
+    const freshRunner = (args: string[]) => {
+      freshCalls.push(args);
+      return args.includes('list')
+        ? listOutput
+        : `kv_namespaces = [{ id = "${createdId}" }]`;
+    };
+
+    expect(provisionKvNamespaces(
+      { cache: { binding: 'CACHE_KV' } },
+      tmpDir,
+      {},
+      freshRunner,
+    )).toMatchObject([{ id: createdId, source: 'created' }]);
+    const scopedName = buildManagedWorkerResourceName('worker-alpha', 'kv', 'CACHE_KV');
+    expect(freshCalls[1]).toEqual([
+      'wrangler', 'kv', 'namespace', 'create', scopedName,
+    ]);
+
+    const legacyRunner = vi.fn(() => listOutput);
+    const previousManifest = manifestWithResource({
+      type: 'kv_namespace',
+      name: 'cache',
+      binding: 'CACHE_KV',
+      id: legacyId,
+      managed: true,
+      source: 'created',
+    }, 'worker-alpha');
+    expect(provisionKvNamespaces(
+      { cache: { binding: 'CACHE_KV' } },
+      tmpDir,
+      { previousManifest },
+      legacyRunner,
+    )).toMatchObject([{ id: legacyId, managed: true, source: 'created' }]);
+    expect(legacyRunner).toHaveBeenCalledTimes(1);
+
+    const manualManifest = manifestWithResource({
+      type: 'kv_namespace',
+      name: 'cache',
+      binding: 'CACHE_KV',
+      id: legacyId,
+      managed: false,
+      source: 'manual',
+    }, 'worker-alpha');
+    expect(provisionKvNamespaces(
+      { cache: { binding: 'CACHE_KV' } },
+      tmpDir,
+      { previousManifest: manualManifest },
+      () => listOutput,
+    )).toMatchObject([{ id: legacyId, managed: false, source: 'existing' }]);
+  });
+
+  it('isolates new Vectorize indexes and gates legacy reuse on the manifest', () => {
+    writeFileSync(join(tmpDir, 'wrangler.toml'), 'name = "worker-alpha"\n');
+    const listOutput = JSON.stringify([{ name: 'edgebase-search' }]);
+    const freshCalls: string[][] = [];
+    const freshRunner = (args: string[]) => {
+      freshCalls.push(args);
+      return args.includes('list') ? listOutput : '';
+    };
+
+    const fresh = provisionVectorizeIndexes(
+      { search: { binding: 'SEARCH_INDEX' } },
+      tmpDir,
+      {},
+      freshRunner,
+    );
+    const scopedName = buildManagedWorkerResourceName('worker-alpha', 'vectorize', 'search');
+    expect(fresh).toMatchObject([{ id: scopedName, source: 'created' }]);
+    expect(freshCalls[1]).toContain(scopedName);
+
+    const legacyRunner = vi.fn(() => listOutput);
+    const previousManifest = manifestWithResource({
+      type: 'vectorize',
+      name: 'search',
+      binding: 'SEARCH_INDEX',
+      id: 'edgebase-search',
+      managed: true,
+      source: 'created',
+    }, 'worker-alpha');
+    expect(provisionVectorizeIndexes(
+      { search: { binding: 'SEARCH_INDEX' } },
+      tmpDir,
+      { previousManifest },
+      legacyRunner,
+    )).toMatchObject([{ id: 'edgebase-search', managed: true, source: 'created' }]);
+    expect(legacyRunner).toHaveBeenCalledTimes(1);
+  });
+
+  it('isolates new Hyperdrive configs and gates legacy reuse on the manifest', async () => {
+    writeFileSync(join(tmpDir, 'wrangler.toml'), 'name = "worker-alpha"\n');
+    writeFileSync(
+      join(tmpDir, '.env.release'),
+      'DB_POSTGRES_PRIMARY_URL=postgres://user:password@db.example.test/app\n',
+    );
+    const legacyId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const createdId = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const listOutput = [
+      '┌────┬────┐',
+      '│ id │ name │',
+      `│ ${legacyId} │ edgebase-db-primary │`,
+      '└────┴────┘',
+    ].join('\n');
+    const createFresh = vi.fn(async () => ({ status: 'created' as const, id: createdId }));
+
+    await expect(provisionProviderHyperdrives(
+      { primary: { provider: 'postgres' } },
+      tmpDir,
+      '9def174e0c9c444685b8c773d076ce4b',
+      { runner: () => listOutput, createConfig: createFresh },
+    )).resolves.toMatchObject([{ id: createdId, source: 'created' }]);
+    expect(createFresh).toHaveBeenCalledWith(
+      buildManagedWorkerResourceName('worker-alpha', 'hyperdrive', 'db-primary'),
+      'postgres://user:password@db.example.test/app',
+      '9def174e0c9c444685b8c773d076ce4b',
+    );
+
+    const previousManifest = manifestWithResource({
+      type: 'hyperdrive',
+      name: 'primary',
+      binding: 'DB_POSTGRES_PRIMARY',
+      id: legacyId,
+      managed: true,
+      source: 'created',
+    }, 'worker-alpha');
+    const createLegacy = vi.fn(async () => ({ status: 'error' as const, message: 'must not run' }));
+    await expect(provisionProviderHyperdrives(
+      { primary: { provider: 'postgres' } },
+      tmpDir,
+      '9def174e0c9c444685b8c773d076ce4b',
+      {
+        runner: () => listOutput,
+        createConfig: createLegacy,
+        previousManifest,
+      },
+    )).resolves.toMatchObject([{ id: legacyId, managed: true, source: 'created' }]);
+    expect(createLegacy).not.toHaveBeenCalled();
+  });
+
+  it('applies the same worker isolation and manifest gate to auth Hyperdrive', async () => {
+    writeFileSync(join(tmpDir, 'wrangler.toml'), 'name = "worker-alpha"\n');
+    writeFileSync(
+      join(tmpDir, '.env.release'),
+      'AUTH_POSTGRES_URL=postgres://user:password@db.example.test/auth\n',
+    );
+    const legacyId = 'cccccccccccccccccccccccccccccccc';
+    const createdId = 'dddddddddddddddddddddddddddddddd';
+    const listOutput = [
+      '┌────┬────┐',
+      '│ id │ name │',
+      `│ ${legacyId} │ edgebase-auth │`,
+      '└────┴────┘',
+    ].join('\n');
+    const createFresh = vi.fn(async () => ({ status: 'created' as const, id: createdId }));
+
+    await expect(provisionAuthPostgresHyperdrive(
+      { provider: 'postgres' },
+      tmpDir,
+      '9def174e0c9c444685b8c773d076ce4b',
+      { runner: () => listOutput, createConfig: createFresh },
+    )).resolves.toMatchObject([{ id: createdId, source: 'created' }]);
+    expect(createFresh).toHaveBeenCalledWith(
+      buildManagedWorkerResourceName('worker-alpha', 'hyperdrive', 'auth'),
+      'postgres://user:password@db.example.test/auth',
+      '9def174e0c9c444685b8c773d076ce4b',
+    );
+
+    const previousManifest = manifestWithResource({
+      type: 'hyperdrive',
+      name: 'auth',
+      binding: 'AUTH_POSTGRES',
+      id: legacyId,
+      managed: true,
+      source: 'created',
+    }, 'worker-alpha');
+    const createLegacy = vi.fn(async () => ({ status: 'error' as const, message: 'must not run' }));
+    await expect(provisionAuthPostgresHyperdrive(
+      { provider: 'postgres' },
+      tmpDir,
+      '9def174e0c9c444685b8c773d076ce4b',
+      {
+        runner: () => listOutput,
+        createConfig: createLegacy,
+        previousManifest,
+      },
+    )).resolves.toMatchObject([{ id: legacyId, managed: true, source: 'created' }]);
+    expect(createLegacy).not.toHaveBeenCalled();
+  });
+
+  it('creates hashed D1 names and reuses a legacy truncation only with manifest proof', () => {
+    writeFileSync(join(tmpDir, 'wrangler.toml'), 'name = "worker-alpha"\n');
+    const legacyId = '11111111-2222-4333-8444-555555555555';
+    const createdId = '66666666-7777-4888-8999-aaaaaaaaaaaa';
+    const legacyName = buildLegacyWorkerScopedD1DatabaseName('worker-alpha', 'app');
+    const listOutput = JSON.stringify([{ name: legacyName, uuid: legacyId }]);
+    const freshCalls: string[][] = [];
+    const freshRunner = (args: string[]) => {
+      freshCalls.push(args);
+      return args.includes('list')
+        ? listOutput
+        : `database_id = "${createdId}"`;
+    };
+    const scopedName = buildManagedD1DatabaseName('worker-alpha', 'app');
+
+    expect(provisionD1Databases(
+      { app: { binding: 'APP_DB' } },
+      tmpDir,
+      undefined,
+      freshRunner,
+    )).toMatchObject([{
+      id: createdId,
+      resourceName: scopedName,
+      source: 'created',
+    }]);
+    expect(freshCalls[1]).toEqual(['wrangler', 'd1', 'create', scopedName]);
+
+    const previousManifest = manifestWithResource({
+      type: 'd1_database',
+      name: 'app',
+      binding: 'APP_DB',
+      id: legacyId,
+      managed: true,
+      source: 'created',
+    }, 'worker-alpha');
+    const legacyRunner = vi.fn(() => listOutput);
+    const legacyBindings = provisionD1Databases(
+      { app: { binding: 'APP_DB' } },
+      tmpDir,
+      { previousManifest },
+      legacyRunner,
+    );
+    expect(legacyBindings).toMatchObject([{
+      id: legacyId,
+      resourceName: legacyName,
+      managed: true,
+      source: 'created',
+    }]);
+    expect(legacyRunner).toHaveBeenCalledTimes(1);
+
+    const generatedWrangler = generateTempWranglerToml(join(tmpDir, 'wrangler.toml'), {
+      bindings: legacyBindings,
+    });
+    expect(generatedWrangler).not.toBeNull();
+    expect(readFileSync(generatedWrangler!, 'utf-8')).toContain(
+      `database_name = "${legacyName}"`,
+    );
+    rmSync(generatedWrangler!);
+  });
+
+  it('requires manifest proof before a managed legacy R2 bucket can be reused', () => {
+    const workerName = 'worker-alpha';
+    const legacyName = buildLegacyManagedR2BucketName(workerName);
+    writeFileSync(join(tmpDir, 'wrangler.toml'), [
+      `name = "${workerName}"`,
+      '[[r2_buckets]]',
+      'binding = "STORAGE"',
+      `bucket_name = "${legacyName}"`,
+    ].join('\n'));
+
+    const untrustedRunner = vi.fn(() => {
+      throw new Error('bucket already exists');
+    });
+    expect(() => provisionR2Buckets(tmpDir, null, untrustedRunner))
+      .toThrow(/Legacy R2 bucket.*without a current-account deploy manifest/i);
+    expect(untrustedRunner).not.toHaveBeenCalled();
+
+    const previousManifest = manifestWithResource({
+      type: 'r2_bucket',
+      name: legacyName,
+      binding: 'STORAGE',
+      id: legacyName,
+      managed: true,
+      source: 'created',
+    }, workerName);
+    const trustedRunner = vi.fn(() => {
+      throw new Error('bucket already exists');
+    });
+    expect(provisionR2Buckets(tmpDir, previousManifest, trustedRunner)).toMatchObject([{
+      name: legacyName,
+      binding: 'STORAGE',
+      managed: true,
+      source: 'created',
+    }]);
+    expect(trustedRunner).toHaveBeenCalledTimes(1);
+
+    const scopedName = buildManagedR2BucketName(workerName);
+    writeFileSync(join(tmpDir, 'wrangler.toml'), [
+      `name = "${workerName}"`,
+      '[[r2_buckets]]',
+      'binding = "STORAGE"',
+      `bucket_name = "${scopedName}"`,
+    ].join('\n'));
+    expect(provisionR2Buckets(tmpDir, null, () => {
+      throw new Error('bucket already exists');
+    })).toMatchObject([{
+      name: scopedName,
+      binding: 'STORAGE',
+      managed: true,
+      source: 'existing',
+    }]);
+  });
+
+  it('rejects malformed requested bindings before any remote mutation', () => {
+    const runner = vi.fn(() => '[]');
+    expect(() => provisionKvNamespaces(
+      { broken: {} as { binding: string } },
+      tmpDir,
+      {},
+      runner,
+    )).toThrow(/must declare a non-empty binding/i);
+    expect(() => provisionVectorizeIndexes(
+      { broken: { binding: '' } },
+      tmpDir,
+      {},
+      runner,
+    )).toThrow(/must resolve to a non-empty binding/i);
+    expect(runner).toHaveBeenCalledTimes(1);
+  });
+
+  it('validates every Wrangler list as an array with resource-specific fields', () => {
+    expect(parseKvNamespaceListOutput(JSON.stringify([
+      { title: 'synthetic-cache', id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+    ]))).toHaveLength(1);
+    expect(parseD1DatabaseListOutput(JSON.stringify([
+      { name: 'synthetic-db', uuid: '11111111-2222-4333-8444-555555555555' },
+    ]))).toHaveLength(1);
+    expect(parseVectorizeIndexListOutput('[{"name":"edgebase-search"}]')).toHaveLength(1);
+
+    expect(() => parseKvNamespaceListOutput('0')).toThrow(/KV namespace list shape/i);
+    expect(() => parseD1DatabaseListOutput('{}')).toThrow(/D1 database list shape/i);
+    expect(() => parseVectorizeIndexListOutput('[{"name":0}]'))
+      .toThrow(/Vectorize index list shape/i);
+  });
+
+  it('does not create after KV, D1, or Vectorize list failure or malformed output', () => {
+    const failedListRunner = vi.fn(() => {
+      throw new Error('synthetic authentication failure');
+    });
+    expect(() => provisionKvNamespaces(
+      { cache: { binding: 'CACHE_KV' } },
+      tmpDir,
+      {},
+      failedListRunner,
+    ))
+      .toThrow(/existing-namespace list.*authentication failure/i);
+    expect(failedListRunner).toHaveBeenCalledTimes(1);
+
+    const malformedD1Runner = vi.fn(() => '{}');
+    expect(() => provisionD1Databases(
+      { app: { binding: 'APP_DB' } },
+      tmpDir,
+      undefined,
+      malformedD1Runner,
+    )).toThrow(/existing-database list.*D1 database list shape/i);
+    expect(malformedD1Runner).toHaveBeenCalledTimes(1);
+
+    const malformedVectorRunner = vi.fn(() => '0');
+    expect(() => provisionVectorizeIndexes(
+      { search: { binding: 'SEARCH_INDEX' } },
+      tmpDir,
+      {},
+      malformedVectorRunner,
+    )).toThrow(/existing-index list.*Vectorize index list shape/i);
+    expect(malformedVectorRunner).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts on R2, KV, D1, and Vectorize create failures', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    writeFileSync(join(tmpDir, 'wrangler.toml'), [
+      'name = "synthetic-worker"',
+      '[[r2_buckets]]',
+      'binding = "STORAGE"',
+      'bucket_name = "synthetic-storage"',
+    ].join('\n'));
+    expect(() => provisionR2Buckets(tmpDir, null, () => {
+      throw new Error('synthetic R2 quota failure');
+    })).toThrow(/Required R2 binding 'STORAGE'.*quota failure/i);
+
+    const createFailure = (args: string[]) => {
+      if (args.includes('list')) return '[]';
+      throw new Error('synthetic create failure');
+    };
+    expect(() => provisionKvNamespaces(
+      { cache: { binding: 'CACHE_KV' } },
+      tmpDir,
+      {},
+      createFailure,
+    )).toThrow(/Required KV binding 'CACHE_KV'.*create failure/i);
+    expect(() => provisionD1Databases(
+      { app: { binding: 'APP_DB' } },
+      tmpDir,
+      undefined,
+      createFailure,
+    )).toThrow(/Required D1 binding 'APP_DB'.*create failure/i);
+    expect(() => provisionVectorizeIndexes(
+      { search: { binding: 'SEARCH_INDEX' } },
+      tmpDir,
+      {},
+      createFailure,
+    )).toThrow(/Required Vectorize binding 'SEARCH_INDEX'.*create failure/i);
+  });
+
+  it('aborts when Wrangler reports KV or D1 create success without a valid id', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const missingIdRunner = (args: string[]) => args.includes('list')
+      ? '[]'
+      : 'Resource created, but no binding metadata was returned.';
+    expect(() => provisionKvNamespaces(
+      { cache: { binding: 'CACHE_KV' } },
+      tmpDir,
+      {},
+      missingIdRunner,
+    )).toThrow(/valid KV namespace id/i);
+    expect(() => provisionD1Databases(
+      { app: { binding: 'APP_DB' } },
+      tmpDir,
+      undefined,
+      missingIdRunner,
+    )).toThrow(/valid D1 database id/i);
+  });
+
+  it('guards against any future provisioning path returning partial binding coverage', () => {
+    expect(() => assertRequiredBindingCoverage(
+      'synthetic',
+      ['FIRST_BINDING', 'SECOND_BINDING'],
+      [{ binding: 'FIRST_BINDING' }],
+    )).toThrow(/SECOND_BINDING.*Deployment aborted/i);
   });
 });
 
@@ -213,6 +1073,7 @@ describe('resolveReleaseSecretVars', () => {
     writeFileSync(envPath, [
       'MOCK_SERVER_URL=https://old-tunnel.example.com',
       'EDGEBASE_EMAIL_API_URL=https://old-tunnel.example.com/email',
+      'EDGEBASE_RUNTIME_MODE=self-hosted',
       'UNCHANGED=value-from-file',
     ].join('\n'));
 
@@ -973,6 +1834,36 @@ const {
 } = _internals;
 
 describe('generateTempWranglerToml', () => {
+  it('owns the runtime mode variable without clobbering other root vars', () => {
+    const wranglerPath = join(tmpDir, 'wrangler.toml');
+    writeFileSync(
+      wranglerPath,
+      [
+        'name = "my-worker"',
+        '',
+        '[vars]',
+        'EXISTING = "kept"',
+        'EDGEBASE_RUNTIME_MODE = "self-hosted"',
+        '',
+        '[assets]',
+        'directory = "./public"',
+      ].join('\n'),
+    );
+
+    const result = generateTempWranglerToml(wranglerPath, {
+      bindings: [],
+      runtimeMode: 'cloudflare',
+    });
+
+    expect(result).not.toBeNull();
+    const content = readFileSync(result!, 'utf-8');
+    expect(content).toContain('EXISTING = "kept"');
+    expect(content).toContain('EDGEBASE_RUNTIME_MODE = "cloudflare"');
+    expect(content).not.toContain('EDGEBASE_RUNTIME_MODE = "self-hosted"');
+    expect(content.match(/EDGEBASE_RUNTIME_MODE/g)).toHaveLength(1);
+    rmSync(result!);
+  });
+
   it('injects EdgeBase assets when no assets block is present', () => {
     const wranglerPath = join(tmpDir, 'wrangler.toml');
     writeFileSync(wranglerPath, 'name = "my-worker"\n');
@@ -1091,7 +1982,9 @@ describe('generateTempWranglerToml', () => {
     const content = readFileSync(result!, 'utf-8');
     expect(content).toContain('[[d1_databases]]');
     expect(content).toContain('binding = "ANALYTICS_DB"');
-    expect(content).toContain('database_name = "my-worker-analytics"');
+    expect(content).toContain(
+      `database_name = "${buildManagedD1DatabaseName('my-worker', 'analytics')}"`,
+    );
     expect(content).toContain('database_id = "db-uuid-123"');
 
     rmSync(result!);
@@ -1274,8 +2167,12 @@ describe('generateTempWranglerToml', () => {
     const content = readFileSync(result!, 'utf-8');
     const d1Count = (content.match(/\[\[d1_databases\]\]/g) || []).length;
     expect(d1Count).toBe(2);
-    expect(content).toContain('database_name = "my-worker-analytics"');
-    expect(content).toContain('database_name = "my-worker-logs"');
+    expect(content).toContain(
+      `database_name = "${buildManagedD1DatabaseName('my-worker', 'analytics')}"`,
+    );
+    expect(content).toContain(
+      `database_name = "${buildManagedD1DatabaseName('my-worker', 'logs')}"`,
+    );
 
     rmSync(result!);
   });

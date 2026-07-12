@@ -8,11 +8,15 @@ sidebar_position: 23
 This feature is in **beta**. Core behavior is stable and ready to try, but some APIs or configuration may still evolve before general availability.
 :::
 
-EdgeBase Authentication costs **$0** regardless of user count. There is no per-MAU pricing.
+EdgeBase charges **no per-MAU license fee**. Your Cloudflare or self-hosted
+infrastructure usage still applies.
 
 ## Why $0?
 
-Authentication uses JWT verification — pure cryptography with no network call and no Durable Object hit per request. Whether you have 100 or 10 million users, the per-request auth cost is the same: effectively zero.
+Ordinary authenticated data requests use local JWT verification — pure
+cryptography with no database or Durable Object hop. Session mutations use D1,
+and OAuth start/callback uses a short-lived key-sharded Durable Object for
+atomic state consumption.
 
 | Operation | How it works | Cost |
 |-----------|-------------|------|
@@ -20,16 +24,17 @@ Authentication uses JWT verification — pure cryptography with no network call 
 | Token verification | Local JWT signature check | $0 (no I/O) |
 | Token refresh | D1 (AUTH_DB) read/write | Covered by D1 limits (Free or Paid) |
 | Session management | D1 (AUTH_DB) operations | Covered by D1 limits (Free or Paid) |
+| OAuth start / callback | D1 plus key-sharded AUTH Durable Object | Covered by the selected Workers/Durable Objects plan |
 
 ## Comparison
 
 | Scale | Firebase | Supabase | EdgeBase |
 |-------|---------|----------|----------|
-| 1K MAU | ~$0 (free tier) | $25 (Pro base) | **$0** |
-| 10K MAU | ~$70 | $25 | **$0** |
-| 100K MAU | ~$550 | $25 | **$0** |
-| 1M MAU | ~$4,700 | ~$2,950 | **$0** |
-| 10M MAU | ~$46,000 | ~$32,000 | **$0** |
+| 1K MAU | ~$0 (free tier) | $25 (Pro base) | Usage-based infrastructure; no MAU fee |
+| 10K MAU | ~$70 | $25 | Usage-based infrastructure; no MAU fee |
+| 100K MAU | ~$550 | $25 | Usage-based infrastructure; no MAU fee |
+| 1M MAU | ~$4,700 | ~$2,950 | Usage-based infrastructure; no MAU fee |
+| 10M MAU | ~$46,000 | ~$32,000 | Usage-based infrastructure; no MAU fee |
 
 *Firebase charges per-MAU after 50K free tier. Supabase charges $0.00325/MAU after 100K included.*
 
@@ -50,7 +55,9 @@ Transactional emails (verification, password reset) use an external email provid
 
 ## Self-Hosting
 
-On Docker, authentication has no external cost. D1 is emulated as local SQLite. All auth operations run against local D1.
+On Docker, D1 and Durable Object storage are local runtime resources. There is
+no managed-service bill, but compute, storage, and operations are still your
+infrastructure cost.
 
 :::info Pricing source
 Prices reflect each provider's published rates as of February 2026. Verify against official pricing pages before making decisions.

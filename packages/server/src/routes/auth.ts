@@ -19,7 +19,6 @@ import {
   buildConstraintCtx,
   resolveRootServiceKey,
   resolveServiceKeyCandidate,
-  timingSafeEqual,
 } from '../lib/service-key.js';
 import { counter, getLimit } from '../middleware/rate-limit.js';
 import { parseConfig } from '../lib/do-router.js';
@@ -27,7 +26,7 @@ import {
   buildEmailActionUrl,
   parseClientRedirectInput,
 } from '../lib/auth-redirect.js';
-import { hashOtpSecret, verifyOtpSecret } from '../lib/auth-token.js';
+import { hashAuthSecret, hashOtpSecret, verifyOtpSecret } from '../lib/auth-token.js';
 import {
   signAccessToken, signRefreshToken, verifyRefreshTokenWithFallback,
   parseDuration, TokenExpiredError,
@@ -64,29 +63,32 @@ import {
   lookupEmail,
   registerEmailPending,
   confirmEmail,
-  deleteEmail,
   deleteEmailPending,
   registerAnonPending,
   confirmAnon,
-  deleteAnon,
-  deleteOAuth,
   lookupPhone,
   registerPhonePending,
   confirmPhone,
-  registerPasskey,
-  deletePasskey,
+  deletePhonePending,
 } from '../lib/auth-d1.js';
 import { zodDefaultHook, jsonResponseSchema, errorResponseSchema } from '../lib/schemas.js';
 import { resolveAuthDb, type AuthDb } from '../lib/auth-db-adapter.js';
 import { queuePublicUserProjectionSync, syncPublicUserProjection } from '../lib/public-user-profile.js';
+import { getDevicesForUser, unregisterToken } from '../lib/push-token.js';
+import { createPushProvider } from '../lib/push-provider.js';
 import {
   applyAuthNoStore,
   assertAuthTransportAllowed,
   clearRefreshCookie,
+  rotateOAuthBrowserGeneration,
   isCookieAuthTransport,
   readRefreshCookie,
   sessionResponse,
 } from '../lib/auth-session-cookie.js';
+import {
+  AuthSessionAuthorityUnavailableError,
+  isAuthSessionActive,
+} from '../lib/auth-session-authority.js';
 
 
 /** Resolve AuthDb from Hono context or raw env. Defaults to D1 (AUTH_DB binding). */
@@ -333,6 +335,23 @@ function getPasskeysConfig(env: Env): PasskeysConfig | undefined {
   return config?.auth?.passkeys;
 }
 
+function requireWebAuthnBase64Url(
+  value: unknown,
+  field: string,
+  minLength: number,
+  maxLength: number,
+): string {
+  if (
+    typeof value !== 'string'
+    || value.length < minLength
+    || value.length > maxLength
+    || !/^[A-Za-z0-9_-]+$/.test(value)
+  ) {
+    throw new EdgeBaseError(400, `${field} must be a valid base64url string.`, undefined, 'invalid-input');
+  }
+  return value;
+}
+
 type OAuthIdentityRecord = {
   id: string;
   provider: string;
@@ -412,10 +431,381 @@ async function getIdentityState(env: Env, db: AuthDb, userId: string): Promise<{
   };
 }
 
+async function issueMfaTicket(db: AuthDb, userId: string): Promise<string> {
+  const ticket = crypto.randomUUID();
+  await authService.issueAuthChallenge(db, {
+    kind: 'mfa-ticket',
+    lookupKey: ticket,
+    userId,
+    ttlSeconds: 300,
+    maxAttempts: 5,
+  });
+  return ticket;
+}
+
+async function healEmailIndexFromCanonicalUser(
+  db: AuthDb,
+  email: string,
+): Promise<{ userId: string; shardId: number } | null> {
+  const user = await authService.getUserByEmail(db, email);
+  if (!user || typeof user.id !== 'string') return null;
+  try {
+    const reservationId = await registerEmailPending(db, email, user.id);
+    await confirmEmail(db, email, user.id, reservationId);
+  } catch (error) {
+    if ((error as Error).message !== 'EMAIL_ALREADY_REGISTERED') return null;
+  }
+  const repaired = await lookupEmail(db, email);
+  return repaired?.userId === user.id ? repaired : null;
+}
+
+async function healPhoneIndexFromCanonicalUser(
+  db: AuthDb,
+  phone: string,
+): Promise<{ userId: string; shardId: number } | null> {
+  const users = await db.query<{ id: string }>(
+    `SELECT id FROM _users WHERE phone = ? ORDER BY createdAt ASC LIMIT 2`,
+    [phone],
+  );
+  if (users.length !== 1) return null;
+  const userId = users[0].id;
+  try {
+    const reservationId = await registerPhonePending(db, phone, userId);
+    await confirmPhone(db, phone, userId, reservationId);
+  } catch (error) {
+    if ((error as Error).message !== 'PHONE_ALREADY_REGISTERED') return null;
+  }
+  const repaired = await lookupPhone(db, phone);
+  return repaired?.userId === userId ? repaired : null;
+}
+
 function generateOTP(): string {
   const buf = new Uint32Array(1);
   crypto.getRandomValues(buf);
   return String(buf[0] % 1000000).padStart(6, '0');
+}
+
+const PHONE_LINK_COMPLETION_TTL_MS = 5 * 60 * 1000;
+const EMAIL_LINK_COMPLETION_TTL_MS = 5 * 60 * 1000;
+
+interface PhoneLinkUpgradeCompletionPayload {
+  version: 1;
+  userId: string;
+  phone: string;
+  sessionId: string;
+  accessToken: string;
+  refreshToken: string;
+}
+
+interface RecoveredPhoneLinkUpgrade {
+  user: Record<string, unknown>;
+  accessToken: string;
+  refreshToken: string;
+  sessionId: string;
+}
+
+interface EmailLinkUpgradeCompletionPayload {
+  version: 1;
+  userId: string;
+  initiatingSessionId: string;
+  email: string;
+  sessionId: string;
+  accessToken: string;
+  refreshToken: string;
+}
+
+interface RecoveredEmailLinkUpgrade {
+  user: Record<string, unknown>;
+  accessToken: string;
+  refreshToken: string;
+  sessionId: string;
+}
+
+function phoneLinkCompletionEncryptionKey(secret: string): string {
+  return `${secret}\u0000edgebase-phone-link-completion-v1`;
+}
+
+function emailLinkCompletionEncryptionKey(secret: string): string {
+  return `${secret}\u0000edgebase-email-link-completion-v1`;
+}
+
+async function derivePhoneLinkCompletionIds(
+  userId: string,
+  challengeKey: string,
+): Promise<{ sessionId: string; reservationId: string }> {
+  // The challenge key is already collision-resistant. Deriving identifiers
+  // without the rotating JWT secret keeps concurrent workers on either side
+  // of a key rotation converged on the same authoritative session.
+  const digest = (await hashAuthSecret(
+    `phone-link-completion\u0000${userId}\u0000${challengeKey}`,
+  )).slice('sha256:'.length);
+  return {
+    sessionId: `phone-link-${digest}`,
+    reservationId: `phone-link-reservation-${digest}`,
+  };
+}
+
+async function deriveEmailLinkCompletionIds(
+  userId: string,
+  email: string,
+): Promise<{ sessionId: string; reservationId: string }> {
+  const digest = (await hashAuthSecret(
+    `email-link-completion\u0000${userId}\u0000${email}`,
+  )).slice('sha256:'.length);
+  return {
+    sessionId: `email-link-${digest}`,
+    reservationId: `email-link-reservation-${digest}`,
+  };
+}
+
+function emailLinkPasswordProofInput(
+  userId: string,
+  initiatingSessionId: string,
+  email: string,
+  password: string,
+): string {
+  // JSON framing prevents delimiter ambiguity without persisting this value.
+  return JSON.stringify([
+    'email-link-completion-v1',
+    userId,
+    initiatingSessionId,
+    email,
+    password,
+  ]);
+}
+
+async function createEmailLinkPasswordProof(
+  env: Env,
+  userId: string,
+  initiatingSessionId: string,
+  email: string,
+  password: string,
+): Promise<string> {
+  return hashOtpSecret(
+    emailLinkPasswordProofInput(userId, initiatingSessionId, email, password),
+    getUserSecret(env),
+  );
+}
+
+async function verifyEmailLinkPasswordProof(
+  env: Env,
+  userId: string,
+  initiatingSessionId: string,
+  email: string,
+  password: string,
+  passwordProof: string,
+): Promise<boolean> {
+  const proofInput = emailLinkPasswordProofInput(
+    userId,
+    initiatingSessionId,
+    email,
+    password,
+  );
+  const secrets = Array.from(new Set(
+    [env.JWT_USER_SECRET, env.JWT_USER_SECRET_OLD]
+      .filter((value): value is string => typeof value === 'string' && value.length > 0),
+  ));
+  for (const secret of secrets) {
+    if (await verifyOtpSecret(proofInput, passwordProof, secret)) return true;
+  }
+  return false;
+}
+
+async function decryptPhoneLinkCompletion(
+  env: Env,
+  ciphertext: string,
+): Promise<PhoneLinkUpgradeCompletionPayload> {
+  const secrets = [env.JWT_USER_SECRET, env.JWT_USER_SECRET_OLD]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0);
+  let lastError: unknown;
+  for (const secret of secrets) {
+    try {
+      const raw = await decryptSecret(ciphertext, phoneLinkCompletionEncryptionKey(secret));
+      const parsed = JSON.parse(raw) as Partial<PhoneLinkUpgradeCompletionPayload>;
+      if (
+        parsed.version === 1 &&
+        typeof parsed.userId === 'string' &&
+        typeof parsed.phone === 'string' &&
+        typeof parsed.sessionId === 'string' && parsed.sessionId.length > 0 &&
+        typeof parsed.accessToken === 'string' && parsed.accessToken.length > 0 &&
+        typeof parsed.refreshToken === 'string' && parsed.refreshToken.length > 0
+      ) {
+        return parsed as PhoneLinkUpgradeCompletionPayload;
+      }
+      lastError = new Error('Invalid phone-link completion payload.');
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error('Phone-link completion key is unavailable.');
+}
+
+async function decryptEmailLinkCompletion(
+  env: Env,
+  ciphertext: string,
+): Promise<EmailLinkUpgradeCompletionPayload> {
+  const secrets = [env.JWT_USER_SECRET, env.JWT_USER_SECRET_OLD]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0);
+  let lastError: unknown;
+  for (const secret of secrets) {
+    try {
+      const raw = await decryptSecret(ciphertext, emailLinkCompletionEncryptionKey(secret));
+      const parsed = JSON.parse(raw) as Partial<EmailLinkUpgradeCompletionPayload>;
+      if (
+        parsed.version === 1 &&
+        typeof parsed.userId === 'string' &&
+        typeof parsed.initiatingSessionId === 'string' && parsed.initiatingSessionId.length > 0 &&
+        typeof parsed.email === 'string' &&
+        typeof parsed.sessionId === 'string' && parsed.sessionId.length > 0 &&
+        typeof parsed.accessToken === 'string' && parsed.accessToken.length > 0 &&
+        typeof parsed.refreshToken === 'string' && parsed.refreshToken.length > 0
+      ) {
+        return parsed as EmailLinkUpgradeCompletionPayload;
+      }
+      lastError = new Error('Invalid email-link completion payload.');
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error('Email-link completion key is unavailable.');
+}
+
+async function verifyPhoneCodeWithActiveSecrets(
+  env: Env,
+  code: string,
+  secretHash: string,
+): Promise<boolean> {
+  const secrets = Array.from(new Set(
+    [env.JWT_USER_SECRET, env.JWT_USER_SECRET_OLD]
+      .filter((value): value is string => typeof value === 'string' && value.length > 0),
+  ));
+  for (const secret of secrets) {
+    if (await verifyOtpSecret(code, secretHash, secret)) return true;
+  }
+  return false;
+}
+
+async function recoverPhoneLinkUpgrade(
+  env: Env,
+  db: AuthDb,
+  userId: string,
+  phone: string,
+  submittedCode: string,
+): Promise<RecoveredPhoneLinkUpgrade | null> {
+  const completion = await authService.getPhoneLinkUpgradeCompletion(db, phone);
+  if (!completion || completion.userId !== userId || completion.subject !== phone) return null;
+
+  const codeMatches = !!completion.secretHash
+    && await verifyPhoneCodeWithActiveSecrets(env, submittedCode, completion.secretHash);
+  if (!codeMatches) {
+    throw new EdgeBaseError(401, 'Invalid OTP code.', undefined, 'invalid-otp');
+  }
+  if (!completion.payload) {
+    throw new EdgeBaseError(409, 'Phone linking completion is unavailable.', undefined, 'auth-state-changed');
+  }
+
+  let payload: PhoneLinkUpgradeCompletionPayload;
+  try {
+    payload = await decryptPhoneLinkCompletion(env, completion.payload);
+  } catch {
+    throw new EdgeBaseError(409, 'Phone linking completion is no longer recoverable.', undefined, 'auth-state-changed');
+  }
+  if (payload.userId !== userId || payload.phone !== phone) {
+    throw new EdgeBaseError(409, 'Phone linking completion ownership changed.', undefined, 'auth-state-changed');
+  }
+
+  const session = await db.first<Record<string, unknown>>(
+    `SELECT id, userId, refreshToken, expiresAt FROM _sessions
+     WHERE id = ? AND userId = ? AND expiresAt > ?`,
+    [payload.sessionId, userId, new Date().toISOString()],
+  );
+  if (!session || session.refreshToken !== payload.refreshToken) {
+    throw new EdgeBaseError(409, 'Phone linking replacement session is no longer active.', undefined, 'auth-state-changed');
+  }
+
+  const user = await authService.getUserById(db, userId);
+  if (
+    !user || user.phone !== phone ||
+    Number(user.isAnonymous) !== 0 || Number(user.phoneVerified) !== 1 ||
+    Number(user.disabled) === 1
+  ) {
+    throw new EdgeBaseError(409, 'Phone linking account state changed.', undefined, 'auth-state-changed');
+  }
+
+  return {
+    user,
+    accessToken: payload.accessToken,
+    refreshToken: payload.refreshToken,
+    sessionId: payload.sessionId,
+  };
+}
+
+async function recoverEmailLinkUpgrade(
+  env: Env,
+  db: AuthDb,
+  userId: string,
+  initiatingSessionId: string,
+  email: string,
+  submittedPassword: string,
+): Promise<RecoveredEmailLinkUpgrade | null> {
+  const completion = await authService.getEmailLinkUpgradeCompletion(db, userId, email);
+  if (!completion || completion.userId !== userId || completion.subject !== email) return null;
+
+  const passwordMatchesProof = !!completion.secretHash
+    && await verifyEmailLinkPasswordProof(
+      env,
+      userId,
+      initiatingSessionId,
+      email,
+      submittedPassword,
+      completion.secretHash,
+    );
+  if (!passwordMatchesProof) {
+    throw new EdgeBaseError(401, 'Invalid email or password.', undefined, 'invalid-credentials');
+  }
+  if (!completion.payload) {
+    throw new EdgeBaseError(409, 'Email linking completion is unavailable.', undefined, 'auth-state-changed');
+  }
+
+  let payload: EmailLinkUpgradeCompletionPayload;
+  try {
+    payload = await decryptEmailLinkCompletion(env, completion.payload);
+  } catch {
+    throw new EdgeBaseError(409, 'Email linking completion is no longer recoverable.', undefined, 'auth-state-changed');
+  }
+  if (
+    payload.userId !== userId ||
+    payload.initiatingSessionId !== initiatingSessionId ||
+    payload.email !== email
+  ) {
+    throw new EdgeBaseError(409, 'Email linking completion ownership changed.', undefined, 'auth-state-changed');
+  }
+
+  const session = await db.first<Record<string, unknown>>(
+    `SELECT id, userId, refreshToken, expiresAt FROM _sessions
+     WHERE id = ? AND userId = ? AND expiresAt > ?`,
+    [payload.sessionId, userId, new Date().toISOString()],
+  );
+  if (!session || session.refreshToken !== payload.refreshToken) {
+    throw new EdgeBaseError(409, 'Email linking replacement session is no longer active.', undefined, 'auth-state-changed');
+  }
+
+  const user = await authService.getUserById(db, userId);
+  const storedPasswordHash = typeof user?.passwordHash === 'string' ? user.passwordHash : '';
+  if (
+    !user || user.email !== email || Number(user.isAnonymous) !== 0 ||
+    Number(user.disabled) === 1 || !storedPasswordHash ||
+    !await verifyPassword(submittedPassword, storedPasswordHash)
+  ) {
+    throw new EdgeBaseError(409, 'Email linking account state changed.', undefined, 'auth-state-changed');
+  }
+
+  return {
+    user,
+    accessToken: payload.accessToken,
+    refreshToken: payload.refreshToken,
+    sessionId: payload.sessionId,
+  };
 }
 
 function parseTTLtoMs(ttl: string): number {
@@ -492,23 +882,49 @@ async function generateAccessToken(
 /**
  * Create a session with eviction and token generation — D1-based.
  */
-async function createSessionAndTokens(
+export async function createSessionAndTokens(
   env: Env,
   userId: string,
   ip: string,
   userAgent: string,
+  options: { sessionId?: string; reuseExisting?: boolean } = {},
 ): Promise<{ accessToken: string; refreshToken: string; sessionId: string }> {
   const db = envAuthDb(env);
   const user = await authService.getUserById(db, userId);
   if (!user) throw new EdgeBaseError(500, 'Internal error: user record was not found immediately after creation.', undefined, 'internal-error');
-
-  // Session limit eviction
-  const maxSessions = getMaxActiveSessions(env);
-  if (maxSessions > 0) {
-    await authService.evictOldestSessions(db, userId, maxSessions);
+  if (Number(user.disabled) === 1) {
+    throw new EdgeBaseError(403, 'This account has been disabled.', undefined, 'account-disabled');
   }
 
-  const sessionId = generateId();
+  const maxSessions = getMaxActiveSessions(env);
+
+  const sessionId = options.sessionId ?? generateId();
+  const reuseExistingSession = async (): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    sessionId: string;
+  } | null> => {
+    const existing = await db.first<Record<string, unknown>>(
+      'SELECT * FROM _sessions WHERE id = ?',
+      [sessionId],
+    );
+    if (!existing) return null;
+    if (existing.userId !== userId) {
+      throw new EdgeBaseError(409, 'OAuth completion session ownership changed.', undefined, 'auth-state-changed');
+    }
+    const existingRefreshToken = typeof existing.refreshToken === 'string' ? existing.refreshToken : '';
+    const existingExpiresAt = new Date(String(existing.expiresAt ?? '')).getTime();
+    if (!existingRefreshToken || !Number.isFinite(existingExpiresAt) || existingExpiresAt <= Date.now()) {
+      await db.run('DELETE FROM _sessions WHERE id = ? AND userId = ?', [sessionId, userId]);
+      return null;
+    }
+    const existingAccessToken = await generateAccessToken(env, user, undefined, sessionId);
+    return { accessToken: existingAccessToken, refreshToken: existingRefreshToken, sessionId };
+  };
+  if (options.reuseExisting && options.sessionId) {
+    const existing = await reuseExistingSession();
+    if (existing) return existing;
+  }
   const accessToken = await generateAccessToken(env, user, undefined, sessionId);
   const refreshToken = await signRefreshToken(
     { sub: userId, type: 'refresh', jti: sessionId },
@@ -521,13 +937,21 @@ async function createSessionAndTokens(
 
   const metadata = JSON.stringify({ ip, userAgent, lastActiveAt: now });
 
-  await authService.createSession(db, {
-    id: sessionId,
-    userId,
-    refreshToken,
-    expiresAt,
-    metadata,
-  });
+  try {
+    await authService.createSession(db, {
+      id: sessionId,
+      userId,
+      refreshToken,
+      expiresAt,
+      metadata,
+    }, maxSessions);
+  } catch (error) {
+    if (options.reuseExisting && options.sessionId) {
+      const winner = await reuseExistingSession();
+      if (winner) return winner;
+    }
+    throw error;
+  }
 
   // Update lastSignedInAt on the user record
   try {
@@ -878,8 +1302,9 @@ async function sendSmsWithHook(
 /**
  * Extract client IP from request headers.
  *
- * Priority: CF-Connecting-IP (Cloudflare, tamper-proof) →
- * X-Forwarded-For (only when trustSelfHostedProxy=true).
+ * Cloudflare/local runtimes use their authoritative CF-Connecting-IP. The
+ * CLI-owned self-hosted runtime uses X-Forwarded-For only when
+ * trustSelfHostedProxy=true.
  *
  * Security: X-Forwarded-For is client-spoofable when EdgeBase is exposed without
  * a reverse proxy. Self-hosted deployments MUST place EdgeBase behind Nginx/Caddy
@@ -1047,7 +1472,8 @@ authRoute.openapi(signup, async (c) => {
 
   const userId = generateId();
   const db = getAuthDb(c);
-  if (await lookupEmail(db, body.email)) {
+  let emailReservationId: string | null = null;
+  if (await lookupEmail(db, body.email) || await healEmailIndexFromCanonicalUser(db, body.email)) {
     throw new EdgeBaseError(409, 'Email already registered.', undefined, 'email-already-exists');
   }
 
@@ -1069,9 +1495,9 @@ authRoute.openapi(signup, async (c) => {
 
     // Register pending in D1 email index
     try {
-      await registerEmailPending(db, body.email, userId);
+      emailReservationId = await registerEmailPending(db, body.email, userId);
     } catch (err) {
-      if ((err as Error).message === 'EMAIL_ALREADY_REGISTERED') {
+      if (['EMAIL_ALREADY_REGISTERED', 'EMAIL_RESERVATION_CONFLICT'].includes((err as Error).message)) {
         throw new EdgeBaseError(409, 'Email already registered.', undefined, 'email-already-exists');
       }
       throw new EdgeBaseError(500, 'Signup failed. Please try again.', undefined, 'internal-error');
@@ -1095,7 +1521,7 @@ authRoute.openapi(signup, async (c) => {
     const session = await createSessionAndTokens(c.env, userId, ip, c.req.header('user-agent') || '');
 
     // Confirm email in D1 index
-    await confirmEmail(db, body.email, userId);
+    await confirmEmail(db, body.email, userId, emailReservationId!);
 
     // Sync to _users_public
     const user = await authService.getUserById(db, userId);
@@ -1121,9 +1547,10 @@ authRoute.openapi(signup, async (c) => {
       sessionId: session.sessionId,
     }, 201);
   } catch (err) {
+    if (emailReservationId) {
+      await authService.deleteProvisionalUser(db, userId).catch(() => {});
+    }
     if (err instanceof EdgeBaseError) throw err;
-    // Compensating transaction
-    await deleteEmailPending(db, body.email).catch(() => {});
     throw new EdgeBaseError(500, 'Signup failed. Please try again.', undefined, 'internal-error');
   }
 });
@@ -1227,12 +1654,7 @@ authRoute.openapi(signin, async (c) => {
   if (mfaConfig?.totp) {
     const factors = await authService.listVerifiedMfaFactors(db, userId);
     if (factors.length > 0) {
-      const mfaTicket = crypto.randomUUID();
-      await c.env.KV.put(
-        `mfa-ticket:${mfaTicket}`,
-        JSON.stringify({ userId }),
-        { expirationTtl: 300 },
-      );
+      const mfaTicket = await issueMfaTicket(db, userId);
 
       return c.json({
         mfaRequired: true,
@@ -1322,8 +1744,8 @@ authRoute.openapi(signinAnonymous, async (c) => {
       sessionId: session.sessionId,
     }, 201);
   } catch (err) {
+    await authService.deleteProvisionalUser(db, userId).catch(() => {});
     if (err instanceof EdgeBaseError) throw err;
-    await deleteAnon(db, userId).catch(() => {});
     throw new EdgeBaseError(500, 'Anonymous signin failed.', undefined, 'internal-error');
   }
 });
@@ -1361,7 +1783,7 @@ authRoute.openapi(signinMagicLink, async (c) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
     throw new EdgeBaseError(400, 'Invalid email format.', undefined, 'invalid-email');
   }
-  const redirect = parseClientRedirectInput(c.env, body);
+  const redirect = parseClientRedirectInput(c.env, body, c.req.raw);
 
   await ensureAuthActionAllowed(c, 'signInMagicLink', body as unknown as Record<string, unknown>);
 
@@ -1373,9 +1795,10 @@ authRoute.openapi(signinMagicLink, async (c) => {
   const autoCreate = config.auth.magicLink.autoCreate !== false; // default true
 
   // Look up email in D1
-  const record = await lookupEmail(getAuthDb(c), body.email);
+  let record = await lookupEmail(getAuthDb(c), body.email);
 
   const db = getAuthDb(c);
+  if (!record) record = await healEmailIndexFromCanonicalUser(db, body.email);
   const exposeTestSecrets = shouldExposeAuthTestSecrets(c.env);
   let debugToken: string | undefined;
   let debugActionUrl: string | undefined;
@@ -1387,9 +1810,6 @@ authRoute.openapi(signinMagicLink, async (c) => {
     if (!user) return c.json({ ok: true }); // Don't reveal details
     if (!user.email) return c.json({ ok: true });
 
-    // Delete old magic-link tokens
-    await authService.deleteEmailTokensByUserAndType(db, userId, 'magic-link');
-
     const magicLinkConfig = getMagicLinkConfig(c.env);
     const tokenTTL = magicLinkConfig?.tokenTTL ?? '15m';
     const ttlMs = parseTTLtoMs(tokenTTL);
@@ -1397,7 +1817,7 @@ authRoute.openapi(signinMagicLink, async (c) => {
     const token = crypto.randomUUID();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + ttlMs);
-    await authService.createEmailToken(db, {
+    await authService.replaceEmailToken(db, {
       token,
       userId,
       type: 'magic-link',
@@ -1444,6 +1864,7 @@ authRoute.openapi(signinMagicLink, async (c) => {
     // Auto-create user + send magic link
     const userId = generateId();
     const reqLocale = parseAcceptLanguage(c.req.header('accept-language'));
+    let emailReservationId: string | null = null;
 
     try {
       // beforeSignUp hook
@@ -1452,9 +1873,9 @@ authRoute.openapi(signinMagicLink, async (c) => {
       }, { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
 
       try {
-        await registerEmailPending(db, body.email, userId);
+        emailReservationId = await registerEmailPending(db, body.email, userId);
       } catch (err) {
-        if ((err as Error).message === 'EMAIL_ALREADY_REGISTERED') {
+        if (['EMAIL_ALREADY_REGISTERED', 'EMAIL_RESERVATION_CONFLICT'].includes((err as Error).message)) {
           return c.json({ ok: true });
         }
         throw new EdgeBaseError(500, 'Magic link request failed.', undefined, 'internal-error');
@@ -1480,7 +1901,7 @@ authRoute.openapi(signinMagicLink, async (c) => {
         );
       }
 
-      await confirmEmail(db, body.email, userId);
+      await confirmEmail(db, body.email, userId, emailReservationId!);
 
       // Send magic link token
       const magicLinkConfig = getMagicLinkConfig(c.env);
@@ -1533,8 +1954,10 @@ authRoute.openapi(signinMagicLink, async (c) => {
         }
       }
     } catch (err) {
+      if (emailReservationId) {
+        await authService.deleteProvisionalUser(db, userId).catch(() => {});
+      }
       if (err instanceof EdgeBaseError) throw err;
-      await deleteEmailPending(db, body.email).catch(() => {});
       return c.json({ ok: true });
     }
   }
@@ -1571,15 +1994,9 @@ authRoute.openapi(verifyMagicLink, async (c) => {
   const db = getAuthDb(c);
   const ip = getClientIP(c.env, c.req.raw);
 
-  // Look up token directly in D1
-  const tokenRow = await authService.getEmailToken(db, body.token);
-  if (!tokenRow || tokenRow.type !== 'magic-link') {
+  const tokenRow = await authService.consumeEmailToken(db, body.token, 'magic-link');
+  if (!tokenRow) {
     throw new EdgeBaseError(400, 'Invalid or expired magic link token.', undefined, 'invalid-token');
-  }
-
-  if (new Date(tokenRow.expiresAt as string) < new Date()) {
-    await authService.deleteEmailToken(db, body.token);
-    throw new EdgeBaseError(400, 'Magic link has expired. Please request a new one.', undefined, 'token-expired');
   }
 
   const userId = tokenRow.userId as string;
@@ -1598,9 +2015,6 @@ authRoute.openapi(verifyMagicLink, async (c) => {
 
   // beforeSignIn hook
   await executeAuthHook(c.env, c.executionCtx, 'beforeSignIn', authService.sanitizeUser(user), { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
-
-  // Delete the token (single-use)
-  await authService.deleteEmailToken(db, body.token);
 
   // Lazy cleanup of expired sessions
   await authService.cleanExpiredSessionsForUser(db, userId);
@@ -1685,12 +2099,13 @@ authRoute.openapi(signinPhone, async (c) => {
   }
 
   // Look up phone in D1
-  const record = await lookupPhone(getAuthDb(c), phone);
+  let record = await lookupPhone(getAuthDb(c), phone);
 
   const exposeTestSecrets = shouldExposeAuthTestSecrets(c.env);
   let devCode: string | undefined;
 
   const db = getAuthDb(c);
+  if (!record) record = await healPhoneIndexFromCanonicalUser(db, phone);
 
   if (record) {
     // Existing user — send OTP directly
@@ -1703,12 +2118,15 @@ authRoute.openapi(signinPhone, async (c) => {
 
     const codeHash = await hashOtpSecret(code, getUserSecret(c.env));
 
-    // Store OTP in KV with 5 min TTL
-    await c.env.KV.put(
-      `phone-otp:${phone}`,
-      JSON.stringify({ codeHash, userId, attempts: 0 }),
-      { expirationTtl: 300 },
-    );
+    await authService.issueAuthChallenge(db, {
+      kind: 'phone-otp',
+      lookupKey: phone,
+      userId,
+      subject: phone,
+      secretHash: codeHash,
+      ttlSeconds: 300,
+      maxAttempts: 5,
+    });
 
     // Send SMS
     const smsProvider = createSmsProvider(getSmsConfig(c.env), c.env);
@@ -1731,6 +2149,7 @@ authRoute.openapi(signinPhone, async (c) => {
   } else {
     // New user — auto-create
     const userId = generateId();
+    let phoneReservationId: string | null = null;
 
     try {
       // beforeSignUp hook
@@ -1739,9 +2158,9 @@ authRoute.openapi(signinPhone, async (c) => {
       }, { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
 
       try {
-        await registerPhonePending(db, phone, userId);
+        phoneReservationId = await registerPhonePending(db, phone, userId);
       } catch (err) {
-        if ((err as Error).message === 'PHONE_ALREADY_REGISTERED') {
+        if (['PHONE_ALREADY_REGISTERED', 'PHONE_RESERVATION_CONFLICT'].includes((err as Error).message)) {
           return c.json({ ok: true });
         }
         throw new EdgeBaseError(500, 'Phone OTP request failed.', undefined, 'internal-error');
@@ -1762,12 +2181,15 @@ authRoute.openapi(signinPhone, async (c) => {
 
       const codeHash = await hashOtpSecret(code, getUserSecret(c.env));
 
-      // Store OTP in KV
-      await c.env.KV.put(
-        `phone-otp:${phone}`,
-        JSON.stringify({ codeHash, userId, attempts: 0 }),
-        { expirationTtl: 300 },
-      );
+      await authService.issueAuthChallenge(db, {
+        kind: 'phone-otp',
+        lookupKey: phone,
+        userId,
+        subject: phone,
+        secretHash: codeHash,
+        ttlSeconds: 300,
+        maxAttempts: 5,
+      });
 
       // Send SMS
       const smsProvider = createSmsProvider(getSmsConfig(c.env), c.env);
@@ -1788,8 +2210,11 @@ authRoute.openapi(signinPhone, async (c) => {
         }
       }
 
-      await confirmPhone(db, phone, userId);
+      await confirmPhone(db, phone, userId, phoneReservationId!);
     } catch (err) {
+      if (phoneReservationId) {
+        await authService.deleteProvisionalUser(db, userId).catch(() => {});
+      }
       if (err instanceof EdgeBaseError) throw err;
       return c.json({ ok: true });
     }
@@ -1837,40 +2262,35 @@ authRoute.openapi(verifyPhone, async (c) => {
     code: body.code,
   });
 
-  // Look up phone → userId via KV OTP data
-  const otpData = await c.env.KV.get(`phone-otp:${phone}`, 'json') as {
-    codeHash?: string; code?: string; userId: string; attempts: number;
-  } | null;
+  const db = getAuthDb(c);
+  const otpData = await authService.getAuthChallenge(db, 'phone-otp', phone);
 
   if (!otpData) {
     throw new EdgeBaseError(400, 'Invalid or expired OTP. Please request a new code.', undefined, 'invalid-token');
   }
-
-  // Check attempts (max 5)
-  if (otpData.attempts >= 5) {
-    await c.env.KV.delete(`phone-otp:${phone}`).catch(() => {});
+  if (otpData.attempts >= otpData.maxAttempts) {
     throw new EdgeBaseError(429, 'Too many failed OTP attempts. Please request a new code.', undefined, 'rate-limited');
   }
 
   const submittedCode = body.code.trim();
-  const otpMatches = otpData.codeHash
-    ? await verifyOtpSecret(submittedCode, otpData.codeHash, getUserSecret(c.env))
-    : timingSafeEqual(otpData.code ?? '', submittedCode);
+  const otpMatches = !!otpData.secretHash
+    && await verifyPhoneCodeWithActiveSecrets(c.env, submittedCode, otpData.secretHash);
   if (!otpMatches) {
-    await c.env.KV.put(
-      `phone-otp:${phone}`,
-      JSON.stringify({ ...otpData, attempts: otpData.attempts + 1 }),
-      { expirationTtl: 300 },
-    ).catch(() => {});
+    const failure = await authService.recordAuthChallengeFailure(db, 'phone-otp', phone);
+    if (!failure || failure.attempts >= failure.maxAttempts) {
+      throw new EdgeBaseError(429, 'Too many failed OTP attempts. Please request a new code.', undefined, 'rate-limited');
+    }
     throw new EdgeBaseError(401, 'Invalid OTP code.', undefined, 'invalid-otp');
   }
 
-  // OTP valid — delete it (single-use)
-  await c.env.KV.delete(`phone-otp:${phone}`).catch(() => {});
+  const consumedOtp = await authService.consumeAuthChallenge(db, 'phone-otp', phone);
+  if (!consumedOtp) {
+    throw new EdgeBaseError(400, 'OTP was already used or expired.', undefined, 'invalid-token');
+  }
 
-  const { userId } = otpData;
+  const userId = consumedOtp.userId;
+  if (!userId) throw new EdgeBaseError(400, 'Invalid OTP owner.', undefined, 'invalid-token');
   const ip = getClientIP(c.env, c.req.raw);
-  const db = getAuthDb(c);
 
   const user = await authService.getUserById(db, userId);
   if (!user) throw new EdgeBaseError(404, 'User not found.', undefined, 'user-not-found');
@@ -1893,12 +2313,7 @@ authRoute.openapi(verifyPhone, async (c) => {
   if (mfaConfig?.totp) {
     const factors = await authService.listVerifiedMfaFactors(db, userId);
     if (factors.length > 0) {
-      const mfaTicket = crypto.randomUUID();
-      await c.env.KV.put(
-        `mfa-ticket:${mfaTicket}`,
-        JSON.stringify({ userId }),
-        { expirationTtl: 300 },
-      );
+      const mfaTicket = await issueMfaTicket(db, userId);
       return c.json({
         mfaRequired: true,
         mfaTicket,
@@ -1984,12 +2399,15 @@ authRoute.openapi(linkPhone, async (c) => {
 
   const codeHash = await hashOtpSecret(code, getUserSecret(c.env));
 
-  // Store link OTP in KV (separate key pattern)
-  await c.env.KV.put(
-    `phone-link-otp:${phone}`,
-    JSON.stringify({ codeHash, userId, attempts: 0 }),
-    { expirationTtl: 300 },
-  );
+  await authService.issueAuthChallenge(db, {
+    kind: 'phone-link-otp',
+    lookupKey: phone,
+    userId,
+    subject: phone,
+    secretHash: codeHash,
+    ttlSeconds: 300,
+    maxAttempts: 5,
+  });
 
   // Send SMS
   const smsProvider = createSmsProvider(getSmsConfig(c.env), c.env);
@@ -2014,6 +2432,26 @@ authRoute.openapi(linkPhone, async (c) => {
 });
 
 // POST /verify-link-phone — verify OTP and link phone to account (authenticated)
+const verifyLinkPhoneResponseSchema = z.union([
+  z.object({ ok: z.literal(true) }).strict().openapi({
+    description: 'A permanent account linked the phone without replacing its session.',
+  }),
+  z.object({
+    ok: z.literal(true).optional(),
+    user: z.record(z.string(), z.unknown()),
+    accessToken: z.string(),
+    refreshToken: z.string().optional().openapi({
+      description: 'Present for body-token transport; omitted when an HttpOnly cookie carries it.',
+    }),
+    sessionId: z.string(),
+    sessionTransport: z.literal('cookie').optional(),
+  }).passthrough().openapi({
+    description: 'Replacement authentication session returned by an anonymous phone upgrade.',
+  }),
+]).openapi({
+  description: 'Permanent link acknowledgement or anonymous-upgrade authentication result.',
+});
+
 const verifyLinkPhone = createRoute({
   operationId: 'authVerifyLinkPhone',
   method: 'post',
@@ -2027,7 +2465,10 @@ const verifyLinkPhone = createRoute({
     }).passthrough() } }, required: true },
   },
   responses: {
-    200: { description: 'Success', content: { 'application/json': { schema: jsonResponseSchema } } },
+    200: {
+      description: 'Permanent link acknowledgement or anonymous-upgrade authentication result',
+      content: { 'application/json': { schema: verifyLinkPhoneResponseSchema } },
+    },
     400: { description: 'Invalid or expired OTP', content: { 'application/json': { schema: errorResponseSchema } } },
     401: { description: 'Invalid OTP code', content: { 'application/json': { schema: errorResponseSchema } } },
     403: { description: 'OTP not issued for this user', content: { 'application/json': { schema: errorResponseSchema } } },
@@ -2042,67 +2483,240 @@ authRoute.openapi(verifyLinkPhone, async (c) => {
     throw new EdgeBaseError(404, 'Phone authentication is not enabled.', undefined, 'feature-not-enabled');
   }
 
-  const userId = requireAuth(c.get('auth'));
+  const auth = c.get('auth') as AuthContext | null;
+  const userId = requireAuth(auth);
   const body = await c.req.json<{ phone: string; code: string }>();
   if (!body.phone || !body.code) {
     throw new EdgeBaseError(400, 'Phone number and OTP code are required.', undefined, 'invalid-input');
   }
   const phone = normalizePhone(body.phone);
-  await ensureAuthActionAllowed(c, 'verifyLinkPhone', { phone, code: body.code, userId });
+  const submittedCode = body.code.trim();
   const db = getAuthDb(c);
 
-  // Verify OTP from KV
-  const otpData = await c.env.KV.get(`phone-link-otp:${phone}`, 'json') as {
-    codeHash?: string; code?: string; userId: string; attempts: number;
-  } | null;
+  // A successful anonymous upgrade revokes the initiating sid in the same
+  // commit. Check the bounded encrypted checkpoint before requiring that old
+  // sid to remain active so a lost HTTP response can be recovered exactly.
+  const completed = await recoverPhoneLinkUpgrade(c.env, db, userId, phone, submittedCode);
+  if (completed) {
+    return sessionResponse(c, {
+      ok: true,
+      user: authService.sanitizeUser(completed.user),
+      accessToken: completed.accessToken,
+      refreshToken: completed.refreshToken,
+      sessionId: completed.sessionId,
+    });
+  }
+
+  if (!auth?.sessionId) {
+    throw new EdgeBaseError(401, 'An active session is required.', undefined, 'invalid-session');
+  }
+  try {
+    if (!await isAuthSessionActive(
+      c.env as unknown as Record<string, unknown>,
+      userId,
+      auth.sessionId,
+    )) {
+      throw new EdgeBaseError(401, 'Session was revoked or expired.', undefined, 'invalid-session');
+    }
+  } catch (error) {
+    if (error instanceof EdgeBaseError) throw error;
+    if (error instanceof AuthSessionAuthorityUnavailableError) {
+      throw new EdgeBaseError(
+        503,
+        'Authentication session validation is temporarily unavailable.',
+        undefined,
+        'auth-authority-unavailable',
+      );
+    }
+    throw error;
+  }
+
+  await ensureAuthActionAllowed(c, 'verifyLinkPhone', { phone, code: body.code, userId });
+  const currentUser = await authService.getUserById(db, userId);
+  if (!currentUser) {
+    throw new EdgeBaseError(404, 'User not found.', undefined, 'user-not-found');
+  }
+
+  const otpData = await authService.getAuthChallenge(db, 'phone-link-otp', phone);
 
   if (!otpData) {
+    // Close the read/commit race with another concurrent completion.
+    const racedCompletion = await recoverPhoneLinkUpgrade(c.env, db, userId, phone, submittedCode);
+    if (racedCompletion) {
+      return sessionResponse(c, {
+        ok: true,
+        user: authService.sanitizeUser(racedCompletion.user),
+        accessToken: racedCompletion.accessToken,
+        refreshToken: racedCompletion.refreshToken,
+        sessionId: racedCompletion.sessionId,
+      });
+    }
     throw new EdgeBaseError(400, 'Invalid or expired OTP. Please request a new code.', undefined, 'invalid-token');
   }
 
   if (otpData.userId !== userId) {
     throw new EdgeBaseError(403, 'OTP was not issued for this user.', undefined, 'action-not-allowed');
   }
-
-  if (otpData.attempts >= 5) {
-    await c.env.KV.delete(`phone-link-otp:${phone}`).catch(() => {});
+  if (otpData.attempts >= otpData.maxAttempts) {
     throw new EdgeBaseError(429, 'Too many failed OTP attempts. Please request a new code.', undefined, 'rate-limited');
   }
 
-  const submittedCode = body.code.trim();
-  const otpMatches = otpData.codeHash
-    ? await verifyOtpSecret(submittedCode, otpData.codeHash, getUserSecret(c.env))
-    : timingSafeEqual(otpData.code ?? '', submittedCode);
+  const otpMatches = !!otpData.secretHash
+    && await verifyPhoneCodeWithActiveSecrets(c.env, submittedCode, otpData.secretHash);
   if (!otpMatches) {
-    await c.env.KV.put(
-      `phone-link-otp:${phone}`,
-      JSON.stringify({ ...otpData, attempts: otpData.attempts + 1 }),
-      { expirationTtl: 300 },
-    ).catch(() => {});
+    const failure = await authService.recordAuthChallengeFailure(db, 'phone-link-otp', phone);
+    if (!failure || failure.attempts >= failure.maxAttempts) {
+      throw new EdgeBaseError(429, 'Too many failed OTP attempts. Please request a new code.', undefined, 'rate-limited');
+    }
     throw new EdgeBaseError(401, 'Invalid OTP code.', undefined, 'invalid-otp');
   }
 
-  // OTP valid — delete it
-  await c.env.KV.delete(`phone-link-otp:${phone}`).catch(() => {});
+  const upgradesAnonymousUser = Number(currentUser.isAnonymous) === 1;
+  if (upgradesAnonymousUser) {
+    const { sessionId, reservationId } = await derivePhoneLinkCompletionIds(userId, otpData.key);
+    try {
+      await registerPhonePending(db, phone, userId, reservationId);
+    } catch (error) {
+      const racedCompletion = await recoverPhoneLinkUpgrade(c.env, db, userId, phone, submittedCode);
+      if (racedCompletion) {
+        return sessionResponse(c, {
+          ok: true,
+          user: authService.sanitizeUser(racedCompletion.user),
+          accessToken: racedCompletion.accessToken,
+          refreshToken: racedCompletion.refreshToken,
+          sessionId: racedCompletion.sessionId,
+        });
+      }
+      if (['PHONE_ALREADY_REGISTERED', 'PHONE_RESERVATION_CONFLICT'].includes((error as Error).message)) {
+        throw new EdgeBaseError(409, 'Phone number is already registered.', undefined, 'phone-already-exists');
+      }
+      throw new EdgeBaseError(500, 'Phone linking failed.', undefined, 'internal-error');
+    }
 
-  // Register phone in D1
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const refreshToken = await signRefreshToken(
+      { sub: userId, type: 'refresh', jti: sessionId },
+      getUserSecret(c.env),
+      getRefreshTokenTTL(c.env),
+    );
+    const replacementAccessToken = await generateAccessToken(
+      c.env,
+      {
+        ...currentUser,
+        phone,
+        phoneVerified: 1,
+        isAnonymous: 0,
+      },
+      undefined,
+      sessionId,
+    );
+    const refreshTTLSeconds = parseDuration(getRefreshTokenTTL(c.env));
+    const sessionExpiresAt = new Date(now.getTime() + refreshTTLSeconds * 1000).toISOString();
+    const completionExpiresAt = new Date(now.getTime() + PHONE_LINK_COMPLETION_TTL_MS).toISOString();
+    const encryptedCompletion = await encryptSecret(
+      JSON.stringify({
+        version: 1,
+        userId,
+        phone,
+        sessionId,
+        accessToken: replacementAccessToken,
+        refreshToken,
+      } satisfies PhoneLinkUpgradeCompletionPayload),
+      phoneLinkCompletionEncryptionKey(getUserSecret(c.env)),
+    );
+
+    try {
+      await authService.finalizeAnonymousPhoneUpgrade(db, {
+        userId,
+        expectedAuthRevision: Number(currentUser.authRevision ?? 0),
+        phone,
+        previousPhone: typeof currentUser.phone === 'string' ? currentUser.phone : null,
+        reservationId,
+        challengeKey: otpData.key,
+        challengeSecretHash: otpData.secretHash as string,
+        encryptedCompletion,
+        completionExpiresAt,
+        replacementSession: {
+          id: sessionId,
+          userId,
+          refreshToken,
+          expiresAt: sessionExpiresAt,
+          metadata: JSON.stringify({
+            ip: getClientIP(c.env, c.req.raw),
+            userAgent: c.req.header('user-agent') || 'phone-link',
+            lastActiveAt: nowIso,
+          }),
+        },
+      });
+    } catch (error) {
+      // This also recovers an unknown commit outcome: the DB transaction may
+      // have committed even if its response was lost to this worker.
+      const racedCompletion = await recoverPhoneLinkUpgrade(c.env, db, userId, phone, submittedCode);
+      if (racedCompletion) {
+        return sessionResponse(c, {
+          ok: true,
+          user: authService.sanitizeUser(racedCompletion.user),
+          accessToken: racedCompletion.accessToken,
+          refreshToken: racedCompletion.refreshToken,
+          sessionId: racedCompletion.sessionId,
+        });
+      }
+      await deletePhonePending(db, phone, userId, reservationId).catch(() => {});
+      if (error instanceof Error && error.message === 'PHONE_UPGRADE_COMPLETION_CONFLICT') {
+        throw new EdgeBaseError(409, 'Account changed while linking the phone. Request a new code.', undefined, 'auth-state-changed');
+      }
+      throw error;
+    }
+
+    const recovered = await recoverPhoneLinkUpgrade(c.env, db, userId, phone, submittedCode);
+    if (!recovered) {
+      throw new EdgeBaseError(500, 'Phone linking completed but its session checkpoint is missing.', undefined, 'internal-error');
+    }
+    return sessionResponse(c, {
+      ok: true,
+      user: authService.sanitizeUser(recovered.user),
+      accessToken: recovered.accessToken,
+      refreshToken: recovered.refreshToken,
+      sessionId: recovered.sessionId,
+    });
+  }
+
+  // Permanent-user phone linking preserves the existing response contract and
+  // does not rotate or replace the caller's active session.
+  const consumedOtp = await authService.consumeAuthChallenge(db, 'phone-link-otp', phone);
+  if (!consumedOtp || consumedOtp.userId !== userId) {
+    throw new EdgeBaseError(400, 'OTP was already used or expired.', undefined, 'invalid-token');
+  }
+
+  let phoneReservationId: string;
   try {
-    await registerPhonePending(db, phone, userId);
-  } catch (err) {
-    if ((err as Error).message === 'PHONE_ALREADY_REGISTERED') {
+    phoneReservationId = await registerPhonePending(db, phone, userId);
+  } catch (error) {
+    if (['PHONE_ALREADY_REGISTERED', 'PHONE_RESERVATION_CONFLICT'].includes((error as Error).message)) {
       throw new EdgeBaseError(409, 'Phone number is already registered.', undefined, 'phone-already-exists');
     }
     throw new EdgeBaseError(500, 'Phone linking failed.', undefined, 'internal-error');
   }
 
-  // Update user record directly in D1
-  await authService.updateUser(db, userId, { phone, phoneVerified: true, isAnonymous: false });
-
-  // Confirm in D1
-  await confirmPhone(db, phone, userId);
-
-  // Delete anon index if exists (upgrade path)
-  await deleteAnon(db, userId).catch(() => {});
+  try {
+    await authService.finalizePhoneIdentity(db, {
+      userId,
+      expectedAuthRevision: Number(currentUser.authRevision ?? 0),
+      value: phone,
+      reservationId: phoneReservationId,
+      updates: { phone, phoneVerified: true, isAnonymous: false },
+      previousValue: typeof currentUser.phone === 'string' ? currentUser.phone : null,
+      deleteAnonymousIndex: true,
+      revokeSessionsOnUpgrade: false,
+    });
+  } catch (error) {
+    await deletePhonePending(db, phone, userId, phoneReservationId).catch(() => {});
+    if (error instanceof Error && error.message === 'PHONE_FINALIZATION_CONFLICT') {
+      throw new EdgeBaseError(409, 'Account changed while linking the phone. Request a new code.', undefined, 'auth-state-changed');
+    }
+    throw error;
+  }
 
   return c.json({ ok: true });
 });
@@ -2161,12 +2775,13 @@ authRoute.openapi(signinEmailOtp, async (c) => {
   }
 
   // Look up email in D1
-  const record = await lookupEmail(getAuthDb(c), email);
+  let record = await lookupEmail(getAuthDb(c), email);
 
   const exposeTestSecrets = shouldExposeAuthTestSecrets(c.env);
   let devCode: string | undefined;
 
   const db = getAuthDb(c);
+  if (!record) record = await healEmailIndexFromCanonicalUser(db, email);
 
   if (record) {
     // Existing user — send OTP directly
@@ -2178,12 +2793,15 @@ authRoute.openapi(signinEmailOtp, async (c) => {
     if (exposeTestSecrets) devCode = code;
     const codeHash = await hashOtpSecret(code, getUserSecret(c.env));
 
-    // Store OTP in KV with 5 min TTL
-    await c.env.KV.put(
-      `email-otp:${email}`,
-      JSON.stringify({ codeHash, userId, attempts: 0 }),
-      { expirationTtl: 300 },
-    );
+    await authService.issueAuthChallenge(db, {
+      kind: 'email-otp',
+      lookupKey: email,
+      userId,
+      subject: email,
+      secretHash: codeHash,
+      ttlSeconds: 300,
+      maxAttempts: 5,
+    });
 
     // Send email
     const emailProvider = createEmailProvider(getEmailConfig(c.env), c.env);
@@ -2212,6 +2830,7 @@ authRoute.openapi(signinEmailOtp, async (c) => {
 
     const userId = generateId();
     const otpReqLocale = parseAcceptLanguage(c.req.header('accept-language'));
+    let emailReservationId: string | null = null;
 
     try {
       // beforeSignUp hook
@@ -2220,9 +2839,9 @@ authRoute.openapi(signinEmailOtp, async (c) => {
       }, { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
 
       try {
-        await registerEmailPending(db, email, userId);
+        emailReservationId = await registerEmailPending(db, email, userId);
       } catch (err) {
-        if ((err as Error).message === 'EMAIL_ALREADY_REGISTERED') {
+        if (['EMAIL_ALREADY_REGISTERED', 'EMAIL_RESERVATION_CONFLICT'].includes((err as Error).message)) {
           return c.json({ ok: true });
         }
         throw new EdgeBaseError(500, 'Email OTP request failed.', undefined, 'internal-error');
@@ -2242,12 +2861,15 @@ authRoute.openapi(signinEmailOtp, async (c) => {
       if (exposeTestSecrets) devCode = code;
       const codeHash = await hashOtpSecret(code, getUserSecret(c.env));
 
-      // Store OTP in KV
-      await c.env.KV.put(
-        `email-otp:${email}`,
-        JSON.stringify({ codeHash, userId, attempts: 0 }),
-        { expirationTtl: 300 },
-      );
+      await authService.issueAuthChallenge(db, {
+        kind: 'email-otp',
+        lookupKey: email,
+        userId,
+        subject: email,
+        secretHash: codeHash,
+        ttlSeconds: 300,
+        maxAttempts: 5,
+      });
 
       // Send email
       const emailProvider = createEmailProvider(getEmailConfig(c.env), c.env);
@@ -2267,8 +2889,11 @@ authRoute.openapi(signinEmailOtp, async (c) => {
         }
       }
 
-      await confirmEmail(db, email, userId);
+      await confirmEmail(db, email, userId, emailReservationId!);
     } catch (err) {
+      if (emailReservationId) {
+        await authService.deleteProvisionalUser(db, userId).catch(() => {});
+      }
       if (err instanceof EdgeBaseError) throw err;
       return c.json({ ok: true });
     }
@@ -2316,39 +2941,35 @@ authRoute.openapi(verifyEmailOtp, async (c) => {
     code: body.code,
   });
 
-  // Look up OTP data from KV
-  const otpData = await c.env.KV.get(`email-otp:${email}`, 'json') as {
-    codeHash?: string; code?: string; userId: string; attempts: number;
-  } | null;
+  const db = getAuthDb(c);
+  const otpData = await authService.getAuthChallenge(db, 'email-otp', email);
 
   if (!otpData) {
     throw new EdgeBaseError(400, 'Invalid or expired OTP. Please request a new code.', undefined, 'invalid-token');
   }
-
-  if (otpData.attempts >= 5) {
-    await c.env.KV.delete(`email-otp:${email}`).catch(() => {});
+  if (otpData.attempts >= otpData.maxAttempts) {
     throw new EdgeBaseError(429, 'Too many failed OTP attempts. Please request a new code.', undefined, 'rate-limited');
   }
 
   const submittedCode = body.code.trim();
-  const otpMatches = otpData.codeHash
-    ? await verifyOtpSecret(submittedCode, otpData.codeHash, getUserSecret(c.env))
-    : timingSafeEqual(otpData.code ?? '', submittedCode);
+  const otpMatches = !!otpData.secretHash
+    && await verifyOtpSecret(submittedCode, otpData.secretHash, getUserSecret(c.env));
   if (!otpMatches) {
-    await c.env.KV.put(
-      `email-otp:${email}`,
-      JSON.stringify({ ...otpData, attempts: otpData.attempts + 1 }),
-      { expirationTtl: 300 },
-    ).catch(() => {});
+    const failure = await authService.recordAuthChallengeFailure(db, 'email-otp', email);
+    if (!failure || failure.attempts >= failure.maxAttempts) {
+      throw new EdgeBaseError(429, 'Too many failed OTP attempts. Please request a new code.', undefined, 'rate-limited');
+    }
     throw new EdgeBaseError(401, 'Invalid OTP code.', undefined, 'invalid-otp');
   }
 
-  // OTP valid — delete it (single-use)
-  await c.env.KV.delete(`email-otp:${email}`).catch(() => {});
+  const consumedOtp = await authService.consumeAuthChallenge(db, 'email-otp', email);
+  if (!consumedOtp) {
+    throw new EdgeBaseError(400, 'OTP was already used or expired.', undefined, 'invalid-token');
+  }
 
-  const { userId } = otpData;
+  const userId = consumedOtp.userId;
+  if (!userId) throw new EdgeBaseError(400, 'Invalid OTP owner.', undefined, 'invalid-token');
   const ip = getClientIP(c.env, c.req.raw);
-  const db = getAuthDb(c);
 
   const user = await authService.getUserById(db, userId);
   if (!user) throw new EdgeBaseError(404, 'User not found.', undefined, 'user-not-found');
@@ -2366,12 +2987,7 @@ authRoute.openapi(verifyEmailOtp, async (c) => {
   if (mfaConfig?.totp) {
     const factors = await authService.listVerifiedMfaFactors(db, userId);
     if (factors.length > 0) {
-      const mfaTicket = crypto.randomUUID();
-      await c.env.KV.put(
-        `mfa-ticket:${mfaTicket}`,
-        JSON.stringify({ userId }),
-        { expirationTtl: 300 },
-      );
+      const mfaTicket = await issueMfaTicket(db, userId);
       return c.json({
         mfaRequired: true,
         mfaTicket,
@@ -2464,22 +3080,6 @@ authRoute.openapi(mfaTotpEnroll, async (c) => {
   });
 });
 
-// Maximum wrong TOTP codes tolerated per signin MFA ticket before the ticket is
-// burned (bounds brute-force within a ticket's 5-minute lifetime).
-const MFA_MAX_TICKET_ATTEMPTS = 5;
-
-// Reject a TOTP code whose time-step was already consumed for this scope, then
-// record it. Prevents replay of a still-in-window code (the ±1 step ≈ 90s).
-async function assertTotpNotReplayed(env: Env, scopeKey: string, counter: number): Promise<void> {
-  const key = `totp-used:${scopeKey}`;
-  const last = await env.KV.get(key);
-  if (last !== null && counter <= Number(last)) {
-    throw new EdgeBaseError(401, 'This code was already used. Wait for the next code.', undefined, 'invalid-totp');
-  }
-  // TTL only needs to outlive the verification window; the code is worthless after that.
-  await env.KV.put(key, String(counter), { expirationTtl: 120 });
-}
-
 // POST /mfa/totp/verify — confirm TOTP enrollment (authenticated)
 const mfaTotpVerify = createRoute({
   operationId: 'authMfaTotpVerify',
@@ -2521,10 +3121,19 @@ authRoute.openapi(mfaTotpVerify, async (c) => {
   const secret = await decryptSecret(factor.secret as string, getUserSecret(c.env));
   const { valid, counter } = await verifyTOTPWithCounter(secret, body.code);
   if (!valid) throw new EdgeBaseError(400, 'Invalid TOTP code. Please try again.', undefined, 'invalid-totp');
-  await assertTotpNotReplayed(c.env, `enroll:${userId}:${body.factorId}`, counter);
-
-  // Mark factor as verified
-  await authService.verifyMfaFactor(db, body.factorId);
+  try {
+    await authService.verifyMfaFactorWithTotpCounter(db, {
+      factorId: body.factorId,
+      userId,
+      replayScope: `enroll:${userId}:${body.factorId}`,
+      counter,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'TOTP_REPLAY_OR_FACTOR_CONFLICT') {
+      throw new EdgeBaseError(401, 'This code was already used. Wait for the next code.', undefined, 'invalid-totp');
+    }
+    throw error;
+  }
 
   return c.json({ ok: true });
 });
@@ -2559,18 +3168,16 @@ authRoute.openapi(mfaVerify, async (c) => {
     code: body.code,
   });
 
-  // Look up mfaTicket from KV
-  const ticketData = await c.env.KV.get(`mfa-ticket:${body.mfaTicket}`, 'json') as {
-    userId: string;
-  } | null;
+  const db = getAuthDb(c);
+  const ticketData = await authService.getAuthChallenge(db, 'mfa-ticket', body.mfaTicket);
 
   if (!ticketData) {
     throw new EdgeBaseError(400, 'Invalid or expired MFA ticket.', undefined, 'invalid-token');
   }
 
   const { userId } = ticketData;
+  if (!userId) throw new EdgeBaseError(400, 'Invalid MFA ticket owner.', undefined, 'invalid-token');
   const ip = getClientIP(c.env, c.req.raw);
-  const db = getAuthDb(c);
 
   // Get verified TOTP factor
   const factor = await authService.getMfaFactorByUser(db, userId, 'totp');
@@ -2587,27 +3194,22 @@ authRoute.openapi(mfaVerify, async (c) => {
   const secret = await decryptSecret(factor.secret as string, getUserSecret(c.env));
   const { valid, counter } = await verifyTOTPWithCounter(secret, body.code);
   if (!valid) {
-    // Burn the ticket after too many wrong codes so a stolen ticket can't be
-    // used to brute-force TOTP for its full 5-minute lifetime.
-    const failKey = `mfa-ticket-fails:${body.mfaTicket}`;
-    const fails = Number((await c.env.KV.get(failKey)) ?? '0') + 1;
-    if (fails >= MFA_MAX_TICKET_ATTEMPTS) {
-      await Promise.all([
-        c.env.KV.delete(`mfa-ticket:${body.mfaTicket}`).catch(() => {}),
-        c.env.KV.delete(failKey).catch(() => {}),
-      ]);
-    } else {
-      await c.env.KV.put(failKey, String(fails), { expirationTtl: 300 }).catch(() => {});
-    }
+    await authService.recordAuthChallengeFailure(db, 'mfa-ticket', body.mfaTicket);
     throw new EdgeBaseError(401, 'Invalid TOTP code.', undefined, 'invalid-totp');
   }
-  await assertTotpNotReplayed(c.env, `login:${userId}:${String(factor.id)}`, counter);
-
-  // Delete mfaTicket (single-use) and its failure counter
-  await Promise.all([
-    c.env.KV.delete(`mfa-ticket:${body.mfaTicket}`).catch(() => {}),
-    c.env.KV.delete(`mfa-ticket-fails:${body.mfaTicket}`).catch(() => {}),
-  ]);
+  try {
+    await authService.completeMfaTotpChallenge(db, {
+      ticket: body.mfaTicket,
+      userId,
+      replayScope: `login:${userId}:${String(factor.id)}`,
+      counter,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'MFA_TOTP_CHALLENGE_CONFLICT') {
+      throw new EdgeBaseError(401, 'MFA ticket or code was already used.', undefined, 'invalid-totp');
+    }
+    throw error;
+  }
 
   // MFA passed — create session
   await authService.cleanExpiredSessionsForUser(db, userId);
@@ -2656,18 +3258,16 @@ authRoute.openapi(mfaRecovery, async (c) => {
     recoveryCode: body.recoveryCode,
   });
 
-  // Look up mfaTicket from KV
-  const ticketData = await c.env.KV.get(`mfa-ticket:${body.mfaTicket}`, 'json') as {
-    userId: string;
-  } | null;
+  const db = getAuthDb(c);
+  const ticketData = await authService.getAuthChallenge(db, 'mfa-ticket', body.mfaTicket);
 
   if (!ticketData) {
     throw new EdgeBaseError(400, 'Invalid or expired MFA ticket.', undefined, 'invalid-token');
   }
 
   const { userId } = ticketData;
+  if (!userId) throw new EdgeBaseError(400, 'Invalid MFA ticket owner.', undefined, 'invalid-token');
   const ip = getClientIP(c.env, c.req.raw);
-  const db = getAuthDb(c);
 
   // Disabled check
   const user = await authService.getUserById(db, userId);
@@ -2693,14 +3293,22 @@ authRoute.openapi(mfaRecovery, async (c) => {
   }
 
   if (!matchedCodeId) {
+    await authService.recordAuthChallengeFailure(db, 'mfa-ticket', body.mfaTicket);
     throw new EdgeBaseError(401, 'Invalid recovery code.', undefined, 'invalid-recovery-code');
   }
 
-  // Mark recovery code as used (single-use)
-  await authService.useRecoveryCode(db, matchedCodeId);
-
-  // Delete mfaTicket (single-use)
-  await c.env.KV.delete(`mfa-ticket:${body.mfaTicket}`).catch(() => {});
+  try {
+    await authService.completeMfaRecoveryChallenge(db, {
+      ticket: body.mfaTicket,
+      userId,
+      recoveryCodeId: matchedCodeId,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'MFA_RECOVERY_CHALLENGE_CONFLICT') {
+      throw new EdgeBaseError(401, 'MFA ticket or recovery code was already used.', undefined, 'invalid-recovery-code');
+    }
+    throw error;
+  }
 
   // MFA passed — create session
   await authService.cleanExpiredSessionsForUser(db, userId);
@@ -2982,6 +3590,7 @@ const signout = createRoute({
   request: {
     body: { content: { 'application/json': { schema: z.object({
       refreshToken: z.string().optional(),
+      pushDeviceId: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).optional(),
     }).passthrough() } }, required: false },
   },
   responses: {
@@ -2993,10 +3602,20 @@ const signout = createRoute({
 
 authRoute.openapi(signout, async (c) => {
   const cookieTransport = isCookieAuthTransport(c);
+  if (cookieTransport) rotateOAuthBrowserGeneration(c);
   try {
     const bodyText = await c.req.text();
-    let body: { refreshToken?: string };
+    let body: { refreshToken?: string; pushDeviceId?: string };
     try { body = bodyText.trim() ? JSON.parse(bodyText) : {}; } catch { throw new EdgeBaseError(400, 'Invalid JSON.', undefined, 'invalid-json'); }
+    if (
+      body.pushDeviceId !== undefined
+      && (typeof body.pushDeviceId !== 'string'
+        || body.pushDeviceId.length < 1
+        || body.pushDeviceId.length > 128
+        || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(body.pushDeviceId))
+    ) {
+      throw new EdgeBaseError(400, 'Invalid push device ID.', undefined, 'validation-failed');
+    }
     const refreshToken = cookieTransport
       ? (readRefreshCookie(c) ?? body.refreshToken)
       : body.refreshToken;
@@ -3037,6 +3656,32 @@ authRoute.openapi(signout, async (c) => {
     // beforeSignOut hook — blocking
     await executeAuthHook(c.env, c.executionCtx, 'beforeSignOut', { userId }, { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
 
+    // Optional push cleanup is authenticated by the verified refresh session,
+    // scoped to that exact user, and completed before revocation. A storage
+    // failure leaves the session valid so a local-first SDK can retain its
+    // durable retry authority instead of reporting a partially completed signout.
+    if (body.pushDeviceId) {
+      const pushStore = { kv: c.env.KV, authDb: db };
+      try {
+        const device = (await getDevicesForUser(pushStore, userId))
+          .find((candidate) => candidate.deviceId === body.pushDeviceId);
+        if (device?.token) {
+          const provider = createPushProvider(parseConfig(c.env).push, c.env);
+          if (provider) await provider.unsubscribeTokenFromTopic(device.token, 'all').catch(() => {});
+        }
+        // Missing devices are an idempotent success; ownership is implicit in
+        // the user-scoped lookup/removal and cannot affect another account.
+        await unregisterToken(pushStore, userId, body.pushDeviceId);
+      } catch {
+        throw new EdgeBaseError(
+          503,
+          'Push device cleanup failed; the session was not revoked. Retry sign-out.',
+          undefined,
+          'push-cleanup-failed',
+        );
+      }
+    }
+
     // Revoke the exact session already verified before the blocking hook. The
     // refresh token may rotate more than once while that hook is awaiting.
     await authService.deleteSession(db, sessionResult.session.id as string);
@@ -3049,7 +3694,7 @@ authRoute.openapi(signout, async (c) => {
     if (cookieTransport) {
       clearRefreshCookie(c);
     }
-    return c.json({ ok: true });
+    return c.json({ ok: true, pushUnregistered: Boolean(body.pushDeviceId) });
   } catch (err) {
     // Only an invalid/expired session makes the refresh cookie unusable. A 403
     // from an access rule or blocking beforeSignOut hook intentionally leaves
@@ -3203,7 +3848,7 @@ authRoute.openapi(changeEmail, async (c) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
     throw new EdgeBaseError(400, 'Invalid email format.', undefined, 'invalid-email');
   }
-  const redirect = parseClientRedirectInput(c.env, body);
+  const redirect = parseClientRedirectInput(c.env, body, c.req.raw);
   await ensureAuthActionAllowed(c, 'changeEmail', { userId, newEmail });
 
   // Rate limit per user
@@ -3237,13 +3882,18 @@ authRoute.openapi(changeEmail, async (c) => {
 
   const oldEmail = user.email as string;
 
-  // 3. Generate verification token and store in KV
+  // 3. Generate a single-use verification token in the auth DB.
   const token = crypto.randomUUID();
-  await c.env.KV.put(
-    `email-change:${token}`,
-    JSON.stringify({ userId, newEmail, oldEmail }),
-    { expirationTtl: 86400 },
-  );
+  await authService.issueAuthChallenge(db, {
+    kind: 'email-change',
+    lookupKey: token,
+    userId,
+    subject: newEmail,
+    payload: JSON.stringify({ newEmail, oldEmail }),
+    ttlSeconds: 86400,
+    maxAttempts: 1,
+    replaceUserKind: true,
+  });
 
   // 4. Send verification email to the NEW email address
   const provider = createEmailProvider(getEmailConfig(c.env), c.env);
@@ -3330,48 +3980,73 @@ authRoute.openapi(verifyEmailChange, async (c) => {
 
   const db = getAuthDb(c);
 
-  // 1. Read from KV
-  const data = await c.env.KV.get(`email-change:${body.token}`, 'json') as {
-    userId: string; newEmail: string; oldEmail: string;
-  } | null;
+  const challenge = await authService.consumeAuthChallenge(db, 'email-change', body.token);
 
-  if (!data) {
+  if (!challenge?.userId || !challenge.payload) {
     throw new EdgeBaseError(400, 'Invalid or expired email change token.', undefined, 'invalid-token');
   }
+  let payload: { newEmail: string; oldEmail: string };
+  try {
+    payload = JSON.parse(challenge.payload) as { newEmail: string; oldEmail: string };
+  } catch {
+    throw new EdgeBaseError(400, 'Invalid email change token.', undefined, 'invalid-token');
+  }
+  const userId = challenge.userId;
+  const { newEmail, oldEmail } = payload;
+  if (
+    typeof newEmail !== 'string'
+    || typeof oldEmail !== 'string'
+    || challenge.subject !== newEmail
+  ) {
+    throw new EdgeBaseError(400, 'Invalid email change token.', undefined, 'invalid-token');
+  }
 
-  const { userId, newEmail, oldEmail } = data;
+  const currentUser = await authService.getUserById(db, userId);
+  if (!currentUser) {
+    throw new EdgeBaseError(404, 'User not found.', undefined, 'user-not-found');
+  }
+  if (currentUser.email !== oldEmail) {
+    throw new EdgeBaseError(409, 'Email changed after this request was issued. Request a new change token.', undefined, 'conflict');
+  }
 
-  // 2. Delete KV token (single-use)
-  await c.env.KV.delete(`email-change:${body.token}`).catch(() => {});
-
-  // 3. Check new email is still not registered (race condition check)
+  // 2. Check new email is still not registered (race condition check)
   const existing = await lookupEmail(db, newEmail);
   if (existing) {
     throw new EdgeBaseError(409, 'Email is already registered.', undefined, 'email-already-exists');
   }
 
   // 4. Register new email as pending in D1
+  let emailReservationId: string;
   try {
-    await registerEmailPending(db, newEmail, userId);
+    emailReservationId = await registerEmailPending(db, newEmail, userId);
   } catch (err) {
-    if ((err as Error).message === 'EMAIL_ALREADY_REGISTERED') {
+    if (['EMAIL_ALREADY_REGISTERED', 'EMAIL_RESERVATION_CONFLICT'].includes((err as Error).message)) {
       throw new EdgeBaseError(409, 'Email is already registered.', undefined, 'email-already-exists');
     }
     throw new EdgeBaseError(500, 'Email change failed.', undefined, 'internal-error');
   }
 
-  // 5. Update user email directly in D1
+  // 5. Update + confirm + remove the prior identity atomically.
   try {
-    await authService.updateUser(db, userId, { email: newEmail });
-  } catch {
-    await deleteEmailPending(db, newEmail).catch(() => {});
-    throw new EdgeBaseError(500, 'Email change failed.', undefined, 'internal-error');
-  }
-
-  // 6. Confirm new email + delete old email in D1
-  await confirmEmail(db, newEmail, userId);
-  if (oldEmail) {
-    await deleteEmail(db, oldEmail).catch(() => {});
+    await authService.finalizeEmailIdentity(db, {
+      userId,
+      expectedAuthRevision: Number(currentUser.authRevision ?? 0),
+      value: newEmail,
+      reservationId: emailReservationId,
+      updates: { email: newEmail },
+      previousValue: oldEmail,
+    });
+  } catch (error) {
+    await deleteEmailPending(db, newEmail, userId, emailReservationId).catch(() => {});
+    if (error instanceof Error && error.message === 'EMAIL_FINALIZATION_CONFLICT') {
+      throw new EdgeBaseError(409, 'Account changed while updating email. Request a new change token.', undefined, 'auth-state-changed');
+    }
+    throw new EdgeBaseError(
+      500,
+      `Email change failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      undefined,
+      'internal-error',
+    );
   }
 
   // Sync _users_public
@@ -3431,12 +4106,19 @@ authRoute.openapi(passkeysRegisterOptions, async (c) => {
     attestationType: 'none',
   });
 
-  // Store challenge in KV (TTL 5 min)
-  await c.env.KV.put(
-    `webauthn-challenge:${userId}`,
-    options.challenge,
-    { expirationTtl: 300 },
-  );
+  try {
+    await authService.storeWebAuthnChallenge(db, {
+      challenge: options.challenge,
+      kind: 'registration',
+      userId,
+      ttlSeconds: 300,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'WEBAUTHN_CHALLENGE_CAPACITY') {
+      throw new EdgeBaseError(429, 'Too many active passkey challenges. Try again shortly.', undefined, 'rate-limited');
+    }
+    throw error;
+  }
 
   return c.json({ options });
 });
@@ -3475,12 +4157,28 @@ authRoute.openapi(passkeysRegister, async (c) => {
   if (!user) throw new EdgeBaseError(404, 'User not found.', undefined, 'user-not-found');
   if (Number(user.disabled) === 1) throw new EdgeBaseError(403, 'This account has been disabled.', undefined, 'account-disabled');
 
-  // Retrieve challenge from KV
-  const expectedChallenge = await c.env.KV.get(`webauthn-challenge:${userId}`);
-  if (!expectedChallenge) throw new EdgeBaseError(400, 'Challenge expired or not found. Please request new registration options.', undefined, 'challenge-expired');
-
-  // Clean up challenge (single-use)
-  await c.env.KV.delete(`webauthn-challenge:${userId}`);
+  const clientDataJSON = requireWebAuthnBase64Url(
+    body.response.response?.clientDataJSON,
+    'clientDataJSON',
+    1,
+    131_072,
+  );
+  let registrationChallenge: string;
+  try {
+    const decoded = atob(clientDataJSON.replace(/-/g, '+').replace(/_/g, '/'));
+    registrationChallenge = requireWebAuthnBase64Url(
+      JSON.parse(decoded).challenge,
+      'challenge',
+      16,
+      512,
+    );
+  } catch {
+    throw new EdgeBaseError(400, 'Invalid clientDataJSON.', undefined, 'invalid-input');
+  }
+  const challengeRecord = await authService.getWebAuthnChallenge(db, registrationChallenge, 'registration');
+  if (!challengeRecord || challengeRecord.userId !== userId) {
+    throw new EdgeBaseError(400, 'Challenge expired or not found. Please request new registration options.', undefined, 'challenge-expired');
+  }
 
   const expectedOrigin = Array.isArray(passkeysConfig.origin) ? passkeysConfig.origin : [passkeysConfig.origin];
 
@@ -3488,7 +4186,7 @@ authRoute.openapi(passkeysRegister, async (c) => {
   try {
     verification = await verifyRegistrationResponse({
       response: body.response,
-      expectedChallenge,
+      expectedChallenge: registrationChallenge,
       expectedOrigin,
       expectedRPID: passkeysConfig.rpID,
       // Registration/auth options use userVerification: 'preferred', so server verification
@@ -3508,7 +4206,8 @@ authRoute.openapi(passkeysRegister, async (c) => {
     throw new EdgeBaseError(400, 'Registration verification failed.', undefined, 'invalid-input');
   }
 
-  const { credentialID, credentialPublicKey, counter } = verification.registrationInfo;
+  const { credentialID: rawCredentialId, credentialPublicKey, counter } = verification.registrationInfo;
+  const credentialID = requireWebAuthnBase64Url(rawCredentialId, 'credential ID', 1, 2_048);
   const transports = body.response.response?.transports || [];
 
   // Convert credentialPublicKey Uint8Array to base64 for TEXT storage
@@ -3517,17 +4216,16 @@ authRoute.openapi(passkeysRegister, async (c) => {
   const credId = generateId();
 
   try {
-    await authService.createWebAuthnCredential(db, {
+    await authService.createPasskeyIdentity(db, {
       id: credId,
       userId,
       credentialId: credentialID,
       credentialPublicKey: pubKeyBase64,
       counter,
       transports: JSON.stringify(transports),
+      registrationChallenge,
     });
 
-    // Register in D1 passkey index
-    await registerPasskey(db, credentialID, userId);
   } catch (error) {
     console.error('[Passkeys] Failed to persist registered credential:', error);
     throw new EdgeBaseError(
@@ -3600,12 +4298,19 @@ authRoute.openapi(passkeysAuthOptions, async (c) => {
     userVerification: 'preferred',
   });
 
-  // Store challenge in KV (keyed by challenge itself for discoverable flow)
-  await c.env.KV.put(
-    `webauthn-auth-challenge:${options.challenge}`,
-    JSON.stringify({ userId: userId || null }),
-    { expirationTtl: 300 },
-  );
+  try {
+    await authService.storeWebAuthnChallenge(db, {
+      challenge: options.challenge,
+      kind: 'authentication',
+      userId: userId ?? null,
+      ttlSeconds: 300,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'WEBAUTHN_CHALLENGE_CAPACITY') {
+      throw new EdgeBaseError(429, 'Too many active passkey challenges. Try again shortly.', undefined, 'rate-limited');
+    }
+    throw error;
+  }
 
   return c.json({ options });
 });
@@ -3638,8 +4343,7 @@ authRoute.openapi(passkeysAuthenticate, async (c) => {
   const body = await c.req.json<{ response: any }>();
   if (!body.response) throw new EdgeBaseError(400, 'Authentication response is required.', undefined, 'invalid-input');
 
-  const credentialId = body.response.id as string;
-  if (!credentialId) throw new EdgeBaseError(400, 'Credential ID is required in the response.', undefined, 'invalid-input');
+  const credentialId = requireWebAuthnBase64Url(body.response.id, 'Credential ID', 1, 2_048);
   await ensureAuthActionAllowed(c, 'passkeysAuthenticate', { credentialId });
 
   const ip = getClientIP(c.env, c.req.raw);
@@ -3650,26 +4354,27 @@ authRoute.openapi(passkeysAuthenticate, async (c) => {
   if (!credRow) throw new EdgeBaseError(400, 'Unknown credential.', undefined, 'invalid-input');
 
   // Extract challenge from clientDataJSON
-  const clientDataJSON = body.response.response?.clientDataJSON as string;
-  if (!clientDataJSON) throw new EdgeBaseError(400, 'clientDataJSON is required in the response.', undefined, 'invalid-input');
+  const clientDataJSON = requireWebAuthnBase64Url(
+    body.response.response?.clientDataJSON,
+    'clientDataJSON',
+    1,
+    131_072,
+  );
 
   let parsedChallenge: string;
   try {
     const decoded = atob(clientDataJSON.replace(/-/g, '+').replace(/_/g, '/'));
     const parsed = JSON.parse(decoded);
-    parsedChallenge = parsed.challenge;
+    parsedChallenge = requireWebAuthnBase64Url(parsed.challenge, 'challenge', 16, 512);
   } catch {
     throw new EdgeBaseError(400, 'Invalid clientDataJSON.', undefined, 'invalid-input');
   }
 
-  // Retrieve challenge data from KV
-  const challengeData = await c.env.KV.get(`webauthn-auth-challenge:${parsedChallenge}`);
-  if (!challengeData) throw new EdgeBaseError(400, 'Challenge expired or not found.', undefined, 'challenge-expired');
-
-  // Clean up challenge (single-use)
-  await c.env.KV.delete(`webauthn-auth-challenge:${parsedChallenge}`);
-
   const userId = credRow.userId as string;
+  const challengeRecord = await authService.getWebAuthnChallenge(db, parsedChallenge, 'authentication');
+  if (!challengeRecord || (challengeRecord.userId !== null && challengeRecord.userId !== userId)) {
+    throw new EdgeBaseError(400, 'Challenge expired or not found.', undefined, 'challenge-expired');
+  }
   const user = await authService.getUserById(db, userId);
   if (!user) throw new EdgeBaseError(404, 'User not found.', undefined, 'user-not-found');
   if (Number(user.disabled) === 1) throw new EdgeBaseError(403, 'This account has been disabled.', undefined, 'account-disabled');
@@ -3706,8 +4411,20 @@ authRoute.openapi(passkeysAuthenticate, async (c) => {
     throw new EdgeBaseError(401, 'Authentication verification failed.', undefined, 'invalid-credentials');
   }
 
-  // Update counter
-  await authService.updateWebAuthnCounter(db, credentialId, verification.authenticationInfo.newCounter);
+  try {
+    await authService.completePasskeyAuthentication(db, {
+      challenge: parsedChallenge,
+      credentialId,
+      userId,
+      expectedCounter: Number(credRow.counter ?? 0),
+      newCounter: verification.authenticationInfo.newCounter,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'PASSKEY_AUTH_STATE_CONFLICT') {
+      throw new EdgeBaseError(401, 'Passkey assertion was already used or the credential changed.', undefined, 'invalid-credentials');
+    }
+    throw error;
+  }
 
   // Run beforeSignIn hook
   const sanitizedUser = authService.sanitizeUser(user);
@@ -3721,12 +4438,7 @@ authRoute.openapi(passkeysAuthenticate, async (c) => {
   if (mfaConfig?.totp) {
     const factors = await authService.listVerifiedMfaFactors(db, userId);
     if (factors.length > 0) {
-      const mfaTicket = crypto.randomUUID();
-      await c.env.KV.put(
-        `mfa-ticket:${mfaTicket}`,
-        JSON.stringify({ userId }),
-        { expirationTtl: 300 },
-      );
+      const mfaTicket = await issueMfaTicket(db, userId);
       return c.json({
         mfaRequired: true,
         mfaTicket,
@@ -3797,6 +4509,7 @@ const passkeysDelete = createRoute({
   },
   responses: {
     200: { description: 'Success', content: { 'application/json': { schema: jsonResponseSchema } } },
+    400: { description: 'Cannot delete the last sign-in method', content: { 'application/json': { schema: errorResponseSchema } } },
     401: { description: 'Authentication required', content: { 'application/json': { schema: errorResponseSchema } } },
     404: { description: 'Passkey not found', content: { 'application/json': { schema: errorResponseSchema } } },
   },
@@ -3805,18 +4518,37 @@ const passkeysDelete = createRoute({
 authRoute.openapi(passkeysDelete, async (c) => {
   const userId = requireAuth(c.get('auth'));
   const db = getAuthDb(c);
-  const credentialId = decodeURIComponent(c.req.param('credentialId')!);
+  const credentialId = requireWebAuthnBase64Url(
+    decodeURIComponent(c.req.param('credentialId')!),
+    'Credential ID',
+    1,
+    2_048,
+  );
   await ensureAuthActionAllowed(c, 'passkeysDelete', { userId, credentialId });
 
   // Verify credential belongs to user
   const cred = await authService.getWebAuthnCredential(db, credentialId);
   if (!cred || cred.userId !== userId) throw new EdgeBaseError(404, 'Passkey not found.', undefined, 'not-found');
 
-  // Delete from _webauthn_credentials table
-  await authService.deleteWebAuthnCredential(db, credentialId, userId);
-
-  // Also remove from D1 passkey index
-  await deletePasskey(db, credentialId).catch(() => {});
+  const identityState = await getIdentityState(c.env, db, userId);
+  if (identityState.summary.total <= 1) {
+    throw new EdgeBaseError(400, 'Cannot delete the last sign-in method.', undefined, 'invalid-input');
+  }
+  try {
+    await authService.deletePasskeyIdentity(db, credentialId, userId, {
+      independentMethodCount:
+        identityState.summary.total
+        - identityState.summary.oauthCount
+        - identityState.summary.passkeyCount,
+      includePasskeys: !!getPasskeysConfig(c.env)?.enabled,
+      expectedAuthRevision: Number(identityState.user.authRevision ?? 0),
+    });
+  } catch (error) {
+    if ((error as Error).message === 'LAST_SIGN_IN_METHOD') {
+      throw new EdgeBaseError(400, 'Cannot delete the last sign-in method.', undefined, 'invalid-input');
+    }
+    throw error;
+  }
 
   return c.json({ ok: true });
 });
@@ -4075,6 +4807,7 @@ const deleteIdentity = createRoute({
   },
   responses: {
     200: { description: 'Success', content: { 'application/json': { schema: jsonResponseSchema } } },
+    400: { description: 'Cannot unlink the last sign-in method', content: { 'application/json': { schema: errorResponseSchema } } },
     401: { description: 'Authentication required', content: { 'application/json': { schema: errorResponseSchema } } },
     404: { description: 'Identity not found', content: { 'application/json': { schema: errorResponseSchema } } },
   },
@@ -4086,7 +4819,7 @@ authRoute.openapi(deleteIdentity, async (c) => {
   const identityId = c.req.param('identityId')!;
   await ensureAuthActionAllowed(c, 'deleteIdentity', { userId, identityId });
 
-  const { oauthAccounts, summary } = await getIdentityState(c.env, db, userId);
+  const { user, oauthAccounts, summary } = await getIdentityState(c.env, db, userId);
   const identity = oauthAccounts.find((account) => account.id === identityId);
   if (!identity) {
     throw new EdgeBaseError(404, 'Identity not found.', undefined, 'not-found');
@@ -4095,8 +4828,24 @@ authRoute.openapi(deleteIdentity, async (c) => {
     throw new EdgeBaseError(400, 'Cannot unlink the last sign-in method.', undefined, 'invalid-input');
   }
 
-  await authService.deleteOAuthAccount(db, identity.id);
-  await deleteOAuth(db, identity.provider, identity.providerUserId).catch(() => {});
+  try {
+    await authService.deleteOAuthIdentity(db, {
+      accountId: identity.id,
+      userId,
+      provider: identity.provider,
+      providerUserId: identity.providerUserId,
+      remainingMethodGuard: {
+        independentMethodCount: summary.total - summary.oauthCount - summary.passkeyCount,
+        includePasskeys: !!getPasskeysConfig(c.env)?.enabled,
+        expectedAuthRevision: Number(user.authRevision ?? 0),
+      },
+    });
+  } catch (error) {
+    if ((error as Error).message === 'LAST_SIGN_IN_METHOD') {
+      throw new EdgeBaseError(400, 'Cannot unlink the last sign-in method.', undefined, 'invalid-input');
+    }
+    throw error;
+  }
 
   const next = await getIdentityState(c.env, db, userId);
   return c.json({
@@ -4136,75 +4885,208 @@ const linkEmail = createRoute({
 });
 
 authRoute.openapi(linkEmail, async (c) => {
-  const userId = requireAuth(c.get('auth'));
+  const auth = c.get('auth') as AuthContext | null;
+  const userId = requireAuth(auth);
   const db = getAuthDb(c);
   const body = await c.req.json<{ email: string; password: string }>();
 
   if (!body.email || !body.password) {
     throw new EdgeBaseError(400, 'Email and password are required.', undefined, 'invalid-input');
   }
-  body.email = body.email.trim().toLowerCase();
+  const email = body.email.trim().toLowerCase();
+  if (email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new EdgeBaseError(400, 'Invalid email format. Please provide a valid email address.', undefined, 'invalid-email');
+  }
   if (body.password.length < 8) {
     throw new EdgeBaseError(400, 'Password must be at least 8 characters.', undefined, 'password-too-short');
   }
-  await ensureAuthActionAllowed(c, 'linkEmail', { userId, email: body.email });
+  if (body.password.length > 256) {
+    throw new EdgeBaseError(400, 'Password must not exceed 256 characters.', undefined, 'password-too-long');
+  }
+
+  const completionResponse = (completion: RecoveredEmailLinkUpgrade) => {
+    syncUserPublic(
+      c.env,
+      c.executionCtx,
+      userId,
+      authService.buildPublicUserData(completion.user),
+    );
+    return sessionResponse(c, {
+      user: authService.sanitizeUser(completion.user),
+      accessToken: completion.accessToken,
+      refreshToken: completion.refreshToken,
+      sessionId: completion.sessionId,
+    });
+  };
+
+  if (!auth?.sessionId) {
+    throw new EdgeBaseError(401, 'An active session is required.', undefined, 'invalid-session');
+  }
+  const initiatingSessionId = auth.sessionId;
+  const recoverSubmittedCompletion = (): Promise<RecoveredEmailLinkUpgrade | null> =>
+    auth.isAnonymous
+      ? recoverEmailLinkUpgrade(
+          c.env,
+          db,
+          userId,
+          initiatingSessionId,
+          email,
+          body.password,
+        )
+      : Promise.resolve(null);
+
+  // A committed anonymous upgrade revokes the initiating sid. A retry with
+  // that stale sid may recover only the exact bounded user/email/password
+  // completion; every fresh mutation below still requires an active session.
+  const completed = await recoverSubmittedCompletion();
+  if (completed) return completionResponse(completed);
+
+  try {
+    if (!await isAuthSessionActive(
+      c.env as unknown as Record<string, unknown>,
+      userId,
+      auth.sessionId,
+    )) {
+      const racedCompletion = await recoverSubmittedCompletion();
+      if (racedCompletion) return completionResponse(racedCompletion);
+      throw new EdgeBaseError(401, 'Session was revoked or expired.', undefined, 'invalid-session');
+    }
+  } catch (error) {
+    if (error instanceof EdgeBaseError) throw error;
+    if (error instanceof AuthSessionAuthorityUnavailableError) {
+      throw new EdgeBaseError(
+        503,
+        'Authentication session validation is temporarily unavailable.',
+        undefined,
+        'auth-authority-unavailable',
+      );
+    }
+    throw error;
+  }
+
+  await ensureAuthActionAllowed(c, 'linkEmail', { userId, email });
 
   // Verify user exists and is anonymous
   const user = await authService.getUserById(db, userId);
   if (!user) throw new EdgeBaseError(404, 'User not found.', undefined, 'user-not-found');
-  if (!user.isAnonymous) throw new EdgeBaseError(400, 'User is not anonymous.', undefined, 'invalid-input');
+  if (Number(user.isAnonymous) !== 1) {
+    const racedCompletion = await recoverSubmittedCompletion();
+    if (racedCompletion) return completionResponse(racedCompletion);
+    throw new EdgeBaseError(400, 'User is not anonymous.', undefined, 'invalid-input');
+  }
   if (Number(user.disabled) === 1) throw new EdgeBaseError(403, 'Account is disabled.', undefined, 'account-disabled');
 
+  const policyResult = await validatePassword(body.password, getPasswordPolicyConfig(c.env));
+  if (!policyResult.valid) {
+    throw new EdgeBaseError(
+      400,
+      policyResult.errors[0],
+      { password: { code: 'password_policy', message: policyResult.errors.join('; ') } },
+      'password-policy',
+    );
+  }
+
   // Check email uniqueness in D1
-  const existing = await lookupEmail(db, body.email);
+  const existing = await lookupEmail(db, email) || await healEmailIndexFromCanonicalUser(db, email);
   if (existing) {
+    const racedCompletion = await recoverSubmittedCompletion();
+    if (racedCompletion) return completionResponse(racedCompletion);
     throw new EdgeBaseError(409, 'Email is already registered.', undefined, 'email-already-exists');
   }
 
-  // Register email as pending in D1
+  const { sessionId, reservationId } = await deriveEmailLinkCompletionIds(userId, email);
+  const passwordHash = await hashPassword(body.password);
+  const passwordProof = await createEmailLinkPasswordProof(
+    c.env,
+    userId,
+    initiatingSessionId,
+    email,
+    body.password,
+  );
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const refreshToken = await signRefreshToken(
+    { sub: userId, type: 'refresh', jti: sessionId },
+    getUserSecret(c.env),
+    getRefreshTokenTTL(c.env),
+  );
+  const replacementAccessToken = await generateAccessToken(
+    c.env,
+    { ...user, email, passwordHash, isAnonymous: 0 },
+    undefined,
+    sessionId,
+  );
+  const refreshTTLSeconds = parseDuration(getRefreshTokenTTL(c.env));
+  const sessionExpiresAt = new Date(now.getTime() + refreshTTLSeconds * 1_000).toISOString();
+  const completionExpiresAt = new Date(now.getTime() + EMAIL_LINK_COMPLETION_TTL_MS).toISOString();
+  const encryptedCompletion = await encryptSecret(
+    JSON.stringify({
+      version: 1,
+      userId,
+      initiatingSessionId,
+      email,
+      sessionId,
+      accessToken: replacementAccessToken,
+      refreshToken,
+    } satisfies EmailLinkUpgradeCompletionPayload),
+    emailLinkCompletionEncryptionKey(getUserSecret(c.env)),
+  );
+
+  // Prepare all fallible cryptographic material before reserving the email so
+  // a local hashing/signing/encryption failure cannot strand a pending owner.
+  // Concurrent workers still use the same reservation authority and converge
+  // on the single checkpoint/session winner committed below.
   try {
-    await registerEmailPending(db, body.email, userId);
+    await registerEmailPending(db, email, userId, reservationId);
   } catch (err) {
-    if ((err as Error).message === 'EMAIL_ALREADY_REGISTERED') {
+    const racedCompletion = await recoverSubmittedCompletion();
+    if (racedCompletion) return completionResponse(racedCompletion);
+    if (['EMAIL_ALREADY_REGISTERED', 'EMAIL_RESERVATION_CONFLICT'].includes((err as Error).message)) {
       throw new EdgeBaseError(409, 'Email is already registered.', undefined, 'email-already-exists');
     }
-    throw err;
+    throw new EdgeBaseError(500, 'Email linking failed.', undefined, 'internal-error');
   }
 
-  // Update user in D1
-  const passwordHash = await hashPassword(body.password);
   try {
-    await authService.updateUser(db, userId, {
-      email: body.email,
+    await authService.finalizeAnonymousEmailUpgrade(db, {
+      userId,
+      initiatingSessionId,
+      expectedAuthRevision: Number(user.authRevision ?? 0),
+      email,
+      previousEmail: typeof user.email === 'string' ? user.email : null,
       passwordHash,
-      isAnonymous: 0,
+      reservationId,
+      passwordProof,
+      encryptedCompletion,
+      completionExpiresAt,
+      replacementSession: {
+        id: sessionId,
+        userId,
+        refreshToken,
+        expiresAt: sessionExpiresAt,
+        metadata: JSON.stringify({
+          ip: getClientIP(c.env, c.req.raw),
+          userAgent: (c.req.header('user-agent') || 'email-link').slice(0, 1_024),
+          lastActiveAt: nowIso,
+        }),
+      },
     });
   } catch (err) {
-    await deleteEmailPending(db, body.email).catch(() => {});
-    throw new EdgeBaseError(500, `Link failed: ${(err as Error).message}`, undefined, 'internal-error');
+    // Recover both a concurrent winner and an unknown commit outcome.
+    const racedCompletion = await recoverSubmittedCompletion();
+    if (racedCompletion) return completionResponse(racedCompletion);
+    await deleteEmailPending(db, email, userId, reservationId).catch(() => {});
+    if (err instanceof Error && err.message === 'EMAIL_UPGRADE_COMPLETION_CONFLICT') {
+      throw new EdgeBaseError(409, 'Anonymous account changed while linking email. Retry the link.', undefined, 'auth-state-changed');
+    }
+    throw new EdgeBaseError(500, 'Email linking failed.', undefined, 'internal-error');
   }
 
-  // Confirm email in D1
-  await confirmEmail(db, body.email, userId);
-
-  // Best-effort: delete from _anon_index
-  await deleteAnon(db, userId).catch(() => {});
-
-  // Sync _users_public
-  const updatedUser = await authService.getUserById(db, userId);
-  if (updatedUser) {
-    syncUserPublic(c.env, c.executionCtx, userId, authService.buildPublicUserData(updatedUser));
+  const recovered = await recoverSubmittedCompletion();
+  if (!recovered) {
+    throw new EdgeBaseError(500, 'Email linking completed but its session checkpoint is missing.', undefined, 'internal-error');
   }
-
-  // Generate new tokens (isAnonymous = false now)
-  const session = await createSessionAndTokens(c.env, userId, '0.0.0.0', 'link');
-
-  return sessionResponse(c, {
-    user: authService.sanitizeUser(updatedUser || user),
-    accessToken: session.accessToken,
-    refreshToken: session.refreshToken,
-    sessionId: session.sessionId,
-  });
+  return completionResponse(recovered);
 });
 
 // ─── Email Verification & Password Reset (M14,) ───
@@ -4236,7 +5118,7 @@ authRoute.openapi(requestEmailVerification, async (c) => {
     redirectUrl?: string;
     state?: string;
   }>().catch(() => ({}));
-  const redirect = parseClientRedirectInput(c.env, body);
+  const redirect = parseClientRedirectInput(c.env, body, c.req.raw);
   await ensureAuthActionAllowed(c, 'verifyEmail', { userId });
 
   const db = getAuthDb(c);
@@ -4251,12 +5133,10 @@ authRoute.openapi(requestEmailVerification, async (c) => {
     throw new EdgeBaseError(429, 'Too many verification email requests. Try again later.', undefined, 'rate-limited');
   }
 
-  await authService.deleteEmailTokensByUserAndType(db, userId, 'verify');
-
   const token = crypto.randomUUID();
   const expiresInHours = 24;
   const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000).toISOString();
-  await authService.createEmailToken(db, {
+  await authService.replaceEmailToken(db, {
     token,
     userId,
     type: 'verify',
@@ -4329,19 +5209,12 @@ authRoute.openapi(verifyEmail, async (c) => {
 
   const db = getAuthDb(c);
 
-  // Look up token directly in D1
-  const row = await authService.getEmailTokenByType(db, body.token, 'verify');
+  const row = await authService.consumeEmailToken(db, body.token, 'verify');
   if (!row) throw new EdgeBaseError(400, 'Invalid or expired verification token.', undefined, 'invalid-token');
-
-  if (new Date(row.expiresAt as string) < new Date()) {
-    await authService.deleteEmailToken(db, body.token);
-    throw new EdgeBaseError(400, 'Verification token has expired. Please request a new one.', undefined, 'token-expired');
-  }
 
   const userId = row.userId as string;
 
   await authService.updateUser(db, userId, { verified: 1 });
-  await authService.deleteEmailTokensByUserAndType(db, userId, 'verify');
 
   // onEmailVerified hook -- non-blocking
   const verifiedUser = await authService.getUserById(db, userId);
@@ -4383,7 +5256,7 @@ authRoute.openapi(requestPasswordReset, async (c) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
     throw new EdgeBaseError(400, 'Invalid email format.', undefined, 'invalid-email');
   }
-  const redirect = parseClientRedirectInput(c.env, body);
+  const redirect = parseClientRedirectInput(c.env, body, c.req.raw);
 
   await ensureAuthActionAllowed(c, 'requestPasswordReset', body as unknown as Record<string, unknown>);
 
@@ -4403,14 +5276,11 @@ authRoute.openapi(requestPasswordReset, async (c) => {
     return c.json({ ok: true, message: 'If the email exists, a reset link has been sent.' });
   }
 
-  // Delete old reset tokens for this user
-  await authService.deleteEmailTokensByUserAndType(db, userId, 'password-reset');
-
   const token = crypto.randomUUID();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 60 * 60 * 1000); // 1h
 
-  await authService.createEmailToken(db, {
+  await authService.replaceEmailToken(db, {
     token,
     userId,
     type: 'password-reset',
@@ -4495,14 +5365,8 @@ authRoute.openapi(resetPassword, async (c) => {
     throw new EdgeBaseError(400, policyResult.errors[0], { password: { code: 'password_policy', message: policyResult.errors.join('; ') } }, 'password-policy');
   }
 
-  // Look up token in D1
-  const row = await authService.getEmailTokenByType(db, body.token, 'password-reset');
+  const row = await authService.consumeEmailToken(db, body.token, 'password-reset');
   if (!row) throw new EdgeBaseError(400, 'Invalid or expired password reset token.', undefined, 'invalid-token');
-
-  if (new Date(row.expiresAt as string) < new Date()) {
-    await authService.deleteEmailToken(db, body.token);
-    throw new EdgeBaseError(400, 'Password reset token has expired. Please request a new one.', undefined, 'token-expired');
-  }
 
   const userId = row.userId as string;
 
@@ -4524,8 +5388,5 @@ authRoute.openapi(resetPassword, async (c) => {
 
   // Revoke all sessions (force re-login)
   await authService.deleteAllUserSessions(db, userId);
-  // Delete all reset tokens
-  await authService.deleteEmailTokensByUserAndType(db, userId, 'password-reset');
-
   return c.json({ ok: true, message: 'Password reset. All sessions revoked.' });
 });

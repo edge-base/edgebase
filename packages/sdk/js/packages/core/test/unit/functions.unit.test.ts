@@ -32,6 +32,7 @@ beforeEach(() => {
   vi.spyOn(httpClient, 'put').mockResolvedValue({ data: 'put-response' });
   vi.spyOn(httpClient, 'patch').mockResolvedValue({ data: 'patch-response' });
   vi.spyOn(httpClient, 'delete').mockResolvedValue({ data: 'delete-response' });
+  vi.spyOn(httpClient, 'requestFunction').mockResolvedValue({ data: 'captcha-response' });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -103,6 +104,23 @@ describe('FunctionsClient.call — method routing', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('FunctionsClient.call — body forwarding', () => {
+  it('sends a protected function token through the dedicated header request path', async () => {
+    await functionsClient.call('protected', {
+      method: 'POST',
+      body: { value: 1 },
+      captchaToken: 'synthetic-captcha-token',
+    });
+
+    expect(httpClient.requestFunction).toHaveBeenCalledWith(
+      'POST',
+      '/api/functions/protected',
+      { value: 1 },
+      undefined,
+      'synthetic-captcha-token',
+    );
+    expect(httpClient.post).not.toHaveBeenCalled();
+  });
+
   it('POST forwards body', async () => {
     const body = { name: 'June', age: 25 };
     await functionsClient.call('create-user', { method: 'POST', body });

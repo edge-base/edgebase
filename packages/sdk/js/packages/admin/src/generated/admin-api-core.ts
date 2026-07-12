@@ -1,7 +1,7 @@
 /**
  * Auto-generated admin API Core — DO NOT EDIT.
  * Regenerate: npx tsx tools/sdk-codegen/generate.ts
- * Source: openapi.json (0.3.8)
+ * Source: openapi.json (0.4.0)
  */
 
 // ─── Interface ─────────────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ export interface GeneratedAdminApi {
   adminAuthImportUsers(body: unknown): Promise<unknown>;
   /** Broadcast to database live channel — POST /api/db/broadcast */
   databaseLiveBroadcast(body: unknown): Promise<unknown>;
-  /** Execute SQL via DatabaseDO — POST /api/sql */
+  /** Execute provider-aware raw SQL — POST /api/sql */
   executeSql(body: unknown): Promise<unknown>;
   /** Execute KV operation — POST /api/kv/{namespace} */
   kvOperation(namespace: string, body: unknown): Promise<unknown>;

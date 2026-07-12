@@ -81,9 +81,10 @@ Legend:
 Notes:
 - `@edge-base/web` desktop columns mean browser-hosted runtimes such as Electron renderer processes, not a native desktop-only SDK.
 - `:client` (Kotlin KMP) uses a no-op JVM captcha provider, so Windows/Linux desktop JVM targets are intentionally not marked supported here.
-- `EdgeBase.Unity` desktop support depends on a supported WebView host. The current macOS path is validated through an embedded `gree/unity-webview` window. Other desktop targets still require a supported host integration or a custom `TurnstileProvider.SetWebViewFactory(...)`.
+- `EdgeBase.Unity` desktop support depends on a supported WebView host. Native/desktop custom factories receive the app-owned hosted challenge URL plus a per-request channel; they must not construct inline Turnstile HTML.
 - `packages/unreal` uses the built-in browser runtime on supported targets; macOS, Android, and iOS are validated in the current example app flow.
 - Admin/server SDKs are not listed here because Service Key requests bypass captcha by design.
+- JavaScript, React Native, Dart/Flutter, Swift, Kotlin, Java, C#/Unity, and C++/Unreal Functions helpers accept a manually acquired token through `FunctionCallOptions` (`captchaToken`, or `CaptchaToken` in C#). They send it only in `X-EdgeBase-Captcha-Token` and never replay the single-use token after transport, 401, or 429 failures. Function calls do not automatically open the hosted challenge; acquire it with action `function` through the platform integration and retry explicitly with a new token when needed.
 
 ## Push Client Support
 

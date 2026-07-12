@@ -1,5 +1,6 @@
 import EdgeBaseCore
 import Foundation
+import Security
 #if canImport(WebKit)
 import WebKit
 #endif
@@ -17,6 +18,12 @@ public final class TurnstileProvider {
 
     private static var cachedSiteKey: String?
     private static var cachedBaseUrl: String?
+    private static var cachedSiteKeyAtUptime: TimeInterval?
+    static let siteKeyCacheTTL: TimeInterval = 300
+
+    static func isSiteKeyCacheFresh(age: TimeInterval) -> Bool {
+        age >= 0 && age < siteKeyCacheTTL
+    }
 
     // MARK: - Public API
 
@@ -28,7 +35,7 @@ public final class TurnstileProvider {
     ///   - action: Turnstile action string (e.g. "signup", "signin").
     ///   - manualToken: If the caller already has a token, it is returned as-is.
     /// - Returns: A captcha token string, or `nil` if captcha is not configured.
-    public static func resolveCaptchaToken(core: GeneratedDbApi, baseUrl: String, action: String, manualToken: String? = nil) async -> String? {
+    public static func resolveCaptchaToken(core: GeneratedDbApi, baseUrl: String, action: String, manualToken: String? = nil) async throws -> String? {
         // If a manual token was provided, use it directly.
         if let manualToken = manualToken, !manualToken.isEmpty {
             return manualToken
@@ -54,43 +61,84 @@ public final class TurnstileProvider {
         }
 
         // Fetch the siteKey from the server config (cached).
-        guard let siteKey = await fetchSiteKey(core: core, baseUrl: baseUrl) else {
+        guard try await fetchSiteKey(core: core, baseUrl: baseUrl) != nil else {
             return nil
         }
 
         // Acquire a token via WKWebView.
         do {
-            let token = try await acquireToken(siteKey: siteKey, action: action)
-            return token
+            return try await acquireToken(baseUrl: baseUrl, action: action)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as TurnstileError {
+            throw CaptchaUnavailableError(reason: error.reason, underlyingDescription: error.localizedDescription)
         } catch {
-            return nil
+            throw CaptchaUnavailableError(reason: "acquisition_failed", underlyingDescription: String(describing: error))
         }
     }
 
     // MARK: - Fetch siteKey
 
     /// Fetch the Turnstile siteKey via `GeneratedDbApi.getConfig()`.
-    /// The result is cached per baseUrl so we only hit the network once.
-    public static func fetchSiteKey(core: GeneratedDbApi, baseUrl: String) async -> String? {
-        // Return cached value if the baseUrl has not changed.
-        if let cached = cachedSiteKey, cachedBaseUrl == baseUrl {
+    /// A positive result is cached per baseUrl for five minutes so long-running
+    /// clients pick up hostname/site-key rotation.
+    @MainActor
+    public static func fetchSiteKey(core: GeneratedDbApi, baseUrl: String) async throws -> String? {
+        let now = ProcessInfo.processInfo.systemUptime
+        if let cached = cachedSiteKey,
+           cachedBaseUrl == baseUrl,
+           let cachedAt = cachedSiteKeyAtUptime,
+           isSiteKeyCacheFresh(age: now - cachedAt) {
             return cached
         }
+        cachedSiteKey = nil
+        cachedBaseUrl = nil
+        cachedSiteKeyAtUptime = nil
 
+        let result: Any
         do {
-            let result = try await core.getConfig()
-            if let json = result as? [String: Any],
-               let captcha = json["captcha"] as? [String: Any],
-               let siteKey = captcha["siteKey"] as? String, !siteKey.isEmpty {
-                cachedBaseUrl = baseUrl
-                cachedSiteKey = siteKey
-                return siteKey
-            }
+            result = try await core.getConfig()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as EdgeBaseError
+            where (200..<300).contains(error.statusCode) &&
+                error.message == "Invalid JSON response body" {
+            throw CaptchaUnavailableError(
+                reason: "config_invalid_response",
+                underlyingDescription: error.localizedDescription
+            )
         } catch {
-            // Network or parsing error — captcha is unavailable.
+            throw CaptchaUnavailableError(
+                reason: "config_fetch_failed",
+                underlyingDescription: String(describing: error)
+            )
         }
 
-        return nil
+        guard let json = result as? [String: Any] else {
+            throw CaptchaUnavailableError(reason: "config_invalid_response")
+        }
+        guard let captchaValue = json["captcha"] else {
+            throw CaptchaUnavailableError(reason: "config_invalid_response")
+        }
+        if captchaValue is NSNull {
+            return nil
+        }
+        guard let captcha = captchaValue as? [String: Any] else {
+            throw CaptchaUnavailableError(reason: "config_invalid_response")
+        }
+        guard let siteKeyValue = captcha["siteKey"], !(siteKeyValue is NSNull) else {
+            throw CaptchaUnavailableError(reason: "config_invalid_response")
+        }
+        guard let siteKey = siteKeyValue as? String else {
+            throw CaptchaUnavailableError(reason: "config_invalid_response")
+        }
+        guard !siteKey.isEmpty, siteKey.utf8.count <= 512 else {
+            throw CaptchaUnavailableError(reason: "config_invalid_response")
+        }
+        cachedBaseUrl = baseUrl
+        cachedSiteKey = siteKey
+        cachedSiteKeyAtUptime = ProcessInfo.processInfo.systemUptime
+        return siteKey
     }
 
     // MARK: - Acquire token via WKWebView
@@ -99,16 +147,26 @@ public final class TurnstileProvider {
     /// Acquire a Turnstile token by rendering the challenge in a WKWebView.
     /// Must run on the main actor because WKWebView is a UI component.
     @MainActor
-    public static func acquireToken(siteKey: String, action: String) async throws -> String {
-        return try await withCheckedThrowingContinuation { continuation in
-            let handler = TurnstileMessageHandler(continuation: continuation)
+    public static func acquireToken(baseUrl: String, action: String) async throws -> String {
+        let channel = try makeChallengeChannel()
+        let challengeURL = try makeChallengeURL(baseUrl: baseUrl, action: action, channel: channel)
+        let holder = TurnstileHandlerHolder()
+        return try await withTaskCancellationHandler(operation: {
+            try Task.checkCancellation()
+            defer { holder.handler = nil }
+            return try await withCheckedThrowingContinuation { continuation in
+            let handler = TurnstileMessageHandler(
+                channel: channel,
+                expectedURL: challengeURL,
+                continuation: continuation
+            )
+            holder.handler = handler
 
             let config = WKWebViewConfiguration()
             let controller = WKUserContentController()
-            controller.add(handler, name: "onToken")
-            controller.add(handler, name: "onError")
-            controller.add(handler, name: "onInteractive")
+            controller.add(handler, name: "edgebaseCaptcha")
             config.userContentController = controller
+            config.websiteDataStore = .default()
 
             let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), configuration: config)
             #if os(iOS)
@@ -119,12 +177,13 @@ public final class TurnstileProvider {
             #endif
 
             handler.webView = webView
+            handler.controller = controller
+            webView.navigationDelegate = handler
 
-            guard let overlayURL = Self.turnstileOverlayURL(siteKey: siteKey, action: action) else {
-                continuation.resume(throwing: TurnstileError.missingTemplate)
-                return
-            }
-            webView.loadFileURL(overlayURL, allowingReadAccessTo: overlayURL.deletingLastPathComponent())
+            var request = URLRequest(url: challengeURL)
+            request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            request.timeoutInterval = 30
+            webView.load(request)
 
             // Timeout after 30 seconds.
             let timeoutTask = Task {
@@ -132,28 +191,74 @@ public final class TurnstileProvider {
                 handler.fail(with: TurnstileError.timeout)
             }
             handler.timeoutTask = timeoutTask
+            if Task.isCancelled { handler.fail(with: CancellationError()) }
         }
+        }, onCancel: {
+            Task { @MainActor in holder.handler?.fail(with: CancellationError()) }
+        })
     }
 #else
     /// Stub for platforms without WebKit — always throws.
-    public static func acquireToken(siteKey: String, action: String) async throws -> String {
+    public static func acquireToken(baseUrl: String, action: String) async throws -> String {
         throw TurnstileError.unsupportedPlatform
     }
 #endif
 
-    // MARK: - HTML template
+    static func makeChallengeChannel() throws -> String {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            throw TurnstileError.secureRandomUnavailable
+        }
+        return bytes.map { String(format: "%02x", $0) }.joined()
+    }
 
-    private static func turnstileOverlayURL(siteKey: String, action: String) -> URL? {
-        guard let resourceURL = Bundle.module.url(forResource: "TurnstileOverlay", withExtension: "html") else {
+    static func makeChallengeURL(baseUrl: String, action: String, channel: String) throws -> URL {
+        let allowedActions = Set([
+            "signup", "signin", "anonymous", "magic-link", "phone",
+            "password-reset", "oauth", "function",
+        ])
+        guard allowedActions.contains(action),
+              channel.range(of: "^[A-Za-z0-9_-]{22,64}$", options: .regularExpression) != nil,
+              var components = URLComponents(string: baseUrl),
+              components.scheme?.lowercased() == "https",
+              components.host != nil,
+              components.user == nil,
+              components.password == nil,
+              components.path.isEmpty || components.path == "/",
+              components.query == nil,
+              components.fragment == nil else {
+            throw TurnstileError.invalidChallengeURL
+        }
+        components.path = "/api/captcha/challenge"
+        components.queryItems = [
+            URLQueryItem(name: "action", value: action),
+            URLQueryItem(name: "channel", value: channel),
+            URLQueryItem(name: "bridge", value: "webkit"),
+        ]
+        components.fragment = nil
+        guard let url = components.url else { throw TurnstileError.invalidChallengeURL }
+        return url
+    }
+
+    static func parseChallengeMessage(_ raw: String, channel: String) -> (type: String, value: String)? {
+        guard let data = raw.data(using: .utf8), data.count <= 4096,
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              payload["v"] as? Int == 1,
+              payload["channel"] as? String == channel,
+              let type = payload["type"] as? String,
+              let value = payload["value"] as? String else { return nil }
+        switch type {
+        case "token" where !value.isEmpty && value.count <= 2048:
+            return (type, value)
+        case "error":
+            return (type, String(value.prefix(256)))
+        case "interactive" where value == "show" || value == "hide":
+            return (type, value)
+        case "ready" where value.count <= 32:
+            return (type, value)
+        default:
             return nil
         }
-        var components = URLComponents(url: resourceURL, resolvingAgainstBaseURL: false)
-        components?.queryItems = [
-            URLQueryItem(name: "siteKey", value: siteKey),
-            URLQueryItem(name: "action", value: action),
-            URLQueryItem(name: "appearance", value: "interaction-only"),
-        ]
-        return components?.url
     }
 }
 
@@ -164,6 +269,19 @@ public enum TurnstileError: Error, LocalizedError {
     case challengeFailed(String)
     case missingTemplate
     case unsupportedPlatform
+    case invalidChallengeURL
+    case secureRandomUnavailable
+
+    public var reason: String {
+        switch self {
+        case .timeout: return "timeout"
+        case .challengeFailed(let reason): return reason
+        case .missingTemplate: return "template_missing"
+        case .unsupportedPlatform: return "unsupported_platform"
+        case .invalidChallengeURL: return "invalid_challenge_url"
+        case .secureRandomUnavailable: return "secure_random_unavailable"
+        }
+    }
 
     public var errorDescription: String? {
         switch self {
@@ -175,41 +293,143 @@ public enum TurnstileError: Error, LocalizedError {
             return "Turnstile overlay template is missing from the Swift package bundle."
         case .unsupportedPlatform:
             return "Turnstile is not supported on this platform (WebKit unavailable)."
+        case .invalidChallengeURL:
+            return "Turnstile requires a valid EdgeBase HTTPS base URL and fixed action."
+        case .secureRandomUnavailable:
+            return "Turnstile could not create a secure bridge channel."
         }
+    }
+}
+
+/// A local CAPTCHA runtime failure, distinct from a server auth rejection.
+public struct CaptchaUnavailableError: Error, LocalizedError, Sendable, Equatable {
+    public let code = "captcha-unavailable"
+    public let reason: String
+    public let underlyingDescription: String?
+
+    public init(reason: String, underlyingDescription: String? = nil) {
+        self.reason = reason
+        self.underlyingDescription = underlyingDescription
+    }
+
+    public var errorDescription: String? {
+        if let underlyingDescription, !underlyingDescription.isEmpty {
+            return "CAPTCHA unavailable: \(reason) (\(underlyingDescription))"
+        }
+        return "CAPTCHA unavailable: \(reason)"
     }
 }
 
 // MARK: - WKScriptMessageHandler
 
 #if canImport(WebKit)
-private final class TurnstileMessageHandler: NSObject, WKScriptMessageHandler {
+@MainActor
+private final class TurnstileHandlerHolder {
+    var handler: TurnstileMessageHandler?
+}
+
+@MainActor
+private final class TurnstileMessageHandler: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     private var continuation: CheckedContinuation<String, Error>?
+    private let channel: String
+    private let expectedURL: URL
     var webView: WKWebView?
+    weak var controller: WKUserContentController?
     var timeoutTask: Task<Void, Error>?
 
-    init(continuation: CheckedContinuation<String, Error>) {
+    init(
+        channel: String,
+        expectedURL: URL,
+        continuation: CheckedContinuation<String, Error>
+    ) {
+        self.channel = channel
+        self.expectedURL = expectedURL
         self.continuation = continuation
         super.init()
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        let value = message.body as? String ?? ""
+        guard message.name == "edgebaseCaptcha" else { return }
+        guard message.frameInfo.isMainFrame else {
+            fail(with: TurnstileError.challengeFailed("origin_frame_mismatch"))
+            return
+        }
+        guard message.frameInfo.securityOrigin.protocol.lowercased() == expectedURL.scheme?.lowercased(),
+              message.frameInfo.securityOrigin.host.lowercased() == expectedURL.host?.lowercased(),
+              message.frameInfo.securityOrigin.port == (expectedURL.port ?? 0) else {
+            fail(with: TurnstileError.challengeFailed("origin_mismatch"))
+            return
+        }
+        guard let raw = message.body as? String,
+              let parsed = TurnstileProvider.parseChallengeMessage(raw, channel: channel) else { return }
 
-        switch message.name {
-        case "onToken":
-            succeed(with: value)
-        case "onError":
-            fail(with: TurnstileError.challengeFailed(value))
-        case "onInteractive":
-            handleInteractive(value)
-        default:
+        switch parsed.type {
+        case "token":
+            succeed(with: parsed.value)
+        case "error":
+            fail(with: TurnstileError.challengeFailed(parsed.value))
+        case "interactive":
+            handleInteractive(parsed.value)
+        case "ready":
             break
+        default: break
         }
     }
 
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        let targetsMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+        if targetsMainFrame, navigationAction.request.url != expectedURL {
+            decisionHandler(.cancel)
+            fail(with: TurnstileError.challengeFailed("unexpected_navigation"))
+            return
+        }
+        decisionHandler(.allow)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        if navigationResponse.isForMainFrame,
+           let response = navigationResponse.response as? HTTPURLResponse,
+           !(200...299).contains(response.statusCode) {
+            decisionHandler(.cancel)
+            fail(with: TurnstileError.challengeFailed("challenge_http_\(response.statusCode)"))
+            return
+        }
+        decisionHandler(.allow)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        fail(with: TurnstileError.challengeFailed("challenge_load_failed"))
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFail navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        fail(with: TurnstileError.challengeFailed("challenge_load_failed"))
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        fail(with: TurnstileError.challengeFailed("challenge_renderer_terminated"))
+    }
+
     private func succeed(with token: String) {
+        guard continuation != nil else { return }
         timeoutTask?.cancel()
-        removeWebView()
+        timeoutTask = nil
+        cleanup()
         continuation?.resume(returning: token)
         continuation = nil
     }
@@ -217,7 +437,8 @@ private final class TurnstileMessageHandler: NSObject, WKScriptMessageHandler {
     func fail(with error: Error) {
         guard continuation != nil else { return }
         timeoutTask?.cancel()
-        removeWebView()
+        timeoutTask = nil
+        cleanup()
         continuation?.resume(throwing: error)
         continuation = nil
     }
@@ -243,16 +464,20 @@ private final class TurnstileMessageHandler: NSObject, WKScriptMessageHandler {
             }
             #endif
         } else if value == "hide" {
-            removeWebView()
+            webView.removeFromSuperview()
         }
     }
 
-    private func removeWebView() {
+    private func cleanup() {
+        controller?.removeScriptMessageHandler(forName: "edgebaseCaptcha")
+        webView?.navigationDelegate = nil
+        webView?.stopLoading()
         #if os(iOS)
         webView?.removeFromSuperview()
         #elseif os(macOS)
         webView?.removeFromSuperview()
         #endif
+        webView = nil
     }
 }
 #endif

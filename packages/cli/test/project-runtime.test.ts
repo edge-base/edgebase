@@ -10,6 +10,7 @@ import {
   resolveProjectWorkerUrl,
   resolveProjectWranglerPath,
 } from '../src/lib/project-runtime.js';
+import { buildManagedD1DatabaseName } from '../src/lib/managed-resource-names.js';
 
 let tmpDir: string;
 
@@ -109,7 +110,7 @@ database_id = "local"
           },
         },
       ),
-    ).toBe('edgebase-db-qa');
+    ).toBe(buildManagedD1DatabaseName('edgebase', 'db-qa'));
   });
 });
 

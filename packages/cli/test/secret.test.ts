@@ -2,7 +2,10 @@
  * Tests for CLI secret command — argument construction for wrangler secret subcommands.
  */
 import { describe, it, expect } from 'vitest';
-import { parseWranglerSecretNames } from '../src/lib/wrangler-secrets.js';
+import {
+  listWranglerSecretNames,
+  parseWranglerSecretNames,
+} from '../src/lib/wrangler-secrets.js';
 
 // ======================================================================
 // 1. Secret set arguments
@@ -51,6 +54,23 @@ describe('Secret list arguments', () => {
     }));
 
     expect(names.has('SERVICE_KEY')).toBe(true);
+  });
+
+  it('bounds the remote secret lookup and propagates outages before deploy', () => {
+    let observedTimeout = 0;
+    const outage = new Error('synthetic network timeout');
+    const runner = (
+      _command: string,
+      _args: string[],
+      options: { timeout: number },
+    ): string => {
+      observedTimeout = options.timeout;
+      throw outage;
+    };
+
+    expect(() => listWranglerSecretNames('/synthetic/project', runner))
+      .toThrow(outage);
+    expect(observedTimeout).toBe(30_000);
   });
 });
 

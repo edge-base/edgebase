@@ -15,7 +15,10 @@ import {
   type EnsureBootstrapAdminResult,
 } from '../lib/admin-bootstrap.js';
 import { createAppBundle } from '../lib/app-bundle.js';
-import { generateTempWranglerToml } from '../lib/deploy-shared.js';
+import {
+  generateTempWranglerToml,
+  RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS,
+} from '../lib/deploy-shared.js';
 import { loadConfigSafe } from '../lib/load-config.js';
 import { resolveLocalDevBindings } from '../lib/project-runtime.js';
 
@@ -290,6 +293,8 @@ function finalizeDockerWrangler(projectDir: string, outputDir: string): void {
   const generatedPath = generateTempWranglerToml(wranglerPath, {
     bindings: resolveLocalDevBindings(config),
     triggerMode: 'preserve',
+    runtimeMode: 'self-hosted',
+    requiredCompatibilityFlags: RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS,
   });
 
   if (!generatedPath) return;

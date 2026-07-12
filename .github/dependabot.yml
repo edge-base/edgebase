@@ -1,0 +1,123 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      runtime-images:
+        patterns: ['*']
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      node-workspace:
+        patterns: ['*']
+
+  - package-ecosystem: cargo
+    directory: /packages/sdk/rust
+    schedule:
+      interval: weekly
+    groups:
+      rust-sdk:
+        patterns: ['*']
+
+  - package-ecosystem: gomod
+    directory: /packages/sdk/go
+    schedule:
+      interval: weekly
+    groups:
+      go-sdk:
+        patterns: ['*']
+
+  - package-ecosystem: pip
+    directories:
+      - /packages/sdk/python
+      - /packages/sdk/python/packages/admin
+      - /packages/sdk/python/packages/core
+    schedule:
+      interval: weekly
+    groups:
+      python-sdk:
+        patterns: ['*']
+
+  - package-ecosystem: pub
+    directories:
+      - /packages/sdk/dart
+      - /packages/sdk/dart/packages/admin
+      - /packages/sdk/dart/packages/core
+      - /packages/sdk/dart/packages/flutter
+    schedule:
+      interval: weekly
+    groups:
+      dart-sdk:
+        patterns: ['*']
+
+  - package-ecosystem: composer
+    directories:
+      - /packages/sdk/php
+      - /packages/sdk/php/packages/admin
+      - /packages/sdk/php/packages/core
+    schedule:
+      interval: weekly
+    groups:
+      php-sdk:
+        patterns: ['*']
+
+  - package-ecosystem: gradle
+    directories:
+      - /packages/sdk/java
+      - /packages/sdk/kotlin
+      - /packages/sdk/scala
+    schedule:
+      interval: weekly
+    groups:
+      jvm-sdks:
+        patterns: ['*']
+
+  - package-ecosystem: nuget
+    directories:
+      - /packages/sdk/csharp
+      - /packages/sdk/csharp/src
+      - /packages/sdk/csharp/packages/admin
+      - /packages/sdk/csharp/packages/admin/tests
+      - /packages/sdk/csharp/packages/core
+      - /packages/sdk/csharp/packages/unity
+      - /packages/sdk/csharp/packages/unity/tests
+      - /packages/sdk/csharp/tests
+    schedule:
+      interval: weekly
+    groups:
+      dotnet-sdks:
+        patterns: ['*']
+
+  - package-ecosystem: swift
+    directories:
+      - /packages/sdk/swift/packages/core
+      - /packages/sdk/swift/packages/ios
+      - /packages/sdk/kotlin
+    schedule:
+      interval: weekly
+    groups:
+      swift-packages:
+        patterns: ['*']
+
+  - package-ecosystem: mix
+    directories:
+      - /packages/sdk/elixir/packages/admin
+      - /packages/sdk/elixir/packages/core
+    schedule:
+      interval: weekly
+    groups:
+      elixir-sdk:
+        patterns: ['*']

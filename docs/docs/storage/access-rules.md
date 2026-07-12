@@ -143,7 +143,11 @@ attachments: {
 | `delete` | Delete a file | Yes |
 
 :::note `file` argument availability
-For **list** and **signed URL generation** operations, the `file` argument will be an empty object `{}` because no specific file is being accessed.
+For **list** operations, the `file` argument is an empty object `{}` because no
+specific file is being accessed. Signed **download** URL generation evaluates
+`read` against each stored object's real metadata, including `uploadedBy`, just
+like a direct download. Signed upload creation and multipart continuation can
+still have an empty resource before final file metadata exists.
 
 For the **`write`** rule, the `file` argument type depends on context: during an **upload**, it is a `WriteFileMeta` (containing the incoming file's metadata); during a **metadata update**, it is an `R2FileMeta` (containing the existing file's stored metadata).
 :::

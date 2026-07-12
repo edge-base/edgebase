@@ -93,3 +93,4 @@ edgebase --json describe --command "deploy"  -> inspect one command
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 - `NEON_API_KEY`
+- `EDGEBASE_RUNTIME_ENV_ALLOWLIST` (comma-separated custom process keys for packed launchers)

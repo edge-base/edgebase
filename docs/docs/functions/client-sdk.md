@@ -201,6 +201,13 @@ const result = await client.functions.call('my-function', {
   method: 'PUT',
   body: { name: 'Updated' },
 });
+
+// For a function declared with captcha: true:
+const protectedResult = await client.functions.call('submit-form', {
+  method: 'POST',
+  body: formData,
+  captchaToken,
+});
 ```
 
 </TabItem>
@@ -212,6 +219,15 @@ final result = await client.functions.call(
   options: const FunctionCallOptions(
     method: 'PUT',
     body: {'name': 'Updated'},
+  ),
+);
+
+final protectedResult = await client.functions.call(
+  'submit-form',
+  options: FunctionCallOptions(
+    method: 'POST',
+    body: formData,
+    captchaToken: captchaToken,
   ),
 );
 ```
@@ -227,6 +243,15 @@ let result = try await client.functions.call(
         body: ["name": "Updated"]
     )
 )
+
+let protectedResult = try await client.functions.call(
+    "submit-form",
+    options: FunctionCallOptions(
+        method: "POST",
+        body: formData,
+        captchaToken: captchaToken
+    )
+)
 ```
 
 </TabItem>
@@ -238,6 +263,15 @@ val result = client.functions.call(
     FunctionCallOptions(
         method = "PUT",
         body = mapOf("name" to "Updated")
+    )
+)
+
+val protectedResult = client.functions.call(
+    "submit-form",
+    FunctionCallOptions(
+        method = "POST",
+        body = formData,
+        captchaToken = captchaToken
     )
 )
 ```
@@ -254,6 +288,16 @@ var result = client.functions().call(
         null
     )
 );
+
+var protectedResult = client.functions().call(
+    "submit-form",
+    new FunctionsClient.FunctionCallOptions(
+        "POST",
+        formData,
+        null,
+        captchaToken
+    )
+);
 ```
 
 </TabItem>
@@ -264,6 +308,15 @@ var result = await client.Functions.CallAsync("my-function", new FunctionCallOpt
     Method = "PUT",
     Body = new { name = "Updated" }
 });
+
+var protectedResult = await client.Functions.CallAsync(
+    "submit-form",
+    new FunctionCallOptions {
+        Method = "POST",
+        Body = formData,
+        CaptchaToken = captchaToken
+    }
+);
 ```
 
 </TabItem>
@@ -275,10 +328,32 @@ auto result = client.functions().call(
     "PUT",
     R"({"name":"Updated"})"
 );
+
+client::FunctionsClient::FunctionCallOptions protectedOptions;
+protectedOptions.method = "POST";
+protectedOptions.jsonBody = formDataJson;
+protectedOptions.captchaToken = captchaToken;
+auto protectedResult = client.functions().call(
+    "submit-form",
+    protectedOptions
+);
 ```
 
 </TabItem>
 </Tabs>
+
+For every client SDK above, `captchaToken` is a **manually acquired**
+Turnstile token for a Function declared with `captcha: true`. The Functions
+helper does not open the hosted challenge automatically; use your platform's
+hosted CAPTCHA integration with action `function`, then pass the returned token
+in `FunctionCallOptions`.
+
+The SDK validates the token as a non-empty value of at most 2,048 characters
+and sends it only in `X-EdgeBase-Captcha-Token`. Turnstile tokens are
+single-use, so a CAPTCHA-protected Function call is never automatically replayed
+after a transport error or HTTP 401/429 response. Reconcile the operation with
+an application idempotency key or status read, acquire a new token, and retry
+explicitly.
 
 ## Authentication
 

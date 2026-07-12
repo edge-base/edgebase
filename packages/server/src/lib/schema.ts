@@ -147,6 +147,46 @@ export function generateAddColumnDDL(
   return `ALTER TABLE ${esc(tableName)} ADD COLUMN ${buildColumnDef(name, field)};`;
 }
 
+/**
+ * Normalize a field for SQLite's restricted ALTER TABLE ADD COLUMN grammar.
+ *
+ * SQLite cannot add PRIMARY KEY or UNIQUE constraints inline. It also rejects
+ * NOT NULL additions for populated tables unless the column has a non-NULL
+ * default that can be applied to every existing row.
+ */
+export function normalizeSQLiteAddColumnField(field: SchemaField): SchemaField {
+  return {
+    ...field,
+    primaryKey: false,
+    unique: false,
+    required: field.required && field.default !== undefined && field.default !== null,
+  };
+}
+
+/**
+ * Generate the ordered DDL needed to add one field to an existing SQLite
+ * table. Unique fields use a separate index because SQLite rejects UNIQUE in
+ * ALTER TABLE ADD COLUMN.
+ */
+export function generateSQLiteAddColumnDDLs(
+  tableName: string,
+  name: string,
+  field: SchemaField,
+): string[] {
+  const ddls = [
+    generateAddColumnDDL(tableName, name, normalizeSQLiteAddColumnField(field)),
+  ];
+
+  if (field.unique) {
+    const indexName = `uidx_${tableName}_${name}`;
+    ddls.push(
+      `CREATE UNIQUE INDEX IF NOT EXISTS ${esc(indexName)} ON ${esc(tableName)}(${esc(name)});`,
+    );
+  }
+
+  return ddls;
+}
+
 // ─── Index DDL ───
 
 /**

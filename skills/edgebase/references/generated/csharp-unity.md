@@ -69,6 +69,11 @@ await client.Storage.Bucket("avatars").UploadAsync(
 - `client.Room(namespaceName, roomId, ...)` is the Unity room entry point
 - `client.Auth`, `client.Storage`, `client.Push`, `client.Functions`, and `client.Analytics` are the main surfaces
 - `client.Destroy()` should be called when the client is no longer needed
+- the default `MemoryAuthTokenStorage` is process-only; inject `IDurableAuthTokenStorage` before anonymous email/phone upgrades
+- call `await client.TryRestoreSessionAsync()` before authenticated work after launch
+- persistence and configured CAPTCHA failures are thrown, not treated as missing authority
+- CAPTCHA config fetch/malformed-response failures are typed; only an explicit captcha:null response is disabled
+- positive CAPTCHA site keys live five minutes; only direct WebGL `challenge_error` retries once
 - avoid copying browser-only assumptions like DOM access or `localStorage` into Unity code
 
 ## Common Mistakes
@@ -91,5 +96,6 @@ client.Analytics                            -> AnalyticsClient
 client.Room(namespaceName, roomId, ...)     -> RoomClient
 client.SetContext(context)                  -> void
 client.SetLocale(locale)                   -> void
+client.TryRestoreSessionAsync()            -> Task<bool>
 client.Destroy()                           -> void
 ```

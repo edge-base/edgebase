@@ -214,6 +214,40 @@ describe('ensureD1Schema — schema update', () => {
     const pragmaInfo = db._calls.find(c => c.sql.includes('PRAGMA table_info'));
     expect(pragmaInfo).toBeDefined();
   });
+
+  it('adds unique fields with a separate index in the same transactional batch', async () => {
+    const db = createMockD1({
+      firstResults: [{ value: 'stale-hash' }],
+      allResult: {
+        results: [
+          { name: 'id' },
+          { name: 'createdAt' },
+          { name: 'updatedAt' },
+          { name: 'pageId' },
+        ],
+      },
+    });
+
+    await ensureD1Schema(db, 'workspace', {
+      notion_import_mappings: {
+        schema: {
+          pageId: { type: 'string', required: true },
+          mappingKey: { type: 'string', unique: true },
+        },
+      },
+    });
+
+    const migrationBatch = db._batchStmts.find((statements) =>
+      statements.some((sql) => sql.includes('ADD COLUMN "mappingKey"')),
+    );
+    expect(migrationBatch).toBeDefined();
+
+    const addColumnSQL = migrationBatch?.find((sql) => sql.includes('ADD COLUMN "mappingKey"'));
+    expect(addColumnSQL).not.toMatch(/\b(?:UNIQUE|PRIMARY KEY|NOT NULL)\b/);
+    expect(migrationBatch).toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "uidx_notion_import_mappings_mappingKey" ON "notion_import_mappings"("mappingKey");',
+    );
+  });
 });
 
 // ─── C. ensureD1Schema — migrations ─────────────────────────────────────────

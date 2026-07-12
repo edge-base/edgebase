@@ -177,12 +177,26 @@ function copyRuntimeDir(source: string, target: string): void {
   if (!existsSync(source)) {
     throw new Error(`Runtime scaffold source is missing: ${source}`);
   }
+  assertCopyTreeHasNoSymbolicLinks(source);
   mkdirSync(target, { recursive: true });
   cpSync(source, target, {
     recursive: true,
     force: true,
+    dereference: false,
     filter: (sourcePath) => basename(sourcePath) !== '_functions-registry.ts',
   });
+}
+
+function assertCopyTreeHasNoSymbolicLinks(source: string): void {
+  const stat = lstatSync(source);
+  if (stat.isSymbolicLink()) {
+    throw new Error(`Refusing to bundle symbolic link from runtime or frontend assets: ${source}`);
+  }
+  if (!stat.isDirectory()) return;
+
+  for (const entry of readdirSync(source)) {
+    assertCopyTreeHasNoSymbolicLinks(join(source, entry));
+  }
 }
 
 function resolveServerRuntimeSource(projectDir: string): string {
@@ -411,9 +425,14 @@ function materializeNodeModulesTree(
 
   const normalizedRoots = dedupeCandidates(candidateRoots)
     .filter((candidate) => existsSync(candidate))
-    .map((candidate) => resolve(candidate))
+    .map((candidate) => realpathSync(candidate))
     .sort((left, right) => right.length - left.length);
+  const approvedExternalRoots = selectedPackages
+    ? dedupeCandidates(selectedPackages.map((selection) => realpathSync(selection.packageDir)))
+      .sort((left, right) => right.length - left.length)
+    : [];
   const copiedTargets = new Set<string>();
+  const activeSourceDirectories = new Set<string>();
 
   if (selectedPackages && selectedPackages.length > 0) {
     for (const selection of selectedPackages) {
@@ -422,7 +441,9 @@ function materializeNodeModulesTree(
         join(targetRoot, ...selection.packageName.split('/')),
         targetRoot,
         normalizedRoots,
+        approvedExternalRoots,
         copiedTargets,
+        activeSourceDirectories,
       );
     }
     return;
@@ -434,7 +455,9 @@ function materializeNodeModulesTree(
       join(targetRoot, entry),
       targetRoot,
       normalizedRoots,
+      approvedExternalRoots,
       copiedTargets,
+      activeSourceDirectories,
     );
   }
 }
@@ -478,7 +501,9 @@ function materializeNodeModulesEntry(
   targetEntry: string,
   targetRoot: string,
   candidateRoots: string[],
+  approvedExternalRoots: string[],
   copiedTargets: Set<string>,
+  activeSourceDirectories: Set<string>,
   skipNestedNodeModules = false,
 ): void {
   const stat = lstatSync(sourceEntry);
@@ -486,36 +511,40 @@ function materializeNodeModulesEntry(
   if (stat.isSymbolicLink()) {
     const sourceLinkTarget = readlinkSync(sourceEntry);
     const resolvedSourceTarget = resolve(dirname(sourceEntry), sourceLinkTarget);
-    const sourceContainerRoot = findContainingRoot(resolvedSourceTarget, candidateRoots);
     if (!existsSync(resolvedSourceTarget)) {
-      rmSync(targetEntry, { recursive: true, force: true });
-      mkdirSync(dirname(targetEntry), { recursive: true });
-      symlinkSync(
-        buildDirectoryLinkTarget(targetEntry, resolvedSourceTarget),
-        targetEntry,
-        process.platform === 'win32' ? 'junction' : 'dir',
+      throw new Error(
+        `Refusing to bundle broken runtime dependency symbolic link: ${sourceEntry} -> ${sourceLinkTarget}`,
       );
-      return;
     }
+    const canonicalSourceTarget = realpathSync(resolvedSourceTarget);
+    const sourceContainerRoot = findContainingRoot(canonicalSourceTarget, candidateRoots);
+    const approvedExternalRoot = findContainingRoot(canonicalSourceTarget, approvedExternalRoots);
 
     if (!sourceContainerRoot) {
-      const targetKey = `${resolvedSourceTarget}=>${targetEntry}`;
+      if (!approvedExternalRoot) {
+        throw new Error(
+          `Refusing to bundle runtime dependency symbolic link outside approved package roots: ${sourceEntry} -> ${sourceLinkTarget}`,
+        );
+      }
+      const targetKey = `${canonicalSourceTarget}=>${targetEntry}`;
       if (copiedTargets.has(targetKey)) {
         return;
       }
       copiedTargets.add(targetKey);
       materializeNodeModulesEntry(
-        resolvedSourceTarget,
+        canonicalSourceTarget,
         targetEntry,
         targetRoot,
         candidateRoots,
+        approvedExternalRoots,
         copiedTargets,
+        activeSourceDirectories,
         true,
       );
       return;
     }
 
-    const materialization = getNodeModulesMaterialization(resolvedSourceTarget, sourceContainerRoot, targetRoot);
+    const materialization = getNodeModulesMaterialization(canonicalSourceTarget, sourceContainerRoot, targetRoot);
     const targetKey = `${materialization.sourceRoot}=>${materialization.targetRoot}`;
     if (!copiedTargets.has(targetKey)) {
       copiedTargets.add(targetKey);
@@ -524,7 +553,9 @@ function materializeNodeModulesEntry(
         materialization.targetRoot,
         targetRoot,
         candidateRoots,
+        approvedExternalRoots,
         copiedTargets,
+        activeSourceDirectories,
         skipNestedNodeModules,
       );
     }
@@ -549,19 +580,30 @@ function materializeNodeModulesEntry(
   }
 
   if (stat.isDirectory()) {
-    mkdirSync(targetEntry, { recursive: true });
-    for (const entry of readdirSync(sourceEntry)) {
-      if (skipNestedNodeModules && entry === 'node_modules') {
-        continue;
+    const canonicalSourceDirectory = realpathSync(sourceEntry);
+    if (activeSourceDirectories.has(canonicalSourceDirectory)) {
+      throw new Error(`Refusing to bundle cyclic runtime dependency symbolic link at: ${sourceEntry}`);
+    }
+    activeSourceDirectories.add(canonicalSourceDirectory);
+    try {
+      mkdirSync(targetEntry, { recursive: true });
+      for (const entry of readdirSync(sourceEntry)) {
+        if (skipNestedNodeModules && entry === 'node_modules') {
+          continue;
+        }
+        materializeNodeModulesEntry(
+          join(sourceEntry, entry),
+          join(targetEntry, entry),
+          targetRoot,
+          candidateRoots,
+          approvedExternalRoots,
+          copiedTargets,
+          activeSourceDirectories,
+          skipNestedNodeModules,
+        );
       }
-      materializeNodeModulesEntry(
-        join(sourceEntry, entry),
-        join(targetEntry, entry),
-        targetRoot,
-        candidateRoots,
-        copiedTargets,
-        skipNestedNodeModules,
-      );
+    } finally {
+      activeSourceDirectories.delete(canonicalSourceDirectory);
     }
     return;
   }
@@ -655,10 +697,13 @@ function buildDirectoryLinkTarget(linkPath: string, destinationPath: string, pla
 }
 
 export const __runtimeScaffoldTestUtils = {
+  assertCopyTreeHasNoSymbolicLinks,
   buildDirectoryLinkTarget,
+  copyRuntimeDir,
   findContainingRoot,
   getNodeModulesMaterialization,
   getRelativePathSegmentsWithinRoot,
+  materializeNodeModulesTree,
   resolvePackageSelectionFromManifestCandidates,
   resolvePackageDirectoryPath,
   resolveRuntimePackageSelections,

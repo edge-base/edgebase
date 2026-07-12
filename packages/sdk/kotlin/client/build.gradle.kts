@@ -135,6 +135,7 @@ kotlin {
             dependencies {
                 implementation("org.junit.jupiter:junit-jupiter-api:5.10.2")
                 implementation("org.junit.jupiter:junit-jupiter:5.10.2")
+                implementation("io.ktor:ktor-client-mock:3.1.0")
                 runtimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.2")
             }
         }
@@ -142,6 +143,12 @@ kotlin {
         val androidUnitTest by getting {
             dependencies {
                 implementation("junit:junit:4.13.2")
+                implementation("org.robolectric:robolectric:4.13")
+                // Robolectric 4.x pins Conscrypt 2.5.2, whose native bundle
+                // omits Linux/macOS arm64. 2.6.0 supplies both arm64 binaries,
+                // so Activity lifecycle regression tests run on Apple Silicon
+                // and arm64 CI containers instead of failing before setup.
+                implementation("org.conscrypt:conscrypt-openjdk-uber:2.6.0")
             }
         }
     }
@@ -159,7 +166,10 @@ android {
     }
     testOptions {
         unitTests.all {
-            it.jvmArgs("-Djava.io.tmpdir=/tmp")
+            it.jvmArgs(
+                "-Djava.io.tmpdir=/tmp",
+                "-Dedgebase.test.allowMissingAndroidActivity=true"
+            )
         }
         unitTests.isReturnDefaultValues = true
     }

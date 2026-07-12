@@ -81,12 +81,12 @@ final sub = client.auth.onAuthStateChange.listen((nextUser) {
 ### Start OAuth
 
 ```dart
-final redirectUrl = client.auth.signInWithOAuth(
-  'google',
-  redirectUrl: 'myapp://auth/callback',
-);
+final redirectUrl = client.auth.signInWithOAuth('google');
 
 // Open redirectUrl with url_launcher or your platform navigation layer.
+// This SDK currently constructs the provider-start URL only. It does not
+// securely bind, validate, rotate, and persist an app callback. Do not ship an
+// end-to-end production OAuth callback until that support is added.
 ```
 
 ### Query a single-instance block
@@ -176,6 +176,12 @@ await client.push.register(metadata: {
 - `client.db(namespace, instanceId: ...)` uses a named `instanceId` parameter in Dart, not a positional second argument
 - `client.auth.onAuthStateChange` is a `Stream<TokenUser?>`, not a callback registration function
 - `client.auth.currentUser` is a property, not a method
+- call `await client.tryRestoreSession()` before the first authenticated request when a prior session may exist
+- the default Flutter store persists one atomic access/refresh pair; custom storage must implement `DurableTokenStorage` before anonymous email/phone upgrades are allowed
+- `MemoryTokenStorage` is test-only for replacement-session flows and is rejected before the upgrade request
+- configured CAPTCHA failures throw `CaptchaUnavailableException`; do not treat them as CAPTCHA-disabled
+- CAPTCHA config fetch/malformed-response failures are typed; only an explicit captcha:null response is disabled
+- positive CAPTCHA site keys live for five minutes, missing keys are not cached, and only direct `challenge_error` gets one fresh-key retry
 - `client.auth.signInWithOAuth(...)` returns a redirect URL string immediately, not an object like `{ url }` and not a `Future`
 - there is no `handleOAuthCallback()` method in this package
 - `client.functions.get/post/put/patch/delete` return `Future<dynamic>`
@@ -190,7 +196,8 @@ await client.push.register(metadata: {
 
 - do not use JS or React Native signatures like `db('workspace', 'ws-1')`; in Dart use `db('workspace', instanceId: 'ws-1')`
 - do not call `client.auth.onAuthStateChange((user) {})`; use `.listen(...)` on the stream
-- do not assume `signInWithOAuth()` completes the full OAuth flow; it only returns the URL to open
+- do not assume `signInWithOAuth()` completes the full OAuth flow; it only
+  returns the URL to open, and secure app-callback completion is not supported
 - do not assume browser-only APIs like `localStorage`, `window.location`, or DOM-based widgets
 - do not treat `get()` as a single-record fetch
 - do not use `'1h'` for `createSignedUrl(..., expiresIn: ...)`; Dart storage APIs expect integer seconds
@@ -214,6 +221,7 @@ client.auth.signInWithMagicLink({ email, captchaToken? })       -> Future<void>
 client.auth.verifyMagicLink(token)                              -> Future<AuthResult>
 client.auth.signInWithPhone({ phone, captchaToken? })           -> Future<void>
 client.auth.verifyPhone({ phone, code })                        -> Future<AuthResult>
+client.tryRestoreSession()                                     -> Future<bool>
 client.auth.requestPasswordReset(email, { captchaToken? })      -> Future<void>
 client.auth.changePassword({ currentPassword, newPassword })    -> Future<AuthResult>
 client.db(namespace, { instanceId? })                           -> DbRef

@@ -58,6 +58,8 @@ export interface CreateAppBundleOptions {
   outputDir?: string;
   overwrite?: boolean;
   injectedEnv?: Record<string, string>;
+  /** Exact environment used only while evaluating config metadata. */
+  configEvaluationEnv?: NodeJS.ProcessEnv;
   portableDependencies?: boolean;
   dependencyProfile?: RuntimeDependencyProfile;
 }
@@ -332,9 +334,26 @@ export function syncAppBundle(
 
   ensureExistingOutputDir(outputDir);
 
-  const config = loadConfigSafe(configFile, projectDir, { allowRegexFallback: false }) as {
+  const config = loadConfigSafe(configFile, projectDir, {
+    allowRegexFallback: false,
+    ...(options.configEvaluationEnv ? { env: options.configEvaluationEnv } : {}),
+  }) as {
     frontend?: FrontendConfigLike;
+    release?: boolean;
+    captcha?: unknown;
   };
+  if (
+    config.release === true
+    && config.captcha
+    && typeof config.captcha === 'object'
+    && !Array.isArray(config.captcha)
+    && Object.prototype.hasOwnProperty.call(config.captcha, 'secretKey')
+  ) {
+    throw new Error(
+      'Release CAPTCHA cannot bundle captcha.secretKey. Remove it from '
+      + 'edgebase.config.ts and provide TURNSTILE_SECRET as a runtime secret.',
+    );
+  }
   const testConfigFile = resolveTestConfigFile(projectDir);
   const hasTestConfigModule = Boolean(testConfigFile);
 

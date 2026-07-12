@@ -240,10 +240,13 @@ constraints: {
 
 The client IP is extracted from:
 
-- `CF-Connecting-IP` on Cloudflare Edge
+- `CF-Connecting-IP` only in CLI-declared Cloudflare/local-development modes
 - `X-Forwarded-For` in self-hosted environments only when `trustSelfHostedProxy: true`
 
-If you self-host and want `ipCidr` constraints to match the real client IP, place EdgeBase behind a reverse proxy that overwrites `X-Forwarded-For`, then enable `trustSelfHostedProxy: true` in `edgebase.config.ts`.
+Docker and packaged runtimes ignore client-supplied `CF-Connecting-IP`. If you
+self-host and want `ipCidr` constraints to match the real client IP, place
+EdgeBase behind a reverse proxy that overwrites `X-Forwarded-For`, then enable
+`trustSelfHostedProxy: true` in `edgebase.config.ts`.
 
 ### `tenant`
 

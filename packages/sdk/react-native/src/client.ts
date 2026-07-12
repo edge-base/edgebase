@@ -9,6 +9,7 @@
  *
  * const client = createClient('https://my-app.edgebase.fun', {
  *   storage: AsyncStorage,
+ *   secureStorage: keychainStorage,
  *   linking: Linking,
  *   appState: AppState,
  * });
@@ -28,7 +29,11 @@ import {
   type FilterMatchFn,
 } from '@edge-base/core';
 import type { ContextValue } from '@edge-base/core';
-import { TokenManager, type AsyncStorageAdapter } from './token-manager.js';
+import {
+  TokenManager,
+  type AsyncStorageAdapter,
+  type SecureRandomProvider,
+} from './token-manager.js';
 import { AuthClient, type LinkingAdapter } from './auth.js';
 import { DatabaseLiveClient, type DatabaseLiveOptions } from './database-live.js';
 import { RoomClient, type RoomOptions } from './room.js';
@@ -36,6 +41,7 @@ import { PushClient } from './push.js';
 import { LifecycleManager, type AppStateAdapter } from './lifecycle.js';
 import { ClientAnalytics } from './analytics.js';
 import { matchesFilter } from './match-filter.js';
+import type { UseTurnstileOptions } from './turnstile.js';
 
 // ─── Options ───
 
@@ -45,6 +51,21 @@ export interface JuneClientOptions {
    * Pass `require('@react-native-async-storage/async-storage').default`
    */
   storage: AsyncStorageAdapter;
+
+  /**
+   * Keychain/Keystore-backed adapter used for refresh tokens and OAuth state.
+   * Required for production; `storage` is used only as a development fallback.
+   */
+  secureStorage?: AsyncStorageAdapter;
+
+  /** Explicit local-development escape hatch; never enable in production. */
+  allowInsecureAuthStorageForDevelopment?: boolean;
+
+  /** Optional explicit credential namespace; defaults to the normalized base URL. */
+  authNamespace?: string;
+
+  /** CSPRNG provider for Hermes runtimes without global crypto.getRandomValues. */
+  secureRandom?: SecureRandomProvider;
 
   /**
    * Linking adapter — pass `require('react-native').Linking`
@@ -86,10 +107,26 @@ export class ClientEdgeBase {
   private contextManager: ContextManager;
   private baseUrl: string;
   private core: DefaultDbApi;
+  private readonly turnstileSecureRandom?: SecureRandomProvider;
 
   constructor(url: string, options: JuneClientOptions) {
     this.baseUrl = url.replace(/\/$/, '');
-    this._tokenManager = new TokenManager(this.baseUrl, options.storage);
+    this.turnstileSecureRandom = options.secureRandom;
+    if (!options.secureStorage && !options.allowInsecureAuthStorageForDevelopment) {
+      throw new Error(
+        '[EdgeBase] secureStorage is required for refresh tokens and OAuth state. '
+        + 'Use a Keychain/Keystore-backed adapter, or explicitly set '
+        + 'allowInsecureAuthStorageForDevelopment only for local development.',
+      );
+    }
+    this._tokenManager = new TokenManager(
+      this.baseUrl,
+      options.secureStorage ?? options.storage,
+      {
+        authNamespace: options.authNamespace,
+        secureRandom: options.secureRandom,
+      },
+    );
     this.contextManager = new ContextManager();
 
     this._httpClient = new HttpClient({
@@ -100,7 +137,6 @@ export class ClientEdgeBase {
 
     this.core = new DefaultDbApi(new HttpClientAdapter(this._httpClient));
     const corePublic = new DefaultDbApi(new PublicHttpClientAdapter(this._httpClient));
-    this.auth = new AuthClient(this._httpClient, this._tokenManager, this.core, corePublic, options.linking);
     this.databaseLive = new DatabaseLiveClient(
       this.baseUrl,
       this._tokenManager,
@@ -108,21 +144,24 @@ export class ClientEdgeBase {
       this.contextManager,
     );
     this.storage = new StorageClient(this._httpClient, this.core);
-    this.push = new PushClient(this._httpClient, options.storage, this.core);
+    const clientNamespace = options.authNamespace?.trim() || this.baseUrl;
+    this.push = new PushClient(
+      this._httpClient,
+      options.storage,
+      this.core,
+      clientNamespace,
+      options.secureRandom,
+    );
+    this.auth = new AuthClient(
+      this._httpClient,
+      this._tokenManager,
+      this.core,
+      corePublic,
+      options.linking,
+      this.push,
+    );
     this.functions = new FunctionsClient(this._httpClient);
     this.analytics = new ClientAnalytics(this.core);
-
-    // Auto-unregister push on signOut
-    const originalSignOut = this.auth.signOut.bind(this.auth);
-    const pushRef = this.push;
-    const storageRef = options.storage;
-    this.auth.signOut = async function (): Promise<void> {
-      try {
-        const cached = await storageRef.getItem('edgebase:push-token-cache');
-        if (cached) await pushRef.unregister();
-      } catch { /* ignore */ }
-      return originalSignOut();
-    };
 
     // AppState lifecycle management
     if (options.appState) {
@@ -148,6 +187,20 @@ export class ClientEdgeBase {
       );
       this.lifecycleManager.start();
     }
+  }
+
+  /**
+   * Bind this client's backend origin and CSPRNG to useTurnstile().
+   * The returned options mount captcha.webView when WebViewComponent is set.
+   */
+  turnstileOptions(
+    options: Omit<UseTurnstileOptions, 'baseUrl' | 'secureRandom'>,
+  ): UseTurnstileOptions {
+    return {
+      ...options,
+      baseUrl: this.baseUrl,
+      secureRandom: this.turnstileSecureRandom,
+    };
   }
 
   /**

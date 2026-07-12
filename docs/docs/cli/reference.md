@@ -120,6 +120,18 @@ Validate config, upload release secrets when `.env.release` exists, provision ma
 
 `deploy` also writes `.edgebase/cloudflare-deploy-manifest.json`, which later destroy and cleanup flows use to target the same project-scoped Cloudflare resources.
 
+Managed KV, D1, default R2, Vectorize, and Hyperdrive resources use
+deterministic Worker-scoped names, so newly provisioned resources for separate
+Workers in one Cloudflare account do not collide on matching logical bindings.
+Legacy account-global or truncation-only names are reused only
+when the previous deploy manifest belongs to the current Cloudflare account
+and proves the same binding/resource. Keep that
+manifest when upgrading an existing legacy deployment.
+
+Resource provisioning is fail-closed: list/auth/timeout/parse errors, missing
+PostgreSQL connection strings, create failures, and missing returned IDs abort
+before `wrangler deploy` instead of publishing an incomplete runtime.
+
 Before invoking Wrangler, `deploy` now builds a fresh app bundle under `.edgebase/targets/deploy-app` and deploys that self-contained runtime instead of reading the source project tree directly.
 
 If `frontend.directory` is configured, `deploy` packages that prebuilt static bundle into the Worker assets upload. Reserved routes such as `/api/*`, `/admin/*`, and `/openapi.json` still win before the frontend bundle.
@@ -355,7 +367,20 @@ If `frontend.directory` is configured, the packed artifact also includes the mer
 - `run.sh` for Unix-like shells
 - `run.cmd` for Windows shells
 
-These launchers bind to `127.0.0.1` by default, write `.dev.vars` from the current environment plus optional `.env`/`.env.local` files, and persist local state in an app-specific data directory unless you override it with `--data-dir` or `--persist-to`.
+These launchers bind to `127.0.0.1` by default and persist local state in an
+app-specific data directory unless you override it with `--data-dir` or
+`--persist-to`. Runtime application variables come from optional
+`.env`/`.env.local` files, an explicit `--env-file`, standard EdgeBase runtime
+keys in the launcher's process environment, and custom process keys named by
+`EDGEBASE_RUNTIME_ENV_ALLOWLIST` (a comma-separated list). Other ambient shell,
+package-manager, CI, and tooling variables are not forwarded automatically;
+put a deliberately required value in the explicit env file or allowlist it by
+name instead.
+
+The launcher materializes those bindings in a temporary, owner-only
+`.dev.vars` file inside its runtime data directory. It writes the file
+atomically with mode `0600` on Unix-like systems and removes the file after a
+normal exit or launch failure.
 
 For packed launchers, the default runtime model is now:
 

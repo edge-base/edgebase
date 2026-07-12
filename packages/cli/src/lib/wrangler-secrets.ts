@@ -1,6 +1,17 @@
 import { execFileSync } from 'node:child_process';
 import { wranglerArgs, wranglerCommand } from './wrangler.js';
 
+type WranglerSecretListRunner = (
+  command: string,
+  args: string[],
+  options: {
+    cwd: string;
+    encoding: 'utf-8';
+    stdio: ['ignore', 'pipe', 'ignore'];
+    timeout: number;
+  },
+) => string;
+
 interface WranglerSecretListEntry {
   name?: unknown;
 }
@@ -31,14 +42,19 @@ export function parseWranglerSecretNames(output: string): Set<string> {
   return names;
 }
 
-export function listWranglerSecretNames(projectDir: string): Set<string> {
-  const output = execFileSync(
+export function listWranglerSecretNames(
+  projectDir: string,
+  runner?: WranglerSecretListRunner,
+): Set<string> {
+  const run = runner ?? ((command, args, options) => execFileSync(command, args, options));
+  const output = run(
     wranglerCommand(),
     wranglerArgs(['wrangler', 'secret', 'list', '--format', 'json']),
     {
       cwd: projectDir,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 30_000,
     },
   );
 

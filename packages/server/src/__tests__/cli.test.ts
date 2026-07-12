@@ -160,19 +160,22 @@ describe('buildConstraintCtx', () => {
 
   it('extracts IP from cf-connecting-ip header', () => {
     const req = { header: (name: string) => name === 'cf-connecting-ip' ? '1.2.3.4' : undefined };
-    const ctx = buildConstraintCtx({ EDGEBASE_CONFIG: '{}' }, req);
+    const ctx = buildConstraintCtx({ EDGEBASE_RUNTIME_MODE: 'cloudflare', EDGEBASE_CONFIG: '{}' }, req);
     expect(ctx.ip).toBe('1.2.3.4');
   });
 
   it('ignores x-forwarded-for unless trustSelfHostedProxy is enabled', () => {
     const req = { header: (name: string) => name === 'x-forwarded-for' ? '5.6.7.8, 9.10.11.12' : undefined };
-    const ctx = buildConstraintCtx({ EDGEBASE_CONFIG: '{}' }, req);
+    const ctx = buildConstraintCtx({ EDGEBASE_RUNTIME_MODE: 'cloudflare', EDGEBASE_CONFIG: '{}' }, req);
     expect(ctx.ip).toBeUndefined();
   });
 
   it('falls back to x-forwarded-for when trustSelfHostedProxy is enabled', () => {
     const req = { header: (name: string) => name === 'x-forwarded-for' ? '5.6.7.8, 9.10.11.12' : undefined };
-    const ctx = buildConstraintCtx({ EDGEBASE_CONFIG: JSON.stringify({ trustSelfHostedProxy: true }) }, req);
+    const ctx = buildConstraintCtx({
+      EDGEBASE_RUNTIME_MODE: 'self-hosted',
+      EDGEBASE_CONFIG: JSON.stringify({ trustSelfHostedProxy: true }),
+    }, req);
     expect(ctx.ip).toBe('5.6.7.8');
   });
 });

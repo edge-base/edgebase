@@ -14,7 +14,7 @@ This feature is in **beta**. Core behavior is stable and ready to try, but some 
 Phone number authentication via one-time SMS codes — users verify their identity with a 6-digit OTP sent to their phone.
 
 :::tip Captcha Protection
-When [captcha is enabled](/docs/authentication/captcha), the Phone signin endpoint is automatically protected by Cloudflare Turnstile. All client SDKs handle token acquisition transparently — no code changes needed.
+When [CAPTCHA is enabled](/docs/authentication/captcha), phone sign-in initiation is protected by Turnstile. Supported UI runtimes can acquire the token automatically; headless runtimes and custom UI must provide it explicitly.
 :::
 
 ## How It Works
@@ -276,6 +276,12 @@ client.auth().verifyLinkPhone("+15551234567", "123456");
 
 </TabItem>
 </Tabs>
+
+When the current user is anonymous, successful verification revokes all old
+anonymous sessions and returns one authoritative replacement session in the
+same transaction. High-level SDKs adopt those replacement tokens before the
+method resolves; an already-open realtime connection using an old session is
+closed when it next sends or receives protected data.
 
 ## Full Example (React)
 

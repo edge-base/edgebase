@@ -410,6 +410,26 @@ if (res.status === 206) {
 
 Valid range requests return `206 Partial Content` with `Content-Range` and `Accept-Ranges: bytes`. Unsatisfiable ranges return `416 Range Not Satisfiable`. Signed download URLs include the file size in the signed grant, so media seeks can usually fetch only the requested byte range without an extra metadata lookup; those responses also use `Cache-Control: private` within the signed URL lifetime so the same browser can reuse cached ranges.
 
+### Safe Content Delivery
+
+An uploaded MIME type is user-controlled metadata, so EdgeBase does not use it
+as permission to execute a document in your application's origin.
+
+- Passive raster images, common audio/video formats, fonts, plain text, and
+  WebVTT keep their normalized MIME type and can render inline.
+- HTML, XHTML, SVG, XML, JavaScript, CSS, PDF, binary, unknown, and malformed
+  types are served as `application/octet-stream` with
+  `Content-Disposition: attachment` and a restrictive sandbox CSP.
+- Every storage body response includes `X-Content-Type-Options: nosniff`.
+- The same policy applies to regular downloads, signed URLs, `200` responses,
+  byte-range `206`/`416` responses, multipart results, and dashboard/backup
+  object downloads.
+
+The stored `FileInfo.contentType` remains available for metadata and access
+rules. If you need to render a forced-download document, fetch its bytes and
+open it in a trusted viewer or on a separate cookieless content origin; do not
+weaken the application-origin response headers.
+
 ## Check File Exists
 
 <Tabs groupId="sdk-language">

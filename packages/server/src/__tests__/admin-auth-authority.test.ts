@@ -14,8 +14,10 @@ function authDb(
     ),
     run: async () => {},
     batch: async () => {},
+    batchWithLock: async () => {},
     compareAndSwapAdminSession: async () => false,
     compareAndSwapUserSession: async () => false,
+    createSessionWithLimit: async () => {},
   };
 }
 

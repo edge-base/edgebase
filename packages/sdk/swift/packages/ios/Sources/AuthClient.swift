@@ -47,11 +47,11 @@ public final class AuthClient: @unchecked Sendable {
         if let userData = userData {
             body["data"] = userData
         }
-        let resolved = await TurnstileProvider.resolveCaptchaToken(core: core, baseUrl: await client.baseUrl, action: "signup", manualToken: captchaToken)
+        let resolved = try await TurnstileProvider.resolveCaptchaToken(core: core, baseUrl: await client.baseUrl, action: "signup", manualToken: captchaToken)
         if let resolved { body["captchaToken"] = resolved }
         let result = try expectObject(await client.postPublic("/auth/signup", body))
         if let tokens = parseTokens(result) {
-            await tokenManager.setTokens(tokens)
+            try await tokenManager.setTokens(tokens)
         }
         return result
     }
@@ -61,7 +61,7 @@ public final class AuthClient: @unchecked Sendable {
     /// - Parameter captchaToken: Captcha token.
     public func signIn(email: String, password: String, captchaToken: String? = nil) async throws -> [String: Any] {
         var body: [String: Any] = ["email": email, "password": password]
-        let resolved = await TurnstileProvider.resolveCaptchaToken(core: core, baseUrl: await client.baseUrl, action: "signin", manualToken: captchaToken)
+        let resolved = try await TurnstileProvider.resolveCaptchaToken(core: core, baseUrl: await client.baseUrl, action: "signin", manualToken: captchaToken)
         if let resolved { body["captchaToken"] = resolved }
         let result = try expectObject(await client.postPublic("/auth/signin", body))
         // If MFA is required, return the result without setting tokens
@@ -69,13 +69,13 @@ public final class AuthClient: @unchecked Sendable {
             return result
         }
         if let tokens = parseTokens(result) {
-            await tokenManager.setTokens(tokens)
+            try await tokenManager.setTokens(tokens)
         }
         return result
     }
 
     /// Sign out.
-    public func signOut() async {
+    public func signOut() async throws {
         // Auto-unregister push token
         do {
             let push = PushClient(client)
@@ -90,18 +90,18 @@ public final class AuthClient: @unchecked Sendable {
         } catch {
             // Continue even if server call fails
         }
-        await tokenManager.clearTokens()
+        try await tokenManager.clearTokens()
     }
 
     /// Sign in anonymously.
     /// - Parameter captchaToken: Captcha token.
     public func signInAnonymously(captchaToken: String? = nil) async throws -> [String: Any] {
         var body: [String: Any] = [:]
-        let resolved = await TurnstileProvider.resolveCaptchaToken(core: core, baseUrl: await client.baseUrl, action: "anonymous", manualToken: captchaToken)
+        let resolved = try await TurnstileProvider.resolveCaptchaToken(core: core, baseUrl: await client.baseUrl, action: "anonymous", manualToken: captchaToken)
         if let resolved { body["captchaToken"] = resolved }
         let result = try expectObject(await client.postPublic("/auth/signin/anonymous", body))
         if let tokens = parseTokens(result) {
-            await tokenManager.setTokens(tokens)
+            try await tokenManager.setTokens(tokens)
         }
         return result
     }
@@ -127,7 +127,7 @@ public final class AuthClient: @unchecked Sendable {
     /// - Parameter captchaToken: Captcha token.
     public func signInWithMagicLink(email: String, captchaToken: String? = nil) async throws {
         var body: [String: Any] = ["email": email]
-        let resolved = await TurnstileProvider.resolveCaptchaToken(core: core, baseUrl: await client.baseUrl, action: "magic-link", manualToken: captchaToken)
+        let resolved = try await TurnstileProvider.resolveCaptchaToken(core: core, baseUrl: await client.baseUrl, action: "magic-link", manualToken: captchaToken)
         if let resolved { body["captchaToken"] = resolved }
         _ = try await client.postPublic("/auth/signin/magic-link", body)
     }
@@ -136,7 +136,7 @@ public final class AuthClient: @unchecked Sendable {
     public func verifyMagicLink(token: String) async throws -> [String: Any] {
         let result = try expectObject(await client.postPublic("/auth/verify-magic-link", ["token": token]))
         if let tokens = parseTokens(result) {
-            await tokenManager.setTokens(tokens)
+            try await tokenManager.setTokens(tokens)
         }
         return result
     }
@@ -148,7 +148,7 @@ public final class AuthClient: @unchecked Sendable {
             "code": code,
         ]))
         if let tokens = parseTokens(result) {
-            await tokenManager.setTokens(tokens)
+            try await tokenManager.setTokens(tokens)
         }
         return result
     }
@@ -159,7 +159,7 @@ public final class AuthClient: @unchecked Sendable {
     /// - Parameter captchaToken: Captcha token.
     public func signInWithPhone(phone: String, captchaToken: String? = nil) async throws {
         var body: [String: Any] = ["phone": phone]
-        let resolved = await TurnstileProvider.resolveCaptchaToken(core: core, baseUrl: await client.baseUrl, action: "phone", manualToken: captchaToken)
+        let resolved = try await TurnstileProvider.resolveCaptchaToken(core: core, baseUrl: await client.baseUrl, action: "phone", manualToken: captchaToken)
         if let resolved { body["captchaToken"] = resolved }
         _ = try await client.postPublic("/auth/signin/phone", body)
     }
@@ -170,7 +170,7 @@ public final class AuthClient: @unchecked Sendable {
             "phone": phone, "code": code
         ]))
         if let tokens = parseTokens(result) {
-            await tokenManager.setTokens(tokens)
+            try await tokenManager.setTokens(tokens)
         }
         return result
     }
@@ -182,17 +182,24 @@ public final class AuthClient: @unchecked Sendable {
 
     /// Verify phone link code. Completes phone linking for the current account.
     public func verifyLinkPhone(phone: String, code: String) async throws {
-        _ = try await client.post("/auth/verify-link-phone", [
+        try await tokenManager.requireDurableStorageForAccountUpgrade()
+        let response = try await client.post("/auth/verify-link-phone", [
             "phone": phone, "code": code
         ])
+        // Anonymous upgrades revoke the provisional session in the same
+        // transaction and return the authoritative replacement tokens.
+        if let result = response as? [String: Any], let tokens = parseTokens(result) {
+            try await tokenManager.setTokens(tokens)
+        }
     }
 
     /// Link current account with email.
     public func linkWithEmail(email: String, password: String) async throws -> [String: Any] {
+        try await tokenManager.requireDurableStorageForAccountUpgrade()
         let body: [String: Any] = ["email": email, "password": password]
         let result = try expectObject(await client.post("/auth/link/email", body))
         if let tokens = parseTokens(result) {
-            await tokenManager.setTokens(tokens)
+            try await tokenManager.setTokens(tokens)
         }
         return result
     }
@@ -245,8 +252,13 @@ public final class AuthClient: @unchecked Sendable {
     /// Update current user profile.
     public func updateProfile(_ data: [String: Any]) async throws -> [String: Any] {
         let result = try expectObject(await client.patch("/auth/profile", data))
-        if let tokens = parseTokens(result) {
-            await tokenManager.setTokens(tokens)
+        var tokenResult = result
+        if result["accessToken"] != nil, result["refreshToken"] == nil,
+           let existingRefresh = await tokenManager.getRefreshToken() {
+            tokenResult["refreshToken"] = existingRefresh
+        }
+        if let tokens = parseTokens(tokenResult) {
+            try await tokenManager.setTokens(tokens)
         }
         return result
     }
@@ -293,7 +305,7 @@ public final class AuthClient: @unchecked Sendable {
     /// - Parameter captchaToken: Captcha token.
     public func requestPasswordReset(email: String, captchaToken: String? = nil) async throws -> [String: Any] {
         var body: [String: Any] = ["email": email]
-        let resolved = await TurnstileProvider.resolveCaptchaToken(core: core, baseUrl: await client.baseUrl, action: "password-reset", manualToken: captchaToken)
+        let resolved = try await TurnstileProvider.resolveCaptchaToken(core: core, baseUrl: await client.baseUrl, action: "password-reset", manualToken: captchaToken)
         if let resolved { body["captchaToken"] = resolved }
         return try expectObject(await client.postPublic("/auth/request-password-reset", body))
     }
@@ -309,7 +321,7 @@ public final class AuthClient: @unchecked Sendable {
         let body: [String: Any] = ["currentPassword": currentPassword, "newPassword": newPassword]
         let result = try expectObject(await client.post("/auth/change-password", body))
         if let tokens = parseTokens(result) {
-            await tokenManager.setTokens(tokens)
+            try await tokenManager.setTokens(tokens)
         }
         return result
     }
@@ -334,7 +346,7 @@ public final class AuthClient: @unchecked Sendable {
         }
         let result = try expectObject(await client.postPublic("/auth/refresh", ["refreshToken": refreshToken]))
         if let tokens = parseTokens(result) {
-            await tokenManager.setTokens(tokens)
+            try await tokenManager.setTokens(tokens)
         }
         return result
     }
@@ -374,7 +386,7 @@ public final class AuthClient: @unchecked Sendable {
     public func passkeysAuthenticate(response: [String: Any]) async throws -> [String: Any] {
         let result = try expectObject(await core.authPasskeysAuthenticate(["response": response]))
         if let tokens = parseTokens(result) {
-            await tokenManager.setTokens(tokens)
+            try await tokenManager.setTokens(tokens)
         }
         return result
     }
@@ -406,7 +418,7 @@ public final class AuthClient: @unchecked Sendable {
             "mfaTicket": mfaTicket, "code": code
         ]))
         if let tokens = parseTokens(result) {
-            await tokenManager.setTokens(tokens)
+            try await tokenManager.setTokens(tokens)
         }
         return result
     }
@@ -417,7 +429,7 @@ public final class AuthClient: @unchecked Sendable {
             "mfaTicket": mfaTicket, "recoveryCode": recoveryCode
         ]))
         if let tokens = parseTokens(result) {
-            await tokenManager.setTokens(tokens)
+            try await tokenManager.setTokens(tokens)
         }
         return result
     }
@@ -456,10 +468,9 @@ public final class AuthClient: @unchecked Sendable {
     }
 
     private func parseTokens(_ result: [String: Any]) -> TokenPair? {
-        guard let accessToken = result["accessToken"] as? String,
-              let refreshToken = result["refreshToken"] as? String else {
-            return nil
-        }
+        if result["accessToken"] == nil && result["refreshToken"] == nil { return nil }
+        let accessToken = result["accessToken"] as? String ?? ""
+        let refreshToken = result["refreshToken"] as? String ?? ""
         return TokenPair(accessToken: accessToken, refreshToken: refreshToken)
     }
 }

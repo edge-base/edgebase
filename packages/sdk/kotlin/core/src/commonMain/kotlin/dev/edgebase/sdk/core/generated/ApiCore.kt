@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 package dev.edgebase.sdk.core.generated
 
@@ -225,20 +225,55 @@ open class GeneratedDbApi(protected val http: HttpClient) {
     suspend fun oauthRedirect(provider: String): Any? =
         http.get("/auth/oauth/${platformUrlEncode(provider)}")
 
+    /** Start OAuth redirect with optional request input. */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun oauthRedirect(provider: String, query: Map<String, String>?): Any? =
+        http.get("/auth/oauth/${platformUrlEncode(provider)}", query)
+
+    /** Atomically exchange a verified OAuth callback ticket — POST /api/auth/oauth/exchange */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun oauthExchange(body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/auth/oauth/exchange", body)
+
     /** OAuth callback — GET /api/auth/oauth/{provider}/callback */
     @Suppress("UNCHECKED_CAST")
-    suspend fun oauthCallback(provider: String): Any? =
-        http.get("/auth/oauth/${platformUrlEncode(provider)}/callback")
+    suspend fun oauthCallback(provider: String, query: Map<String, String>? = null): Any? =
+        http.get("/auth/oauth/${platformUrlEncode(provider)}/callback", query)
+
+    /** OAuth form-post callback — POST /api/auth/oauth/{provider}/callback */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun oauthCallbackPost(provider: String, body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/auth/oauth/${platformUrlEncode(provider)}/callback", body)
 
     /** Start OAuth account linking — POST /api/auth/oauth/link/{provider} */
     @Suppress("UNCHECKED_CAST")
     suspend fun oauthLinkStart(provider: String): Any? =
         http.post("/auth/oauth/link/${platformUrlEncode(provider)}")
 
+    /** Start OAuth account linking with optional request input. */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun oauthLinkStart(provider: String, body: Map<String, Any?>): Any? =
+        http.post("/auth/oauth/link/${platformUrlEncode(provider)}", body)
+
+    /** Continue OAuth account linking in the system browser — GET /api/auth/oauth/link/{provider}/continue */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun oauthLinkContinue(provider: String, query: Map<String, String>? = null): Any? =
+        http.get("/auth/oauth/link/${platformUrlEncode(provider)}/continue", query)
+
+    /** Complete OAuth account linking for the current authenticated user — POST /api/auth/oauth/complete/link */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun oauthLinkComplete(body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/auth/oauth/complete/link", body)
+
     /** OAuth link callback — GET /api/auth/oauth/link/{provider}/callback */
     @Suppress("UNCHECKED_CAST")
-    suspend fun oauthLinkCallback(provider: String): Any? =
-        http.get("/auth/oauth/link/${platformUrlEncode(provider)}/callback")
+    suspend fun oauthLinkCallback(provider: String, query: Map<String, String>? = null): Any? =
+        http.get("/auth/oauth/link/${platformUrlEncode(provider)}/callback", query)
+
+    /** OAuth link form-post callback — POST /api/auth/oauth/link/{provider}/callback */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun oauthLinkCallbackPost(provider: String, body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/auth/oauth/link/${platformUrlEncode(provider)}/callback", body)
 
     /** Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count */
     @Suppress("UNCHECKED_CAST")
@@ -285,11 +320,6 @@ open class GeneratedDbApi(protected val http: HttpClient) {
     open suspend fun dbSingleBatchByFilter(namespace: String, table: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
         http.postWithQuery("/db/${platformUrlEncode(namespace)}/tables/${platformUrlEncode(table)}/batch-by-filter", body, query)
 
-    /** Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact */
-    @Suppress("UNCHECKED_CAST")
-    open suspend fun dbSingleTransact(namespace: String, body: Map<String, Any?> = emptyMap()): Any? =
-        http.post("/db/${platformUrlEncode(namespace)}/transact", body)
-
     /** Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count */
     @Suppress("UNCHECKED_CAST")
     suspend fun dbCountRecords(namespace: String, instanceId: String, table: String, query: Map<String, String>? = null): Any? =
@@ -334,6 +364,11 @@ open class GeneratedDbApi(protected val http: HttpClient) {
     @Suppress("UNCHECKED_CAST")
     suspend fun dbBatchByFilter(namespace: String, instanceId: String, table: String, body: Map<String, Any?> = emptyMap(), query: Map<String, String>? = null): Any? =
         http.postWithQuery("/db/${platformUrlEncode(namespace)}/${platformUrlEncode(instanceId)}/tables/${platformUrlEncode(table)}/batch-by-filter", body, query)
+
+    /** Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact */
+    @Suppress("UNCHECKED_CAST")
+    open suspend fun dbSingleTransact(namespace: String, body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/db/${platformUrlEncode(namespace)}/transact", body)
 
     /** Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact */
     @Suppress("UNCHECKED_CAST")
@@ -439,6 +474,11 @@ open class GeneratedDbApi(protected val http: HttpClient) {
     suspend fun getConfig(): Any? =
         http.get("/config")
 
+    /** Render the hosted Turnstile page for native WebViews — GET /api/captcha/challenge */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun getCaptchaChallenge(query: Map<String, String>? = null): Any? =
+        http.get("/captcha/challenge", query)
+
     /** Register push token — POST /api/push/register */
     @Suppress("UNCHECKED_CAST")
     suspend fun pushRegister(body: Map<String, Any?> = emptyMap()): Any? =
@@ -473,6 +513,16 @@ open class GeneratedDbApi(protected val http: HttpClient) {
     @Suppress("UNCHECKED_CAST")
     suspend fun getRoomMetadata(query: Map<String, String>? = null): Any? =
         http.get("/room/metadata", query)
+
+    /** Get room summary — GET /api/room/summary */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun getRoomSummary(query: Map<String, String>? = null): Any? =
+        http.get("/room/summary", query)
+
+    /** Get summaries for multiple rooms — POST /api/room/summaries */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun getRoomSummaries(body: Map<String, Any?> = emptyMap()): Any? =
+        http.post("/room/summaries", body)
 
     /** Track custom events — POST /api/analytics/track */
     @Suppress("UNCHECKED_CAST")
@@ -589,8 +639,13 @@ object ApiPaths {
     const val AUTH_MFA_VERIFY = "/api/auth/mfa/verify"
     fun oauthRedirect(provider: String) = "/api/auth/oauth/$provider"
     fun oauthCallback(provider: String) = "/api/auth/oauth/$provider/callback"
+    fun oauthCallbackPost(provider: String) = "/api/auth/oauth/$provider/callback"
+    const val OAUTH_LINK_COMPLETE = "/api/auth/oauth/complete/link"
+    const val OAUTH_EXCHANGE = "/api/auth/oauth/exchange"
     fun oauthLinkStart(provider: String) = "/api/auth/oauth/link/$provider"
     fun oauthLinkCallback(provider: String) = "/api/auth/oauth/link/$provider/callback"
+    fun oauthLinkCallbackPost(provider: String) = "/api/auth/oauth/link/$provider/callback"
+    fun oauthLinkContinue(provider: String) = "/api/auth/oauth/link/$provider/continue"
     const val AUTH_PASSKEYS_LIST = "/api/auth/passkeys"
     fun authPasskeysDelete(credentialId: String) = "/api/auth/passkeys/$credentialId"
     const val AUTH_PASSKEYS_AUTH_OPTIONS = "/api/auth/passkeys/auth-options"
@@ -617,6 +672,7 @@ object ApiPaths {
     const val AUTH_VERIFY_LINK_PHONE = "/api/auth/verify-link-phone"
     const val AUTH_VERIFY_MAGIC_LINK = "/api/auth/verify-magic-link"
     const val AUTH_VERIFY_PHONE = "/api/auth/verify-phone"
+    const val GET_CAPTCHA_CHALLENGE = "/api/captcha/challenge"
     const val GET_CONFIG = "/api/config"
     fun executeD1Query(database: String) = "/api/d1/$database"
     fun dbListRecords(namespace: String, instanceId: String, table: String) = "/api/db/$namespace/$instanceId/tables/$table"
@@ -660,6 +716,8 @@ object ApiPaths {
     const val CONNECT_ROOM = "/api/room"
     const val CHECK_ROOM_CONNECTION = "/api/room/connect-check"
     const val GET_ROOM_METADATA = "/api/room/metadata"
+    const val GET_ROOM_SUMMARIES = "/api/room/summaries"
+    const val GET_ROOM_SUMMARY = "/api/room/summary"
     const val GET_SCHEMA = "/api/schema"
     const val EXECUTE_SQL = "/api/sql"
     fun listFiles(bucket: String) = "/api/storage/$bucket"

@@ -45,7 +45,11 @@ A temporary `wrangler.toml` is generated with the required bindings during deplo
 
 ## Internal vs. User Resources
 
-EdgeBase uses its own internal KV and D1 bindings for system purposes. Today that includes OAuth state in KV plus two internal D1 databases: `AUTH_DB` for auth state and `CONTROL_DB` for plugin and control-plane metadata.
+EdgeBase uses internal Durable Object, KV, and D1 bindings for system purposes.
+New OAuth callback authority is key-sharded in the `AUTH` Durable Object and
+atomically consumed. Internal KV keeps only a best-effort rolling-upgrade
+mirror/legacy fallback. The two internal D1 databases are `AUTH_DB` for durable
+auth state and `CONTROL_DB` for plugin and control-plane metadata.
 
 User-defined direct-control resources are completely separate Wrangler bindings. There is no way to access internal resources through the direct-control APIs, and no risk of collision.
 

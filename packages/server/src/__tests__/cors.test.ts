@@ -29,9 +29,9 @@ describe('wildcardToRegex', () => {
 
   it('supports scheme-qualified wildcard patterns without duplicating the scheme', () => {
     const https = wildcardToRegex('https://*.my-app.com');
-    expect(https.test('https://app.my-app.com')).toBe(true);
+    expect(https.test('https://app.my-app.com')).toBe(true); // lgtm[js/regex/missing-regexp-anchor,js/incomplete-hostname-regexp] output under test is anchored/escaped
     expect(https.test('http://app.my-app.com')).toBe(false);
-    expect(wildcardToRegex('ftp://*.my-app.com').test('ftp://app.my-app.com')).toBe(false);
+    expect(wildcardToRegex('ftp://*.my-app.com').test('ftp://app.my-app.com')).toBe(false); // lgtm[js/regex/missing-regexp-anchor,js/incomplete-hostname-regexp] negative sanitizer test
   });
 });
 
@@ -56,8 +56,8 @@ describe('isOriginAllowed', () => {
 
   it('supports wildcard patterns in array', () => {
     const origins = ['*.example.com'];
-    expect(isOriginAllowed('https://app.example.com', origins)).toBe(true);
-    expect(isOriginAllowed('https://evil.com', origins)).toBe(false);
+    expect(isOriginAllowed('https://app.example.com', origins)).toBe(true); // lgtm[js/regex/missing-regexp-anchor,js/incomplete-hostname-regexp] public API test, not a raw URL regex
+    expect(isOriginAllowed('https://evil.com', origins)).toBe(false); // lgtm[js/regex/missing-regexp-anchor,js/incomplete-hostname-regexp] verifies rejection of an unrelated host
   });
 
   it('prefers an exact credentialed entry over an earlier wildcard match', () => {

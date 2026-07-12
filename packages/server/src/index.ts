@@ -54,6 +54,7 @@ async function buildApp() {
     d1RouteModule,
     vectorizeRouteModule,
     configRouteModule,
+    captchaChallengeRouteModule,
     pushRouteModule,
     roomRouteModule,
     analyticsRouteModule,
@@ -94,6 +95,7 @@ async function buildApp() {
     import('./routes/d1.js'),
     import('./routes/vectorize.js'),
     import('./routes/config.js'),
+    import('./routes/captcha.js'),
     import('./routes/push.js'),
     import('./routes/room.js'),
     import('./routes/analytics-api.js'),
@@ -163,6 +165,7 @@ async function buildApp() {
   app.route('/api/d1', d1RouteModule.d1Route);
   app.route('/api/vectorize', vectorizeRouteModule.vectorizeRoute);
   app.route('/api/config', configRouteModule.configRoute);
+  app.route('/api/captcha', captchaChallengeRouteModule.captchaChallengeRoute);
   app.route('/api/push', pushRouteModule.pushRoute);
   app.route('/api/room', roomRouteModule.roomRoute);
   app.route('/api/analytics', analyticsRouteModule.analyticsApi);
@@ -446,6 +449,7 @@ export default {
       authDbAdapterModule,
       serviceKeyModule,
       doRouterModule,
+      signedUploadGrantsModule,
     ] = await Promise.all([
       import('./lib/plugin-migrations.js'),
       import('./lib/functions.js'),
@@ -456,6 +460,7 @@ export default {
       import('./lib/auth-db-adapter.js'),
       import('./lib/service-key.js'),
       import('./lib/do-router.js'),
+      import('./lib/signed-upload-grants.js'),
     ]);
 
     const { executePluginMigrations } = pluginMigrationsModule;
@@ -465,6 +470,7 @@ export default {
     const { ensureAuthSchema, deleteAnon } = authD1Module;
     const { resolveAuthDb } = authDbAdapterModule;
     const { resolveRootServiceKey } = serviceKeyModule;
+    const { cleanupExpiredSignedUploadGrants } = signedUploadGrantsModule;
 
     const config = doRouterModule.parseConfig(env);
     if (config.plugins?.length) {
@@ -496,6 +502,13 @@ export default {
           }
         } catch (err) {
           console.error('[EdgeBase] Session/anonymous cleanup failed:', err);
+        }
+        try {
+          if (env.STORAGE) {
+            await cleanupExpiredSignedUploadGrants(env.STORAGE, event.scheduledTime);
+          }
+        } catch (err) {
+          console.error('[EdgeBase] Signed-upload grant cleanup failed:', err);
         }
       })(),
     );

@@ -138,12 +138,13 @@ EdgeBase supports multiple simultaneous sessions per user. Each sign-in creates 
 
 ## Refresh Token Rotation
 
-Each token refresh issues a new refresh token and invalidates the old one:
+Each current-token refresh issues one replacement. The previous token remains a
+bounded retry alias for that same replacement:
 
 ```
 Client → POST /auth/refresh (old refreshToken)
 Server → { accessToken: "new...", refreshToken: "new..." }
-         (old refreshToken invalidated)
+         (old refreshToken enters the 30-second previous-token grace path)
 ```
 
 A 30-second grace period allows in-flight requests using the previous refresh token to succeed.
@@ -152,7 +153,8 @@ A 30-second grace period allows in-flight requests using the previous refresh to
 
 When a refresh token is rotated, the **previous token remains valid for 30 seconds**. This prevents race conditions when multiple browser tabs or concurrent requests attempt to refresh the token simultaneously.
 
-- During the 30-second window, both the old and new refresh tokens are accepted
+- During the 30-second window, the previous token returns the already-winning
+  current replacement; it never triggers another rotation branch
 - After the 30-second window expires, using the old token triggers **token theft detection** -- the session is revoked
 - This protects against stolen refresh tokens while being tolerant of normal concurrent usage patterns
 
@@ -181,7 +183,7 @@ The oldest session (by `createdAt`) is deleted to make room for the new session.
 | Token | Default TTL | Storage |
 |---|---|---|
 | **Access Token** | 15 minutes | Memory only |
-| **Refresh Token** | 28 days | `localStorage` / secure storage, or an opt-in EdgeBase HttpOnly cookie on Web |
+| **Refresh Token** | 28 days | Legacy Web body mode: `localStorage`; recommended Web cookie mode: EdgeBase `__Host-` HttpOnly cookie on HTTPS; React Native: app-provided Keychain/Keystore `secureStorage` |
 
 Configure in `edgebase.config.ts`:
 
@@ -197,7 +199,8 @@ auth: {
 For browser applications, enable `auth.session.cookie` on the server and create
 the Web client with `refreshTokenTransport: 'httpOnlyCookie'` to keep the
 refresh credential out of JavaScript-accessible storage. Access tokens remain
-short-lived Bearer tokens held in memory.
+short-lived Bearer tokens held in memory. HTTPS uses a host-only `__Host-`
+cookie with `Secure; Path=/`; release cookie transport requires HTTPS.
 
 ## JWT Key Rotation
 

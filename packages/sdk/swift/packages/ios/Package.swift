@@ -13,9 +13,7 @@ let package = Package(
     targets: [
         .target(name: "EdgeBase", dependencies: [
             .product(name: "EdgeBaseCore", package: "core"),
-        ], path: "Sources", resources: [
-            .process("Resources"),
-        ]),
+        ], path: "Sources"),
         .testTarget(name: "EdgeBaseTests", dependencies: ["EdgeBase"], path: "Tests"),
     ]
 )

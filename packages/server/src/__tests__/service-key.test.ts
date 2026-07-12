@@ -629,7 +629,10 @@ describe('buildConstraintCtx', () => {
     };
     // With a self-hosted proxy declared, the proxy's X-Forwarded-For is
     // authoritative and a client-forged cf-connecting-ip must not win.
-    expect(getTrustedClientIp({ EDGEBASE_CONFIG: JSON.stringify({ trustSelfHostedProxy: true }) }, req)).toBe('10.0.0.1');
+    expect(getTrustedClientIp({
+      EDGEBASE_RUNTIME_MODE: 'self-hosted',
+      EDGEBASE_CONFIG: JSON.stringify({ trustSelfHostedProxy: true }),
+    }, req)).toBe('10.0.0.1');
   });
 
   it('prefers cf-connecting-ip on the Cloudflare edge default (no self-hosted proxy)', () => {
@@ -640,7 +643,7 @@ describe('buildConstraintCtx', () => {
         return undefined;
       },
     };
-    expect(getTrustedClientIp({ EDGEBASE_CONFIG: '{}' }, req)).toBe('1.1.1.1');
+    expect(getTrustedClientIp({ EDGEBASE_RUNTIME_MODE: 'cloudflare', EDGEBASE_CONFIG: '{}' }, req)).toBe('1.1.1.1');
   });
 
   it('sets env from ENVIRONMENT', () => {
@@ -650,7 +653,7 @@ describe('buildConstraintCtx', () => {
 
   it('extracts IP from cf-connecting-ip', () => {
     const req = { header: (name: string) => name === 'cf-connecting-ip' ? '1.2.3.4' : undefined };
-    const ctx = buildConstraintCtx({ EDGEBASE_CONFIG: '{}' }, req);
+    const ctx = buildConstraintCtx({ EDGEBASE_RUNTIME_MODE: 'cloudflare', EDGEBASE_CONFIG: '{}' }, req);
     expect(ctx.ip).toBe('1.2.3.4');
   });
 
@@ -658,7 +661,7 @@ describe('buildConstraintCtx', () => {
     const req = {
       header: (name: string) => name === 'x-forwarded-for' ? '10.0.0.1, 10.0.0.2' : undefined,
     };
-    const ctx = buildConstraintCtx({ EDGEBASE_CONFIG: '{}' }, req);
+    const ctx = buildConstraintCtx({ EDGEBASE_RUNTIME_MODE: 'cloudflare', EDGEBASE_CONFIG: '{}' }, req);
     expect(ctx.ip).toBeUndefined();
   });
 
@@ -666,7 +669,10 @@ describe('buildConstraintCtx', () => {
     const req = {
       header: (name: string) => name === 'x-forwarded-for' ? '10.0.0.1, 10.0.0.2' : undefined,
     };
-    const ctx = buildConstraintCtx({ EDGEBASE_CONFIG: JSON.stringify({ trustSelfHostedProxy: true }) }, req);
+    const ctx = buildConstraintCtx({
+      EDGEBASE_RUNTIME_MODE: 'self-hosted',
+      EDGEBASE_CONFIG: JSON.stringify({ trustSelfHostedProxy: true }),
+    }, req);
     expect(ctx.ip).toBe('10.0.0.1');
   });
 
@@ -674,7 +680,10 @@ describe('buildConstraintCtx', () => {
     const req = {
       header: (name: string) => name === 'x-forwarded-for' ? '  10.0.0.1 , 10.0.0.2' : undefined,
     };
-    const ctx = buildConstraintCtx({ EDGEBASE_CONFIG: JSON.stringify({ trustSelfHostedProxy: true }) }, req);
+    const ctx = buildConstraintCtx({
+      EDGEBASE_RUNTIME_MODE: 'self-hosted',
+      EDGEBASE_CONFIG: JSON.stringify({ trustSelfHostedProxy: true }),
+    }, req);
     expect(ctx.ip).toBe('10.0.0.1');
   });
 
@@ -682,7 +691,10 @@ describe('buildConstraintCtx', () => {
     const req = {
       header: (name: string) => name === 'x-forwarded-for' ? '10.0.0.1' : undefined,
     };
-    const ctx = buildConstraintCtx({ EDGEBASE_CONFIG: JSON.stringify({ trustSelfHostedProxy: true }) }, req);
+    const ctx = buildConstraintCtx({
+      EDGEBASE_RUNTIME_MODE: 'self-hosted',
+      EDGEBASE_CONFIG: JSON.stringify({ trustSelfHostedProxy: true }),
+    }, req);
     expect(ctx.ip).toBe('10.0.0.1');
   });
 

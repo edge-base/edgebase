@@ -23,7 +23,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.3.8'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.4.0'
 }
 ```
 
@@ -32,6 +32,7 @@ If you are building from the monorepo directly, depend on `:packages:android`.
 ## Main Types
 
 - `dev.edgebase.sdk.client.EdgeBase`
+- `dev.edgebase.sdk.client.AndroidEdgeBase`
 - `ClientEdgeBase`
 - `AuthClient`
 - `DatabaseLiveClient`
@@ -42,13 +43,28 @@ If you are building from the monorepo directly, depend on `:packages:android`.
 ## Quick Start
 
 ```java
+import dev.edgebase.sdk.client.AndroidEdgeBase;
 import dev.edgebase.sdk.client.ClientEdgeBase;
-import dev.edgebase.sdk.client.EdgeBase;
 
-ClientEdgeBase client = EdgeBase.client("https://your-project.edgebase.fun");
+ClientEdgeBase client = AndroidEdgeBase.client(
+    this,
+    "https://your-project.edgebase.fun",
+    appSecureDurableTokenStorage
+);
 ```
 
 ## Notes
 
+- Pass the current `Activity` to `AndroidEdgeBase.client(...)`. Calling
+  `EdgeBase.client(...)` on Android fails fast by design.
+- Android's no-storage overload is process memory. Anonymous `linkWithEmail`
+  and `verifyLinkPhone` require an app-provided `DurableTokenStorage` backed by
+  platform-secure, process-persistent, full-pair storage; otherwise they fail
+  before the request.
+- Call `client.tryRestoreSession()` before authenticated work after launch.
+- Replacement/refresh persistence and configured CAPTCHA failures are thrown,
+  not converted to missing authority.
+- CAPTCHA config fetch/malformed-response failures are typed; only an explicit
+  `captcha: null` response is treated as disabled.
 - This is the client package. Prefer `edgebase-admin-java` for trusted server code.
 - The `EdgeBase` facade also exposes an admin factory for JVM-only workflows.

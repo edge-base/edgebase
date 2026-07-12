@@ -1,11 +1,29 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text.Json;
+using System.Collections.Concurrent;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace EdgeBase
 {
+
+/// <summary>CAPTCHA is configured but the local runtime could not produce a token.</summary>
+public sealed class CaptchaUnavailableException : Exception
+{
+    public const string ErrorCode = "captcha-unavailable";
+    public string Code => ErrorCode;
+    public string Reason { get; }
+
+    public CaptchaUnavailableException(string reason, Exception? innerException = null)
+        : base($"CAPTCHA unavailable: {reason}", innerException)
+    {
+        Reason = reason;
+    }
+}
 
 /// <summary>
 /// Turnstile captcha provider for Unity.
@@ -13,7 +31,26 @@ namespace EdgeBase
 /// </summary>
 public static class TurnstileProvider
 {
-    private static readonly Dictionary<string, string> _siteKeyCache = new();
+    private const long SiteKeyCacheTtlSeconds = 300;
+    private static readonly ConcurrentDictionary<string, CachedSiteKey> _siteKeyCache = new();
+
+    private sealed class CachedSiteKey
+    {
+        public CachedSiteKey(string value, long cachedAtTimestamp)
+        {
+            Value = value;
+            CachedAtTimestamp = cachedAtTimestamp;
+        }
+
+        public string Value { get; }
+        public long CachedAtTimestamp { get; }
+    }
+
+    private static bool IsSiteKeyCacheFresh(long cachedAtTimestamp, long nowTimestamp)
+    {
+        var age = nowTimestamp - cachedAtTimestamp;
+        return age >= 0 && age < Stopwatch.Frequency * SiteKeyCacheTtlSeconds;
+    }
 
     /// <summary>
     /// Resolve captcha token: use provided token or auto-acquire via Turnstile.
@@ -58,64 +95,145 @@ public static class TurnstileProvider
         var siteKey = await FetchSiteKeyAsync(baseUrl);
         if (siteKey == null) return null;
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        return await AcquireDirectCaptchaWithSingleSiteKeyRetryAsync(
+            siteKey,
+            nextSiteKey => AcquireTypedTokenAsync(baseUrl, action, nextSiteKey),
+            async () =>
+            {
+                _siteKeyCache.TryRemove(NormalizeBaseUrl(baseUrl), out _);
+                return await FetchSiteKeyAsync(baseUrl);
+            }
+        );
+#else
+        return await AcquireTypedTokenAsync(baseUrl, action, siteKey);
+#endif
+    }
+
+    private static async Task<string> AcquireTypedTokenAsync(
+        string baseUrl,
+        string action,
+        string siteKey)
+    {
         try
         {
-            return await AcquireTokenAsync(siteKey, action);
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // WebGL executes on the application's real browser origin, so the
+            // browser adapter uses the public site key directly.
+            if (_webViewFactory == null)
+                throw new InvalidOperationException("No WebView factory configured for Turnstile");
+            return await _webViewFactory(siteKey, action);
+#else
+            return await AcquireTokenAsync(baseUrl, action);
+#endif
         }
-        catch
+        catch (CaptchaUnavailableException)
         {
-            return null; // Turnstile failed — let server handle (failMode)
+            throw;
+        }
+        catch (Exception error)
+        {
+            throw new CaptchaUnavailableException("acquisition_failed", error);
+        }
+    }
+
+    private static bool ShouldRetryWithFreshSiteKey(string reason) =>
+        string.Equals(reason, "challenge_error", StringComparison.Ordinal);
+
+    private static async Task<string?> AcquireDirectCaptchaWithSingleSiteKeyRetryAsync(
+        string initialSiteKey,
+        Func<string, Task<string>> acquire,
+        Func<Task<string?>> refreshSiteKey)
+    {
+        try
+        {
+            return await acquire(initialSiteKey);
+        }
+        catch (CaptchaUnavailableException error) when (ShouldRetryWithFreshSiteKey(error.Reason))
+        {
+            var refreshedSiteKey = await refreshSiteKey();
+            if (refreshedSiteKey == null) return null;
+            // Intentionally no recursive retry: the second failure is the
+            // authoritative diagnostic exposed to the caller.
+            return await acquire(refreshedSiteKey);
         }
     }
 
     private static async Task<string?> FetchSiteKeyAsync(string baseUrl)
     {
         var normalizedBaseUrl = NormalizeBaseUrl(baseUrl);
-        if (_siteKeyCache.TryGetValue(normalizedBaseUrl, out var cachedSiteKey))
+        if (_siteKeyCache.TryGetValue(normalizedBaseUrl, out var cachedSiteKey) &&
+            IsSiteKeyCacheFresh(cachedSiteKey.CachedAtTimestamp, Stopwatch.GetTimestamp()))
         {
-            return cachedSiteKey;
+            return cachedSiteKey.Value;
         }
 
         try
         {
             using var http = new JbHttpClient(normalizedBaseUrl);
-            var payload = await http.GetAsync("/api/config");
-            if (payload.TryGetValue("captcha", out var captchaValue) &&
-                captchaValue is JsonElement captcha &&
-                captcha.ValueKind == JsonValueKind.Object &&
-                captcha.TryGetProperty("siteKey", out var siteKeyElement))
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var payload = await http.GetAsync("/api/config", timeout.Token);
+            if (!payload.TryGetValue("captcha", out var captchaValue))
+                throw new CaptchaUnavailableException("config_invalid_response");
+            if (captchaValue == null)
             {
-                var siteKey = siteKeyElement.GetString();
-                if (!string.IsNullOrEmpty(siteKey))
-                {
-                    _siteKeyCache[normalizedBaseUrl] = siteKey;
-                }
-                return siteKey;
+                return null;
             }
+            if (captchaValue is not JsonElement captcha)
+                throw new CaptchaUnavailableException("config_invalid_response");
+            if (captcha.ValueKind == JsonValueKind.Null)
+                return null;
+            if (captcha.ValueKind != JsonValueKind.Object)
+                throw new CaptchaUnavailableException("config_invalid_response");
+            if (!captcha.TryGetProperty("siteKey", out var siteKeyElement))
+                throw new CaptchaUnavailableException("config_invalid_response");
+            if (siteKeyElement.ValueKind != JsonValueKind.String)
+                throw new CaptchaUnavailableException("config_invalid_response");
+
+            var siteKey = siteKeyElement.GetString();
+            if (string.IsNullOrWhiteSpace(siteKey) || siteKey.Length > 512)
+                throw new CaptchaUnavailableException("config_invalid_response");
+            _siteKeyCache[normalizedBaseUrl] = new CachedSiteKey(
+                siteKey,
+                Stopwatch.GetTimestamp()
+            );
+            return siteKey;
         }
-        catch { /* ignore */ }
-        return null;
+        catch (CaptchaUnavailableException)
+        {
+            throw;
+        }
+        catch (JsonException error)
+        {
+            throw new CaptchaUnavailableException("config_invalid_response", error);
+        }
+        catch (Exception error)
+        {
+            throw new CaptchaUnavailableException("config_fetch_failed", error);
+        }
     }
 
     private static string NormalizeBaseUrl(string baseUrl) => baseUrl.TrimEnd('/');
 
-    private static async Task<string> AcquireTokenAsync(string siteKey, string action)
+    private static async Task<string> AcquireTokenAsync(string baseUrl, string action)
     {
-        // Unity WebView integration point.
-        // In Unity, this would use a WebView plugin to load Turnstile HTML.
-        // The WebView renders Turnstile invisibly, captures token via JS bridge.
-        //
-        // For now, use a TaskCompletionSource pattern that WebView callbacks can complete.
-        // Unity developers should call TurnstileProvider.SetWebViewFactory() to provide
-        // their WebView implementation.
-
         if (_webViewFactory != null)
         {
-            return await _webViewFactory(siteKey, action);
+            var randomBytes = new byte[16];
+            try
+            {
+                using var random = RandomNumberGenerator.Create();
+                random.GetBytes(randomBytes);
+            }
+            catch (Exception error)
+            {
+                throw new CaptchaUnavailableException("secure_random_unavailable", error);
+            }
+            var channel = BitConverter.ToString(randomBytes).Replace("-", "").ToLowerInvariant();
+            return await _webViewFactory(BuildChallengeUrl(baseUrl, action, channel), channel);
         }
 
-        // Fallback: return null if no WebView factory configured
-        throw new InvalidOperationException("No WebView factory configured for Turnstile");
+        throw new CaptchaUnavailableException("webview_adapter_unavailable");
     }
 
     // ── WebView Factory (pluggable for Unity) ──
@@ -131,7 +249,8 @@ public static class TurnstileProvider
     /// <summary>
     /// Set the WebView factory for acquiring Turnstile tokens.
     /// Called once during app initialization.
-    /// <para>The factory receives (siteKey, action) and returns a captcha token.</para>
+    /// <para>Native/desktop factories receive (hostedChallengeUrl, channel). A WebGL
+    /// build receives (siteKey, action), because it executes on the browser origin.</para>
     /// <para>Built-in adapters (UniWebView, Vuplex, gree) auto-register via TurnstileAdapters.
     /// Only call this manually if using an unsupported WebView plugin.</para>
     /// </summary>
@@ -141,25 +260,95 @@ public static class TurnstileProvider
     }
 
     /// <summary>
-    /// Generate the Turnstile HTML for loading in a WebView.
-    /// The HTML communicates via window.external.notify() or a custom scheme.
+    /// Build the registered EdgeBase HTTPS challenge URL for a native WebView.
     /// </summary>
-    public static string GetTurnstileHtml(
-        string siteKey, string action, string appearance = "interaction-only") =>
-        "<!DOCTYPE html><html><head>" +
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-        "<script src=\"https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit\" async></script>" +
-        "<style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:transparent}</style>" +
-        "</head><body><div id=\"cf-turnstile\"></div><script>" +
-        "function init(){if(window.turnstile){window.turnstile.render('#cf-turnstile',{" +
-        $"sitekey:'{siteKey}',action:'{action}',appearance:'{appearance}'," +
-        "callback:function(t){try{window.external.notify('token:'+t)}catch(e){window.location='edgebase://token/'+t}}," +
-        "'error-callback':function(e){try{window.external.notify('error:'+e)}catch(ex){window.location='edgebase://error/'+e}}," +
-        "'before-interactive-callback':function(){try{window.external.notify('interactive:show')}catch(e){window.location='edgebase://interactive/show'}}," +
-        "'after-interactive-callback':function(){try{window.external.notify('interactive:hide')}catch(e){window.location='edgebase://interactive/hide'}}," +
-        "'timeout-callback':function(){try{window.external.notify('error:timeout')}catch(e){window.location='edgebase://error/timeout'}}" +
-        "})}else{setTimeout(init,50)}}init();" +
-        "</script></body></html>";
+    public static string BuildChallengeUrl(
+        string baseUrl,
+        string action,
+        string channel,
+        string bridge = "unity")
+    {
+        var allowedActions = new HashSet<string>(StringComparer.Ordinal) {
+            "signup", "signin", "anonymous", "magic-link", "phone",
+            "password-reset", "oauth", "function",
+        };
+        if (!Uri.TryCreate(NormalizeBaseUrl(baseUrl), UriKind.Absolute, out var uri) ||
+            uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo) ||
+            uri.AbsolutePath != "/" || !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment) || !allowedActions.Contains(action) ||
+            channel.Length < 22 || channel.Length > 64 ||
+            channel.Any(ch => !(
+                (ch >= 'a' && ch <= 'z') ||
+                (ch >= 'A' && ch <= 'Z') ||
+                (ch >= '0' && ch <= '9') || ch == '_' || ch == '-')) ||
+            bridge is not ("unity" or "vuplex" or "uri" or "uniwebview"))
+        {
+            throw new ArgumentException("Turnstile requires an origin-only HTTPS EdgeBase URL, fixed action, and secure channel.");
+        }
+        return $"{uri.GetLeftPart(UriPartial.Authority)}/api/captcha/challenge" +
+            $"?action={action}&channel={channel}&bridge={bridge}";
+    }
+
+    /// <summary>Switch a provider-generated URL to a supported SDK bridge.</summary>
+    public static string WithChallengeBridge(string challengeUrl, string bridge)
+    {
+        const string defaultSuffix = "&bridge=unity";
+        if (bridge is not ("unity" or "vuplex" or "uri" or "uniwebview") ||
+            !challengeUrl.EndsWith(defaultSuffix, StringComparison.Ordinal) ||
+            !Uri.TryCreate(challengeUrl, UriKind.Absolute, out var uri) ||
+            uri.Scheme != Uri.UriSchemeHttps ||
+            uri.AbsolutePath != "/api/captcha/challenge")
+        {
+            throw new ArgumentException("Invalid EdgeBase CAPTCHA challenge URL or bridge.");
+        }
+        return challengeUrl[..^defaultSuffix.Length] + "&bridge=" + bridge;
+    }
+
+    public static bool TryParseChallengeMessage(
+        string json,
+        string expectedChannel,
+        out string type,
+        out string value)
+    {
+        type = "";
+        value = "";
+        if (string.IsNullOrEmpty(json) || System.Text.Encoding.UTF8.GetByteCount(json) > 4096)
+            return false;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("v", out var version) || version.GetInt32() != 1 ||
+                !root.TryGetProperty("channel", out var channel) || channel.GetString() != expectedChannel ||
+                !root.TryGetProperty("type", out var typeElement) ||
+                !root.TryGetProperty("value", out var valueElement)) return false;
+            type = typeElement.GetString() ?? "";
+            value = valueElement.GetString() ?? "";
+            if (type == "token") return value.Length is > 0 and <= 2048;
+            if (type == "error") { value = value[..Math.Min(value.Length, 256)]; return true; }
+            if (type == "interactive") return value is "show" or "hide";
+            return type == "ready" && value.Length <= 32;
+        }
+        catch
+        {
+            type = "";
+            value = "";
+            return false;
+        }
+    }
+
+    /// <summary>Normalize an untrusted bridge error into a bounded diagnostic reason.</summary>
+    public static string NormalizeFailureReason(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "challenge_error";
+        var normalized = new string(value
+            .ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) || ch is '_' or '-' ? ch : '_')
+            .Take(128)
+            .ToArray());
+        return string.IsNullOrEmpty(normalized) ? "challenge_error" : $"challenge_{normalized}";
+    }
 }
 
 }

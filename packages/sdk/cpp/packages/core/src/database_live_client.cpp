@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <set>
 #include <sstream>
+#include <iomanip>
+#include <stdexcept>
 #include <cctype>
 #include <cstdlib>
 #include <ixwebsocket/IXWebSocket.h>
@@ -13,6 +15,19 @@
 namespace client {
 
 using json = nlohmann::json;
+
+static std::string oauthUrlEncode(const std::string &value) {
+  std::ostringstream encoded;
+  encoded << std::uppercase << std::hex;
+  for (const unsigned char ch : value) {
+    if (std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+      encoded << static_cast<char>(ch);
+    } else {
+      encoded << '%' << std::setw(2) << std::setfill('0') << static_cast<int>(ch);
+    }
+  }
+  return encoded.str();
+}
 
 static std::string buildWsUrl(const std::string &baseUrl,
                               const std::string &channel = "") {
@@ -397,20 +412,72 @@ void DatabaseLiveClient::destroy() {
 
 // ── AuthClient minimal implementation ────────────────────────────────────────
 // Delegates to GeneratedDbApi when core_ is available; falls back to HttpClient.
-// Token management is preserved in the wrapper.
+// Token management is preserved in the wrapper. When durable storage is
+// configured, a complete replacement pair is committed there before the
+// shared HttpClient can expose it to another SDK surface.
 
-static void extractAndStoreTokenStub(const Result &r,
-                                     const std::shared_ptr<HttpClient> &http) {
-  if (!r.ok || r.body.empty())
-    return;
-  try {
-    auto j = nlohmann::json::parse(r.body);
-    if (j.contains("accessToken") && j["accessToken"].is_string())
-      http->setToken(j["accessToken"].get<std::string>());
-    if (j.contains("refreshToken") && j["refreshToken"].is_string())
-      http->setRefreshToken(j["refreshToken"].get<std::string>());
-  } catch (...) {
+enum class SessionKind { Anonymous, NonAnonymous, Unknown };
+
+static std::optional<nlohmann::json>
+decodeJwtPayload(const std::string &token) {
+  if (token.empty() || token.size() > 65536) {
+    return std::nullopt;
   }
+  const auto firstDot = token.find('.');
+  if (firstDot == std::string::npos) {
+    return std::nullopt;
+  }
+  const auto secondDot = token.find('.', firstDot + 1);
+  if (secondDot == std::string::npos) {
+    return std::nullopt;
+  }
+
+  std::string payload = token.substr(firstDot + 1, secondDot - firstDot - 1);
+  for (auto &ch : payload) {
+    if (ch == '-') ch = '+';
+    else if (ch == '_') ch = '/';
+  }
+  while (payload.size() % 4 != 0) {
+    payload += '=';
+  }
+
+  static const std::string alphabet =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string decoded;
+  decoded.reserve(payload.size() * 3 / 4);
+  unsigned int value = 0;
+  int bits = 0;
+  for (const unsigned char ch : payload) {
+    if (ch == '=') break;
+    const auto position = alphabet.find(ch);
+    if (position == std::string::npos) {
+      return std::nullopt;
+    }
+    value = (value << 6) | static_cast<unsigned int>(position);
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      decoded.push_back(static_cast<char>((value >> bits) & 0xff));
+      value &= bits == 0 ? 0u : ((1u << bits) - 1u);
+    }
+  }
+
+  auto parsed = nlohmann::json::parse(decoded, nullptr, false);
+  if (parsed.is_discarded() || !parsed.is_object()) {
+    return std::nullopt;
+  }
+  return parsed;
+}
+
+static SessionKind classifySession(const std::string &accessToken) {
+  const auto payload = decodeJwtPayload(accessToken);
+  if (!payload || !payload->contains("isAnonymous") ||
+      !(*payload)["isAnonymous"].is_boolean()) {
+    return SessionKind::Unknown;
+  }
+  return (*payload)["isAnonymous"].get<bool>()
+             ? SessionKind::Anonymous
+             : SessionKind::NonAnonymous;
 }
 
 static std::string toLowerCopy(std::string value) {
@@ -419,7 +486,17 @@ static std::string toLowerCopy(std::string value) {
   return value;
 }
 
-static std::string resolveCaptchaTokenForTests(const std::string &manualToken) {
+static std::mutex captchaProviderMutex;
+static AuthClient::CaptchaTokenProvider captchaTokenProvider;
+
+void AuthClient::setCaptchaTokenProvider(CaptchaTokenProvider provider) {
+  std::lock_guard<std::mutex> lock(captchaProviderMutex);
+  captchaTokenProvider = std::move(provider);
+}
+
+static std::string resolveCaptchaToken(
+    const std::shared_ptr<HttpClient> &http, const std::string &action,
+    const std::string &manualToken) {
   if (!manualToken.empty()) {
     return manualToken;
   }
@@ -438,18 +515,118 @@ static std::string resolveCaptchaTokenForTests(const std::string &manualToken) {
     return "test-captcha-token";
   }
 
+  AuthClient::CaptchaTokenProvider provider;
+  {
+    std::lock_guard<std::mutex> lock(captchaProviderMutex);
+    provider = captchaTokenProvider;
+  }
+  if (provider) {
+    return provider(http, action, manualToken);
+  }
+
   return "";
+}
+
+static bool resolveCaptchaForResult(
+    const std::shared_ptr<HttpClient> &http, const std::string &action,
+    const std::string &manualToken, std::string &resolved, Result &error) {
+  try {
+    resolved = resolveCaptchaToken(http, action, manualToken);
+    return true;
+  } catch (const std::exception &cause) {
+    error = {false, 0, "", std::string("captcha-unavailable: ") + cause.what()};
+    return false;
+  } catch (...) {
+    error = {false, 0, "", "captcha-unavailable: native CAPTCHA failed"};
+    return false;
+  }
 }
 
 struct AuthClient::State {
   std::mutex cbMutex;
+  std::mutex tokenMutex;
   std::vector<AuthStateCallback> authCallbacks;
 };
 
 AuthClient::AuthClient(std::shared_ptr<HttpClient> http,
                        std::shared_ptr<GeneratedDbApi> core)
+    : AuthClient(std::move(http), std::move(core), nullptr) {}
+
+AuthClient::AuthClient(std::shared_ptr<HttpClient> http,
+                       std::shared_ptr<GeneratedDbApi> core,
+                       std::shared_ptr<AuthTokenStorage> tokenStorage)
     : http_(std::move(http)), core_(std::move(core)),
-      state_(std::make_shared<State>()) {}
+      tokenStorage_(std::move(tokenStorage)), state_(std::make_shared<State>()) {
+  if (!tokenStorage_) {
+    return;
+  }
+  const auto stored = tokenStorage_->loadTokens();
+  if (!stored) {
+    return;
+  }
+  if (stored->accessToken.empty() || stored->refreshToken.empty()) {
+    throw std::runtime_error(
+        "token-storage-invalid: durable storage returned an incomplete token pair");
+  }
+  http_->setTokens(stored->accessToken, stored->refreshToken);
+}
+
+Result AuthClient::adoptAuthTokens(Result result,
+                                   const std::string &retryHint) const {
+  if (!result.ok || result.body.empty()) {
+    return result;
+  }
+
+  const auto response = nlohmann::json::parse(result.body, nullptr, false);
+  if (response.is_discarded() || !response.is_object()) {
+    return result;
+  }
+  const bool hasAccess = response.contains("accessToken");
+  const bool hasRefresh = response.contains("refreshToken");
+  if (!hasAccess && !hasRefresh) {
+    return result;
+  }
+  if (!hasAccess || !hasRefresh || !response["accessToken"].is_string() ||
+      !response["refreshToken"].is_string()) {
+    return {false, 0, "",
+            "invalid-auth-response: server returned an incomplete replacement token pair"};
+  }
+
+  const AuthTokenPair replacement{
+      response["accessToken"].get<std::string>(),
+      response["refreshToken"].get<std::string>()};
+  if (replacement.accessToken.empty() || replacement.refreshToken.empty()) {
+    return {false, 0, "",
+            "invalid-auth-response: server returned an empty replacement token"};
+  }
+
+  std::lock_guard<std::mutex> lock(state_->tokenMutex);
+  if (tokenStorage_) {
+    try {
+      // AuthTokenStorage::saveTokens is contractually atomic. Do not update
+      // memory until the durable pair is known to have committed.
+      tokenStorage_->saveTokens(replacement);
+    } catch (const std::exception &cause) {
+      std::string message =
+          "token-persistence-failed: replacement session was not exposed; ";
+      message += retryHint.empty()
+                     ? "retry the same authentication operation"
+                     : retryHint;
+      message += ". Storage error: ";
+      message += cause.what();
+      return {false, 0, "", std::move(message)};
+    } catch (...) {
+      std::string message =
+          "token-persistence-failed: replacement session was not exposed; ";
+      message += retryHint.empty()
+                     ? "retry the same authentication operation"
+                     : retryHint;
+      return {false, 0, "", std::move(message)};
+    }
+  }
+  http_->setTokens(replacement.accessToken, replacement.refreshToken);
+  return result;
+}
 
 Result AuthClient::signUp(const std::string &email, const std::string &password,
                           const std::string &displayName,
@@ -457,11 +634,15 @@ Result AuthClient::signUp(const std::string &email, const std::string &password,
   nlohmann::json body = {{"email", email}, {"password", password}};
   if (!displayName.empty())
     body["displayName"] = displayName;
-  const auto resolvedCaptcha = resolveCaptchaTokenForTests(captchaToken);
+  std::string resolvedCaptcha;
+  Result captchaError;
+  if (!resolveCaptchaForResult(http_, "signup", captchaToken,
+                               resolvedCaptcha, captchaError))
+    return captchaError;
   if (!resolvedCaptcha.empty())
     body["captchaToken"] = resolvedCaptcha;
   auto result = core_->auth_signup(body.dump());
-  extractAndStoreTokenStub(result, http_);
+  result = adoptAuthTokens(std::move(result));
   if (result.ok)
     notifyAuthChange(currentUser());
   return result;
@@ -470,11 +651,15 @@ Result AuthClient::signUp(const std::string &email, const std::string &password,
 Result AuthClient::signIn(const std::string &email, const std::string &password,
                           const std::string &captchaToken) const {
   nlohmann::json body = {{"email", email}, {"password", password}};
-  const auto resolvedCaptcha = resolveCaptchaTokenForTests(captchaToken);
+  std::string resolvedCaptcha;
+  Result captchaError;
+  if (!resolveCaptchaForResult(http_, "signin", captchaToken,
+                               resolvedCaptcha, captchaError))
+    return captchaError;
   if (!resolvedCaptcha.empty())
     body["captchaToken"] = resolvedCaptcha;
   auto result = core_->auth_signin(body.dump());
-  extractAndStoreTokenStub(result, http_);
+  result = adoptAuthTokens(std::move(result));
   if (result.ok)
     notifyAuthChange(currentUser());
   return result;
@@ -485,8 +670,26 @@ Result AuthClient::signOut() const {
   nlohmann::json j = {{"refreshToken", rt}};
   auto result = core_->auth_signout(j.dump());
   if (result.ok) {
-    http_->clearToken();
-    http_->clearRefreshToken();
+    if (tokenStorage_) {
+      try {
+        std::lock_guard<std::mutex> lock(state_->tokenMutex);
+        tokenStorage_->clearTokens();
+      } catch (const std::exception &cause) {
+        http_->clearTokens();
+        notifyAuthChange("");
+        return {false, 0, "",
+                std::string("token-clear-failed: the server session was revoked; "
+                            "clear the durable token store before restart. Storage error: ") +
+                    cause.what()};
+      } catch (...) {
+        http_->clearTokens();
+        notifyAuthChange("");
+        return {false, 0, "",
+                "token-clear-failed: the server session was revoked; clear "
+                "the durable token store before restart"};
+      }
+    }
+    http_->clearTokens();
     notifyAuthChange("");
   }
   return result;
@@ -495,12 +698,16 @@ Result AuthClient::signOut() const {
 Result
 AuthClient::signInAnonymously(const std::string &captchaToken) const {
   nlohmann::json body = nlohmann::json::object();
-  const auto resolvedCaptcha = resolveCaptchaTokenForTests(captchaToken);
+  std::string resolvedCaptcha;
+  Result captchaError;
+  if (!resolveCaptchaForResult(http_, "anonymous", captchaToken,
+                               resolvedCaptcha, captchaError))
+    return captchaError;
   if (!resolvedCaptcha.empty()) {
     body["captchaToken"] = resolvedCaptcha;
   }
   auto result = core_->auth_signin_anonymous(body.dump());
-  extractAndStoreTokenStub(result, http_);
+  result = adoptAuthTokens(std::move(result));
   if (result.ok)
     notifyAuthChange(currentUser());
   return result;
@@ -509,7 +716,11 @@ AuthClient::signInAnonymously(const std::string &captchaToken) const {
 Result AuthClient::signInWithMagicLink(const std::string &email,
                                        const std::string &captchaToken) const {
   nlohmann::json body = {{"email", email}};
-  const auto resolvedCaptcha = resolveCaptchaTokenForTests(captchaToken);
+  std::string resolvedCaptcha;
+  Result captchaError;
+  if (!resolveCaptchaForResult(http_, "magic-link", captchaToken,
+                               resolvedCaptcha, captchaError))
+    return captchaError;
   if (!resolvedCaptcha.empty()) {
     body["captchaToken"] = resolvedCaptcha;
   }
@@ -519,7 +730,7 @@ Result AuthClient::signInWithMagicLink(const std::string &email,
 Result AuthClient::verifyMagicLink(const std::string &token) const {
   nlohmann::json body = {{"token", token}};
   auto result = core_->auth_verify_magic_link(body.dump());
-  extractAndStoreTokenStub(result, http_);
+  result = adoptAuthTokens(std::move(result));
   if (result.ok)
     notifyAuthChange(currentUser());
   return result;
@@ -528,20 +739,34 @@ Result AuthClient::verifyMagicLink(const std::string &token) const {
 std::string
 AuthClient::signInWithOAuth(const std::string &provider,
                             const std::string &redirectUrl,
-                            const std::string & /*captchaToken*/) const {
+                            const std::string &captchaToken) const {
   // OAuth returns a redirect URL — not a JSON API call.
   // Keep as URL construction (no network call, mirrors Swift/C#).
-  std::string url = ApiPaths::oauth_redirect(provider);
-  if (!redirectUrl.empty())
-    url += "?redirectUrl=" + redirectUrl;
+  std::string url = ApiPaths::oauth_redirect(oauthUrlEncode(provider));
+  const auto resolvedCaptcha = resolveCaptchaToken(http_, "oauth", captchaToken);
+  if (!redirectUrl.empty()) {
+    url += "?redirect_url=" + oauthUrlEncode(redirectUrl);
+  }
+  if (!resolvedCaptcha.empty()) {
+    url += redirectUrl.empty() ? "?" : "&";
+    url += "captcha_token=" + oauthUrlEncode(resolvedCaptcha);
+  }
   return url;
 }
 
 Result AuthClient::linkWithEmail(const std::string &email,
                                  const std::string &password) const {
+  if (!tokenStorage_) {
+    return {false, 0, "",
+            "token-persistence-required: anonymous account upgrades revoke "
+            "the provisional session; configure a durable AuthTokenStorage "
+            "before linkWithEmail (no request was sent)"};
+  }
   nlohmann::json body = {{"email", email}, {"password", password}};
   auto result = core_->auth_link_email(body.dump());
-  extractAndStoreTokenStub(result, http_);
+  result = adoptAuthTokens(
+      std::move(result),
+      "retry linkWithEmail with the same email and password while the server checkpoint is valid");
   if (result.ok)
     notifyAuthChange(currentUser());
   return result;
@@ -550,18 +775,17 @@ Result AuthClient::linkWithEmail(const std::string &email,
 std::string
 AuthClient::linkWithOAuth(const std::string &provider,
                           const std::string &redirectUrl) const {
-  std::string url = ApiPaths::oauth_link_start(provider);
-  if (!redirectUrl.empty()) {
-    url += "?redirectUrl=" + redirectUrl;
-  }
-  return url;
+  (void)provider;
+  (void)redirectUrl;
+  throw std::logic_error(
+      "C++ OAuth account linking is unsupported because secure callback completion is not implemented");
 }
 
 Result AuthClient::changePassword(const std::string &cur,
                                   const std::string &nw) const {
   nlohmann::json body = {{"currentPassword", cur}, {"newPassword", nw}};
   auto result = core_->auth_change_password(body.dump());
-  extractAndStoreTokenStub(result, http_);
+  result = adoptAuthTokens(std::move(result));
   if (result.ok)
     notifyAuthChange(currentUser());
   return result;
@@ -574,7 +798,7 @@ Result AuthClient::refreshToken() const {
   }
   nlohmann::json body = {{"refreshToken", refresh_token}};
   auto result = core_->auth_refresh(body.dump());
-  extractAndStoreTokenStub(result, http_);
+  result = adoptAuthTokens(std::move(result));
   if (result.ok)
     notifyAuthChange(currentUser());
   return result;
@@ -584,7 +808,7 @@ Result AuthClient::updateProfile(
     const std::map<std::string, std::string> &data) const {
   nlohmann::json body = data;
   auto result = core_->auth_update_profile(body.dump());
-  extractAndStoreTokenStub(result, http_);
+  result = adoptAuthTokens(std::move(result));
   if (result.ok)
     notifyAuthChange(currentUser());
   return result;
@@ -612,7 +836,11 @@ Result
 AuthClient::requestPasswordReset(const std::string &email,
                                  const std::string &captchaToken) const {
   nlohmann::json body = {{"email", email}};
-  const auto resolvedCaptcha = resolveCaptchaTokenForTests(captchaToken);
+  std::string resolvedCaptcha;
+  Result captchaError;
+  if (!resolveCaptchaForResult(http_, "password-reset", captchaToken,
+                               resolvedCaptcha, captchaError))
+    return captchaError;
   if (!resolvedCaptcha.empty()) {
     body["captchaToken"] = resolvedCaptcha;
   }
@@ -652,7 +880,11 @@ Result AuthClient::unlinkIdentity(const std::string &identityId) const {
 
 Result AuthClient::signInWithPhone(const std::string &phone) const {
   nlohmann::json body = {{"phone", phone}};
-  const auto resolvedCaptcha = resolveCaptchaTokenForTests("");
+  std::string resolvedCaptcha;
+  Result captchaError;
+  if (!resolveCaptchaForResult(http_, "phone", "", resolvedCaptcha,
+                               captchaError))
+    return captchaError;
   if (!resolvedCaptcha.empty()) {
     body["captchaToken"] = resolvedCaptcha;
   }
@@ -663,7 +895,7 @@ Result AuthClient::verifyPhone(const std::string &phone,
                                const std::string &code) const {
   nlohmann::json body = {{"phone", phone}, {"code", code}};
   auto result = core_->auth_verify_phone(body.dump());
-  extractAndStoreTokenStub(result, http_);
+  result = adoptAuthTokens(std::move(result));
   if (result.ok)
     notifyAuthChange(currentUser());
   return result;
@@ -676,8 +908,21 @@ Result AuthClient::linkWithPhone(const std::string &phone) const {
 
 Result AuthClient::verifyLinkPhone(const std::string &phone,
                                    const std::string &code) const {
+  const SessionKind session = classifySession(http_->getToken());
+  if (!tokenStorage_ && session != SessionKind::NonAnonymous) {
+    return {false, 0, "",
+            "token-persistence-required: an anonymous or unclassifiable "
+            "session may be replaced by verifyLinkPhone; configure a durable "
+            "AuthTokenStorage before retrying (no request was sent)"};
+  }
   nlohmann::json body = {{"phone", phone}, {"code", code}};
-  return core_->auth_verify_link_phone(body.dump());
+  auto result = core_->auth_verify_link_phone(body.dump());
+  result = adoptAuthTokens(
+      std::move(result),
+      "retry verifyLinkPhone with the same phone and code while the five-minute server checkpoint is valid");
+  if (result.ok)
+    notifyAuthChange(currentUser());
+  return result;
 }
 
 Result AuthClient::signInWithEmailOtp(const std::string &email) const {
@@ -689,7 +934,7 @@ Result AuthClient::verifyEmailOtp(const std::string &email,
                                   const std::string &code) const {
   nlohmann::json body = {{"email", email}, {"code", code}};
   auto result = core_->auth_verify_email_otp(body.dump());
-  extractAndStoreTokenStub(result, http_);
+  result = adoptAuthTokens(std::move(result));
   if (result.ok)
     notifyAuthChange(currentUser());
   return result;
@@ -715,7 +960,7 @@ Result AuthClient::passkeysAuthenticate(
     const std::string &responseJson) const {
   nlohmann::json body = {{"response", nlohmann::json::parse(responseJson)}};
   auto result = core_->auth_passkeys_authenticate(body.dump());
-  extractAndStoreTokenStub(result, http_);
+  result = adoptAuthTokens(std::move(result));
   if (result.ok)
     notifyAuthChange(currentUser());
   return result;
@@ -743,7 +988,7 @@ Result AuthClient::verifyTotp(const std::string &mfaTicket,
                               const std::string &code) const {
   nlohmann::json body = {{"mfaTicket", mfaTicket}, {"code", code}};
   auto result = core_->auth_mfa_verify(body.dump());
-  extractAndStoreTokenStub(result, http_);
+  result = adoptAuthTokens(std::move(result));
   if (result.ok)
     notifyAuthChange(currentUser());
   return result;
@@ -754,7 +999,7 @@ Result AuthClient::useRecoveryCode(const std::string &mfaTicket,
   nlohmann::json body = {{"mfaTicket", mfaTicket},
                          {"recoveryCode", recoveryCode}};
   auto result = core_->auth_mfa_recovery(body.dump());
-  extractAndStoreTokenStub(result, http_);
+  result = adoptAuthTokens(std::move(result));
   if (result.ok)
     notifyAuthChange(currentUser());
   return result;
@@ -775,64 +1020,19 @@ Result AuthClient::listFactors() const {
 std::string AuthClient::currentToken() const { return http_->getToken(); }
 
 std::string AuthClient::currentUser() const {
-  std::string token = http_->getToken();
-  if (token.empty()) {
+  auto parsed = decodeJwtPayload(http_->getToken());
+  if (!parsed) {
     return "";
   }
-
-  auto firstDot = token.find('.');
-  if (firstDot == std::string::npos) {
-    return "";
+  if (!parsed->contains("id") && parsed->contains("sub") &&
+      (*parsed)["sub"].is_string()) {
+    (*parsed)["id"] = (*parsed)["sub"];
   }
-  auto secondDot = token.find('.', firstDot + 1);
-  if (secondDot == std::string::npos) {
-    return "";
+  if (!parsed->contains("customClaims") && parsed->contains("custom") &&
+      (*parsed)["custom"].is_object()) {
+    (*parsed)["customClaims"] = (*parsed)["custom"];
   }
-
-  std::string payload = token.substr(firstDot + 1, secondDot - firstDot - 1);
-  for (auto &c : payload) {
-    if (c == '-') c = '+';
-    else if (c == '_') c = '/';
-  }
-  while (payload.size() % 4 != 0) {
-    payload += '=';
-  }
-
-  static const std::string chars =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  std::string decoded;
-  int val = 0;
-  int bits = -8;
-  for (unsigned char c : payload) {
-    if (c == '=') {
-      break;
-    }
-    auto pos = chars.find(c);
-    if (pos == std::string::npos) {
-      continue;
-    }
-    val = (val << 6) + static_cast<int>(pos);
-    bits += 6;
-    if (bits >= 0) {
-      decoded += static_cast<char>((val >> bits) & 0xFF);
-      bits -= 8;
-    }
-  }
-
-  try {
-    auto parsed = nlohmann::json::parse(decoded);
-    if (parsed.is_object() && !parsed.contains("id") &&
-        parsed.contains("sub") && parsed["sub"].is_string()) {
-      parsed["id"] = parsed["sub"];
-    }
-    if (parsed.is_object() && !parsed.contains("customClaims") &&
-        parsed.contains("custom") && parsed["custom"].is_object()) {
-      parsed["customClaims"] = parsed["custom"];
-    }
-    return parsed.dump();
-  } catch (...) {
-    return decoded;
-  }
+  return parsed->dump();
 }
 
 void AuthClient::onAuthStateChange(AuthStateCallback callback) {
@@ -841,8 +1041,15 @@ void AuthClient::onAuthStateChange(AuthStateCallback callback) {
 }
 
 void AuthClient::notifyAuthChange(const std::string &userJson) const {
-  std::lock_guard<std::mutex> lock(state_->cbMutex);
-  for (const auto &cb : state_->authCallbacks)
+  // User callbacks may subscribe again or call another AuthClient surface.
+  // Snapshot under the mutex and invoke outside it to avoid self-deadlock and
+  // to keep a slow callback from blocking subscription changes.
+  std::vector<AuthStateCallback> callbacks;
+  {
+    std::lock_guard<std::mutex> lock(state_->cbMutex);
+    callbacks = state_->authCallbacks;
+  }
+  for (const auto &cb : callbacks)
     cb(userJson);
 }
 

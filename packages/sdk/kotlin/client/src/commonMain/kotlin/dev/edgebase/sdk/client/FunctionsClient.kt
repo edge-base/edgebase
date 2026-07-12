@@ -5,7 +5,8 @@ import dev.edgebase.sdk.core.HttpClient
 data class FunctionCallOptions(
     val method: String = "POST",
     val body: Map<String, Any?>? = null,
-    val query: Map<String, String>? = null
+    val query: Map<String, String>? = null,
+    val captchaToken: String? = null
 )
 
 class FunctionsClient(
@@ -13,12 +14,17 @@ class FunctionsClient(
 ) {
     suspend fun call(path: String, options: FunctionCallOptions = FunctionCallOptions()): Any? {
         val normalizedPath = "/functions/$path"
+        options.captchaToken?.let {
+            require(it.isNotEmpty() && it.length <= 2_048) {
+                "captchaToken must be non-empty and at most 2048 characters"
+            }
+        }
         return when (options.method.uppercase()) {
-            "GET" -> httpClient.get(normalizedPath, options.query)
-            "PUT" -> httpClient.put(normalizedPath, options.body ?: emptyMap())
-            "PATCH" -> httpClient.patch(normalizedPath, options.body ?: emptyMap())
-            "DELETE" -> httpClient.delete(normalizedPath)
-            else -> httpClient.post(normalizedPath, options.body ?: emptyMap())
+            "GET" -> httpClient.get(normalizedPath, options.query, options.captchaToken)
+            "PUT" -> httpClient.put(normalizedPath, options.body ?: emptyMap(), options.captchaToken)
+            "PATCH" -> httpClient.patch(normalizedPath, options.body ?: emptyMap(), options.captchaToken)
+            "DELETE" -> httpClient.delete(normalizedPath, captchaToken = options.captchaToken)
+            else -> httpClient.post(normalizedPath, options.body ?: emptyMap(), options.captchaToken)
         }
     }
 

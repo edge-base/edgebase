@@ -65,10 +65,8 @@ const KNOWN_UNCOVERED_EXPORTS = new Set([
   'auth-d1.ts:deleteAdmin',
   // Database-live emitter and D1 handler — moved to UNTESTED_LIBS (integration-test only)
   // Auth D1 — _users_public helpers used by auth-do, admin routes, backup (tested via integration)
-  'auth-d1.ts:upsertUserPublic',
   'auth-d1.ts:deleteUserPublic',
   'auth-d1.ts:batchDeleteUserPublic',
-  'auth-d1.ts:getUserPublic',
   'auth-d1.ts:listUsersPublic',
   // Auth D1 — provider constants used by adapter tests, not directly referenced
   'auth-d1.ts:AUTH_PG_SCHEMA',

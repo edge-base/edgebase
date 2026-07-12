@@ -7,6 +7,7 @@
  * - Full operation list is tracked (addition/removal/rename detected)
  */
 import { describe, it, expect } from 'vitest';
+import staticOpenApi from '../../openapi.json';
 
 const BASE = 'http://localhost';
 const SK = 'test-service-key-for-admin';
@@ -93,6 +94,100 @@ describe('OpenAPI spec stability', () => {
       'multipart/form-data',
     );
     expect(spec.paths?.['/admin/api/setup']?.post?.responses).toHaveProperty('403');
+  });
+
+  it('documents the browser OAuth callback-binding inputs', async () => {
+    const spec = await fetchSpec();
+    const redirect = spec.paths?.['/api/auth/oauth/{provider}']?.get;
+    const redirectQuery = Object.fromEntries(
+      (redirect?.parameters ?? [])
+        .filter((parameter: any) => parameter.in === 'query')
+        .map((parameter: any) => [parameter.name, parameter]),
+    );
+
+    expect(Object.keys(redirectQuery).sort()).toEqual([
+      'auth_transport',
+      'captcha_token',
+      'oauth_recovery_nonce',
+      'redirectUrl',
+      'redirect_url',
+    ]);
+    expect(redirectQuery.oauth_recovery_nonce?.schema).toMatchObject({
+      type: 'string',
+      pattern: '^[0-9a-f]{64}$',
+    });
+
+    const linkBody = spec.paths?.['/api/auth/oauth/link/{provider}']?.post?.requestBody;
+    expect(linkBody?.required).toBe(false);
+    expect(linkBody?.content?.['application/json']?.schema).toMatchObject({
+      type: 'object',
+      properties: {
+        redirectUrl: { type: 'string' },
+        state: { type: 'string', maxLength: 1024 },
+        oauthRecoveryNonce: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+      },
+    });
+  });
+
+  it('publishes completion, hosted captcha, combined signout, and phone-upgrade contracts', async () => {
+    const spec = await fetchSpec();
+    expect(spec.paths?.['/api/auth/oauth/exchange']?.post?.operationId).toBe('oauthExchange');
+    expect(spec.paths?.['/api/auth/oauth/complete/link']?.post?.operationId).toBe('oauthLinkComplete');
+
+    const captcha = spec.paths?.['/api/captcha/challenge']?.get;
+    expect(captcha?.operationId).toBe('getCaptchaChallenge');
+    expect(captcha?.responses?.['200']?.content).toHaveProperty('text/html');
+    const bridge = (captcha?.parameters ?? []).find((parameter: any) => parameter.name === 'bridge');
+    expect(bridge?.schema?.enum).toContain('uniwebview');
+
+    expect(spec.paths?.['/api/auth/signout']?.post?.requestBody?.content?.['application/json']?.schema)
+      .toMatchObject({
+        properties: {
+          pushDeviceId: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 128,
+            pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$',
+          },
+        },
+      });
+
+    const phoneSchema = spec.paths?.['/api/auth/verify-link-phone']?.post
+      ?.responses?.['200']?.content?.['application/json']?.schema;
+    const branches = phoneSchema?.anyOf ?? phoneSchema?.oneOf;
+    expect(branches).toHaveLength(2);
+    expect(branches).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        properties: { ok: { type: 'boolean', enum: [true] } },
+        required: ['ok'],
+      }),
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          user: expect.any(Object),
+          accessToken: { type: 'string' },
+          refreshToken: expect.objectContaining({ type: 'string' }),
+          sessionId: { type: 'string' },
+        }),
+        required: expect.arrayContaining(['user', 'accessToken', 'sessionId']),
+      }),
+    ]));
+  });
+
+  it('keeps the checked-in SDK contract synchronized with runtime route semantics', async () => {
+    const runtime = await fetchSpec();
+    const paths = [
+      '/api/auth/oauth/exchange',
+      '/api/auth/oauth/complete/link',
+      '/api/captcha/challenge',
+      '/api/auth/signout',
+      '/api/auth/verify-link-phone',
+    ];
+    for (const path of paths) {
+      expect(
+        (staticOpenApi.paths as Record<string, unknown>)[path],
+        `${path} in packages/server/openapi.json drifted from the runtime route`,
+      ).toEqual(runtime.paths?.[path]);
+    }
   });
 
   it('every path has an operationId', async () => {

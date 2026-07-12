@@ -24,6 +24,8 @@ export interface FunctionCallOptions {
   body?: unknown;
   /** Query string parameters (appended to URL). */
   query?: Record<string, string>;
+  /** Turnstile token for a function declared with `captcha: true`. */
+  captchaToken?: string;
 }
 
 // ─── FunctionsClient ───
@@ -48,6 +50,16 @@ export class FunctionsClient {
   async call<T = unknown>(name: string, options?: FunctionCallOptions): Promise<T> {
     const method = options?.method ?? 'POST';
     const path = `/api/functions/${name}`;
+
+    if (options?.captchaToken) {
+      return this.httpClient.requestFunction<T>(
+        method,
+        path,
+        options.body,
+        options.query,
+        options.captchaToken,
+      );
+    }
 
     switch (method) {
       case 'GET':

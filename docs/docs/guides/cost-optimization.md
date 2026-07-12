@@ -49,7 +49,11 @@ Cloudflare R2 has $0 egress. Serve files (images, videos, PDFs) from R2 instead 
 
 ### 5. D1-Based Auth (Built-in)
 
-Auth operations go directly to D1 (AUTH_DB), with no Durable Object overhead. D1 works well on the Free plan for small apps, and the Workers Paid plan raises limits to 25B reads and 50M writes per month. If you outgrow D1 limits, switch to Neon PostgreSQL with a single config change — no code modifications, no migration downtime.
+Durable auth records go directly to D1 (AUTH_DB), while ordinary JWT
+verification stays local. OAuth start/callback alone uses a key-sharded Durable
+Object to atomically consume short-lived state and link continuations. D1 works
+well on the Free plan for small apps; include that targeted DO usage when
+estimating OAuth-heavy traffic.
 
 ## Example Monthly Costs
 

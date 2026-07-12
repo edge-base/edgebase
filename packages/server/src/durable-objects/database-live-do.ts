@@ -8,9 +8,15 @@ import { parseConfig as getGlobalConfig } from '../lib/do-router.js';
 import { isDbLiveChannel } from '../lib/database-live-emitter.js';
 import { resolveDbLiveAuthTimeoutMs } from '../lib/database-live-config.js';
 import { ensureServerStartup } from '../lib/runtime-startup.js';
+import {
+  AuthSessionAuthorityUnavailableError,
+  isAuthSessionActive,
+} from '../lib/auth-session-authority.js';
 
 interface DOEnv {
   JWT_USER_SECRET?: string;
+  AUTH_DB?: unknown;
+  EDGEBASE_CONFIG?: unknown;
 }
 
 interface DatabaseLiveEvent {
@@ -34,6 +40,7 @@ type FilterOperator = FilterCondition[1];
 interface WSMeta {
   authenticated: boolean;
   userId?: string;
+  sessionId?: string;
   role?: string;
   connectionId: string;
   subscribedChannels: string[];
@@ -48,6 +55,7 @@ interface WSMeta {
 interface PersistedWSMeta {
   authenticated: boolean;
   userId?: string;
+  sessionId?: string;
   role?: string;
   connectionId: string;
   subscribedChannels: string[];
@@ -66,6 +74,7 @@ function serializeWSMeta(meta: WSMeta): PersistedWSMeta {
   return {
     authenticated: meta.authenticated,
     userId: meta.userId,
+    sessionId: meta.sessionId,
     role: meta.role,
     connectionId: meta.connectionId,
     subscribedChannels: meta.subscribedChannels,
@@ -83,6 +92,7 @@ function deserializeWSMeta(value: unknown): WSMeta | null {
   return {
     authenticated: !!v.authenticated,
     userId: v.userId,
+    sessionId: v.sessionId,
     role: v.role,
     connectionId: v.connectionId,
     subscribedChannels: Array.isArray(v.subscribedChannels) ? v.subscribedChannels : [],
@@ -299,8 +309,12 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
       return;
     }
 
+    if (!(await this.ensureLiveSessionAuthority(ws, meta))) {
+      return;
+    }
+
     if (this.filterRecoveryNeeded) {
-      this.broadcastToAuthenticated({ type: 'FILTER_RESYNC' });
+      await this.broadcastToAuthenticated({ type: 'FILTER_RESYNC' });
       this.filterRecoveryNeeded = false;
     }
 
@@ -374,8 +388,21 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
 
     try {
       const verified = await verifyAccessToken(token, secret);
+      const sessionId = typeof verified.sid === 'string' ? verified.sid : undefined;
+      if (!sessionId) {
+        throw new Error('Database Live requires a session-bound access token.');
+      }
+      const active = await isAuthSessionActive(
+        this.env as unknown as Record<string, unknown>,
+        verified.sub,
+        sessionId,
+      );
+      if (!active) {
+        throw new Error('Authentication session was revoked or expired.');
+      }
       meta.authenticated = true;
       meta.userId = verified.sub;
+      meta.sessionId = sessionId;
       meta.role = (verified as Record<string, unknown>).role as string | undefined;
       if (sdkVersion) {
         meta.sdkVersion = sdkVersion;
@@ -413,7 +440,15 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
         type: 'auth_success',
         userId: verified.sub,
       }));
-    } catch {
+    } catch (error) {
+      if (error instanceof AuthSessionAuthorityUnavailableError) {
+        this.sendRawUnchecked(ws, JSON.stringify({
+          type: 'error',
+          code: 'AUTH_AUTHORITY_UNAVAILABLE',
+          message: 'Authentication session validation is temporarily unavailable.',
+        }));
+        return;
+      }
       if (isReAuth) {
         ws.send(JSON.stringify({
           type: 'error',
@@ -631,6 +666,7 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
     for (const ws of sockets) {
       const meta = this.getWSMeta(ws);
       if (!meta?.authenticated) continue;
+      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
       if (!meta.subscribedChannels.includes(batch.channel)) continue;
 
       if (meta.supportsBatch) {
@@ -743,6 +779,7 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
     for (const ws of sockets) {
       const meta = this.getWSMeta(ws);
       if (!meta?.authenticated) continue;
+      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
       // Deliver to clients subscribed to the target channel or any parent channel
       if (!meta.subscribedChannels.some(sub => channel === sub || channel.startsWith(`${sub}:`))) {
         continue;
@@ -796,6 +833,7 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
     for (const ws of sockets) {
       const meta = this.getWSMeta(ws);
       if (!meta?.authenticated) continue;
+      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
       if (msgChannel && !meta.subscribedChannels.includes(msgChannel)) continue;
 
       const canRead = await this.evaluateRowReadAccess(tableName, meta, eventData);
@@ -822,16 +860,69 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
     }
   }
 
-  private broadcastToAuthenticated(msg: Record<string, unknown>): void {
+  private async broadcastToAuthenticated(msg: Record<string, unknown>): Promise<void> {
     const payload = JSON.stringify(msg);
     for (const ws of this.ctx.getWebSockets()) {
       const meta = this.getWSMeta(ws);
       if (!meta?.authenticated) continue;
+      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
       try {
         ws.send(payload);
       } catch {
         // Socket may be closing.
       }
+    }
+  }
+
+  private async ensureLiveSessionAuthority(ws: WebSocket, meta: WSMeta): Promise<boolean> {
+    if (!meta.sessionId || !meta.userId) {
+      this.revokeLiveSession(ws, meta, 'Authentication session metadata is missing.');
+      return false;
+    }
+
+    try {
+      const active = await isAuthSessionActive(
+        this.env as unknown as Record<string, unknown>,
+        meta.userId,
+        meta.sessionId,
+      );
+      if (active) return true;
+
+      this.revokeLiveSession(ws, meta, 'Authentication session was revoked. Reconnect required.');
+      return false;
+    } catch (error) {
+      if (error instanceof AuthSessionAuthorityUnavailableError) {
+        this.sendRawUnchecked(ws, JSON.stringify({
+          type: 'error',
+          code: 'AUTH_AUTHORITY_UNAVAILABLE',
+          message: 'Authentication session validation is temporarily unavailable.',
+        }));
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  private revokeLiveSession(ws: WebSocket, meta: WSMeta, message: string): void {
+    meta.authenticated = false;
+    this.setWSMeta(ws, meta);
+    this.sendRawUnchecked(ws, JSON.stringify({
+      type: 'error',
+      code: 'SESSION_REVOKED',
+      message,
+    }));
+    try {
+      ws.close(4002, 'Authentication session revoked');
+    } catch {
+      // Socket may already be closing.
+    }
+  }
+
+  private sendRawUnchecked(ws: WebSocket, payload: string): void {
+    try {
+      ws.send(payload);
+    } catch {
+      // Socket may already be closing.
     }
   }
 

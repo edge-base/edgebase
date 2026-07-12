@@ -51,6 +51,15 @@ async function api(method: string, path: string, body?: unknown) {
   return { status: res.status, data, headers: res.headers };
 }
 
+function expectOpaqueAttachment(headers: Headers, filename: string) {
+  expect(headers.get('content-type')).toBe('application/octet-stream');
+  expect(headers.get('content-disposition')).toContain('attachment;');
+  expect(headers.get('content-disposition')).toContain(filename);
+  expect(headers.get('content-security-policy')).toContain('sandbox');
+  expect(headers.get('content-security-policy')).toContain("default-src 'none'");
+  expect(headers.get('x-content-type-options')).toBe('nosniff');
+}
+
 // ─── 1. Upload ─────────────────────────────────────────────────────────────────
 
 describe('1-15 storage — upload', () => {
@@ -154,6 +163,191 @@ describe('1-15 storage — download', () => {
     });
     expect(res.status).toBe(416);
     expect(res.headers.get('content-range')).toBe(`bytes */${content.length}`);
+  });
+});
+
+describe('1-15 storage — active content delivery security', () => {
+  const keys: string[] = [];
+
+  afterAll(async () => {
+    for (const key of keys) {
+      await api('DELETE', `/api/storage/${BUCKET}/${key}`).catch(() => {});
+    }
+  });
+
+  it('serves safe raster media inline with nosniff', async () => {
+    const key = `safe-inline-${crypto.randomUUID().slice(0, 8)}.png`;
+    keys.push(key);
+    expect((await upload(key, 'synthetic-png-bytes', 'image/png')).status).toBe(201);
+
+    const res = await (globalThis as any).SELF.fetch(`${BASE}/api/storage/${BUCKET}/${key}`, {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/png');
+    expect(res.headers.get('content-disposition')).toBeNull();
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('forces HTML to an opaque sandboxed attachment on a full 200 response', async () => {
+    const key = `active-${crypto.randomUUID().slice(0, 8)}.html`;
+    const payload = '<!doctype html><script>globalThis.pwned = true</script>';
+    keys.push(key);
+    const uploaded = await upload(key, payload, 'text/html');
+    expect(uploaded.status).toBe(201);
+    expect((await uploaded.json() as any).contentType).toBe('text/html');
+
+    const res = await (globalThis as any).SELF.fetch(`${BASE}/api/storage/${BUCKET}/${key}`, {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+    });
+
+    expect(res.status).toBe(200);
+    expectOpaqueAttachment(res.headers, key);
+    expect(await res.text()).toBe(payload);
+  });
+
+  it('keeps the attachment and sandbox policy on 206 and 416 responses', async () => {
+    const key = `active-range-${crypto.randomUUID().slice(0, 8)}.svg`;
+    const payload = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>';
+    keys.push(key);
+    expect((await upload(key, payload, 'image/svg+xml')).status).toBe(201);
+
+    const partial = await (globalThis as any).SELF.fetch(`${BASE}/api/storage/${BUCKET}/${key}`, {
+      headers: { 'X-EdgeBase-Service-Key': SK, Range: 'bytes=0-15' },
+    });
+    expect(partial.status).toBe(206);
+    expectOpaqueAttachment(partial.headers, key);
+    expect(partial.headers.get('content-range')).toBe(`bytes 0-15/${payload.length}`);
+
+    const unsatisfiable = await (globalThis as any).SELF.fetch(`${BASE}/api/storage/${BUCKET}/${key}`, {
+      headers: { 'X-EdgeBase-Service-Key': SK, Range: 'bytes=9999-10000' },
+    });
+    expect(unsatisfiable.status).toBe(416);
+    expectOpaqueAttachment(unsatisfiable.headers, key);
+    expect(unsatisfiable.headers.get('content-range')).toBe(`bytes */${payload.length}`);
+  });
+
+  it('applies the same policy to unauthenticated signed downloads', async () => {
+    const key = `active-signed-${crypto.randomUUID().slice(0, 8)}.xhtml`;
+    keys.push(key);
+    expect((await upload(key, '<script>alert(1)</script>', 'application/xhtml+xml')).status).toBe(201);
+    const { data } = await api('POST', `/api/storage/${BUCKET}/signed-url`, { key });
+    const signed = new URL(data.url);
+
+    const res = await (globalThis as any).SELF.fetch(`${BASE}${signed.pathname}${signed.search}`);
+
+    expect(res.status).toBe(200);
+    expectOpaqueAttachment(res.headers, key);
+    expect(res.headers.get('cache-control')).toContain('private');
+  });
+
+  it('cannot bypass the policy by changing stored contentType metadata', async () => {
+    const key = `active-metadata-${crypto.randomUUID().slice(0, 8)}.txt`;
+    keys.push(key);
+    expect((await upload(key, '<script>alert(1)</script>', 'text/plain')).status).toBe(201);
+    const updated = await api('PATCH', `/api/storage/${BUCKET}/${key}/metadata`, {
+      contentType: 'text/html; charset=utf-8',
+    });
+    expect(updated.status).toBe(200);
+    expect(updated.data.contentType).toBe('text/html');
+
+    const res = await (globalThis as any).SELF.fetch(`${BASE}/api/storage/${BUCKET}/${key}`, {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+    });
+    expect(res.status).toBe(200);
+    expectOpaqueAttachment(res.headers, key);
+  });
+
+  it('applies the policy to completed multipart uploads', async () => {
+    const key = `active-multipart-${crypto.randomUUID().slice(0, 8)}.svg`;
+    const payload = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>';
+    keys.push(key);
+    const { status, data: created } = await api('POST', `/api/storage/${BUCKET}/multipart/create`, {
+      key,
+      contentType: 'image/svg+xml; charset=utf-8',
+    });
+    expect(status).toBe(200);
+
+    const partRes = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/storage/${BUCKET}/multipart/upload-part?uploadId=${encodeURIComponent(created.uploadId)}&partNumber=1&key=${encodeURIComponent(key)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'X-EdgeBase-Service-Key': SK,
+        },
+        body: payload,
+      },
+    );
+    expect(partRes.status).toBe(200);
+    const part = await partRes.json() as { partNumber: number; etag: string };
+
+    const completed = await api('POST', `/api/storage/${BUCKET}/multipart/complete`, {
+      uploadId: created.uploadId,
+      key,
+      parts: [part],
+    });
+    expect(completed.status).toBe(200);
+    expect(completed.data.contentType).toBe('image/svg+xml');
+
+    const res = await (globalThis as any).SELF.fetch(`${BASE}/api/storage/${BUCKET}/${key}`, {
+      headers: { 'X-EdgeBase-Service-Key': SK },
+    });
+    expect(res.status).toBe(200);
+    expectOpaqueAttachment(res.headers, key);
+  });
+
+  it('protects the admin dashboard object preview route', async () => {
+    const key = `active-admin-${crypto.randomUUID().slice(0, 8)}.html`;
+    keys.push(key);
+    const form = new FormData();
+    form.append('file', new Blob(['<script>alert(1)</script>'], { type: 'text/html' }), key);
+    form.append('key', key);
+    const uploaded = await (globalThis as any).SELF.fetch(
+      `${BASE}/admin/api/data/storage/buckets/${BUCKET}/upload`,
+      {
+        method: 'POST',
+        headers: { 'X-EdgeBase-Service-Key': SK },
+        body: form,
+      },
+    );
+    expect(uploaded.status).toBe(201);
+
+    const res = await (globalThis as any).SELF.fetch(
+      `${BASE}/admin/api/data/storage/buckets/${BUCKET}/objects/${key}`,
+      { headers: { 'X-EdgeBase-Service-Key': SK } },
+    );
+    expect(res.status).toBe(200);
+    expectOpaqueAttachment(res.headers, key);
+  });
+
+  it('protects service-key backup object downloads', async () => {
+    const key = `active-backup-${crypto.randomUUID().slice(0, 8)}.svg`;
+    const fullKey = `${BUCKET}/${key}`;
+    keys.push(key);
+    const restored = await (globalThis as any).SELF.fetch(
+      `${BASE}/admin/api/backup/restore-storage?action=put&key=${encodeURIComponent(fullKey)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'image/svg+xml; charset=utf-8',
+          'X-EdgeBase-Service-Key': SK,
+        },
+        body: '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+      },
+    );
+    expect(restored.status).toBe(200);
+
+    const res = await (globalThis as any).SELF.fetch(
+      `${BASE}/admin/api/backup/dump-storage?action=get&key=${encodeURIComponent(fullKey)}`,
+      {
+        method: 'POST',
+        headers: { 'X-EdgeBase-Service-Key': SK },
+      },
+    );
+    expect(res.status).toBe(200);
+    expectOpaqueAttachment(res.headers, key);
   });
 });
 
@@ -294,6 +488,32 @@ describe('1-15 storage — signed-url', () => {
     expect(res.status).toBe(200);
   });
 
+  it('서명 후 같은 key가 overwrite되면 full/range 모두 412로 fail-closed', async () => {
+    const versionedKey = `test-signed-version-${crypto.randomUUID().slice(0, 8)}.txt`;
+    expect((await upload(versionedKey, 'first', 'text/plain')).status).toBe(201);
+    const { data } = await api('POST', `/api/storage/${BUCKET}/signed-url`, {
+      key: versionedKey,
+    });
+    const signed = new URL(data.url);
+
+    // Same size and MIME ensure the ETag check, not only metadata, detects it.
+    expect((await upload(versionedKey, 'other', 'text/plain')).status).toBe(201);
+
+    for (const headers of [{}, { Range: 'bytes=0-1' }]) {
+      const response = await (globalThis as any).SELF.fetch(
+        `${BASE}${signed.pathname}${signed.search}`,
+        { headers },
+      );
+      expect(response.status).toBe(412);
+      expect(await response.json()).toMatchObject({
+        message: 'Signed download URL no longer matches the current object version. Create a new signed URL.',
+        slug: 'failed-precondition',
+      });
+    }
+
+    await api('DELETE', `/api/storage/${BUCKET}/${versionedKey}`).catch(() => {});
+  });
+
   it('존재하지 않는 파일 signed-url → 404', async () => {
     const { status } = await api('POST', `/api/storage/${BUCKET}/signed-url`, { key: 'nonexistent.txt' });
     expect(status).toBe(404);
@@ -350,6 +570,53 @@ describe('1-15 storage — signed-upload-url', () => {
     await api('DELETE', `/api/storage/${BUCKET}/${key}`).catch(() => {});
   });
 
+  it('signed-upload-url은 첫 커밋 후 삭제되어도 replay로 key를 재생성하지 못함', async () => {
+    const key = `test-signed-up-replay-${crypto.randomUUID().slice(0, 8)}.txt`;
+    const { data } = await api('POST', `/api/storage/${BUCKET}/signed-upload-url`, { key });
+    const signed = new URL(data.url);
+    const uploadOnce = () => {
+      const form = new FormData();
+      form.append('file', new Blob(['single-use signed upload'], { type: 'text/plain' }), 'file.txt');
+      form.append('key', key);
+      return (globalThis as any).SELF.fetch(`${BASE}${signed.pathname}${signed.search}`, {
+        method: 'POST',
+        body: form,
+      });
+    };
+
+    expect((await uploadOnce()).status).toBe(201);
+    expect((await api('DELETE', `/api/storage/${BUCKET}/${key}`)).status).toBe(200);
+
+    const replay = await uploadOnce();
+    expect(replay.status).toBe(403);
+    expect(await replay.json()).toMatchObject({
+      message: 'Signed upload token has already been used or revoked.',
+      slug: 'access-denied',
+    });
+
+    const readAfterReplay = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/storage/${BUCKET}/${key}`,
+      { headers: { 'X-EdgeBase-Service-Key': SK } },
+    );
+    expect(readAfterReplay.status).toBe(404);
+  });
+
+  it('signed-upload token은 private download 권한으로 혼용할 수 없음', async () => {
+    const bucket = 'documents';
+    const key = `test-upload-token-scope-${crypto.randomUUID().slice(0, 8)}.txt`;
+    expect((await uploadToBucket(bucket, key, 'private content')).status).toBe(201);
+    const { data } = await api('POST', `/api/storage/${bucket}/signed-upload-url`, { key });
+    const signedUpload = new URL(data.url);
+    const token = signedUpload.searchParams.get('token');
+
+    const download = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/storage/${bucket}/${key}?token=${encodeURIComponent(token!)}`,
+    );
+    expect(download.status).toBe(403);
+
+    await api('DELETE', `/api/storage/${bucket}/${key}`).catch(() => {});
+  });
+
   it('signed-upload-url maxFileSize 초과 업로드 → 413', async () => {
     const key = `test-signed-up-too-large-${crypto.randomUUID().slice(0, 8)}.txt`;
     const { data } = await api('POST', `/api/storage/${BUCKET}/signed-upload-url`, {
@@ -402,6 +669,26 @@ describe('1-15 storage — signed-upload-url', () => {
     expect(created.key).toBe(key);
     expect(typeof created.uploadId).toBe('string');
 
+    const replayCreateRes = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/storage/${BUCKET}/multipart/create?${signedQuery}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, contentType: 'application/octet-stream' }),
+      },
+    );
+    expect(replayCreateRes.status).toBe(403);
+
+    const wrongAbortRes = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/storage/${BUCKET}/multipart/abort?${signedQuery}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, uploadId: `${created.uploadId}-other` }),
+      },
+    );
+    expect(wrongAbortRes.status).toBe(403);
+
     const abortRes = await (globalThis as any).SELF.fetch(
       `${BASE}/api/storage/${BUCKET}/multipart/abort?${signedQuery}`,
       {
@@ -411,6 +698,52 @@ describe('1-15 storage — signed-upload-url', () => {
       },
     );
     expect(abortRes.status).toBe(200);
+  });
+
+  it('signed multipart maxFileSize는 모든 part의 누적 예약을 R2 쓰기 전에 제한', async () => {
+    const key = `test-signed-up-mp-budget-${crypto.randomUUID().slice(0, 8)}.bin`;
+    const { data } = await api('POST', `/api/storage/${BUCKET}/signed-upload-url`, {
+      key,
+      maxFileSize: '8B',
+    });
+    const signed = new URL(data.url);
+    const signedQuery = `token=${encodeURIComponent(signed.searchParams.get('token')!)}&key=${encodeURIComponent(key)}`;
+
+    const createRes = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/storage/${BUCKET}/multipart/create?${signedQuery}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, contentType: 'application/octet-stream' }),
+      },
+    );
+    expect(createRes.status).toBe(200);
+    const { uploadId } = await createRes.json() as { uploadId: string };
+
+    const uploadPart = (partNumber: number, bytes: number) => (globalThis as any).SELF.fetch(
+      `${BASE}/api/storage/${BUCKET}/multipart/upload-part?${signedQuery}&uploadId=${encodeURIComponent(uploadId)}&partNumber=${partNumber}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': String(bytes),
+        },
+        body: new Uint8Array(bytes),
+      },
+    );
+
+    expect((await uploadPart(1, 4)).status).toBe(200);
+    expect((await uploadPart(2, 4)).status).toBe(200);
+    const overBudget = await uploadPart(3, 1);
+    expect(overBudget.status).toBe(413);
+    expect(await overBudget.json()).toMatchObject({
+      slug: 'payload-too-large',
+    });
+
+    const continuation = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/storage/${BUCKET}/uploads/${encodeURIComponent(uploadId)}/parts?${signedQuery}`,
+    );
+    expect(continuation.status).toBe(403);
   });
 
   it('key 누락 → 400', async () => {

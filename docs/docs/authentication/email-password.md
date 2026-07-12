@@ -14,7 +14,7 @@ This feature is in **beta**. Core behavior is stable and ready to try, but some 
 Built-in email/password authentication with no MAU charges.
 
 :::tip Captcha Protection
-When [captcha is enabled](/docs/authentication/captcha), the **Sign Up**, **Sign In**, and **Password Reset** endpoints are automatically protected by Cloudflare Turnstile. All client SDKs handle token acquisition transparently — no code changes needed.
+When [CAPTCHA is enabled](/docs/authentication/captcha), **Sign Up**, **Sign In**, and **Password Reset** are protected by Cloudflare Turnstile. Supported UI runtimes acquire tokens through their browser or hosted-WebView adapter; headless runtimes and custom UI must pass a token explicitly.
 :::
 
 ## Sign Up
@@ -533,7 +533,9 @@ client.auth().requestPasswordReset("user@example.com");
 </TabItem>
 </Tabs>
 
-On the Web SDK, `requestPasswordReset()` also accepts `redirectUrl` plus optional `state`. The clicked email link includes:
+On the Web SDK, `requestPasswordReset()` also accepts `redirectUrl` plus
+optional `state`. The clicked email link includes these values in its URL
+fragment:
 
 - `token`
 - `type=password-reset`
@@ -541,7 +543,9 @@ On the Web SDK, `requestPasswordReset()` also accepts `redirectUrl` plus optiona
 
 If you do not pass a request-specific redirect, EdgeBase falls back to `email.resetUrl`.
 
-If your project sets `auth.allowedRedirectUrls`, the redirect must match that allowlist.
+In release, a request-specific redirect requires a non-empty
+`auth.allowedRedirectUrls`, must use HTTPS, and must match an explicitly
+approved URL, origin-wide entry, or path-prefix `*` entry.
 
 ### Reset Password with Token
 

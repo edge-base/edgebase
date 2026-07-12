@@ -80,8 +80,9 @@ describe('admin refresh cookie transport', () => {
       admin: { id: 'admin-1' },
     });
     expect(body).not.toHaveProperty('refreshToken');
-    expect(cookie).toContain('__Secure-edgebase-admin-refresh=admin-refresh');
-    expect(cookie).toContain('Path=/admin/api/auth');
+    expect(cookie).toContain('__Host-edgebase-admin-refresh=admin-refresh');
+    expect(cookie).toContain('Path=/');
+    expect(cookie).toContain('__Secure-edgebase-admin-refresh=; Max-Age=0; Path=/admin/api/auth');
     expect(cookie).toContain('HttpOnly');
     expect(cookie).toContain('Secure');
     expect(cookie).toContain('SameSite=Strict');
@@ -191,11 +192,41 @@ describe('admin refresh cookie transport', () => {
     expect(res.headers.get('Set-Cookie')).toBeNull();
   });
 
+  it('permits release admin cookie auth only on the CLI-owned local loopback boundary', async () => {
+    const headers = {
+      Origin: 'http://127.0.0.1:8787',
+      'CF-Connecting-IP': '127.0.0.1',
+      'X-EdgeBase-Auth-Transport': 'cookie',
+    };
+    const local = await createApp().request('http://127.0.0.1:8787/issue', {
+      method: 'POST',
+      headers,
+    }, { EDGEBASE_RUNTIME_MODE: 'local-development' });
+
+    expect(local.status).toBe(200);
+    expect(local.headers.get('Set-Cookie')).toContain('edgebase-admin-refresh=admin-refresh');
+    expect(local.headers.get('Set-Cookie')).not.toContain('Secure');
+
+    const forgedPublicHost = await createApp().request('http://api.example.com/issue', {
+      method: 'POST',
+      headers: { ...headers, Origin: 'http://api.example.com' },
+    }, { EDGEBASE_RUNTIME_MODE: 'local-development' });
+    expect(forgedPublicHost.status).toBe(400);
+    expect(await forgedPublicHost.json()).toMatchObject({ slug: 'insecure-cookie-config' });
+
+    const nonLoopbackPeer = await createApp().request('http://127.0.0.1:8787/issue', {
+      method: 'POST',
+      headers: { ...headers, 'CF-Connecting-IP': '198.51.100.9' },
+    }, { EDGEBASE_RUNTIME_MODE: 'local-development' });
+    expect(nonLoopbackPeer.status).toBe(400);
+    expect(await nonLoopbackPeer.json()).toMatchObject({ slug: 'insecure-cookie-config' });
+  });
+
   it('reads and expires only the negotiated admin cookie', async () => {
     const headers = {
       Origin: 'https://api.example.com',
       'X-EdgeBase-Auth-Transport': 'cookie',
-      Cookie: '__Secure-edgebase-admin-refresh=admin-refresh',
+      Cookie: '__Host-edgebase-admin-refresh=admin-refresh',
     };
     const read = await createApp().request('https://api.example.com/read', {
       method: 'POST',
@@ -210,6 +241,30 @@ describe('admin refresh cookie transport', () => {
     expect(cleared.headers.get('Set-Cookie')).toContain('Max-Age=0');
   });
 
+  it('ignores legacy admin cookies even when they precede the valid __Host cookie', async () => {
+    const common = {
+      Origin: 'https://api.example.com',
+      'X-EdgeBase-Auth-Transport': 'cookie',
+    };
+    const preferred = await createApp().request('https://api.example.com/read', {
+      method: 'POST',
+      headers: {
+        ...common,
+        Cookie: '__Secure-edgebase-admin-refresh=legacy-attacker; edgebase-admin-refresh=plain-attacker; __Host-edgebase-admin-refresh=host-valid',
+      },
+    });
+    expect(await preferred.json()).toEqual({ refreshToken: 'host-valid' });
+
+    const legacyOnly = await createApp().request('https://api.example.com/read', {
+      method: 'POST',
+      headers: {
+        ...common,
+        Cookie: '__Secure-edgebase-admin-refresh=legacy-only; edgebase-admin-refresh=plain-only',
+      },
+    });
+    expect(await legacyOnly.json()).toEqual({ refreshToken: null });
+  });
+
   it('supports direct negotiated cookie issuance with no-store headers', async () => {
     const res = await createApp().request('https://api.example.com/direct', {
       method: 'POST',
@@ -222,5 +277,35 @@ describe('admin refresh cookie transport', () => {
     expect(await res.json()).toEqual({ cookieTransport: true });
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     expect(res.headers.get('Set-Cookie')).toContain('direct-admin-refresh');
+  });
+
+  it('trusts forwarded HTTPS only for the trusted self-hosted runtime', async () => {
+    setConfig({ release: true, trustSelfHostedProxy: true });
+
+    const trusted = await createApp().request('http://api.example.com/issue', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://api.example.com',
+        'X-Forwarded-Proto': 'https',
+        'X-EdgeBase-Auth-Transport': 'cookie',
+      },
+    }, { EDGEBASE_RUNTIME_MODE: 'self-hosted' });
+    expect(trusted.status).toBe(200);
+    expect(trusted.headers.get('Set-Cookie')).toContain('__Host-edgebase-admin-refresh=');
+    expect(trusted.headers.get('Set-Cookie')).toContain('Secure');
+
+    for (const mode of ['cloudflare', 'local-development']) {
+      const spoofed = await createApp().request('http://api.example.com/issue', {
+        method: 'POST',
+        headers: {
+          Origin: 'http://api.example.com',
+          'X-Forwarded-Proto': 'https',
+          'X-EdgeBase-Auth-Transport': 'cookie',
+        },
+      }, { EDGEBASE_RUNTIME_MODE: mode });
+      expect(spoofed.status).toBe(400);
+      expect(await spoofed.json()).toMatchObject({ slug: 'insecure-cookie-config' });
+      expect(spoofed.headers.get('Set-Cookie')).toBeNull();
+    }
   });
 });

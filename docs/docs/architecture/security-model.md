@@ -121,8 +121,9 @@ Request → CORS → Rate Limit → Captcha → Auth Handler
 
 - Captcha is **not a global middleware** — it's applied internally within auth routes (signup, signin, anonymous, magic-link, phone, password-reset, OAuth) and optionally on HTTP functions
 - **Service Keys bypass** captcha — server-to-server calls are trusted
-- **failMode: open** (default) allows requests through if the Turnstile API is unreachable
+- Every deployed runtime is fail-closed and rejects `failMode: 'open'`; only the trusted CLI `local-development` runtime may opt into fail-open explicitly
 - **Action verification** prevents token reuse across endpoints (a signup token can't be used for signin)
+- **Hostname verification** binds tokens to one of 1-10 exact configured hostnames; wildcards are rejected
 
 See [Captcha Guide](/docs/authentication/captcha) for full configuration and SDK details.
 

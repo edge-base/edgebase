@@ -28,7 +28,7 @@ import { EdgeBaseError, getTableAccess, getTableHooks } from '@edge-base/shared'
 import {
   META_TABLE_DDL,
   generateTableDDL,
-  generateAddColumnDDL,
+  generateSQLiteAddColumnDDLs,
   generateFTS5DDL,
   generateFTS5Triggers,
   generateIndexDDL,
@@ -352,11 +352,23 @@ export class DatabaseDO extends DurableObject<DOEnv> {
     }
 
     const effectiveSchema = buildEffectiveSchema(config.schema);
+    const migrationDDLs: string[] = [];
     for (const [colName, field] of Object.entries(effectiveSchema)) {
       if (!existingCols.has(colName)) {
-        const ddl = generateAddColumnDDL(name, colName, field);
-        this.execMulti(ddl);
+        migrationDDLs.push(...generateSQLiteAddColumnDDLs(name, colName, field));
       }
+    }
+
+    if (migrationDDLs.length > 0) {
+      // Keep ADD COLUMN and its follow-up UNIQUE index atomic. If index
+      // creation fails, the column is rolled back too, so a later request can
+      // safely retry the complete migration instead of persisting a partially
+      // constrained schema.
+      this.ctx.storage.transactionSync(() => {
+        for (const ddl of migrationDDLs) {
+          this.execMulti(ddl);
+        }
+      });
     }
   }
 

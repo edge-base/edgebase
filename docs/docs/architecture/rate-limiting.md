@@ -44,7 +44,7 @@ The primary defense. A per-isolate **Fixed Window Counter** in memory, configure
 
 | Group | Default Limit | Key | What It Protects |
 |---|---|---|---|
-| `global` | 10,000,000 / 60s | IP | Overall request ceiling |
+| `global` | 10,000,000 / 60s | IP | Overall API/control request ceiling |
 | `db` | 100 / 60s | IP | Database CRUD operations |
 | `storage` | 50 / 60s | IP | File upload/download |
 | `functions` | 50 / 60s | IP | App Functions execution |
@@ -84,6 +84,11 @@ export default defineConfig({
 ```
 
 Only the groups you specify are overridden — all others keep their defaults. The `global` group is intentionally set high (10M/60s) and is rarely customized.
+
+Frontend and built-in admin/harness `GET`/`HEAD` assets do not consume the
+`global` API budget. This includes HTML shells, SPA navigations, hashed chunks,
+favicons, manifests, and service workers. `/api/*`, `/admin/api/*`,
+`/internal/*`, `/openapi.json`, and `/.well-known/*` remain rate limited.
 
 For built-in groups, you can also add `binding` settings if you want the generated Cloudflare binding to match your app policy more closely. Custom groups remain software-counter only.
 

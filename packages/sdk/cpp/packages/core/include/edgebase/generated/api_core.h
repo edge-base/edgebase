@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 #pragma once
 
@@ -103,12 +103,26 @@ public:
   Result auth_reset_password(const std::string& json_body) const;
   /// Start OAuth redirect — GET /api/auth/oauth/{provider}
   Result oauth_redirect(const std::string& provider) const;
+  /// Start OAuth redirect with optional request input.
+  Result oauth_redirect(const std::string& provider, const std::map<std::string, std::string>& query) const;
+  /// Atomically exchange a verified OAuth callback ticket — POST /api/auth/oauth/exchange
+  Result oauth_exchange(const std::string& json_body) const;
   /// OAuth callback — GET /api/auth/oauth/{provider}/callback
-  Result oauth_callback(const std::string& provider) const;
+  Result oauth_callback(const std::string& provider, const std::map<std::string, std::string>& query = {}) const;
+  /// OAuth form-post callback — POST /api/auth/oauth/{provider}/callback
+  Result oauth_callback_post(const std::string& provider, const std::string& json_body) const;
   /// Start OAuth account linking — POST /api/auth/oauth/link/{provider}
   Result oauth_link_start(const std::string& provider) const;
+  /// Start OAuth account linking with optional request input.
+  Result oauth_link_start(const std::string& provider, const std::string& json_body) const;
+  /// Continue OAuth account linking in the system browser — GET /api/auth/oauth/link/{provider}/continue
+  Result oauth_link_continue(const std::string& provider, const std::map<std::string, std::string>& query = {}) const;
+  /// Complete OAuth account linking for the current authenticated user — POST /api/auth/oauth/complete/link
+  Result oauth_link_complete(const std::string& json_body) const;
   /// OAuth link callback — GET /api/auth/oauth/link/{provider}/callback
-  Result oauth_link_callback(const std::string& provider) const;
+  Result oauth_link_callback(const std::string& provider, const std::map<std::string, std::string>& query = {}) const;
+  /// OAuth link form-post callback — POST /api/auth/oauth/link/{provider}/callback
+  Result oauth_link_callback_post(const std::string& provider, const std::string& json_body) const;
   /// Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
   virtual Result db_single_count_records(const std::string& namespace_, const std::string& table, const std::map<std::string, std::string>& query = {}) const;
   /// Search records in a single-instance table — GET /api/db/{namespace}/tables/{table}/search
@@ -127,8 +141,6 @@ public:
   virtual Result db_single_batch_records(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Batch update/delete records by filter in a single-instance table — POST /api/db/{namespace}/tables/{table}/batch-by-filter
   virtual Result db_single_batch_by_filter(const std::string& namespace_, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
-  /// Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
-  virtual Result db_single_transact(const std::string& namespace_, const std::string& json_body) const;
   /// Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
   Result db_count_records(const std::string& namespace_, const std::string& instance_id, const std::string& table, const std::map<std::string, std::string>& query = {}) const;
   /// Search records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/search
@@ -147,6 +159,8 @@ public:
   Result db_batch_records(const std::string& namespace_, const std::string& instance_id, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter
   Result db_batch_by_filter(const std::string& namespace_, const std::string& instance_id, const std::string& table, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
+  /// Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
+  virtual Result db_single_transact(const std::string& namespace_, const std::string& json_body) const;
   /// Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact
   Result db_transact(const std::string& namespace_, const std::string& instance_id, const std::string& json_body) const;
   /// Check database live subscription WebSocket prerequisites — GET /api/db/connect-check
@@ -189,6 +203,8 @@ public:
   Result abort_multipart_upload(const std::string& bucket, const std::string& json_body, const std::map<std::string, std::string>& query = {}) const;
   /// Get public configuration — GET /api/config
   Result get_config() const;
+  /// Render the hosted Turnstile page for native WebViews — GET /api/captcha/challenge
+  Result get_captcha_challenge(const std::map<std::string, std::string>& query = {}) const;
   /// Register push token — POST /api/push/register
   Result push_register(const std::string& json_body) const;
   /// Unregister push token — POST /api/push/unregister
@@ -203,6 +219,10 @@ public:
   Result connect_room(const std::map<std::string, std::string>& query = {}) const;
   /// Get room metadata — GET /api/room/metadata
   Result get_room_metadata(const std::map<std::string, std::string>& query = {}) const;
+  /// Get room summary — GET /api/room/summary
+  Result get_room_summary(const std::map<std::string, std::string>& query = {}) const;
+  /// Get summaries for multiple rooms — POST /api/room/summaries
+  Result get_room_summaries(const std::string& json_body) const;
   /// Track custom events — POST /api/analytics/track
   Result track_events(const std::string& json_body) const;
 
@@ -382,11 +402,22 @@ namespace ApiPaths {
   inline std::string oauth_callback(const std::string& provider) {
     return "/api/auth/oauth/" + provider + "/callback";
   }
+  inline std::string oauth_callback_post(const std::string& provider) {
+    return "/api/auth/oauth/" + provider + "/callback";
+  }
+  constexpr const char* OAUTH_LINK_COMPLETE = "/api/auth/oauth/complete/link";
+  constexpr const char* OAUTH_EXCHANGE = "/api/auth/oauth/exchange";
   inline std::string oauth_link_start(const std::string& provider) {
     return "/api/auth/oauth/link/" + provider;
   }
   inline std::string oauth_link_callback(const std::string& provider) {
     return "/api/auth/oauth/link/" + provider + "/callback";
+  }
+  inline std::string oauth_link_callback_post(const std::string& provider) {
+    return "/api/auth/oauth/link/" + provider + "/callback";
+  }
+  inline std::string oauth_link_continue(const std::string& provider) {
+    return "/api/auth/oauth/link/" + provider + "/continue";
   }
   constexpr const char* AUTH_PASSKEYS_LIST = "/api/auth/passkeys";
   inline std::string auth_passkeys_delete(const std::string& credential_id) {
@@ -418,6 +449,7 @@ namespace ApiPaths {
   constexpr const char* AUTH_VERIFY_LINK_PHONE = "/api/auth/verify-link-phone";
   constexpr const char* AUTH_VERIFY_MAGIC_LINK = "/api/auth/verify-magic-link";
   constexpr const char* AUTH_VERIFY_PHONE = "/api/auth/verify-phone";
+  constexpr const char* GET_CAPTCHA_CHALLENGE = "/api/captcha/challenge";
   constexpr const char* GET_CONFIG = "/api/config";
   inline std::string execute_d1_query(const std::string& database) {
     return "/api/d1/" + database;
@@ -505,6 +537,8 @@ namespace ApiPaths {
   constexpr const char* CONNECT_ROOM = "/api/room";
   constexpr const char* CHECK_ROOM_CONNECTION = "/api/room/connect-check";
   constexpr const char* GET_ROOM_METADATA = "/api/room/metadata";
+  constexpr const char* GET_ROOM_SUMMARIES = "/api/room/summaries";
+  constexpr const char* GET_ROOM_SUMMARY = "/api/room/summary";
   constexpr const char* GET_SCHEMA = "/api/schema";
   constexpr const char* EXECUTE_SQL = "/api/sql";
   inline std::string list_files(const std::string& bucket) {

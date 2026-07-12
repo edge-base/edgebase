@@ -1,7 +1,7 @@
 // EdgeBase Kotlin SDK — Android captcha provider (Turnstile via WebView).
 //
-// Zero-config: uses AndroidActivityTracker for Application context and Activity
-// tracking. No developer initialization required.
+// Android client creation requires AndroidEdgeBase.client(currentActivity, ...),
+// which captures an already-resumed Activity without hidden-API reflection.
 //
 // Phase 1: Headless WebView renders Cloudflare Turnstile invisibly (99% auto-pass).
 // Phase 2: If interactive challenge needed, WebView is shown as a full-screen
@@ -16,29 +16,62 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.ViewGroup
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
+import java.security.SecureRandom
 import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
+import kotlin.coroutines.resumeWithException
 
-actual suspend fun acquireCaptchaToken(siteKey: String, action: String): String? {
+internal actual val usesDirectCaptchaSiteKey: Boolean = false
+
+actual suspend fun acquireCaptchaToken(baseUrl: String, siteKey: String, action: String): String? {
     testCaptchaToken()?.let { return it }
-    return withTimeoutOrNull(30_000L) {
-        withContext(Dispatchers.Main) {
-            suspendCoroutine { cont ->
+    val channel = secureCaptchaChannel()
+    val challengeUrl = buildHostedCaptchaChallengeUrl(baseUrl, action, channel, "android")
+    return try {
+        withTimeout(30_000L) {
+          withContext(Dispatchers.Main) {
+            suspendCancellableCoroutine { cont ->
                 var resumed = false
                 var overlay: FrameLayout? = null
 
                 @SuppressLint("SetJavaScriptEnabled")
-                val webView = WebView(AndroidActivityTracker.ensureContext()).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    webViewClient = object : WebViewClient() {}
+                val webView = try {
+                    WebView(
+                        AndroidActivityTracker.getCurrentActivity()
+                            ?: AndroidActivityTracker.ensureContext()
+                    ).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.allowFileAccess = false
+                        settings.allowContentAccess = false
+                        settings.setSupportMultipleWindows(false)
+                        settings.javaScriptCanOpenWindowsAutomatically = false
+                        settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                    }
+                } catch (error: RuntimeException) {
+                    cont.resumeWithException(
+                        CaptchaUnavailableException("webview_initialization_failed", error)
+                    )
+                    return@suspendCancellableCoroutine
+                }
+                CookieManager.getInstance().apply {
+                    setAcceptCookie(true)
+                    setAcceptThirdPartyCookies(webView, true)
                 }
 
                 fun cleanup() {
@@ -46,37 +79,100 @@ actual suspend fun acquireCaptchaToken(siteKey: String, action: String): String?
                         (ov.parent as? ViewGroup)?.removeView(ov)
                     }
                     overlay = null
+                    webView.removeJavascriptInterface("EdgeBaseCaptchaBridge")
+                    webView.stopLoading()
                     webView.destroy()
+                }
+
+                fun finish(token: String) {
+                    Handler(Looper.getMainLooper()).post {
+                        if (!resumed) {
+                            resumed = true
+                            cleanup()
+                            if (cont.isActive) cont.resume(token)
+                        }
+                    }
+                }
+
+                fun fail(reason: String) {
+                    Handler(Looper.getMainLooper()).post {
+                        if (!resumed) {
+                            resumed = true
+                            cleanup()
+                            if (cont.isActive) {
+                                cont.resumeWithException(CaptchaUnavailableException(reason))
+                            }
+                        }
+                    }
+                }
+
+                webView.webViewClient = object : WebViewClient() {
+                    private fun blockUnexpected(url: String): Boolean {
+                        if (url == challengeUrl) return false
+                        fail("unexpected_navigation")
+                        return true
+                    }
+
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView,
+                        request: WebResourceRequest
+                    ): Boolean = request.isForMainFrame && blockUnexpected(request.url.toString())
+
+                    @Deprecated("Deprecated in Android")
+                    override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean =
+                        blockUnexpected(url)
+
+                    override fun onReceivedError(
+                        view: WebView,
+                        request: WebResourceRequest,
+                        error: WebResourceError
+                    ) {
+                        if (request.isForMainFrame) fail("challenge_load_failed")
+                    }
+
+                    override fun onReceivedHttpError(
+                        view: WebView,
+                        request: WebResourceRequest,
+                        errorResponse: WebResourceResponse
+                    ) {
+                        if (request.isForMainFrame && errorResponse.statusCode >= 400) {
+                            fail("challenge_http_${errorResponse.statusCode}")
+                        }
+                    }
+
+                    override fun onRenderProcessGone(
+                        view: WebView,
+                        detail: RenderProcessGoneDetail
+                    ): Boolean {
+                        fail("renderer_terminated")
+                        return true
+                    }
                 }
 
                 webView.addJavascriptInterface(object {
                     @JavascriptInterface
-                    fun onToken(token: String) {
-                        if (!resumed) {
-                            resumed = true
-                            Handler(Looper.getMainLooper()).post { cleanup() }
-                            cont.resume(token)
-                        }
-                    }
-
-                    @JavascriptInterface
-                    fun onError(error: String) {
-                        if (!resumed) {
-                            resumed = true
-                            Handler(Looper.getMainLooper()).post { cleanup() }
-                            cont.resume(null)
-                        }
-                    }
-
-                    @JavascriptInterface
-                    fun onInteractive(state: String) {
+                    fun postMessage(raw: String) {
+                        val message = parseHostedCaptchaMessage(raw, channel) ?: return
                         Handler(Looper.getMainLooper()).post {
-                            if (state == "show") {
+                            if (resumed) return@post
+                            if (message.type == "token") {
+                                finish(message.value)
+                            } else if (message.type == "error") {
+                                fail(captchaBridgeFailureReason(message.value))
+                            } else if (message.type == "interactive" && message.value == "show") {
                                 // Phase 2: Show WebView as overlay on current Activity
-                                val activity = AndroidActivityTracker.getCurrentActivity() ?: return@post
+                                val activity = AndroidActivityTracker.getCurrentActivity()
+                                if (activity == null) {
+                                    fail("activity_unavailable")
+                                    return@post
+                                }
                                 val contentView = activity.findViewById<FrameLayout>(
                                     android.R.id.content
-                                ) ?: return@post
+                                )
+                                if (contentView == null) {
+                                    fail("activity_content_unavailable")
+                                    return@post
+                                }
 
                                 // Remove WebView from any existing parent
                                 (webView.parent as? ViewGroup)?.removeView(webView)
@@ -99,7 +195,7 @@ actual suspend fun acquireCaptchaToken(siteKey: String, action: String): String?
                                 ov.addView(webView, webViewParams)
                                 contentView.addView(ov)
                                 overlay = ov
-                            } else if (state == "hide") {
+                            } else if (message.type == "interactive" && message.value == "hide") {
                                 overlay?.let { ov ->
                                     (ov.parent as? ViewGroup)?.removeView(ov)
                                 }
@@ -107,16 +203,41 @@ actual suspend fun acquireCaptchaToken(siteKey: String, action: String): String?
                             }
                         }
                     }
-                }, "captchaHandler")
+                }, "EdgeBaseCaptchaBridge")
 
-                val html = buildTurnstileHtml(siteKey, action)
-                webView.loadDataWithBaseURL(
-                    "https://challenges.cloudflare.com",
-                    html, "text/html", "utf-8", null
-                )
+                cont.invokeOnCancellation {
+                    Handler(Looper.getMainLooper()).post {
+                        if (!resumed) {
+                            resumed = true
+                            cleanup()
+                        }
+                    }
+                }
+                webView.loadUrl(challengeUrl)
             }
+          }
         }
+    } catch (timeout: TimeoutCancellationException) {
+        throw CaptchaUnavailableException("timeout", timeout)
     }
+}
+
+private fun secureCaptchaChannel(): String {
+    return try {
+        val bytes = ByteArray(16)
+        SecureRandom().nextBytes(bytes)
+        bytes.joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    } catch (error: RuntimeException) {
+        throw CaptchaUnavailableException("secure_random_unavailable", error)
+    }
+}
+
+private fun captchaBridgeFailureReason(value: String): String {
+    val normalized = value.lowercase()
+        .map { if (it.isLetterOrDigit() || it == '_' || it == '-') it else '_' }
+        .joinToString("")
+        .take(128)
+    return if (normalized.isBlank()) "challenge_error" else "challenge_$normalized"
 }
 
 private fun testCaptchaToken(): String? {
@@ -147,41 +268,3 @@ private fun testCaptchaToken(): String? {
 fun initCaptchaContext(context: android.content.Context) {
     AndroidActivityTracker.initContext(context)
 }
-
-// ─── HTML Template ───
-
-/**
- * Build the Turnstile HTML page for WebView rendering.
- * Uses appearance: 'interaction-only' so it's invisible for 99% of users.
- * Includes before/after interactive callbacks for the 1% who need to solve a challenge.
- */
-private fun buildTurnstileHtml(siteKey: String, action: String): String = """
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async></script>
-  <style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:transparent}</style>
-</head>
-<body>
-  <div id="cf-turnstile"></div>
-  <script>
-    function init(){
-      if(window.turnstile){
-        window.turnstile.render('#cf-turnstile',{
-          sitekey:'$siteKey',
-          action:'$action',
-          appearance:'interaction-only',
-          callback:function(t){window.captchaHandler.onToken(t)},
-          'error-callback':function(e){window.captchaHandler.onError(String(e))},
-          'before-interactive-callback':function(){window.captchaHandler.onInteractive('show')},
-          'after-interactive-callback':function(){window.captchaHandler.onInteractive('hide')},
-          'timeout-callback':function(){window.captchaHandler.onError('timeout')}
-        });
-      }else{setTimeout(init,50)}
-    }
-    init();
-  </script>
-</body>
-</html>
-""".trimIndent()

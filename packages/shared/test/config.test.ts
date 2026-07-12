@@ -8,6 +8,7 @@ import {
   getRoomActionHandlers,
   getRoomHooks,
   getRoomStateConfig,
+  resolveCaptchaHostnames,
 } from '../src/index.js';
 
 describe('defineConfig', () => {
@@ -1081,6 +1082,94 @@ describe('auth session cookie config', () => {
         },
       },
     })).toThrow(/sameSite/);
+
+    expect(() => defineConfig({
+      auth: {
+        session: {
+          cookie: { enabled: true, name: 'edgebase-admin-refresh' },
+        },
+      },
+    })).toThrow(/reserved admin cookie name/);
+  });
+});
+
+describe('captcha config', () => {
+  it('derives a sorted exact hostname set from every public origin surface', () => {
+    const config = defineConfig({
+      baseUrl: 'https://api.example.test',
+      cors: { origin: ['https://app.example.test', 'https://api.example.test'] },
+      auth: {
+        allowedRedirectUrls: ['https://login.example.test/callback'],
+        passkeys: { rpId: 'app.example.test', origin: 'https://passkey.example.test' },
+      },
+      captcha: {
+        siteKey: 'synthetic-site-key',
+        secretKey: 'synthetic-secret-key',
+        hostnames: ['native.example.test'],
+      },
+    });
+
+    expect(resolveCaptchaHostnames(config)).toEqual([
+      'api.example.test',
+      'app.example.test',
+      'login.example.test',
+      'native.example.test',
+      'passkey.example.test',
+    ]);
+  });
+
+  it.each([
+    ['wildcard', ['*.example.test']],
+    ['scheme', ['https://api.example.test']],
+    ['port', ['api.example.test:8443']],
+    ['path', ['api.example.test/path']],
+    ['empty', []],
+  ])('rejects an invalid %s hostname allowlist', (_label, hostnames) => {
+    expect(() => defineConfig({
+      captcha: {
+        siteKey: 'synthetic-site-key',
+        secretKey: 'synthetic-secret-key',
+        hostnames,
+      },
+    })).toThrow(/1-10 exact hostnames/i);
+  });
+
+  it('rejects malformed keys, fail modes, and unbounded Siteverify timeouts', () => {
+    expect(() => defineConfig({
+      captcha: { siteKey: '', secretKey: 'secret' },
+    })).toThrow(/siteKey/);
+    expect(() => defineConfig({
+      captcha: { siteKey: 'site', secretKey: '' },
+    })).toThrow(/secretKey/);
+    expect(() => defineConfig({
+      captcha: { siteKey: 'site', secretKey: 'secret', failMode: 'maybe' as 'closed' },
+    })).toThrow(/failMode/);
+    expect(() => defineConfig({
+      captcha: { siteKey: 'site', secretKey: 'secret', siteverifyTimeout: 30_001 },
+    })).toThrow(/between 250 and 30000/);
+  });
+
+  it('requires hostname binding and runtime-only secrets for release CAPTCHA', () => {
+    expect(() => defineConfig({ release: true, captcha: true })).toThrow(/exact hostname/i);
+    expect(() => defineConfig({
+      release: true,
+      baseUrl: 'https://api.example.test',
+      captcha: {
+        siteKey: 'site',
+        secretKey: 'must-not-be-bundled',
+      },
+    })).toThrow(/TURNSTILE_SECRET/);
+    expect(() => defineConfig({
+      release: true,
+      baseUrl: 'https://api.example.test',
+      captcha: { siteKey: 'site', failMode: 'open' },
+    })).toThrow(/cannot use failMode: open/);
+
+    expect(defineConfig({
+      release: true,
+      baseUrl: 'https://api.example.test',
+      captcha: { siteKey: 'site' },
+    }).captcha).toEqual({ siteKey: 'site' });
   });
 });
 

@@ -22,8 +22,12 @@ OIDC Federation providers use the same OAuth sign-in flow as built-in providers.
 1. EdgeBase fetches the provider's **OpenID Connect Discovery document** from `{issuer}/.well-known/openid-configuration`
 2. The discovery document provides the `authorization_endpoint`, `token_endpoint`, and `userinfo_endpoint`
 3. The standard OAuth authorization code flow runs using these discovered endpoints
-4. User info is extracted from the **ID token** (JWT claims) when available, with fallback to the userinfo endpoint
-5. PKCE is automatically enabled for all OIDC providers
+4. EdgeBase requires and cryptographically verifies the **ID token** against the
+   discovery document's JWKS, issuer, audience, expiry, authorized party, and
+   per-flow nonce
+5. EdgeBase fetches the authenticated `userinfo_endpoint` and requires its
+   `sub` to match the verified ID token before using profile or email claims
+6. PKCE is automatically enabled for all OIDC providers
 
 ## Configuration
 
@@ -71,7 +75,7 @@ Each OIDC provider requires three fields:
 |-------|----------|-------------|
 | `clientId` | Yes | OAuth client ID from your identity provider |
 | `clientSecret` | Yes | OAuth client secret |
-| `issuer` | Yes | The OIDC issuer URL (must serve `/.well-known/openid-configuration`) |
+| `issuer` | Yes | The exact OIDC issuer URL (must serve a matching `/.well-known/openid-configuration`; HTTPS is required outside loopback development) |
 | `scopes` | No | Custom scopes array (default: `['openid', 'email', 'profile']`) |
 
 ### 3. Register Redirect URI
@@ -197,6 +201,13 @@ Override the default scopes if your provider requires specific ones:
 
 OIDC providers use the same SDK methods as built-in OAuth providers. Use the `oidc:{name}` format for the provider parameter.
 
+:::caution Native callback support
+Only `@edge-base/web` and `@edge-base/react-native` currently complete a bound
+app callback. The Dart, Swift, Kotlin, Java, and C# methods shown below only
+construct a provider-start URL; they are not an end-to-end production OAuth
+completion flow.
+:::
+
 <Tabs groupId="sdk-language">
 <TabItem value="js" label="JavaScript" default>
 
@@ -214,14 +225,14 @@ client.auth.signInWithOAuth('oidc:azure-ad', {
 <TabItem value="dart" label="Dart/Flutter">
 
 ```dart
-await client.auth.signInWithOAuth('oidc:okta');
+final url = client.auth.signInWithOAuth('oidc:okta');
 ```
 
 </TabItem>
 <TabItem value="swift" label="Swift">
 
 ```swift
-let url = client.auth.signInWithOAuth(provider: "oidc:okta")
+let url = await client.auth.signInWithOAuth(provider: "oidc:okta")
 // Open url in SFSafariViewController or ASWebAuthenticationSession
 ```
 
@@ -229,7 +240,7 @@ let url = client.auth.signInWithOAuth(provider: "oidc:okta")
 <TabItem value="kotlin" label="Kotlin">
 
 ```kotlin
-client.auth().signInWithOAuth("oidc:okta");
+val url = client.auth.signInWithOAuth("oidc:okta")
 ```
 
 </TabItem>
@@ -266,19 +277,20 @@ OIDC federation uses the same OAuth endpoints with the `oidc:{name}` provider pa
 
 EdgeBase caches the OIDC discovery document in memory for 1 hour per Worker instance. This avoids refetching the discovery document on every authentication request while still picking up provider configuration changes reasonably quickly.
 
-### ID Token Parsing
+### ID Token and Userinfo Verification
 
-When the OIDC provider returns an `id_token` in the token response, EdgeBase extracts user information directly from the JWT claims:
+An `id_token`, discovery `jwks_uri`, and `userinfo_endpoint` are required for
+the current OIDC flow. EdgeBase accepts only asymmetric JWT algorithms, verifies
+the signature with the discovered JWKS, and checks `iss`, `aud`, `exp`, `iat`,
+`sub`, `nonce`, and `azp` when required. The discovery document's `issuer` must
+match the configured issuer, and discovered endpoints must be HTTPS except for
+explicit loopback development.
 
-| JWT Claim | Mapped Field |
-|-----------|-------------|
-| `sub` | `providerUserId` |
-| `email` | `email` |
-| `email_verified` | `emailVerified` |
-| `name` | `displayName` |
-| `picture` | `avatarUrl` |
-
-If no `id_token` is returned, EdgeBase falls back to the provider's `userinfo_endpoint`.
+After ID-token verification, EdgeBase fetches userinfo with the provider access
+token and requires `userinfo.sub === id_token.sub`. Profile data comes from
+that authenticated userinfo response. `email_verified` is true only for the
+literal boolean `true` or string `"true"`; other truthy-looking values do not
+enable email auto-linking. There is no decode-only or missing-ID-token fallback.
 
 ### PKCE Support
 
@@ -293,6 +305,7 @@ If a user signs in with an OIDC provider using an email that already exists in y
 To verify that your OIDC provider is correctly configured:
 
 1. Confirm the discovery endpoint is accessible: `curl https://your-issuer/.well-known/openid-configuration`
-2. Verify the response includes `authorization_endpoint` and `token_endpoint`
+2. Verify the response includes `issuer`, `authorization_endpoint`,
+   `token_endpoint`, `userinfo_endpoint`, and `jwks_uri`
 3. Confirm the redirect URI is registered in your provider's admin console
 4. Start the dev server and attempt a sign-in via `GET /api/auth/oauth/oidc:{name}`

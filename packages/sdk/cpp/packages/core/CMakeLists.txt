@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(EdgeBaseCore VERSION 0.3.8 LANGUAGES CXX)
+project(EdgeBaseCore VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,6 +24,12 @@ FetchContent_Declare(
   GIT_TAG        v11.4.5
 )
 set(USE_TLS ON CACHE BOOL "Enable TLS for database-live websocket transport" FORCE)
+# IXWebSocket defaults to mbedTLS on Windows, but the Unreal ThirdParty
+# contract and the documented vcpkg bootstrap provide OpenSSL. Pin the backend
+# so Win64 never configures against an undeclared archive.
+if(WIN32)
+  set(USE_OPEN_SSL ON CACHE BOOL "Use OpenSSL for IXWebSocket TLS" FORCE)
+endif()
 FetchContent_MakeAvailable(ixwebsocket)
 
 # Find libcurl

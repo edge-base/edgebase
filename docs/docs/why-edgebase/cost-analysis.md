@@ -53,7 +53,11 @@ EdgeBase doesn't optimize expensive operations — it eliminates the conditions 
 
 ### Authentication: $0
 
-Traditional BaaS charges per-MAU because the server manages sessions per user. EdgeBase issues a JWT on sign-in, then every subsequent request verifies the JWT signature locally (pure cryptography, no network call, no Durable Object hit). Whether you have 100 or 10 million users, the per-request auth cost is the same. The Free plan already covers small apps, and the Workers Paid plan ($5/mo) raises D1 to 25B reads and 50M writes per month. If you ever outgrow D1 limits, a single config change switches auth to Neon PostgreSQL with no code modifications.
+Traditional BaaS products often charge per MAU. EdgeBase adds no per-MAU
+license fee: ordinary bearer-authenticated data requests verify JWT signatures
+locally. Session mutations use D1, and OAuth start/callback uses a short-lived,
+key-sharded Durable Object for atomic state consumption, so normal Cloudflare
+or self-hosted infrastructure usage still applies.
 
 ### Egress: $0
 

@@ -21,7 +21,13 @@ export { DatabaseLiveClient, type DatabaseLiveOptions } from './database-live.js
 export { matchesFilter, type FilterOperator, type FilterEntry } from './match-filter.js';
 
 // Captcha
-export { getCaptchaToken, fetchSiteKey, resolveCaptchaToken } from './turnstile.js';
+export {
+  TurnstileError,
+  getCaptchaToken,
+  fetchSiteKey,
+  resolveCaptchaToken,
+} from './turnstile.js';
+export type { TurnstileErrorReason } from './turnstile.js';
 
 // Room
 export {

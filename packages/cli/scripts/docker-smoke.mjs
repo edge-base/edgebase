@@ -149,6 +149,8 @@ function readDockerInspect(containerName) {
 async function main() {
   const skipIfUnavailable = process.argv.includes('--skip-if-unavailable')
     || process.env.EDGEBASE_SKIP_DOCKER_SMOKE_IF_UNAVAILABLE === '1';
+  const keepImage = process.argv.includes('--keep-image')
+    || process.env.EDGEBASE_KEEP_DOCKER_SMOKE_IMAGE === '1';
 
   if (!isDockerResponsive()) {
     if (skipIfUnavailable) {
@@ -170,6 +172,7 @@ async function main() {
     `import { defineConfig } from '@edge-base/shared';
 
 export default defineConfig({
+  release: true,
   databases: {
     shared: {
       tables: {},
@@ -178,6 +181,12 @@ export default defineConfig({
   frontend: {
     directory: './web/dist',
     spaFallback: true,
+  },
+  auth: {
+    anonymousAuth: true,
+    access: {
+      signInAnonymous: (_input, ctx) => ctx.ip === '::1' || ctx.ip?.startsWith('127.') === true,
+    },
   },
 });
 `,
@@ -198,7 +207,8 @@ export default defineConfig({
   );
   cpSync(dockerfileSource, join(projectDir, 'Dockerfile'));
 
-  const tag = `edgebase-docker-smoke:${Date.now()}`;
+  const tag = process.env.EDGEBASE_DOCKER_SMOKE_TAG?.trim()
+    || `edgebase-docker-smoke:${Date.now()}`;
   const containerName = `edgebase-docker-smoke-${Date.now()}`;
   const persistDir = join(tempRoot, 'data');
   mkdirSync(persistDir, { recursive: true });
@@ -211,13 +221,15 @@ export default defineConfig({
       // ignore
     }
   });
-  cleanupTasks.push(() => {
-    try {
-      execFileSync('docker', ['image', 'rm', '-f', tag], { stdio: 'ignore', timeout: 20_000 });
-    } catch {
-      // ignore
-    }
-  });
+  if (!keepImage) {
+    cleanupTasks.push(() => {
+      try {
+        execFileSync('docker', ['image', 'rm', '-f', tag], { stdio: 'ignore', timeout: 20_000 });
+      } catch {
+        // ignore
+      }
+    });
+  }
 
   log('Building Docker image through the CLI...');
   const buildRaw = run(
@@ -283,7 +295,22 @@ export default defineConfig({
   }
 
   ensure(frontendResponse.ok, 'Frontend route did not return a successful response.');
+  const forgedAnonymous = await fetch(`http://127.0.0.1:${port}/api/auth/signin/anonymous`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'cf-connecting-ip': '127.0.0.1',
+    },
+    body: '{}',
+  });
+  ensure(
+    forgedAnonymous.status === 403,
+    `Self-hosted runtime trusted a forged CF loopback header (status ${forgedAnonymous.status}).`,
+  );
   log(`Docker smoke passed: ${healthUrl} and ${frontendUrl}`);
+  if (keepImage) {
+    log(`Retained verified image for follow-up scanning: ${tag}`);
+  }
 }
 
 try {

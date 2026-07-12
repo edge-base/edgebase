@@ -38,12 +38,12 @@ class HttpClient(
     // MARK: - Public API
 
     @Suppress("UNCHECKED_CAST")
-    suspend fun get(path: String, queryParams: Map<String, String>? = null): Any? =
-        request("GET", path, queryParams = queryParams)
+    suspend fun get(path: String, queryParams: Map<String, String>? = null, captchaToken: String? = null): Any? =
+        request("GET", path, queryParams = queryParams, captchaToken = captchaToken)
 
     @Suppress("UNCHECKED_CAST")
-    suspend fun post(path: String, body: Map<String, Any?> = emptyMap()): Any? =
-        request("POST", path, body)
+    suspend fun post(path: String, body: Map<String, Any?> = emptyMap(), captchaToken: String? = null): Any? =
+        request("POST", path, body, captchaToken = captchaToken)
 
     /**
      * POST with both JSON body and query parameters.
@@ -54,12 +54,12 @@ class HttpClient(
         request("POST", path, body, queryParams = queryParams)
 
     @Suppress("UNCHECKED_CAST")
-    suspend fun patch(path: String, body: Map<String, Any?> = emptyMap()): Any? =
-        request("PATCH", path, body)
+    suspend fun patch(path: String, body: Map<String, Any?> = emptyMap(), captchaToken: String? = null): Any? =
+        request("PATCH", path, body, captchaToken = captchaToken)
 
     @Suppress("UNCHECKED_CAST")
-    suspend fun put(path: String, body: Map<String, Any?> = emptyMap()): Any? =
-        request("PUT", path, body)
+    suspend fun put(path: String, body: Map<String, Any?> = emptyMap(), captchaToken: String? = null): Any? =
+        request("PUT", path, body, captchaToken = captchaToken)
 
     /**
      * PUT with both JSON body and query parameters.
@@ -70,8 +70,8 @@ class HttpClient(
         request("PUT", path, body, queryParams = queryParams)
 
     @Suppress("UNCHECKED_CAST")
-    suspend fun delete(path: String, body: Map<String, Any?>? = null): Any? =
-        request("DELETE", path, body)
+    suspend fun delete(path: String, body: Map<String, Any?>? = null, captchaToken: String? = null): Any? =
+        request("DELETE", path, body, captchaToken = captchaToken)
 
     /** HEAD request — returns true if resource exists (2xx). */
     suspend fun head(path: String): Boolean {
@@ -82,7 +82,7 @@ class HttpClient(
                 if (serviceKey != null) {
                     header("X-EdgeBase-Service-Key", serviceKey)
                 } else {
-                    val token = try { tokenManager.getAccessToken() } catch (_: Exception) { null }
+                    val token = tokenManager.getAccessToken()
                     if (token != null) header(HttpHeaders.Authorization, "Bearer $token")
                 }
                 addContextHeaders(this)
@@ -124,7 +124,7 @@ class HttpClient(
                     if (serviceKey != null) {
                         header("X-EdgeBase-Service-Key", serviceKey)
                     } else {
-                        val token = try { tokenManager.getAccessToken() } catch (_: Exception) { null }
+                        val token = tokenManager.getAccessToken()
                         if (token != null) header(HttpHeaders.Authorization, "Bearer $token")
                     }
                 }
@@ -220,12 +220,13 @@ class HttpClient(
         isPublic: Boolean = false,
         isRetry: Boolean = false,
         queryParams: Map<String, String>? = null,
-        rateLimitAttempt: Int = 0
+        rateLimitAttempt: Int = 0,
+        captchaToken: String? = null
     ): Any? {
         val url = buildUrl(path, queryParams)
         val requestBody = body?.let { mapToJsonString(it) }
 
-        val response = executeRequestWithRetry {
+        val response = executeRequestWithRetry(allowRetry = captchaToken == null) {
             client.request(url) {
                 this.method = HttpMethod.parse(method)
 
@@ -250,40 +251,46 @@ class HttpClient(
 
                 // Add request metadata headers
                 addContextHeaders(this)
+                if (captchaToken != null) {
+                    header("X-EdgeBase-Captcha-Token", captchaToken)
+                }
             }
         }
 
         // 429 retry with Retry-After header
-        if (response.status.value == 429 && rateLimitAttempt < 3) {
+        if (captchaToken == null && response.status.value == 429 && rateLimitAttempt < 3) {
             val retryAfter = response.headers["Retry-After"]
             val baseDelayMs = retryAfter?.toLongOrNull()?.let { it * 1000 }
                 ?: (1000L * (1L shl rateLimitAttempt))
             val jitter = (baseDelayMs * 0.25 * kotlin.random.Random.nextDouble()).toLong()
             delay(minOf(baseDelayMs + jitter, 10000L))
-            return request(method, path, body, isPublic, isRetry, queryParams, rateLimitAttempt + 1)
+            return request(method, path, body, isPublic, isRetry, queryParams, rateLimitAttempt + 1, captchaToken)
         }
 
         // Handle 401 — retry once after token refresh
-        if (response.status.value == 401 && !isRetry && !isPublic) {
+        if (captchaToken == null && response.status.value == 401 && !isRetry && !isPublic) {
             val refreshToken = tokenManager.getRefreshToken()
             if (refreshToken != null) {
                 try {
                     tokenManager.getAccessToken() // triggers refresh internally
                 } catch (_: Exception) { /* ignore */ }
             }
-            return request(method, path, body, isPublic, isRetry = true, queryParams = queryParams)
+            return request(method, path, body, isPublic, isRetry = true, queryParams = queryParams, captchaToken = captchaToken)
         }
 
         return parseResponse(response)
     }
 
-    private suspend fun executeRequestWithRetry(block: suspend () -> HttpResponse): HttpResponse {
+    private suspend fun executeRequestWithRetry(
+        allowRetry: Boolean = true,
+        block: suspend () -> HttpResponse
+    ): HttpResponse {
         var attempt = 0
         while (true) {
             try {
                 return block()
             } catch (error: Throwable) {
-                if (attempt >= maxTransportRetries || !isRetryableTransportFailure(error)) {
+                if (!allowRetry || attempt >= maxTransportRetries || !isRetryableTransportFailure(error)) {
                     throw error
                 }
                 attempt += 1

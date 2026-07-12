@@ -70,6 +70,12 @@ export default defineConfig({
 
 ## 5. Usage
 
+:::caution Native callback support
+Only `@edge-base/web` and `@edge-base/react-native` currently complete a bound
+app callback. Other native examples below construct the provider start URL
+only; do not treat them as a production end-to-end OAuth flow.
+:::
+
 <Tabs groupId="sdk-language">
 <TabItem value="js" label="JavaScript" default>
 
@@ -81,14 +87,14 @@ client.auth.signInWithOAuth('facebook');
 <TabItem value="dart" label="Dart/Flutter">
 
 ```dart
-await client.auth.signInWithOAuth('facebook');
+final url = client.auth.signInWithOAuth('facebook');
 ```
 
 </TabItem>
 <TabItem value="swift" label="Swift">
 
 ```swift
-let url = client.auth.signInWithOAuth(provider: "facebook")
+let url = await client.auth.signInWithOAuth(provider: "facebook")
 // Open url in SFSafariViewController or ASWebAuthenticationSession
 ```
 

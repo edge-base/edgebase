@@ -10,6 +10,14 @@
  * M18: Microsoft, Facebook, Kakao, Naver, X, Line, Slack, Spotify, Twitch
  */
 
+import {
+  createLocalJWKSet,
+  createRemoteJWKSet,
+  jwtVerify,
+  type JSONWebKeySet,
+  type JWTPayload,
+} from 'jose';
+
 // ─── Types ───
 
 export interface OAuthUserInfo {
@@ -47,6 +55,73 @@ export interface OAuthProvider {
     codeVerifier?: string,
   ): Promise<OAuthTokens>;
   getUserInfo(accessToken: string): Promise<OAuthUserInfo>;
+}
+
+const OAUTH_FETCH_TIMEOUT_MS = 10_000;
+const OAUTH_RESPONSE_MAX_BYTES = 1024 * 1024;
+
+/** Bound every provider request across headers and body, and reject redirects. */
+async function fetchOAuthResponse(url: string, init: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OAUTH_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      ...init,
+      // Cloudflare Workers implements only `follow` and `manual`. Manual mode
+      // plus an explicit 3xx rejection gives us the same no-redirect SSRF
+      // boundary without relying on a Fetch option the production runtime
+      // rejects before issuing the request.
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    if (response.status >= 300 && response.status < 400) {
+      response.body?.cancel().catch(() => undefined);
+      throw new Error('OAuth provider redirects are not allowed');
+    }
+    const declaredLength = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declaredLength) && declaredLength > OAUTH_RESPONSE_MAX_BYTES) {
+      throw new Error('OAuth provider response is too large');
+    }
+    if (!response.body) return response;
+
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > OAUTH_RESPONSE_MAX_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error('OAuth provider response is too large');
+      }
+      chunks.push(value);
+    }
+    const body = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Accept only the boolean/standard string representation of verified=true. */
+export function isOAuthEmailVerified(value: unknown): boolean {
+  return value === true || value === 'true';
+}
+
+function safeProviderErrorCode(value: unknown): string {
+  return typeof value === 'string' && /^[A-Za-z0-9._-]{1,64}$/.test(value)
+    ? value
+    : 'provider_error';
 }
 
 // ─── PKCE Helper ───
@@ -98,7 +173,7 @@ class GoogleOAuthProvider implements OAuthProvider {
     };
     if (codeVerifier) body.code_verifier = codeVerifier;
 
-    const resp = await fetch('https://oauth2.googleapis.com/token', {
+    const resp = await fetchOAuthResponse('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(body),
@@ -115,7 +190,7 @@ class GoogleOAuthProvider implements OAuthProvider {
   }
 
   async getUserInfo(accessToken: string): Promise<OAuthUserInfo> {
-    const resp = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+    const resp = await fetchOAuthResponse('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!resp.ok) throw new Error(`Google userinfo failed: ${resp.status}`);
@@ -123,7 +198,7 @@ class GoogleOAuthProvider implements OAuthProvider {
     return {
       providerUserId: String(data.id),
       email: (data.email as string) || null,
-      emailVerified: Boolean(data.verified_email), // Google uses verified_email
+      emailVerified: isOAuthEmailVerified(data.verified_email), // Google uses verified_email
       displayName: (data.name as string) || null,
       avatarUrl: (data.picture as string) || null,
       raw: data,
@@ -148,7 +223,7 @@ class GitHubOAuthProvider implements OAuthProvider {
   }
 
   async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
-    const resp = await fetch('https://github.com/login/oauth/access_token', {
+    const resp = await fetchOAuthResponse('https://github.com/login/oauth/access_token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -163,7 +238,7 @@ class GitHubOAuthProvider implements OAuthProvider {
     });
     if (!resp.ok) throw new Error(`GitHub token exchange failed: ${resp.status}`);
     const data = await resp.json() as Record<string, unknown>;
-    if (data.error) throw new Error(`GitHub OAuth error: ${data.error_description || data.error}`);
+    if (data.error) throw new Error(`GitHub OAuth error: ${safeProviderErrorCode(data.error)}`);
     return {
       accessToken: data.access_token as string,
       tokenType: data.token_type as string,
@@ -172,10 +247,10 @@ class GitHubOAuthProvider implements OAuthProvider {
 
   async getUserInfo(accessToken: string): Promise<OAuthUserInfo> {
     const [userResp, emailsResp] = await Promise.all([
-      fetch('https://api.github.com/user', {
+      fetchOAuthResponse('https://api.github.com/user', {
         headers: { Authorization: `Bearer ${accessToken}`, 'User-Agent': 'EdgeBase' },
       }),
-      fetch('https://api.github.com/user/emails', {
+      fetchOAuthResponse('https://api.github.com/user/emails', {
         headers: { Authorization: `Bearer ${accessToken}`, 'User-Agent': 'EdgeBase' },
       }),
     ]);
@@ -217,13 +292,14 @@ class AppleOAuthProvider implements OAuthProvider {
       response_type: 'code',
       scope: 'name email',
       state,
+      nonce: state,
       response_mode: 'form_post',
     });
     return `https://appleid.apple.com/auth/authorize?${params}`;
   }
 
   async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
-    const resp = await fetch('https://appleid.apple.com/auth/token', {
+    const resp = await fetchOAuthResponse('https://appleid.apple.com/auth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -253,7 +329,7 @@ class AppleOAuthProvider implements OAuthProvider {
   }
 }
 
-/** Parse Apple id_token claims (JWT decode without verification — verification is via token exchange) */
+/** Decode Apple claims for compatibility tooling. Auth routes use verifyAppleIdToken(). */
 export function parseAppleIdToken(idToken: string): OAuthUserInfo {
   const parts = idToken.split('.');
   if (parts.length !== 3) throw new Error('Invalid Apple id_token');
@@ -261,7 +337,7 @@ export function parseAppleIdToken(idToken: string): OAuthUserInfo {
   return {
     providerUserId: payload.sub as string,
     email: (payload.email as string) || null,
-    emailVerified: Boolean(payload.email_verified), // Apple always verified
+    emailVerified: isOAuthEmailVerified(payload.email_verified),
     displayName: null, // Apple sends name only on first sign-in via form_post body
     avatarUrl: null,
     raw: payload,
@@ -286,7 +362,7 @@ class DiscordOAuthProvider implements OAuthProvider {
   }
 
   async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
-    const resp = await fetch('https://discord.com/api/v10/oauth2/token', {
+    const resp = await fetchOAuthResponse('https://discord.com/api/v10/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -306,7 +382,7 @@ class DiscordOAuthProvider implements OAuthProvider {
   }
 
   async getUserInfo(accessToken: string): Promise<OAuthUserInfo> {
-    const resp = await fetch('https://discord.com/api/v10/users/@me', {
+    const resp = await fetchOAuthResponse('https://discord.com/api/v10/users/@me', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!resp.ok) throw new Error(`Discord user API failed: ${resp.status}`);
@@ -320,7 +396,7 @@ class DiscordOAuthProvider implements OAuthProvider {
     return {
       providerUserId: String(data.id),
       email: (data.email as string) || null,
-      emailVerified: Boolean(data.verified), // Discord uses 'verified' field
+      emailVerified: isOAuthEmailVerified(data.verified), // Discord uses 'verified' field
       displayName: (data.global_name as string) || (data.username as string) || null,
       avatarUrl,
       raw: data,
@@ -359,7 +435,7 @@ class MicrosoftOAuthProvider implements OAuthProvider {
       scope: 'openid email profile',
     };
     if (codeVerifier) body.code_verifier = codeVerifier;
-    const resp = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+    const resp = await fetchOAuthResponse('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(body),
@@ -376,7 +452,7 @@ class MicrosoftOAuthProvider implements OAuthProvider {
   }
 
   async getUserInfo(accessToken: string): Promise<OAuthUserInfo> {
-    const resp = await fetch('https://graph.microsoft.com/oidc/userinfo', {
+    const resp = await fetchOAuthResponse('https://graph.microsoft.com/oidc/userinfo', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!resp.ok) throw new Error(`Microsoft userinfo failed: ${resp.status}`);
@@ -384,7 +460,7 @@ class MicrosoftOAuthProvider implements OAuthProvider {
     return {
       providerUserId: String(data.sub),
       email: (data.email as string) || null,
-      emailVerified: Boolean(data.email_verified), //: Microsoft provides email_verified
+      emailVerified: isOAuthEmailVerified(data.email_verified), //: Microsoft provides email_verified
       displayName: (data.name as string) || null,
       avatarUrl: null, // Microsoft Graph userinfo doesn't return avatar
       raw: data,
@@ -416,7 +492,11 @@ class FacebookOAuthProvider implements OAuthProvider {
       code,
       redirect_uri: redirectUri,
     });
-    const resp = await fetch(`https://graph.facebook.com/v19.0/oauth/access_token?${params}`);
+    const resp = await fetchOAuthResponse('https://graph.facebook.com/v19.0/oauth/access_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params,
+    });
     if (!resp.ok) throw new Error(`Facebook token exchange failed: ${resp.status}`);
     const data = await resp.json() as Record<string, unknown>;
     return {
@@ -427,8 +507,9 @@ class FacebookOAuthProvider implements OAuthProvider {
   }
 
   async getUserInfo(accessToken: string): Promise<OAuthUserInfo> {
-    const resp = await fetch(
-      `https://graph.facebook.com/v19.0/me?fields=id,name,email,picture.type(large)&access_token=${accessToken}`,
+    const resp = await fetchOAuthResponse(
+      'https://graph.facebook.com/v19.0/me?fields=id,name,email,picture.type(large)',
+      { headers: { Authorization: `Bearer ${accessToken}` } },
     );
     if (!resp.ok) throw new Error(`Facebook user API failed: ${resp.status}`);
     const data = await resp.json() as Record<string, unknown>;
@@ -461,7 +542,7 @@ class KakaoOAuthProvider implements OAuthProvider {
   }
 
   async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
-    const resp = await fetch('https://kauth.kakao.com/oauth/token', {
+    const resp = await fetchOAuthResponse('https://kauth.kakao.com/oauth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -483,7 +564,7 @@ class KakaoOAuthProvider implements OAuthProvider {
   }
 
   async getUserInfo(accessToken: string): Promise<OAuthUserInfo> {
-    const resp = await fetch('https://kapi.kakao.com/v2/user/me', {
+    const resp = await fetchOAuthResponse('https://kapi.kakao.com/v2/user/me', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!resp.ok) throw new Error(`Kakao user API failed: ${resp.status}`);
@@ -494,7 +575,7 @@ class KakaoOAuthProvider implements OAuthProvider {
       providerUserId: String(data.id),
       email: (account?.email as string) || null,
       //: Kakao — conditional, use is_email_verified if available
-      emailVerified: Boolean(account?.is_email_verified),
+      emailVerified: isOAuthEmailVerified(account?.is_email_verified),
       displayName: (profile?.nickname as string) || null,
       avatarUrl: (profile?.profile_image_url as string) || null,
       raw: data,
@@ -520,7 +601,7 @@ class NaverOAuthProvider implements OAuthProvider {
 
   async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
     void redirectUri; // Naver doesn't require redirect_uri in token exchange
-    const resp = await fetch('https://nid.naver.com/oauth2.0/token', {
+    const resp = await fetchOAuthResponse('https://nid.naver.com/oauth2.0/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -541,7 +622,7 @@ class NaverOAuthProvider implements OAuthProvider {
   }
 
   async getUserInfo(accessToken: string): Promise<OAuthUserInfo> {
-    const resp = await fetch('https://openapi.naver.com/v1/nid/me', {
+    const resp = await fetchOAuthResponse('https://openapi.naver.com/v1/nid/me', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!resp.ok) throw new Error(`Naver user API failed: ${resp.status}`);
@@ -590,7 +671,7 @@ class XOAuthProvider implements OAuthProvider {
     if (codeVerifier) body.code_verifier = codeVerifier;
     // X uses Basic Auth for confidential clients
     const credentials = btoa(`${this.config.clientId}:${this.config.clientSecret}`);
-    const resp = await fetch('https://api.x.com/2/oauth2/token', {
+    const resp = await fetchOAuthResponse('https://api.x.com/2/oauth2/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -609,7 +690,7 @@ class XOAuthProvider implements OAuthProvider {
   }
 
   async getUserInfo(accessToken: string): Promise<OAuthUserInfo> {
-    const resp = await fetch('https://api.x.com/2/users/me?user.fields=profile_image_url,name,username', {
+    const resp = await fetchOAuthResponse('https://api.x.com/2/users/me?user.fields=profile_image_url,name,username', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!resp.ok) throw new Error(`X user API failed: ${resp.status}`);
@@ -646,7 +727,7 @@ class RedditOAuthProvider implements OAuthProvider {
 
   async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
     const credentials = btoa(`${this.config.clientId}:${this.config.clientSecret}`);
-    const resp = await fetch('https://www.reddit.com/api/v1/access_token', {
+    const resp = await fetchOAuthResponse('https://www.reddit.com/api/v1/access_token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -670,7 +751,7 @@ class RedditOAuthProvider implements OAuthProvider {
   }
 
   async getUserInfo(accessToken: string): Promise<OAuthUserInfo> {
-    const resp = await fetch('https://oauth.reddit.com/api/v1/me', {
+    const resp = await fetchOAuthResponse('https://oauth.reddit.com/api/v1/me', {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'User-Agent': 'EdgeBase OAuth/1.0',
@@ -707,7 +788,7 @@ class LineOAuthProvider implements OAuthProvider {
   }
 
   async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
-    const resp = await fetch('https://api.line.me/oauth2/v2.1/token', {
+    const resp = await fetchOAuthResponse('https://api.line.me/oauth2/v2.1/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -730,7 +811,7 @@ class LineOAuthProvider implements OAuthProvider {
   }
 
   async getUserInfo(accessToken: string): Promise<OAuthUserInfo> {
-    const resp = await fetch('https://api.line.me/v2/profile', {
+    const resp = await fetchOAuthResponse('https://api.line.me/v2/profile', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!resp.ok) throw new Error(`Line user API failed: ${resp.status}`);
@@ -764,7 +845,7 @@ class SlackOAuthProvider implements OAuthProvider {
   }
 
   async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
-    const resp = await fetch('https://slack.com/api/openid.connect.token', {
+    const resp = await fetchOAuthResponse('https://slack.com/api/openid.connect.token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -777,7 +858,7 @@ class SlackOAuthProvider implements OAuthProvider {
     });
     if (!resp.ok) throw new Error(`Slack token exchange failed: ${resp.status}`);
     const data = await resp.json() as Record<string, unknown>;
-    if (!data.ok) throw new Error(`Slack OAuth error: ${data.error}`);
+    if (!data.ok) throw new Error(`Slack OAuth error: ${safeProviderErrorCode(data.error)}`);
     return {
       accessToken: data.access_token as string,
       tokenType: data.token_type as string || 'bearer',
@@ -786,7 +867,7 @@ class SlackOAuthProvider implements OAuthProvider {
   }
 
   async getUserInfo(accessToken: string): Promise<OAuthUserInfo> {
-    const resp = await fetch('https://slack.com/api/openid.connect.userInfo', {
+    const resp = await fetchOAuthResponse('https://slack.com/api/openid.connect.userInfo', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!resp.ok) throw new Error(`Slack userinfo failed: ${resp.status}`);
@@ -794,7 +875,7 @@ class SlackOAuthProvider implements OAuthProvider {
     return {
       providerUserId: String(data.sub),
       email: (data.email as string) || null,
-      emailVerified: Boolean(data.email_verified), //: Slack — always true
+      emailVerified: isOAuthEmailVerified(data.email_verified),
       displayName: (data.name as string) || null,
       avatarUrl: (data.picture as string) || null,
       raw: data,
@@ -821,7 +902,7 @@ class SpotifyOAuthProvider implements OAuthProvider {
 
   async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
     const credentials = btoa(`${this.config.clientId}:${this.config.clientSecret}`);
-    const resp = await fetch('https://accounts.spotify.com/api/token', {
+    const resp = await fetchOAuthResponse('https://accounts.spotify.com/api/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -844,7 +925,7 @@ class SpotifyOAuthProvider implements OAuthProvider {
   }
 
   async getUserInfo(accessToken: string): Promise<OAuthUserInfo> {
-    const resp = await fetch('https://api.spotify.com/v1/me', {
+    const resp = await fetchOAuthResponse('https://api.spotify.com/v1/me', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!resp.ok) throw new Error(`Spotify user API failed: ${resp.status}`);
@@ -879,7 +960,7 @@ class TwitchOAuthProvider implements OAuthProvider {
   }
 
   async exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
-    const resp = await fetch('https://id.twitch.tv/oauth2/token', {
+    const resp = await fetchOAuthResponse('https://id.twitch.tv/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -901,7 +982,7 @@ class TwitchOAuthProvider implements OAuthProvider {
   }
 
   async getUserInfo(accessToken: string): Promise<OAuthUserInfo> {
-    const resp = await fetch('https://api.twitch.tv/helix/users', {
+    const resp = await fetchOAuthResponse('https://api.twitch.tv/helix/users', {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Client-Id': this.config.clientId,
@@ -915,7 +996,7 @@ class TwitchOAuthProvider implements OAuthProvider {
     return {
       providerUserId: String(data.id),
       email: (data.email as string) || null,
-      emailVerified: Boolean(data.email_verified), //: Twitch provides email_verified
+      emailVerified: isOAuthEmailVerified(data.email_verified),
       displayName: (data.display_name as string) || (data.login as string) || null,
       avatarUrl: (data.profile_image_url as string) || null,
       raw: data,
@@ -944,13 +1025,125 @@ interface OIDCDiscoveryDocument {
   issuer: string;
 }
 
+const appleJwks = createRemoteJWKSet(new URL('https://appleid.apple.com/auth/keys'));
+const OIDC_ASYMMETRIC_ALGORITHMS = [
+  'RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512', 'ES256', 'ES384', 'ES512', 'EdDSA',
+];
+
+function assertAuthorizedParty(payload: JWTPayload, clientId: string): void {
+  const audiences = Array.isArray(payload.aud) ? payload.aud : payload.aud ? [payload.aud] : [];
+  if (payload.azp !== undefined && payload.azp !== clientId) {
+    throw new Error('OIDC id_token azp does not match client_id');
+  }
+  if (audiences.length > 1 && payload.azp !== clientId) {
+    throw new Error('OIDC id_token azp does not match client_id');
+  }
+}
+
+export async function verifyAppleIdToken(
+  idToken: string,
+  clientId: string,
+  expectedNonce: string,
+): Promise<OAuthUserInfo> {
+  const { payload } = await jwtVerify(idToken, appleJwks, {
+    issuer: 'https://appleid.apple.com',
+    audience: clientId,
+    algorithms: ['RS256'],
+    requiredClaims: ['iss', 'aud', 'exp', 'iat', 'sub', 'nonce'],
+  });
+  assertAuthorizedParty(payload, clientId);
+  if (payload.nonce !== expectedNonce) throw new Error('Apple id_token nonce mismatch');
+  if (typeof payload.sub !== 'string' || !payload.sub) throw new Error('Apple id_token missing sub');
+  return {
+    providerUserId: payload.sub,
+    email: typeof payload.email === 'string' ? payload.email : null,
+    emailVerified: isOAuthEmailVerified(payload.email_verified),
+    displayName: null,
+    avatarUrl: null,
+    raw: payload,
+  };
+}
+
 /**
  * In-memory cache for OIDC discovery documents (per Worker lifetime).
  * Avoids refetching on every request within the same Worker instance.
  */
 const oidcDiscoveryCache = new Map<string, { doc: OIDCDiscoveryDocument; expiresAt: number }>();
+const oidcJwksCache = new Map<string, {
+  jwks: ReturnType<typeof createLocalJWKSet>;
+  expiresAt: number;
+}>();
+const OIDC_JSON_MAX_BYTES = OAUTH_RESPONSE_MAX_BYTES;
+
+async function fetchOIDCResponse(url: string, init: RequestInit = {}): Promise<Response> {
+  return fetchOAuthResponse(url, init);
+}
+
+async function readOIDCJson<T>(response: Response, label: string): Promise<T> {
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > OIDC_JSON_MAX_BYTES) {
+    throw new Error(`OIDC ${label} response is too large`);
+  }
+  if (!response.body) throw new Error(`OIDC ${label} response body is missing`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > OIDC_JSON_MAX_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`OIDC ${label} response is too large`);
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  text += decoder.decode();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`OIDC ${label} response is not valid JSON`);
+  }
+}
+
+function canonicalIssuer(value: string): string {
+  return value.replace(/\/$/, '');
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+}
+
+function parseOIDCHttpsEndpoint(
+  value: string,
+  label: string,
+  allowInsecureLoopback: boolean,
+): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`OIDC ${label} must be an absolute URL`);
+  }
+  if (url.username || url.password) throw new Error(`OIDC ${label} must not contain userinfo`);
+  if (url.protocol !== 'https:' && !(allowInsecureLoopback && url.protocol === 'http:' && isLoopbackHost(url.hostname))) {
+    throw new Error(`OIDC ${label} must use HTTPS`);
+  }
+  return url;
+}
+
+/** Validate issuer configuration before any discovery/network request. */
+export function validateOIDCProviderSecurity(
+  config: OIDCProviderConfig,
+  release: boolean,
+): void {
+  parseOIDCHttpsEndpoint(config.issuer, 'issuer', !release);
+}
 
 async function fetchOIDCDiscovery(issuer: string): Promise<OIDCDiscoveryDocument> {
+  const issuerUrl = parseOIDCHttpsEndpoint(issuer, 'issuer', true);
+  const allowInsecureLoopback = issuerUrl.protocol === 'http:' && isLoopbackHost(issuerUrl.hostname);
   const cacheKey = issuer;
   const cached = oidcDiscoveryCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
@@ -958,7 +1151,7 @@ async function fetchOIDCDiscovery(issuer: string): Promise<OIDCDiscoveryDocument
   }
 
   const discoveryUrl = `${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`;
-  const resp = await fetch(discoveryUrl, {
+  const resp = await fetchOIDCResponse(discoveryUrl, {
     headers: { Accept: 'application/json' },
   });
 
@@ -966,19 +1159,72 @@ async function fetchOIDCDiscovery(issuer: string): Promise<OIDCDiscoveryDocument
     throw new Error(`OIDC discovery failed for ${issuer}: ${resp.status} ${resp.statusText}`);
   }
 
-  const doc = await resp.json() as OIDCDiscoveryDocument;
+  const doc = await readOIDCJson<OIDCDiscoveryDocument>(resp, 'discovery');
   if (!doc.authorization_endpoint || !doc.token_endpoint) {
     throw new Error(`OIDC discovery document missing required endpoints for ${issuer}`);
   }
+  if (canonicalIssuer(doc.issuer) !== canonicalIssuer(issuer)) {
+    throw new Error(`OIDC discovery issuer mismatch for ${issuer}`);
+  }
+  parseOIDCHttpsEndpoint(doc.authorization_endpoint, 'authorization_endpoint', allowInsecureLoopback);
+  parseOIDCHttpsEndpoint(doc.token_endpoint, 'token_endpoint', allowInsecureLoopback);
+  if (doc.userinfo_endpoint) {
+    parseOIDCHttpsEndpoint(doc.userinfo_endpoint, 'userinfo_endpoint', allowInsecureLoopback);
+  }
+  if (doc.jwks_uri) parseOIDCHttpsEndpoint(doc.jwks_uri, 'jwks_uri', allowInsecureLoopback);
 
   // Cache for 1 hour
   oidcDiscoveryCache.set(cacheKey, { doc, expiresAt: Date.now() + 3600_000 });
   return doc;
 }
 
+export async function verifyOIDCIdToken(
+  idToken: string,
+  config: OIDCProviderConfig,
+  expectedNonce: string,
+): Promise<JWTPayload> {
+  const discovery = await fetchOIDCDiscovery(config.issuer);
+  if (!discovery.jwks_uri) throw new Error('OIDC discovery document missing jwks_uri');
+  let cachedJwks = oidcJwksCache.get(discovery.jwks_uri);
+  if (!cachedJwks || cachedJwks.expiresAt <= Date.now()) {
+    const response = await fetchOIDCResponse(discovery.jwks_uri, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) throw new Error(`OIDC JWKS request failed: ${response.status}`);
+    const document = await readOIDCJson<JSONWebKeySet>(response, 'JWKS');
+    if (!document || !Array.isArray(document.keys) || document.keys.length === 0) {
+      throw new Error('OIDC JWKS response does not contain keys');
+    }
+    cachedJwks = {
+      jwks: createLocalJWKSet(document),
+      expiresAt: Date.now() + 3600_000,
+    };
+    oidcJwksCache.set(discovery.jwks_uri, cachedJwks);
+  }
+  const { payload } = await jwtVerify(idToken, cachedJwks.jwks, {
+    issuer: discovery.issuer,
+    audience: config.clientId,
+    algorithms: OIDC_ASYMMETRIC_ALGORITHMS,
+    requiredClaims: ['iss', 'aud', 'exp', 'iat', 'sub', 'nonce'],
+  });
+  assertAuthorizedParty(payload, config.clientId);
+  if (payload.nonce !== expectedNonce) throw new Error('OIDC id_token nonce mismatch');
+  if (typeof payload.sub !== 'string' || !payload.sub) throw new Error('OIDC id_token missing sub');
+  return payload;
+}
+
+export function assertOIDCUserInfoSubject(
+  payload: JWTPayload,
+  userInfo: Pick<OAuthUserInfo, 'providerUserId'>,
+): void {
+  if (userInfo.providerUserId !== payload.sub) {
+    throw new Error('OIDC id_token and userinfo subject mismatch');
+  }
+}
+
 /**
- * Parse OIDC ID token (JWT decode without cryptographic verification).
- * Signature verification is delegated to the token endpoint trust (same pattern as Apple).
+ * Decode OIDC claims for compatibility tooling. Auth routes use
+ * verifyOIDCIdToken() plus the authenticated userinfo endpoint.
  */
 export function parseOIDCIdToken(idToken: string): OAuthUserInfo {
   const parts = idToken.split('.');
@@ -987,7 +1233,7 @@ export function parseOIDCIdToken(idToken: string): OAuthUserInfo {
   return {
     providerUserId: payload.sub as string,
     email: (payload.email as string) || null,
-    emailVerified: Boolean(payload.email_verified),
+    emailVerified: isOAuthEmailVerified(payload.email_verified),
     displayName: (payload.name as string) || (payload.preferred_username as string) || null,
     avatarUrl: (payload.picture as string) || null,
     raw: payload,
@@ -1026,6 +1272,7 @@ class OIDCGenericProvider implements OAuthProvider {
       response_type: 'code',
       scope: scopes.join(' '),
       state,
+      nonce: state,
     });
     if (codeChallenge) {
       params.set('code_challenge', codeChallenge);
@@ -1048,18 +1295,19 @@ class OIDCGenericProvider implements OAuthProvider {
       bodyParams.code_verifier = codeVerifier;
     }
 
-    const resp = await fetch(discovery.token_endpoint, {
+    const resp = await fetchOIDCResponse(discovery.token_endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(bodyParams),
     });
 
     if (!resp.ok) {
-      const err = await resp.text().catch(() => '');
-      throw new Error(`OIDC token exchange failed: ${resp.status} ${err}`);
+      // Provider bodies can echo codes, client credentials, or bearer tokens.
+      // Never propagate them into application logs or top-level error JSON.
+      throw new Error(`OIDC token exchange failed: ${resp.status}`);
     }
 
-    const data = await resp.json() as Record<string, unknown>;
+    const data = await readOIDCJson<Record<string, unknown>>(resp, 'token');
     return {
       accessToken: data.access_token as string,
       tokenType: (data.token_type as string) || 'Bearer',
@@ -1076,7 +1324,7 @@ class OIDCGenericProvider implements OAuthProvider {
       throw new Error(`OIDC provider ${this.name} does not have a userinfo endpoint`);
     }
 
-    const resp = await fetch(discovery.userinfo_endpoint, {
+    const resp = await fetchOIDCResponse(discovery.userinfo_endpoint, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
@@ -1084,11 +1332,11 @@ class OIDCGenericProvider implements OAuthProvider {
       throw new Error(`OIDC userinfo failed: ${resp.status}`);
     }
 
-    const data = await resp.json() as Record<string, unknown>;
+    const data = await readOIDCJson<Record<string, unknown>>(resp, 'userinfo');
     return {
       providerUserId: data.sub as string,
       email: (data.email as string) || null,
-      emailVerified: Boolean(data.email_verified),
+      emailVerified: isOAuthEmailVerified(data.email_verified),
       displayName: (data.name as string) || (data.preferred_username as string) || null,
       avatarUrl: (data.picture as string) || null,
       raw: data,
@@ -1119,7 +1367,7 @@ export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number] | `oidc:${s
 export function isSupportedProvider(name: string): name is SupportedProvider {
   if ((SUPPORTED_PROVIDERS as readonly string[]).includes(name)) return true;
   // OIDC federation: oidc:{name}
-  if (name.startsWith('oidc:') && name.length > 5) return true;
+  if (/^oidc:[A-Za-z0-9._-]+$/.test(name)) return true;
   return false;
 }
 

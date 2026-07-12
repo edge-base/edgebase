@@ -30,8 +30,8 @@ jobs:
       - name: Check lockstep release versions
         run: node ./scripts/check-release-versions.mjs
 
-      - name: Test release contracts
-        run: node --test ./scripts/release-version.test.mjs
+      - name: Test release and supply-chain contracts
+        run: pnpm release:test
 
   ci-node:
     name: Core CI (Node ${{ matrix.node-version }})
@@ -151,9 +151,9 @@ jobs:
         run: pnpm --dir packages/sdk/react-native test
 
   docker-smoke:
-    name: Docker Smoke
+    name: Docker Smoke and Supply-Chain Scan
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
@@ -171,7 +171,64 @@ jobs:
         run: pnpm build
 
       - name: Docker Smoke
+        env:
+          EDGEBASE_DOCKER_SMOKE_TAG: edgebase-docker-ci:${{ github.sha }}
+          EDGEBASE_KEEP_DOCKER_SMOKE_IMAGE: '1'
         run: pnpm --dir packages/cli run test:docker-smoke
+
+      - name: Generate verified-image SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: edgebase-docker-ci:${{ github.sha }}
+          format: cyclonedx
+          output: edgebase-docker-sbom.cdx.json
+          exit-code: '0'
+
+      - name: Record every HIGH and CRITICAL finding
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: edgebase-docker-ci:${{ github.sha }}
+          format: json
+          output: edgebase-docker-vulnerabilities.json
+          exit-code: '0'
+          ignore-unfixed: 'false'
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          scanners: vuln
+          skip-setup-trivy: 'true'
+          timeout: 10m0s
+
+      - name: Upload container security evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: edgebase-container-security-${{ github.sha }}
+          path: |
+            edgebase-docker-sbom.cdx.json
+            edgebase-docker-vulnerabilities.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Block fixable HIGH and CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: edgebase-docker-ci:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          # Vendor findings without a fix remain in the JSON artifact above;
+          # every finding with a remediation is release-blocking.
+          ignore-unfixed: 'true'
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          scanners: vuln
+          skip-setup-trivy: 'true'
+          timeout: 10m0s
+
+      - name: Remove scanned image
+        if: always()
+        run: docker image rm --force edgebase-docker-ci:${{ github.sha }} || true
 
   pack-smoke:
     name: Pack Smoke (${{ matrix.os }})

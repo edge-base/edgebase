@@ -62,7 +62,9 @@ curl -X POST https://your-project.edgebase.fun/api/storage/avatars/upload \
 
 `GET /api/storage/:bucket/:key`
 
-Download a file by its key. The response is the raw file binary with the appropriate `Content-Type` header set automatically based on the stored `httpMetadata`.
+Download a file by its key. The response is the raw file binary. Passive media
+uses a normalized stored `Content-Type`; active or unknown content is returned
+as an opaque attachment so it cannot execute in the application origin.
 
 **Auth**: Bearer Token required (unless bucket read rule allows public access)
 
@@ -71,7 +73,16 @@ Download a file by its key. The response is the raw file binary with the appropr
 | `bucket` | Bucket name |
 | `key` | File key (path) |
 
-**Response**: File binary with auto-detected `Content-Type`.
+**Response**: File binary.
+
+| Header | Behavior |
+|---|---|
+| `Content-Type` | Passive raster image/audio/video/font/plain-text media keeps its normalized MIME type. Active or unknown content uses `application/octet-stream`. |
+| `Content-Disposition` | Set to `attachment` for HTML, XHTML, SVG, XML, JavaScript, CSS, PDF, binary, unknown, or malformed types. |
+| `Content-Security-Policy` | Restrictive sandbox policy on forced attachments. |
+| `X-Content-Type-Options` | Always `nosniff`. |
+
+This policy is identical for authenticated, public, signed, full, and byte-range downloads.
 
 | Error | Status | Description |
 |---|---|---|
@@ -290,19 +301,26 @@ Update the custom metadata of an existing file. Provide key-value pairs to set o
 `POST /api/storage/:bucket/signed-url`
 
 Generate a temporary signed URL for downloading a file. The URL provides public access without authentication for a limited time.
+The bucket's `read` rule is evaluated against the stored object's actual
+metadata before the URL is issued. Batch generation repeats that authorization
+for every existing key; a list-level empty-resource decision does not authorize
+other objects.
 Signed download URLs include signed file metadata, which lets byte-range media playback seek with a direct range read and return private browser-cacheable range responses until the URL expires.
+The signed size, MIME type, and ETag are checked against the object returned by
+R2. Overwriting the key invalidates existing signed URLs with `412
+failed-precondition` instead of serving the replacement body.
 
 **Auth**: Bearer Token required
 
 | Request Body | Type | Required | Description |
 |---|---|---|---|
 | `key` | string | Yes | File key to generate the URL for |
-| `expiresIn` | number | No | Expiration time in seconds |
+| `expiresIn` | string | No | Expiration duration such as `"30m"` or `"1h"` |
 
 ```json
 {
   "key": "profile/photo.jpg",
-  "expiresIn": 3600
+  "expiresIn": "1h"
 }
 ```
 
@@ -310,9 +328,13 @@ Signed download URLs include signed file metadata, which lets byte-range media p
 
 ```json
 {
-  "url": "https://your-bucket.r2.cloudflarestorage.com/profile/photo.jpg?X-Amz-Signature=..."
+  "url": "https://your-project.edgebase.fun/api/storage/private/profile%2Fphoto.jpg?token=...",
+  "expiresAt": "2026-07-11T12:00:00.000Z"
 }
 ```
+
+Fetching a signed URL returns `412 failed-precondition` if the key's object
+version no longer matches the size, MIME type, and ETag captured in the token.
 
 ---
 
@@ -369,7 +391,10 @@ Generate multiple signed download URLs in a single request.
 
 `POST /api/storage/:bucket/signed-upload-url`
 
-Generate a signed URL that allows the client to upload a file directly to R2, bypassing the EdgeBase server. Useful for large files or reducing server load.
+Generate a signed URL that allows the client to upload through the EdgeBase
+storage endpoint without sending an auth header. The token binds the bucket,
+key, expiry, optional maximum size, and a random single-use grant. Use multipart
+upload for large files.
 
 **Auth**: Bearer Token required
 
@@ -387,17 +412,24 @@ Generate a signed URL that allows the client to upload a file directly to R2, by
 
 ```json
 {
-  "url": "https://your-bucket.r2.cloudflarestorage.com/videos/intro.mp4?X-Amz-Signature=..."
+  "url": "https://your-project.edgebase.fun/api/storage/uploads/upload?token=...&key=videos%2Fintro.mp4"
 }
 ```
 
-The client can then `PUT` the file directly to the returned URL:
+The client sends the same multipart form used by the normal upload endpoint:
 
 ```bash
-curl -X PUT "<signed-upload-url>" \
-  -H "Content-Type: video/mp4" \
-  --data-binary @intro.mp4
+curl -X POST "<signed-upload-url>" \
+  -F "file=@intro.mp4;type=video/mp4" \
+  -F "key=videos/intro.mp4"
 ```
+
+The grant must still be valid when EdgeBase atomically consumes a single-file
+attempt or authorizes a multipart continuation. A request admitted before
+`expiresAt` may finish afterward; new requests at or after the boundary are
+rejected. The grant is consumed before a single-file write or bound to the
+first multipart session, so replay is rejected even after the uploaded object
+is deleted.
 
 ---
 
@@ -413,7 +445,10 @@ For large files, use multipart upload to split the file into parts and upload th
 | `POST` | `/api/storage/:bucket/multipart/abort` | Abort the multipart upload |
 | `GET` | `/api/storage/:bucket/uploads/:uploadId/parts` | List uploaded parts (for resuming) |
 
-**Auth**: Bearer Token required for all multipart endpoints.
+**Auth**: Use a user Bearer token or service key, or pass the bound `token` and
+`key` query parameters from a signed-upload URL. A signed-upload grant is
+single-use at multipart creation and remains bound to that upload ID for part,
+list, complete, and abort requests.
 
 ### Create Multipart Upload
 
@@ -445,6 +480,13 @@ Start a new multipart upload session.
 `POST /api/storage/:bucket/multipart/upload-part`
 
 Upload a single part of a multipart upload. Parts can be uploaded in parallel.
+
+For a signed upload with `maxFileSize`, every part must send a positive `Content-Length`.
+EdgeBase atomically reserves each declared length against the grant's aggregate
+budget before writing the part to R2. The first request that would exceed the
+budget terminally closes and aborts the session. Retries and replacements also
+consume reservation budget, preventing repeated part writes from multiplying
+the signed grant's storage cost.
 
 | Query Parameter | Type | Required | Description |
 |---|---|---|---|

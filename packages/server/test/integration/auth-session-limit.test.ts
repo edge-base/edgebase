@@ -117,6 +117,30 @@ describe('auth-session-limit — no eviction when within limit', () => {
   });
 });
 
+describe('auth-session-limit — concurrent creation remains capped atomically', () => {
+  it('동시 로그인 후 활성 refresh token은 정확히 maxActiveSessions(3)개', async () => {
+    const email = randomEmail();
+    const password = 'ConcurrentLimit1!';
+    const signup = await api('POST', '/signup', { email, password });
+    expect(signup.status).toBe(201);
+
+    const signins = await Promise.all(Array.from({ length: 8 }, () => (
+      api('POST', '/signin', { email, password })
+    )));
+    expect(signins.every(({ status }) => status === 200)).toBe(true);
+
+    const refreshTokens = [
+      signup.data.refreshToken,
+      ...signins.map(({ data }) => data.refreshToken),
+    ];
+    const refreshResults = await Promise.all(refreshTokens.map((refreshToken) => (
+      api('POST', '/refresh', { refreshToken })
+    )));
+    expect(refreshResults.filter(({ status }) => status === 200)).toHaveLength(3);
+    expect(refreshResults.filter(({ status }) => status === 401)).toHaveLength(6);
+  });
+});
+
 // ─── 3. 연속 초과 → 항상 가장 오래된 것부터 퇴출 ──────────────────────────────
 
 describe('auth-session-limit — multiple exceed eviction', () => {

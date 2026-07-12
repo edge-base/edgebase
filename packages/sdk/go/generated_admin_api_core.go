@@ -1,6 +1,6 @@
 // Auto-generated admin API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 package edgebase
 
@@ -70,7 +70,7 @@ func (a *GeneratedAdminApi) DatabaseLiveBroadcast(ctx context.Context, body inte
 	return a.client.do(ctx, "POST", "/api/db/broadcast", body)
 }
 
-// ExecuteSql — Execute SQL via DatabaseDO — POST /api/sql
+// ExecuteSql — Execute provider-aware raw SQL — POST /api/sql
 func (a *GeneratedAdminApi) ExecuteSql(ctx context.Context, body interface{}) (map[string]interface{}, error) {
 	return a.client.do(ctx, "POST", "/api/sql", body)
 }

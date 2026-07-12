@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>10.0</LangVersion>
     <PackageId>dev.edgebase.unity</PackageId>
-    <Version>0.3.8</Version>
+    <Version>0.4.0</Version>
     <Description>EdgeBase Unity client SDK for .NET Standard 2.1 - auth, database, realtime, rooms, storage, functions, analytics, and push</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://edgebase.fun/docs/database/client-sdk</PackageProjectUrl>
@@ -20,6 +20,16 @@
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="" />
     <None Include="llms.txt" Pack="true" PackagePath="" />
+    <!-- TurnstileAdapters is intentionally compiled by Unity, where platform
+         define symbols and WebView plugin assemblies are available. The
+         package DLL is built outside Unity, so omitting this source would make
+         every built-in adapter dead code for NuGet consumers. -->
+    <None Include="TurnstileAdapters.cs"
+          Pack="true"
+          PackagePath="content/Assets/EdgeBase/Runtime/TurnstileAdapters.cs" />
+    <None Update="Assets/**/*"
+          Pack="true"
+          PackagePath="content/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="tests/**" />

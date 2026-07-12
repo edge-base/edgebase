@@ -126,12 +126,48 @@ const refreshClaimPluginB = definePlugin<Record<string, never>>({
 // stale pending email/phone index entry behind.
 // All other signups pass through untouched.
 const signUpGateSeen = new Set<string>();
+const signInGateSeen = new Set<string>();
+export interface OAuthLifecycleEventCounts {
+    beforeSignUp: number;
+    afterSignUp: number;
+    beforeSignIn: number;
+    afterSignIn: number;
+}
+
+const oauthLifecycleEventCounts = new Map<string, OAuthLifecycleEventCounts>();
+
+function recordOAuthLifecycleEvent(email: string, event: keyof OAuthLifecycleEventCounts): void {
+    if (!email.includes('oauth-lifecycle-race')) return;
+    const counts = oauthLifecycleEventCounts.get(email) ?? {
+        beforeSignUp: 0,
+        afterSignUp: 0,
+        beforeSignIn: 0,
+        afterSignIn: 0,
+    };
+    counts[event] += 1;
+    oauthLifecycleEventCounts.set(email, counts);
+}
+
+export function resetOAuthLifecycleEventCounts(email: string): void {
+    oauthLifecycleEventCounts.delete(email);
+}
+
+export function getOAuthLifecycleEventCounts(email: string): OAuthLifecycleEventCounts {
+    return { ...(oauthLifecycleEventCounts.get(email) ?? {
+        beforeSignUp: 0,
+        afterSignUp: 0,
+        beforeSignIn: 0,
+        afterSignIn: 0,
+    }) };
+}
+
 const signUpGatePlugin = definePlugin<Record<string, never>>({
     name: 'test-signup-gate',
     hooks: {
         async beforeSignUp(ctx) {
             const after = (ctx.data?.after ?? {}) as { email?: string | null; phone?: string | null };
             const key = String(after.email ?? after.phone ?? '');
+            recordOAuthLifecycleEvent(key, 'beforeSignUp');
             if (key.includes('gate-reject-always')) {
                 throw new Error('Blocked by test beforeSignUp (always)');
             }
@@ -139,6 +175,23 @@ const signUpGatePlugin = definePlugin<Record<string, never>>({
                 signUpGateSeen.add(key);
                 throw new Error('Blocked by test beforeSignUp (first attempt)');
             }
+        },
+        async beforeSignIn(ctx) {
+            const after = (ctx.data?.after ?? {}) as { email?: string | null };
+            const key = String(after.email ?? '');
+            recordOAuthLifecycleEvent(key, 'beforeSignIn');
+            if (key.includes('oauth-signin-hook-once') && !signInGateSeen.has(key)) {
+                signInGateSeen.add(key);
+                throw new Error('Blocked by test beforeSignIn (first attempt)');
+            }
+        },
+        async afterSignUp(ctx) {
+            const after = (ctx.data?.after ?? {}) as { email?: string | null };
+            recordOAuthLifecycleEvent(String(after.email ?? ''), 'afterSignUp');
+        },
+        async afterSignIn(ctx) {
+            const after = (ctx.data?.after ?? {}) as { email?: string | null };
+            recordOAuthLifecycleEvent(String(after.email ?? ''), 'afterSignIn');
         },
     },
 });

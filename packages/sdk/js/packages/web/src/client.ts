@@ -25,6 +25,34 @@ import { AuthClient } from './auth.js';
 import { ClientAnalytics } from './analytics.js';
 import { createBrowserStorage } from './browser-storage.js';
 
+interface WebPushCachedRegistration {
+  version: 1;
+  token: string;
+  platform: 'web';
+  deviceId: string;
+}
+
+function parseWebPushCachedRegistration(value: string | null): WebPushCachedRegistration | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<WebPushCachedRegistration>;
+    if (
+      parsed.version !== 1
+      || typeof parsed.token !== 'string'
+      || !parsed.token
+      || parsed.platform !== 'web'
+      || typeof parsed.deviceId !== 'string'
+      || parsed.deviceId.length < 1
+      || parsed.deviceId.length > 128
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(parsed.deviceId)
+    ) return null;
+    return parsed as WebPushCachedRegistration;
+  } catch {
+    // Legacy token-only caches intentionally force one safe re-registration.
+    return null;
+  }
+}
+
 // ─── Option types ───
 
 /** Options for createClient() */
@@ -123,6 +151,8 @@ export class ClientEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> 
     this.analytics = new ClientAnalytics(this.httpClient, baseUrl, this.core);
     this.baseUrl = baseUrl;
     const storage = createBrowserStorage();
+    const pushNamespace = options?.authNamespace?.trim() || baseUrl;
+    const pushKeyPrefix = `eb_push:${encodeURIComponent(pushNamespace)}`;
 
     // Push — closures over generated core (no hardcoded paths)
     const core = this.core;
@@ -146,26 +176,45 @@ export class ClientEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> 
 
     // Helper: get or create persistent device ID
     const getDeviceId = (): string => {
-      const key = 'eb_push_device_id';
+      const key = `${pushKeyPrefix}:device_id`;
       let id = storage.getItem(key);
       if (!id) {
-        id = typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        if (!storage.isPersistent) {
+          throw new EdgeBaseError(0, 'Persistent browser storage is required to register a push device safely.');
+        }
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+          id = `web-${crypto.randomUUID()}`;
+        } else if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+          const bytes = new Uint8Array(16);
+          const returned = crypto.getRandomValues(bytes);
+          if (!(returned instanceof Uint8Array) || returned.byteLength !== 16) {
+            throw new EdgeBaseError(0, 'Secure random generation returned an invalid push device ID.');
+          }
+          id = `web-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+        } else {
+          throw new EdgeBaseError(0, 'Secure random generation is required to create a push device ID.');
+        }
         storage.setItem(key, id);
       }
       return id;
     };
 
     // Helper: token cache (skip network if unchanged)
-    const CACHE_KEY = 'eb_push_token_cache';
-    const getCachedToken = (): string | null => storage.getItem(CACHE_KEY);
-    const setCachedToken = (token: string) => {
-      storage.setItem(CACHE_KEY, token);
+    const CACHE_KEY = `${pushKeyPrefix}:token_cache`;
+    const getCachedRegistration = (): WebPushCachedRegistration | null =>
+      parseWebPushCachedRegistration(storage.getItem(CACHE_KEY));
+    const setCachedRegistration = (registration: WebPushCachedRegistration) => {
+      storage.setItem(CACHE_KEY, JSON.stringify(registration));
     };
 
     // FCM token provider — set by app via setTokenProvider()
     let tokenProvider: (() => Promise<string>) | null = null;
+    let pushMutationTail: Promise<void> = Promise.resolve();
+    const enqueuePushMutation = <T>(operation: () => Promise<T>): Promise<T> => {
+      const result = pushMutationTail.then(operation, operation);
+      pushMutationTail = result.then(() => undefined, () => undefined);
+      return result;
+    };
 
     // Helper: detect browser name + version from User-Agent
     const detectBrowser = (): string => {
@@ -212,38 +261,51 @@ export class ClientEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> 
 
       // register — Decision §5/§9/§10 (FCM 일원화)
       async register(options?: { metadata?: Record<string, unknown> }): Promise<void> {
-        // 1. Request permission
-        if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-          const perm = await Notification.requestPermission();
-          if (perm !== 'granted') return;
-        }
-        if (typeof Notification !== 'undefined' && Notification.permission === 'denied') return;
-
-        // 2. Get FCM token via provider (must be set by app using setTokenProvider)
-        if (!tokenProvider) {
-          throw new Error('Token provider not set. Call client.push.setTokenProvider() first.');
-        }
-        const token = await tokenProvider();
-
-        // 3. Check token cache — skip if unchanged (§9)
-        if (getCachedToken() === token && !options?.metadata) return;
-
-        // 4. Register with server — auto-collect deviceInfo
-        const deviceId = getDeviceId();
-        await core.pushRegister({
-          deviceId,
-          token,
-          platform: 'web',
-          deviceInfo: collectDeviceInfo(),
-          metadata: options?.metadata,
+        return enqueuePushMutation(async () => {
+          if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+            const perm = await Notification.requestPermission();
+            if (perm !== 'granted') return;
+          }
+          if (typeof Notification !== 'undefined' && Notification.permission === 'denied') return;
+          if (!tokenProvider) {
+            throw new Error('Token provider not set. Call client.push.setTokenProvider() first.');
+          }
+          const token = await tokenProvider();
+          const deviceId = getDeviceId();
+          const cached = getCachedRegistration();
+          if (
+            cached?.token === token
+            && cached.platform === 'web'
+            && cached.deviceId === deviceId
+            && !options?.metadata
+          ) return;
+          await core.pushRegister({
+            deviceId,
+            token,
+            platform: 'web',
+            deviceInfo: collectDeviceInfo(),
+            metadata: options?.metadata,
+          });
+          setCachedRegistration({ version: 1, token, platform: 'web', deviceId });
         });
-        setCachedToken(token);
       },
 
       async unregister(deviceId?: string): Promise<void> {
-        const id = deviceId ?? getDeviceId();
-        await core.pushUnregister({ deviceId: id });
-        storage.removeItem(CACHE_KEY);
+        return enqueuePushMutation(async () => {
+          const cached = getCachedRegistration();
+          const id = deviceId ?? cached?.deviceId ?? storage.getItem(`${pushKeyPrefix}:device_id`);
+          if (!id) {
+            if (storage.getItem(CACHE_KEY)) {
+              throw new Error('Push registration cannot be removed because its scoped device ID is missing.');
+            }
+            return;
+          }
+          if (id.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(id)) {
+            throw new Error('Invalid push device ID.');
+          }
+          await core.pushUnregister({ deviceId: id });
+          if (!cached || cached.deviceId === id) storage.removeItem(CACHE_KEY);
+        });
       },
 
       async subscribeTopic(topic: string): Promise<void> {
@@ -274,19 +336,19 @@ export class ClientEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> 
     };
 
     // ─── Auto-unregister push on signOut ───
-    // Wrap auth.signOut so the current device token is removed before clearing
-    // session tokens. This prevents stale tokens accumulating in KV.
+    // The auth endpoint removes the scoped push device using the verified
+    // refresh session. Auth state is cleared locally before that network wait;
+    // no separate authenticated push request can delay local sign-out.
     const originalSignOut = this.auth.signOut.bind(this.auth);
-    const pushRef = this.push;
     const cacheKey = CACHE_KEY;
     this.auth.signOut = async function (): Promise<void> {
-      // Best-effort push unregister — never fail signOut because of push
-      try {
-        if (storage.getItem(cacheKey)) {
-          await pushRef.unregister();
-        }
-      } catch { /* ignore */ }
-      return originalSignOut();
+      const cachedRaw = storage.getItem(cacheKey);
+      const cached = getCachedRegistration();
+      const pushDeviceId = cachedRaw
+        ? cached?.deviceId ?? storage.getItem(`${pushKeyPrefix}:device_id`) ?? undefined
+        : undefined;
+      await originalSignOut(pushDeviceId ? { pushDeviceId } : undefined);
+      if (pushDeviceId) storage.removeItem(cacheKey);
     };
   }
 

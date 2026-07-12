@@ -5,13 +5,17 @@ const {
   confirmEmailMock,
   confirmPhoneMock,
   deleteEmailMock,
+  deleteEmailForUserMock,
   deleteEmailPendingMock,
   deletePhoneMock,
+  deletePhonePendingMock,
   registerEmailPendingMock,
   registerPhonePendingMock,
   createUserMock,
+  finalizeManagedUserCreationMock,
   getUserByIdMock,
   updateUserMock,
+  finalizeManagedUserUpdateMock,
   buildPublicUserDataMock,
   syncPublicUserProjectionMock,
   deletePublicUserProjectionMock,
@@ -22,13 +26,17 @@ const {
   confirmEmailMock: vi.fn(),
   confirmPhoneMock: vi.fn(),
   deleteEmailMock: vi.fn(),
+  deleteEmailForUserMock: vi.fn(),
   deleteEmailPendingMock: vi.fn(),
   deletePhoneMock: vi.fn(),
+  deletePhonePendingMock: vi.fn(),
   registerEmailPendingMock: vi.fn(),
   registerPhonePendingMock: vi.fn(),
   createUserMock: vi.fn(),
+  finalizeManagedUserCreationMock: vi.fn(),
   getUserByIdMock: vi.fn(),
   updateUserMock: vi.fn(),
+  finalizeManagedUserUpdateMock: vi.fn(),
   buildPublicUserDataMock: vi.fn(),
   syncPublicUserProjectionMock: vi.fn(),
   deletePublicUserProjectionMock: vi.fn(),
@@ -44,8 +52,10 @@ vi.mock('../lib/auth-d1.js', async () => {
     confirmEmail: confirmEmailMock,
     confirmPhone: confirmPhoneMock,
     deleteEmail: deleteEmailMock,
+    deleteEmailForUser: deleteEmailForUserMock,
     deleteEmailPending: deleteEmailPendingMock,
     deletePhone: deletePhoneMock,
+    deletePhonePending: deletePhonePendingMock,
     registerEmailPending: registerEmailPendingMock,
     registerPhonePending: registerPhonePendingMock,
   };
@@ -57,8 +67,10 @@ vi.mock('../lib/auth-d1-service.js', async () => {
     ...actual,
     buildPublicUserData: buildPublicUserDataMock,
     createUser: createUserMock,
+    finalizeManagedUserCreation: finalizeManagedUserCreationMock,
     getUserById: getUserByIdMock,
     updateUser: updateUserMock,
+    finalizeManagedUserUpdate: finalizeManagedUserUpdateMock,
   };
 });
 
@@ -115,7 +127,11 @@ function createMockAuthDb(): AuthDb & {
     async compareAndSwapUserSession(): Promise<boolean> {
       return false;
     },
+    async createSessionWithLimit(): Promise<void> {},
     async batch(statements: { sql: string; params?: unknown[] }[]): Promise<void> {
+      batchStatements.push(...statements);
+    },
+    async batchWithLock(_lockKey: string | string[], statements: { sql: string; params?: unknown[] }[]): Promise<void> {
       batchStatements.push(...statements);
     },
     _batchStatements: batchStatements,
@@ -138,13 +154,17 @@ beforeEach(() => {
   confirmEmailMock.mockReset().mockResolvedValue(undefined);
   confirmPhoneMock.mockReset().mockResolvedValue(undefined);
   deleteEmailMock.mockReset().mockResolvedValue(undefined);
+  deleteEmailForUserMock.mockReset().mockResolvedValue(undefined);
   deleteEmailPendingMock.mockReset().mockResolvedValue(undefined);
   deletePhoneMock.mockReset().mockResolvedValue(undefined);
-  registerEmailPendingMock.mockReset().mockResolvedValue(undefined);
-  registerPhonePendingMock.mockReset().mockResolvedValue(undefined);
+  deletePhonePendingMock.mockReset().mockResolvedValue(undefined);
+  registerEmailPendingMock.mockReset().mockResolvedValue('email-reservation-test');
+  registerPhonePendingMock.mockReset().mockResolvedValue('phone-reservation-test');
   createUserMock.mockReset();
+  finalizeManagedUserCreationMock.mockReset().mockResolvedValue(undefined);
   getUserByIdMock.mockReset();
   updateUserMock.mockReset();
+  finalizeManagedUserUpdateMock.mockReset().mockResolvedValue(undefined);
   buildPublicUserDataMock.mockReset().mockReturnValue({
     displayName: 'Public User',
     createdAt: '2026-03-10T00:00:00.000Z',
@@ -184,7 +204,7 @@ describe('createManagedAdminUser', () => {
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     };
-    createUserMock.mockResolvedValue(createdUser);
+    getUserByIdMock.mockResolvedValue(createdUser);
 
     const user = await createManagedAdminUser(db, {
       userId: 'user-1',
@@ -195,13 +215,41 @@ describe('createManagedAdminUser', () => {
     });
 
     expect(user).toEqual(createdUser);
-    expect(confirmEmailMock).toHaveBeenCalledWith(db, 'user@example.com', 'user-1');
+    expect(finalizeManagedUserCreationMock).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        user: expect.objectContaining({ userId: 'user-1', email: 'user@example.com' }),
+        emailReservationId: 'email-reservation-test',
+      }),
+    );
     expect(syncPublicUserProjectionMock).toHaveBeenCalledWith(
       db,
       'user-1',
       buildPublicUserDataMock.mock.results[0]?.value,
       expect.objectContaining({ awaitCacheWrites: false }),
     );
+  });
+
+  it('does not delete an existing user when caller-supplied id collides', async () => {
+    const db = createMockAuthDb();
+    finalizeManagedUserCreationMock.mockRejectedValue(new Error('UNIQUE constraint failed: _users.id'));
+
+    await expect(createManagedAdminUser(db, {
+      userId: 'existing-user-id',
+      email: 'contended@example.com',
+      passwordHash: 'hashed:secret123',
+    })).rejects.toMatchObject({ code: 500 });
+
+    expect(deleteEmailPendingMock).toHaveBeenCalledWith(
+      db,
+      'contended@example.com',
+      'existing-user-id',
+      'email-reservation-test',
+    );
+    expect(db._batchStatements.some((statement) => (
+      statement.sql.includes('DELETE FROM _users WHERE id = ?')
+    ))).toBe(false);
+    expect(deleteEmailMock).not.toHaveBeenCalledWith(db, 'contended@example.com');
   });
 });
 
@@ -236,20 +284,25 @@ describe('deleteManagedAdminUser', () => {
 describe('updateManagedAdminUser', () => {
   it('updates the public projection without awaiting KV cache writes', async () => {
     const db = createMockAuthDb();
-    getUserByIdMock.mockResolvedValue({
+    const existingUser = {
       id: 'user-1',
       email: 'user@example.com',
       displayName: 'Before',
+      authRevision: 4,
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
-    });
-    updateUserMock.mockResolvedValue({
+    };
+    const updatedUser = {
       id: 'user-1',
       email: 'user@example.com',
       displayName: 'After',
+      authRevision: 5,
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:01:00.000Z',
-    });
+    };
+    getUserByIdMock
+      .mockResolvedValueOnce(existingUser)
+      .mockResolvedValueOnce(updatedUser);
 
     const updated = await updateManagedAdminUser(db, 'user-1', {
       displayName: 'After',
@@ -258,6 +311,13 @@ describe('updateManagedAdminUser', () => {
     });
 
     expect(updated).toMatchObject({ displayName: 'After' });
+    expect(finalizeManagedUserUpdateMock).toHaveBeenCalledWith(db, {
+      userId: 'user-1',
+      expectedAuthRevision: 4,
+      updates: { displayName: 'After' },
+      contacts: [],
+    });
+    expect(updateUserMock).not.toHaveBeenCalled();
     expect(syncPublicUserProjectionMock).toHaveBeenCalledWith(
       db,
       'user-1',
@@ -266,7 +326,7 @@ describe('updateManagedAdminUser', () => {
     );
   });
 
-  it('restores the old email index when cleanup fails after the user row is updated', async () => {
+  it('rejects a stale contact update without rolling back or deleting another winner', async () => {
     const db = createMockAuthDb();
     const existingUser = {
       id: 'user-1',
@@ -275,34 +335,37 @@ describe('updateManagedAdminUser', () => {
       createdAt: '2026-03-10T00:00:00.000Z',
       updatedAt: '2026-03-10T00:00:00.000Z',
     };
-    const updatedUser = {
-      ...existingUser,
-      email: 'new@example.com',
-      updatedAt: '2026-03-10T00:01:00.000Z',
-    };
-
     getUserByIdMock.mockResolvedValue(existingUser);
-    updateUserMock
-      .mockResolvedValueOnce(updatedUser)
-      .mockResolvedValueOnce(existingUser);
-    deleteEmailMock.mockImplementation(async (_db: AuthDb, email: string) => {
-      if (email === 'old@example.com') {
-        throw new Error('delete-old-email-failed');
-      }
-    });
+    finalizeManagedUserUpdateMock.mockRejectedValue(new Error('AUTH_STATE_CONFLICT'));
 
     await expect(updateManagedAdminUser(db, 'user-1', {
       email: 'new@example.com',
-    })).rejects.toMatchObject({ code: 500 });
+    })).rejects.toMatchObject({ code: 409 });
 
     expect(registerEmailPendingMock).toHaveBeenCalledWith(db, 'new@example.com', 'user-1');
-    expect(confirmEmailMock).toHaveBeenCalledWith(db, 'new@example.com', 'user-1');
-    expect(deleteEmailMock).toHaveBeenCalledWith(db, 'old@example.com');
-    expect(deleteEmailMock).toHaveBeenCalledWith(db, 'new@example.com');
-    expect(registerEmailPendingMock).toHaveBeenCalledWith(db, 'old@example.com', 'user-1');
-    expect(confirmEmailMock).toHaveBeenCalledWith(db, 'old@example.com', 'user-1');
-    expect(updateUserMock).toHaveBeenCalledTimes(2);
-    expect(syncPublicUserProjectionMock).toHaveBeenCalledTimes(2);
+    expect(finalizeManagedUserUpdateMock).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        userId: 'user-1',
+        expectedAuthRevision: 0,
+        contacts: [expect.objectContaining({
+          kind: 'email',
+          previousValue: 'old@example.com',
+          nextValue: 'new@example.com',
+          reservationId: 'email-reservation-test',
+        })],
+      }),
+    );
+    expect(deleteEmailPendingMock).toHaveBeenCalledWith(
+      db,
+      'new@example.com',
+      'user-1',
+      'email-reservation-test',
+    );
+    expect(updateUserMock).not.toHaveBeenCalled();
+    expect(confirmEmailMock).not.toHaveBeenCalled();
+    expect(deleteEmailForUserMock).not.toHaveBeenCalled();
+    expect(syncPublicUserProjectionMock).not.toHaveBeenCalled();
   });
 });
 

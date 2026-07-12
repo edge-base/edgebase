@@ -493,11 +493,10 @@ export interface AuthConfig {
    */
   oauth?: OAuthProvidersConfig;
   /**
-   * Optional client redirect URL allowlist for OAuth and email-based auth actions.
-   * When unset, redirect URLs are accepted as-is for backward compatibility
-   * (release mode logs a one-time warning). Strongly recommended in production:
-   * these flows append access/refresh tokens to the redirect target, so an
-   * unrestricted redirect is a token-exfiltration vector.
+   * Client redirect URL allowlist for OAuth and email-based auth actions.
+   * Release mode requires a non-empty HTTPS allowlist and fails closed when it
+   * is absent. OAuth app callbacks carry short-lived one-time completion
+   * tickets; email actions carry their bounded action token in the fragment.
    *
    * Supported forms:
    * - exact URL: 'https://app.example.com/auth/callback'
@@ -517,7 +516,7 @@ export interface AuthConfig {
     cookie?: {
       /** Enable `X-EdgeBase-Auth-Transport: cookie` for browser clients. */
       enabled: boolean;
-      /** Base cookie name. Secure requests add the `__Secure-` prefix. */
+      /** Base cookie name. Secure requests add the `__Host-` prefix. */
       name?: string;
       /** Refresh cookie SameSite policy. Default: 'strict'. */
       sameSite?: 'strict' | 'lax' | 'none';
@@ -848,7 +847,19 @@ export interface ServiceKeysConfig {
 
 export interface CaptchaConfig {
   siteKey: string;
-  secretKey: string;
+  /**
+   * Local-development convenience only. Release configs must keep this value
+   * out of source/bundles and provide TURNSTILE_SECRET as a runtime secret.
+   * @deprecated Do not use in release configuration.
+   */
+  secretKey?: string;
+  /**
+   * Exact hostnames allowed to mint tokens for this widget. Release runtimes
+   * also derive hostnames from baseUrl, CORS origins, auth redirects, and
+   * passkey origins, but an explicit list is recommended for native WebViews.
+   * Wildcards are deliberately unsupported.
+   */
+  hostnames?: string[];
   failMode?: 'open' | 'closed';
   siteverifyTimeout?: number;
 }
@@ -1322,6 +1333,82 @@ export interface EdgeBaseConfig {
   rooms?: Record<string, RoomNamespaceConfig>;
 }
 
+function normalizeCaptchaHostname(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.includes('*')) return null;
+  try {
+    const parsed = new URL(`https://${trimmed}`);
+    if (
+      parsed.username
+      || parsed.password
+      || parsed.port
+      || parsed.pathname !== '/'
+      || parsed.search
+      || parsed.hash
+    ) return null;
+    return parsed.hostname
+      .replace(/^\[|\]$/g, '')
+      .replace(/\.$/, '')
+      .toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function captchaHostnameFromUrl(value: string): string | null {
+  const trimmed = value.trim().replace(/\*$/, '');
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      !['http:', 'https:'].includes(parsed.protocol)
+      || parsed.username
+      || parsed.password
+    ) return null;
+    const hostname = parsed.hostname
+      .replace(/^\[|\]$/g, '')
+      .replace(/\.$/, '')
+      .toLowerCase();
+    return hostname.includes('*') ? null : hostname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve exact Turnstile hostnames from explicit CAPTCHA configuration and
+ * the public application origins already present in EdgeBase config.
+ */
+export function resolveCaptchaHostnames(config: EdgeBaseConfig): string[] {
+  const hostnames = new Set<string>();
+  const addHostname = (value: unknown) => {
+    if (typeof value !== 'string') return;
+    const hostname = normalizeCaptchaHostname(value);
+    if (hostname) hostnames.add(hostname);
+  };
+  const addUrl = (value: unknown) => {
+    if (typeof value !== 'string') return;
+    const hostname = captchaHostnameFromUrl(value);
+    if (hostname) hostnames.add(hostname);
+  };
+
+  if (config.captcha && typeof config.captcha === 'object') {
+    for (const hostname of config.captcha.hostnames ?? []) addHostname(hostname);
+  }
+  addUrl(config.baseUrl);
+  const corsOrigins = Array.isArray(config.cors?.origin)
+    ? config.cors.origin
+    : [config.cors?.origin];
+  for (const origin of corsOrigins) addUrl(origin);
+  for (const redirect of config.auth?.allowedRedirectUrls ?? []) addUrl(redirect);
+  const passkeyOrigins = Array.isArray(config.auth?.passkeys?.origin)
+    ? config.auth.passkeys.origin
+    : [config.auth?.passkeys?.origin];
+  for (const origin of passkeyOrigins) addUrl(origin);
+
+  return Array.from(hostnames).sort();
+}
+
 export function getDbAccess(dbBlock?: DbBlock): DbAccess | undefined {
   return dbBlock?.access;
 }
@@ -1752,6 +1839,7 @@ export interface FunctionStorageProxy {
     body: ReadableStream;
     contentType: string;
     size: number;
+    etag: string;
     customMetadata: Record<string, string>;
   } | null>;
   delete(key: string): Promise<void>;
@@ -1769,6 +1857,7 @@ export interface FunctionStorageProxy {
     key: string;
     size: number;
     contentType: string;
+    etag: string;
     customMetadata: Record<string, string>;
   } | null>;
 }
@@ -2039,6 +2128,78 @@ export function defineConfig(config: EdgeBaseConfig): EdgeBaseConfig {
     validateCloudflareConfig(config.cloudflare);
   }
 
+  if (config.captcha !== undefined && typeof config.captcha !== 'boolean') {
+    if (!config.captcha || typeof config.captcha !== 'object' || Array.isArray(config.captcha)) {
+      throw new Error('captcha must be a boolean or an object.');
+    }
+    if (typeof config.captcha.siteKey !== 'string' || config.captcha.siteKey.trim().length === 0) {
+      throw new Error('captcha.siteKey must be a non-empty string.');
+    }
+    if (
+      config.captcha.secretKey !== undefined
+      && (typeof config.captcha.secretKey !== 'string' || config.captcha.secretKey.trim().length === 0)
+    ) {
+      throw new Error('captcha.secretKey must be a non-empty string when provided.');
+    }
+    if (config.captcha.hostnames !== undefined) {
+      if (
+        !Array.isArray(config.captcha.hostnames)
+        || config.captcha.hostnames.length === 0
+        || config.captcha.hostnames.length > 10
+        || config.captcha.hostnames.some(
+          (hostname) => typeof hostname !== 'string' || normalizeCaptchaHostname(hostname) === null,
+        )
+      ) {
+        throw new Error('captcha.hostnames must contain 1-10 exact hostnames without schemes, ports, paths, or wildcards.');
+      }
+    }
+    if (
+      config.captcha.failMode !== undefined
+      && !['open', 'closed'].includes(config.captcha.failMode)
+    ) {
+      throw new Error("captcha.failMode must be 'open' or 'closed'.");
+    }
+    if (
+      config.captcha.siteverifyTimeout !== undefined
+      && (
+        !Number.isInteger(config.captcha.siteverifyTimeout)
+        || config.captcha.siteverifyTimeout < 250
+        || config.captcha.siteverifyTimeout > 30_000
+      )
+    ) {
+      throw new Error('captcha.siteverifyTimeout must be an integer between 250 and 30000 milliseconds.');
+    }
+  }
+  if (config.captcha) {
+    const captchaHostnames = resolveCaptchaHostnames(config);
+    if (captchaHostnames.length > 10) {
+      throw new Error('captcha resolves to more than 10 exact hostnames, which Turnstile does not support.');
+    }
+    if (config.release === true && captchaHostnames.length === 0) {
+      throw new Error(
+        'Release CAPTCHA requires at least one exact hostname via captcha.hostnames, '
+        + 'baseUrl, CORS origins, auth redirects, or passkey origins.',
+      );
+    }
+    if (
+      config.release === true
+      && typeof config.captcha === 'object'
+      && config.captcha.failMode === 'open'
+    ) {
+      throw new Error('Release CAPTCHA cannot use failMode: open. Use failMode: closed or omit it.');
+    }
+    if (
+      config.release === true
+      && typeof config.captcha === 'object'
+      && config.captcha.secretKey !== undefined
+    ) {
+      throw new Error(
+        'Release CAPTCHA cannot embed captcha.secretKey in config. '
+        + 'Provide TURNSTILE_SECRET as a runtime/Workers secret instead.',
+      );
+    }
+  }
+
   // ─── Auth Provider Validation ───
   if (config.auth?.provider) {
     if (!VALID_AUTH_PROVIDERS.includes(config.auth.provider)) {
@@ -2073,9 +2234,10 @@ export function defineConfig(config: EdgeBaseConfig): EdgeBaseConfig {
         || !/^[A-Za-z0-9._-]+$/.test(authCookie.name)
         || authCookie.name.startsWith('__Secure-')
         || authCookie.name.startsWith('__Host-')
+        || authCookie.name === 'edgebase-admin-refresh'
       ) {
         throw new Error(
-          'auth.session.cookie.name must be a 1-64 character cookie-safe base name without a reserved prefix.',
+          'auth.session.cookie.name must be a 1-64 character cookie-safe base name without a reserved prefix or the reserved admin cookie name.',
         );
       }
     }

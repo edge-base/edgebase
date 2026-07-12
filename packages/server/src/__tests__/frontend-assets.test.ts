@@ -63,14 +63,34 @@ describe('frontend cache headers', () => {
 
     const manifest = applyFrontendAssetHeaders(new Response('ok'), '/manifest.webmanifest');
     expect(manifest.headers.get('Cache-Control')).toBe('no-cache');
+
+    const worker = applyFrontendAssetHeaders(new Response('ok'), '/sw.js');
+    expect(worker.headers.get('Cache-Control')).toBe('no-cache');
+
+    // The generic hashed-filename heuristic would otherwise mistake the
+    // eight-letter word "precache" for a content hash and cache this mutable,
+    // unversioned update manifest as immutable for one year.
+    const precache = applyFrontendAssetHeaders(new Response('ok'), '/sw-precache.json');
+    expect(precache.headers.get('Cache-Control')).toBe('no-cache');
   });
 
   it('marks hashed assets as immutable and unhashed assets as short-lived', () => {
     const hashed = applyFrontendAssetHeaders(new Response('ok'), '/assets/app-abc123def456.js');
     expect(hashed.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
 
+    const viteHash = applyFrontendAssetHeaders(new Response('ok'), '/assets/index-BwbIofh5.js');
+    expect(viteHash.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+
+    const urlSafeHash = applyFrontendAssetHeaders(new Response('ok'), '/assets/chunk-9WSbeU9-.css');
+    expect(urlSafeHash.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+
     const plain = applyFrontendAssetHeaders(new Response('ok'), '/favicon.ico');
     expect(plain.headers.get('Cache-Control')).toBe('public, max-age=300');
+
+    for (const name of ['site-precache.json', 'site-configuration.json', 'site-version2026.json']) {
+      const metadata = applyFrontendAssetHeaders(new Response('ok'), `/assets/${name}`);
+      expect(metadata.headers.get('Cache-Control')).toBe('public, max-age=300');
+    }
   });
 
   it('applies configured security headers without dropping cache policy', () => {

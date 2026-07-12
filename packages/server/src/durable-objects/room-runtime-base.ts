@@ -27,6 +27,11 @@ import {
 } from '../lib/room-monitoring.js';
 import { parseConfig as getGlobalConfig } from '../lib/do-router.js';
 import { ensureServerStartup } from '../lib/runtime-startup.js';
+import { getTrustedClientIp } from '../lib/client-ip.js';
+import {
+  AuthSessionAuthorityUnavailableError,
+  isAuthSessionActive,
+} from '../lib/auth-session-authority.js';
 
 // ─── Types ───
 
@@ -38,12 +43,21 @@ export interface RoomDOEnv {
   AUTH?: DurableObjectNamespace;
   AUTH_DB?: unknown;
   SERVICE_KEY?: string;
+  EDGEBASE_RUNTIME_MODE?: string;
+  EDGEBASE_CONFIG?: unknown;
+  trustSelfHostedProxy?: boolean;
+}
+
+export function resolveRoomClientIp(env: RoomDOEnv, request: Request): string | undefined {
+  return getTrustedClientIp(env, request);
 }
 
 export interface RoomWSMeta {
   authenticated: boolean;
   authStateLost?: boolean;
   userId?: string;
+  sessionId?: string;
+  sessionAuthority?: 'session' | 'tokenless-anonymous';
   role?: string;
   auth?: SharedAuthContext;
   ip?: string;
@@ -229,6 +243,8 @@ function cloneRoomWSMeta(meta: RoomWSMeta): RoomWSMeta {
     authenticated: meta.authenticated,
     authStateLost: meta.authStateLost === true,
     userId: meta.userId,
+    sessionId: meta.sessionId,
+    sessionAuthority: meta.sessionAuthority,
     role: meta.role,
     auth: meta.auth
       ? {
@@ -469,9 +485,7 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       authStateLost: false,
       connectionId,
       lastSeenAt: Date.now(),
-      ip: request.headers.get('CF-Connecting-IP')
-        || request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim()
-        || undefined,
+      ip: resolveRoomClientIp(this.env, request),
       userAgent: request.headers.get('User-Agent') || undefined,
     };
 
@@ -560,6 +574,13 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         typeof msg.token === 'string' ? msg.token : undefined,
         msg.authPayload,
       );
+      return;
+    }
+
+    // A signed connection remains authorized only while its backing session
+    // row is active. Tokenless anonymous room actors are handled explicitly by
+    // ensureLiveSessionAuthority and do not have a session row.
+    if (meta.authenticated && !(await this.ensureLiveSessionAuthority(ws, meta))) {
       return;
     }
 
@@ -883,10 +904,20 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     }
 
     if (anonymousAuth) {
+      if (isReAuth && meta.userId && meta.userId !== anonymousAuth.id) {
+        this.safeSend(ws, {
+          type: 'error',
+          code: 'AUTH_REFRESH_FAILED',
+          message: 'Room re-authentication cannot change the connected user.',
+        });
+        return;
+      }
       meta.authenticated = true;
       meta.authStateLost = false;
       meta.lastSeenAt = Date.now();
       meta.userId = anonymousAuth.id;
+      meta.sessionId = undefined;
+      meta.sessionAuthority = 'tokenless-anonymous';
       meta.role = anonymousAuth.role;
       meta.auth = anonymousAuth;
       this.setWSMeta(ws, meta);
@@ -933,10 +964,18 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
         accessToken,
         new Request('http://internal/api/room/auth', { headers }),
       );
+      if (!auth.sessionId) {
+        throw new Error('Room access requires a session-bound access token.');
+      }
+      if (isReAuth && meta.userId && meta.userId !== auth.id) {
+        throw new Error('Room re-authentication cannot change the connected user.');
+      }
       meta.authenticated = true;
       meta.authStateLost = false;
       meta.lastSeenAt = Date.now();
       meta.userId = auth.id;
+      meta.sessionId = auth.sessionId;
+      meta.sessionAuthority = 'session';
       meta.role = auth.role;
       meta.auth = {
         id: auth.id,
@@ -977,6 +1016,14 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       await this.recoverStateIfNeeded();
       // Note: full sync is sent during handleJoin(), not here
     } catch (error) {
+      if (error instanceof AuthSessionAuthorityUnavailableError) {
+        this.sendRawUnchecked(ws, JSON.stringify({
+          type: 'error',
+          code: 'AUTH_AUTHORITY_UNAVAILABLE',
+          message: 'Authentication session validation is temporarily unavailable.',
+        }));
+        return;
+      }
       const detail = error instanceof Error ? error.message : String(error);
       console.error('[Room] handleAuth failed', {
         room: this.namespace && this.roomId ? `${this.namespace}::${this.roomId}` : null,
@@ -1920,11 +1967,82 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     this.safeSendRaw(ws, JSON.stringify(msg));
   }
 
+  private outboundSessionChains: WeakMap<WebSocket, Promise<void>> | undefined;
+
   protected safeSendRaw(ws: WebSocket, msg: string): void {
+    const meta = this.getWSMeta(ws);
+    if (!meta?.authenticated || meta.sessionAuthority === 'tokenless-anonymous') {
+      this.sendRawUnchecked(ws, msg);
+      return;
+    }
+
+    const chains = (this.outboundSessionChains ??= new WeakMap());
+    const previous = chains.get(ws) ?? Promise.resolve();
+    const run = previous.then(async () => {
+      // Re-read after earlier queued sends complete. A preceding authority
+      // check may already have revoked and replaced the cached attachment;
+      // using the object captured before the queue would emit duplicate
+      // SESSION_REVOKED frames and repeated close attempts.
+      const currentMeta = this.getWSMeta(ws);
+      if (currentMeta?.authenticated && await this.ensureLiveSessionAuthority(ws, currentMeta)) {
+        this.sendRawUnchecked(ws, msg);
+      }
+    });
+    const settled = run.then(() => undefined, () => undefined);
+    chains.set(ws, settled);
+    this.ctx.waitUntil(settled);
+  }
+
+  private sendRawUnchecked(ws: WebSocket, msg: string): void {
     try {
       ws.send(msg);
     } catch {
       // Socket may already be closed while async work is finishing.
+    }
+  }
+
+  protected async ensureLiveSessionAuthority(ws: WebSocket, meta: RoomWSMeta): Promise<boolean> {
+    if (meta.sessionAuthority === 'tokenless-anonymous') return true;
+    if (!meta.sessionId || !meta.userId) {
+      this.revokeLiveSession(ws, meta, 'Authentication session metadata is missing.');
+      return false;
+    }
+    try {
+      const active = await isAuthSessionActive(
+        this.env as unknown as Record<string, unknown>,
+        meta.userId,
+        meta.sessionId,
+      );
+      if (active) return true;
+
+      this.revokeLiveSession(ws, meta, 'Authentication session was revoked. Reconnect required.');
+      return false;
+    } catch (error) {
+      if (error instanceof AuthSessionAuthorityUnavailableError) {
+        this.sendRawUnchecked(ws, JSON.stringify({
+          type: 'error',
+          code: 'AUTH_AUTHORITY_UNAVAILABLE',
+          message: 'Authentication session validation is temporarily unavailable.',
+        }));
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  private revokeLiveSession(ws: WebSocket, meta: RoomWSMeta, message: string): void {
+    meta.authenticated = false;
+    meta.authStateLost = true;
+    this.setWSMeta(ws, meta);
+    this.sendRawUnchecked(ws, JSON.stringify({
+      type: 'error',
+      code: 'SESSION_REVOKED',
+      message,
+    }));
+    try {
+      ws.close(4002, 'Authentication session revoked');
+    } catch {
+      // Socket may already be closing.
     }
   }
 

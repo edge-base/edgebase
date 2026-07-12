@@ -17,7 +17,7 @@ Technical limits for EdgeBase Authentication.
 | Access token TTL | **15 minutes** | Yes | `auth.session.accessTokenTTL` |
 | Refresh token TTL | **28 days** | Yes | `auth.session.refreshTokenTTL` |
 | Max active sessions per user | **Unlimited** (0) | Yes | `auth.session.maxActiveSessions` — see [Session Management](/docs/authentication/session-management) |
-| Refresh token rotation grace period | **30 seconds** | No | Prevents race conditions in multi-tab scenarios |
+| Refresh token rotation grace period | **30 seconds** | No | Previous-token retries converge on the already-issued replacement |
 | SDK proactive refresh buffer | **30 seconds** | No | Refreshes token 30s before expiry |
 
 ## Email Tokens

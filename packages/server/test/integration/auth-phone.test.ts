@@ -11,6 +11,11 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { setConfig } from '../../src/lib/do-router.js';
+import { D1AuthDb } from '../../src/lib/auth-db-adapter.js';
+import {
+  getAuthChallenge,
+  getPhoneLinkUpgradeCompletion,
+} from '../../src/lib/auth-d1-service.js';
 import testConfig from '../../edgebase.test.config.ts';
 
 const BASE = 'http://localhost';
@@ -66,12 +71,9 @@ describe('auth-phone — signin/phone', () => {
     expect(typeof data.code).toBe('string');
     expect(data.code.length).toBe(6);
 
-    const storedOtp = await (globalThis as any).env.KV.get(`phone-otp:${phone}`, 'json') as {
-      code?: string;
-      codeHash?: string;
-    } | null;
-    expect(storedOtp?.code).toBeUndefined();
-    expect(storedOtp?.codeHash).toMatch(/^hmac-sha256:[a-f0-9]{64}$/);
+    const authDb = new D1AuthDb((globalThis as any).env.AUTH_DB as D1Database);
+    const storedOtp = await getAuthChallenge(authDb, 'phone-otp', phone);
+    expect(storedOtp?.secretHash).toMatch(/^hmac-sha256:[a-f0-9]{64}$/);
   });
 
   it('phone 누락 → 400', async () => {
@@ -111,6 +113,27 @@ describe('auth-phone — signin/phone', () => {
       // Code may be different (but doesn't have to be since it's random)
       expect(typeof d2.code).toBe('string');
     }
+  });
+
+  it('raw phone user만 남은 부분 실패 상태를 다음 OTP 요청이 index 복구', async () => {
+    const phone = randomPhone();
+    const first = await api('POST', '/signin/phone', { phone });
+    expect(first.status).toBe(200);
+    const originalUser = await (globalThis as any).env.AUTH_DB.prepare(
+      `SELECT id FROM _users WHERE phone = ?`,
+    ).bind(phone).first<{ id: string }>();
+    expect(originalUser?.id).toBeTruthy();
+    await (globalThis as any).env.AUTH_DB.prepare(
+      `DELETE FROM _phone_index WHERE phone = ?`,
+    ).bind(phone).run();
+
+    const retry = await api('POST', '/signin/phone', { phone });
+    expect(retry.status).toBe(200);
+    expect(typeof retry.data.code).toBe('string');
+    const repaired = await (globalThis as any).env.AUTH_DB.prepare(
+      `SELECT userId, status FROM _phone_index WHERE phone = ?`,
+    ).bind(phone).first<{ userId: string; status: string }>();
+    expect(repaired).toEqual({ userId: originalUser!.id, status: 'confirmed' });
   });
 });
 
@@ -229,12 +252,9 @@ describe('auth-phone — link/phone', () => {
     // Dev mode: code returned for testing
     expect(typeof data.code).toBe('string');
 
-    const storedOtp = await (globalThis as any).env.KV.get(`phone-link-otp:${phone}`, 'json') as {
-      code?: string;
-      codeHash?: string;
-    } | null;
-    expect(storedOtp?.code).toBeUndefined();
-    expect(storedOtp?.codeHash).toMatch(/^hmac-sha256:[a-f0-9]{64}$/);
+    const authDb = new D1AuthDb((globalThis as any).env.AUTH_DB as D1Database);
+    const storedOtp = await getAuthChallenge(authDb, 'phone-link-otp', phone);
+    expect(storedOtp?.secretHash).toMatch(/^hmac-sha256:[a-f0-9]{64}$/);
   });
 
   it('미인증 → 401', async () => {
@@ -284,7 +304,7 @@ describe('auth-phone — verify-link-phone', () => {
       // Verify link
       const { status, data } = await api('POST', '/verify-link-phone', { phone, code }, signup.accessToken);
       expect(status).toBe(200);
-      expect(data.ok).toBe(true);
+      expect(data).toEqual({ ok: true });
     }
   });
 
@@ -368,6 +388,85 @@ describe('auth-phone — anonymous upgrade', () => {
         expect(verifyData.user?.phone).toBe(phone);
       }
     }
+  });
+
+  it('응답 유실 후 동일 phone/code와 폐기된 sid로 재시도하면 동일 세션·토큰을 복구', async () => {
+    const { data: anonData } = await api('POST', '/signin/anonymous', {});
+    const phone = randomPhone();
+    const { data: linkData } = await api('POST', '/link/phone', { phone }, anonData.accessToken);
+    const code = linkData.code as string;
+
+    // Treat this response as lost by deliberately retaining only its values
+    // for assertions; the retry still uses the now-revoked initiating token.
+    const first = await api('POST', '/verify-link-phone', { phone, code }, anonData.accessToken);
+    expect(first.status).toBe(200);
+    const retry = await api('POST', '/verify-link-phone', { phone, code }, anonData.accessToken);
+
+    expect(retry.status).toBe(200);
+    expect(retry.data.sessionId).toBe(first.data.sessionId);
+    expect(retry.data.accessToken).toBe(first.data.accessToken);
+    expect(retry.data.refreshToken).toBe(first.data.refreshToken);
+    expect(retry.data.user?.id).toBe(anonData.user.id);
+    expect(retry.data.user?.isAnonymous).toBe(false);
+
+    const staleSession = await api('GET', '/sessions', undefined, anonData.accessToken);
+    expect(staleSession.status).toBe(401);
+    const wrongCodeRecovery = await api(
+      'POST',
+      '/verify-link-phone',
+      { phone, code: code === '000000' ? '111111' : '000000' },
+      anonData.accessToken,
+    );
+    expect(wrongCodeRecovery.status).toBe(401);
+    const freshMutationWithRevokedSid = await api(
+      'POST',
+      '/verify-link-phone',
+      { phone: randomPhone(), code: '123456' },
+      anonData.accessToken,
+    );
+    expect(freshMutationWithRevokedSid.status).toBe(401);
+    const replacementSession = await api('GET', '/sessions', undefined, retry.data.accessToken);
+    expect(replacementSession.status).toBe(200);
+
+    const rows = await (globalThis as any).env.AUTH_DB.prepare(
+      `SELECT id, refreshToken FROM _sessions WHERE userId = ?`,
+    ).bind(anonData.user.id).all<{ id: string; refreshToken: string }>();
+    expect(rows.results).toEqual([{
+      id: first.data.sessionId,
+      refreshToken: first.data.refreshToken,
+    }]);
+
+    const authDb = new D1AuthDb((globalThis as any).env.AUTH_DB as D1Database);
+    const checkpoint = await getPhoneLinkUpgradeCompletion(authDb, phone);
+    expect(checkpoint).toMatchObject({
+      kind: 'phone-link-completion',
+      userId: anonData.user.id,
+      subject: phone,
+    });
+    expect(checkpoint?.payload).not.toContain(first.data.accessToken);
+    expect(checkpoint?.payload).not.toContain(first.data.refreshToken);
+  });
+
+  it('동시 두 완료 요청도 하나의 replacement session 결과로 수렴', async () => {
+    const { data: anonData } = await api('POST', '/signin/anonymous', {});
+    const phone = randomPhone();
+    const { data: linkData } = await api('POST', '/link/phone', { phone }, anonData.accessToken);
+    const code = linkData.code as string;
+
+    const [first, second] = await Promise.all([
+      api('POST', '/verify-link-phone', { phone, code }, anonData.accessToken),
+      api('POST', '/verify-link-phone', { phone, code }, anonData.accessToken),
+    ]);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(second.data.sessionId).toBe(first.data.sessionId);
+    expect(second.data.accessToken).toBe(first.data.accessToken);
+    expect(second.data.refreshToken).toBe(first.data.refreshToken);
+    const count = await (globalThis as any).env.AUTH_DB.prepare(
+      `SELECT COUNT(*) AS count FROM _sessions WHERE userId = ?`,
+    ).bind(anonData.user.id).first<{ count: number }>();
+    expect(count?.count).toBe(1);
   });
 });
 

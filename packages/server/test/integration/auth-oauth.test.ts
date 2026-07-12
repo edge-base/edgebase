@@ -15,9 +15,18 @@
  *   - link/callback: 만료 state → 400
  */
 import { describe, it, expect } from 'vitest';
+import { consumeOAuthTransient } from '../../src/lib/oauth-state-store.js';
 
 const BASE = 'http://localhost';
 const SK = 'test-service-key-for-admin';
+
+function oauthState(): string {
+  return `${crypto.randomUUID().replaceAll('-', '')}${crypto.randomUUID().replaceAll('-', '')}`;
+}
+
+function oauthStateCookie(state: string): string {
+  return `edgebase-test-refresh-oauth-${state.slice(0, 32)}=${state}`;
+}
 
 async function api(method: string, path: string, body?: unknown, token?: string) {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -60,6 +69,48 @@ describe('1-13 auth-oauth — 지원하지 않는 provider', () => {
 // ─── 2. OAuth callback — GET /api/auth/oauth/:provider/callback ──────────────
 
 describe('1-13 auth-oauth — callback 파라미터 검증', () => {
+  it('rejects a regular body-transport state without burning it when the browser cookie is missing', async () => {
+    const state = oauthState();
+    const key = `oauth:state:google:${state}`;
+    await (globalThis as any).env.KV.put(key, JSON.stringify({
+      provider: 'google',
+      redirectUri: 'http://localhost/api/auth/oauth/google/callback',
+      codeVerifier: null,
+      authTransport: 'body',
+    }), { expirationTtl: 300 });
+    const { status, data } = await api(
+      'GET',
+      `/api/auth/oauth/google/callback?code=attacker-code&state=${state}`,
+    );
+    expect(status).toBe(400);
+    expect(data.message).toContain('not bound to this browser');
+    expect(await (globalThis as any).env.KV.get(key)).not.toBeNull();
+  });
+
+  it('accepts Apple form_post callback shape and consumes provider errors once', async () => {
+    const state = oauthState();
+    const key = `oauth:state:apple:${state}`;
+    await (globalThis as any).env.KV.put(key, JSON.stringify({
+      provider: 'apple',
+      redirectUri: 'https://localhost/api/auth/oauth/apple/callback',
+      codeVerifier: null,
+    }), { expirationTtl: 300 });
+    const response = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/auth/oauth/apple/callback`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Cookie: oauthStateCookie(state),
+        },
+        body: new URLSearchParams({ error: 'access_denied', state }),
+        redirect: 'manual',
+      },
+    );
+    expect(response.status).toBe(400);
+    expect(await (globalThis as any).env.KV.get(key)).toBeNull();
+  });
+
   it('code 누락 → 400', async () => {
     const { status } = await api('GET', '/api/auth/oauth/google/callback?state=fakestate');
     expect(status).toBe(400);
@@ -80,6 +131,30 @@ describe('1-13 auth-oauth — callback 파라미터 검증', () => {
     expect(status).toBe(400);
   });
 
+  it('provider error consumes exact state even without an app redirect or matching provider', async () => {
+    const state = oauthState();
+    const key = `oauth:state:google:${state}`;
+    await (globalThis as any).env.KV.put(key, JSON.stringify({
+      provider: 'github',
+      redirectUri: 'http://localhost/callback',
+      codeVerifier: null,
+    }), { expirationTtl: 300 });
+
+    const first = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/auth/oauth/google/callback?error=access_denied&state=${state}`,
+      { redirect: 'manual', headers: { Cookie: oauthStateCookie(state) } },
+    );
+    expect(first.status).toBe(400);
+    expect(await (globalThis as any).env.KV.get(key)).toBeNull();
+
+    const replay = await api(
+      'GET',
+      `/api/auth/oauth/google/callback?error=access_denied&state=${state}`,
+    );
+    expect(replay.status).toBe(400);
+    expect(await (globalThis as any).env.KV.get(key)).toBeNull();
+  });
+
   it('만료되거나 존재하지 않는 state → 400', async () => {
     const { status } = await api('GET', '/api/auth/oauth/google/callback?code=testcode&state=nonexistent-state-xyz');
     expect(status).toBe(400);
@@ -94,6 +169,37 @@ describe('1-13 auth-oauth — callback 파라미터 검증', () => {
 // ─── 3. OAuth state KV TTL ────────────────────────────────────────────────────
 
 describe('1-13 auth-oauth — OAuth state KV', () => {
+  it('atomically consumes coordinated OAuth state under concurrent requests', async () => {
+    const namespace = (globalThis as any).env.AUTH;
+    const stub = namespace.get(namespace.idFromName('edgebase-oauth-state-coordinator-v1'));
+    const key = `concurrent-${crypto.randomUUID()}`;
+    const stored = await stub.fetch('https://oauth-state.internal/internal/oauth-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value: 'one-shot-value', expiresAt: Date.now() + 60_000 }),
+    });
+    expect(stored.status).toBe(200);
+    const consume = () => stub.fetch('https://oauth-state.internal/internal/oauth-state', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    }).then((response: Response) => response.json());
+    const results = await Promise.all([consume(), consume()]) as Array<{ value: string | null }>;
+    expect(results.filter((result) => result.value === 'one-shot-value')).toHaveLength(1);
+    expect(results.filter((result) => result.value === null)).toHaveLength(1);
+  });
+
+  it('atomically claims a rolling-upgrade KV-only OAuth state', async () => {
+    const key = `legacy-concurrent-${crypto.randomUUID()}`;
+    await (globalThis as any).env.KV.put(key, 'legacy-value', { expirationTtl: 300 });
+    const values = await Promise.all([
+      consumeOAuthTransient((globalThis as any).env, key),
+      consumeOAuthTransient((globalThis as any).env, key),
+    ]);
+    expect(values.filter((value) => value === 'legacy-value')).toHaveLength(1);
+    expect(values.filter((value) => value === null)).toHaveLength(1);
+  });
+
   it('state를 KV에 수동 저장 후 callback — state provider 불일치 → 400', async () => {
     // Manually store state with mismatched provider
     const state = `test-state-${crypto.randomUUID().slice(0, 8)}`;
@@ -122,6 +228,17 @@ describe('1-13 auth-oauth — OAuth state KV', () => {
 // ─── 4. link/oauth — POST /api/auth/oauth/link/:provider ─────────────────────
 
 describe('1-13 auth-oauth — link OAuth', () => {
+  it('malformed callback-binding nonce → 400 before OAuth start', async () => {
+    const { status, data } = await api('POST', '/api/auth/oauth/link/google', {
+      oauthRecoveryNonce: 'not-a-valid-nonce',
+    });
+    expect(status).toBe(400);
+    expect(data).toMatchObject({
+      code: 400,
+      message: expect.stringContaining('oauthRecoveryNonce'),
+    });
+  });
+
   it('인증없이 link 시도 → 401', async () => {
     const { status } = await api('POST', '/api/auth/oauth/link/google');
     expect(status).toBe(401);
@@ -143,6 +260,29 @@ describe('1-13 auth-oauth — link OAuth', () => {
     expect(data.message).toContain('not configured');
   });
 
+  it('treats a legacy literal JSON null link body as absent', async () => {
+    const email = `oauth-null-body-${crypto.randomUUID().slice(0, 8)}@test.com`;
+    const signupRes = await (globalThis as any).SELF.fetch(`${BASE}/api/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: 'Link1234!' }),
+    });
+    const { accessToken } = await signupRes.json() as any;
+    const response = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/auth/oauth/link/google`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: 'null',
+      },
+    );
+    expect(response.status).toBe(500);
+    expect((await response.json() as any).message).toContain('not configured');
+  });
+
   it('unsupported provider for link → 400', async () => {
     const email = `oauth-link-${crypto.randomUUID().slice(0, 8)}@test.com`;
     const signupRes = await (globalThis as any).SELF.fetch(`${BASE}/api/auth/signup`, {
@@ -159,6 +299,55 @@ describe('1-13 auth-oauth — link OAuth', () => {
 // ─── 5. link/callback — GET /api/auth/oauth/link/:provider/callback ──────────
 
 describe('1-13 auth-oauth — link callback 파라미터 검증', () => {
+  it('consumes a system-browser continuation ticket once and issues the state cookie', async () => {
+    const ticket = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '');
+    const state = 'linked-browser-state';
+    const key = `oauth:link-continue:${ticket}`;
+    await (globalThis as any).env.KV.put(key, JSON.stringify({
+      provider: 'google',
+      state,
+      authUrl: 'https://accounts.example.test/authorize?state=linked-browser-state',
+    }), { expirationTtl: 60 });
+
+    const response = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/auth/oauth/link/google/continue?ticket=${ticket}`,
+      { redirect: 'manual' },
+    );
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toContain('accounts.example.test/authorize');
+    expect(response.headers.get('set-cookie')).toContain('-oauth-');
+    expect(response.headers.get('cache-control')).toContain('no-store');
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(await (globalThis as any).env.KV.get(key)).toBeNull();
+
+    const replay = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/auth/oauth/link/google/continue?ticket=${ticket}`,
+      { redirect: 'manual' },
+    );
+    expect(replay.status).toBe(400);
+  });
+
+  it('rejects a stolen link state from a browser without the binding cookie', async () => {
+    const state = oauthState();
+    const key = `oauth:link-state:google:${state}`;
+    await (globalThis as any).env.KV.put(key, JSON.stringify({
+      provider: 'google',
+      redirectUri: 'http://localhost/api/auth/oauth/link/google/callback',
+      codeVerifier: null,
+      linkUserId: 'victim-user',
+      linkMode: 'attach-oauth',
+      authTransport: 'body',
+    }), { expirationTtl: 300 });
+
+    const { status, data } = await api(
+      'GET',
+      `/api/auth/oauth/link/google/callback?code=attacker-code&state=${state}`,
+    );
+    expect(status).toBe(400);
+    expect(data.message).toContain('not bound to this browser');
+    expect(await (globalThis as any).env.KV.get(key)).not.toBeNull();
+  });
+
   it('code 누락 → 400', async () => {
     const { status } = await api('GET', '/api/auth/oauth/link/google/callback?state=x');
     expect(status).toBe(400);
@@ -351,6 +540,32 @@ describe('1-13 auth-oauth — link callback 확장', () => {
   it('link callback error query param → 400', async () => {
     const { status } = await api('GET', '/api/auth/oauth/link/google/callback?error=access_denied&code=x&state=y');
     expect(status).toBe(400);
+  });
+
+  it('link provider error consumes exact link state before mismatch/no-redirect failure', async () => {
+    const state = oauthState();
+    const key = `oauth:link-state:google:${state}`;
+    await (globalThis as any).env.KV.put(key, JSON.stringify({
+      provider: 'github',
+      redirectUri: 'http://localhost/callback',
+      codeVerifier: null,
+      linkUserId: 'synthetic-user',
+      linkMode: 'attach-oauth',
+    }), { expirationTtl: 300 });
+
+    const first = await (globalThis as any).SELF.fetch(
+      `${BASE}/api/auth/oauth/link/google/callback?error=access_denied&state=${state}`,
+      { redirect: 'manual', headers: { Cookie: oauthStateCookie(state) } },
+    );
+    expect(first.status).toBe(400);
+    expect(await (globalThis as any).env.KV.get(key)).toBeNull();
+
+    const replay = await api(
+      'GET',
+      `/api/auth/oauth/link/google/callback?error=access_denied&state=${state}`,
+    );
+    expect(replay.status).toBe(400);
+    expect(await (globalThis as any).env.KV.get(key)).toBeNull();
   });
 
   it('link callback code+state 모두 누락 → 400', async () => {

@@ -9,7 +9,14 @@ export type { JuneClientOptions } from './client.js';
 
 // ─── Token Manager ───
 export { TokenManager } from './token-manager.js';
-export type { TokenPair, TokenUser, AuthStateChangeHandler, AsyncStorageAdapter } from './token-manager.js';
+export type {
+  TokenPair,
+  TokenUser,
+  AuthStateChangeHandler,
+  AsyncStorageAdapter,
+  SecureRandomProvider,
+  TokenManagerOptions,
+} from './token-manager.js';
 
 // ─── Auth ───
 export { AuthClient } from './auth.js';
@@ -40,8 +47,20 @@ export type {
 } from './room.js';
 
 // ─── Turnstile / Captcha ───
-export { TurnstileWebView, useTurnstile, isPlatformWeb } from './turnstile.js';
-export type { TurnstileWebViewProps, UseTurnstileOptions, UseTurnstileResult } from './turnstile.js';
+export {
+  TurnstileError,
+  TurnstileWebView,
+  useTurnstile,
+  isPlatformWeb,
+} from './turnstile.js';
+export type {
+  TurnstileErrorReason,
+  TurnstileWebViewProps,
+  UseTurnstileOptions,
+  UseTurnstileResult,
+  TurnstileSecureCrypto,
+  TurnstileGetRandomValues,
+} from './turnstile.js';
 
 // ─── Lifecycle ───
 export { LifecycleManager, useLifecycle } from './lifecycle.js';

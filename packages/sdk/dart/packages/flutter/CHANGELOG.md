@@ -1,3 +1,26 @@
+## Unreleased
+
+- Persist access and refresh tokens as one SharedPreferences value, expose
+  `tryRestoreSession()`, migrate legacy refresh-only state, and reject incomplete
+  pairs before exposure.
+- Require `DurableTokenStorage` before anonymous email/phone upgrades; failed
+  replacement writes keep the initiating session and can safely replay the
+  server checkpoint.
+- Surface token persistence failures through authenticated HTTP instead of
+  retrying without authority.
+- Added typed CAPTCHA failures, bounded/retryable web script loading, unique DOM
+  cleanup, a five-minute positive site-key cache, and one fresh-key retry only
+  for direct `challenge_error` failures.
+- CAPTCHA config fetch and malformed-response failures now fail closed instead
+  of being interpreted as disabled protection.
+- Raised the Dart SDK floor to 3.4 for modern JS interop.
+
+## 0.4.0
+
+- Synchronized package metadata, `edgebase_core`, and realtime SDK version
+  reporting with EdgeBase 0.3.9
+- No public Flutter API compatibility break is introduced
+
 ## 0.3.8
 
 - Synchronized package metadata, `edgebase_core`, and realtime SDK version

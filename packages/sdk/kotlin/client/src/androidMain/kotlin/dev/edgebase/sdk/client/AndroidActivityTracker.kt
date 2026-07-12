@@ -1,8 +1,7 @@
-// EdgeBase Kotlin SDK — Zero-config Android Activity tracker.
+// EdgeBase Kotlin SDK — Android Activity tracker.
 //
-// Auto-detects Application context via ActivityThread reflection (same pattern
-// used by Firebase, WorkManager, etc.) and tracks the current foreground
-// Activity via ActivityLifecycleCallbacks. No developer initialization required.
+// AndroidEdgeBase captures the initial Activity synchronously, then lifecycle
+// callbacks keep the foreground Activity current for later UI-bound features.
 //
 // Shared by CaptchaProvider, PlatformPush, and any other component that needs
 // Activity context on Android.
@@ -16,8 +15,11 @@ import android.os.Bundle
 import java.lang.ref.WeakReference
 
 object AndroidActivityTracker {
+    @Volatile
     private var appContext: android.content.Context? = null
+    @Volatile
     private var currentActivityRef: WeakReference<Activity>? = null
+    @Volatile
     private var lifecycleRegistered = false
 
     /**
@@ -54,11 +56,17 @@ object AndroidActivityTracker {
     }
 
     /**
-     * Optional: manually set Application context.
-     * Only needed if auto-detection via ActivityThread reflection fails.
+     * Set the application context and synchronously capture an Activity when
+     * one is supplied. AndroidEdgeBase uses this before client construction.
      */
     fun initContext(context: android.content.Context) {
         appContext = context.applicationContext
+        // Lifecycle callbacks registered after an Activity has already reached
+        // RESUMED do not receive a replay. Capturing an explicitly supplied
+        // Activity closes that first-interactive-CAPTCHA gap.
+        if (context is Activity && !context.isFinishing) {
+            currentActivityRef = WeakReference(context)
+        }
         (context.applicationContext as? Application)?.let { registerLifecycleTracking(it) }
     }
 
@@ -66,6 +74,7 @@ object AndroidActivityTracker {
      * Register ActivityLifecycleCallbacks to auto-track the current foreground Activity.
      * Called once, idempotent.
      */
+    @Synchronized
     private fun registerLifecycleTracking(app: Application) {
         if (lifecycleRegistered) return
         lifecycleRegistered = true
@@ -85,5 +94,10 @@ object AndroidActivityTracker {
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
             override fun onActivityDestroyed(activity: Activity) {}
         })
+    }
+
+    internal fun clearForTest() {
+        currentActivityRef = null
+        appContext = null
     }
 }

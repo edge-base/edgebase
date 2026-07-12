@@ -848,7 +848,7 @@ describe('RN E2E — DatabaseLive (구조 검증)', () => {
 
     const tm = new TokenManager(BASE_URL, storage);
     await tm.ready();
-    tm.setTokens({ accessToken, refreshToken });
+    await tm.setTokens({ accessToken, refreshToken });
 
     const cm = new ContextManager();
     const live = new DatabaseLiveClient(BASE_URL, tm, undefined, cm);
@@ -886,7 +886,7 @@ describe('RN E2E — Room (구조 검증)', () => {
 
     const tm = new TokenManager(BASE_URL, storage);
     await tm.ready();
-    tm.setTokens({ accessToken, refreshToken });
+    await tm.setTokens({ accessToken, refreshToken });
 
     const room = new RoomClient(BASE_URL, 'default', `rn-test-room-${Date.now()}`, tm);
     // join should attempt connection (may succeed or fail depending on server config)
@@ -1012,7 +1012,7 @@ describe('RN E2E — createClient 통합', () => {
         removeItem: async (key: string) => { store.delete(key); },
       };
     })();
-    const client = createClient(BASE_URL, { storage });
+    const client = createClient(BASE_URL, { storage, allowInsecureAuthStorageForDevelopment: true });
     const email = `rn-client-${Date.now()}@test.com`;
     const result = await client.auth.signUp({ email, password: 'RnClient1234!' });
     expect(result.user.id).toBeTruthy();
@@ -1032,13 +1032,13 @@ describe('RN E2E — createClient 통합', () => {
         removeItem: async (key: string) => { store.delete(key); },
       };
     })();
-    const client = createClient(BASE_URL, { storage });
+    const client = createClient(BASE_URL, { storage, allowInsecureAuthStorageForDevelopment: true });
     const email = `rn-client-si-${Date.now()}@test.com`;
     await client.auth.signUp({ email, password: 'RnSi1234!' });
     client.destroy();
 
     // New client for sign-in
-    const client2 = createClient(BASE_URL, { storage: (() => {
+    const client2 = createClient(BASE_URL, { allowInsecureAuthStorageForDevelopment: true, storage: (() => {
       const store = new Map<string, string>();
       return {
         getItem: async (key: string) => store.get(key) ?? null,
@@ -1062,7 +1062,7 @@ describe('RN E2E — createClient 통합', () => {
         removeItem: async (key: string) => { store.delete(key); },
       };
     })();
-    const client = createClient(BASE_URL, { storage });
+    const client = createClient(BASE_URL, { storage, allowInsecureAuthStorageForDevelopment: true });
     const email = `rn-client-so-${Date.now()}@test.com`;
     await client.auth.signUp({ email, password: 'RnSo1234!' });
     expect(client.auth.currentUser).not.toBeNull();
@@ -1081,7 +1081,7 @@ describe('RN E2E — createClient 통합', () => {
         removeItem: async (key: string) => { store.delete(key); },
       };
     })();
-    const client = createClient(BASE_URL, { storage });
+    const client = createClient(BASE_URL, { storage, allowInsecureAuthStorageForDevelopment: true });
     const states: (any | null)[] = [];
     const unsub = client.auth.onAuthStateChange(user => states.push(user));
     // Initial state = null
@@ -1111,7 +1111,7 @@ describe('RN E2E — createClient 통합', () => {
         removeItem: async (key: string) => { store.delete(key); },
       };
     })();
-    const client = createClient(BASE_URL, { storage });
+    const client = createClient(BASE_URL, { storage, allowInsecureAuthStorageForDevelopment: true });
     const email = `rn-client-crud-${Date.now()}@test.com`;
     await client.auth.signUp({ email, password: 'RnCrud1234!' });
 

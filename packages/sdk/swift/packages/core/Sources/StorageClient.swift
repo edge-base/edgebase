@@ -230,7 +230,7 @@ public final class StorageBucket: @unchecked Sendable {
         }
     }
 
-    /// Create a signed upload URL (client-side direct upload).
+    /// Create a single-use signed URL for uploading through EdgeBase without auth headers.
     public func createSignedUploadUrl(
         _ key: String,
         expiresIn: Int = 3600,
@@ -248,9 +248,9 @@ public final class StorageBucket: @unchecked Sendable {
         )
     }
 
-    public func exists(_ key: String) async -> Bool {
+    public func exists(_ key: String) async throws -> Bool {
         let encodedKey = key.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? key
-        return await client.head("/storage/\(name)/\(encodedKey)")
+        return try await client.head("/storage/\(name)/\(encodedKey)")
     }
 
     public func getUploadParts(_ key: String, uploadId: String) async throws -> [String: Any] {

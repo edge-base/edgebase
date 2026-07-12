@@ -19,13 +19,18 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * Does NOT expose: adminAuth, sql (admin-only).
  *
  * <p>
- * Usage:
+ * Desktop JVM usage:
  *
  * <pre>{@code
  * ClientEdgeBase client = EdgeBase.client("https://my-app.edgebase.fun");
  * client.auth().signUp("user@test.com", "pass123");
  * var posts = client.db("shared").table("posts").getList();
  * }</pre>
+ *
+ * <p>Android apps must instead call
+ * {@code AndroidEdgeBase.client(currentActivity, url, ...)}. Construction fails
+ * fast on Android without an Activity so first-interaction CAPTCHA and permission
+ * UI always have a valid host.</p>
  */
 public class ClientEdgeBase {
     private final HttpClient httpClient;
@@ -47,6 +52,9 @@ public class ClientEdgeBase {
 
     ClientEdgeBase(String url, TokenStorage tokenStorage, String projectId) {
         this.baseUrl = url.replaceAll("/$", "");
+        if (isAndroidRuntime()) {
+            validateAndroidInitialization();
+        }
         this.contextManager = new ContextManager();
         this.tokenManager = new TokenManager(tokenStorage != null ? tokenStorage : new MemoryTokenStorage());
 
@@ -114,6 +122,16 @@ public class ClientEdgeBase {
             } catch (Exception ignored) {
             }
         });
+    }
+
+    static void validateAndroidInitialization() {
+        android.app.Activity activity = AndroidActivityTracker.getCurrentActivity();
+        if (activity == null || activity.isFinishing()) {
+            throw new IllegalStateException(
+                "EdgeBase Android clients require the current Activity at SDK initialization. " +
+                "Use AndroidEdgeBase.client(activity, url) after the Activity is available."
+            );
+        }
     }
 
     /** Authentication client. */
@@ -188,6 +206,11 @@ public class ClientEdgeBase {
     /** Get the currently configured locale override. */
     public String getLocale() {
         return httpClient.getLocale();
+    }
+
+    /** Restore a previously persisted session before issuing authenticated calls. */
+    public boolean tryRestoreSession() {
+        return tokenManager.tryRestoreSession();
     }
 
     /** Clear legacy isolateBy context state. */

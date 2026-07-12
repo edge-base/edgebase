@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgeBase API",
-    "version": "0.3.8"
+    "version": "0.4.0"
   },
   "components": {
     "schemas": {},
@@ -54,7 +54,7 @@
                     },
                     "version": {
                       "type": "string",
-                      "example": "0.3.8"
+                      "example": "0.4.0"
                     }
                   },
                   "required": [
@@ -113,32 +113,6 @@
           },
           "400": {
             "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "number",
-                      "description": "HTTP status code",
-                      "example": 400
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Human-readable message",
-                      "example": "Invalid request body"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -1048,13 +1022,67 @@
         },
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Permanent link acknowledgement or anonymous-upgrade authentication result",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {},
-                  "description": "JSON response"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "additionalProperties": false,
+                      "description": "A permanent account linked the phone without replacing its session."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        },
+                        "user": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "accessToken": {
+                          "type": "string"
+                        },
+                        "refreshToken": {
+                          "type": "string",
+                          "description": "Present for body-token transport; omitted when an HttpOnly cookie carries it."
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "sessionTransport": {
+                          "type": "string",
+                          "enum": [
+                            "cookie"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "user",
+                        "accessToken",
+                        "sessionId"
+                      ],
+                      "additionalProperties": {},
+                      "description": "Replacement authentication session returned by an anonymous phone upgrade."
+                    }
+                  ],
+                  "description": "Permanent link acknowledgement or anonymous-upgrade authentication result."
                 }
               }
             }
@@ -2174,6 +2202,12 @@
                 "properties": {
                   "refreshToken": {
                     "type": "string"
+                  },
+                  "pushDeviceId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                   }
                 },
                 "additionalProperties": {}
@@ -3061,6 +3095,32 @@
               }
             }
           },
+          "400": {
+            "description": "Cannot delete the last sign-in method",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
           "401": {
             "description": "Authentication required",
             "content": {
@@ -3491,6 +3551,32 @@
                   "type": "object",
                   "additionalProperties": {},
                   "description": "JSON response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cannot unlink the last sign-in method",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
                 }
               }
             }
@@ -4802,6 +4888,58 @@
             "required": true,
             "name": "provider",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional CAPTCHA token for OAuth start."
+            },
+            "required": false,
+            "description": "Optional CAPTCHA token for OAuth start.",
+            "name": "captcha_token",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Optional refresh-token transport; only 'cookie' is supported."
+            },
+            "required": false,
+            "description": "Optional refresh-token transport; only 'cookie' is supported.",
+            "name": "auth_transport",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Client application callback URL."
+            },
+            "required": false,
+            "description": "Client application callback URL.",
+            "name": "redirect_url",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Legacy camelCase alias for redirect_url."
+            },
+            "required": false,
+            "description": "Legacy camelCase alias for redirect_url.",
+            "name": "redirectUrl",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "Optional 32-byte lowercase hexadecimal client SDK callback-binding nonce.",
+              "example": "abababababababababababababababababababababababababababababababab"
+            },
+            "required": false,
+            "description": "Optional 32-byte lowercase hexadecimal client SDK callback-binding nonce.",
+            "name": "oauth_recovery_nonce",
+            "in": "query"
           }
         ],
         "responses": {
@@ -4810,6 +4948,92 @@
           },
           "400": {
             "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/oauth/exchange": {
+      "post": {
+        "operationId": "oauthExchange",
+        "tags": [
+          "client"
+        ],
+        "summary": "Atomically exchange a verified OAuth callback ticket",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ticket": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "oauthRecoveryNonce": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "Optional 32-byte lowercase hexadecimal client SDK callback-binding nonce.",
+                    "example": "abababababababababababababababababababababababababababababababab"
+                  }
+                },
+                "required": [
+                  "ticket"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authentication result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created authentication result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired completion ticket",
             "content": {
               "application/json": {
                 "schema": {
@@ -4847,6 +5071,103 @@
         "parameters": [
           {
             "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "required": false,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "required": false,
+            "name": "error",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "required": false,
+            "name": "error_description",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authentication result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "302": {
+            "description": "Redirect to the client application"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "oauthCallbackPost",
+        "tags": [
+          "client"
+        ],
+        "summary": "OAuth form-post callback",
+        "parameters": [
+          {
+            "schema": {
               "type": "string"
             },
             "required": true,
@@ -4854,6 +5175,39 @@
             "in": "path"
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "maxLength": 8192
+                  },
+                  "state": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "error": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "error_description": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "user": {
+                    "type": "string",
+                    "maxLength": 8192,
+                    "description": "Apple first-authorization user profile JSON."
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Authentication result",
@@ -4916,6 +5270,33 @@
             "in": "path"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "redirectUrl": {
+                    "type": "string",
+                    "description": "Client application callback URL."
+                  },
+                  "state": {
+                    "type": "string",
+                    "maxLength": 1024,
+                    "description": "Optional application state returned with the callback."
+                  },
+                  "oauthRecoveryNonce": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "Optional 32-byte lowercase hexadecimal client SDK callback-binding nonce.",
+                    "example": "abababababababababababababababababababababababababababababababab"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Redirect URL",
@@ -4989,6 +5370,191 @@
         ]
       }
     },
+    "/api/auth/oauth/link/{provider}/continue": {
+      "get": {
+        "operationId": "oauthLinkContinue",
+        "tags": [
+          "client"
+        ],
+        "summary": "Continue OAuth account linking in the system browser",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "required": true,
+            "name": "ticket",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the OAuth provider"
+          },
+          "400": {
+            "description": "Invalid or expired continuation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/oauth/complete/link": {
+      "post": {
+        "operationId": "oauthLinkComplete",
+        "tags": [
+          "client"
+        ],
+        "summary": "Complete OAuth account linking for the current authenticated user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ticket": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "oauthRecoveryNonce": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "Optional 32-byte lowercase hexadecimal client SDK callback-binding nonce.",
+                    "example": "abababababababababababababababababababababababababababababababab"
+                  }
+                },
+                "required": [
+                  "ticket"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Link result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired completion ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Initiating account changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/oauth/link/{provider}/callback": {
       "get": {
         "operationId": "oauthLinkCallback",
@@ -4999,6 +5565,103 @@
         "parameters": [
           {
             "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "required": false,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "required": false,
+            "name": "error",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "required": false,
+            "name": "error_description",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Link result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "302": {
+            "description": "Redirect after linking"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "oauthLinkCallbackPost",
+        "tags": [
+          "client"
+        ],
+        "summary": "OAuth link form-post callback",
+        "parameters": [
+          {
+            "schema": {
               "type": "string"
             },
             "required": true,
@@ -5006,6 +5669,39 @@
             "in": "path"
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "maxLength": 8192
+                  },
+                  "state": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "error": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "error_description": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "user": {
+                    "type": "string",
+                    "maxLength": 8192,
+                    "description": "Apple first-authorization user profile JSON."
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Link result",
@@ -6021,17 +6717,6 @@
             "description": "Full-text search query",
             "name": "search",
             "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Set to '0' or 'false' to skip the COUNT query. total is returned as null and hasMore still drives cursor pagination.",
-              "example": "0"
-            },
-            "required": false,
-            "description": "Set to '0' or 'false' to skip the COUNT query. total is returned as null and hasMore still drives cursor pagination.",
-            "name": "includeTotal",
-            "in": "query"
           }
         ],
         "responses": {
@@ -6549,86 +7234,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "/api/db/{namespace}/transact": {
-      "post": {
-        "operationId": "dbSingleTransact",
-        "tags": [
-          "client"
-        ],
-        "summary": "Apply multi-table write operations atomically in a single-instance database",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "Database namespace",
-              "example": "app"
-            },
-            "required": true,
-            "description": "Database namespace",
-            "name": "namespace",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "operations": {
-                    "type": "array",
-                    "description": "Ordered operations applied atomically in one transaction. op: insert | update | delete | expect. insert: { table, op, data }. update: { table, op, id, data }. delete: { table, op, id }. expect: { table, op, id?, where?, exists } asserts row state and aborts the transaction with 409 when unmet.",
-                    "items": {
-                      "type": "object",
-                      "additionalProperties": {}
-                    }
-                  }
-                },
-                "required": [
-                  "operations"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Ordered per-operation results",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "results": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": {}
-                      }
-                    }
-                  },
-                  "additionalProperties": {}
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error (unknown table, malformed op, batch limit exceeded)"
-          },
-          "403": {
-            "description": "An access rule rejected one of the operations"
-          },
-          "409": {
-            "description": "An expect operation was not satisfied; transaction rolled back"
-          },
-          "501": {
-            "description": "Provider does not support multi-table transactions (d1/postgres)"
           }
         }
       }
@@ -7669,17 +8274,6 @@
             "description": "Full-text search query",
             "name": "search",
             "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "Set to '0' or 'false' to skip the COUNT query. total is returned as null and hasMore still drives cursor pagination.",
-              "example": "0"
-            },
-            "required": false,
-            "description": "Set to '0' or 'false' to skip the COUNT query. total is returned as null and hasMore still drives cursor pagination.",
-            "name": "includeTotal",
-            "in": "query"
           }
         ],
         "responses": {
@@ -8234,6 +8828,169 @@
         }
       }
     },
+    "/api/db/{namespace}/transact": {
+      "post": {
+        "operationId": "dbSingleTransact",
+        "tags": [
+          "client"
+        ],
+        "summary": "Apply multi-table write operations atomically in a single-instance database",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Database namespace",
+              "example": "app"
+            },
+            "required": true,
+            "description": "Database namespace",
+            "name": "namespace",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operations": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "description": "Ordered insert | update | delete | expect operations applied atomically."
+                  }
+                },
+                "required": [
+                  "operations"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ordered per-operation results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "description": "JSON response"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Expectation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Provider unsupported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/db/{namespace}/{instanceId}/transact": {
       "post": {
         "operationId": "dbTransact",
@@ -8246,7 +9003,7 @@
             "schema": {
               "type": "string",
               "description": "Database namespace",
-              "example": "app"
+              "example": "workspace"
             },
             "required": true,
             "description": "Database namespace",
@@ -8256,11 +9013,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Database instance ID",
+              "description": "Instance ID",
               "example": "ws-456"
             },
             "required": true,
-            "description": "Database instance ID",
+            "description": "Instance ID",
             "name": "instanceId",
             "in": "path"
           }
@@ -8274,17 +9031,16 @@
                 "properties": {
                   "operations": {
                     "type": "array",
-                    "description": "Ordered operations applied atomically in one transaction. op: insert | update | delete | expect. insert: { table, op, data }. update: { table, op, id, data }. delete: { table, op, id }. expect: { table, op, id?, where?, exists } asserts row state and aborts the transaction with 409 when unmet.",
                     "items": {
                       "type": "object",
                       "additionalProperties": {}
-                    }
+                    },
+                    "description": "Ordered insert | update | delete | expect operations applied atomically."
                   }
                 },
                 "required": [
                   "operations"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -8296,31 +9052,115 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "properties": {
-                    "results": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": {}
-                      }
-                    }
-                  },
-                  "additionalProperties": {}
+                  "additionalProperties": {},
+                  "description": "JSON response"
                 }
               }
             }
           },
           "400": {
-            "description": "Validation error (unknown table, malformed op, batch limit exceeded)"
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
           },
           "403": {
-            "description": "An access rule rejected one of the operations"
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
           },
           "409": {
-            "description": "An expect operation was not satisfied; transaction rolled back"
+            "description": "Expectation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
           },
           "501": {
-            "description": "Provider does not support multi-table transactions (d1/postgres)"
+            "description": "Provider unsupported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -9384,6 +10224,32 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Signed object version changed",
             "content": {
               "application/json": {
                 "schema": {
@@ -10724,7 +11590,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "Execute SQL via DatabaseDO",
+        "summary": "Execute provider-aware raw SQL",
         "requestBody": {
           "required": true,
           "content": {
@@ -10825,6 +11691,32 @@
           },
           "403": {
             "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Namespace not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -11396,6 +12288,101 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/captcha/challenge": {
+      "get": {
+        "operationId": "getCaptchaChallenge",
+        "tags": [
+          "client"
+        ],
+        "summary": "Render the hosted Turnstile page for native WebViews",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "action",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "channel",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "rn",
+                "webkit",
+                "android",
+                "flutter",
+                "vuplex",
+                "unity",
+                "uniwebview",
+                "uri"
+              ]
+            },
+            "required": true,
+            "name": "bridge",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "always",
+                "execute",
+                "interaction-only"
+              ]
+            },
+            "required": false,
+            "name": "appearance",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "normal",
+                "compact",
+                "flexible"
+              ]
+            },
+            "required": false,
+            "name": "size",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "No-store Turnstile challenge HTML",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid action or display option"
+          },
+          "403": {
+            "description": "Hostname is not registered for this widget"
+          },
+          "404": {
+            "description": "CAPTCHA is not configured"
+          },
+          "500": {
+            "description": "CAPTCHA runtime configuration is incomplete"
           }
         }
       }
@@ -13704,6 +14691,357 @@
         }
       }
     },
+    "/api/room/summary": {
+      "get": {
+        "operationId": "getRoomSummary",
+        "tags": [
+          "client"
+        ],
+        "summary": "Get room summary",
+        "description": "Returns lobby-safe room metadata plus current occupancy without joining the room.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Room namespace"
+            },
+            "required": true,
+            "description": "Room namespace",
+            "name": "namespace",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Room ID"
+            },
+            "required": true,
+            "description": "Room ID",
+            "name": "id",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Room summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "namespace": {
+                      "type": "string"
+                    },
+                    "roomId": {
+                      "type": "string"
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "occupancy": {
+                      "type": "object",
+                      "properties": {
+                        "activeMembers": {
+                          "type": "number"
+                        },
+                        "activeConnections": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "activeMembers",
+                        "activeConnections"
+                      ]
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "namespace",
+                    "roomId",
+                    "metadata",
+                    "occupancy",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/room/summaries": {
+      "post": {
+        "operationId": "getRoomSummaries",
+        "tags": [
+          "client"
+        ],
+        "summary": "Get summaries for multiple rooms",
+        "description": "Returns lobby-safe room metadata plus current occupancy for multiple room IDs in the same namespace.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "namespace": {
+                    "type": "string",
+                    "description": "Room namespace shared by the requested room IDs"
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "description": "Room IDs to summarize"
+                  }
+                },
+                "required": [
+                  "namespace",
+                  "ids"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Room summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "namespace": {
+                      "type": "string"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "namespace": {
+                            "type": "string"
+                          },
+                          "roomId": {
+                            "type": "string"
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "occupancy": {
+                            "type": "object",
+                            "properties": {
+                              "activeMembers": {
+                                "type": "number"
+                              },
+                              "activeConnections": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "activeMembers",
+                              "activeConnections"
+                            ]
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "namespace",
+                          "roomId",
+                          "metadata",
+                          "occupancy",
+                          "updatedAt"
+                        ]
+                      }
+                    },
+                    "deniedIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "namespace",
+                    "items",
+                    "deniedIds",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Room feature not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/analytics/query": {
       "get": {
         "operationId": "queryAnalytics",
@@ -14156,6 +15494,32 @@
           },
           "400": {
             "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "description": "HTTP status code",
+                      "example": 400
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Human-readable message",
+                      "example": "Invalid request body"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {

@@ -47,6 +47,22 @@ import {
   executeSqlProviderAware,
   getWorkerUrl,
 } from '../lib/functions.js';
+import {
+  applyStorageContentSecurityHeaders,
+  normalizeStorageContentType,
+} from '../lib/storage-content-security.js';
+import { resolvePublicRequestOrigin } from '../lib/public-origin.js';
+import {
+  assertSignedMultipartUploadGrant,
+  assertSignedUploadGrantActive,
+  bindSignedMultipartUploadGrant,
+  claimSignedMultipartUploadGrant,
+  consumeSignedUploadGrant,
+  createSignedUploadGrantId,
+  INTERNAL_STORAGE_NAMESPACE,
+  reserveSignedMultipartUploadBytes,
+  terminateSignedMultipartUploadGrant,
+} from '../lib/signed-upload-grants.js';
 
 
 const storage = new OpenAPIHono<HonoEnv>({ defaultHook: zodDefaultHook });
@@ -277,6 +293,9 @@ function checkStorageRule(
 
 /** Get bucket config, throw if bucket not configured. Returns release flag for rule evaluation. */
 function getBucketConfig(env: Env, bucketName: string): { bucketConfig: StorageBucketConfig; release: boolean } {
+  if (bucketName === INTERNAL_STORAGE_NAMESPACE) {
+    throw new EdgeBaseError(404, `Storage bucket '${bucketName}' is reserved for internal runtime state.`, undefined, 'not-found');
+  }
   const config = parseConfig(env);
   const bucketConfig = config.storage?.buckets?.[bucketName];
   if (!bucketConfig) {
@@ -305,6 +324,8 @@ function checkServiceKey(env: Env, header: string | undefined, scope: string, re
 type SignedTokenClaims = {
   expiresAt: number;
   maxBytes: number | null;
+  grantId: string | null;
+  purpose: 'download' | 'upload' | null;
   file?: SignedTokenFileMetadata | null;
 };
 
@@ -319,6 +340,7 @@ type SignedTokenFileMetadata = {
 
 type SignedTokenOptions = {
   maxBytes?: number | null;
+  grantId?: string | null;
   file?: SignedTokenFileMetadata | null;
 };
 
@@ -351,14 +373,20 @@ function parseByteSize(value?: string): number | null {
         ? 1024 * 1024
         : 1024 * 1024 * 1024;
 
-  return amount * multiplier;
+  const bytes = amount * multiplier;
+  if (!Number.isSafeInteger(bytes)) {
+    throw new EdgeBaseError(400, 'Invalid maxFileSize. The byte size is too large.', undefined, 'validation-failed');
+  }
+  return bytes;
 }
 
 function emptySignedTokenClaims(expiresAt = 0, maxBytes: number | null = null): SignedTokenClaims {
-  return { expiresAt, maxBytes, file: null };
+  return { expiresAt, maxBytes, grantId: null, purpose: null, file: null };
 }
 
-function normalizeSignedTokenOptions(options?: number | null | SignedTokenOptions): Required<Pick<SignedTokenOptions, 'maxBytes'>> & Pick<SignedTokenOptions, 'file'> {
+function normalizeSignedTokenOptions(
+  options?: number | null | SignedTokenOptions,
+): Required<Pick<SignedTokenOptions, 'maxBytes' | 'grantId'>> & Pick<SignedTokenOptions, 'file'> {
   const rawMaxBytes = typeof options === 'object' && options !== null
     ? options.maxBytes
     : options;
@@ -368,7 +396,13 @@ function normalizeSignedTokenOptions(options?: number | null | SignedTokenOption
   const file = typeof options === 'object' && options !== null
     ? normalizeSignedFileMetadata(options.file)
     : null;
-  return { maxBytes, file };
+  const rawGrantId = typeof options === 'object' && options !== null
+    ? options.grantId
+    : null;
+  const grantId = typeof rawGrantId === 'string' && /^[a-f0-9]{32}$/.test(rawGrantId)
+    ? rawGrantId
+    : null;
+  return { maxBytes, grantId, file };
 }
 
 function normalizeSignedFileMetadata(file?: SignedTokenFileMetadata | null): SignedTokenFileMetadata | null {
@@ -427,7 +461,25 @@ export async function createSignedToken(
   options?: number | null | SignedTokenOptions,
 ): Promise<string> {
   const encoder = new TextEncoder();
-  const { maxBytes: normalizedMaxBytes, file } = normalizeSignedTokenOptions(options);
+  const { maxBytes: normalizedMaxBytes, grantId, file } = normalizeSignedTokenOptions(options);
+  if (grantId) {
+    const payload = encodeBase64Url(JSON.stringify({
+      v: 3,
+      bucket,
+      key,
+      exp: Math.trunc(expiresAt),
+      max: normalizedMaxBytes,
+      grant: grantId,
+      purpose: 'upload',
+    }));
+    const data = `v3.${payload}`;
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+    );
+    const signature = await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(data));
+    const sigHex = Array.from(new Uint8Array(signature)).map(b => b.toString(16).padStart(2, '0')).join('');
+    return `${data}.${sigHex}`;
+  }
   if (file) {
     const payload = encodeBase64Url(JSON.stringify({
       v: 2,
@@ -457,6 +509,19 @@ export async function createSignedToken(
     : `${expiresAt}.${normalizedMaxBytes}.${sigHex}`;
 }
 
+export function createSignedUploadToken(
+  key: string,
+  bucket: string,
+  expiresAt: number,
+  secret: string,
+  maxBytes: number | null = null,
+): Promise<string> {
+  return createSignedToken(key, bucket, expiresAt, secret, {
+    maxBytes,
+    grantId: createSignedUploadGrantId(),
+  });
+}
+
 /** Verify HMAC-based signed URL token. */
 async function verifySignedToken(
   token: string,
@@ -465,7 +530,8 @@ async function verifySignedToken(
   secret: string,
 ): Promise<{ valid: boolean; claims: SignedTokenClaims }> {
   const parts = token.split('.');
-  if (parts.length === 3 && parts[0] === 'v2') {
+  if (parts.length === 3 && (parts[0] === 'v2' || parts[0] === 'v3')) {
+    const version = parts[0] === 'v3' ? 3 : 2;
     const payload = parts[1]!;
     const signature = parts[2]!;
     let claims: SignedTokenClaims = emptySignedTokenClaims();
@@ -476,20 +542,29 @@ async function verifySignedToken(
         key?: unknown;
         exp?: unknown;
         max?: unknown;
+        grant?: unknown;
+        purpose?: unknown;
         file?: unknown;
       };
       const expiresAt = typeof parsed.exp === 'number' ? Math.trunc(parsed.exp) : NaN;
       const maxBytes = typeof parsed.max === 'number' && Number.isFinite(parsed.max)
         ? Math.max(0, Math.trunc(parsed.max))
         : null;
+      const grantId = typeof parsed.grant === 'string' && /^[a-f0-9]{32}$/.test(parsed.grant)
+        ? parsed.grant
+        : null;
+      const purpose = version === 3
+        ? (parsed.purpose === 'upload' ? 'upload' : null)
+        : 'download';
       const file = normalizeSignedFileMetadata(parsed.file as SignedTokenFileMetadata | null | undefined);
-      claims = { expiresAt, maxBytes, file };
+      claims = { expiresAt, maxBytes, grantId, purpose, file };
       if (
-        parsed.v !== 2
+        parsed.v !== version
         || parsed.bucket !== bucket
         || parsed.key !== key
         || !Number.isFinite(expiresAt)
-        || Date.now() > expiresAt
+        || Date.now() >= expiresAt
+        || (version === 3 && (!grantId || purpose !== 'upload'))
       ) {
         return { valid: false, claims };
       }
@@ -498,7 +573,7 @@ async function verifySignedToken(
     }
 
     const encoder = new TextEncoder();
-    const data = `v2.${payload}`;
+    const data = `v${version}.${payload}`;
     const cryptoKey = await crypto.subtle.importKey(
       'raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
     );
@@ -517,7 +592,7 @@ async function verifySignedToken(
   const maxBytes = parts.length === 3 ? parseInt(parts[1]!, 10) : null;
   const signature = parts[parts.length - 1]!;
 
-  if (isNaN(expiresAt) || Date.now() > expiresAt) {
+  if (isNaN(expiresAt) || Date.now() >= expiresAt) {
     return { valid: false, claims: emptySignedTokenClaims(expiresAt, Number.isFinite(maxBytes ?? NaN) ? maxBytes : null) };
   }
   if (parts.length === 3 && !Number.isFinite(maxBytes)) {
@@ -536,6 +611,8 @@ async function verifySignedToken(
     claims: {
       expiresAt,
       maxBytes: parts.length === 3 ? maxBytes : null,
+      grantId: null,
+      purpose: null,
       file: null,
     },
   };
@@ -545,6 +622,7 @@ async function verifySignedUploadQuery(
   c: Context<HonoEnv>,
   bucketName: string,
   key: string,
+  multipartUploadId?: string,
 ): Promise<SignedTokenClaims | null> {
   const token = c.req.query('token');
   const tokenKey = c.req.query('key');
@@ -557,8 +635,13 @@ async function verifySignedUploadQuery(
     throw new EdgeBaseError(403, 'Signed upload tokens require JWT_USER_SECRET to be configured.', undefined, 'access-denied');
   }
   const verified = await verifySignedToken(token, key, bucketName, secret);
-  if (!verified.valid) {
+  if (!verified.valid || verified.claims.purpose !== 'upload') {
     throw new EdgeBaseError(403, 'Signed upload token is invalid or expired.', undefined, 'access-denied');
+  }
+  if (multipartUploadId === undefined) {
+    await assertSignedUploadGrantActive(c.env.STORAGE, verified.claims);
+  } else {
+    await assertSignedMultipartUploadGrant(c.env.STORAGE, verified.claims, multipartUploadId);
   }
   return verified.claims;
 }
@@ -566,8 +649,10 @@ async function verifySignedUploadQuery(
 function requestContentLength(c: Context<HonoEnv>): number | null {
   const header = c.req.header('content-length');
   if (!header) return null;
-  const size = Number(header);
-  return Number.isFinite(size) && size >= 0 ? Math.floor(size) : null;
+  const normalized = header.trim();
+  if (!/^\d+$/.test(normalized)) return null;
+  const size = Number(normalized);
+  return Number.isSafeInteger(size) ? size : null;
 }
 
 async function assertSignedMultipartSizeWithinLimit(
@@ -654,22 +739,36 @@ function buildMetadata(obj: R2Object): R2FileMeta {
   } as R2FileMeta;
 }
 
-function buildMetadataFromSignedFile(key: string, file: SignedTokenFileMetadata): R2FileMeta {
-  return {
-    key,
-    size: file.size,
-    contentType: file.contentType || 'application/octet-stream',
-    etag: file.etag || '',
-    uploadedAt: file.uploadedAt,
-    uploadedBy: file.uploadedBy ?? file.customMetadata?.uploadedBy ?? null,
-    customMetadata: file.customMetadata || {},
-  } as R2FileMeta;
+function signedDownloadPreconditionError(): EdgeBaseError {
+  return new EdgeBaseError(
+    412,
+    'Signed download URL no longer matches the current object version. Create a new signed URL.',
+    undefined,
+    'failed-precondition',
+  );
 }
 
-function hasBlockingBeforeDownloadHooks(env: Env, bucketName: string): boolean {
-  const pluginHooks = getFunctionsByTrigger('storage', { type: 'storage', event: 'beforeDownload' } as unknown as StorageTrigger);
-  if (pluginHooks.length > 0) return true;
-  return !!getStorageHooks(env, bucketName)?.beforeDownload;
+function assertSignedDownloadObjectMatches(
+  claims: SignedTokenClaims | null,
+  object: R2Object,
+): void {
+  if (!claims) return;
+  const signed = claims.file;
+  if (!signed?.etag) throw signedDownloadPreconditionError();
+
+  const signedContentType = normalizeStorageContentType(signed.contentType);
+  const actualContentType = normalizeStorageContentType(object.httpMetadata?.contentType);
+  if (
+    object.etag !== signed.etag
+    || object.size !== signed.size
+    || actualContentType !== signedContentType
+  ) {
+    throw signedDownloadPreconditionError();
+  }
+}
+
+function hasR2Body(object: R2Object | R2ObjectBody): object is R2ObjectBody {
+  return 'body' in object;
 }
 
 function parseDownloadRange(header: string | undefined, size: number): ParsedDownloadRange {
@@ -713,7 +812,7 @@ function parseDownloadRange(header: string | undefined, size: number): ParsedDow
 
 function createDownloadHeaders(meta: R2FileMeta, signedClaims?: SignedTokenClaims | null): Headers {
   const headers = new Headers();
-  headers.set('Content-Type', meta.contentType || 'application/octet-stream');
+  applyStorageContentSecurityHeaders(headers, meta.key, meta.contentType);
   if (meta.etag) {
     headers.set('ETag', meta.etag);
   }
@@ -939,13 +1038,20 @@ storage.openapi(uploadFile, async (c) => {
   const token = c.req.query('token');
   const tokenKey = c.req.query('key');
   let skipRules = false;
+  let signedClaims: SignedTokenClaims | null = null;
 
   if (token && tokenKey) {
     const secret = c.env.JWT_USER_SECRET;
     if (secret) {
       const verified = await verifySignedToken(token, tokenKey, bucketName, secret);
-      if (verified.valid) {
+      if (verified.valid && verified.claims.purpose === 'upload') {
+        // A signed URL authorizes exactly one request attempt, not one
+        // successful parse. Consume before reading attacker-controlled body
+        // bytes so malformed and oversized replays cannot multiply ingress or
+        // Worker memory cost with the same grant.
+        await consumeSignedUploadGrant(c.env.STORAGE, verified.claims);
         skipRules = true;
+        signedClaims = verified.claims;
       }
     }
     // secret absent → ignore token, fall through to rule evaluation (asymmetric fail-closed,)
@@ -966,20 +1072,11 @@ storage.openapi(uploadFile, async (c) => {
     throw new EdgeBaseError(400, 'Missing required fields: file and key.', undefined, 'validation-failed');
   }
   validateStorageKey(key);
+  const contentType = normalizeStorageContentType(file.type);
   if (skipRules && tokenKey !== key) {
     throw new EdgeBaseError(400, 'Signed upload key mismatch between query and form body.', undefined, 'validation-failed');
   }
 
-  let signedClaims: SignedTokenClaims | null = null;
-  if (skipRules && token && tokenKey) {
-    const secret = c.env.JWT_USER_SECRET;
-    if (secret) {
-      const verified = await verifySignedToken(token, tokenKey, bucketName, secret);
-      if (verified.valid) {
-        signedClaims = verified.claims;
-      }
-    }
-  }
   if (signedClaims?.maxBytes != null && file.size > signedClaims.maxBytes) {
     throw new EdgeBaseError(413, `Signed upload exceeds maxFileSize of ${signedClaims.maxBytes} bytes.`, undefined, 'payload-too-large');
   }
@@ -991,7 +1088,7 @@ storage.openapi(uploadFile, async (c) => {
       // §19: WriteFileMeta uses actual file metadata from form data
       const writeFileMeta: WriteFileMeta = {
         size: file.size,
-        contentType: file.type || 'application/octet-stream',
+        contentType,
         key: key,
       };
       checkStorageRule(bucketConfig.access?.write, auth, writeFileMeta, 'write', bucketName, release);
@@ -1011,13 +1108,13 @@ storage.openapi(uploadFile, async (c) => {
   }
 
   // Plugin blocking storage hooks (beforeUpload)
-  const pluginMeta = await executeBlockingStorageHooks('beforeUpload', { key, bucket: bucketName, size: file.size, contentType: file.type || 'application/octet-stream' } as WriteFileMeta & { bucket: string }, auth, c.env, getWorkerUrl(c.req.url, c.env));
+  const pluginMeta = await executeBlockingStorageHooks('beforeUpload', { key, bucket: bucketName, size: file.size, contentType } as WriteFileMeta & { bucket: string }, auth, c.env, getWorkerUrl(c.req.url, c.env));
   if (pluginMeta) Object.assign(customMetadata, pluginMeta);
 
   // beforeUpload hook — blocking, can inject custom metadata or reject
   const hooks = getStorageHooks(c.env, bucketName);
   if (hooks?.beforeUpload) {
-    const writeFileMeta: WriteFileMeta = { size: file.size, contentType: file.type || 'application/octet-stream', key };
+    const writeFileMeta: WriteFileMeta = { size: file.size, contentType, key };
     const hookCtx = buildStorageHookCtx(c.env, c.executionCtx, getWorkerUrl(c.req.url, c.env));
     let extraMeta: Record<string, string> | void;
     try {
@@ -1036,7 +1133,7 @@ storage.openapi(uploadFile, async (c) => {
   const buf = await file.arrayBuffer();
   const obj = await c.env.STORAGE.put(fullKey, buf, {
     httpMetadata: {
-      contentType: file.type || 'application/octet-stream',
+      contentType,
     },
     customMetadata,
   });
@@ -1143,7 +1240,9 @@ const handleUpdateFileMetadata = async (c: Context<HonoEnv>) => {
 
   const body = await c.req.json<{ customMetadata?: Record<string, string>; contentType?: string }>();
   const newCustomMetadata = { ...existing.customMetadata, ...body.customMetadata };
-  const newContentType = body.contentType || existing.httpMetadata?.contentType || 'application/octet-stream';
+  const newContentType = normalizeStorageContentType(
+    body.contentType || existing.httpMetadata?.contentType,
+  );
 
   // R2 doesn't support metadata-only update — re-put with same body
   const obj = await c.env.STORAGE.put(fullKey, existing.body, {
@@ -1237,7 +1336,7 @@ storage.openapi(getUploadParts, async (c) => {
   }
 
   // Security: check write rule (resume upload = write operation)
-  const signedClaims = await verifySignedUploadQuery(c, bucketName, key);
+  const signedClaims = await verifySignedUploadQuery(c, bucketName, key, uploadId);
   const serviceKeyBypass = signedClaims
     ? false
     : checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
@@ -1270,6 +1369,7 @@ const downloadFile = createRoute({
     206: { description: 'Partial file content' },
     403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
     404: { description: 'Not found', content: { 'application/json': { schema: errorResponseSchema } } },
+    412: { description: 'Signed object version changed', content: { 'application/json': { schema: errorResponseSchema } } },
     416: { description: 'Range not satisfiable' },
   },
 });
@@ -1289,7 +1389,8 @@ const handleDownloadFile = async (c: Context<HonoEnv>) => {
     const secret = c.env.JWT_USER_SECRET;
     if (secret) {
       const verified = await verifySignedToken(token, key, bucketName, secret);
-      if (verified.valid) {
+      if (verified.valid && verified.claims.purpose !== 'upload') {
+        if (!verified.claims.file?.etag) throw signedDownloadPreconditionError();
         skipRules = true;
         signedClaims = verified.claims;
       }
@@ -1298,24 +1399,29 @@ const handleDownloadFile = async (c: Context<HonoEnv>) => {
 
   const fullKey = r2Key(bucketName, key);
   const rangeHeader = c.req.header('Range') ?? c.req.header('range');
-  const isByteRangeRequest = !!rangeHeader && /^bytes=/i.test(rangeHeader.trim());
-  const signedMetadataAllowed = skipRules && isByteRangeRequest && !!signedClaims?.file && !hasBlockingBeforeDownloadHooks(c.env, bucketName);
-  let fileMeta: R2FileMeta | null = signedMetadataAllowed && signedClaims?.file
-    ? buildMetadataFromSignedFile(key, signedClaims.file)
-    : null;
+  let fileMeta: R2FileMeta | null = null;
   let bodyObj: R2ObjectBody | null = null;
 
-  if (!fileMeta) {
-    const file = rangeHeader
-      ? await c.env.STORAGE.head(fullKey)
-      : await c.env.STORAGE.get(fullKey);
+  if (rangeHeader) {
+    const file = await c.env.STORAGE.head(fullKey);
     if (!file) {
       throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
     }
+    assertSignedDownloadObjectMatches(signedClaims, file);
     fileMeta = buildMetadata(file);
-    if (!rangeHeader) {
-      bodyObj = file as R2ObjectBody;
+  } else {
+    const expectedEtag = signedClaims?.file?.etag;
+    const file = await c.env.STORAGE.get(
+      fullKey,
+      expectedEtag ? { onlyIf: { etagMatches: expectedEtag } } : undefined,
+    );
+    if (!file) {
+      throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
     }
+    assertSignedDownloadObjectMatches(signedClaims, file);
+    if (!hasR2Body(file)) throw signedDownloadPreconditionError();
+    fileMeta = buildMetadata(file);
+    bodyObj = file;
   }
 
   // Security: check read rule
@@ -1355,22 +1461,33 @@ const handleDownloadFile = async (c: Context<HonoEnv>) => {
   }
 
   if (parsedRange.kind === 'partial') {
+    const expectedEtag = signedClaims?.file?.etag;
     const rangedObj = await c.env.STORAGE.get(fullKey, {
+      ...(expectedEtag ? { onlyIf: { etagMatches: expectedEtag } } : {}),
       range: { offset: parsedRange.offset, length: parsedRange.length },
     });
     if (!rangedObj) {
       throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
     }
+    assertSignedDownloadObjectMatches(signedClaims, rangedObj);
+    if (!hasR2Body(rangedObj)) throw signedDownloadPreconditionError();
     headers.set('Content-Length', String(parsedRange.length));
     headers.set('Content-Range', `bytes ${parsedRange.offset}-${parsedRange.end}/${fileMeta.size}`);
     return new Response(rangedObj.body, { status: 206, headers });
   }
 
   if (!bodyObj) {
-    bodyObj = await c.env.STORAGE.get(fullKey);
-    if (!bodyObj) {
+    const expectedEtag = signedClaims?.file?.etag;
+    const object = await c.env.STORAGE.get(
+      fullKey,
+      expectedEtag ? { onlyIf: { etagMatches: expectedEtag } } : undefined,
+    );
+    if (!object) {
       throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
     }
+    assertSignedDownloadObjectMatches(signedClaims, object);
+    if (!hasR2Body(object)) throw signedDownloadPreconditionError();
+    bodyObj = object;
   }
   headers.set('Content-Length', String(fileMeta.size));
   return new Response(bodyObj.body, { headers });
@@ -1618,13 +1735,6 @@ storage.openapi(createSignedDownloadUrl, async (c) => {
   const bucketName = c.req.param('bucket')!;
   const { bucketConfig, release } = getBucketConfig(c.env, bucketName);
 
-  // Security: check read rule (signed URL creation = read access)
-  const serviceKeyBypass = checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:read`, c.req);
-  if (!serviceKeyBypass) {
-    const auth = c.get('auth') as AuthContext | null;
-    checkStorageRule(bucketConfig.access?.read, auth, null, 'read', bucketName, release);
-  }
-
   const body = await c.req.json<{ key: string; expiresIn?: string }>();
   if (!body.key) {
     throw new EdgeBaseError(400, 'Missing required field: key.', undefined, 'validation-failed');
@@ -1636,6 +1746,15 @@ storage.openapi(createSignedDownloadUrl, async (c) => {
   const obj = await c.env.STORAGE.head(fullKey);
   if (!obj) {
     throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
+  }
+
+  // A signed URL delegates this exact object's read authority. Evaluate the
+  // rule against its real metadata just like a direct download; a bucket/list
+  // check with an empty resource must never authorize every key in the bucket.
+  const serviceKeyBypass = checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:read`, c.req);
+  if (!serviceKeyBypass) {
+    const auth = c.get('auth') as AuthContext | null;
+    checkStorageRule(bucketConfig.access?.read, auth, buildMetadata(obj), 'read', bucketName, release);
   }
 
   const expiresInMs = parseDuration(body.expiresIn || '1h');
@@ -1651,10 +1770,13 @@ storage.openapi(createSignedDownloadUrl, async (c) => {
   });
 
   // Build signed URL
-  const url = new URL(c.req.url);
-  const signedUrl = `${url.protocol}//${url.host}/api/storage/${encodeURIComponent(bucketName)}/${encodeURIComponent(body.key)}?token=${token}`;
+  const signedUrl = new URL(
+    `/api/storage/${encodeURIComponent(bucketName)}/${encodeURIComponent(body.key)}`,
+    resolvePublicRequestOrigin(c.env, c.req),
+  );
+  signedUrl.searchParams.set('token', token);
 
-  return c.json({ url: signedUrl, expiresAt: new Date(expiresAt).toISOString() });
+  return c.json({ url: signedUrl.href, expiresAt: new Date(expiresAt).toISOString() });
 });
 
 // ─── Batch Signed URLs ───
@@ -1680,13 +1802,6 @@ storage.openapi(createSignedDownloadUrls, async (c) => {
   const bucketName = c.req.param('bucket')!;
   const { bucketConfig, release } = getBucketConfig(c.env, bucketName);
 
-  // Security: check read rule
-  const serviceKeyBypass = checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:read`, c.req);
-  if (!serviceKeyBypass) {
-    const auth = c.get('auth') as AuthContext | null;
-    checkStorageRule(bucketConfig.access?.read, auth, null, 'read', bucketName, release);
-  }
-
   const body = await c.req.json<{ keys: string[]; expiresIn?: string }>();
   if (!body.keys || !Array.isArray(body.keys) || body.keys.length === 0) {
     throw new EdgeBaseError(400, 'Missing required field: keys (non-empty array).', undefined, 'validation-failed');
@@ -1702,22 +1817,33 @@ storage.openapi(createSignedDownloadUrls, async (c) => {
 
   const expiresInMs = parseDuration(body.expiresIn || '1h');
   const expiresAt = Date.now() + expiresInMs;
-  const url = new URL(c.req.url);
+  const publicOrigin = resolvePublicRequestOrigin(c.env, c.req);
+  const serviceKeyBypass = checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:read`, c.req);
+  const auth = c.get('auth') as AuthContext | null;
 
   const urls: Array<{ key: string; url: string; expiresAt: string }> = [];
 
+  for (const key of body.keys) validateStorageKey(key);
   for (const key of body.keys) {
-    validateStorageKey(key);
     const fullKey = r2Key(bucketName, key);
     const obj = await c.env.STORAGE.head(fullKey);
     if (!obj) continue; // skip non-existent files
 
+    if (!serviceKeyBypass) {
+      checkStorageRule(bucketConfig.access?.read, auth, buildMetadata(obj), 'read', bucketName, release);
+    }
+
     const token = await createSignedToken(key, bucketName, expiresAt, secret, {
       file: signedFileMetadataFromObject(obj),
     });
+    const signedUrl = new URL(
+      `/api/storage/${encodeURIComponent(bucketName)}/${encodeURIComponent(key)}`,
+      publicOrigin,
+    );
+    signedUrl.searchParams.set('token', token);
     urls.push({
       key,
-      url: `${url.protocol}//${url.host}/api/storage/${encodeURIComponent(bucketName)}/${encodeURIComponent(key)}?token=${token}`,
+      url: signedUrl.href,
       expiresAt: new Date(expiresAt).toISOString(),
     });
   }
@@ -1770,17 +1896,21 @@ storage.openapi(createSignedUploadUrl, async (c) => {
   if (!secret) {
     throw new EdgeBaseError(500, 'Signed URLs require JWT_USER_SECRET to be configured.', undefined, 'internal-error');
   }
-  const token = await createSignedToken(body.key, bucketName, expiresAt, secret, maxBytes);
+  const token = await createSignedUploadToken(body.key, bucketName, expiresAt, secret, maxBytes);
 
   // Build signed upload URL (uploads go through our Worker endpoint with the token)
-  const url = new URL(c.req.url);
-  const signedUrl = `${url.protocol}//${url.host}/api/storage/${bucketName}/upload?token=${token}&key=${encodeURIComponent(body.key)}`;
+  const signedUrl = new URL(
+    `/api/storage/${encodeURIComponent(bucketName)}/upload`,
+    resolvePublicRequestOrigin(c.env, c.req),
+  );
+  signedUrl.searchParams.set('token', token);
+  signedUrl.searchParams.set('key', body.key);
 
   // Add uploadedBy from auth context
   const auth = c.get('auth') as AuthContext | null;
 
   return c.json({
-    url: signedUrl,
+    url: signedUrl.href,
     expiresAt: new Date(expiresAt).toISOString(),
     maxFileSize: body.maxFileSize ?? null,
     uploadedBy: auth?.id || null,
@@ -1837,10 +1967,39 @@ storage.openapi(createMultipartUpload, async (c) => {
   }
 
   const fullKey = r2Key(bucketName, body.key);
-  const multipartUpload = await c.env.STORAGE.createMultipartUpload(fullKey, {
-    httpMetadata: { contentType: body.contentType || 'application/octet-stream' },
-    customMetadata,
-  });
+  const contentType = normalizeStorageContentType(body.contentType);
+  const grantClaim = signedClaims
+    ? await claimSignedMultipartUploadGrant(c.env.STORAGE, signedClaims)
+    : null;
+  let multipartUpload: R2MultipartUpload;
+  try {
+    multipartUpload = await c.env.STORAGE.createMultipartUpload(fullKey, {
+      httpMetadata: { contentType },
+      customMetadata,
+    });
+  } catch (error) {
+    if (signedClaims && grantClaim) {
+      // The existing creating marker already blocks replay if this best-effort
+      // terminal CAS fails, so never release an ambiguous create for retry.
+      await terminateSignedMultipartUploadGrant(c.env.STORAGE, signedClaims, grantClaim).catch(() => {});
+    }
+    throw error;
+  }
+
+  if (signedClaims && grantClaim) {
+    try {
+      await bindSignedMultipartUploadGrant(
+        c.env.STORAGE,
+        signedClaims,
+        grantClaim,
+        multipartUpload.uploadId,
+      );
+    } catch (error) {
+      await multipartUpload.abort().catch(() => { /* R2 auto-aborts abandoned sessions. */ });
+      await terminateSignedMultipartUploadGrant(c.env.STORAGE, signedClaims, grantClaim).catch(() => {});
+      throw error;
+    }
+  }
 
   return c.json({
     uploadId: multipartUpload.uploadId,
@@ -1877,16 +2036,22 @@ storage.openapi(uploadPart, async (c) => {
   const { bucketConfig, release } = getBucketConfig(c.env, bucketName);
 
   const uploadId = c.req.query('uploadId');
-  const partNumber = parseInt(c.req.query('partNumber') || '0', 10);
+  const rawPartNumber = c.req.query('partNumber');
+  const partNumber = rawPartNumber && /^\d+$/.test(rawPartNumber)
+    ? Number(rawPartNumber)
+    : 0;
   const key = c.req.query('key');
 
-  if (!uploadId || !partNumber || !key) {
+  if (!uploadId || !rawPartNumber || !key) {
     throw new EdgeBaseError(400, 'Missing required query params: uploadId, partNumber, key.', undefined, 'validation-failed');
+  }
+  if (!Number.isSafeInteger(partNumber) || partNumber < 1 || partNumber > 10_000) {
+    throw new EdgeBaseError(400, 'partNumber must be an integer between 1 and 10000.', undefined, 'validation-failed');
   }
   validateStorageKey(key);
 
   // Security: check signed upload token or write rule
-  const signedClaims = await verifySignedUploadQuery(c, bucketName, key);
+  const signedClaims = await verifySignedUploadQuery(c, bucketName, key, uploadId);
   const serviceKeyBypass = signedClaims
     ? false
     : checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
@@ -1898,12 +2063,27 @@ storage.openapi(uploadPart, async (c) => {
   if (signedClaims?.maxBytes != null && partSize == null) {
     throw new EdgeBaseError(400, 'Signed multipart upload parts require Content-Length.', undefined, 'validation-failed');
   }
-  if (signedClaims?.maxBytes != null && partSize !== null && partSize > signedClaims.maxBytes) {
-    throw new EdgeBaseError(413, `Signed upload exceeds maxFileSize of ${signedClaims.maxBytes} bytes.`, undefined, 'payload-too-large');
+  if (signedClaims?.maxBytes != null && partSize === 0) {
+    throw new EdgeBaseError(400, 'Signed multipart upload parts must contain at least one byte.', undefined, 'validation-failed');
   }
 
   const fullKey = r2Key(bucketName, key);
   const multipartUpload = c.env.STORAGE.resumeMultipartUpload(fullKey, uploadId);
+
+  if (signedClaims?.maxBytes != null && partSize !== null) {
+    const reserved = await reserveSignedMultipartUploadBytes(
+      c.env.STORAGE,
+      signedClaims,
+      uploadId,
+      partSize,
+    );
+    if (!reserved) {
+      await multipartUpload.abort().catch(() => { /* Terminal grant state still blocks continuation. */ });
+      const kvKey = partTrackingKey(bucketName, key, uploadId);
+      await c.env.KV.delete(kvKey).catch(() => { /* best effort */ });
+      throw new EdgeBaseError(413, `Signed upload exceeds maxFileSize of ${signedClaims.maxBytes} bytes.`, undefined, 'payload-too-large');
+    }
+  }
 
   const part = await multipartUpload.uploadPart(partNumber, c.req.raw.body!);
 
@@ -1966,7 +2146,7 @@ storage.openapi(completeMultipartUpload, async (c) => {
   validateStorageKey(body.key);
 
   // Security: check signed upload token or write rule
-  const signedClaims = await verifySignedUploadQuery(c, bucketName, body.key);
+  const signedClaims = await verifySignedUploadQuery(c, bucketName, body.key, body.uploadId);
   const serviceKeyBypass = signedClaims
     ? false
     : checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
@@ -1977,7 +2157,6 @@ storage.openapi(completeMultipartUpload, async (c) => {
   if (signedClaims?.maxBytes != null) {
     await assertSignedMultipartSizeWithinLimit(c, bucketName, body.key, body.uploadId, body.parts, signedClaims.maxBytes);
   }
-
   const fullKey = r2Key(bucketName, body.key);
   const multipartUpload = c.env.STORAGE.resumeMultipartUpload(fullKey, body.uploadId);
 
@@ -2025,7 +2204,7 @@ storage.openapi(abortMultipartUpload, async (c) => {
   validateStorageKey(body.key);
 
   // Security: check signed upload token or write rule
-  const signedClaims = await verifySignedUploadQuery(c, bucketName, body.key);
+  const signedClaims = await verifySignedUploadQuery(c, bucketName, body.key, body.uploadId);
   const serviceKeyBypass = signedClaims
     ? false
     : checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:write`, c.req);
@@ -2033,7 +2212,6 @@ storage.openapi(abortMultipartUpload, async (c) => {
     const auth = c.get('auth') as AuthContext | null;
     checkStorageRule(bucketConfig.access?.write, auth, null, 'write', bucketName, release);
   }
-
   const fullKey = r2Key(bucketName, body.key);
   const multipartUpload = c.env.STORAGE.resumeMultipartUpload(fullKey, body.uploadId);
   await multipartUpload.abort();

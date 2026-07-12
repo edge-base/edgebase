@@ -81,6 +81,44 @@ describe('1-11 auth-session — signup', () => {
     expect(status).toBe(409);
   });
 
+  it('raw user만 남은 부분 실패 상태를 재가입 요청이 index 복구 후 409로 수렴', async () => {
+    const email = randomEmail();
+    const password = 'OrphanRecovery1!';
+    const first = await api('POST', '/signup', { email, password });
+    expect(first.status).toBe(201);
+    const originalUserId = first.data.user.id as string;
+
+    await (globalThis as any).env.AUTH_DB.prepare(
+      `DELETE FROM _email_index WHERE email = ?`,
+    ).bind(email).run();
+
+    const retry = await api('POST', '/signup', { email, password: 'MustNotOverwrite1!' });
+    expect(retry.status).toBe(409);
+    const repaired = await (globalThis as any).env.AUTH_DB.prepare(
+      `SELECT userId, status FROM _email_index WHERE email = ?`,
+    ).bind(email).first<{ userId: string; status: string }>();
+    expect(repaired).toEqual({ userId: originalUserId, status: 'confirmed' });
+
+    const signin = await api('POST', '/signin', { email, password });
+    expect(signin.status).toBe(200);
+  });
+
+  it('동시 동일 이메일 가입은 정확히 한 요청만 이기고 패자 보상이 승자 계정을 보존', async () => {
+    const email = randomEmail();
+    const attempts = await Promise.all([
+      api('POST', '/signup', { email, password: 'RaceWinner1!' }),
+      api('POST', '/signup', { email, password: 'RaceWinner2!' }),
+    ]);
+
+    expect(attempts.filter(({ status }) => status === 201)).toHaveLength(1);
+    expect(attempts.filter(({ status }) => status === 409)).toHaveLength(1);
+
+    const winningPassword = attempts[0].status === 201 ? 'RaceWinner1!' : 'RaceWinner2!';
+    const signin = await api('POST', '/signin', { email, password: winningPassword });
+    expect(signin.status).toBe(200);
+    expect(signin.data.user?.email).toBe(email);
+  });
+
   it('이메일 소문자 정규화 — User@Example.COM → user@example.com', async () => {
     const base = crypto.randomUUID().slice(0, 8);
     const { data } = await api('POST', '/signup', {
@@ -301,8 +339,9 @@ describe('1-11 auth-session — change-password', () => {
   });
 
   it('변경 후 새 비밀번호로 로그인 가능', async () => {
-    const { status } = await api('POST', '/signin', { email, password: newPw });
+    const { status, data } = await api('POST', '/signin', { email, password: newPw });
     expect(status).toBe(200);
+    accessToken = data.accessToken;
   });
 
   it('변경 후 이전 비밀번호로 로그인 실패 → 401', async () => {

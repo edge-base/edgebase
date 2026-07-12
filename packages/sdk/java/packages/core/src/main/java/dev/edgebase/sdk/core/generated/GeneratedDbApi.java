@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 package dev.edgebase.sdk.core.generated;
 
@@ -235,9 +235,24 @@ public class GeneratedDbApi {
         return http.get("/auth/oauth/" + encodePathParam(provider));
     }
 
+    /** Start OAuth redirect with optional request input. */
+    public Object oauthRedirect(String provider, Map<String, String> query) throws EdgeBaseError {
+        return http.getWithQuery("/auth/oauth/" + encodePathParam(provider), query);
+    }
+
+    /** Atomically exchange a verified OAuth callback ticket — POST /api/auth/oauth/exchange */
+    public Object oauthExchange(Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/auth/oauth/exchange", body);
+    }
+
     /** OAuth callback — GET /api/auth/oauth/{provider}/callback */
-    public Object oauthCallback(String provider) throws EdgeBaseError {
-        return http.get("/auth/oauth/" + encodePathParam(provider) + "/callback");
+    public Object oauthCallback(String provider, Map<String, String> query) throws EdgeBaseError {
+        return http.getWithQuery("/auth/oauth/" + encodePathParam(provider) + "/callback", query);
+    }
+
+    /** OAuth form-post callback — POST /api/auth/oauth/{provider}/callback */
+    public Object oauthCallbackPost(String provider, Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/auth/oauth/" + encodePathParam(provider) + "/callback", body);
     }
 
     /** Start OAuth account linking — POST /api/auth/oauth/link/{provider} */
@@ -245,9 +260,29 @@ public class GeneratedDbApi {
         return http.post("/auth/oauth/link/" + encodePathParam(provider), null);
     }
 
+    /** Start OAuth account linking with optional request input. */
+    public Object oauthLinkStart(String provider, Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/auth/oauth/link/" + encodePathParam(provider), body);
+    }
+
+    /** Continue OAuth account linking in the system browser — GET /api/auth/oauth/link/{provider}/continue */
+    public Object oauthLinkContinue(String provider, Map<String, String> query) throws EdgeBaseError {
+        return http.getWithQuery("/auth/oauth/link/" + encodePathParam(provider) + "/continue", query);
+    }
+
+    /** Complete OAuth account linking for the current authenticated user — POST /api/auth/oauth/complete/link */
+    public Object oauthLinkComplete(Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/auth/oauth/complete/link", body);
+    }
+
     /** OAuth link callback — GET /api/auth/oauth/link/{provider}/callback */
-    public Object oauthLinkCallback(String provider) throws EdgeBaseError {
-        return http.get("/auth/oauth/link/" + encodePathParam(provider) + "/callback");
+    public Object oauthLinkCallback(String provider, Map<String, String> query) throws EdgeBaseError {
+        return http.getWithQuery("/auth/oauth/link/" + encodePathParam(provider) + "/callback", query);
+    }
+
+    /** OAuth link form-post callback — POST /api/auth/oauth/link/{provider}/callback */
+    public Object oauthLinkCallbackPost(String provider, Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/auth/oauth/link/" + encodePathParam(provider) + "/callback", body);
     }
 
     /** Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count */
@@ -295,11 +330,6 @@ public class GeneratedDbApi {
         return http.postWithQuery("/db/" + encodePathParam(namespace) + "/tables/" + encodePathParam(table) + "/batch-by-filter", body, query);
     }
 
-    /** Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact */
-    public Object dbSingleTransact(String namespace, Map<String, ?> body) throws EdgeBaseError {
-        return http.post("/db/" + encodePathParam(namespace) + "/transact", body);
-    }
-
     /** Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count */
     public Object dbCountRecords(String namespace, String instanceId, String table, Map<String, String> query) throws EdgeBaseError {
         return http.getWithQuery("/db/" + encodePathParam(namespace) + "/" + encodePathParam(instanceId) + "/tables/" + encodePathParam(table) + "/count", query);
@@ -343,6 +373,11 @@ public class GeneratedDbApi {
     /** Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter */
     public Object dbBatchByFilter(String namespace, String instanceId, String table, Map<String, ?> body, Map<String, String> query) throws EdgeBaseError {
         return http.postWithQuery("/db/" + encodePathParam(namespace) + "/" + encodePathParam(instanceId) + "/tables/" + encodePathParam(table) + "/batch-by-filter", body, query);
+    }
+
+    /** Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact */
+    public Object dbSingleTransact(String namespace, Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/db/" + encodePathParam(namespace) + "/transact", body);
     }
 
     /** Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact */
@@ -450,6 +485,11 @@ public class GeneratedDbApi {
         return http.get("/config");
     }
 
+    /** Render the hosted Turnstile page for native WebViews — GET /api/captcha/challenge */
+    public Object getCaptchaChallenge(Map<String, String> query) throws EdgeBaseError {
+        return http.getWithQuery("/captcha/challenge", query);
+    }
+
     /** Register push token — POST /api/push/register */
     public Object pushRegister(Map<String, ?> body) throws EdgeBaseError {
         return http.post("/push/register", body);
@@ -483,6 +523,16 @@ public class GeneratedDbApi {
     /** Get room metadata — GET /api/room/metadata */
     public Object getRoomMetadata(Map<String, String> query) throws EdgeBaseError {
         return http.getWithQuery("/room/metadata", query);
+    }
+
+    /** Get room summary — GET /api/room/summary */
+    public Object getRoomSummary(Map<String, String> query) throws EdgeBaseError {
+        return http.getWithQuery("/room/summary", query);
+    }
+
+    /** Get summaries for multiple rooms — POST /api/room/summaries */
+    public Object getRoomSummaries(Map<String, ?> body) throws EdgeBaseError {
+        return http.post("/room/summaries", body);
     }
 
     /** Track custom events — POST /api/analytics/track */
@@ -665,11 +715,22 @@ public class GeneratedDbApi {
         public static String oauthCallback(String provider) {
             return "/api/auth/oauth/" + provider + "/callback";
         }
+        public static String oauthCallbackPost(String provider) {
+            return "/api/auth/oauth/" + provider + "/callback";
+        }
+        public static final String OAUTH_LINK_COMPLETE = "/api/auth/oauth/complete/link";
+        public static final String OAUTH_EXCHANGE = "/api/auth/oauth/exchange";
         public static String oauthLinkStart(String provider) {
             return "/api/auth/oauth/link/" + provider;
         }
         public static String oauthLinkCallback(String provider) {
             return "/api/auth/oauth/link/" + provider + "/callback";
+        }
+        public static String oauthLinkCallbackPost(String provider) {
+            return "/api/auth/oauth/link/" + provider + "/callback";
+        }
+        public static String oauthLinkContinue(String provider) {
+            return "/api/auth/oauth/link/" + provider + "/continue";
         }
         public static final String AUTH_PASSKEYS_LIST = "/api/auth/passkeys";
         public static String authPasskeysDelete(String credentialId) {
@@ -701,6 +762,7 @@ public class GeneratedDbApi {
         public static final String AUTH_VERIFY_LINK_PHONE = "/api/auth/verify-link-phone";
         public static final String AUTH_VERIFY_MAGIC_LINK = "/api/auth/verify-magic-link";
         public static final String AUTH_VERIFY_PHONE = "/api/auth/verify-phone";
+        public static final String GET_CAPTCHA_CHALLENGE = "/api/captcha/challenge";
         public static final String GET_CONFIG = "/api/config";
         public static String executeD1Query(String database) {
             return "/api/d1/" + database;
@@ -788,6 +850,8 @@ public class GeneratedDbApi {
         public static final String CONNECT_ROOM = "/api/room";
         public static final String CHECK_ROOM_CONNECTION = "/api/room/connect-check";
         public static final String GET_ROOM_METADATA = "/api/room/metadata";
+        public static final String GET_ROOM_SUMMARIES = "/api/room/summaries";
+        public static final String GET_ROOM_SUMMARY = "/api/room/summary";
         public static final String GET_SCHEMA = "/api/schema";
         public static final String EXECUTE_SQL = "/api/sql";
         public static String listFiles(String bucket) {

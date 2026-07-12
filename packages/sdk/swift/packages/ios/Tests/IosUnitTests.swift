@@ -67,6 +67,59 @@ private func readRequestBody(_ request: URLRequest) throws -> Data {
  */
 final class EdgeBaseClientIosUnitTests: XCTestCase {
 
+    func test_turnstileChallengeUrl_isHttpsHostedAndChannelBound() throws {
+        let channel = "0123456789abcdef0123456789abcdef"
+        let url = try TurnstileProvider.makeChallengeURL(
+            baseUrl: "https://api.example.test/",
+            action: "signin",
+            channel: channel
+        )
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+
+        XCTAssertEqual(components.scheme, "https")
+        XCTAssertEqual(components.host, "api.example.test")
+        XCTAssertEqual(components.path, "/api/captcha/challenge")
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "action" })?.value, "signin")
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "channel" })?.value, channel)
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "bridge" })?.value, "webkit")
+    }
+
+    func test_turnstilePositiveSiteKeyCacheExpiresAtFiveMinutes() {
+        XCTAssertTrue(
+            TurnstileProvider.isSiteKeyCacheFresh(age: 299.999)
+        )
+        XCTAssertFalse(
+            TurnstileProvider.isSiteKeyCacheFresh(age: 300)
+        )
+    }
+
+    func test_turnstileChallengeUrl_rejectsHttpAndDynamicActions() {
+        let channel = "0123456789abcdef0123456789abcdef"
+        XCTAssertThrowsError(try TurnstileProvider.makeChallengeURL(
+            baseUrl: "http://api.example.test",
+            action: "signin",
+            channel: channel
+        ))
+        XCTAssertThrowsError(try TurnstileProvider.makeChallengeURL(
+            baseUrl: "https://api.example.test",
+            action: "function:unsafe",
+            channel: channel
+        ))
+    }
+
+    func test_turnstileBridgeMessage_isVersionedAndChannelBound() {
+        let channel = "0123456789abcdef0123456789abcdef"
+        let valid = #"{"v":1,"channel":"0123456789abcdef0123456789abcdef","type":"token","value":"synthetic-token"}"#
+        let wrongChannel = #"{"v":1,"channel":"fedcba9876543210fedcba9876543210","type":"token","value":"synthetic-token"}"#
+
+        XCTAssertEqual(TurnstileProvider.parseChallengeMessage(valid, channel: channel)?.value, "synthetic-token")
+        XCTAssertNil(TurnstileProvider.parseChallengeMessage(wrongChannel, channel: channel))
+        XCTAssertNil(TurnstileProvider.parseChallengeMessage(
+            #"{"v":1,"channel":"0123456789abcdef0123456789abcdef","type":"token","value":""}"#,
+            channel: channel
+        ))
+    }
+
     // ─── A. EdgeBaseClient 생성 ───────────────────────────────────────────────
 
     func test_instantiation_succeeds() throws {
@@ -255,6 +308,126 @@ final class EdgeBaseClientIosUnitTests: XCTestCase {
     }
 }
 
+final class TurnstileConfigIosUnitTests: XCTestCase {
+    override func tearDown() {
+        MockRoomURLProtocol.requestHandler = nil
+        super.tearDown()
+    }
+
+    @MainActor
+    func test_configFetchFailureIsNotTreatedAsDisabled() async {
+        MockRoomURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 503,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"message":"synthetic outage"}"#.utf8)
+            )
+        }
+        let api = makeGeneratedApi(baseUrl: "https://captcha-config-failure.example.test")
+
+        do {
+            _ = try await TurnstileProvider.fetchSiteKey(
+                core: api,
+                baseUrl: "https://captcha-config-failure.example.test"
+            )
+            XCTFail("Expected config fetch failure")
+        } catch let error as CaptchaUnavailableError {
+            XCTAssertEqual(error.reason, "config_fetch_failed")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    @MainActor
+    func test_explicitNullCaptchaConfigRemainsDisabled() async throws {
+        MockRoomURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"captcha":null}"#.utf8)
+            )
+        }
+        let baseUrl = "https://captcha-disabled.example.test"
+        let api = makeGeneratedApi(baseUrl: baseUrl)
+
+        let siteKey = try await TurnstileProvider.fetchSiteKey(core: api, baseUrl: baseUrl)
+
+        XCTAssertNil(siteKey)
+    }
+
+    @MainActor
+    func test_missingCaptchaConfigIsRejectedAsMalformed() async {
+        MockRoomURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("{}".utf8)
+            )
+        }
+        let baseUrl = "https://captcha-malformed.example.test"
+        let api = makeGeneratedApi(baseUrl: baseUrl)
+
+        do {
+            _ = try await TurnstileProvider.fetchSiteKey(core: api, baseUrl: baseUrl)
+            XCTFail("Expected malformed config failure")
+        } catch let error as CaptchaUnavailableError {
+            XCTAssertEqual(error.reason, "config_invalid_response")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    @MainActor
+    func test_malformedCaptchaJSONHasInvalidResponseReason() async {
+        MockRoomURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("not-json".utf8)
+            )
+        }
+        let baseUrl = "https://captcha-invalid-json.example.test"
+        let api = makeGeneratedApi(baseUrl: baseUrl)
+
+        do {
+            _ = try await TurnstileProvider.fetchSiteKey(core: api, baseUrl: baseUrl)
+            XCTFail("Expected invalid JSON failure")
+        } catch let error as CaptchaUnavailableError {
+            XCTAssertEqual(error.reason, "config_invalid_response")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    private func makeGeneratedApi(baseUrl: String) -> GeneratedDbApi {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockRoomURLProtocol.self]
+        let manager = TokenManager(storage: MemoryTokenStorage())
+        let http = HttpClient(
+            baseUrl: baseUrl,
+            tokenManager: manager,
+            session: URLSession(configuration: configuration)
+        )
+        return GeneratedDbApi(http: http)
+    }
+}
+
 private enum FakeSocketError: Error {
     case messageTimeout(index: Int)
 }
@@ -420,10 +593,10 @@ final class TokenManagerIosUnitTests: XCTestCase {
         XCTAssertNil(loaded)
     }
 
-    func test_tokenManager_clearTokens() async {
+    func test_tokenManager_clearTokens() async throws {
         let tm = TokenManager(storage: MemoryTokenStorage())
-        await tm.setTokens(TokenPair(accessToken: "at-1", refreshToken: "rt-1"))
-        await tm.clearTokens()
+        try await tm.setTokens(TokenPair(accessToken: "at-1", refreshToken: "rt-1"))
+        try await tm.clearTokens()
         let token = try? await tm.getAccessToken()
         XCTAssertNil(token)
     }
@@ -434,9 +607,9 @@ final class TokenManagerIosUnitTests: XCTestCase {
         XCTAssertNil(token)
     }
 
-    func test_tokenManager_getRefreshToken() async {
+    func test_tokenManager_getRefreshToken() async throws {
         let tm = TokenManager(storage: MemoryTokenStorage())
-        await tm.setTokens(TokenPair(accessToken: "at", refreshToken: "rt-xyz"))
+        try await tm.setTokens(TokenPair(accessToken: "at", refreshToken: "rt-xyz"))
         let rt = await tm.getRefreshToken()
         XCTAssertEqual(rt, "rt-xyz")
     }
@@ -447,17 +620,17 @@ final class TokenManagerIosUnitTests: XCTestCase {
         XCTAssertNil(rt)
     }
 
-    func test_tokenManager_tryRestoreSession_empty() async {
+    func test_tokenManager_tryRestoreSession_empty() async throws {
         let tm = TokenManager(storage: MemoryTokenStorage())
-        let restored = await tm.tryRestoreSession()
+        let restored = try await tm.tryRestoreSession()
         XCTAssertFalse(restored)
     }
 
-    func test_tokenManager_tryRestoreSession_withTokens() async {
+    func test_tokenManager_tryRestoreSession_withTokens() async throws {
         let storage = MemoryTokenStorage()
         await storage.saveTokens(TokenPair(accessToken: "at-saved", refreshToken: "rt-saved"))
         let tm = TokenManager(storage: storage)
-        let restored = await tm.tryRestoreSession()
+        let restored = try await tm.tryRestoreSession()
         XCTAssertTrue(restored)
     }
 
@@ -479,9 +652,9 @@ final class TokenManagerIosUnitTests: XCTestCase {
         XCTAssertNil(user)
     }
 
-    func test_tokenManager_destroy() async {
+    func test_tokenManager_destroy() async throws {
         let tm = TokenManager(storage: MemoryTokenStorage())
-        await tm.setTokens(TokenPair(accessToken: "at", refreshToken: "rt"))
+        try await tm.setTokens(TokenPair(accessToken: "at", refreshToken: "rt"))
         await tm.destroy()
         // After destroy, handlers removed (no crash on notify)
     }
@@ -492,6 +665,203 @@ final class TokenManagerIosUnitTests: XCTestCase {
         let decoded = try JSONDecoder().decode(TokenPair.self, from: data)
         XCTAssertEqual(decoded.accessToken, "at-cod")
         XCTAssertEqual(decoded.refreshToken, "rt-cod")
+    }
+
+    func test_replacementTokensPersistBeforeExposure() async throws {
+        let storage = FailingSwiftTokenStorage()
+        let tm = TokenManager(storage: storage)
+        try await tm.setTokens(TokenPair(accessToken: "original-access", refreshToken: "original-refresh"))
+        await storage.setFailWrites(true)
+
+        do {
+            try await tm.setTokens(TokenPair(accessToken: "replacement-access", refreshToken: "replacement-refresh"))
+            XCTFail("Expected synthetic persistence failure")
+        } catch let error as TokenPersistenceError {
+            XCTAssertEqual(error.operation, "save")
+            XCTAssertTrue(error.causeDescription.contains("saveFailed"))
+        }
+
+        XCTAssertEqual(await tm.getRefreshToken(), "original-refresh")
+        XCTAssertEqual(try await tm.getAccessToken(), "original-access")
+        XCTAssertEqual(try await storage.getTokens()?.refreshToken, "original-refresh")
+    }
+
+    func test_captchaUnavailableDiagnosticContract() {
+        let error = CaptchaUnavailableError(reason: "renderer_terminated")
+        XCTAssertEqual(error.code, "captcha-unavailable")
+        XCTAssertEqual(error.reason, "renderer_terminated")
+    }
+
+    func test_incompleteStoredPairFailsClosed() async {
+        let tm = TokenManager(storage: IncompleteSwiftTokenStorage())
+        do {
+            _ = try await tm.tryRestoreSession()
+            XCTFail("Expected incomplete pair failure")
+        } catch let error as InvalidTokenPairError {
+            XCTAssertEqual(error.operation, "restore")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertNil(try? await tm.getAccessToken())
+    }
+}
+
+private enum SyntheticTokenStorageError: Error, Equatable {
+    case saveFailed
+}
+
+private actor FailingSwiftTokenStorage: DurableTokenStorage {
+    private var tokens: TokenPair?
+    private var failWrites = false
+
+    func setFailWrites(_ value: Bool) {
+        failWrites = value
+    }
+
+    func getTokens() async throws -> TokenPair? { tokens }
+
+    func saveTokens(_ tokens: TokenPair) async throws {
+        if failWrites { throw SyntheticTokenStorageError.saveFailed }
+        self.tokens = tokens
+    }
+
+    func clearTokens() async throws {
+        tokens = nil
+    }
+}
+
+private actor IncompleteSwiftTokenStorage: TokenStorage {
+    func getTokens() async throws -> TokenPair? {
+        TokenPair(accessToken: "", refreshToken: "refresh-only")
+    }
+    func saveTokens(_ tokens: TokenPair) async throws {}
+    func clearTokens() async throws {}
+}
+
+final class EmailLinkCheckpointIosUnitTests: XCTestCase {
+    override func tearDown() {
+        MockRoomURLProtocol.requestHandler = nil
+        super.tearDown()
+    }
+
+    func test_emailLinkRetryReplaysCheckpointBeforeAdoptingReplacementTokens() async throws {
+        let storage = FailingSwiftTokenStorage()
+        let original = TokenPair(
+            accessToken: "anonymous-access",
+            refreshToken: "anonymous-refresh"
+        )
+        try await storage.saveTokens(original)
+        let tokenManager = TokenManager(storage: storage)
+        XCTAssertTrue(try await tokenManager.tryRestoreSession())
+
+        let recorder = FunctionRequestRecorder()
+        MockRoomURLProtocol.requestHandler = { request in
+            recorder.append(request)
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("""
+                {
+                    "sessionId":"permanent-session",
+                    "accessToken":"permanent-access",
+                    "refreshToken":"permanent-refresh"
+                }
+                """.utf8)
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockRoomURLProtocol.self]
+        let http = HttpClient(
+            baseUrl: "https://api.example.test",
+            tokenManager: tokenManager,
+            session: URLSession(configuration: configuration)
+        )
+        let auth = AuthClient(client: http, tokenManager: tokenManager)
+
+        await storage.setFailWrites(true)
+        do {
+            _ = try await auth.linkWithEmail(
+                email: "user@example.test",
+                password: "Exact-Pass-123!"
+            )
+            XCTFail("Expected synthetic persistence failure")
+        } catch let error as TokenPersistenceError {
+            XCTAssertEqual(error.operation, "save")
+            XCTAssertTrue(error.causeDescription.contains("saveFailed"))
+        }
+        XCTAssertEqual(try await tokenManager.getAccessToken(), "anonymous-access")
+        XCTAssertEqual(await tokenManager.getRefreshToken(), "anonymous-refresh")
+        XCTAssertEqual(try await storage.getTokens()?.refreshToken, "anonymous-refresh")
+
+        await storage.setFailWrites(false)
+        let replay = try await auth.linkWithEmail(
+            email: "user@example.test",
+            password: "Exact-Pass-123!"
+        )
+
+        XCTAssertEqual(replay["sessionId"] as? String, "permanent-session")
+        XCTAssertEqual(try await tokenManager.getAccessToken(), "permanent-access")
+        XCTAssertEqual(await tokenManager.getRefreshToken(), "permanent-refresh")
+        XCTAssertEqual(try await storage.getTokens()?.refreshToken, "permanent-refresh")
+
+        let requests = recorder.snapshot()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(
+            requests.map { $0.value(forHTTPHeaderField: "Authorization") },
+            ["Bearer anonymous-access", "Bearer anonymous-access"]
+        )
+        let requestBodies = try requests.map { request -> [String: Any] in
+            let data = try readRequestBody(request)
+            return try XCTUnwrap(
+                JSONSerialization.jsonObject(with: data) as? [String: Any]
+            )
+        }
+        for body in requestBodies {
+            XCTAssertEqual(body["email"] as? String, "user@example.test")
+            XCTAssertEqual(body["password"] as? String, "Exact-Pass-123!")
+        }
+    }
+
+    func test_accountUpgradeFailsBeforeNetworkWithoutDurableStorage() async {
+        let recorder = FunctionRequestRecorder()
+        MockRoomURLProtocol.requestHandler = { request in
+            recorder.append(request)
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 500,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data()
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockRoomURLProtocol.self]
+        let manager = TokenManager(storage: MemoryTokenStorage())
+        let http = HttpClient(
+            baseUrl: "https://api.example.test",
+            tokenManager: manager,
+            session: URLSession(configuration: configuration)
+        )
+        let auth = AuthClient(client: http, tokenManager: manager)
+
+        do {
+            _ = try await auth.linkWithEmail(
+                email: "user@example.test",
+                password: "Exact-Pass-123!"
+            )
+            XCTFail("Expected durable storage preflight failure")
+        } catch is DurableTokenStorageRequiredError {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(recorder.snapshot().count, 0)
     }
 }
 
@@ -507,6 +877,21 @@ final class AuthClientIosUnitTests: XCTestCase {
     func test_authClient_nonNil() {
         let client = EdgeBaseClient("https://dummy.edgebase.fun")
         XCTAssertNotNil(client.auth)
+    }
+
+    func test_newClientRestoresPrepopulatedStorage() async throws {
+        let storage = MemoryTokenStorage()
+        await storage.saveTokens(TokenPair(
+            accessToken: "header.eyJzdWIiOiJyZXN0b3JlZC11c2VyIiwiaXNBbm9ueW1vdXMiOmZhbHNlfQ.signature",
+            refreshToken: "restored-refresh"
+        ))
+        let client = EdgeBaseClient(
+            "https://api.example.test",
+            tokenStorage: storage
+        )
+
+        XCTAssertTrue(try await client.tryRestoreSession())
+        XCTAssertEqual(await client.auth.currentUser()?["id"] as? String, "restored-user")
     }
 }
 
@@ -836,6 +1221,131 @@ final class RoomClientIosUnitTests: XCTestCase {
         try await adminTask.value
 
         XCTAssertEqual(fakeSocket.events, ["send:signal", "send:member_state", "send:admin"])
+    }
+}
+
+final class FunctionsCaptchaTransportTests: XCTestCase {
+    override func tearDown() {
+        MockRoomURLProtocol.requestHandler = nil
+        super.tearDown()
+    }
+
+    func test_captchaHeaderIsSentForGetPostAndDelete() async throws {
+        let recorder = FunctionRequestRecorder()
+        MockRoomURLProtocol.requestHandler = { request in
+            recorder.append(request)
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("{}".utf8)
+            )
+        }
+        let client = EdgeBaseClient(
+            "https://api.example.test",
+            session: makeFunctionTestSession()
+        )
+
+        for method in ["GET", "POST", "DELETE"] {
+            _ = try await client.functions.call(
+                "protected-\(method.lowercased())",
+                options: FunctionCallOptions(
+                    method: method,
+                    body: method == "POST" ? ["ok": true] : nil,
+                    query: method == "GET" ? ["page": "1"] : nil,
+                    captchaToken: "captcha-\(method)"
+                )
+            )
+        }
+
+        let requests = recorder.snapshot()
+        XCTAssertEqual(requests.compactMap(\.httpMethod), ["GET", "POST", "DELETE"])
+        XCTAssertEqual(
+            requests.compactMap { $0.value(forHTTPHeaderField: "X-EdgeBase-Captcha-Token") },
+            ["captcha-GET", "captcha-POST", "captcha-DELETE"]
+        )
+        XCTAssertEqual(requests.first?.url?.query, "page=1")
+    }
+
+    func test_captchaRequestNeverReplaysNetwork401Or429Failures() async {
+        let recorder = FunctionRequestRecorder()
+        MockRoomURLProtocol.requestHandler = { request in
+            recorder.append(request)
+            let name = request.url!.lastPathComponent
+            if name == "network" {
+                throw URLError(.networkConnectionLost)
+            }
+            let status = name == "unauthorized" ? 401 : 429
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: status,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"message":"synthetic failure"}"#.utf8)
+            )
+        }
+        let client = EdgeBaseClient(
+            "https://api.example.test",
+            session: makeFunctionTestSession()
+        )
+
+        for name in ["network", "unauthorized", "rate-limited"] {
+            do {
+                _ = try await client.functions.call(
+                    name,
+                    options: FunctionCallOptions(
+                        captchaToken: "single-use-token"
+                    )
+                )
+                XCTFail("Expected \(name) to fail")
+            } catch {
+                // Expected: the important contract is that the request is not replayed.
+            }
+        }
+
+        XCTAssertEqual(recorder.countsByLastPathComponent(), [
+            "network": 1,
+            "unauthorized": 1,
+            "rate-limited": 1,
+        ])
+    }
+
+    private func makeFunctionTestSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockRoomURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+}
+
+private final class FunctionRequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var requests: [URLRequest] = []
+
+    func append(_ request: URLRequest) {
+        lock.lock()
+        requests.append(request)
+        lock.unlock()
+    }
+
+    func snapshot() -> [URLRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return requests
+    }
+
+    func countsByLastPathComponent() -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for request in snapshot() {
+            if let name = request.url?.lastPathComponent {
+                counts[name, default: 0] += 1
+            }
+        }
+        return counts
     }
 }
 

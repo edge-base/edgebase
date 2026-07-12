@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.3.8)
+// Source: openapi.json (0.4.0)
 
 package edgebase
 
@@ -230,9 +230,24 @@ func (a *GeneratedDbApi) OauthRedirect(ctx context.Context, provider string) (ma
 	return a.client.Get(ctx, fmt.Sprintf("/api/auth/oauth/%s", url.PathEscape(provider)))
 }
 
+// OauthRedirectWithQuery — Start OAuth redirect with optional request input.
+func (a *GeneratedDbApi) OauthRedirectWithQuery(ctx context.Context, provider string, query map[string]string) (map[string]interface{}, error) {
+	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/auth/oauth/%s", url.PathEscape(provider)), query)
+}
+
+// OauthExchange — Atomically exchange a verified OAuth callback ticket — POST /api/auth/oauth/exchange
+func (a *GeneratedDbApi) OauthExchange(ctx context.Context, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", "/api/auth/oauth/exchange", body)
+}
+
 // OauthCallback — OAuth callback — GET /api/auth/oauth/{provider}/callback
-func (a *GeneratedDbApi) OauthCallback(ctx context.Context, provider string) (map[string]interface{}, error) {
-	return a.client.Get(ctx, fmt.Sprintf("/api/auth/oauth/%s/callback", url.PathEscape(provider)))
+func (a *GeneratedDbApi) OauthCallback(ctx context.Context, provider string, query map[string]string) (map[string]interface{}, error) {
+	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/auth/oauth/%s/callback", url.PathEscape(provider)), query)
+}
+
+// OauthCallbackPost — OAuth form-post callback — POST /api/auth/oauth/{provider}/callback
+func (a *GeneratedDbApi) OauthCallbackPost(ctx context.Context, provider string, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", fmt.Sprintf("/api/auth/oauth/%s/callback", url.PathEscape(provider)), body)
 }
 
 // OauthLinkStart — Start OAuth account linking — POST /api/auth/oauth/link/{provider}
@@ -240,9 +255,29 @@ func (a *GeneratedDbApi) OauthLinkStart(ctx context.Context, provider string) (m
 	return a.client.Post(ctx, fmt.Sprintf("/api/auth/oauth/link/%s", url.PathEscape(provider)), nil)
 }
 
+// OauthLinkStartWithBody — Start OAuth account linking with optional request input.
+func (a *GeneratedDbApi) OauthLinkStartWithBody(ctx context.Context, provider string, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", fmt.Sprintf("/api/auth/oauth/link/%s", url.PathEscape(provider)), body)
+}
+
+// OauthLinkContinue — Continue OAuth account linking in the system browser — GET /api/auth/oauth/link/{provider}/continue
+func (a *GeneratedDbApi) OauthLinkContinue(ctx context.Context, provider string, query map[string]string) (map[string]interface{}, error) {
+	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/auth/oauth/link/%s/continue", url.PathEscape(provider)), query)
+}
+
+// OauthLinkComplete — Complete OAuth account linking for the current authenticated user — POST /api/auth/oauth/complete/link
+func (a *GeneratedDbApi) OauthLinkComplete(ctx context.Context, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", "/api/auth/oauth/complete/link", body)
+}
+
 // OauthLinkCallback — OAuth link callback — GET /api/auth/oauth/link/{provider}/callback
-func (a *GeneratedDbApi) OauthLinkCallback(ctx context.Context, provider string) (map[string]interface{}, error) {
-	return a.client.Get(ctx, fmt.Sprintf("/api/auth/oauth/link/%s/callback", url.PathEscape(provider)))
+func (a *GeneratedDbApi) OauthLinkCallback(ctx context.Context, provider string, query map[string]string) (map[string]interface{}, error) {
+	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/auth/oauth/link/%s/callback", url.PathEscape(provider)), query)
+}
+
+// OauthLinkCallbackPost — OAuth link form-post callback — POST /api/auth/oauth/link/{provider}/callback
+func (a *GeneratedDbApi) OauthLinkCallbackPost(ctx context.Context, provider string, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", fmt.Sprintf("/api/auth/oauth/link/%s/callback", url.PathEscape(provider)), body)
 }
 
 // DbSingleCountRecords — Count records in a single-instance table — GET /api/db/{namespace}/tables/{table}/count
@@ -290,11 +325,6 @@ func (a *GeneratedDbApi) DbSingleBatchByFilter(ctx context.Context, namespace st
 	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/db/%s/tables/%s/batch-by-filter", url.PathEscape(namespace), url.PathEscape(table)), body, query)
 }
 
-// DbSingleTransact — Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
-func (a *GeneratedDbApi) DbSingleTransact(ctx context.Context, namespace string, body interface{}) (map[string]interface{}, error) {
-	return a.client.do(ctx, "POST", fmt.Sprintf("/api/db/%s/transact", url.PathEscape(namespace)), body)
-}
-
 // DbCountRecords — Count records in dynamic table — GET /api/db/{namespace}/{instanceId}/tables/{table}/count
 func (a *GeneratedDbApi) DbCountRecords(ctx context.Context, namespace string, instanceId string, table string, query map[string]string) (map[string]interface{}, error) {
 	return a.client.GetWithQuery(ctx, fmt.Sprintf("/api/db/%s/%s/tables/%s/count", url.PathEscape(namespace), url.PathEscape(instanceId), url.PathEscape(table)), query)
@@ -338,6 +368,11 @@ func (a *GeneratedDbApi) DbBatchRecords(ctx context.Context, namespace string, i
 // DbBatchByFilter — Batch update/delete records by filter in dynamic table — POST /api/db/{namespace}/{instanceId}/tables/{table}/batch-by-filter
 func (a *GeneratedDbApi) DbBatchByFilter(ctx context.Context, namespace string, instanceId string, table string, body interface{}, query map[string]string) (map[string]interface{}, error) {
 	return a.client.DoWithQuery(ctx, "POST", fmt.Sprintf("/api/db/%s/%s/tables/%s/batch-by-filter", url.PathEscape(namespace), url.PathEscape(instanceId), url.PathEscape(table)), body, query)
+}
+
+// DbSingleTransact — Apply multi-table write operations atomically in a single-instance database — POST /api/db/{namespace}/transact
+func (a *GeneratedDbApi) DbSingleTransact(ctx context.Context, namespace string, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", fmt.Sprintf("/api/db/%s/transact", url.PathEscape(namespace)), body)
 }
 
 // DbTransact — Apply multi-table write operations atomically in a dynamic database instance — POST /api/db/{namespace}/{instanceId}/transact
@@ -445,6 +480,11 @@ func (a *GeneratedDbApi) GetConfig(ctx context.Context) (map[string]interface{},
 	return a.client.Get(ctx, "/api/config")
 }
 
+// GetCaptchaChallenge — Render the hosted Turnstile page for native WebViews — GET /api/captcha/challenge
+func (a *GeneratedDbApi) GetCaptchaChallenge(ctx context.Context, query map[string]string) (map[string]interface{}, error) {
+	return a.client.GetWithQuery(ctx, "/api/captcha/challenge", query)
+}
+
 // PushRegister — Register push token — POST /api/push/register
 func (a *GeneratedDbApi) PushRegister(ctx context.Context, body interface{}) (map[string]interface{}, error) {
 	return a.client.do(ctx, "POST", "/api/push/register", body)
@@ -478,6 +518,16 @@ func (a *GeneratedDbApi) ConnectRoom(ctx context.Context, query map[string]strin
 // GetRoomMetadata — Get room metadata — GET /api/room/metadata
 func (a *GeneratedDbApi) GetRoomMetadata(ctx context.Context, query map[string]string) (map[string]interface{}, error) {
 	return a.client.GetWithQuery(ctx, "/api/room/metadata", query)
+}
+
+// GetRoomSummary — Get room summary — GET /api/room/summary
+func (a *GeneratedDbApi) GetRoomSummary(ctx context.Context, query map[string]string) (map[string]interface{}, error) {
+	return a.client.GetWithQuery(ctx, "/api/room/summary", query)
+}
+
+// GetRoomSummaries — Get summaries for multiple rooms — POST /api/room/summaries
+func (a *GeneratedDbApi) GetRoomSummaries(ctx context.Context, body interface{}) (map[string]interface{}, error) {
+	return a.client.do(ctx, "POST", "/api/room/summaries", body)
 }
 
 // TrackEvents — Track custom events — POST /api/analytics/track
@@ -561,6 +611,8 @@ const (
 	PathAuthMfaTotpEnroll = "/api/auth/mfa/totp/enroll"
 	PathAuthMfaTotpVerify = "/api/auth/mfa/totp/verify"
 	PathAuthMfaVerify = "/api/auth/mfa/verify"
+	PathOauthLinkComplete = "/api/auth/oauth/complete/link"
+	PathOauthExchange = "/api/auth/oauth/exchange"
 	PathAuthPasskeysList = "/api/auth/passkeys"
 	PathAuthPasskeysAuthOptions = "/api/auth/passkeys/auth-options"
 	PathAuthPasskeysAuthenticate = "/api/auth/passkeys/authenticate"
@@ -585,6 +637,7 @@ const (
 	PathAuthVerifyLinkPhone = "/api/auth/verify-link-phone"
 	PathAuthVerifyMagicLink = "/api/auth/verify-magic-link"
 	PathAuthVerifyPhone = "/api/auth/verify-phone"
+	PathGetCaptchaChallenge = "/api/captcha/challenge"
 	PathGetConfig = "/api/config"
 	PathDatabaseLiveBroadcast = "/api/db/broadcast"
 	PathCheckDatabaseSubscriptionConnection = "/api/db/connect-check"
@@ -606,6 +659,8 @@ const (
 	PathConnectRoom = "/api/room"
 	PathCheckRoomConnection = "/api/room/connect-check"
 	PathGetRoomMetadata = "/api/room/metadata"
+	PathGetRoomSummaries = "/api/room/summaries"
+	PathGetRoomSummary = "/api/room/summary"
 	PathGetSchema = "/api/schema"
 	PathExecuteSql = "/api/sql"
 )
@@ -770,6 +825,11 @@ func PathOauthCallback(provider string) string {
 	return "/api/auth/oauth/" + provider + "/callback"
 }
 
+// PathOauthCallbackPost builds the path for /api/auth/oauth/{provider}/callback.
+func PathOauthCallbackPost(provider string) string {
+	return "/api/auth/oauth/" + provider + "/callback"
+}
+
 // PathOauthLinkStart builds the path for /api/auth/oauth/link/{provider}.
 func PathOauthLinkStart(provider string) string {
 	return "/api/auth/oauth/link/" + provider
@@ -778,6 +838,16 @@ func PathOauthLinkStart(provider string) string {
 // PathOauthLinkCallback builds the path for /api/auth/oauth/link/{provider}/callback.
 func PathOauthLinkCallback(provider string) string {
 	return "/api/auth/oauth/link/" + provider + "/callback"
+}
+
+// PathOauthLinkCallbackPost builds the path for /api/auth/oauth/link/{provider}/callback.
+func PathOauthLinkCallbackPost(provider string) string {
+	return "/api/auth/oauth/link/" + provider + "/callback"
+}
+
+// PathOauthLinkContinue builds the path for /api/auth/oauth/link/{provider}/continue.
+func PathOauthLinkContinue(provider string) string {
+	return "/api/auth/oauth/link/" + provider + "/continue"
 }
 
 // PathAuthPasskeysDelete builds the path for /api/auth/passkeys/{credentialId}.

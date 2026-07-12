@@ -160,6 +160,27 @@ afterEach(() => {
 }, 120_000);
 
 describe('build-app command', () => {
+  it('refuses to emit a release bundle containing an inline CAPTCHA secret', () => {
+    const projectDir = createTempProject('captcha-secret');
+    writeFileSync(
+      join(projectDir, 'edgebase.config.ts'),
+      `export default {
+  release: true,
+  baseUrl: 'https://api.example.test',
+  captcha: {
+    siteKey: 'synthetic-site-key',
+    secretKey: 'must-not-enter-artifact',
+    hostnames: ['api.example.test'],
+  },
+};\n`,
+    );
+
+    expect(() => createAppBundle(projectDir, {
+      outputDir: 'unsafe-bundle',
+      overwrite: true,
+    })).toThrow(/cannot bundle captcha\.secretKey/i);
+  });
+
   it('builds a self-contained app bundle that does not rely on project config or function source files', async () => {
     const projectDir = createTempProject('self-contained');
     mkdirSync(join(projectDir, 'functions'), { recursive: true });
@@ -339,6 +360,7 @@ export default defineConfig({
       },
     });
 
+    expect(existsSync(join(bundle.outputDir, '.dev.vars'))).toBe(false);
     expect(existsSync(join(bundle.outputDir, '.edgebase', 'runtime', 'server', 'bundle', 'functions', 'one.js'))).toBe(true);
     expect(existsSync(join(bundle.outputDir, '.edgebase', 'runtime', 'server', 'bundle', 'config', 'edgebase.test.config.bundle.js'))).toBe(true);
     expect(readFileSync(join(bundle.outputDir, '.edgebase', 'runtime', 'server', 'app-assets', 'index.html'), 'utf-8')).toContain('v1');

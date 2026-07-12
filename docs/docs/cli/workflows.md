@@ -48,6 +48,19 @@ Use `--isolated` when you need a clean local state directory without disturbing 
 
 Use `edgebase dev` as the standard local entrypoint. It reads `edgebase.config.ts` and injects the managed bindings required for local development, including single-instance D1 namespaces.
 
+Config evaluation and the local Worker receive the same values from
+`.env.development`/`.dev.vars`. Shell-only `NODE_ENV` and
+`*_RATE_LIMIT_PROFILE` values are also propagated. To expose another
+shell-only value to `edgebase.config.ts` and the local Worker, list its exact
+name in `EDGEBASE_CONFIG_ENV_ALLOWLIST` (comma-separated). `edgebase dev`
+materializes the resulting values in an ignored, mode-`0600` `.dev.vars`
+inside `.edgebase/targets/dev-app`, replaces that file whenever config or env
+inputs reload, and prevents Wrangler from copying unrelated parent-shell
+variables. The generated dev Wrangler config populates `process.env` from
+those isolated Worker bindings, so config modules and request handlers see the
+same values. This dev-only secret file is not part of `build-app` or `pack`
+artifacts; do not enable `CLOUDFLARE_INCLUDE_PROCESS_ENV` as a workaround.
+
 The starter project does not create a default `posts` table anymore. Define your first DB block in `edgebase.config.ts`, or use the dev dashboard to create a database block, table, or storage bucket and let it write back to config for you.
 
 Raw `wrangler dev` is an advanced/manual path. Use it only when you are intentionally supplying a complete Wrangler config yourself, such as an explicit `--config` test setup.
@@ -109,8 +122,12 @@ What `deploy` manages for you:
 
 - validates `edgebase.config.ts`
 - bundles functions and runtime scaffolding
-- uploads `.env.release` secrets when present
-- provisions or reuses managed Cloudflare resources such as KV, D1, R2, Vectorize, Hyperdrive, and Turnstile when the project configuration requires them
+- attaches `.env.release` and CLI-managed secrets to the same Worker version as
+  the code/config upload (a mode-0600 temporary file is removed immediately)
+- checks the remote Worker—not the gitignored local manifest—to preserve
+  existing service/JWT secrets on fresh CI checkouts
+- provisions or reuses managed Cloudflare resources such as KV, D1, R2, Vectorize, Hyperdrive, and Turnstile when the project configuration requires them; managed CAPTCHA hostname changes are serialized by an expiring remote D1 lease and use a same-widget `old∪new` stage, version-owned Worker publish, and exact finalization
+- runs `scripts/edgebase-post-scaffold.mjs`, when present, as a non-interactive project hook with a five-minute hard timeout
 - writes a deploy manifest under `.edgebase/` so later cleanup can target the same project resources
 
 Before you treat the release as healthy, verify more than a public route:

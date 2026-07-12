@@ -23,7 +23,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.edge-base.edgebase:edgebase-core-java:v0.3.8'
+    implementation 'com.github.edge-base.edgebase:edgebase-core-java:v0.4.0'
 }
 ```
 

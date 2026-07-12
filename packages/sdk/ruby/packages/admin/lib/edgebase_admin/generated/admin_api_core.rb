@@ -3,7 +3,7 @@
 # Auto-generated admin API Core — DO NOT EDIT.
 #
 # Regenerate: npx tsx tools/sdk-codegen/generate.ts
-# Source: openapi.json (0.3.8)
+# Source: openapi.json (0.4.0)
 
 require "cgi"
 
@@ -65,7 +65,7 @@ module EdgebaseAdmin
       @http.post("/db/broadcast", body)
     end
 
-    # Execute SQL via DatabaseDO — POST /api/sql
+    # Execute provider-aware raw SQL — POST /api/sql
     def execute_sql(body = nil)
       @http.post("/sql", body)
     end

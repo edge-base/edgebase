@@ -13,10 +13,13 @@ import Foundation
 /// Protocol for persistent token storage.
 /// Default implementation uses Keychain. Override for testing.
 public protocol TokenStorage: Sendable {
-    func getTokens() async -> TokenPair?
-    func saveTokens(_ tokens: TokenPair) async
-    func clearTokens() async
+    func getTokens() async throws -> TokenPair?
+    func saveTokens(_ tokens: TokenPair) async throws
+    func clearTokens() async throws
 }
+
+/// Storage that survives process restart and reports failed writes.
+public protocol DurableTokenStorage: TokenStorage {}
 
 /// Token pair (access + refresh).
 public struct TokenPair: Codable, Sendable {
@@ -48,7 +51,7 @@ public actor MemoryTokenStorage: TokenStorage {
 // MARK: - Keychain Token Storage
 
 /// Keychain-based persistent token storage.
-public final class KeychainTokenStorage: TokenStorage, @unchecked Sendable {
+public final class KeychainTokenStorage: DurableTokenStorage, @unchecked Sendable {
     private let service: String
     private let accessGroup: String?
     private let queue = DispatchQueue(label: "com.edgebase.keychain")
@@ -58,35 +61,39 @@ public final class KeychainTokenStorage: TokenStorage, @unchecked Sendable {
         self.accessGroup = accessGroup
     }
 
-    public func getTokens() async -> TokenPair? {
-        queue.sync {
-            var query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecAttrAccount as String: "tokens",
-                kSecReturnData as String: true,
-                kSecMatchLimit as String: kSecMatchLimitOne,
-            ]
-            if let group = accessGroup {
-                query[kSecAttrAccessGroup as String] = group
-            }
+    public func getTokens() async throws -> TokenPair? {
+        try queue.sync {
+            var query = baseQuery()
+            query[kSecReturnData as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
 
             var result: AnyObject?
             let status = SecItemCopyMatching(query as CFDictionary, &result)
-            guard status == errSecSuccess, let data = result as? Data else { return nil }
-            return try? JSONDecoder().decode(TokenPair.self, from: data)
+            if status == errSecItemNotFound { return nil }
+            guard status == errSecSuccess else {
+                throw KeychainTokenStorageError(operation: "read", status: status)
+            }
+            guard let data = result as? Data else {
+                throw KeychainTokenStorageError(operation: "read-invalid-data", status: status)
+            }
+            do {
+                return try JSONDecoder().decode(TokenPair.self, from: data)
+            } catch {
+                throw KeychainTokenStorageError(operation: "decode", status: errSecDecode)
+            }
         }
     }
 
-    public func saveTokens(_ tokens: TokenPair) async {
-        queue.sync {
-            guard let data = try? JSONEncoder().encode(tokens) else { return }
+    public func saveTokens(_ tokens: TokenPair) async throws {
+        try queue.sync {
+            let data: Data
+            do {
+                data = try JSONEncoder().encode(tokens)
+            } catch {
+                throw KeychainTokenStorageError(operation: "encode", status: errSecParam)
+            }
 
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecAttrAccount as String: "tokens",
-            ]
+            let query = baseQuery()
 
             // Try update first, then add
             let updateAttrs: [String: Any] = [kSecValueData as String: data]
@@ -95,21 +102,74 @@ public final class KeychainTokenStorage: TokenStorage, @unchecked Sendable {
             if updateStatus == errSecItemNotFound {
                 var addQuery = query
                 addQuery[kSecValueData as String] = data
-                addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-                SecItemAdd(addQuery as CFDictionary, nil)
+                addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+                let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+                guard addStatus == errSecSuccess else {
+                    throw KeychainTokenStorageError(operation: "add", status: addStatus)
+                }
+            } else if updateStatus != errSecSuccess {
+                throw KeychainTokenStorageError(operation: "update", status: updateStatus)
             }
         }
     }
 
-    public func clearTokens() async {
-        queue.sync {
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecAttrAccount as String: "tokens",
-            ]
-            SecItemDelete(query as CFDictionary)
+    public func clearTokens() async throws {
+        try queue.sync {
+            let query = baseQuery()
+            let status = SecItemDelete(query as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else {
+                throw KeychainTokenStorageError(operation: "delete", status: status)
+            }
         }
+    }
+
+    private func baseQuery() -> [String: Any] {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: "tokens",
+        ]
+        if let group = accessGroup {
+            query[kSecAttrAccessGroup as String] = group
+        }
+        return query
+    }
+}
+
+public struct KeychainTokenStorageError: Error, LocalizedError, Sendable, Equatable {
+    public let operation: String
+    public let status: OSStatus
+
+    public var errorDescription: String? {
+        "Apple Keychain \(operation) failed (OSStatus \(status))."
+    }
+}
+
+public struct InvalidTokenPairError: Error, LocalizedError, Sendable, Equatable {
+    public let operation: String
+    public var errorDescription: String? {
+        "EdgeBase token pair is incomplete during \(operation)."
+    }
+}
+
+public struct DurableTokenStorageRequiredError: Error, LocalizedError, Sendable, Equatable {
+    public init() {}
+    public var errorDescription: String? {
+        "Anonymous account upgrades require DurableTokenStorage so replacement tokens survive response loss or process termination."
+    }
+}
+
+public struct TokenPersistenceError: Error, LocalizedError, Sendable, Equatable {
+    public let operation: String
+    public let causeDescription: String
+
+    public init(operation: String, cause: Error) {
+        self.operation = operation
+        self.causeDescription = String(describing: cause)
+    }
+
+    public var errorDescription: String? {
+        "Token persistence \(operation) failed before token adoption: \(causeDescription)"
     }
 }
 
@@ -139,9 +199,16 @@ public actor TokenManager: TokenManageable {
     }
 
     /// Set tokens after login.
-    public func setTokens(_ tokens: TokenPair) async {
+    public func setTokens(_ tokens: TokenPair) async throws {
+        guard !tokens.accessToken.isEmpty, !tokens.refreshToken.isEmpty else {
+            throw InvalidTokenPairError(operation: "save")
+        }
+        do {
+            try await storage.saveTokens(tokens)
+        } catch {
+            throw TokenPersistenceError(operation: "save", cause: error)
+        }
         currentTokens = tokens
-        await storage.saveTokens(tokens)
         let user = decodeJWTPayload(tokens.accessToken)
         notifyAuthStateChange(user)
     }
@@ -151,25 +218,45 @@ public actor TokenManager: TokenManageable {
     /// Cancels any in-flight refresh and bumps the session generation so a refresh
     /// that is already awaiting the network cannot re-persist tokens or emit a
     /// signed-in event after logout.
-    public func clearTokens() async {
+    public func clearTokens() async throws {
         sessionGeneration &+= 1
         refreshTask?.cancel()
         refreshTask = nil
+        do {
+            try await storage.clearTokens()
+        } catch {
+            throw TokenPersistenceError(operation: "clear", cause: error)
+        }
         currentTokens = nil
-        await storage.clearTokens()
         notifyAuthStateChange(nil)
     }
 
     /// Try to restore session from storage.
     /// Notifies auth state listeners on success (matches JS SDK auto-restore behavior).
-    public func tryRestoreSession() async -> Bool {
-        if let tokens = await storage.getTokens() {
+    public func tryRestoreSession() async throws -> Bool {
+        let stored: TokenPair?
+        do {
+            stored = try await storage.getTokens()
+        } catch {
+            throw TokenPersistenceError(operation: "load", cause: error)
+        }
+        if let tokens = stored {
+            guard !tokens.accessToken.isEmpty, !tokens.refreshToken.isEmpty else {
+                throw InvalidTokenPairError(operation: "restore")
+            }
             currentTokens = tokens
             let user = decodeJWTPayload(tokens.accessToken)
             notifyAuthStateChange(user)
             return true
         }
         return false
+    }
+
+    /// Fail closed before an operation that can revoke the initiating session.
+    public func requireDurableStorageForAccountUpgrade() throws {
+        if storage is any DurableTokenStorage { return }
+        if currentUser()?["isAnonymous"] as? Bool == false { return }
+        throw DurableTokenStorageRequiredError()
     }
 
     /// Get valid access token, refreshing if needed.
@@ -220,7 +307,7 @@ public actor TokenManager: TokenManageable {
             let newTokens = try await refreshCb(refreshToken)
             // If a logout happened while we were awaiting the network, do NOT
             // resurrect the session by persisting tokens or firing signed-in events.
-            let committed = await self.commitRefreshedTokens(newTokens, generation: generation)
+            let committed = try await self.commitRefreshedTokens(newTokens, generation: generation)
             guard committed else {
                 throw EdgeBaseError(statusCode: 401, message: "Session was cleared during token refresh.")
             }
@@ -233,17 +320,25 @@ public actor TokenManager: TokenManageable {
             let newTokens = try await task.value
             return newTokens.accessToken
         } catch {
-            await handleRefreshFailure(error, generation: generation)
+            try await handleRefreshFailure(error, generation: generation)
             throw error
         }
     }
 
     /// Persist refreshed tokens and emit a signed-in event, unless a logout has
     /// occurred since the refresh started. Returns false when the refresh is stale.
-    private func commitRefreshedTokens(_ newTokens: TokenPair, generation: Int) async -> Bool {
+    private func commitRefreshedTokens(_ newTokens: TokenPair, generation: Int) async throws -> Bool {
+        guard generation == sessionGeneration else { return false }
+        guard !newTokens.accessToken.isEmpty, !newTokens.refreshToken.isEmpty else {
+            throw InvalidTokenPairError(operation: "refresh")
+        }
+        do {
+            try await storage.saveTokens(newTokens)
+        } catch {
+            throw TokenPersistenceError(operation: "save", cause: error)
+        }
         guard generation == sessionGeneration else { return false }
         currentTokens = newTokens
-        await storage.saveTokens(newTokens)
         notifyAuthStateChange(decodeJWTPayload(newTokens.accessToken))
         return true
     }
@@ -251,10 +346,10 @@ public actor TokenManager: TokenManageable {
     /// On a refresh failure with 401, clear the session (token revoked/expired),
     /// matching the JS reference. Other errors (network, 5xx) keep the session for
     /// retry. Skipped if a logout already advanced the generation.
-    private func handleRefreshFailure(_ error: Error, generation: Int) async {
+    private func handleRefreshFailure(_ error: Error, generation: Int) async throws {
         guard (error as? EdgeBaseError)?.statusCode == 401 else { return }
         guard generation == sessionGeneration else { return }
-        await clearTokens()
+        try await clearTokens()
     }
 
     /// Check if token is expired (with 30s buffer).

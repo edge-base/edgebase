@@ -98,18 +98,24 @@ The workhorse for dynamic DB blocks. Each instance owns an embedded SQLite datab
 
 A single DatabaseDO processes requests serially (single-threaded). This eliminates concurrency bugs but bounds throughput to ~200-1,000 writes/sec per instance. The DB-block pattern (`user:{id}`, `workspace:{id}`, etc.) distributes load across many independent DO instances.
 
-### Auth (D1-First)
+### Auth (D1-First, DO-Coordinated OAuth)
 
-All authentication is handled by D1 (AUTH_DB) directly — no Durable Objects involved:
+Durable auth data is handled by D1. Only short-lived OAuth callback authority
+uses a key-sharded Durable Object:
 
 ```
 D1 (AUTH_DB) ── All auth data (users, sessions, OAuth, MFA, passkeys)
 D1 (CONTROL_DB) ── Internal control-plane metadata (plugin versions, cleanup state)
+AUTH Durable Objects ── Five-minute OAuth state and one-time link continuations
 ```
 
-The Worker routes auth requests directly to D1 via `auth-d1-service.ts` (~61 functions). The Auth DO binding (`AUTH`) exists only as an empty shell for Cloudflare migration compatibility (returns 410 Gone).
+The Worker routes user/session/identity operations directly to D1. OAuth start
+and callback routes use the `AUTH` binding to atomically consume their random
+state key; new flows never use eventually consistent KV as callback authority.
 
-**Key design decision**: Data requests verify JWT locally and then go straight to the configured DB backend. No separate auth infrastructure hop is needed first.
+**Key design decision**: Ordinary data requests verify JWT locally and then go
+straight to the configured DB backend. They do not pay the OAuth coordination
+hop.
 
 ### DatabaseLiveDO
 
@@ -138,7 +144,8 @@ Server-authoritative real-time state channel for multiplayer games, collaborativ
 | ------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | **D1**  | Auth database (AUTH_DB)             | All auth data: users, sessions, OAuth, email tokens, MFA, passkeys, public profiles                         |
 | **D1**  | Internal control plane (CONTROL_DB) | Plugin versions and other internal operational metadata                                                     |
-| **KV**  | Ephemeral state cache               | OAuth state (300s), short-lived WebSocket pending gates, multipart upload tracking (7d), email tokens, push tokens/logs |
+| **DO**  | Atomic OAuth coordinator            | Key-sharded, five-minute sign-in/link state and one-minute browser continuations                            |
+| **KV**  | Ephemeral state cache               | Short-lived WebSocket pending gates, multipart upload tracking, email caches, push tokens/logs, legacy OAuth migration mirror |
 | **R2**  | File storage                        | User uploads, signed URLs, multipart uploads                                                                |
 
 Most KV usage in EdgeBase is ephemeral or cache-like. Persistent, strongly consistent state should live in D1, Durable Objects, or a database provider instead.

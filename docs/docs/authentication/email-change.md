@@ -45,7 +45,7 @@ await client.auth.changeEmail({
 await client.auth.changeEmail(
   'new@example.com',
   password: 'current-password',
-  redirectUrl: 'myapp://auth/verify-email-change',
+  redirectUrl: 'https://app.example.com/auth/verify-email-change',
 );
 ```
 
@@ -56,7 +56,7 @@ await client.auth.changeEmail(
 try await client.auth.changeEmail(
     newEmail: "new@example.com",
     password: "current-password",
-    redirectUrl: "myapp://auth/verify-email-change"
+    redirectUrl: "https://app.example.com/auth/verify-email-change"
 )
 ```
 
@@ -67,7 +67,7 @@ try await client.auth.changeEmail(
 client.auth.changeEmail(
     newEmail = "new@example.com",
     password = "current-password",
-    redirectUrl = "myapp://auth/verify-email-change"
+    redirectUrl = "https://app.example.com/auth/verify-email-change"
 )
 ```
 
@@ -78,7 +78,7 @@ client.auth.changeEmail(
 client.auth().changeEmail(
     "new@example.com",
     "current-password",
-    "myapp://auth/verify-email-change"
+    "https://app.example.com/auth/verify-email-change"
 );
 ```
 
@@ -89,7 +89,7 @@ client.auth().changeEmail(
 await client.Auth.ChangeEmailAsync(
     "new@example.com",
     "current-password",
-    "myapp://auth/verify-email-change"
+    "https://app.example.com/auth/verify-email-change"
 );
 ```
 
@@ -104,7 +104,9 @@ On the Web SDK, you can finish the flow directly with the callback token:
 await client.auth.verifyEmailChange('verification-token');
 ```
 
-If you pass `redirectUrl`, EdgeBase appends `token`, `type=email-change`, and your optional `state` to that URL.
+If you pass `redirectUrl`, EdgeBase appends `token`, `type=email-change`, and
+your optional `state` to that URL's fragment. Read and scrub the fragment in
+the browser; it is intentionally not sent to a server route.
 
 ## REST API
 
@@ -144,7 +146,9 @@ Content-Type: application/json
 - **Single-use**: Tokens are deleted after use
 - **Race condition protection**: The new email is re-checked for uniqueness at verification time
 - **Disabled accounts**: Returns `403` if the account is disabled
-- **Redirect allowlist**: If `auth.allowedRedirectUrls` is configured, request-specific redirects must match that allowlist
+- **Redirect allowlist**: Release request-specific redirects require a
+  non-empty `auth.allowedRedirectUrls`, HTTPS, and a match within its explicitly
+  approved URL/origin/path scope
 
 ## Data Flow
 

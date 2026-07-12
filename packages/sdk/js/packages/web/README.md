@@ -158,7 +158,9 @@ The main thing we recommend is avoiding scaffolding directly into an existing ap
 ```ts
 import { createClient } from '@edge-base/web';
 
-const client = createClient('https://your-project.edgebase.fun');
+const client = createClient('https://your-project.edgebase.fun', {
+  refreshTokenTransport: 'httpOnlyCookie',
+});
 
 await client.auth.signIn({
   email: 'june@example.com',
@@ -177,6 +179,10 @@ const health = await client.functions.get('health');
 
 console.log(posts.items, health);
 ```
+
+This example assumes the server has `auth.session.cookie.enabled: true`. If it
+does not, omit `refreshTokenTransport`; body transport remains the compatibility
+default.
 
 `app` in the example above is your database block name from `edgebase.config.ts`.
 
@@ -243,6 +249,25 @@ if (result) {
 ```
 
 By default, the browser SDK uses `/auth/callback` on the current origin as the redirect target.
+
+Call `handleOAuthCallback()` in a browser route, not a server route. EdgeBase
+returns callback fields in the URL fragment, scrubs them before storage or
+network access, and binds the callback to the exact SDK-started flow. The
+fragment carries a five-minute completion ticket, never a bearer credential;
+the SDK atomically posts it to `/api/auth/oauth/exchange`. With the recommended
+`httpOnlyCookie` transport, JavaScript receives no refresh token and EdgeBase
+owns a rotating `__Host-` HttpOnly cookie on HTTPS.
+
+The SDK persists the exact ticket before exchange. If the response is lost or
+local session persistence fails, retrying `handleOAuthCallback()` uses that same
+ticket and receives the server's cached exact result without creating a second
+session.
+
+The server must enable `auth.session.cookie`, and every release app callback
+must be HTTPS and match `auth.allowedRedirectUrls`. All credential-creating
+auth requests are serialized across tabs. A persisted auth epoch and pending
+sign-out tombstone ensure a late sign-in, refresh, or OAuth response cannot
+restore a session after sign-out.
 
 Read more: [Authentication Docs](https://edgebase.fun/docs/authentication)
 

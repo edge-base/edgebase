@@ -33,8 +33,15 @@ For client-side components (`'use client'`), use `@edge-base/web`:
 
 import { createClient } from '@edge-base/web';
 
-export const client = createClient(process.env.NEXT_PUBLIC_EDGEBASE_URL!);
+export const client = createClient(process.env.NEXT_PUBLIC_EDGEBASE_URL!, {
+  refreshTokenTransport: 'httpOnlyCookie',
+});
 ```
+
+Enable `auth.session.cookie` on the EdgeBase server. Cross-origin deployments
+also require the exact Next.js origin in `cors.origin`,
+`cors.credentials: true`, and a cookie `sameSite` mode compatible with the
+topology; same-origin deployment is more reliable.
 
 ### SSR Client (App Router)
 
@@ -154,7 +161,7 @@ export function LikeButton({ postId }: { postId: string }) {
 import { client } from '@/lib/edgebase-client';
 import { createContext, useContext, useEffect, useState } from 'react';
 
-type User = ReturnType<typeof client.auth.currentUser>;
+type User = typeof client.auth.currentUser;
 const AuthContext = createContext<User>(null);
 
 export const useAuth = () => useContext(AuthContext);
@@ -203,38 +210,56 @@ export default function LoginPage() {
 }
 ```
 
-### OAuth Callback (Route Handler)
+### OAuth Callback (Client Component)
 
-Handle OAuth redirects server-side using the SSR client:
+EdgeBase returns app-callback fields in the URL fragment. Browsers never send a
+fragment to a Next.js Route Handler, middleware, Server Component, or server
+log, so those server surfaces cannot complete the callback. Start and finish
+OAuth with the browser SDK:
 
-```typescript
-// app/auth/callback/route.ts
-import { NextResponse } from 'next/server';
-import { createServerClient } from '@edge-base/ssr';
-import { cookies } from 'next/headers';
+```tsx
+// Example login action
+client.auth.signInWithOAuth('google', {
+  redirectUrl: `${window.location.origin}/auth/callback`,
+});
+```
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const accessToken = url.searchParams.get('access_token');
-  const refreshToken = url.searchParams.get('refresh_token');
+```tsx
+// app/auth/callback/page.tsx
+'use client';
 
-  if (accessToken && refreshToken) {
-    const cookieStore = await cookies();
-    const client = createServerClient(process.env.EDGEBASE_URL!, {
-      cookies: {
-        get: (name) => cookieStore.get(name)?.value,
-        set: (name, value, options) => cookieStore.set(name, value, options),
-        delete: (name) => cookieStore.delete(name),
-      },
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { client } from '@/lib/edgebase-client';
+
+export default function OAuthCallbackPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    let active = true;
+
+    void client.auth.handleOAuthCallback().then((result) => {
+      if (!active) return;
+      router.replace(result ? '/dashboard' : '/login?error=oauth_failed');
     });
 
-    // Store tokens in httpOnly cookies
-    client.setSession({ accessToken, refreshToken });
-  }
+    return () => {
+      active = false;
+    };
+  }, [router]);
 
-  return NextResponse.redirect(new URL('/dashboard', request.url));
+  return <p>Completing sign-in…</p>;
 }
 ```
+
+With `refreshTokenTransport: 'httpOnlyCookie'`, EdgeBase stores and rotates the
+refresh credential on the EdgeBase origin and the callback fragment contains
+only a five-minute `oauth_exchange_ticket`, transport marker, and SDK binding
+nonce. The handler removes those fields, consumes the nonce, and atomically
+posts the ticket to `/api/auth/oauth/exchange`; that response establishes the
+server-managed cookie and returns the access token. Do not copy bearer values
+from a query string into application cookies—no bearer value belongs in this
+callback URL at all.
 
 ## Middleware
 
