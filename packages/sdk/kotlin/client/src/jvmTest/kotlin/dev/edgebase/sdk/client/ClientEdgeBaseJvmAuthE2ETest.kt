@@ -91,16 +91,24 @@ class ClientEdgeBaseJvmAuthE2ETest {
 
         val sessions = client.auth.listSessions()
         assertTrue(sessions.isNotEmpty())
+        // changePassword revoked all sessions and issued one new session for this
+        // client; capture its id so we never revoke it below (which would
+        // invalidate this client's own token).
+        val ownSessionId = (sessions.first()["id"] ?: "").toString()
 
         val client2 = ClientEdgeBase(baseUrl, MemoryTokenStorage())
         client2.auth.signIn(email, newPassword)
         val sessionsAfterSecondSignIn = client.auth.listSessions()
         assertTrue(sessionsAfterSecondSignIn.isNotEmpty())
 
-        if (sessionsAfterSecondSignIn.size >= 2) {
-            client.auth.revokeSession((sessionsAfterSecondSignIn.last()["id"] ?: "").toString())
+        val target = sessionsAfterSecondSignIn.firstOrNull {
+            (it["id"] ?: "").toString() != ownSessionId
+        }
+        if (target != null) {
+            val targetId = (target["id"] ?: "").toString()
+            client.auth.revokeSession(targetId)
             val remaining = client.auth.listSessions()
-            assertTrue(remaining.size < sessionsAfterSecondSignIn.size)
+            assertTrue(remaining.none { (it["id"] ?: "").toString() == targetId })
         }
 
         client2.destroy()
