@@ -454,13 +454,13 @@ describe('js-web:auth — requestPasswordReset', () => {
     }
   });
 
-  it('sign in with OAuth → url 구성', () => {
+  it('sign in with OAuth → url 구성', async () => {
     const result = await client.auth.signInWithOAuth('google');
     expect(result.url).toContain('/api/auth/oauth/google');
     expect(result.url).toContain('redirect_url=');
   });
 
-  it('sign in with OAuth → custom redirectUrl 포함', () => {
+  it('sign in with OAuth → custom redirectUrl 포함', async () => {
     const result = await client.auth.signInWithOAuth('google', {
       redirectUrl: 'http://localhost:4173/auth/callback',
     });
