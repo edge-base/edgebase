@@ -20,3 +20,6 @@ d5844cc5f94ac2a05db637a5cd6fd8e98162ca4b:packages/server/src/__tests__/totp.test
 569a5750e958d78c05c332ab153dfe6d0d754a5d:packages/server/edgebase.test.config.ts:private-key:253
 569a5750e958d78c05c332ab153dfe6d0d754a5d:packages/server/wrangler.test.toml:private-key:86
 569a5750e958d78c05c332ab153dfe6d0d754a5d:packages/server/test/integration/cli.test.ts:generic-api-key:787
+# Deterministic fake JWT ("header.<base64 test payload>.signature") in a Swift
+# iOS token-restore unit test; not a real credential.
+b93d1781d29f1b6ef77ce447d79840e17dab60a0:packages/sdk/swift/packages/ios/Tests/IosUnitTests.swift:generic-api-key:885
