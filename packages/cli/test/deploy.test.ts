@@ -470,7 +470,10 @@ describe('version-bound deploy secrets', () => {
     expect(payload.JWT_USER_SECRET).toHaveLength(64);
     expect(payload.JWT_ADMIN_SECRET).toHaveLength(64);
     expect(payload).not.toHaveProperty('EDGEBASE_RUNTIME_MODE');
-    expect(statSync(secretsPath!).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      // NTFS cannot represent POSIX 0600; Node reports 0o666 on Windows.
+      expect(statSync(secretsPath!).mode & 0o777).toBe(0o600);
+    }
 
     const persisted = JSON.parse(
       readFileSync(join(tmpDir, '.edgebase', 'secrets.json'), 'utf8'),
@@ -542,7 +545,10 @@ describe('version-bound deploy secrets', () => {
       { storeCfCredentials: false },
     );
 
-    expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      // NTFS cannot represent POSIX 0600; Node reports 0o666 on Windows.
+      expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
+    }
     expect(JSON.parse(readFileSync(secretsPath, 'utf-8'))).toEqual(validManagedSecrets);
   });
 
@@ -582,7 +588,10 @@ describe('version-bound deploy secrets', () => {
       JWT_USER_SECRET: persisted.JWT_USER_SECRET,
       JWT_ADMIN_SECRET: persisted.JWT_ADMIN_SECRET,
     });
-    expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      // NTFS cannot represent POSIX 0600; Node reports 0o666 on Windows.
+      expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('fails closed before publish when an existing Worker has no local managed-secret authority', () => {
@@ -623,7 +632,10 @@ describe('version-bound deploy secrets', () => {
       },
     )).toThrow(/existing remote SERVICE_KEY.*valid authoritative local value/i);
     expect(JSON.parse(readFileSync(secretsPath, 'utf-8'))).toEqual(hostile);
-    expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      // NTFS cannot represent POSIX 0600; Node reports 0o666 on Windows.
+      expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('retains verified local authority without re-uploading existing managed secrets', () => {
@@ -644,7 +656,10 @@ describe('version-bound deploy secrets', () => {
 
     expect(deploySecretsPath).toBeNull();
     expect(JSON.parse(readFileSync(secretsPath, 'utf-8'))).toEqual(validManagedSecrets);
-    expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      // NTFS cannot represent POSIX 0600; Node reports 0o666 on Windows.
+      expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('maps an explicit self-destruct token only to the scoped runtime name', () => {
