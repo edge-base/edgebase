@@ -681,9 +681,12 @@ final class TokenManagerIosUnitTests: XCTestCase {
             XCTAssertTrue(error.causeDescription.contains("saveFailed"))
         }
 
-        XCTAssertEqual(await tm.getRefreshToken(), "original-refresh")
-        XCTAssertEqual(try await tm.getAccessToken(), "original-access")
-        XCTAssertEqual(try await storage.getTokens()?.refreshToken, "original-refresh")
+        let originalRefresh = await tm.getRefreshToken()
+        XCTAssertEqual(originalRefresh, "original-refresh")
+        let originalAccess = try await tm.getAccessToken()
+        XCTAssertEqual(originalAccess, "original-access")
+        let originalStoredRefresh = try await storage.getTokens()?.refreshToken
+        XCTAssertEqual(originalStoredRefresh, "original-refresh")
     }
 
     func test_captchaUnavailableDiagnosticContract() {
@@ -702,7 +705,8 @@ final class TokenManagerIosUnitTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
-        XCTAssertNil(try? await tm.getAccessToken())
+        let clearedAccess = try? await tm.getAccessToken()
+        XCTAssertNil(clearedAccess)
     }
 }
 
@@ -752,7 +756,8 @@ final class EmailLinkCheckpointIosUnitTests: XCTestCase {
         )
         try await storage.saveTokens(original)
         let tokenManager = TokenManager(storage: storage)
-        XCTAssertTrue(try await tokenManager.tryRestoreSession())
+        let didRestore = try await tokenManager.tryRestoreSession()
+        XCTAssertTrue(didRestore)
 
         let recorder = FunctionRequestRecorder()
         MockRoomURLProtocol.requestHandler = { request in
@@ -793,9 +798,12 @@ final class EmailLinkCheckpointIosUnitTests: XCTestCase {
             XCTAssertEqual(error.operation, "save")
             XCTAssertTrue(error.causeDescription.contains("saveFailed"))
         }
-        XCTAssertEqual(try await tokenManager.getAccessToken(), "anonymous-access")
-        XCTAssertEqual(await tokenManager.getRefreshToken(), "anonymous-refresh")
-        XCTAssertEqual(try await storage.getTokens()?.refreshToken, "anonymous-refresh")
+        let anonAccess = try await tokenManager.getAccessToken()
+        XCTAssertEqual(anonAccess, "anonymous-access")
+        let anonRefresh = await tokenManager.getRefreshToken()
+        XCTAssertEqual(anonRefresh, "anonymous-refresh")
+        let anonStoredRefresh = try await storage.getTokens()?.refreshToken
+        XCTAssertEqual(anonStoredRefresh, "anonymous-refresh")
 
         await storage.setFailWrites(false)
         let replay = try await auth.linkWithEmail(
@@ -804,9 +812,12 @@ final class EmailLinkCheckpointIosUnitTests: XCTestCase {
         )
 
         XCTAssertEqual(replay["sessionId"] as? String, "permanent-session")
-        XCTAssertEqual(try await tokenManager.getAccessToken(), "permanent-access")
-        XCTAssertEqual(await tokenManager.getRefreshToken(), "permanent-refresh")
-        XCTAssertEqual(try await storage.getTokens()?.refreshToken, "permanent-refresh")
+        let permAccess = try await tokenManager.getAccessToken()
+        XCTAssertEqual(permAccess, "permanent-access")
+        let permRefresh = await tokenManager.getRefreshToken()
+        XCTAssertEqual(permRefresh, "permanent-refresh")
+        let permStoredRefresh = try await storage.getTokens()?.refreshToken
+        XCTAssertEqual(permStoredRefresh, "permanent-refresh")
 
         let requests = recorder.snapshot()
         XCTAssertEqual(requests.count, 2)
@@ -890,8 +901,10 @@ final class AuthClientIosUnitTests: XCTestCase {
             tokenStorage: storage
         )
 
-        XCTAssertTrue(try await client.tryRestoreSession())
-        XCTAssertEqual(await client.auth.currentUser()?["id"] as? String, "restored-user")
+        let clientRestored = try await client.tryRestoreSession()
+        XCTAssertTrue(clientRestored)
+        let restoredUserId = await client.auth.currentUser()?["id"] as? String
+        XCTAssertEqual(restoredUserId, "restored-user")
     }
 }
 
