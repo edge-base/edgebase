@@ -58,6 +58,10 @@ pnpm --filter @edge-base/dashboard test
 pnpm --dir packages/server test
 ```
 
+For running the per-language SDK end-to-end suites locally (toolchain matrix,
+`run-with-services.mjs` commands, and reproduction gotchas), see
+[`dev/testing/sdk-e2e.md`](dev/testing/sdk-e2e.md).
+
 ## Test Debugging Principles
 
 - Never skip failing tests just to get green

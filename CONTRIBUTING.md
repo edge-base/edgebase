@@ -46,6 +46,10 @@ pnpm lint
 pnpm build
 ```
 
+To run a language SDK's end-to-end suite against a local test server (toolchain
+requirements and per-language commands), see
+[`dev/testing/sdk-e2e.md`](dev/testing/sdk-e2e.md).
+
 ## Project Structure
 
 ```
