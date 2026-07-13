@@ -89,6 +89,18 @@ test('workflow containers and every external action are immutable', () => {
   }
 });
 
+test('hosted CI schedules only Linux and macOS runners', () => {
+  const workflowsDir = resolve(REPO_ROOT, '.github/workflows');
+  for (const filename of readdirSync(workflowsDir).filter((name) => /\.ya?ml$/.test(name))) {
+    const workflow = readFileSync(join(workflowsDir, filename), 'utf8');
+    assert.doesNotMatch(
+      workflow,
+      /windows(?:-latest|-\d{4})|runner\.os\s*(?:==|!=)\s*['"]Windows['"]/i,
+      `${filename} must not schedule or branch on unsupported Windows CI runners`,
+    );
+  }
+});
+
 test('secret scanning covers protected branches and all fetched history', () => {
   const workflow = read('.github/workflows/secret-scan.yml');
   assert.match(workflow, /push:\n\s+branches: \[main, develop\]/);
