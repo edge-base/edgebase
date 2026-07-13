@@ -273,6 +273,13 @@ export default defineConfig({
     timeout: 60_000,
   }).trim();
   ensure(containerId.length > 0, 'Docker run did not return a container id.');
+  run('docker', [
+    'exec',
+    containerName,
+    'sh',
+    '-lc',
+    'test -s /etc/ssl/certs/ca-certificates.crt',
+  ], { capture: true, timeout: 20_000 });
 
   const healthUrl = `http://127.0.0.1:${port}/api/health`;
   const frontendUrl = `http://127.0.0.1:${port}/`;

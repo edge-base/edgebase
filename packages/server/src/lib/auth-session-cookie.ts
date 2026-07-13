@@ -18,6 +18,7 @@ type SameSite = 'strict' | 'lax' | 'none';
 
 interface SessionCookieConfig {
   enabled: boolean;
+  allowInsecureLocalhost: boolean;
   name: string;
   legacyNames: string[];
   sameSite: SameSite;
@@ -33,6 +34,7 @@ function cookieConfig(c: AuthContext): SessionCookieConfig {
   const configured = parseConfig(c.env)?.auth?.session?.cookie;
   return {
     enabled: configured?.enabled === true,
+    allowInsecureLocalhost: configured?.allowInsecureLocalhost === true,
     name: configured?.name ?? 'edgebase-refresh',
     legacyNames: configured?.legacyNames ?? [],
     sameSite: configured?.sameSite ?? 'strict',
@@ -59,6 +61,14 @@ function isExplicitLocalDevelopmentLoopback(c: AuthContext): boolean {
   const ip = getTrustedClientIp(c.env, c.req.raw);
   const loopbackPeer = ip === '::1' || ip === '[::1]' || ip?.startsWith('127.') === true;
   return loopbackPeer && url.protocol === 'http:'
+    && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]');
+}
+
+function isExplicitSelfHostedLocalhost(c: AuthContext): boolean {
+  if (c.env?.EDGEBASE_RUNTIME_MODE !== 'self-hosted') return false;
+  if (!cookieConfig(c).allowInsecureLocalhost) return false;
+  const url = new URL(c.req.raw.url);
+  return url.protocol === 'http:'
     && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]');
 }
 
@@ -100,6 +110,7 @@ export function assertCookieAuthEnabled(c: AuthContext): void {
     parseConfig(c.env)?.release === true
     && !isSecureRequest(c)
     && !isExplicitLocalDevelopmentLoopback(c)
+    && !isExplicitSelfHostedLocalhost(c)
   ) {
     throw new EdgeBaseError(
       400,

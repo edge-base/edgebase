@@ -445,6 +445,7 @@ Scaffold a plugin package with server and optional client SDK boilerplate.
 
 ```bash
 npx edgebase docker build
+npx edgebase docker build --context-only
 npx edgebase docker run
 npx edgebase docker run --port 3000 --detach
 npx edgebase docker run --bootstrap-admin-email admin@example.com
@@ -455,6 +456,10 @@ Build and run the self-hosted Docker image.
 When `frontend.directory` is configured, `docker build` copies that prebuilt bundle into the image and `docker run` serves it on the same origin as the API.
 
 `docker build` first creates a portable app bundle under `.edgebase/targets/docker-app`, then builds the image from that bundle-centric runtime layout.
+
+Use `docker build --context-only` to prepare the portable bundle and the synthetic context under `.edgebase/targets/docker-context` without requiring or invoking a local Docker daemon. This is useful when another tool, host, or CI builder will build the image.
+
+If the project Dockerfile needs additional build-time files, place them under a project-level `docker-context/` directory. EdgeBase copies its contents into the synthetic context after generating the portable bundle. `Dockerfile`, `.dockerignore`, and `.edgebase/` remain generator-owned; matching entries under `docker-context/` are ignored so they cannot replace the generated build inputs.
 
 ### `pack`
 

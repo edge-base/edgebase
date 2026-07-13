@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4
+
+- Synchronized the Swift package with the EdgeBase 0.4.4 patch release.
+- No public Swift API compatibility break is introduced.
+
 ## 0.4.3
 
 - Synchronized the Swift package with the EdgeBase 0.4.3 patch release.

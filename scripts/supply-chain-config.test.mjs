@@ -16,6 +16,16 @@ test('Docker runtime uses immutable audited inputs and a self-hosted trust mode'
   );
   assert.match(dockerfile, /npm install -g npm@\d+\.\d+\.\d+/);
   assert.match(dockerfile, /npm install -g wrangler@\d+\.\d+\.\d+/);
+  assert.match(
+    dockerfile,
+    /apt-get install -y --no-install-recommends ca-certificates/,
+    'Docker runtimes must trust public HTTPS APIs through the system CA bundle',
+  );
+  assert.match(
+    dockerfile,
+    /VOLUME \["\/data"\]/,
+    'Docker runtimes must create a data volume when the operator does not map one explicitly',
+  );
   assert.doesNotMatch(dockerfile, /\bcorepack\b|\bpnpm@/);
   assert.match(dockerfile, /export EDGEBASE_RUNTIME_MODE=self-hosted/);
   assert.match(dockerfile, /ENV EDGEBASE_RUNTIME_MODE=self-hosted/);
