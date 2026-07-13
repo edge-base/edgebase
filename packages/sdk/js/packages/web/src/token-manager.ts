@@ -1021,12 +1021,19 @@ export class TokenManager {
       };
       const timeout = setTimeout(() => {
         if (settled) return;
-        settled = true;
-        cleanup();
         const activeLock = parseRefreshLock(this.storage.getItem(this.keys.refreshLockKey));
         if (!activeLock || !isFreshRefreshLock(activeLock)) {
           this.storage.removeItem(this.keys.refreshLockKey);
+          // The cookie and non-secret session marker are still authoritative
+          // enough to attempt server revalidation. If the leader tab died,
+          // continue into refreshAfterCookieSignal so this same request can
+          // take over the stale lock instead of surfacing a signed-out UI
+          // until the user reloads again.
+          finish();
+          return;
         }
+        settled = true;
+        cleanup();
         reject(new EdgeBaseError(0, 'Token refresh timeout'));
       }, LOCK_TIMEOUT_MS);
 
