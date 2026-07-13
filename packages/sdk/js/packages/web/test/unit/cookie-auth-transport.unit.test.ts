@@ -603,6 +603,78 @@ describe('HttpOnly-cookie TokenManager', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
     manager.destroy();
   });
+
+  it('takes over a stale cookie refresh lock when the leader tab dies', async () => {
+    vi.useFakeTimers();
+    try {
+      const { store } = installBrowserMocks();
+      store.set(
+        'edgebase:cookie-session',
+        JSON.stringify({ version: 1, userId: 'takeover-user' }),
+      );
+      store.set(
+        'edgebase:refresh-lock',
+        JSON.stringify({ ownerId: 'closed-peer', timestamp: Date.now() }),
+      );
+      const manager = new TokenManager('https://api.example.com', {
+        refreshTokenTransport: 'httpOnlyCookie',
+      });
+      const freshAccess = makeJwt('takeover-user');
+      const refresh = vi.fn(async () => ({ accessToken: freshAccess, refreshToken: '' }));
+
+      const result = manager.getAccessToken(refresh);
+      await vi.advanceTimersByTimeAsync(10_100);
+
+      await expect(result).resolves.toBe(freshAccess);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(store.has('edgebase:refresh-lock')).toBe(false);
+      expect(manager.getCurrentUser()?.id).toBe('takeover-user');
+      manager.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not take over a cookie refresh lock whose leader is still heartbeating', async () => {
+    vi.useFakeTimers();
+    try {
+      const { store } = installBrowserMocks();
+      store.set(
+        'edgebase:cookie-session',
+        JSON.stringify({ version: 1, userId: 'heartbeat-user' }),
+      );
+      store.set(
+        'edgebase:refresh-lock',
+        JSON.stringify({ ownerId: 'live-peer', timestamp: Date.now() }),
+      );
+      const manager = new TokenManager('https://api.example.com', {
+        refreshTokenTransport: 'httpOnlyCookie',
+      });
+      const refresh = vi.fn(async () => ({
+        accessToken: makeJwt('heartbeat-user'),
+        refreshToken: '',
+      }));
+
+      const result = manager.getAccessToken(refresh);
+      const outcome = result.then(
+        () => null,
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(9_000);
+      store.set(
+        'edgebase:refresh-lock',
+        JSON.stringify({ ownerId: 'live-peer', timestamp: Date.now() }),
+      );
+      await vi.advanceTimersByTimeAsync(1_100);
+
+      await expect(outcome).resolves.toMatchObject({ code: 0 });
+      expect(refresh).not.toHaveBeenCalled();
+      expect(store.has('edgebase:refresh-lock')).toBe(true);
+      manager.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('HttpOnly-cookie AuthClient', () => {

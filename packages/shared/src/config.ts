@@ -516,6 +516,12 @@ export interface AuthConfig {
     cookie?: {
       /** Enable `X-EdgeBase-Auth-Transport: cookie` for browser clients. */
       enabled: boolean;
+      /**
+       * Allow an HttpOnly, non-Secure cookie on plain-HTTP localhost when the
+       * CLI-owned runtime mode is `self-hosted`. This is intended for local
+       * Docker Desktop access; non-loopback hosts remain HTTPS-only.
+       */
+      allowInsecureLocalhost?: boolean;
       /** Base cookie name. Secure requests add the `__Host-` prefix. */
       name?: string;
       /**
@@ -2236,6 +2242,12 @@ export function defineConfig(config: EdgeBaseConfig): EdgeBaseConfig {
     }
     if (typeof authCookie.enabled !== 'boolean') {
       throw new Error('auth.session.cookie.enabled must be a boolean.');
+    }
+    if (
+      authCookie.allowInsecureLocalhost !== undefined
+      && typeof authCookie.allowInsecureLocalhost !== 'boolean'
+    ) {
+      throw new Error('auth.session.cookie.allowInsecureLocalhost must be a boolean.');
     }
     if (authCookie.name !== undefined) {
       if (

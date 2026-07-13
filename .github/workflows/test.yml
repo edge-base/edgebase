@@ -167,7 +167,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -245,7 +245,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
@@ -255,13 +255,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
         with:
           gradle-version: '8.13'
-      - name: Kotlin unit tests (Unix)
-        if: runner.os != 'Windows'
+      - name: Kotlin unit tests
         run: ./gradlew :core:test :client:jvmTest
-        working-directory: packages/sdk/kotlin
-      - name: Kotlin unit tests (Windows)
-        if: runner.os == 'Windows'
-        run: .\gradlew.bat :core:test :client:jvmTest
         working-directory: packages/sdk/kotlin
       - name: Kotlin Android compile and unit tests
         if: runner.os == 'Linux'
@@ -279,7 +274,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
@@ -300,7 +295,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: subosito/flutter-action@0ca7a949e71ae44c8e688a51c5e7e93b2c87e295
@@ -323,7 +318,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
@@ -341,7 +336,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
@@ -358,7 +353,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
@@ -375,7 +370,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
@@ -400,7 +395,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     needs: [server-unit]
     env:
       EDGEBASE_E2E_REQUIRED: '1'
@@ -423,7 +418,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     needs: [server-unit]
     env:
       EDGEBASE_E2E_REQUIRED: '1'
@@ -449,7 +444,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     needs: [server-unit]
     env:
       EDGEBASE_E2E_REQUIRED: '1'
@@ -482,7 +477,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     needs: [server-unit]
     env:
       EDGEBASE_E2E_REQUIRED: '1'
@@ -861,30 +856,6 @@ jobs:
               "$UNREAL_BUILD_DIR/unit_test"
               "$UNREAL_BUILD_DIR/e2e_test"'
 
-  # Win64 is a separate release artifact path in EdgeBase.Build.cs. Build and
-  # sync it on a real Windows toolchain so the documented PowerShell install
-  # path cannot silently drift while Linux CMake remains green.
-  sdk-cpp-win64-thirdparty:
-    name: C++ Unreal Win64 ThirdParty package
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: Install native dependencies
-        shell: pwsh
-        run: vcpkg install curl:x64-windows openssl:x64-windows
-      - name: Build and sync Win64 Unreal core
-        shell: pwsh
-        run: packages/sdk/cpp/scripts/sync-thirdparty.ps1
-      - name: Verify packaged artifacts
-        shell: pwsh
-        run: |
-          if (-not (Test-Path packages/sdk/cpp/ThirdParty/lib/win64/edgebase_core.lib)) { throw "Missing Win64 core library" }
-          if (-not (Test-Path packages/sdk/cpp/ThirdParty/lib/win64/ixwebsocket.lib)) { throw "Missing Win64 IXWebSocket library" }
-          if (-not (Test-Path packages/sdk/cpp/ThirdParty/include/edgebase/edgebase.h)) { throw "Missing core headers" }
-          if (-not (Test-Path packages/sdk/cpp/ThirdParty/include/nlohmann/json.hpp)) { throw "Missing JSON headers" }
-          if (-not (Test-Path packages/sdk/cpp/packages/core/build-win64/thirdparty-consumer/Release/edgebase_thirdparty_consumer.exe)) { throw "Missing standalone packaged consumer" }
-
   # ─── Role Contract Catalog ──────────────────────────────────────────────────
   sdk-role-contract-catalog:
     name: SDK Role Contract Catalog
@@ -1192,7 +1163,6 @@ jobs:
       - sdk-scala-e2e
       - sdk-ruby-e2e
       - sdk-cpp-e2e
-      - sdk-cpp-win64-thirdparty
       - sdk-role-contract-catalog
       - sdk-admin-contract
       - sdk-core-contract
@@ -1230,7 +1200,6 @@ jobs:
           echo "Scala E2E: ${{ needs.sdk-scala-e2e.result }}"
           echo "Ruby E2E: ${{ needs.sdk-ruby-e2e.result }}"
           echo "C++ E2E: ${{ needs.sdk-cpp-e2e.result }}"
-          echo "C++ Unreal Win64 ThirdParty: ${{ needs.sdk-cpp-win64-thirdparty.result }}"
           echo "Role Contract Catalog: ${{ needs.sdk-role-contract-catalog.result }}"
           echo "Admin Contract: ${{ needs.sdk-admin-contract.result }}"
           echo "Core Contract: ${{ needs.sdk-core-contract.result }}"

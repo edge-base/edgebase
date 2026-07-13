@@ -2,15 +2,20 @@
  * Tests for CLI docker command — findProjectRoot, argument construction.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, symlinkSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { _internals } from '../src/commands/docker.js';
+import { _internals, dockerCommand } from '../src/commands/docker.js';
 import { buildManagedD1DatabaseName } from '../src/lib/managed-resource-names.js';
+import { resolveTsxCommand } from '../src/lib/node-tools.js';
 
 let tmpDir: string;
-const dockerfilePath = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'Dockerfile');
+const cliPackageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const dockerfilePath = resolve(cliPackageDir, '..', '..', 'Dockerfile');
+const tsxCommand = resolveTsxCommand();
+const tsxExecOptions = /\.cmd$/i.test(tsxCommand.command) ? { shell: true as const } : {};
 
 beforeEach(() => {
   tmpDir = join(tmpdir(), `eb-docker-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -74,6 +79,85 @@ describe('Docker build argument construction', () => {
     expect(args[2]).toBe('myorg/edgebase:v1.0');
   });
 
+  it('exposes context-only preparation on the docker build command', () => {
+    const buildCommand = dockerCommand.commands.find((command) => command.name() === 'build');
+
+    expect(buildCommand?.options.some((option) => option.long === '--context-only')).toBe(true);
+  });
+
+  it('prepares a portable build context without invoking a Docker executable', { timeout: 60_000 }, () => {
+    mkdirSync(join(tmpDir, 'functions'), { recursive: true });
+    writeFileSync(
+      join(tmpDir, 'edgebase.config.ts'),
+      'export default { databases: { shared: { tables: {} } } };\n',
+    );
+    writeFileSync(
+      join(tmpDir, 'functions', 'health.ts'),
+      "export async function GET() { return new Response('ok'); }\n",
+    );
+    writeFileSync(
+      join(tmpDir, 'Dockerfile'),
+      'FROM node:22\nCOPY .edgebase/targets/docker-app/ /app/\n',
+    );
+
+    const fakeBinDir = join(tmpDir, 'fake-bin');
+    const dockerMarker = join(tmpDir, 'docker-was-invoked');
+    mkdirSync(fakeBinDir, { recursive: true });
+    writeFileSync(
+      join(fakeBinDir, 'docker'),
+      '#!/bin/sh\ntouch "$DOCKER_CALLED_MARKER"\nexit 97\n',
+    );
+    chmodSync(join(fakeBinDir, 'docker'), 0o755);
+
+    const result = spawnSync(
+      tsxCommand.command,
+      [
+        ...tsxCommand.argsPrefix,
+        resolve(cliPackageDir, 'src', 'index.ts'),
+        '--json',
+        'docker',
+        'build',
+        '--context-only',
+        '--tag',
+        'example/edgebase:test',
+      ],
+      {
+        cwd: tmpDir,
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          PATH: `${fakeBinDir}:${process.env.PATH ?? ''}`,
+          DOCKER_CALLED_MARKER: dockerMarker,
+          NO_COLOR: '1',
+        },
+        stdio: 'pipe',
+        ...tsxExecOptions,
+      },
+    );
+
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      operation: string;
+      tag: string;
+      projectDir: string;
+      contextDir: string;
+    };
+    expect(payload).toMatchObject({
+      operation: 'build-context',
+      tag: 'example/edgebase:test',
+      contextDir: join(payload.projectDir, '.edgebase', 'targets', 'docker-context'),
+    });
+    expect(existsSync(dockerMarker)).toBe(false);
+    expect(existsSync(join(payload.contextDir, 'Dockerfile'))).toBe(true);
+    expect(existsSync(join(
+      payload.contextDir,
+      '.edgebase',
+      'targets',
+      'docker-app',
+      'edgebase-app.json',
+    ))).toBe(true);
+  });
+
   it('creates a minimal docker build context with the bundled app payload', () => {
     writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:22\nCOPY .edgebase/targets/docker-app/ ./\n');
     writeFileSync(join(tmpDir, '.dockerignore'), 'node_modules\n.edgebase\n');
@@ -98,6 +182,47 @@ describe('Docker build argument construction', () => {
     expect(existsSync(join(contextDir, '.edgebase', 'targets', 'docker-app', 'edgebase-app.json'))).toBe(true);
     expect(existsSync(join(contextDir, '.edgebase', 'targets', 'docker-app', '.edgebase', 'runtime', 'server', 'node_modules', 'hono'))).toBe(true);
     expect(existsSync(join(contextDir, 'node_modules'))).toBe(false);
+  });
+
+  it('copies optional project docker-context support files into the synthetic context', () => {
+    writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:22\nCOPY entrypoint.mjs /app/entrypoint.mjs\n');
+    const bundleDir = join(tmpDir, '.edgebase', 'targets', 'docker-app');
+    mkdirSync(bundleDir, { recursive: true });
+    writeFileSync(join(bundleDir, 'edgebase-app.json'), '{}\n');
+    mkdirSync(join(tmpDir, 'docker-context', 'scripts'), { recursive: true });
+    writeFileSync(join(tmpDir, 'docker-context', 'entrypoint.mjs'), 'export {};\n');
+    writeFileSync(join(tmpDir, 'docker-context', 'scripts', 'healthcheck.sh'), '#!/bin/sh\nexit 0\n');
+
+    const contextDir = _internals.prepareDockerBuildContext(tmpDir, bundleDir);
+
+    expect(readFileSync(join(contextDir, 'entrypoint.mjs'), 'utf-8')).toBe('export {};\n');
+    expect(readFileSync(join(contextDir, 'scripts', 'healthcheck.sh'), 'utf-8')).toContain('exit 0');
+  });
+
+  it('keeps generated Docker context entries protected from docker-context overrides', () => {
+    writeFileSync(join(tmpDir, 'Dockerfile'), 'FROM node:22\n');
+    writeFileSync(join(tmpDir, '.dockerignore'), 'node_modules\n');
+    const bundleDir = join(tmpDir, '.edgebase', 'targets', 'docker-app');
+    mkdirSync(bundleDir, { recursive: true });
+    writeFileSync(join(bundleDir, 'edgebase-app.json'), '{"generated":true}\n');
+
+    const projectContextDir = join(tmpDir, 'docker-context');
+    mkdirSync(join(projectContextDir, '.edgebase', 'targets', 'docker-app'), { recursive: true });
+    writeFileSync(join(projectContextDir, 'Dockerfile'), 'FROM malicious\n');
+    writeFileSync(join(projectContextDir, '.dockerignore'), 'Dockerfile\n');
+    writeFileSync(
+      join(projectContextDir, '.edgebase', 'targets', 'docker-app', 'edgebase-app.json'),
+      '{"generated":false}\n',
+    );
+
+    const contextDir = _internals.prepareDockerBuildContext(tmpDir, bundleDir);
+
+    expect(readFileSync(join(contextDir, 'Dockerfile'), 'utf-8')).toBe('FROM node:22\n');
+    expect(readFileSync(join(contextDir, '.dockerignore'), 'utf-8')).toContain('node_modules');
+    expect(readFileSync(
+      join(contextDir, '.edgebase', 'targets', 'docker-app', 'edgebase-app.json'),
+      'utf-8',
+    )).toBe('{"generated":true}\n');
   });
 
   it('adds managed D1 bindings to the Docker bundle wrangler config', () => {

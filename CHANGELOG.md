@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.4 — 2026-07-13
+
+### Added
+
+- The Docker CLI can prepare its portable bundle and synthetic build context
+  without invoking Docker through `edgebase docker build --context-only`.
+  Projects can add bounded support files from `docker-context/` while generated
+  `Dockerfile`, `.dockerignore`, and `.edgebase/` inputs remain protected.
+- Release cookie authentication has an explicit self-hosted-only
+  `auth.session.cookie.allowInsecureLocalhost` option for Docker Desktop access
+  through plain-HTTP `localhost`/loopback. Non-loopback HTTP remains rejected.
+
+### Fixed
+
+- The runtime Docker image now includes the public CA bundle required by
+  workerd for outbound HTTPS APIs and declares `/data` as a Docker volume, so a
+  first run gets persistent storage even when the operator does not map one.
+
 ## 0.4.3 — 2026-07-13
 
 ### Fixed

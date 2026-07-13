@@ -16,6 +16,16 @@ test('Docker runtime uses immutable audited inputs and a self-hosted trust mode'
   );
   assert.match(dockerfile, /npm install -g npm@\d+\.\d+\.\d+/);
   assert.match(dockerfile, /npm install -g wrangler@\d+\.\d+\.\d+/);
+  assert.match(
+    dockerfile,
+    /apt-get install -y --no-install-recommends ca-certificates/,
+    'Docker runtimes must trust public HTTPS APIs through the system CA bundle',
+  );
+  assert.match(
+    dockerfile,
+    /VOLUME \["\/data"\]/,
+    'Docker runtimes must create a data volume when the operator does not map one explicitly',
+  );
   assert.doesNotMatch(dockerfile, /\bcorepack\b|\bpnpm@/);
   assert.match(dockerfile, /export EDGEBASE_RUNTIME_MODE=self-hosted/);
   assert.match(dockerfile, /ENV EDGEBASE_RUNTIME_MODE=self-hosted/);
@@ -79,6 +89,18 @@ test('workflow containers and every external action are immutable', () => {
   }
 });
 
+test('hosted CI schedules only Linux and macOS runners', () => {
+  const workflowsDir = resolve(REPO_ROOT, '.github/workflows');
+  for (const filename of readdirSync(workflowsDir).filter((name) => /\.ya?ml$/.test(name))) {
+    const workflow = readFileSync(join(workflowsDir, filename), 'utf8');
+    assert.doesNotMatch(
+      workflow,
+      /windows(?:-latest|-\d{4})|win64|runner\.os\s*(?:==|!=)\s*['"]Windows['"]/i,
+      `${filename} must not schedule, branch on, or require unsupported Windows CI jobs`,
+    );
+  }
+});
+
 test('secret scanning covers protected branches and all fetched history', () => {
   const workflow = read('.github/workflows/secret-scan.yml');
   assert.match(workflow, /push:\n\s+branches: \[main, develop\]/);
@@ -90,7 +112,7 @@ test('secret scanning covers protected branches and all fetched history', () => 
 
 test('Dependabot covers workflow, Docker, workspace, and maintained SDK ecosystems', () => {
   const config = read('.github/dependabot.yml');
-  for (const ecosystem of [
+  const ecosystems = [
     'github-actions',
     'docker',
     'npm',
@@ -103,9 +125,24 @@ test('Dependabot covers workflow, Docker, workspace, and maintained SDK ecosyste
     'nuget',
     'swift',
     'mix',
-  ]) {
+  ];
+  for (const ecosystem of ecosystems) {
     assert.match(config, new RegExp(`package-ecosystem: ${ecosystem}\\b`));
   }
   assert.match(config, /package-ecosystem: docker\n\s+directory: \//);
   assert.match(config, /package-ecosystem: npm\n\s+directory: \//);
+
+  const updateBlocks = config
+    .split(/^  - package-ecosystem: /m)
+    .slice(1)
+    .map((block) => `package-ecosystem: ${block}`);
+  assert.equal(updateBlocks.length, ecosystems.length);
+  for (const block of updateBlocks) {
+    const ecosystem = block.match(/^package-ecosystem: ([^\n]+)/)?.[1];
+    assert.match(
+      block,
+      /\n\s+cooldown:\n\s+default-days: 7\b/,
+      `${ecosystem} updates must wait seven days before adopting a new release`,
+    );
+  }
 });

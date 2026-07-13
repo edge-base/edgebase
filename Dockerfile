@@ -2,8 +2,14 @@ FROM node:22-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547c
 
 # workerd requires glibc, so use Debian slim instead of Alpine. Keep npm pinned
 # to the audited release used by consumer runtime images. The container invokes
-# Wrangler directly and does not need a package-manager CLI at runtime.
-RUN npm install -g npm@12.0.1 && npm install -g wrangler@4.103.0
+# Wrangler directly and does not need a package-manager CLI at runtime. Workerd
+# uses the system trust store for outbound HTTPS, so keep the public CA bundle
+# in the otherwise-minimal image.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    npm install -g npm@12.0.1 && \
+    npm install -g wrangler@4.103.0
 
 WORKDIR /app
 
@@ -56,6 +62,8 @@ ENV PERSIST_DIR=/data
 ENV WRANGLER_CONFIG=wrangler.toml
 ENV CLOUDFLARE_INCLUDE_PROCESS_ENV=true
 ENV EDGEBASE_RUNTIME_MODE=self-hosted
+
+VOLUME ["/data"]
 
 EXPOSE 8787
 

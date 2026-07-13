@@ -226,6 +226,20 @@ describe('defineConfig', () => {
     expect(config.trustSelfHostedProxy).toBe(true);
   });
 
+  it('should accept self-hosted localhost HTTP cookie opt-in', () => {
+    const config = defineConfig({
+      auth: {
+        session: {
+          cookie: {
+            enabled: true,
+            allowInsecureLocalhost: true,
+          },
+        },
+      },
+    });
+    expect(config.auth?.session?.cookie?.allowInsecureLocalhost).toBe(true);
+  });
+
   it('should accept frontend config for a built static bundle', () => {
     const config = defineConfig({
       frontend: {
@@ -246,6 +260,19 @@ describe('defineConfig', () => {
 
   it('should reject non-boolean trustSelfHostedProxy values', () => {
     expect(() => defineConfig({ trustSelfHostedProxy: 'yes' as never })).toThrow(/trustSelfHostedProxy must be a boolean/);
+  });
+
+  it('should reject non-boolean self-hosted localhost HTTP cookie opt-in', () => {
+    expect(() => defineConfig({
+      auth: {
+        session: {
+          cookie: {
+            enabled: true,
+            allowInsecureLocalhost: 'yes' as never,
+          },
+        },
+      },
+    })).toThrow(/auth\.session\.cookie\.allowInsecureLocalhost must be a boolean/);
   });
 
   it('should reject empty frontend.directory values', () => {

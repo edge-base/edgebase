@@ -318,6 +318,58 @@ describe('refresh cookie session transport', () => {
     expect(await nonLoopbackPeer.json()).toMatchObject({ slug: 'insecure-cookie-config' });
   });
 
+  it('permits self-hosted Docker localhost HTTP only with the explicit cookie opt-in', async () => {
+    setConfig({
+      release: true,
+      auth: {
+        session: {
+          cookie: {
+            enabled: true,
+            name: 'test-refresh',
+            sameSite: 'strict',
+            allowInsecureLocalhost: true,
+          },
+        },
+      },
+    });
+    const headers = {
+      Origin: 'http://localhost:8787',
+      'CF-Connecting-IP': '172.17.0.1',
+      'X-EdgeBase-Auth-Transport': 'cookie',
+    };
+    const localhost = await createApp().request('http://localhost:8787/issue', {
+      method: 'POST',
+      headers,
+    }, { EDGEBASE_RUNTIME_MODE: 'self-hosted' });
+
+    expect(localhost.status).toBe(200);
+    expect(localhost.headers.get('Set-Cookie')).toContain('test-refresh=refresh-token');
+    expect(localhost.headers.get('Set-Cookie')).toContain('HttpOnly');
+    expect(localhost.headers.get('Set-Cookie')).not.toContain('Secure');
+
+    const publicHost = await createApp().request('http://desktop.example/issue', {
+      method: 'POST',
+      headers: { ...headers, Origin: 'http://desktop.example' },
+    }, { EDGEBASE_RUNTIME_MODE: 'self-hosted' });
+    expect(publicHost.status).toBe(400);
+    expect(await publicHost.json()).toMatchObject({ slug: 'insecure-cookie-config' });
+
+    setConfig({
+      release: true,
+      auth: {
+        session: {
+          cookie: { enabled: true, name: 'test-refresh', sameSite: 'strict' },
+        },
+      },
+    });
+    const deniedWithoutOptIn = await createApp().request('http://localhost:8787/issue', {
+      method: 'POST',
+      headers,
+    }, { EDGEBASE_RUNTIME_MODE: 'self-hosted' });
+    expect(deniedWithoutOptIn.status).toBe(400);
+    expect(await deniedWithoutOptIn.json()).toMatchObject({ slug: 'insecure-cookie-config' });
+  });
+
   it('reads and expires the negotiated cookie', async () => {
     const headers = {
       Origin: 'https://api.example.com',

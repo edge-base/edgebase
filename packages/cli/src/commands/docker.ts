@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { spawn, execFileSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import chalk from 'chalk';
@@ -258,6 +258,23 @@ function buildSyntheticDockerignore(sourceDockerignore: string): string {
     : `${requiredIncludes}\n`;
 }
 
+function copyProjectDockerContextFiles(projectDir: string, contextDir: string): void {
+  const sourceDir = resolve(projectDir, 'docker-context');
+  if (!existsSync(sourceDir)) return;
+
+  const reservedEntries = new Set(['dockerfile', '.dockerignore', '.edgebase']);
+  for (const entry of readdirSync(sourceDir)) {
+    if (reservedEntries.has(entry.toLowerCase())) continue;
+
+    cpSync(join(sourceDir, entry), join(contextDir, entry), {
+      recursive: true,
+      force: true,
+      dereference: false,
+      verbatimSymlinks: true,
+    });
+  }
+}
+
 function prepareDockerBuildContext(projectDir: string, dockerBundleDir: string): string {
   const contextDir = resolve(projectDir, '.edgebase', 'targets', 'docker-context');
   const contextBundleDir = join(contextDir, '.edgebase', 'targets', 'docker-app');
@@ -274,6 +291,7 @@ function prepareDockerBuildContext(projectDir: string, dockerBundleDir: string):
     dereference: false,
     verbatimSymlinks: true,
   });
+  copyProjectDockerContextFiles(projectDir, contextDir);
 
   return contextDir;
 }
@@ -429,7 +447,8 @@ dockerCommand
   .description('Build EdgeBase Docker image')
   .option('-t, --tag <tag>', 'Image tag', 'edgebase:latest')
   .option('--no-cache', 'Build without cache')
-  .action(async (options: { tag: string; cache: boolean }) => {
+  .option('--context-only', 'Prepare the portable Docker build context without invoking Docker')
+  .action(async (options: { tag: string; cache: boolean; contextOnly?: boolean }) => {
     const projectDir = findProjectRoot();
     const dockerfilePath = resolve(projectDir, 'Dockerfile');
     if (!existsSync(dockerfilePath)) {
@@ -440,7 +459,9 @@ dockerCommand
       });
     }
 
-    ensureDockerAvailable();
+    if (!options.contextOnly) {
+      ensureDockerAvailable();
+    }
 
     let dockerBundle: ReturnType<typeof createAppBundle>;
     try {
@@ -462,6 +483,28 @@ dockerCommand
 
     const args = buildDockerBuildArgs(options);
     const contextDir = prepareDockerBuildContext(projectDir, dockerBundle.outputDir);
+
+    if (options.contextOnly) {
+      if (isJson()) {
+        console.log(JSON.stringify({
+          status: 'success',
+          operation: 'build-context',
+          tag: options.tag,
+          projectDir,
+          bundleDir: dockerBundle.outputDir,
+          contextDir,
+        }));
+        return;
+      }
+
+      console.log(chalk.green('✓ Docker build context prepared successfully!'));
+      console.log(chalk.dim(`  Bundle: ${dockerBundle.outputDir}`));
+      console.log(chalk.dim(`  Context: ${contextDir}`));
+      console.log();
+      console.log(chalk.dim('  Build with:'));
+      console.log(`  ${chalk.cyan(`docker build -t ${options.tag} ${contextDir}`)}`);
+      return;
+    }
 
     if (!isQuiet()) {
       console.log(chalk.blue('🐳 Building EdgeBase Docker image...'));

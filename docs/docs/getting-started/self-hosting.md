@@ -52,16 +52,23 @@ On first run, `npx edgebase docker run` automatically creates `.env.release` wit
 
 If your project defines `frontend.directory` in `edgebase.config.ts`, `npx edgebase docker build` also copies that prebuilt static bundle into the container image and serves it on the same origin as the API. Build the frontend before you run the Docker build so the bundle exists on disk.
 
+For extra files referenced by the project Dockerfile, such as an entrypoint or
+health-check script, put them in a project-level `docker-context/` directory.
+EdgeBase copies those files into its synthetic build context. The generated
+`Dockerfile`, `.dockerignore`, and `.edgebase/` bundle are reserved and cannot be
+overridden from that directory.
+
 ### Docker Compose
 
 The Compose file uses `build: .`, and the `Dockerfile` copies the portable app
 bundle from `.edgebase/targets/docker-app/`. That directory only exists after you
-run `npx edgebase docker build`, so build the bundle first or `docker compose up`
-will fail with a `COPY` error.
+prepare the Docker context, so generate it first or `docker compose up` will fail
+with a `COPY` error. `--context-only` performs this preparation without building
+an image or requiring a local Docker daemon.
 
 ```bash
-# Prerequisite: generate the portable app bundle the Dockerfile copies from
-npx edgebase docker build
+# Prerequisite: generate the portable app bundle and Docker build context
+npx edgebase docker build --context-only
 
 # Start
 docker compose up -d
@@ -356,7 +363,7 @@ echo "0 3 * * * docker run --rm -v edgebase-data:/data -v /backups:/backup alpin
 
 ```bash
 curl http://localhost:8787/api/health
-# → {"status":"ok","version":"0.4.3","timestamp":"2026-03-17T12:00:00.000Z"}
+# → {"status":"ok","version":"0.4.4","timestamp":"2026-03-17T12:00:00.000Z"}
 ```
 
 ### Docker Logs
