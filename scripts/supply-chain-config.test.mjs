@@ -95,8 +95,8 @@ test('hosted CI schedules only Linux and macOS runners', () => {
     const workflow = readFileSync(join(workflowsDir, filename), 'utf8');
     assert.doesNotMatch(
       workflow,
-      /windows(?:-latest|-\d{4})|runner\.os\s*(?:==|!=)\s*['"]Windows['"]/i,
-      `${filename} must not schedule or branch on unsupported Windows CI runners`,
+      /windows(?:-latest|-\d{4})|win64|runner\.os\s*(?:==|!=)\s*['"]Windows['"]/i,
+      `${filename} must not schedule, branch on, or require unsupported Windows CI jobs`,
     );
   }
 });

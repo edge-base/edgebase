@@ -1163,7 +1163,6 @@ jobs:
       - sdk-scala-e2e
       - sdk-ruby-e2e
       - sdk-cpp-e2e
-      - sdk-cpp-win64-thirdparty
       - sdk-role-contract-catalog
       - sdk-admin-contract
       - sdk-core-contract
@@ -1201,7 +1200,6 @@ jobs:
           echo "Scala E2E: ${{ needs.sdk-scala-e2e.result }}"
           echo "Ruby E2E: ${{ needs.sdk-ruby-e2e.result }}"
           echo "C++ E2E: ${{ needs.sdk-cpp-e2e.result }}"
-          echo "C++ Unreal Win64 ThirdParty: ${{ needs.sdk-cpp-win64-thirdparty.result }}"
           echo "Role Contract Catalog: ${{ needs.sdk-role-contract-catalog.result }}"
           echo "Admin Contract: ${{ needs.sdk-admin-contract.result }}"
           echo "Core Contract: ${{ needs.sdk-core-contract.result }}"
