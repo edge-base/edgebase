@@ -100,7 +100,7 @@ test('secret scanning covers protected branches and all fetched history', () => 
 
 test('Dependabot covers workflow, Docker, workspace, and maintained SDK ecosystems', () => {
   const config = read('.github/dependabot.yml');
-  for (const ecosystem of [
+  const ecosystems = [
     'github-actions',
     'docker',
     'npm',
@@ -113,9 +113,24 @@ test('Dependabot covers workflow, Docker, workspace, and maintained SDK ecosyste
     'nuget',
     'swift',
     'mix',
-  ]) {
+  ];
+  for (const ecosystem of ecosystems) {
     assert.match(config, new RegExp(`package-ecosystem: ${ecosystem}\\b`));
   }
   assert.match(config, /package-ecosystem: docker\n\s+directory: \//);
   assert.match(config, /package-ecosystem: npm\n\s+directory: \//);
+
+  const updateBlocks = config
+    .split(/^  - package-ecosystem: /m)
+    .slice(1)
+    .map((block) => `package-ecosystem: ${block}`);
+  assert.equal(updateBlocks.length, ecosystems.length);
+  for (const block of updateBlocks) {
+    const ecosystem = block.match(/^package-ecosystem: ([^\n]+)/)?.[1];
+    assert.match(
+      block,
+      /\n\s+cooldown:\n\s+default-days: 7\b/,
+      `${ecosystem} updates must wait seven days before adopting a new release`,
+    );
+  }
 });
