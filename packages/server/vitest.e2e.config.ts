@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
+import { localCiTimeout } from './vitest-local-ci-timeout';
 
 /**
  * E2E test config for wrangler dev tests (Decision #102, #103).
@@ -17,8 +18,8 @@ export default defineConfig({
   },
   test: {
     include: ['test/integration/realtime-e2e.test.ts', 'test/integration/sdk-live.test.ts', 'test/integration/room-e2e.test.ts'],
-    testTimeout: 30_000,
-    hookTimeout: 15_000,
+    testTimeout: localCiTimeout(30_000),
+    hookTimeout: localCiTimeout(15_000),
     fileParallelism: false,
     pool: 'forks',
     poolOptions: {

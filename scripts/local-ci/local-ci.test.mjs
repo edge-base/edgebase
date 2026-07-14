@@ -294,7 +294,28 @@ test('emulated amd64 release checks retain native timeouts outside local CI', as
     path.join(repoRoot, 'scripts/release-version.test.mjs'),
     'utf8',
   );
+  const serverTimeout = await readFile(
+    path.join(repoRoot, 'packages/server/vitest-local-ci-timeout.ts'),
+    'utf8',
+  );
+  const serverUnitConfig = await readFile(
+    path.join(repoRoot, 'packages/server/vitest.unit.config.ts'),
+    'utf8',
+  );
+  const ownershipTest = await readFile(
+    path.join(
+      repoRoot,
+      'packages/server/src/__tests__/integration-harness-process-ownership.test.ts',
+    ),
+    'utf8',
+  );
   assert.match(runner, /EDGEBASE_LOCAL_CI_EMULATED_AMD64=1/);
   assert.match(releaseTest, /EDGEBASE_LOCAL_CI_EMULATED_AMD64 === '1'/);
   assert.match(releaseTest, /timeout: localCiTimeout\(120_000\)/);
+  assert.match(serverTimeout, /EDGEBASE_LOCAL_CI_EMULATED_AMD64 === '1'/);
+  assert.match(serverTimeout, /milliseconds \* 3/);
+  assert.match(serverUnitConfig, /testTimeout: localCiTimeout\(5_000\)/);
+  assert.match(serverUnitConfig, /hookTimeout: localCiTimeout\(10_000\)/);
+  assert.match(ownershipTest, /timeoutMs = localCiTimeout\(5_000\)/);
+  assert.equal((ownershipTest.match(/localCiTimeout\(10_000\)/g) ?? []).length, 2);
 });

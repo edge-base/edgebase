@@ -1,4 +1,5 @@
 import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import { localCiTimeout } from './vitest-local-ci-timeout';
 
 process.env.EDGEBASE_USE_TEST_CONFIG ??= '1';
 
@@ -9,8 +10,8 @@ export default defineWorkersConfig({
     setupFiles: ['./test/integration/setup.ts'],
     fileParallelism: false,
     retry: 1, // in-process retry는 DO invalidation에 무의미 — 프로세스 레벨 재시도 사용 (run-integration-shards.sh)
-    testTimeout: 30_000,
-    hookTimeout: 15_000,
+    testTimeout: localCiTimeout(30_000),
+    hookTimeout: localCiTimeout(15_000),
     poolOptions: {
       workers: {
         singleWorker: true,

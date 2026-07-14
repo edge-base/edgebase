@@ -40,8 +40,8 @@
   and macOS compatibility boundary, and hardened Dependabot cooldown policy.
 - Hardened the local Linux gate for nested Docker networking and large npm pack
   manifests, and added a pinned tokenless, emulation-aware Trivy bootstrap for
-  local scans, so isolated smoke and release-contract jobs fail only on their
-  actual checks.
+  local scans plus emulation-only test deadline scaling, so isolated jobs fail
+  only on their actual checks rather than QEMU scheduling overhead.
 
 ## 0.4.4 — 2026-07-13
 

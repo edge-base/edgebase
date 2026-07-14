@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { localCiTimeout } from '../../vitest-local-ci-timeout';
 
 const SERVER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const HARNESS_PATH = join(SERVER_DIR, 'scripts/run-integration-shards.sh');
@@ -31,7 +32,7 @@ function processGroupExists(processGroupId: number): boolean {
 async function waitUntil(
   predicate: () => boolean,
   description: string,
-  timeoutMs = 5_000,
+  timeoutMs = localCiTimeout(5_000),
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -177,7 +178,7 @@ echo '      Tests  1 passed (1)'
           FAKE_PNPM_COUNT: invocationCountPath,
         },
         encoding: 'utf8',
-        timeout: 30_000,
+        timeout: localCiTimeout(30_000),
       });
       const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
 
@@ -189,7 +190,7 @@ echo '      Tests  1 passed (1)'
     } finally {
       rmSync(fixtureDir, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, localCiTimeout(30_000));
 
   it('reaps only its recorded leader and descendant process group', async () => {
     const fixtureDir = mkdtempSync(join(tmpdir(), 'edgebase-owned-process-'));
@@ -272,7 +273,7 @@ trap - EXIT
       await forceStop(unrelated);
       rmSync(fixtureDir, { recursive: true, force: true });
     }
-  }, 10_000);
+  }, localCiTimeout(10_000));
 
   it('runs the same ownership-scoped cleanup when the harness receives SIGTERM', async () => {
     const fixtureDir = mkdtempSync(join(tmpdir(), 'edgebase-owned-process-signal-'));
@@ -353,5 +354,5 @@ while :; do sleep 1; done
       await forceStop(unrelated);
       rmSync(fixtureDir, { recursive: true, force: true });
     }
-  }, 10_000);
+  }, localCiTimeout(10_000));
 });
