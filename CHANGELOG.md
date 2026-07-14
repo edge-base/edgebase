@@ -41,9 +41,10 @@
 - Hardened the local Linux gate for nested Docker networking and large npm pack
   manifests, and added a pinned tokenless, emulation-aware Trivy bootstrap for
   local scans plus emulation-only test deadline scaling and zombie-aware process
-  cleanup assertions. Mutation checks receive the exact committed server-lib
-  diff instead of depending on unavailable Git metadata inside act. The gate
-  runs jobs sequentially so isolated jobs fail only on their actual checks
+  cleanup assertions. Mutation checks receive the configured Stryker targets
+  from the exact committed server-lib diff instead of depending on unavailable
+  Git metadata inside act, and build their workspace prerequisites first. The
+  gate runs jobs sequentially so isolated jobs fail only on their actual checks
   rather than cross-job load, QEMU scheduling, or container-init artifacts.
 
 ## 0.4.4 — 2026-07-13

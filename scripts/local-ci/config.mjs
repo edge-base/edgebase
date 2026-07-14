@@ -51,6 +51,9 @@ export const RUNNER_PATHS = Object.freeze([
   'AGENT.md',
   'AGENTS.md',
   'package.json',
+  'packages/server/mutation-targets.mjs',
+  'packages/server/scripts/filter-mutation-files.mjs',
+  'packages/server/stryker.config.mjs',
   'scripts/local-ci',
 ]);
 

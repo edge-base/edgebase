@@ -80,10 +80,10 @@ Semgrep, Gitleaks, mutation and benchmark job. Test-summary and SDK contract
 jobs are represented by the local dependency graph: a receipt is impossible
 unless every underlying Linux job succeeds.
 
-The mutation job receives its changed `packages/server/src/lib/*.ts` set from
-the host's exact committed diff against `origin/main`. Generated act checkouts
-do not contain Git metadata, so the local workflow fails closed if that input
-is absent instead of incorrectly treating the change set as empty.
+The mutation job receives the intersection of its configured Stryker targets
+and the host's exact committed diff against `origin/main`. Generated act
+checkouts do not contain Git metadata, so the local workflow fails closed if
+that input is absent instead of incorrectly treating the change set as empty.
 
 GitHub remains authoritative for the parts a Linux desktop cannot reproduce:
 

@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { chmod, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
+import { filterMutationTargets } from '../../packages/server/mutation-targets.mjs';
 import { ACT_DOWNLOADS, ACT_VERSION, RECEIPT_SCHEMA, receiptPath, stateDir } from './config.mjs';
 
 export function run(command, args, options = {}) {
@@ -49,7 +50,7 @@ export function mutationFileList(diffOutput) {
   if (files.some((file) => file.includes(','))) {
     throw new Error('Mutation file paths cannot contain commas.');
   }
-  return files.join(',');
+  return filterMutationTargets(files).join(',');
 }
 
 export async function changedServerLibFiles(repoRoot, baseCommit, commit) {

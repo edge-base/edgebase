@@ -117,22 +117,24 @@ test('standalone workflows remove orchestration dependencies and GitHub-only upl
   assert.match(semgrep, /name: Block PR on high-severity Semgrep findings/);
 
   const mutation = renderStandaloneWorkflow(testSource, 'mutation-test', 'mutation-test');
+  assert.match(mutation, /name: Build shared package/);
+  assert.match(mutation, /name: Build JS SDK core package/);
   assert.match(mutation, /EDGEBASE_LOCAL_CI_MUTATE_FILES is required in local CI/);
   assert.match(mutation, /CHANGED="\$\{EDGEBASE_LOCAL_CI_MUTATE_FILES\}"/);
   assert.doesNotMatch(mutation, /CHANGED=\$\(git diff/);
 });
 
-test('mutation file discovery preserves only server lib TypeScript paths', () => {
+test('mutation file discovery preserves only configured Stryker targets', () => {
   assert.equal(
     mutationFileList(
       [
         'packages/server/src/lib/version.ts',
         'packages/server/src/database-live-do.ts',
-        'packages/server/src/lib/schemas.ts',
+        'packages/server/src/lib/errors.ts',
         'packages/web/src/index.ts',
       ].join('\n'),
     ),
-    'src/lib/version.ts,src/lib/schemas.ts',
+    'src/lib/errors.ts',
   );
   assert.throws(
     () => mutationFileList('packages/server/src/lib/unsafe,name.ts'),
