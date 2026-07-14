@@ -51,15 +51,14 @@ apply the verification rules below.
   commit SHA and tree, all public workflow digests, the local runner digest,
   `linux/amd64`, and every required job. Partial and diagnostic runs never
   authorize a push.
-- Each public Linux CI job runs in a clean container and network. The scheduler
-  uses bounded, resource-aware parallelism (at most three jobs) and does not
-  share mutable application state, databases, containers or networks between
-  jobs. Immutable image acquisition caches and per-job dependency caches may
-  be used only when frozen dependency resolution still verifies the result.
-- The scheduler scales from a four-point budget on a 4-CPU/8-GiB Docker engine
-  to an eight-point budget on an 8-CPU/16-GiB engine. It may run two four-point
-  jobs together at the larger size, but must never exceed eight total points or
-  three concurrent jobs without a new measured isolation and parity review.
+- Each public Linux CI job runs sequentially in its own clean container and
+  network. Jobs do not share mutable application state, databases, containers
+  or networks. Immutable image acquisition caches and per-job dependency
+  caches may be used only when frozen dependency resolution still verifies the
+  result.
+- Resource weights size each isolated job, but the local gate must start only
+  one public CI job at a time. Do not reintroduce cross-job parallelism without
+  explicit user approval and a new measured isolation and parity review.
 - When a public workflow or the local runner changes, update parity coverage
   and rerun the full gate. GitHub-hosted macOS/Swift, CodeQL/SARIF transport,
   npm OIDC/provenance and external repository syncs remain remote-only checks;

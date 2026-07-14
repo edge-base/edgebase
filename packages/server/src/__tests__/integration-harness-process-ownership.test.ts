@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,21 +11,51 @@ const HARNESS_PATH = join(SERVER_DIR, 'scripts/run-integration-shards.sh');
 const PROCESS_LIB_PATH = join(SERVER_DIR, 'scripts/lib/owned-process-groups.sh');
 const PROCESS_RUNNER_PATH = join(SERVER_DIR, 'scripts/lib/owned-process-runner.mjs');
 
+function readLinuxProcessStat(pid: number): { processGroupId: number; state: string } | null {
+  if (process.platform !== 'linux') return null;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
+    return { state: fields[0], processGroupId: Number(fields[2]) };
+  } catch {
+    return null;
+  }
+}
+
 function processExists(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch {
     return false;
   }
+  if (process.platform !== 'linux') return true;
+
+  const stat = readLinuxProcessStat(pid);
+  // Container PID 1 implementations do not always reap orphaned grandchildren
+  // immediately. A zombie has exited and cannot perform work, even though
+  // kill(pid, 0) continues to report that its PID exists.
+  return stat !== null && stat.state !== 'Z' && stat.state !== 'X';
 }
 
 function processGroupExists(processGroupId: number): boolean {
   try {
     process.kill(-processGroupId, 0);
-    return true;
   } catch {
     return false;
+  }
+  if (process.platform !== 'linux') return true;
+
+  try {
+    return readdirSync('/proc', { withFileTypes: true }).some((entry) => {
+      if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) return false;
+      const stat = readLinuxProcessStat(Number(entry.name));
+      return stat?.processGroupId === processGroupId
+        && stat.state !== 'Z'
+        && stat.state !== 'X';
+    });
+  } catch {
+    // Preserve the conservative signal-based result if /proc cannot be read.
+    return true;
   }
 }
 

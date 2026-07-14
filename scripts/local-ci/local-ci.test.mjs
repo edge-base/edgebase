@@ -164,14 +164,14 @@ test('weighted scheduler respects capacity, locks, and dependencies', async () =
   );
 });
 
-test('Docker capacity scales from one heavy job to two without exceeding three jobs', () => {
-  assert.deepEqual(schedulerCapacity(4, 7.7), { maxWeight: 4, maxJobs: 3 });
-  assert.deepEqual(schedulerCapacity(8, 15.7), { maxWeight: 8, maxJobs: 3 });
-  assert.deepEqual(schedulerCapacity(10, 64), { maxWeight: 8, maxJobs: 3 });
-  assert.deepEqual(schedulerCapacity(2, 3.7), { maxWeight: 2, maxJobs: 2 });
+test('Docker capacity keeps the local gate sequential at every supported size', () => {
+  assert.deepEqual(schedulerCapacity(4, 7.7), { maxWeight: 4, maxJobs: 1 });
+  assert.deepEqual(schedulerCapacity(8, 15.7), { maxWeight: 8, maxJobs: 1 });
+  assert.deepEqual(schedulerCapacity(10, 64), { maxWeight: 8, maxJobs: 1 });
+  assert.deepEqual(schedulerCapacity(2, 3.7), { maxWeight: 2, maxJobs: 1 });
 });
 
-test('eight-point scheduling runs two heavy jobs together and waits before a third', async () => {
+test('eight-point local capacity still runs heavy and light jobs one at a time', async () => {
   let activeWeight = 0;
   let peakWeight = 0;
   let peakJobs = 0;
@@ -183,7 +183,7 @@ test('eight-point scheduling runs two heavy jobs together and waits before a thi
       { id: 'light', weight: 1, locks: [], needs: [] },
     ],
     {
-      maxJobs: 3,
+      maxJobs: schedulerCapacity(8, 15.7).maxJobs,
       maxWeight: 8,
       async execute(job) {
         active.add(job.id);
@@ -196,8 +196,8 @@ test('eight-point scheduling runs two heavy jobs together and waits before a thi
       },
     },
   );
-  assert.equal(peakWeight, 8);
-  assert.equal(peakJobs, 2);
+  assert.equal(peakWeight, 4);
+  assert.equal(peakJobs, 1);
 });
 
 test('weighted scheduler blocks dependants after a failed prerequisite', async () => {

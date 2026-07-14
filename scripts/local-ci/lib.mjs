@@ -210,16 +210,16 @@ export async function installAct(repoRoot) {
 
 export function schedulerCapacity(cpus, memoryGiB) {
   // Docker reports slightly less than its configured whole-GiB allocation.
-  // One scheduling point represents roughly two GiB. The eight-point ceiling
-  // permits two four-point jobs on an 8-CPU/16-GiB engine while keeping at
-  // most three isolated jobs active.
+  // One scheduling point represents roughly two GiB. Resource weights still
+  // size each isolated job, but the authoritative gate deliberately starts
+  // only one public CI job at a time.
   const maxWeight = Math.max(
     1,
     Math.min(8, Math.floor(Number(cpus)), Math.round(Number(memoryGiB) / 2)),
   );
   return {
     maxWeight,
-    maxJobs: Math.max(1, Math.min(3, maxWeight)),
+    maxJobs: 1,
   };
 }
 

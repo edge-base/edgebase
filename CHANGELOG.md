@@ -17,8 +17,8 @@
   in `main`, frozen dependencies, release preflight, the repository-scoped npm
   token, and npm provenance permissions.
 - A repository-owned local Linux CI gate now mirrors every public Linux job in
-  isolated containers with bounded resource-aware parallelism and writes a
-  commit-bound receipt required by the managed pre-push hook.
+  sequential isolated containers and writes a commit-bound receipt required by
+  the managed pre-push hook.
 
 ### Fixed
 
@@ -40,8 +40,10 @@
   and macOS compatibility boundary, and hardened Dependabot cooldown policy.
 - Hardened the local Linux gate for nested Docker networking and large npm pack
   manifests, and added a pinned tokenless, emulation-aware Trivy bootstrap for
-  local scans plus emulation-only test deadline scaling, so isolated jobs fail
-  only on their actual checks rather than QEMU scheduling overhead.
+  local scans plus emulation-only test deadline scaling and zombie-aware process
+  cleanup assertions. The gate runs jobs sequentially so isolated jobs fail only
+  on their actual checks rather than cross-job load, QEMU scheduling, or
+  container-init artifacts.
 
 ## 0.4.4 — 2026-07-13
 

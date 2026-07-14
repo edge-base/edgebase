@@ -91,7 +91,7 @@ async function doctor() {
     `Docker: ${capacity.cpus} CPUs, ${capacity.memoryGiB.toFixed(1)} GiB, ${capacity.architecture}`,
   );
   console.log(
-    `Scheduler: ${capacity.maxJobs} concurrent jobs, weight budget ${capacity.maxWeight}`,
+    `Scheduler: sequential jobs, weight budget ${capacity.maxWeight}`,
   );
   console.log(`Linux target: linux/amd64`);
   console.log(version.stdout.toString().trim());
@@ -147,7 +147,7 @@ async function main() {
   const mode = authoritative ? 'AUTHORITATIVE' : 'DIAGNOSTIC';
   console.log(
     `[local-ci] ${mode} ${initial.commit} | ${selected.length} jobs | ` +
-      `${capacity.maxJobs} parallel / weight ${capacity.maxWeight}`,
+      `sequential / weight ${capacity.maxWeight}`,
   );
 
   const results = await runWeightedJobs(selected, {

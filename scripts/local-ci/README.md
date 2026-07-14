@@ -47,15 +47,12 @@ node scripts/local-ci/run.mjs --diagnostic
 write a push-authorizing receipt. A selected job automatically includes its
 declared prerequisites.
 
-## Parallelism and isolation
+## Scheduling and isolation
 
-The scheduler derives its capacity from Docker's CPU and memory allocation. It
-runs at most three jobs concurrently and scales its resource budget up to eight
-points. On a four-CPU, eight-GiB engine the budget remains four, so heavy
-server, Docker, release, mutation and C++ jobs run alone. On an eight-CPU,
-16-GiB engine the budget becomes eight, allowing two four-point jobs or up to
-three compatible lighter jobs to overlap. Locks prevent duplicate matrix jobs
-and exclusive services from colliding.
+The scheduler derives each job's resource capacity from Docker's CPU and memory
+allocation, but starts public CI jobs sequentially. Heavy server, Docker,
+release, mutation and C++ jobs therefore never overlap with another job, and
+lighter matrix jobs also wait for the active job to finish.
 
 The recommended Apple Silicon Colima allocation is:
 
@@ -63,8 +60,8 @@ The recommended Apple Silicon Colima allocation is:
 colima start --cpu 8 --memory 16
 ```
 
-Larger engines do not exceed the eight-point or three-job ceilings. This keeps
-parallelism bounded and leaves host and Docker-daemon headroom.
+Larger engines may give the active job more headroom, but do not increase the
+one-job scheduling limit.
 
 Jobs never reuse a container, application state, database or network. Pinned
 runner images are shared as immutable Docker acquisition cache. Package and
