@@ -8,6 +8,10 @@
   user-id hint for choosing an account-scoped offline cache while an HttpOnly
   cookie session is being revalidated. The hint is suppressed by pending local
   sign-out and is never authenticated identity or an authorization signal.
+- JavaScript Web, SSR, and Admin clients can opt into JSON request deadlines,
+  including per-function overrides. Deadline failures use the distinct
+  `request-timeout` slug, cover body consumption, and never automatically replay
+  mutations whose server-side outcome may already be committed.
 - Published stable GitHub Releases can trigger the guarded npm package graph
   publisher. The workflow requires an exact `vMAJOR.MINOR.PATCH` tag contained
   in `main`, frozen dependencies, release preflight, the repository-scoped npm
@@ -25,6 +29,10 @@
   subscription and coalesces only concurrent checks for the same session. This
   removes duplicate auth-database work during event fan-out while preserving a
   fresh authority check after the in-flight read settles.
+- Database Live and Room fan-out now use bounded parallel delivery, share only
+  in-flight authority reads, and drain ordered outbound bursts after one fresh
+  session check. Revocation remains visible to the next burst without a TTL
+  cache window, while duplicate sequential checks are avoided.
 
 ### Internal
 
