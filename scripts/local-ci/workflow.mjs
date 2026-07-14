@@ -1,4 +1,6 @@
 const JOB_HEADER = /^  ([A-Za-z_][A-Za-z0-9_-]*):\s*$/;
+const LOCAL_TRIVY_VERSION = 'v0.70.0';
+const TRIVY_INSTALL_SCRIPT_COMMIT = '75c4dc0f45c5d7ffd05ae26df1e0c666787bdf2a';
 
 export function listTopLevelJobs(source) {
   const lines = source.split(/\r?\n/);
@@ -47,6 +49,42 @@ function removeNamedStep(lines, stepName) {
   return result;
 }
 
+function prepareDockerSmokeTrivy(lines) {
+  const sbomStep = lines.indexOf('      - name: Generate verified-image SBOM');
+  if (sbomStep < 0) {
+    throw new Error('Docker smoke workflow has no verified-image SBOM step.');
+  }
+
+  const bootstrap = [
+    '      - name: Install Trivy for local CI',
+    '        shell: bash',
+    '        run: |',
+    '          install_root="${RUNNER_TEMP}/edgebase-trivy"',
+    '          mkdir -p "$install_root/bin"',
+    '          curl --fail --location --silent --show-error \\',
+    `            https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_INSTALL_SCRIPT_COMMIT}/contrib/install.sh \\`,
+    '            --output "$install_root/install.sh"',
+    `          bash "$install_root/install.sh" -b "$install_root/bin" -c setup-trivy ${LOCAL_TRIVY_VERSION}`,
+    '          echo "$install_root/bin" >> "$GITHUB_PATH"',
+    '',
+  ];
+  lines.splice(sbomStep, 0, ...bootstrap);
+
+  const renderedSbomStep = lines.indexOf('      - name: Generate verified-image SBOM');
+  const nextStep = lines.findIndex(
+    (line, index) => index > renderedSbomStep && /^      - (name:|uses:)/.test(line),
+  );
+  const stepEnd = nextStep < 0 ? lines.length : nextStep;
+  const withLine = lines.findIndex(
+    (line, index) => index > renderedSbomStep && index < stepEnd && line === '        with:',
+  );
+  if (withLine < 0) {
+    throw new Error('Docker smoke SBOM action has no inputs block.');
+  }
+  lines.splice(withLine + 1, 0, "          skip-setup-trivy: 'true'");
+  return lines;
+}
+
 export function renderStandaloneWorkflow(source, sourceJob, localJobId, options = {}) {
   const lines = source.split(/\r?\n/);
   const jobsLine = lines.findIndex((line) => line === 'jobs:');
@@ -70,6 +108,10 @@ export function renderStandaloneWorkflow(source, sourceJob, localJobId, options 
   // run locally; GitHub remains authoritative for SARIF/artifact publication.
   block = removeNamedStep(block, 'Upload Semgrep SARIF');
   block = removeNamedStep(block, 'Upload container security evidence');
+
+  if (sourceJob === 'docker-smoke') {
+    block = prepareDockerSmokeTrivy(block);
+  }
 
   if (sourceJob === 'server-unit') {
     if (options.dryRun) block = removeJobField(block, 'services');

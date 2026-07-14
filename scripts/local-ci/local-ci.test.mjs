@@ -86,6 +86,18 @@ test('standalone workflows remove orchestration dependencies and GitHub-only upl
   const docker = renderStandaloneWorkflow(ciSource, 'docker-smoke', 'docker-smoke-linux');
   assert.doesNotMatch(docker, /name: Upload container security evidence/);
   assert.match(docker, /name: Block fixable HIGH and CRITICAL vulnerabilities/);
+  assert.match(ciSource, /name: Generate verified-image SBOM[\s\S]*version: v0\.70\.0/);
+  assert.match(docker, /name: Install Trivy for local CI/);
+  assert.match(
+    docker,
+    /raw\.githubusercontent\.com\/aquasecurity\/trivy\/75c4dc0f45c5d7ffd05ae26df1e0c666787bdf2a\/contrib\/install\.sh/,
+  );
+  assert.match(docker, /setup-trivy v0\.70\.0/);
+  assert.match(
+    docker,
+    /name: Generate verified-image SBOM[\s\S]*skip-setup-trivy: 'true'[\s\S]*version: v0\.70\.0/,
+  );
+  assert.doesNotMatch(docker, /token-setup-trivy:/);
 
   const semgrepSource = await readFile(
     path.join(repoRoot, '.github/workflows/semgrep.yml'),
