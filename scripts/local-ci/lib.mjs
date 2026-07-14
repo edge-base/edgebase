@@ -40,6 +40,30 @@ export async function git(repoRoot, args, options = {}) {
   return result.stdout.toString().trim();
 }
 
+export function mutationFileList(diffOutput) {
+  const files = diffOutput
+    .split(/\r?\n/)
+    .map((file) => file.trim())
+    .filter((file) => /^packages\/server\/src\/lib\/.*\.ts$/.test(file))
+    .map((file) => file.slice('packages/server/'.length));
+  if (files.some((file) => file.includes(','))) {
+    throw new Error('Mutation file paths cannot contain commas.');
+  }
+  return files.join(',');
+}
+
+export async function changedServerLibFiles(repoRoot, baseCommit, commit) {
+  const diff = await git(repoRoot, [
+    'diff',
+    '--name-only',
+    baseCommit,
+    commit,
+    '--',
+    'packages/server/src/lib',
+  ]);
+  return mutationFileList(diff);
+}
+
 export function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }

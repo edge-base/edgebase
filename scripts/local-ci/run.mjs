@@ -17,6 +17,7 @@ import {
 } from './config.mjs';
 import { FULL_GATE_JOB_IDS, LOCAL_CI_JOBS, findLocalCiJob } from './jobs.mjs';
 import {
+  changedServerLibFiles,
   digestRef,
   digestWorktree,
   dockerCapacity,
@@ -144,6 +145,9 @@ async function main() {
 
   const baseCommit = await git(repoRoot, ['rev-parse', 'origin/main']);
   const selected = selectedBase;
+  const mutationFiles = selected.some((job) => job.id === 'mutation-test')
+    ? await changedServerLibFiles(repoRoot, baseCommit, initial.commit)
+    : '';
   const mode = authoritative ? 'AUTHORITATIVE' : 'DIAGNOSTIC';
   console.log(
     `[local-ci] ${mode} ${initial.commit} | ${selected.length} jobs | ` +
@@ -163,6 +167,7 @@ async function main() {
         dockerHost: capacity.dockerHost,
         dryRun: options.dryRun,
         hostDockerArchitecture: capacity.architecture,
+        mutationFiles,
         repoRoot,
         runId,
         runRoot,

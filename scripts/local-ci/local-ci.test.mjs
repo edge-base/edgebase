@@ -11,7 +11,12 @@ import {
   REMOTE_ONLY_WORKFLOW_JOBS,
   VIRTUAL_WORKFLOW_JOBS,
 } from './jobs.mjs';
-import { parsePrePushInput, schedulerCapacity, validateReceiptShape } from './lib.mjs';
+import {
+  mutationFileList,
+  parsePrePushInput,
+  schedulerCapacity,
+  validateReceiptShape,
+} from './lib.mjs';
 import { runWeightedJobs } from './scheduler.mjs';
 import { listTopLevelJobs, renderStandaloneWorkflow } from './workflow.mjs';
 
@@ -110,6 +115,29 @@ test('standalone workflows remove orchestration dependencies and GitHub-only upl
   const semgrep = renderStandaloneWorkflow(semgrepSource, 'scan', 'semgrep-high-severity');
   assert.doesNotMatch(semgrep, /name: Upload Semgrep SARIF/);
   assert.match(semgrep, /name: Block PR on high-severity Semgrep findings/);
+
+  const mutation = renderStandaloneWorkflow(testSource, 'mutation-test', 'mutation-test');
+  assert.match(mutation, /EDGEBASE_LOCAL_CI_MUTATE_FILES is required in local CI/);
+  assert.match(mutation, /CHANGED="\$\{EDGEBASE_LOCAL_CI_MUTATE_FILES\}"/);
+  assert.doesNotMatch(mutation, /CHANGED=\$\(git diff/);
+});
+
+test('mutation file discovery preserves only server lib TypeScript paths', () => {
+  assert.equal(
+    mutationFileList(
+      [
+        'packages/server/src/lib/version.ts',
+        'packages/server/src/database-live-do.ts',
+        'packages/server/src/lib/schemas.ts',
+        'packages/web/src/index.ts',
+      ].join('\n'),
+    ),
+    'src/lib/version.ts,src/lib/schemas.ts',
+  );
+  assert.throws(
+    () => mutationFileList('packages/server/src/lib/unsafe,name.ts'),
+    /cannot contain commas/,
+  );
 });
 
 test('PostgreSQL service uses its isolated bridge-network hostname locally', async () => {
@@ -267,6 +295,7 @@ test('act jobs keep root and isolated release installs on the same pnpm store', 
   const source = await readFile(path.join(repoRoot, 'scripts/local-ci/act-job.mjs'), 'utf8');
   assert.match(source, /npm_config_store_dir=\/root\/\.local\/share\/pnpm\/store/);
   assert.match(source, /target=\/root\/\.local\/share\/pnpm\/store/);
+  assert.match(source, /EDGEBASE_LOCAL_CI_MUTATE_FILES=\$\{context\.mutationFiles\}/);
 });
 
 test('nested Docker smoke probes its child container on the isolated job network', async () => {

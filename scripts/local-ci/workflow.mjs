@@ -97,6 +97,23 @@ function prepareDockerSmokeTrivy(lines) {
   return lines;
 }
 
+function prepareMutationFiles(lines) {
+  const changedLine = lines.findIndex((line) => line.includes('CHANGED=$(git diff --name-only'));
+  if (changedLine < 0) {
+    throw new Error('Mutation workflow has no changed-lib discovery command.');
+  }
+  lines.splice(
+    changedLine,
+    1,
+    '          if [ "${EDGEBASE_LOCAL_CI_MUTATE_FILES+x}" != "x" ]; then',
+    '            echo "EDGEBASE_LOCAL_CI_MUTATE_FILES is required in local CI." >&2',
+    '            exit 1',
+    '          fi',
+    '          CHANGED="${EDGEBASE_LOCAL_CI_MUTATE_FILES}"',
+  );
+  return lines;
+}
+
 export function renderStandaloneWorkflow(source, sourceJob, localJobId, options = {}) {
   const lines = source.split(/\r?\n/);
   const jobsLine = lines.findIndex((line) => line === 'jobs:');
@@ -123,6 +140,10 @@ export function renderStandaloneWorkflow(source, sourceJob, localJobId, options 
 
   if (sourceJob === 'docker-smoke') {
     block = prepareDockerSmokeTrivy(block);
+  }
+
+  if (sourceJob === 'mutation-test') {
+    block = prepareMutationFiles(block);
   }
 
   if (sourceJob === 'server-unit') {

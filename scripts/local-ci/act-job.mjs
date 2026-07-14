@@ -135,6 +135,9 @@ export async function runActJob(job, context) {
     'LOCAL_CI=1',
     '--env',
     'CI=true',
+    ...(job.id === 'mutation-test'
+      ? ['--env', `EDGEBASE_LOCAL_CI_MUTATE_FILES=${context.mutationFiles}`]
+      : []),
     ...(job.id === 'docker-smoke-linux'
       ? ['--env', `EDGEBASE_DOCKER_SMOKE_NETWORK=${network}`]
       : []),
