@@ -93,6 +93,10 @@ test('standalone workflows remove orchestration dependencies and GitHub-only upl
     /raw\.githubusercontent\.com\/aquasecurity\/trivy\/75c4dc0f45c5d7ffd05ae26df1e0c666787bdf2a\/contrib\/install\.sh/,
   );
   assert.match(docker, /setup-trivy v0\.70\.0/);
+  assert.match(docker, /EDGEBASE_LOCAL_CI_EMULATED_AMD64/);
+  assert.match(docker, /RUNNER_ARCH/);
+  assert.match(docker, /ARM64\) trivy_arch=arm64/);
+  assert.match(docker, /ARCH=\\\$\(uname_arch\)/);
   assert.match(
     docker,
     /name: Generate verified-image SBOM[\s\S]*skip-setup-trivy: 'true'[\s\S]*version: v0\.70\.0/,
