@@ -1,9 +1,12 @@
 import { defineConfig } from 'vitest/config';
+import { localCiTimeout } from './vitest-local-ci-timeout';
 
 export default defineConfig({
   test: {
     include: ['src/__tests__/**/*.test.ts'],
     environment: 'node',
+    testTimeout: localCiTimeout(5_000),
+    hookTimeout: localCiTimeout(10_000),
     // No retry for unit tests — deterministic by nature
     coverage: {
       provider: 'v8',

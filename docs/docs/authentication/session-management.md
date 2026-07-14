@@ -100,6 +100,13 @@ set by EdgeBase as a host-only `HttpOnly` cookie. HTTPS requests use the
 development uses the configured base name with `Path=/api/auth`.
 `SameSite=Strict` is the default.
 
+Local-first clients may read `client.auth.sessionUserIdHint` to choose the
+matching account-scoped offline cache while cookie revalidation runs. The hint
+contains only the persisted user id, is suppressed by a pending local sign-out,
+and is not authenticated identity. Never use it for authorization or server-
+backed decisions; those must wait for `currentUser` after session revalidation
+and remain subject to server enforcement.
+
 An HTTP loopback request is allowed only when the CLI marks the process as
 `EDGEBASE_RUNTIME_MODE=local-development`, even if the loaded config sets
 `release: true`. Deployed Cloudflare and self-hosted release runtimes remain

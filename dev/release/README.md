@@ -65,6 +65,28 @@ Explicit shell/CI environment variables always override values from an optional
 local env file, so stale developer credentials cannot replace a deliberate
 release credential.
 
+Publishing a stable GitHub Release is the explicit authorization for automated
+npm publication. `.github/workflows/npm-publish.yml` accepts only a published
+`vMAJOR.MINOR.PATCH` release whose tag matches the source version and is
+contained in `main`. It installs the frozen workspace, runs
+`release:preflight`, and then invokes the same resumable `release:npm` driver
+used locally. A failed run should be rerun from GitHub Actions; already-published
+packages are detected and skipped by the driver.
+
+The workflow requires the repository Actions secret `NPM_TOKEN`. It must be a
+granular npm token limited to read/write access for the npm release targets,
+with Bypass 2FA enabled for noninteractive publication. The token is exposed
+only to the credential check and publish steps. GitHub OIDC permission is used
+separately to generate npm provenance attestations. Record the token expiration
+outside the repository and rotate the secret before it expires.
+
+Token-authenticated direct publication is transitional. npm has announced that
+2FA-bypass granular tokens will stop publishing directly around January 2027:
+https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/
+Keep the `npm-publish.yml` workflow filename stable when migrating its publish
+authentication to npm Trusted Publishing (OIDC), because npm binds that trust
+configuration to the workflow filename.
+
 The npm release driver copies the required workspace sources into a temporary
 staging tree and runs every package lifecycle there. Package builds therefore
 cannot rewrite ignored artifacts such as the Admin bundle in the reviewed

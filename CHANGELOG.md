@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.4.5 — 2026-07-14
+
+### Added
+
+- The Web SDK exposes `client.auth.sessionUserIdHint` as a non-secret local
+  user-id hint for choosing an account-scoped offline cache while an HttpOnly
+  cookie session is being revalidated. The hint is suppressed by pending local
+  sign-out and is never authenticated identity or an authorization signal.
+- JavaScript Web, SSR, and Admin clients can opt into JSON request deadlines,
+  including per-function overrides. Deadline failures use the distinct
+  `request-timeout` slug, cover body consumption, and never automatically replay
+  mutations whose server-side outcome may already be committed.
+- Published stable GitHub Releases can trigger the guarded npm package graph
+  publisher. The workflow requires an exact `vMAJOR.MINOR.PATCH` tag contained
+  in `main`, frozen dependencies, release preflight, the repository-scoped npm
+  token, and npm provenance permissions.
+- A repository-owned local Linux CI gate now mirrors every public Linux job in
+  sequential isolated containers and writes a commit-bound receipt required by
+  the managed pre-push hook.
+
+### Fixed
+
+- HttpOnly-cookie clients now take over a stale cross-tab refresh lock when the
+  leader tab disappears, instead of surfacing a signed-out state until another
+  reload. A still-heartbeating leader remains authoritative.
+- Database Live skips session-authority reads for events with no matching
+  subscription and coalesces only concurrent checks for the same session. This
+  removes duplicate auth-database work during event fan-out while preserving a
+  fresh authority check after the in-flight read settles.
+- Database Live and Room fan-out now use bounded parallel delivery, share only
+  in-flight authority reads, and drain ordered outbound bursts after one fresh
+  session check. Revocation remains visible to the next burst without a TTL
+  cache window, while duplicate sequential checks are avoided.
+
+### Internal
+
+- Removed obsolete hosted Windows jobs and dependencies, retained the Linux
+  and macOS compatibility boundary, and hardened Dependabot cooldown policy.
+- Hardened the local Linux gate for nested Docker networking and large npm pack
+  manifests, and added a pinned tokenless, emulation-aware Trivy bootstrap for
+  local scans plus emulation-only test deadline scaling and zombie-aware process
+  cleanup assertions. Mutation checks receive the configured Stryker targets
+  from the exact committed server-lib diff instead of depending on unavailable
+  Git metadata inside act, and build their workspace prerequisites first. The
+  gate runs jobs sequentially so isolated jobs fail only on their actual checks
+  rather than cross-job load, QEMU scheduling, or container-init artifacts.
+
 ## 0.4.4 — 2026-07-13
 
 ### Added

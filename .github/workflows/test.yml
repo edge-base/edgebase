@@ -1042,12 +1042,20 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: .
 
+      - name: Build shared package
+        run: pnpm --dir packages/shared build
+        working-directory: .
+
+      - name: Build JS SDK core package
+        run: pnpm --dir packages/sdk/js/packages/core build
+        working-directory: .
+
       - name: Get changed lib files
         id: changed
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          CHANGED=$(git diff --name-only "origin/${BASE_REF}" -- 'packages/server/src/lib/**/*.ts' | sed 's|packages/server/||' | tr '\n' ',' | sed 's/,$//')
+          CHANGED=$(git diff --name-only "origin/${BASE_REF}" -- 'packages/server/src/lib/**/*.ts' | sed 's|packages/server/||' | node ./scripts/filter-mutation-files.mjs)
           echo "files=${CHANGED}" >> "$GITHUB_OUTPUT"
           echo "Changed files: ${CHANGED}"
 
@@ -1057,9 +1065,9 @@ jobs:
           MUTATE_FILES: ${{ steps.changed.outputs.files }}
         run: pnpm exec stryker run --mutate "$MUTATE_FILES"
 
-      - name: Skip mutation (no lib changes)
+      - name: Skip mutation (no configured targets changed)
         if: steps.changed.outputs.files == ''
-        run: echo "No lib files changed, skipping mutation testing"
+        run: echo "No configured mutation targets changed, skipping mutation testing"
 
   # ─── Performance Regression (PR only) ──────────────────────────────────────
   bench:

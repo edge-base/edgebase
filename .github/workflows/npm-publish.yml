@@ -1,0 +1,88 @@
+name: Publish npm Packages
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: npm-publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish npm release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check npm publish token
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [[ -z "${NPM_TOKEN}" ]]; then
+            echo "::error::Missing secret NPM_TOKEN."
+            echo "::error::Add a granular npm token with package read/write access and Bypass 2FA enabled."
+            exit 1
+          fi
+
+      - name: Checkout release tag
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Validate release authorization
+        id: release
+        env:
+          RELEASE_IS_PRERELEASE: ${{ github.event.release.prerelease }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${RELEASE_IS_PRERELEASE}" == "true" ]]; then
+            echo "::error::Prereleases are not supported by the stable EdgeBase release driver."
+            exit 1
+          fi
+
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Stable release tags must match vMAJOR.MINOR.PATCH; received ${RELEASE_TAG}."
+            exit 1
+          fi
+
+          source_version="$(node -p "require('./package.json').version")"
+          if [[ "${RELEASE_TAG}" != "v${source_version}" ]]; then
+            echo "::error::Release tag ${RELEASE_TAG} does not match source version ${source_version}."
+            exit 1
+          fi
+
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::Release tag ${RELEASE_TAG} is not contained in main."
+            exit 1
+          fi
+
+          echo "version=${source_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run release preflight
+        run: pnpm release:preflight
+
+      - name: Publish npm package graph
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm release:npm "${{ steps.release.outputs.version }}"

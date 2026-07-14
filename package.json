@@ -1,6 +1,6 @@
 {
     "name": "edgebase",
-    "version": "0.4.4",
+    "version": "0.4.5",
     "type": "module",
     "private": true,
     "scripts": {
@@ -22,7 +22,7 @@
         "skills:verify-export": "node ./tools/agent-skill-gen/verify-export.mjs",
         "release:sync": "node ./scripts/sync-release-versions.mjs",
         "release:check": "node ./scripts/check-release-versions.mjs",
-        "release:test": "node --test ./scripts/release-version.test.mjs ./scripts/supply-chain-config.test.mjs",
+        "release:test": "node --test ./scripts/release-version.test.mjs ./scripts/supply-chain-config.test.mjs ./scripts/local-ci/local-ci.test.mjs",
         "release:preflight": "pnpm release:test && pnpm release:check && pnpm security:audit",
         "release:set": "node ./scripts/set-release-version.mjs",
         "release:npm": "node ./dev/release/publish-npm-release.mjs",
@@ -37,7 +37,10 @@
         "release:go-sync": "node ./dev/release/sync-go-split-release.mjs",
         "release:go-verify": "node ./dev/release/verify-go-split-release.mjs",
         "release:jitpack": "node ./dev/release/verify-jitpack-release.mjs",
-        "security:audit": "pnpm audit --audit-level high"
+        "security:audit": "pnpm audit --audit-level high",
+        "local-ci": "node ./scripts/local-ci/run.mjs",
+        "local-ci:doctor": "node ./scripts/local-ci/run.mjs --doctor",
+        "local-ci:test": "node --test ./scripts/local-ci/local-ci.test.mjs"
     },
     "devDependencies": {
         "@eslint/js": "^9.39.2",

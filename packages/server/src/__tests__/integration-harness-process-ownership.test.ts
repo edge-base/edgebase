@@ -1,37 +1,68 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { localCiTimeout } from '../../vitest-local-ci-timeout';
 
 const SERVER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const HARNESS_PATH = join(SERVER_DIR, 'scripts/run-integration-shards.sh');
 const PROCESS_LIB_PATH = join(SERVER_DIR, 'scripts/lib/owned-process-groups.sh');
 const PROCESS_RUNNER_PATH = join(SERVER_DIR, 'scripts/lib/owned-process-runner.mjs');
 
+function readLinuxProcessStat(pid: number): { processGroupId: number; state: string } | null {
+  if (process.platform !== 'linux') return null;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
+    return { state: fields[0], processGroupId: Number(fields[2]) };
+  } catch {
+    return null;
+  }
+}
+
 function processExists(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch {
     return false;
   }
+  if (process.platform !== 'linux') return true;
+
+  const stat = readLinuxProcessStat(pid);
+  // Container PID 1 implementations do not always reap orphaned grandchildren
+  // immediately. A zombie has exited and cannot perform work, even though
+  // kill(pid, 0) continues to report that its PID exists.
+  return stat !== null && stat.state !== 'Z' && stat.state !== 'X';
 }
 
 function processGroupExists(processGroupId: number): boolean {
   try {
     process.kill(-processGroupId, 0);
-    return true;
   } catch {
     return false;
+  }
+  if (process.platform !== 'linux') return true;
+
+  try {
+    return readdirSync('/proc', { withFileTypes: true }).some((entry) => {
+      if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) return false;
+      const stat = readLinuxProcessStat(Number(entry.name));
+      return stat?.processGroupId === processGroupId
+        && stat.state !== 'Z'
+        && stat.state !== 'X';
+    });
+  } catch {
+    // Preserve the conservative signal-based result if /proc cannot be read.
+    return true;
   }
 }
 
 async function waitUntil(
   predicate: () => boolean,
   description: string,
-  timeoutMs = 5_000,
+  timeoutMs = localCiTimeout(5_000),
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -177,7 +208,7 @@ echo '      Tests  1 passed (1)'
           FAKE_PNPM_COUNT: invocationCountPath,
         },
         encoding: 'utf8',
-        timeout: 30_000,
+        timeout: localCiTimeout(30_000),
       });
       const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
 
@@ -189,7 +220,7 @@ echo '      Tests  1 passed (1)'
     } finally {
       rmSync(fixtureDir, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, localCiTimeout(30_000));
 
   it('reaps only its recorded leader and descendant process group', async () => {
     const fixtureDir = mkdtempSync(join(tmpdir(), 'edgebase-owned-process-'));
@@ -272,7 +303,7 @@ trap - EXIT
       await forceStop(unrelated);
       rmSync(fixtureDir, { recursive: true, force: true });
     }
-  }, 10_000);
+  }, localCiTimeout(10_000));
 
   it('runs the same ownership-scoped cleanup when the harness receives SIGTERM', async () => {
     const fixtureDir = mkdtempSync(join(tmpdir(), 'edgebase-owned-process-signal-'));
@@ -353,5 +384,5 @@ while :; do sleep 1; done
       await forceStop(unrelated);
       rmSync(fixtureDir, { recursive: true, force: true });
     }
-  }, 10_000);
+  }, localCiTimeout(10_000));
 });

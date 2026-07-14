@@ -66,6 +66,7 @@ export class ServerEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> 
       tokenManager: options.serviceKey ? undefined : this.tokenManager,
       serviceKey: options.serviceKey,
       contextManager: new ContextManager(),
+      requestTimeoutMs: options.requestTimeoutMs,
     });
 
     this.core = new DefaultDbApi(new HttpClientAdapter(this.httpClient));

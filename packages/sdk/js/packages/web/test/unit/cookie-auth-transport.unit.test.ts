@@ -220,6 +220,7 @@ describe('HttpOnly-cookie TokenManager', () => {
     });
 
     expect(online.getCurrentUser()).toBeNull();
+    expect(online.getSessionUserIdHint()).toBe('marker-user');
     const verifiedAccess = makeJwt('verified-user', {
       email: 'verified@example.com',
       custom: { plan: 'pro' },
@@ -242,9 +243,34 @@ describe('HttpOnly-cookie TokenManager', () => {
       refreshTokenTransport: 'httpOnlyCookie',
     });
     expect(offline.getCurrentUser()).toEqual({ id: 'verified-user' });
+    expect(offline.getSessionUserIdHint()).toBe('verified-user');
     expect(offline.getCurrentUser()).not.toHaveProperty('email');
     expect(offline.getCurrentUser()).not.toHaveProperty('custom');
     offline.destroy();
+  });
+
+  it('exposes the cookie marker through the public cache hint without authenticating it', () => {
+    const { store } = installBrowserMocks();
+    vi.stubGlobal('navigator', { onLine: true });
+    store.set('edgebase:cookie-session', JSON.stringify({
+      version: 1,
+      userId: 'cache-owner',
+      email: 'ignored@example.com',
+      role: 'admin',
+    }));
+    const client = createClient('https://api.example.com', {
+      refreshTokenTransport: 'httpOnlyCookie',
+    });
+
+    expect(client.auth.currentUser).toBeNull();
+    expect(client.auth.sessionUserIdHint).toBe('cache-owner');
+
+    store.set('edgebase:pending-signout', JSON.stringify({
+      version: 1,
+      createdAt: Date.now(),
+    }));
+    expect(client.auth.sessionUserIdHint).toBeNull();
+    client.destroy();
   });
 
   it('keeps a verified in-memory user and promotes only its id after an online reload network failure', async () => {
@@ -914,7 +940,10 @@ describe('HttpOnly-cookie AuthClient', () => {
         throw new Error(`Unexpected request: ${String(input)}`);
       }
       refreshAttempts += 1;
-      if (refreshAttempts <= 3) {
+      // A cookie refresh is a mutation (it may rotate session state), so the
+      // HTTP layer must not replay an ambiguous network failure internally.
+      // Recovery happens on the explicit next callback attempt instead.
+      if (refreshAttempts === 1) {
         throw new TypeError('network offline');
       }
       return new Response(JSON.stringify({
@@ -960,6 +989,7 @@ describe('HttpOnly-cookie AuthClient', () => {
     expect(store.get('edgebase:cookie-session')).toBe(
       JSON.stringify({ version: 1, userId: 'oauth-recovered-user' }),
     );
+    expect(refreshAttempts).toBe(2);
     reloaded.destroy();
   });
 

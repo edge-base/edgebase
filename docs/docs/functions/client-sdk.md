@@ -37,6 +37,24 @@ import { createClient } from '@edge-base/web';
 const client = createClient('https://my-app.edgebase.fun');
 ```
 
+JavaScript function calls can opt into a deadline that covers both response
+headers and JSON body consumption:
+
+```typescript
+await client.functions.call('reports/generate', {
+  method: 'POST',
+  body: { reportId: 'report-1' },
+  timeoutMs: 20_000,
+});
+```
+
+A deadline failure has error slug `request-timeout`. EdgeBase does not
+automatically replay timed-out mutations because the server may already have
+committed them; confirm state or use an application-level idempotency key before
+retrying. To apply one default to JSON API calls, pass `requestTimeoutMs` to
+`createClient`. It is intentionally opt-in so long-running functions keep their
+existing behavior.
+
 </TabItem>
 <TabItem value="dart" label="Dart/Flutter">
 

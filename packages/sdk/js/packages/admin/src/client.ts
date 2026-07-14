@@ -39,6 +39,8 @@ export interface JuneAdminClientOptions<Schema extends EdgeBaseTableMap = EdgeBa
   serviceKey?: string;
   /** Schema map from typegen (for example `EdgeBaseTables`) used for table inference. */
   schema?: Schema;
+  /** Optional default deadline for JSON API requests. Undefined is unbounded. */
+  requestTimeoutMs?: number;
 }
 
 // ─── Admin SDK ───
@@ -73,6 +75,7 @@ export class AdminEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> {
       baseUrl: this.baseUrl,
       serviceKey: options.serviceKey,
       contextManager: this.contextManager,
+      requestTimeoutMs: options.requestTimeoutMs,
     });
     const adapter = new HttpClientAdapter(this.httpClient);
     this.core = new DefaultDbApi(adapter);

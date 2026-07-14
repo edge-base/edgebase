@@ -89,6 +89,24 @@ test('workflow containers and every external action are immutable', () => {
   }
 });
 
+test('npm publishing requires an authorized stable GitHub release on main', () => {
+  const workflow = read('.github/workflows/npm-publish.yml');
+  assert.match(workflow, /release:\n\s+types: \[published\]/);
+  assert.doesNotMatch(workflow, /\n\s+push:/);
+  assert.doesNotMatch(workflow, /workflow_dispatch/);
+  assert.match(workflow, /contents: read/);
+  assert.match(workflow, /id-token: write/);
+  assert.match(workflow, /cancel-in-progress: false/);
+  assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /RELEASE_IS_PRERELEASE/);
+  assert.match(workflow, /Stable release tags must match vMAJOR\.MINOR\.PATCH/);
+  assert.match(workflow, /git merge-base --is-ancestor HEAD origin\/main/);
+  assert.match(workflow, /pnpm install --frozen-lockfile/);
+  assert.match(workflow, /pnpm release:preflight/);
+  assert.match(workflow, /NPM_TOKEN: \$\{\{ secrets\.NPM_TOKEN \}\}/);
+  assert.match(workflow, /pnpm release:npm/);
+});
+
 test('hosted CI schedules only Linux and macOS runners', () => {
   const workflowsDir = resolve(REPO_ROOT, '.github/workflows');
   for (const filename of readdirSync(workflowsDir).filter((name) => /\.ya?ml$/.test(name))) {

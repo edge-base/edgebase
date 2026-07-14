@@ -1173,6 +1173,15 @@ export class AuthClient {
     return this.tokenManager.getCurrentUser();
   }
 
+  /**
+   * Non-secret local user-id hint for account-scoped cache selection.
+   * This is not authenticated identity; revalidate the cookie session before
+   * using the principal for authorization or server-backed decisions.
+   */
+  get sessionUserIdHint(): string | null {
+    return this.tokenManager.getSessionUserIdHint();
+  }
+
   /** Update current user's profile */
   async updateProfile(data: UpdateProfileOptions): Promise<TokenUser> {
     await this.client.getAuthHeaders();
