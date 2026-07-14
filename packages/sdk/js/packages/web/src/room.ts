@@ -17,6 +17,7 @@ import {
   type Subscription,
 } from '@edge-base/core';
 import { refreshAccessToken } from './auth-refresh.js';
+import { RoomConnectionLifecycle } from './room-connection-lifecycle.js';
 import {
   createRoomCollab,
   type RoomCollabClient,
@@ -246,9 +247,25 @@ export class RoomClient {
   // ─── Connection ───
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
-  private connected = false;
-  private authenticated = false;
-  private joined = false;
+  private readonly connectionLifecycle = new RoomConnectionLifecycle();
+  private get connected(): boolean {
+    return this.connectionLifecycle.transportOpen;
+  }
+  private set connected(value: boolean) {
+    this.connectionLifecycle.setTransportOpen(value);
+  }
+  private get authenticated(): boolean {
+    return this.connectionLifecycle.authenticated;
+  }
+  private set authenticated(value: boolean) {
+    this.connectionLifecycle.setAuthenticated(value);
+  }
+  private get joined(): boolean {
+    return this.connectionLifecycle.joined;
+  }
+  private set joined(value: boolean) {
+    this.connectionLifecycle.setJoined(value);
+  }
   private currentUserId: string | null = null;
   private currentConnectionId: string | null = null;
   private connectionState: RoomConnectionState = 'idle';
@@ -1067,6 +1084,7 @@ export class RoomClient {
         clearTimeout(connectionTimer);
         this.connected = true;
         this.startHeartbeat();
+        this.connectionLifecycle.beginAuthentication();
         this.authenticate()
           .then(() => {
             if (!settled) {
@@ -1190,6 +1208,7 @@ export class RoomClient {
             if (this.ws) this.ws.onmessage = originalOnMessage ?? null;
 
             // Send join message with last known state for eviction recovery
+                        this.connectionLifecycle.beginJoin();
                         this.sendRaw({
                             type: 'join',
                             lastSharedState: this._sharedState,
@@ -1301,6 +1320,7 @@ export class RoomClient {
     // completes. Resetting here (after the first authoritative sync) preserves
     // exponential backoff and the max-attempt bound for that failure mode.
     this.reconnectAttempts = 0;
+    this.connectionLifecycle.markSynchronized();
     this.setConnectionState('connected');
 
     // Notify handlers with full state as changes
@@ -1569,7 +1589,6 @@ export class RoomClient {
 
     this.waitingForAuth = this.joinRequested;
     this.reconnectInfo = null;
-    this.setConnectionState('auth_lost');
 
     // Reject pending requests — auth is gone, server won't respond
     this.rejectAllPendingRequests(new EdgeBaseError(401, 'Auth state lost'));
@@ -1584,6 +1603,7 @@ export class RoomClient {
       this.joined = false;
       this.currentUserId = null;
       this.currentConnectionId = null;
+      this.setConnectionState('auth_lost');
       try {
         closeSocketAfterLeave(socket, 'Signed out');
       } catch {
@@ -1595,6 +1615,7 @@ export class RoomClient {
     this.connected = false;
     this.authenticated = false;
     this.joined = false;
+    this.setConnectionState('auth_lost');
   }
 
   private handleAuthenticationFailure(error: unknown): void {
@@ -1722,6 +1743,7 @@ export class RoomClient {
   private getDebugSnapshot(): unknown {
     return {
       connectionState: this.connectionState,
+      lifecycle: this.connectionLifecycle.snapshot(),
       connected: this.connected,
       authenticated: this.authenticated,
       joined: this.joined,
@@ -1819,6 +1841,25 @@ export class RoomClient {
   }
 
   private setConnectionState(next: RoomConnectionState): void {
+    switch (next) {
+      case 'connecting':
+        this.connectionLifecycle.beginTransport();
+        break;
+      case 'reconnecting':
+        this.connectionLifecycle.waitForReconnect();
+        break;
+      case 'connected':
+        this.connectionLifecycle.markSynchronized();
+        break;
+      case 'auth_lost':
+      case 'kicked':
+      case 'disconnected':
+        this.connectionLifecycle.stop(next);
+        break;
+      case 'idle':
+        this.connectionLifecycle.stop('idle');
+        break;
+    }
     if (this.connectionState === next) {
       return;
     }
