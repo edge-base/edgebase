@@ -34,3 +34,35 @@ apply the verification rules below.
 - Before publishing, require a documented release-critical set of remote
   checks to be green. Unrelated scheduled analysis should remain visible but
   should not silently become a release blocker.
+
+## Mandatory Local Linux Push Gate
+
+- Every public/product push must be preceded by the complete local Linux gate
+  for the exact committed `HEAD` that will be pushed:
+
+  ```sh
+  node scripts/local-ci/run.mjs
+  ```
+
+- Install and preserve the managed hook with
+  `node scripts/local-ci/install-hook.mjs`. Never bypass it with
+  `--no-verify`.
+- The success receipt under `.edgebase/local-linux-ci/` must match the pushed
+  commit SHA and tree, all public workflow digests, the local runner digest,
+  `linux/amd64`, and every required job. Partial and diagnostic runs never
+  authorize a push.
+- Each public Linux CI job runs in a clean container and network. The scheduler
+  uses bounded, resource-aware parallelism (at most three jobs) and does not
+  share mutable application state, databases, containers or networks between
+  jobs. Immutable image acquisition caches and per-job dependency caches may
+  be used only when frozen dependency resolution still verifies the result.
+- The scheduler scales from a four-point budget on a 4-CPU/8-GiB Docker engine
+  to an eight-point budget on an 8-CPU/16-GiB engine. It may run two four-point
+  jobs together at the larger size, but must never exceed eight total points or
+  three concurrent jobs without a new measured isolation and parity review.
+- When a public workflow or the local runner changes, update parity coverage
+  and rerun the full gate. GitHub-hosted macOS/Swift, CodeQL/SARIF transport,
+  npm OIDC/provenance and external repository syncs remain remote-only checks;
+  they do not replace the local Linux gate.
+- See [`scripts/local-ci/README.md`](scripts/local-ci/README.md) for the job
+  inventory, isolation model and diagnostic commands.

@@ -220,6 +220,7 @@ describe('HttpOnly-cookie TokenManager', () => {
     });
 
     expect(online.getCurrentUser()).toBeNull();
+    expect(online.getSessionUserIdHint()).toBe('marker-user');
     const verifiedAccess = makeJwt('verified-user', {
       email: 'verified@example.com',
       custom: { plan: 'pro' },
@@ -242,9 +243,34 @@ describe('HttpOnly-cookie TokenManager', () => {
       refreshTokenTransport: 'httpOnlyCookie',
     });
     expect(offline.getCurrentUser()).toEqual({ id: 'verified-user' });
+    expect(offline.getSessionUserIdHint()).toBe('verified-user');
     expect(offline.getCurrentUser()).not.toHaveProperty('email');
     expect(offline.getCurrentUser()).not.toHaveProperty('custom');
     offline.destroy();
+  });
+
+  it('exposes the cookie marker through the public cache hint without authenticating it', () => {
+    const { store } = installBrowserMocks();
+    vi.stubGlobal('navigator', { onLine: true });
+    store.set('edgebase:cookie-session', JSON.stringify({
+      version: 1,
+      userId: 'cache-owner',
+      email: 'ignored@example.com',
+      role: 'admin',
+    }));
+    const client = createClient('https://api.example.com', {
+      refreshTokenTransport: 'httpOnlyCookie',
+    });
+
+    expect(client.auth.currentUser).toBeNull();
+    expect(client.auth.sessionUserIdHint).toBe('cache-owner');
+
+    store.set('edgebase:pending-signout', JSON.stringify({
+      version: 1,
+      createdAt: Date.now(),
+    }));
+    expect(client.auth.sessionUserIdHint).toBeNull();
+    client.destroy();
   });
 
   it('keeps a verified in-memory user and promotes only its id after an online reload network failure', async () => {

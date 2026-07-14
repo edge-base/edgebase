@@ -1834,6 +1834,23 @@ export class TokenManager {
     return this.cachedUser;
   }
 
+  /**
+   * Return the non-secret local principal hint used to scope offline caches.
+   *
+   * This is deliberately separate from `getCurrentUser()`: an online cookie
+   * marker has not been authenticated yet and must never grant access or be
+   * treated as verified claims. A pending local sign-out is authoritative and
+   * suppresses the hint immediately.
+   */
+  getSessionUserIdHint(): string | null {
+    if (!this.usesHttpOnlyCookie) return this.cachedUser?.id ?? null;
+    if (this.hasPendingSignOut()) return null;
+    const marker = parseCookieSessionMarker(
+      this.storage.getItem(this.keys.cookieSessionKey),
+    );
+    return marker?.userId ?? this.cachedUser?.id ?? null;
+  }
+
   /** Subscribe to auth state changes */
   onAuthStateChange(handler: AuthStateChangeHandler): () => void {
     this.authStateListeners.push(handler);

@@ -54,6 +54,9 @@ import {
 } from '../dev/release/verify-jitpack-release.mjs';
 import { resolveCommand } from './ci-utils.mjs';
 
+const localCiTimeout = (milliseconds) =>
+  process.env.EDGEBASE_LOCAL_CI_EMULATED_AMD64 === '1' ? milliseconds * 3 : milliseconds;
+
 function spawnToolSync(command, args, options = {}) {
   const resolvedCommand = resolveCommand(command);
   return spawnSync(resolvedCommand, args, {
@@ -590,7 +593,7 @@ test('isolated server pack excludes tests and credential fixtures', () => {
   }
 });
 
-test('packed npm CLI resolves runtime dependencies across clean npm and pnpm consumers', { timeout: 240_000 }, async () => {
+test('packed npm CLI resolves runtime dependencies across clean npm and pnpm consumers', { timeout: localCiTimeout(240_000) }, async () => {
   const stage = createNpmReleaseWorkspace();
   const tempRoot = mkdtempSync(resolve(tmpdir(), 'edgebase-cli-consumer-contract-'));
   const packDir = join(tempRoot, 'tarballs');
@@ -618,7 +621,7 @@ test('packed npm CLI resolves runtime dependencies across clean npm and pnpm con
           cwd: stage.root,
           encoding: 'utf8',
           env: { ...process.env, npm_config_ignore_scripts: 'false' },
-          timeout: 120_000,
+          timeout: localCiTimeout(120_000),
         },
       );
       assert.equal(packed.status, 0, `${packed.stdout ?? ''}${packed.stderr ?? ''}`);
@@ -656,7 +659,7 @@ test('packed npm CLI resolves runtime dependencies across clean npm and pnpm con
       {
         cwd: consumerDir,
         encoding: 'utf8',
-        timeout: 120_000,
+        timeout: localCiTimeout(120_000),
       },
     );
     assert.equal(installed.status, 0, `${installed.stdout ?? ''}${installed.stderr ?? ''}`);
@@ -687,7 +690,7 @@ test('packed npm CLI resolves runtime dependencies across clean npm and pnpm con
         cwd: consumerDir,
         encoding: 'utf8',
         env: { ...process.env, NO_COLOR: '1' },
-        timeout: 120_000,
+        timeout: localCiTimeout(120_000),
       },
     );
     assert.equal(npmDevBundle.status, 0, `${npmDevBundle.stdout ?? ''}${npmDevBundle.stderr ?? ''}`);
@@ -699,7 +702,7 @@ test('packed npm CLI resolves runtime dependencies across clean npm and pnpm con
         cwd: consumerDir,
         encoding: 'utf8',
         env: { ...process.env, NO_COLOR: '1' },
-        timeout: 120_000,
+        timeout: localCiTimeout(120_000),
       },
     );
     assert.equal(portable.status, 0, `${portable.stdout ?? ''}${portable.stderr ?? ''}`);
@@ -783,7 +786,7 @@ test('packed npm CLI resolves runtime dependencies across clean npm and pnpm con
       {
         cwd: pnpmConsumerDir,
         encoding: 'utf8',
-        timeout: 120_000,
+        timeout: localCiTimeout(120_000),
       },
     );
     assert.equal(
@@ -807,7 +810,7 @@ test('packed npm CLI resolves runtime dependencies across clean npm and pnpm con
         cwd: pnpmConsumerDir,
         encoding: 'utf8',
         env: { ...process.env, NO_COLOR: '1' },
-        timeout: 120_000,
+        timeout: localCiTimeout(120_000),
       },
     );
     assert.equal(

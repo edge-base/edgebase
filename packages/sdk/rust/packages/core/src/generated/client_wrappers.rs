@@ -1,6 +1,6 @@
 //! Auto-generated client wrapper methods — DO NOT EDIT.
 //! Regenerate: npx tsx tools/sdk-codegen/generate.ts
-//! Source: wrapper-config.json + openapi.json (0.4.4)
+//! Source: wrapper-config.json + openapi.json (0.4.5)
 
 use crate::Error;
 use crate::generated::api_core::GeneratedDbApi;

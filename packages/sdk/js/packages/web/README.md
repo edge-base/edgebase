@@ -184,6 +184,12 @@ This example assumes the server has `auth.session.cookie.enabled: true`. If it
 does not, omit `refreshTokenTransport`; body transport remains the compatibility
 default.
 
+For local-first apps, `client.auth.sessionUserIdHint` exposes only the persisted
+user-id marker needed to select an account-scoped offline cache before the
+HttpOnly cookie refresh completes. It is not authenticated identity and must
+never be used for authorization; `client.auth.currentUser` and the server remain
+authoritative after session revalidation.
+
 `app` in the example above is your database block name from `edgebase.config.ts`.
 
 For instance databases, pass both a namespace and an id:

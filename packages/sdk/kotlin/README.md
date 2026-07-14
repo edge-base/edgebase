@@ -20,9 +20,9 @@ This package is one part of the wider EdgeBase platform. For the full platform, 
 
 | Module | Artifact | Targets |
 | --- | --- | --- |
-| `:core` | `com.github.edge-base.edgebase:edgebase-core:v0.4.4` | current JitPack route publishes the JVM variant of the shared runtime |
-| `:client` | `com.github.edge-base.edgebase:edgebase-client:v0.4.4` | current JitPack route publishes the JVM variant of the client runtime |
-| `:admin` | `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.4.4` | JVM only |
+| `:core` | `com.github.edge-base.edgebase:edgebase-core:v0.4.5` | current JitPack route publishes the JVM variant of the shared runtime |
+| `:client` | `com.github.edge-base.edgebase:edgebase-client:v0.4.5` | current JitPack route publishes the JVM variant of the client runtime |
+| `:admin` | `com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.4.5` | JVM only |
 
 If you build from the monorepo directly, depend on the Gradle modules under
 `packages/sdk/kotlin`. That path remains the way to consume the full Android, iOS,
@@ -38,9 +38,9 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-core:v0.4.4")
-    implementation("com.github.edge-base.edgebase:edgebase-client:v0.4.4")
-    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.4.4")
+    implementation("com.github.edge-base.edgebase:edgebase-core:v0.4.5")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.4.5")
+    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.4.5")
 }
 ```
 
@@ -115,7 +115,7 @@ client.destroy()
 
 ## Publication Notes
 
-- JitPack versions use the repository tag, for example `v0.4.4`
+- JitPack versions use the repository tag, for example `v0.4.5`
 - the public JitPack route validates the JVM publications of `:core` and `:client`
 - the umbrella root artifact `edgebase-kotlin` is intentionally excluded from public installs
 

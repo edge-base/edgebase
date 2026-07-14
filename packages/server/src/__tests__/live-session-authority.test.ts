@@ -59,6 +59,112 @@ function databaseLiveMeta(userId: string, sessionId: string) {
 }
 
 describe('live websocket session authority', () => {
+  it('does not query session authority for database-live events with no matching subscription', async () => {
+    const { DatabaseLiveDO } = await import('../durable-objects/database-live-do.js');
+    const ws = createWebSocket();
+    const authDb = createAuthDb(new Set(['user-1:session-current'])) as any;
+    const ctx = {
+      getWebSockets: vi.fn(() => [ws]),
+      getTags: vi.fn(() => []),
+      acceptWebSocket: vi.fn(),
+    } as any;
+    const live = new DatabaseLiveDO(ctx, { AUTH_DB: authDb } as any) as any;
+    live.setWSMeta(ws, {
+      ...databaseLiveMeta('user-1', 'session-current'),
+      subscribedChannels: ['dblive:shared:comments'],
+    });
+
+    await Promise.all([
+      live.handleInternalEvent(new Request('http://internal/internal/event', {
+        method: 'POST',
+        body: JSON.stringify({
+          deliveryId: 'unmatched-event',
+          type: 'added',
+          channel: 'dblive:shared:posts',
+          table: 'posts',
+          docId: 'post-1',
+          data: { id: 'post-1' },
+          timestamp: '2026-07-14T00:00:00.000Z',
+        }),
+      })),
+      live.handleInternalBatchEvent(new Request('http://internal/internal/batch-event', {
+        method: 'POST',
+        body: JSON.stringify({
+          deliveryId: 'unmatched-batch',
+          type: 'batch_changes',
+          channel: 'dblive:shared:posts',
+          table: 'posts',
+          changes: [{
+            type: 'added',
+            docId: 'post-2',
+            data: { id: 'post-2' },
+            timestamp: '2026-07-14T00:00:00.000Z',
+          }],
+          total: 1,
+        }),
+      })),
+      live.handleInternalBroadcast(new Request('http://internal/internal/broadcast', {
+        method: 'POST',
+        body: JSON.stringify({
+          deliveryId: 'unmatched-broadcast',
+          channel: 'dblive:shared:posts',
+          event: 'refresh',
+        }),
+      })),
+    ]);
+
+    expect(authDb.prepare).not.toHaveBeenCalled();
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('coalesces concurrent database-live checks for the same session', async () => {
+    const { DatabaseLiveDO } = await import('../durable-objects/database-live-do.js');
+    const ws = createWebSocket();
+    let releaseAuthority!: () => void;
+    const authorityGate = new Promise<void>((resolve) => {
+      releaseAuthority = resolve;
+    });
+    const first = vi.fn(async () => {
+      await authorityGate;
+      return { id: 'session-current' };
+    });
+    const authDb = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({ first })),
+      })),
+    } as unknown as D1Database;
+    const ctx = {
+      getWebSockets: vi.fn(() => [ws]),
+      getTags: vi.fn(() => []),
+      acceptWebSocket: vi.fn(),
+    } as any;
+    const live = new DatabaseLiveDO(ctx, { AUTH_DB: authDb } as any) as any;
+    live.setWSMeta(ws, databaseLiveMeta('user-1', 'session-current'));
+
+    const deliveries = [1, 2].map((index) => live.handleInternalEvent(new Request(
+      'http://internal/internal/event',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          deliveryId: `concurrent-event-${index}`,
+          type: 'added',
+          channel: 'dblive:shared:posts',
+          table: 'posts',
+          docId: `post-${index}`,
+          data: { id: `post-${index}` },
+          timestamp: '2026-07-14T00:00:00.000Z',
+        }),
+      },
+    )));
+
+    await vi.waitFor(() => expect(first).toHaveBeenCalledTimes(1));
+    releaseAuthority();
+    await Promise.all(deliveries);
+
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(ws.send).toHaveBeenCalledTimes(2);
+  });
+
   it('disconnects the revoked Database Live client while continuing delivery to the replacement client', async () => {
     const { DatabaseLiveDO } = await import('../durable-objects/database-live-do.js');
     const revoked = createWebSocket();

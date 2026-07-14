@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.5 — 2026-07-14
+
+### Added
+
+- The Web SDK exposes `client.auth.sessionUserIdHint` as a non-secret local
+  user-id hint for choosing an account-scoped offline cache while an HttpOnly
+  cookie session is being revalidated. The hint is suppressed by pending local
+  sign-out and is never authenticated identity or an authorization signal.
+- Published stable GitHub Releases can trigger the guarded npm package graph
+  publisher. The workflow requires an exact `vMAJOR.MINOR.PATCH` tag contained
+  in `main`, frozen dependencies, release preflight, the repository-scoped npm
+  token, and npm provenance permissions.
+- A repository-owned local Linux CI gate now mirrors every public Linux job in
+  isolated containers with bounded resource-aware parallelism and writes a
+  commit-bound receipt required by the managed pre-push hook.
+
+### Fixed
+
+- HttpOnly-cookie clients now take over a stale cross-tab refresh lock when the
+  leader tab disappears, instead of surfacing a signed-out state until another
+  reload. A still-heartbeating leader remains authoritative.
+- Database Live skips session-authority reads for events with no matching
+  subscription and coalesces only concurrent checks for the same session. This
+  removes duplicate auth-database work during event fan-out while preserving a
+  fresh authority check after the in-flight read settles.
+
+### Internal
+
+- Removed obsolete hosted Windows jobs and dependencies, retained the Linux
+  and macOS compatibility boundary, and hardened Dependabot cooldown policy.
+
 ## 0.4.4 — 2026-07-13
 
 ### Added

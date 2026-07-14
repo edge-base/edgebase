@@ -201,6 +201,13 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
   private config: EdgeBaseConfig;
   private filterRecoveryNeeded = true;
   private pendingAuth = new Map<string, ReturnType<typeof setTimeout>>();
+  // A single database transaction can fan out into table and document events
+  // at the same time. All of those deliveries must verify the same session,
+  // but issuing one AUTH_DB query per event amplifies a slow local persistence
+  // layer and can build a seconds-long delivery backlog. Share only checks
+  // that are currently in flight; once a check settles, the next delivery
+  // reads the authoritative session row again, preserving prompt revocation.
+  private sessionAuthorityInFlight = new Map<string, Promise<boolean>>();
   private metaCache = new Map<WebSocket, WSMeta>();
   private recentDeliveryIds = new Map<string, number>();
   private runtimeReadyPromise: Promise<void> | null = null;
@@ -666,8 +673,8 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
     for (const ws of sockets) {
       const meta = this.getWSMeta(ws);
       if (!meta?.authenticated) continue;
-      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
       if (!meta.subscribedChannels.includes(batch.channel)) continue;
+      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
 
       if (meta.supportsBatch) {
         const filteredChanges: typeof batchMsg.changes = [];
@@ -779,11 +786,11 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
     for (const ws of sockets) {
       const meta = this.getWSMeta(ws);
       if (!meta?.authenticated) continue;
-      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
       // Deliver to clients subscribed to the target channel or any parent channel
       if (!meta.subscribedChannels.some(sub => channel === sub || channel.startsWith(`${sub}:`))) {
         continue;
       }
+      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
       try {
         ws.send(msg);
       } catch {
@@ -833,8 +840,8 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
     for (const ws of sockets) {
       const meta = this.getWSMeta(ws);
       if (!meta?.authenticated) continue;
-      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
       if (msgChannel && !meta.subscribedChannels.includes(msgChannel)) continue;
+      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
 
       const canRead = await this.evaluateRowReadAccess(tableName, meta, eventData);
       if (!canRead) continue;
@@ -881,11 +888,30 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
     }
 
     try {
-      const active = await isAuthSessionActive(
-        this.env as unknown as Record<string, unknown>,
-        meta.userId,
-        meta.sessionId,
-      );
+      const authorityKey = JSON.stringify([meta.userId, meta.sessionId]);
+      let authorityCheck = this.sessionAuthorityInFlight.get(authorityKey);
+      if (!authorityCheck) {
+        authorityCheck = isAuthSessionActive(
+          this.env as unknown as Record<string, unknown>,
+          meta.userId,
+          meta.sessionId,
+        );
+        this.sessionAuthorityInFlight.set(authorityKey, authorityCheck);
+        const trackedCheck = authorityCheck;
+        trackedCheck.then(
+          () => {
+            if (this.sessionAuthorityInFlight.get(authorityKey) === trackedCheck) {
+              this.sessionAuthorityInFlight.delete(authorityKey);
+            }
+          },
+          () => {
+            if (this.sessionAuthorityInFlight.get(authorityKey) === trackedCheck) {
+              this.sessionAuthorityInFlight.delete(authorityKey);
+            }
+          },
+        );
+      }
+      const active = await authorityCheck;
       if (active) return true;
 
       this.revokeLiveSession(ws, meta, 'Authentication session was revoked. Reconnect required.');
