@@ -2981,7 +2981,11 @@ describe('RoomClient — construction', () => {
       }),
     );
     const send = vi.fn();
-    const ws = { send, onmessage: null as ((event: MessageEvent) => void) | null } as unknown as WebSocket;
+    const ws = {
+      send,
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      readyState: 1,
+    } as unknown as WebSocket;
 
     tm.setTokens({
       accessToken: makeValidJwt('room-refresh-user'),
@@ -3022,7 +3026,11 @@ describe('RoomClient — construction', () => {
         },
       },
     });
-    const ws = { send: vi.fn(), onmessage: null as ((event: MessageEvent) => void) | null } as unknown as WebSocket;
+    const ws = {
+      send: vi.fn(),
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      readyState: 1,
+    } as unknown as WebSocket;
     (room as any).ws = ws;
     (room as any).connected = true;
 
@@ -3076,6 +3084,7 @@ describe('RoomClient — construction', () => {
     const originalOnMessage = vi.fn();
     const ws = {
       onmessage: originalOnMessage as ((event: MessageEvent) => void) | null,
+      readyState: 1,
       send: vi.fn((raw: string) => {
         const message = JSON.parse(raw) as Record<string, unknown>;
         if (message.type === 'auth') {
@@ -3189,7 +3198,7 @@ describe('RoomClient — method signatures', () => {
     const send = vi.fn();
     const close = vi.fn();
 
-    (room as any).ws = { close, send };
+    (room as any).ws = { close, send, readyState: 1 };
     (room as any).connected = true;
     room.leave();
 
@@ -3197,6 +3206,106 @@ describe('RoomClient — method signatures', () => {
     expect(close).toHaveBeenCalledWith(4005, 'Client left room');
     tm.destroy();
     vi.useRealTimers();
+  });
+
+  it('leave does not send after the socket has started closing', () => {
+    const tm = new TokenManager('http://localhost:8688');
+    const room = new RoomClient('http://localhost:8688', 'default', 'r1', tm);
+    const send = vi.fn();
+    const close = vi.fn();
+
+    (room as any).ws = { close, send, readyState: 2 };
+    (room as any).connected = true;
+    room.leave();
+
+    expect(send).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledWith(4005, 'Client left room');
+    tm.destroy();
+  });
+
+  it.each([
+    {
+      name: 'action',
+      invoke: (room: RoomClient) => room.send('SAVE'),
+      pendingMap: 'pendingRequests',
+    },
+    {
+      name: 'signal',
+      invoke: (room: RoomClient) => room.signals.send('cursor'),
+      pendingMap: 'pendingSignalRequests',
+    },
+    {
+      name: 'member state',
+      invoke: (room: RoomClient) => room.members.setState({ editing: true }),
+      pendingMap: 'pendingMemberStateRequests',
+    },
+    {
+      name: 'admin operation',
+      invoke: (room: RoomClient) => room.admin.kick('member-1'),
+      pendingMap: 'pendingAdminRequests',
+    },
+  ])('$name rejects immediately when the socket is closing', async ({ invoke, pendingMap }) => {
+    const tm = new TokenManager('http://localhost:8688');
+    const room = new RoomClient('http://localhost:8688', 'default', 'r1', tm, {
+      sendTimeout: 60_000,
+    });
+    const send = vi.fn();
+
+    (room as any).ws = { close: vi.fn(), send, readyState: 2 };
+    (room as any).connected = true;
+    (room as any).authenticated = true;
+
+    await expect(invoke(room)).rejects.toThrow(/Room connection required/);
+    expect(send).not.toHaveBeenCalled();
+    expect((room as any)[pendingMap].size).toBe(0);
+    tm.destroy();
+  });
+
+  it.each([
+    {
+      name: 'action',
+      invoke: (room: RoomClient) => room.send('SAVE'),
+      pendingMap: 'pendingRequests',
+    },
+    {
+      name: 'signal',
+      invoke: (room: RoomClient) => room.signals.send('cursor'),
+      pendingMap: 'pendingSignalRequests',
+    },
+    {
+      name: 'member state',
+      invoke: (room: RoomClient) => room.members.setState({ editing: true }),
+      pendingMap: 'pendingMemberStateRequests',
+    },
+    {
+      name: 'admin operation',
+      invoke: (room: RoomClient) => room.admin.kick('member-1'),
+      pendingMap: 'pendingAdminRequests',
+    },
+  ])('$name clears its pending request when the socket closes during send', async ({ invoke, pendingMap }) => {
+    const tm = new TokenManager('http://localhost:8688');
+    const room = new RoomClient('http://localhost:8688', 'default', 'r1', tm, {
+      sendTimeout: 60_000,
+    });
+    const send = vi.fn();
+    let readyStateReads = 0;
+    const socket = {
+      close: vi.fn(),
+      send,
+      get readyState() {
+        readyStateReads += 1;
+        return readyStateReads === 1 ? 1 : 2;
+      },
+    };
+
+    (room as any).ws = socket;
+    (room as any).connected = true;
+    (room as any).authenticated = true;
+
+    await expect(invoke(room)).rejects.toThrow(/Room connection required/);
+    expect(send).not.toHaveBeenCalled();
+    expect((room as any)[pendingMap].size).toBe(0);
+    tm.destroy();
   });
 
   it('send is a function (v2: replaces setState/patchState/sendAction)', () => {

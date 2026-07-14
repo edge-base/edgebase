@@ -120,7 +120,7 @@ final admin = AdminEdgeBase(
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.4.5")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.4.6")
 ]
 ```
 
@@ -144,7 +144,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-client:v0.4.5")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.4.6")
 }
 ```
 
@@ -164,7 +164,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.4.5")
+    implementation("com.github.edge-base.edgebase:edgebase-admin-kotlin:v0.4.6")
 }
 ```
 
@@ -192,7 +192,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.4.5'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.4.6'
 }
 ```
 
@@ -212,7 +212,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.edge-base.edgebase:edgebase-admin-java:v0.4.5'
+    implementation 'com.github.edge-base.edgebase:edgebase-admin-java:v0.4.6'
 }
 ```
 
@@ -236,7 +236,7 @@ AdminEdgeBase admin = EdgeBase.admin(
 // build.sbt
 resolvers += "jitpack" at "https://jitpack.io"
 
-libraryDependencies += "com.github.edge-base.edgebase" % "edgebase-admin-scala" % "v0.4.5"
+libraryDependencies += "com.github.edge-base.edgebase" % "edgebase-admin-scala" % "v0.4.6"
 ```
 
 ```scala
@@ -341,7 +341,7 @@ $admin = new AdminClient('https://your-project.edgebase.fun', getenv('EDGEBASE_S
 ```toml
 # Cargo.toml
 [dependencies]
-edgebase-admin = "0.4.5"
+edgebase-admin = "0.4.6"
 tokio = "1"
 serde_json = "1"
 ```
@@ -433,7 +433,7 @@ admin = EdgebaseAdmin::AdminClient.new(
 # mix.exs
 defp deps do
   [
-    {:edgebase_admin, "~> 0.4.5"}
+    {:edgebase_admin, "~> 0.4.6"}
   ]
 end
 ```

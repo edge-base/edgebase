@@ -1,3 +1,8 @@
+## 0.4.6
+
+- Synchronized the Flutter package with the EdgeBase 0.4.6 patch release
+- No public Dart API compatibility break is introduced
+
 ## 0.4.5
 
 - Synchronized the Flutter package with the EdgeBase 0.4.5 patch release

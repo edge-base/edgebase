@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.6 — 2026-07-14
+
+### Fixed
+
+- The Web SDK no longer attempts to send Room frames after a WebSocket has
+  entered `CLOSING` or `CLOSED`. Action, signal, member-state, and admin calls
+  now fail immediately and clear their pending request state if the socket
+  closes during the send boundary, instead of surfacing a native WebSocket
+  error or waiting for the request timeout. Explicit room leave and heartbeat
+  frames also tolerate the same close race.
+
 ## 0.4.5 — 2026-07-14
 
 ### Added

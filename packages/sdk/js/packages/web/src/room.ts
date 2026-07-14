@@ -207,6 +207,10 @@ function isSocketOpenOrConnecting(socket: Pick<WebSocket, 'readyState'> | null |
   return !!socket && (socket.readyState === WS_OPEN || socket.readyState === WS_CONNECTING);
 }
 
+function isSocketOpen(socket: Pick<WebSocket, 'readyState'> | null | undefined): boolean {
+  return !!socket && socket.readyState === WS_OPEN;
+}
+
 function closeSocketAfterLeave(socket: Pick<WebSocket, 'close'>, reason: string): void {
   try {
     socket.close(ROOM_EXPLICIT_LEAVE_CLOSE_CODE, reason);
@@ -679,12 +683,16 @@ export class RoomClient {
   }
 
   private assertConnected(action: string): void {
-    if (!this.ws || !this.connected || !this.authenticated) {
-      throw new EdgeBaseError(
-        400,
-        `Room connection required before ${action}. Call room.join() and wait for the connection to finish.`,
-      );
+    if (!isSocketOpen(this.ws) || !this.connected || !this.authenticated) {
+      throw this.connectionRequiredError(action);
     }
+  }
+
+  private connectionRequiredError(action: string): EdgeBaseError {
+    return new EdgeBaseError(
+      400,
+      `Room connection required before ${action}. Call room.join() and wait for the connection to finish.`,
+    );
   }
 
   /**
@@ -725,7 +733,8 @@ export class RoomClient {
    * const result = await room.send('SET_SCORE', { score: 42 });
    */
   async send(actionType: string, payload?: unknown): Promise<unknown> {
-    this.assertConnected(`sending action '${actionType}'`);
+    const action = `sending action '${actionType}'`;
+    this.assertConnected(action);
 
     const requestId = generateRequestId();
 
@@ -737,12 +746,17 @@ export class RoomClient {
 
       this.pendingRequests.set(requestId, { resolve, reject, timeout });
 
-      this.sendRaw({
+      const sent = this.sendRaw({
         type: 'send',
         actionType,
         payload: payload ?? {},
         requestId,
       });
+      if (!sent) {
+        clearTimeout(timeout);
+        this.pendingRequests.delete(requestId);
+        reject(this.connectionRequiredError(action));
+      }
     });
   }
 
@@ -928,7 +942,8 @@ export class RoomClient {
     payload?: unknown,
     options?: { includeSelf?: boolean; memberId?: string },
   ): Promise<void> {
-    this.assertConnected(`sending signal '${event}'`);
+    const action = `sending signal '${event}'`;
+    this.assertConnected(action);
 
     const requestId = generateRequestId();
     return new Promise<void>((resolve, reject) => {
@@ -938,7 +953,7 @@ export class RoomClient {
       }, this.options.sendTimeout);
 
       this.pendingSignalRequests.set(requestId, { resolve, reject, timeout });
-      this.sendRaw({
+      const sent = this.sendRaw({
         type: 'signal',
         event,
         payload: payload ?? {},
@@ -946,6 +961,11 @@ export class RoomClient {
         memberId: options?.memberId,
         requestId,
       });
+      if (!sent) {
+        clearTimeout(timeout);
+        this.pendingSignalRequests.delete(requestId);
+        reject(this.connectionRequiredError(action));
+      }
     });
   }
 
@@ -975,7 +995,8 @@ export class RoomClient {
     payload: { type: 'member_state'; state: Record<string, unknown> } | { type: 'member_state_clear' },
     onSuccess?: () => void,
   ): Promise<void> {
-    this.assertConnected('updating member state');
+    const action = 'updating member state';
+    this.assertConnected(action);
 
     const requestId = generateRequestId();
     return new Promise<void>((resolve, reject) => {
@@ -985,7 +1006,11 @@ export class RoomClient {
       }, this.options.sendTimeout);
 
       this.pendingMemberStateRequests.set(requestId, { resolve, reject, timeout, onSuccess });
-      this.sendRaw({ ...payload, requestId });
+      if (!this.sendRaw({ ...payload, requestId })) {
+        clearTimeout(timeout);
+        this.pendingMemberStateRequests.delete(requestId);
+        reject(this.connectionRequiredError(action));
+      }
     });
   }
 
@@ -994,7 +1019,8 @@ export class RoomClient {
     memberId: string,
     payload?: Record<string, unknown>,
   ): Promise<void> {
-    this.assertConnected(`running admin operation '${operation}'`);
+    const action = `running admin operation '${operation}'`;
+    this.assertConnected(action);
 
     const requestId = generateRequestId();
     return new Promise<void>((resolve, reject) => {
@@ -1004,13 +1030,18 @@ export class RoomClient {
       }, this.options.sendTimeout);
 
       this.pendingAdminRequests.set(requestId, { resolve, reject, timeout });
-      this.sendRaw({
+      const sent = this.sendRaw({
         type: 'admin',
         operation,
         memberId,
         payload: payload ?? {},
         requestId,
       });
+      if (!sent) {
+        clearTimeout(timeout);
+        this.pendingAdminRequests.delete(requestId);
+        reject(this.connectionRequiredError(action));
+      }
     });
   }
 
@@ -1800,10 +1831,16 @@ export class RoomClient {
 
   // ─── Private: Helpers ───
 
-  private sendRaw(data: Record<string, unknown>): void {
-    if (this.ws && this.connected) {
-      this.ws.send(JSON.stringify(data));
-      return;
+  private sendRaw(data: Record<string, unknown>): boolean {
+    const socket = this.ws;
+    if (!socket || !this.connected || !isSocketOpen(socket)) return false;
+    try {
+      socket.send(JSON.stringify(data));
+      return true;
+    } catch {
+      // The socket can start closing between the readyState check and send.
+      // Its close handler owns pending-request rejection and reconnection.
+      return false;
     }
   }
 
@@ -1884,16 +1921,21 @@ export class RoomClient {
     this.stopHeartbeat();
     this.lastHeartbeatAckAt = Date.now();
     this.heartbeatTimer = setInterval(() => {
-      if (this.ws && this.connected) {
+      const socket = this.ws;
+      if (socket && this.connected && isSocketOpen(socket)) {
         if (Date.now() - this.lastHeartbeatAckAt > this.options.heartbeatStaleTimeoutMs) {
           try {
-            this.ws.close();
+            socket.close();
           } catch {
             // Socket may already be closing.
           }
           return;
         }
-        this.ws.send(JSON.stringify({ type: 'ping' }));
+        try {
+          socket.send(JSON.stringify({ type: 'ping' }));
+        } catch {
+          // The close handler owns recovery if the socket changed state here.
+        }
       }
     }, this.options.heartbeatIntervalMs);
   }

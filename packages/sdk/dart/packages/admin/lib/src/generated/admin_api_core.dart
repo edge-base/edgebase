@@ -1,6 +1,6 @@
 // Auto-generated admin API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.4.5)
+// Source: openapi.json (0.4.6)
 
 import 'package:edgebase_core/src/http_client.dart';
 

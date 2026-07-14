@@ -29,7 +29,7 @@ from edgebase.room import RoomClient, Subscription
 try:
     __version__ = version("edgebase")
 except PackageNotFoundError:
-    __version__ = "0.4.5"
+    __version__ = "0.4.6"
 
 __all__ = [
     "EdgeBaseServer",

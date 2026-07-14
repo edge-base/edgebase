@@ -21,7 +21,7 @@ code. For backend code, prefer `edgebase-admin-java`.
 
 ## Public Artifact
 
-- `com.github.edge-base.edgebase:edgebase-android-java:v0.4.5`
+- `com.github.edge-base.edgebase:edgebase-android-java:v0.4.6`
 
 ## Canonical Examples
 

@@ -21,7 +21,7 @@ Add the public core package repository to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift-core", from: "0.4.5")
+    .package(url: "https://github.com/edge-base/edgebase-swift-core", from: "0.4.6")
 ]
 ```
 
