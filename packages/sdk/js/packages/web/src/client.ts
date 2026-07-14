@@ -68,6 +68,8 @@ export interface JuneClientOptions<Schema extends EdgeBaseTableMap = EdgeBaseTab
    * Defaults to `body`, which preserves the legacy localStorage transport.
    */
   refreshTokenTransport?: RefreshTokenTransport;
+  /** Optional default deadline for JSON API requests. Undefined is unbounded. */
+  requestTimeoutMs?: number;
 }
 
 // ─── Client SDK (browser / mobile) ───
@@ -141,6 +143,7 @@ export class ClientEdgeBase<Schema extends EdgeBaseTableMap = EdgeBaseTableMap> 
       tokenManager: this.tokenManager,
       contextManager: this.contextManager,
       refreshTokenTransport: options?.refreshTokenTransport,
+      requestTimeoutMs: options?.requestTimeoutMs,
     });
     this.core = new DefaultDbApi(new HttpClientAdapter(this.httpClient));
     const corePublic = new DefaultDbApi(new PublicHttpClientAdapter(this.httpClient));

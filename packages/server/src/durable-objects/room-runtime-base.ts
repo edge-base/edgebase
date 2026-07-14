@@ -321,6 +321,11 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
   // ─── WebSocket metadata cache ───
   private _metaCache = new Map<WebSocket, RoomWSMeta>();
   private _attachmentExtraCache = new Map<WebSocket, unknown>();
+  // Fanout can ask the same signed session for authority from several sockets
+  // or inbound/outbound paths at once. Share only the currently in-flight read;
+  // remove it immediately after settlement so the next burst observes session
+  // revocation without a TTL window.
+  private sessionAuthorityInFlight: Map<string, Promise<boolean>> | undefined;
 
   // ─── Auth timeout tracking ───
   private pendingAuth = new Map<string, number>();
@@ -2005,7 +2010,8 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
     this.safeSendRaw(ws, JSON.stringify(msg));
   }
 
-  private outboundSessionChains: WeakMap<WebSocket, Promise<void>> | undefined;
+  private outboundSessionQueues: WeakMap<WebSocket, string[]> | undefined;
+  private outboundSessionDrains: WeakMap<WebSocket, Promise<void>> | undefined;
 
   protected safeSendRaw(ws: WebSocket, msg: string): void {
     const meta = this.getWSMeta(ws);
@@ -2014,20 +2020,55 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       return;
     }
 
-    const chains = (this.outboundSessionChains ??= new WeakMap());
-    const previous = chains.get(ws) ?? Promise.resolve();
-    const run = previous.then(async () => {
-      // Re-read after earlier queued sends complete. A preceding authority
-      // check may already have revoked and replaced the cached attachment;
-      // using the object captured before the queue would emit duplicate
-      // SESSION_REVOKED frames and repeated close attempts.
-      const currentMeta = this.getWSMeta(ws);
-      if (currentMeta?.authenticated && await this.ensureLiveSessionAuthority(ws, currentMeta)) {
-        this.sendRawUnchecked(ws, msg);
+    const queues = (this.outboundSessionQueues ??= new WeakMap());
+    let queue = queues.get(ws);
+    if (!queue) {
+      queue = [];
+      queues.set(ws, queue);
+    }
+    queue.push(msg);
+    this.startOutboundSessionDrain(ws, queue);
+  }
+
+  private startOutboundSessionDrain(ws: WebSocket, queue: string[]): void {
+    const drains = (this.outboundSessionDrains ??= new WeakMap());
+    if (drains.has(ws)) return;
+
+    const run = Promise.resolve().then(async () => {
+      while (queue.length > 0) {
+        // Re-read before every burst. A preceding authority check may already
+        // have revoked and replaced the cached attachment; using stale metadata
+        // would emit duplicate SESSION_REVOKED frames and repeated close calls.
+        const currentMeta = this.getWSMeta(ws);
+        if (!currentMeta?.authenticated) {
+          queue.length = 0;
+          return;
+        }
+        if (!(await this.ensureLiveSessionAuthority(ws, currentMeta))) {
+          queue.length = 0;
+          return;
+        }
+
+        // Frames accumulated while the one authority read was in flight are a
+        // single ordered burst. No TTL is introduced: any later burst performs
+        // a fresh authority read and observes session revocation promptly.
+        const batch = queue.splice(0);
+        for (const payload of batch) {
+          this.sendRawUnchecked(ws, payload);
+        }
       }
     });
     const settled = run.then(() => undefined, () => undefined);
-    chains.set(ws, settled);
+    drains.set(ws, settled);
+    settled.then(() => {
+      if (drains.get(ws) !== settled) return;
+      drains.delete(ws);
+      // A frame can arrive after the drain observes an empty queue but before
+      // this cleanup microtask runs. Start a new, freshly authorized burst.
+      if (queue.length > 0) {
+        this.startOutboundSessionDrain(ws, queue);
+      }
+    });
     this.ctx.waitUntil(settled);
   }
 
@@ -2046,11 +2087,31 @@ export class RoomRuntimeBaseDO extends DurableObject<RoomDOEnv> {
       return false;
     }
     try {
-      const active = await isAuthSessionActive(
-        this.env as unknown as Record<string, unknown>,
-        meta.userId,
-        meta.sessionId,
-      );
+      const authorityKey = JSON.stringify([meta.userId, meta.sessionId]);
+      const inFlight = (this.sessionAuthorityInFlight ??= new Map());
+      let authorityCheck = inFlight.get(authorityKey);
+      if (!authorityCheck) {
+        authorityCheck = isAuthSessionActive(
+          this.env as unknown as Record<string, unknown>,
+          meta.userId,
+          meta.sessionId,
+        );
+        inFlight.set(authorityKey, authorityCheck);
+        const trackedCheck = authorityCheck;
+        trackedCheck.then(
+          () => {
+            if (inFlight.get(authorityKey) === trackedCheck) {
+              inFlight.delete(authorityKey);
+            }
+          },
+          () => {
+            if (inFlight.get(authorityKey) === trackedCheck) {
+              inFlight.delete(authorityKey);
+            }
+          },
+        );
+      }
+      const active = await authorityCheck;
       if (active) return true;
 
       this.revokeLiveSession(ws, meta, 'Authentication session was revoked. Reconnect required.');

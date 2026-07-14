@@ -26,6 +26,11 @@ export interface FunctionCallOptions {
   query?: Record<string, string>;
   /** Turnstile token for a function declared with `captcha: true`. */
   captchaToken?: string;
+  /**
+   * Optional deadline covering response headers and body consumption.
+   * A timed-out mutation may already have committed and is not retried.
+   */
+  timeoutMs?: number;
 }
 
 // ─── FunctionsClient ───
@@ -51,13 +56,14 @@ export class FunctionsClient {
     const method = options?.method ?? 'POST';
     const path = `/api/functions/${name}`;
 
-    if (options?.captchaToken) {
+    if (options?.captchaToken || options?.timeoutMs !== undefined) {
       return this.httpClient.requestFunction<T>(
         method,
         path,
         options.body,
         options.query,
         options.captchaToken,
+        options.timeoutMs,
       );
     }
 

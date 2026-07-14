@@ -117,6 +117,25 @@ describe('FunctionsClient.call — body forwarding', () => {
       { value: 1 },
       undefined,
       'synthetic-captcha-token',
+      undefined,
+    );
+    expect(httpClient.post).not.toHaveBeenCalled();
+  });
+
+  it('routes an explicit deadline through the bounded function request path', async () => {
+    await functionsClient.call('slow-report', {
+      method: 'POST',
+      body: { reportId: 'report-1' },
+      timeoutMs: 12_000,
+    });
+
+    expect(httpClient.requestFunction).toHaveBeenCalledWith(
+      'POST',
+      '/api/functions/slow-report',
+      { reportId: 'report-1' },
+      undefined,
+      undefined,
+      12_000,
     );
     expect(httpClient.post).not.toHaveBeenCalled();
   });

@@ -3,15 +3,18 @@
  */
 
 import type { ContextManager } from './context.js';
-import { parseErrorResponse, networkError } from './errors.js';
+import { parseErrorResponse, networkError, requestTimeoutError } from './errors.js';
 import type { ITokenManager, ITokenPair } from './types.js';
 
 const COOKIE_AUTH_REQUEST_TIMEOUT_MS = 15_000;
 
-class CookieAuthRequestTimeoutError extends Error {
-  constructor() {
-    super(`Cookie auth request timed out after ${COOKIE_AUTH_REQUEST_TIMEOUT_MS}ms.`);
-    this.name = 'CookieAuthRequestTimeoutError';
+class RequestTimeoutError extends Error {
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super(`Request timed out after ${timeoutMs}ms.`);
+    this.name = 'RequestTimeoutError';
+    this.timeoutMs = timeoutMs;
   }
 }
 
@@ -55,6 +58,12 @@ export interface HttpClientOptions {
    * authentication for the rest of the API.
    */
   refreshTokenTransport?: 'body' | 'httpOnlyCookie';
+  /**
+   * Optional default deadline for JSON API requests, including response-body
+   * consumption. Undefined preserves the unbounded legacy behavior. A timed
+   * out mutation has an unknown outcome and is never transport-retried.
+   */
+  requestTimeoutMs?: number;
 }
 
 export class HttpClient {
@@ -63,6 +72,7 @@ export class HttpClient {
   private tokenManager?: ITokenManager;
   private locale?: string;
   private refreshTokenTransport: 'body' | 'httpOnlyCookie';
+  private requestTimeoutMs?: number;
 
   constructor(options: HttpClientOptions) {
     if (!options.baseUrl || typeof options.baseUrl !== 'string') {
@@ -72,6 +82,13 @@ export class HttpClient {
     this.serviceKey = options.serviceKey;
     this.tokenManager = options.tokenManager;
     this.refreshTokenTransport = options.refreshTokenTransport ?? 'body';
+    if (
+      options.requestTimeoutMs !== undefined
+      && (!Number.isFinite(options.requestTimeoutMs) || options.requestTimeoutMs <= 0)
+    ) {
+      throw new Error('[EdgeBase] requestTimeoutMs must be a finite number greater than 0.');
+    }
+    this.requestTimeoutMs = options.requestTimeoutMs;
 
     // — warn if Service Key is used in a browser context
     if (this.serviceKey && typeof window !== 'undefined') {
@@ -137,7 +154,7 @@ export class HttpClient {
     const refreshUrl = `${this.baseUrl}/api/auth/refresh`;
     let response: Response;
     try {
-      response = await this.fetchWithCookieAuthTimeout(refreshUrl, {
+      response = await this.fetchWithRequestTimeout(refreshUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -180,15 +197,19 @@ export class HttpClient {
    * retain the cross-tab refresh lock forever. Aborting also prevents a late
    * Set-Cookie response from racing a subsequent sign-out.
    */
-  private async fetchWithCookieAuthTimeout(
+  private async fetchWithRequestTimeout(
     input: string,
     init: RequestInit,
+    requestTimeoutMs?: number,
   ): Promise<Response> {
     const url = new URL(input, this.baseUrl);
-    const shouldBound = this.refreshTokenTransport === 'httpOnlyCookie'
+    const shouldBoundCookieAuth = this.refreshTokenTransport === 'httpOnlyCookie'
       && /(?:^|\/)api\/auth(?:\/|$)/.test(url.pathname)
       && String(init.method ?? 'GET').toUpperCase() === 'POST';
-    if (!shouldBound) return fetch(input, init);
+    const timeoutMs = shouldBoundCookieAuth
+      ? Math.min(requestTimeoutMs ?? COOKIE_AUTH_REQUEST_TIMEOUT_MS, COOKIE_AUTH_REQUEST_TIMEOUT_MS)
+      : requestTimeoutMs;
+    if (timeoutMs === undefined) return fetch(input, init);
 
     const controller = new AbortController();
     let timedOut = false;
@@ -197,8 +218,8 @@ export class HttpClient {
       timeout = setTimeout(() => {
         timedOut = true;
         controller.abort();
-        reject(new CookieAuthRequestTimeoutError());
-      }, COOKIE_AUTH_REQUEST_TIMEOUT_MS);
+        reject(new RequestTimeoutError(timeoutMs));
+      }, timeoutMs);
     });
 
     try {
@@ -217,7 +238,7 @@ export class HttpClient {
         timeoutPromise,
       ]);
     } catch (error) {
-      if (timedOut) throw new CookieAuthRequestTimeoutError();
+      if (timedOut) throw new RequestTimeoutError(timeoutMs);
       throw error;
     } finally {
       if (timeout !== undefined) clearTimeout(timeout);
@@ -249,6 +270,7 @@ export class HttpClient {
       skipAuth?: boolean;
       query?: Record<string, string>;
       captchaToken?: string;
+      timeoutMs?: number;
     } = {},
   ): Promise<T> {
     const url = new URL(path, this.baseUrl);
@@ -266,6 +288,14 @@ export class HttpClient {
     // it, so automatic replay would be ambiguous and potentially duplicate a
     // function side effect.
     const maxRetries = options.captchaToken ? 0 : 3;
+    const methodUpper = method.toUpperCase();
+    const requestTimeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
+    if (
+      requestTimeoutMs !== undefined
+      && (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0)
+    ) {
+      throw new Error('[EdgeBase] timeoutMs must be a finite number greater than 0.');
+    }
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       let refreshFailure: Error | null = null;
@@ -284,13 +314,27 @@ export class HttpClient {
 
       let response: Response;
       try {
-        response = await this.fetchWithCookieAuthTimeout(url.toString(), fetchOptions);
+        response = await this.fetchWithRequestTimeout(
+          url.toString(),
+          fetchOptions,
+          requestTimeoutMs,
+        );
       } catch (err) {
-        // Transport retry: retry on network errors (max 2 transport retries)
+        if (err instanceof RequestTimeoutError) {
+          const unknownOutcome = methodUpper === 'GET'
+            ? ''
+            : ' The server may still have committed this mutation; confirm its state before retrying.';
+          throw requestTimeoutError(
+            `${requestLabel} timed out after ${err.timeoutMs}ms.${unknownOutcome}`,
+          );
+        }
+        // Only safe reads are replayed after an ambiguous transport failure.
+        // POST/PATCH/PUT/DELETE may already have committed before the connection
+        // failed, so automatic retry could duplicate a side effect.
         if (
           attempt < 2
+          && methodUpper === 'GET'
           && !options.captchaToken
-          && !(err instanceof CookieAuthRequestTimeoutError)
           && isRetryableNetworkError(err)
         ) {
           await sleep(50 * (attempt + 1));
@@ -354,13 +398,25 @@ export class HttpClient {
           if (body !== undefined) {
             retryOptions.body = JSON.stringify(body);
           }
-          const retryResponse = await this.fetchWithCookieAuthTimeout(url.toString(), retryOptions);
+          const retryResponse = await this.fetchWithRequestTimeout(
+            url.toString(),
+            retryOptions,
+            requestTimeoutMs,
+          );
           if (retryResponse.ok) {
             if (retryResponse.status === 204) return undefined as T;
             return (await retryResponse.json()) as T;
           }
           response = retryResponse;
         } catch (error) {
+          if (error instanceof RequestTimeoutError) {
+            const unknownOutcome = methodUpper === 'GET'
+              ? ''
+              : ' The server may still have committed this mutation; confirm its state before retrying.';
+            throw requestTimeoutError(
+              `${requestLabel} timed out after ${error.timeoutMs}ms while retrying after a 401 response.${unknownOutcome}`,
+            );
+          }
           throw networkError(
             `${requestLabel} could not reach ${this.baseUrl} while retrying after a 401 response. Make sure the EdgeBase server is running and the URL is correct.`,
             { cause: error },
@@ -428,6 +484,7 @@ export class HttpClient {
     body?: unknown,
     query?: Record<string, string>,
     captchaToken?: string,
+    timeoutMs?: number,
   ): Promise<T> {
     if (
       captchaToken !== undefined
@@ -438,6 +495,7 @@ export class HttpClient {
     return this.request<T>(method, path, method === 'GET' ? undefined : body, {
       query,
       captchaToken,
+      timeoutMs,
     });
   }
 

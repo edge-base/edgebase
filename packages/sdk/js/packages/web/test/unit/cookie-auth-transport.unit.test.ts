@@ -940,7 +940,10 @@ describe('HttpOnly-cookie AuthClient', () => {
         throw new Error(`Unexpected request: ${String(input)}`);
       }
       refreshAttempts += 1;
-      if (refreshAttempts <= 3) {
+      // A cookie refresh is a mutation (it may rotate session state), so the
+      // HTTP layer must not replay an ambiguous network failure internally.
+      // Recovery happens on the explicit next callback attempt instead.
+      if (refreshAttempts === 1) {
         throw new TypeError('network offline');
       }
       return new Response(JSON.stringify({
@@ -986,6 +989,7 @@ describe('HttpOnly-cookie AuthClient', () => {
     expect(store.get('edgebase:cookie-session')).toBe(
       JSON.stringify({ version: 1, userId: 'oauth-recovered-user' }),
     );
+    expect(refreshAttempts).toBe(2);
     reloaded.destroy();
   });
 

@@ -171,6 +171,6 @@ describe('HttpClient HttpOnly-cookie auth transport', () => {
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
 
-    await expect(outcome).resolves.toMatchObject({ code: 0, slug: 'network-error' });
+    await expect(outcome).resolves.toMatchObject({ code: 0, slug: 'request-timeout' });
   });
 });

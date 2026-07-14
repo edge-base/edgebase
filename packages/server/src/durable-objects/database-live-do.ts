@@ -104,6 +104,7 @@ function deserializeWSMeta(value: unknown): WSMeta | null {
 }
 
 const MAX_FILTER_CONDITIONS = 5;
+const MAX_CONCURRENT_LIVE_FANOUT = 16;
 const RECENT_DELIVERY_TTL_MS = 60_000;
 const MAX_RECENT_DELIVERIES = 2048;
 const VALID_FILTER_OPERATORS = new Set<FilterOperator>([
@@ -200,6 +201,7 @@ export function normalizeDatabaseLiveFilterPayload(
 export class DatabaseLiveDO extends DurableObject<DOEnv> {
   private config: EdgeBaseConfig;
   private filterRecoveryNeeded = true;
+  private filterRecoveryInFlight: Promise<void> | null = null;
   private pendingAuth = new Map<string, ReturnType<typeof setTimeout>>();
   // A single database transaction can fan out into table and document events
   // at the same time. All of those deliveries must verify the same session,
@@ -320,10 +322,7 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
       return;
     }
 
-    if (this.filterRecoveryNeeded) {
-      await this.broadcastToAuthenticated({ type: 'FILTER_RESYNC' });
-      this.filterRecoveryNeeded = false;
-    }
+    await this.recoverFiltersIfNeeded(meta.connectionId);
 
     switch (msg.type) {
       case 'subscribe':
@@ -670,11 +669,11 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
     };
     const batchMsgStr = JSON.stringify(batchMsg);
 
-    for (const ws of sockets) {
+    await this.forEachSocketBounded(sockets, async (ws) => {
       const meta = this.getWSMeta(ws);
-      if (!meta?.authenticated) continue;
-      if (!meta.subscribedChannels.includes(batch.channel)) continue;
-      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
+      if (!meta?.authenticated) return;
+      if (!meta.subscribedChannels.includes(batch.channel)) return;
+      if (!(await this.ensureLiveSessionAuthority(ws, meta))) return;
 
       if (meta.supportsBatch) {
         const filteredChanges: typeof batchMsg.changes = [];
@@ -712,7 +711,7 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
             // Socket may be closing.
           }
         }
-        continue;
+        return;
       }
 
       for (const change of batch.changes) {
@@ -746,7 +745,7 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
           // Socket may be closing.
         }
       }
-    }
+    });
 
     return Response.json({ ok: true });
   }
@@ -783,20 +782,20 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
     });
 
     const sockets = this.ctx.getWebSockets();
-    for (const ws of sockets) {
+    await this.forEachSocketBounded(sockets, async (ws) => {
       const meta = this.getWSMeta(ws);
-      if (!meta?.authenticated) continue;
+      if (!meta?.authenticated) return;
       // Deliver to clients subscribed to the target channel or any parent channel
       if (!meta.subscribedChannels.some(sub => channel === sub || channel.startsWith(`${sub}:`))) {
-        continue;
+        return;
       }
-      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
+      if (!(await this.ensureLiveSessionAuthority(ws, meta))) return;
       try {
         ws.send(msg);
       } catch {
         // Socket may be closing.
       }
-    }
+    });
 
     return Response.json({ ok: true });
   }
@@ -837,14 +836,14 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
     const msgChannel = typeof msg.channel === 'string' ? msg.channel : null;
     const tableName = typeof msg.table === 'string' ? msg.table : '';
 
-    for (const ws of sockets) {
+    await this.forEachSocketBounded(sockets, async (ws) => {
       const meta = this.getWSMeta(ws);
-      if (!meta?.authenticated) continue;
-      if (msgChannel && !meta.subscribedChannels.includes(msgChannel)) continue;
-      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
+      if (!meta?.authenticated) return;
+      if (msgChannel && !meta.subscribedChannels.includes(msgChannel)) return;
+      if (!(await this.ensureLiveSessionAuthority(ws, meta))) return;
 
       const canRead = await this.evaluateRowReadAccess(tableName, meta, eventData);
-      if (!canRead) continue;
+      if (!canRead) return;
 
       let shouldSend = true;
       if ((meta.channelFilters.size > 0 || meta.channelOrFilters.size > 0) && msgChannel) {
@@ -857,28 +856,72 @@ export class DatabaseLiveDO extends DurableObject<DOEnv> {
         }
       }
 
-      if (!shouldSend) continue;
+      if (!shouldSend) return;
 
       try {
         ws.send(msgStr);
       } catch {
         // Socket may be closing.
       }
-    }
+    });
   }
 
-  private async broadcastToAuthenticated(msg: Record<string, unknown>): Promise<void> {
+  private async broadcastToAuthenticated(
+    msg: Record<string, unknown>,
+    alreadyAuthorizedConnectionId?: string,
+  ): Promise<void> {
     const payload = JSON.stringify(msg);
-    for (const ws of this.ctx.getWebSockets()) {
+    await this.forEachSocketBounded(this.ctx.getWebSockets(), async (ws) => {
       const meta = this.getWSMeta(ws);
-      if (!meta?.authenticated) continue;
-      if (!(await this.ensureLiveSessionAuthority(ws, meta))) continue;
+      if (!meta?.authenticated) return;
+      if (
+        meta.connectionId !== alreadyAuthorizedConnectionId
+        && !(await this.ensureLiveSessionAuthority(ws, meta))
+      ) return;
       try {
         ws.send(payload);
       } catch {
         // Socket may be closing.
       }
+    });
+  }
+
+  private async recoverFiltersIfNeeded(alreadyAuthorizedConnectionId: string): Promise<void> {
+    if (!this.filterRecoveryNeeded) return;
+
+    let recovery = this.filterRecoveryInFlight;
+    if (!recovery) {
+      recovery = this.broadcastToAuthenticated(
+        { type: 'FILTER_RESYNC' },
+        alreadyAuthorizedConnectionId,
+      ).then(() => {
+        this.filterRecoveryNeeded = false;
+      });
+      this.filterRecoveryInFlight = recovery;
     }
+
+    try {
+      await recovery;
+    } finally {
+      if (this.filterRecoveryInFlight === recovery) {
+        this.filterRecoveryInFlight = null;
+      }
+    }
+  }
+
+  private async forEachSocketBounded(
+    sockets: WebSocket[],
+    callback: (ws: WebSocket) => Promise<void>,
+  ): Promise<void> {
+    let nextIndex = 0;
+    const workerCount = Math.min(MAX_CONCURRENT_LIVE_FANOUT, sockets.length);
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+      while (nextIndex < sockets.length) {
+        const ws = sockets[nextIndex];
+        nextIndex += 1;
+        await callback(ws);
+      }
+    }));
   }
 
   private async ensureLiveSessionAuthority(ws: WebSocket, meta: WSMeta): Promise<boolean> {

@@ -95,3 +95,12 @@ export function networkError(
     'network-error',
   );
 }
+
+/**
+ * Create a caller-configured request deadline error.
+ * Uses a distinct slug so applications can avoid blindly retrying a mutation
+ * whose response timed out after the server may already have committed it.
+ */
+export function requestTimeoutError(message: string): EdgeBaseError {
+  return new EdgeBaseError(0, message, undefined, 'request-timeout');
+}

@@ -245,10 +245,16 @@ export class RoomsDO extends RoomRuntimeBaseDO {
     }
 
     // RoomsDO handles these protocol extensions before delegating to the base
-    // processor, so it must apply the same authoritative sid check here too.
-    // Otherwise a socket whose session was revoked could keep sending signals,
-    // member-state changes, or admin operations until it reconnects.
-    if (msg.type !== 'auth') {
+    // processor, so it must apply the authoritative sid check to extensions
+    // here. Base protocol messages are checked by RoomRuntimeBaseDO; checking
+    // every non-auth message in both layers would issue two sequential AUTH_DB
+    // reads for join/send/ping/leave.
+    if (
+      msg.type === 'signal'
+      || msg.type === 'member_state'
+      || msg.type === 'member_state_clear'
+      || msg.type === 'admin'
+    ) {
       const meta = this.getWSMeta(ws);
       if (meta?.authenticated && !(await this.ensureLiveSessionAuthority(ws, meta))) {
         return;

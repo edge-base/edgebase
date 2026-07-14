@@ -680,6 +680,63 @@ describe('HttpClient — network failures', () => {
       message: expect.stringContaining('GET /api/posts could not reach http://localhost:8688'),
     });
   });
+
+  it('does not automatically replay a mutation after an ambiguous transport failure', async () => {
+    const cm = new ContextManager();
+    const client = new HttpClient({ baseUrl: 'http://localhost:8688', contextManager: cm });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      new TypeError('synthetic connection reset'),
+    );
+
+    await expect(client.post('/api/functions/create-record', { id: 'record-1' }))
+      .rejects.toMatchObject({ status: 0, slug: 'network-error' });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a typed deadline error when a bounded JSON response body stalls', async () => {
+    vi.useFakeTimers();
+    const stalledBody = new ReadableStream<Uint8Array>({ start() { /* never close */ } });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(stalledBody, {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const cm = new ContextManager();
+    const client = new HttpClient({
+      baseUrl: 'http://localhost:8688',
+      contextManager: cm,
+      requestTimeoutMs: 1_000,
+    });
+
+    const outcome = client.post('/api/functions/create-record', { id: 'record-1' }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(999);
+    let settled = false;
+    void outcome.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(outcome).resolves.toMatchObject({
+      status: 0,
+      slug: 'request-timeout',
+      message: expect.stringContaining('confirm its state before retrying'),
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects invalid default request deadlines before network I/O', async () => {
+    const cm = new ContextManager();
+    expect(() => new HttpClient({
+      baseUrl: 'http://localhost:8688',
+      contextManager: cm,
+      requestTimeoutMs: 0,
+    })).toThrow(/requestTimeoutMs/);
+  });
 });
 
 // ─── H. TableRef — immutable chaining ───────────────────────────────────────

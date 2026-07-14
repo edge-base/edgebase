@@ -52,4 +52,6 @@ export interface ServerClientOptions<Schema extends EdgeBaseTableMap = EdgeBaseT
    * When provided, requests use the service key instead of user tokens.
    */
   serviceKey?: string;
+  /** Optional default deadline for JSON API requests. Undefined is unbounded. */
+  requestTimeoutMs?: number;
 }
