@@ -209,10 +209,11 @@ export default defineConfig({
 
   const tag = process.env.EDGEBASE_DOCKER_SMOKE_TAG?.trim()
     || `edgebase-docker-smoke:${Date.now()}`;
+  const dockerNetwork = process.env.EDGEBASE_DOCKER_SMOKE_NETWORK?.trim() || null;
   const containerName = `edgebase-docker-smoke-${Date.now()}`;
   const persistDir = join(tempRoot, 'data');
   mkdirSync(persistDir, { recursive: true });
-  const port = allocatePort();
+  const port = dockerNetwork ? 8787 : allocatePort();
 
   cleanupTasks.push(() => {
     try {
@@ -263,8 +264,7 @@ export default defineConfig({
     '-d',
     '--name',
     containerName,
-    '-p',
-    `${port}:8787`,
+    ...(dockerNetwork ? ['--network', dockerNetwork] : ['-p', `${port}:8787`]),
     '-v',
     `${persistDir}:/data`,
     tag,
@@ -281,8 +281,10 @@ export default defineConfig({
     'test -s /etc/ssl/certs/ca-certificates.crt',
   ], { capture: true, timeout: 20_000 });
 
-  const healthUrl = `http://127.0.0.1:${port}/api/health`;
-  const frontendUrl = `http://127.0.0.1:${port}/`;
+  const probeHost = dockerNetwork ? containerName : '127.0.0.1';
+  const baseUrl = `http://${probeHost}:${port}`;
+  const healthUrl = `${baseUrl}/api/health`;
+  const frontendUrl = `${baseUrl}/`;
 
   let frontendResponse;
   try {
@@ -302,7 +304,7 @@ export default defineConfig({
   }
 
   ensure(frontendResponse.ok, 'Frontend route did not return a successful response.');
-  const forgedAnonymous = await fetch(`http://127.0.0.1:${port}/api/auth/signin/anonymous`, {
+  const forgedAnonymous = await fetch(`${baseUrl}/api/auth/signin/anonymous`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',

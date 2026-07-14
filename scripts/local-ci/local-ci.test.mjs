@@ -253,6 +253,18 @@ test('act jobs keep root and isolated release installs on the same pnpm store', 
   assert.match(source, /target=\/root\/\.local\/share\/pnpm\/store/);
 });
 
+test('nested Docker smoke probes its child container on the isolated job network', async () => {
+  const runner = await readFile(path.join(repoRoot, 'scripts/local-ci/act-job.mjs'), 'utf8');
+  const smoke = await readFile(
+    path.join(repoRoot, 'packages/cli/scripts/docker-smoke.mjs'),
+    'utf8',
+  );
+  assert.match(runner, /EDGEBASE_DOCKER_SMOKE_NETWORK=\$\{network\}/);
+  assert.match(smoke, /process\.env\.EDGEBASE_DOCKER_SMOKE_NETWORK/);
+  assert.match(smoke, /\['--network', dockerNetwork\]/);
+  assert.match(smoke, /dockerNetwork \? containerName : '127\.0\.0\.1'/);
+});
+
 test('Go concurrency is limited only while amd64 jobs are emulated', () => {
   assert.equal(needsAmd64EmulationLimit('aarch64'), true);
   assert.equal(needsAmd64EmulationLimit('arm64'), true);

@@ -135,6 +135,9 @@ export async function runActJob(job, context) {
     'LOCAL_CI=1',
     '--env',
     'CI=true',
+    ...(job.id === 'docker-smoke-linux'
+      ? ['--env', `EDGEBASE_DOCKER_SMOKE_NETWORK=${network}`]
+      : []),
     '--env',
     'npm_config_store_dir=/root/.local/share/pnpm/store',
     ...(needsAmd64EmulationLimit(context.hostDockerArchitecture)

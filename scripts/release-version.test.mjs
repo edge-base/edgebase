@@ -61,6 +61,7 @@ function spawnToolSync(command, args, options = {}) {
   const resolvedCommand = resolveCommand(command);
   return spawnSync(resolvedCommand, args, {
     ...options,
+    maxBuffer: options.maxBuffer ?? 32 * 1024 * 1024,
     shell: options.shell
       ?? (process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(resolvedCommand)),
   });
@@ -571,7 +572,11 @@ test('isolated server pack excludes tests and credential fixtures', () => {
         env: { ...process.env, npm_config_ignore_scripts: 'true' },
       },
     );
-    assert.equal(pack.status, 0, `${pack.stdout ?? ''}${pack.stderr ?? ''}`);
+    assert.equal(
+      pack.status,
+      0,
+      `${pack.error?.message ?? ''}${pack.stdout ?? ''}${pack.stderr ?? ''}`,
+    );
     const tarballs = readdirSync(packDir).filter((name) => name.endsWith('.tgz'));
     assert.equal(tarballs.length, 1);
     const tarball = resolve(packDir, tarballs[0]);

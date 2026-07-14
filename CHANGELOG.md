@@ -30,6 +30,9 @@
 
 - Removed obsolete hosted Windows jobs and dependencies, retained the Linux
   and macOS compatibility boundary, and hardened Dependabot cooldown policy.
+- Hardened the local Linux gate for nested Docker networking and large npm pack
+  manifests so isolated smoke and release-contract jobs fail only on their
+  actual checks.
 
 ## 0.4.4 — 2026-07-13
 
