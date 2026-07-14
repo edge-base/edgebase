@@ -1066,7 +1066,6 @@ export class RoomClient {
       ws.onopen = () => {
         clearTimeout(connectionTimer);
         this.connected = true;
-        this.reconnectAttempts = 0;
         this.startHeartbeat();
         this.authenticate()
           .then(() => {
@@ -1297,6 +1296,11 @@ export class RoomClient {
     this._playerVersion = msg.playerVersion as number;
     const reconnectInfo = this.reconnectInfo;
     this.reconnectInfo = null;
+    // Opening the TCP/WebSocket transport is not a recovered Room session.
+    // Reverse proxies can accept the upgrade and then close before auth/join
+    // completes. Resetting here (after the first authoritative sync) preserves
+    // exponential backoff and the max-attempt bound for that failure mode.
+    this.reconnectAttempts = 0;
     this.setConnectionState('connected');
 
     // Notify handlers with full state as changes

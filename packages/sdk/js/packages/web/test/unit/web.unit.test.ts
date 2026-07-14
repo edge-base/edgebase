@@ -2946,6 +2946,70 @@ describe('RoomClient — construction', () => {
     tm.destroy();
   });
 
+  it('preserves reconnect backoff until the room receives an authoritative sync', async () => {
+    class TestWebSocket {
+      static latest: TestWebSocket | null = null;
+      readyState = 0;
+      onopen: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      send = vi.fn();
+
+      constructor() {
+        TestWebSocket.latest = this;
+      }
+
+      close(code = 1000, reason = '') {
+        this.readyState = 3;
+        this.onclose?.({ code, reason } as CloseEvent);
+      }
+    }
+    vi.stubGlobal('WebSocket', TestWebSocket as unknown as typeof WebSocket);
+
+    const tm = new TokenManager('http://localhost:8688');
+    tm.setTokens({
+      accessToken: makeValidJwt('room-backoff'),
+      refreshToken: makeValidJwt('room-backoff'),
+    });
+    const room = new RoomClient('http://localhost:8688', 'default', 'room-backoff', tm);
+    (room as any).reconnectAttempts = 3;
+    (room as any).reconnectInfo = { attempt: 3 };
+
+    const joining = room.join();
+    const socket = TestWebSocket.latest;
+    expect(socket).not.toBeNull();
+    socket!.readyState = 1;
+    socket!.onopen?.({} as Event);
+    await vi.waitFor(() => expect(socket!.send).toHaveBeenCalled());
+    socket!.onmessage?.({
+      data: JSON.stringify({
+        type: 'auth_success',
+        userId: 'room-backoff',
+        connectionId: 'conn-1',
+      }),
+    } as MessageEvent);
+    await joining;
+
+    // A proxy can accept the upgrade and still drop auth/join immediately.
+    // That transport open must not restart the retry loop at one second.
+    expect((room as any).reconnectAttempts).toBe(3);
+
+    socket!.onmessage?.({
+      data: JSON.stringify({
+        type: 'sync',
+        sharedState: {},
+        sharedVersion: 1,
+        playerState: {},
+        playerVersion: 1,
+      }),
+    } as MessageEvent);
+    expect((room as any).reconnectAttempts).toBe(0);
+
+    room.destroy();
+    tm.destroy();
+  });
+
   it('does not start a second room connection while a socket is already connecting', async () => {
     const tm = new TokenManager('http://localhost:8688');
     const room = new RoomClient('http://localhost:8688', 'default', 'room-1', tm);
