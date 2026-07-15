@@ -365,7 +365,9 @@ test('isolated local release checks retain hosted timeouts outside local CI', as
   assert.match(serverTimeout, /EDGEBASE_LOCAL_CI_EMULATED_AMD64 === '1'/);
   assert.match(serverTimeout, /milliseconds \* 3/);
   assert.match(cliUnitConfig, /process\.env\.LOCAL_CI === '1'/);
-  assert.match(cliUnitConfig, /testTimeout: isSlowLocalCi \? 60_000 : 20_000/);
+  assert.match(cliUnitConfig, /\? 180_000/);
+  assert.match(cliUnitConfig, /\? 60_000/);
+  assert.match(cliUnitConfig, /: 20_000/);
   assert.match(serverUnitConfig, /testTimeout: localCiTimeout\(5_000\)/);
   assert.match(serverUnitConfig, /hookTimeout: localCiTimeout\(10_000\)/);
   assert.match(ownershipTest, /timeoutMs = localCiTimeout\(5_000\)/);
