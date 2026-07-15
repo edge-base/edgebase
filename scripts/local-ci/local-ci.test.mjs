@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { ACT_VERSION, WORKFLOW_PATHS } from './config.mjs';
-import { needsAmd64EmulationLimit } from './act-job.mjs';
+import { needsAmd64EmulationLimit, pnpmStoreVolumeName } from './act-job.mjs';
 import {
   FULL_GATE_JOB_IDS,
   LOCAL_CI_JOBS,
@@ -300,8 +300,17 @@ test('pre-push reads stdin as a Node 24-compatible stream', async () => {
 test('act jobs keep root and isolated release installs on the same pnpm store', async () => {
   const source = await readFile(path.join(repoRoot, 'scripts/local-ci/act-job.mjs'), 'utf8');
   assert.match(source, /npm_config_store_dir=\/root\/\.local\/share\/pnpm\/store/);
+  assert.match(source, /--mount=type=volume,source=\$\{pnpmStoreVolume\}/);
   assert.match(source, /target=\/root\/\.local\/share\/pnpm\/store/);
   assert.match(source, /EDGEBASE_LOCAL_CI_MUTATE_FILES=\$\{context\.mutationFiles\}/);
+});
+
+test('pnpm cache volumes are deterministic and isolated per workflow and job', () => {
+  const first = pnpmStoreVolumeName('workflow-a', 'ci-node-22');
+  assert.match(first, /^edgebase-lci-pnpm-[a-f0-9]{32}$/);
+  assert.equal(first, pnpmStoreVolumeName('workflow-a', 'ci-node-22'));
+  assert.notEqual(first, pnpmStoreVolumeName('workflow-a', 'ci-node-24'));
+  assert.notEqual(first, pnpmStoreVolumeName('workflow-b', 'ci-node-22'));
 });
 
 test('nested Docker smoke probes its child container on the isolated job network', async () => {

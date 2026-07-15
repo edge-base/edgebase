@@ -14,6 +14,10 @@ export function needsAmd64EmulationLimit(architecture) {
   return !['amd64', 'x86_64'].includes(architecture);
 }
 
+export function pnpmStoreVolumeName(workflowDigest, jobId) {
+  return `edgebase-lci-pnpm-${sha256(`${workflowDigest}:${jobId}`).slice(0, 32)}`;
+}
+
 function eventPayload(job, context) {
   return {
     ref: `refs/heads/${context.branch}`,
@@ -78,12 +82,11 @@ export async function runActJob(job, context) {
   const eventPath = path.join(jobRoot, 'event.json');
   const home = path.join(jobRoot, 'home');
   const cache = path.join(context.stateRoot, 'cache', context.workflowDigest, job.id);
-  const pnpmStore = path.join(cache, 'pnpm-store');
+  const pnpmStoreVolume = pnpmStoreVolumeName(context.workflowDigest, job.id);
   const network = `edgebase-lci-${sha256(`${context.runId}:${job.id}`).slice(0, 20)}`;
   const source = await readFile(path.join(context.repoRoot, job.workflow), 'utf8');
   await mkdir(home, { recursive: true });
   await mkdir(cache, { recursive: true });
-  await mkdir(pnpmStore, { recursive: true });
   await writeFile(
     workflowPath,
     renderStandaloneWorkflow(source, job.sourceJob, job.id, {
@@ -151,7 +154,7 @@ export async function runActJob(job, context) {
       `--cpus=${job.weight}`,
       `--memory=${memoryLimit(job.weight)}`,
       '--pids-limit=4096',
-      `--mount=type=bind,source=${pnpmStore},target=/root/.local/share/pnpm/store`,
+      `--mount=type=volume,source=${pnpmStoreVolume},target=/root/.local/share/pnpm/store`,
       job.id === 'docker-smoke-linux' ? '--privileged' : '',
     ]
       .filter(Boolean)
