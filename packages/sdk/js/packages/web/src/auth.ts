@@ -1174,6 +1174,15 @@ export class AuthClient {
   }
 
   /**
+   * True only after this document has obtained a currently valid in-memory
+   * access token. Unlike `sessionUserIdHint`, this never derives from the
+   * non-secret cookie-session marker used for offline cache selection.
+   */
+  get hasValidAccessToken(): boolean {
+    return this.tokenManager.hasValidAccessToken;
+  }
+
+  /**
    * Non-secret local user-id hint for account-scoped cache selection.
    * This is not authenticated identity; revalidate the cookie session before
    * using the principal for authorization or server-backed decisions.

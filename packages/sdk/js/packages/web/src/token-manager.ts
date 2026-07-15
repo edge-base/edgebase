@@ -442,6 +442,7 @@ export type AuthStateChangeHandler = (user: TokenUser | null) => void;
 export class TokenManager {
   private accessToken: string | null = null;
   private storage: StorageAdapter;
+  private refreshCoordinationPromise: Promise<string> | null = null;
   private refreshPromise: Promise<TokenPair> | null = null;
   private authStateListeners: AuthStateChangeHandler[] = [];
   private broadcastChannel: BroadcastChannel | null = null;
@@ -597,6 +598,11 @@ export class TokenManager {
   /** Read-only access to current access token (for database-live re-auth) */
   get currentAccessToken(): string | null {
     return this.accessToken;
+  }
+
+  /** Whether this document already holds a non-expired in-memory access token. */
+  get hasValidAccessToken(): boolean {
+    return Boolean(this.accessToken && !isTokenExpired(this.accessToken));
   }
 
   get refreshTokenTransport(): RefreshTokenTransport {
@@ -815,10 +821,39 @@ export class TokenManager {
     refreshToken: string,
     doRefresh: (refreshToken: string) => Promise<TokenPair>,
     expectedEpoch: number = this.currentAuthEpoch(),
+    bypassSameTabCoordination = false,
   ): Promise<string> {
     this.assertAuthEpoch(expectedEpoch);
     if (this.hasPendingSignOut()) {
       throw new EdgeBaseError(401, 'Sign-out superseded this session refresh.', undefined, 'auth-state-changed');
+    }
+    // Reserve the whole election before its first async lock-verification
+    // yield. `refreshPromise` below covers only the elected leader's network
+    // operation; without this outer fence, simultaneous cold-start callers can
+    // all pass its null check, acquire the same instance-owned lock, and queue
+    // duplicate refreshes behind the auth mutation lock.
+    if (!bypassSameTabCoordination) {
+      if (this.refreshCoordinationPromise) {
+        const accessToken = await this.refreshCoordinationPromise;
+        this.assertAuthEpoch(expectedEpoch);
+        return accessToken;
+      }
+      const coordinationPromise = this.refreshWithLeaderElection(
+        refreshToken,
+        doRefresh,
+        expectedEpoch,
+        true,
+      );
+      this.refreshCoordinationPromise = coordinationPromise;
+      try {
+        const accessToken = await coordinationPromise;
+        this.assertAuthEpoch(expectedEpoch);
+        return accessToken;
+      } finally {
+        if (this.refreshCoordinationPromise === coordinationPromise) {
+          this.refreshCoordinationPromise = null;
+        }
+      }
     }
     // Deduplicate within same tab
     if (this.refreshPromise) {
@@ -1078,7 +1113,9 @@ export class TokenManager {
     }
     this.assertAuthEpoch(expectedEpoch);
     const migrationToken = this.storage.getItem(this.keys.refreshTokenKey) ?? '';
-    return this.refreshWithLeaderElection(migrationToken, doRefresh, expectedEpoch);
+    // This continuation belongs to the already-reserved same-tab coordination
+    // promise. Re-enter only the election worker or it would await itself.
+    return this.refreshWithLeaderElection(migrationToken, doRefresh, expectedEpoch, true);
   }
 
   /**

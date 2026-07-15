@@ -630,6 +630,26 @@ describe('HttpOnly-cookie TokenManager', () => {
     manager.destroy();
   });
 
+  it('coalesces concurrent cold-start and explicit refreshes before lock verification', async () => {
+    installBrowserMocks(false);
+    const manager = new TokenManager('https://api.example.com', {
+      refreshTokenTransport: 'httpOnlyCookie',
+    });
+    manager.setTokens({ accessToken: makeJwt('burst-user', { exp: 1 }), refreshToken: '' });
+    const freshAccess = makeJwt('burst-user');
+    const refresh = vi.fn(async () => ({ accessToken: freshAccess, refreshToken: '' }));
+
+    const automatic = Array.from({ length: 8 }, () => manager.getAccessToken(refresh));
+    const explicit = manager.forceRefresh(refresh);
+
+    expect(manager.hasValidAccessToken).toBe(false);
+    await expect(Promise.all(automatic)).resolves.toEqual(Array(8).fill(freshAccess));
+    await expect(explicit).resolves.toEqual({ accessToken: freshAccess, refreshToken: '' });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(manager.hasValidAccessToken).toBe(true);
+    manager.destroy();
+  });
+
   it('takes over a stale cookie refresh lock when the leader tab dies', async () => {
     vi.useFakeTimers();
     try {
