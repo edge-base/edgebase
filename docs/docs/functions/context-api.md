@@ -27,6 +27,7 @@ Every App Function receives a `context` object that provides access to all EdgeB
 | Check who made this request | `auth` | [context.auth](#contextauth) |
 | Get URL path parameters | `params` | [context.params](#contextparams) |
 | Know what triggered this function | `trigger` / `data` | [context.trigger](#contexttrigger) |
+| Keep background work alive after returning | `waitUntil(promise)` | [context.waitUntil](#contextwaituntilpromise) |
 
 ---
 
@@ -34,6 +35,7 @@ Every App Function receives a `context` object that provides access to all EdgeB
 
 ```typescript
 interface FunctionContext {
+  waitUntil(promise: Promise<unknown>): void; // Keep background work alive after returning
   admin: FunctionAdminContext;   // Server SDK — full access to all services
   auth: AuthContext | null;      // Current user (if request is authenticated)
   params: Record<string, string>; // Dynamic route params from [param] segments
@@ -58,6 +60,29 @@ interface FunctionContext {
 :::info Admin SDK Coverage
 The `context.admin` methods documented here are the same server-side surfaces exposed by all Admin SDKs.
 :::
+
+## context.waitUntil(promise)
+
+Schedule background work without delaying the HTTP App Function response. On
+Cloudflare Workers this delegates to `ExecutionContext.waitUntil()`. In the
+self-hosted runtime the promise remains attached to the long-lived server
+process and its rejection is observed.
+
+```typescript
+export default defineFunction({
+  trigger: { type: 'http', method: 'POST' },
+  async handler(context) {
+    context.waitUntil(
+      context.admin.db('app').table('jobs').insert({ status: 'queued' }),
+    );
+    return new Response(null, { status: 202 });
+  },
+});
+```
+
+Use this only for work that may safely finish after the response. Perform
+authorization and request validation before scheduling it, and persist enough
+state to report eventual failure when the caller needs a durable result.
 
 ## context.admin.db(namespace, id?)
 
