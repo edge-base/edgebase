@@ -34,6 +34,9 @@ import {
   generateIndexDDL,
   buildEffectiveSchema,
   computeSchemaHashSync,
+  planSQLiteFieldUniqueIndex,
+  sqliteUniqueDuplicateError,
+  type SQLiteIndexState,
 } from '../lib/schema.js';
 
 import { generateId } from '../lib/uuid.js';
@@ -335,8 +338,11 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       // Run pending migrations
       this.runMigrations(name, config);
     } else {
-      // No schema change — still check migrations
+      // No hash change — run migrations first, then verify the physical schema.
+      // This self-heals databases whose hash was saved by an older runtime
+      // before existing-column UNIQUE changes were materialized.
       this.runMigrations(name, config);
+      this.handleSchemaUpdate(name, config);
     }
 
     // Always ensure FTS5 + indexes exist (idempotent IF NOT EXISTS DDL).
@@ -345,25 +351,67 @@ export class DatabaseDO extends DurableObject<DOEnv> {
   }
 
   private handleSchemaUpdate(name: string, config: TableConfig): void {
-    // Add new columns (non-destructive)
+    // Add new columns and reconcile field-owned UNIQUE indexes.
     const existingCols = new Set<string>();
-    for (const row of this.sql(`PRAGMA table_info("${name}")`)) {
+    for (const row of this.sql(`PRAGMA table_info(${escapeIdentifier(name)})`)) {
       existingCols.add(row.name as string);
+    }
+
+    const existingIndexes: SQLiteIndexState[] = [];
+    for (const row of this.sql(`PRAGMA index_list(${escapeIdentifier(name)})`)) {
+      const indexName = row.name as string;
+      const columns = [...this.sql(`PRAGMA index_info(${escapeIdentifier(indexName)})`)]
+        .sort((left, right) => Number(left.seqno) - Number(right.seqno))
+        .map((column) => column.name as string);
+      existingIndexes.push({
+        name: indexName,
+        unique: Number(row.unique) === 1,
+        origin: String(row.origin ?? ''),
+        partial: Number(row.partial) === 1,
+        columns,
+      });
     }
 
     const effectiveSchema = buildEffectiveSchema(config.schema);
     const migrationDDLs: string[] = [];
     for (const [colName, field] of Object.entries(effectiveSchema)) {
       if (!existingCols.has(colName)) {
-        migrationDDLs.push(...generateSQLiteAddColumnDDLs(name, colName, field));
+        const [addColumnDDL] = generateSQLiteAddColumnDDLs(name, colName, field);
+        migrationDDLs.push(addColumnDDL);
+        if (field.unique) {
+          const uniquePlan = planSQLiteFieldUniqueIndex(
+            name,
+            colName,
+            true,
+            existingIndexes,
+          );
+          if (uniquePlan.ddl) migrationDDLs.push(uniquePlan.ddl);
+        }
+        continue;
       }
+
+      const plan = planSQLiteFieldUniqueIndex(
+        name,
+        colName,
+        !!field.unique,
+        existingIndexes,
+      );
+      if (plan.action === 'create') {
+        const duplicate = [...this.sql(
+          `SELECT 1 AS "duplicate" FROM ${escapeIdentifier(name)} `
+          + `WHERE ${escapeIdentifier(colName)} IS NOT NULL `
+          + `GROUP BY ${escapeIdentifier(colName)} HAVING COUNT(*) > 1 LIMIT 1`,
+        )];
+        if (duplicate.length > 0) {
+          throw sqliteUniqueDuplicateError(name, colName);
+        }
+      }
+      if (plan.ddl) migrationDDLs.push(plan.ddl);
     }
 
     if (migrationDDLs.length > 0) {
-      // Keep ADD COLUMN and its follow-up UNIQUE index atomic. If index
-      // creation fails, the column is rolled back too, so a later request can
-      // safely retry the complete migration instead of persisting a partially
-      // constrained schema.
+      // Keep column and index reconciliation atomic. If any DDL fails, a later
+      // request can safely retry without a partially constrained schema.
       this.ctx.storage.transactionSync(() => {
         for (const ddl of migrationDDLs) {
           this.execMulti(ddl);

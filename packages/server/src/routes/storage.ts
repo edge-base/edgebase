@@ -646,6 +646,24 @@ async function verifySignedUploadQuery(
   return verified.claims;
 }
 
+async function verifySignedDownloadQuery(
+  c: Context<HonoEnv>,
+  bucketName: string,
+  key: string,
+): Promise<SignedTokenClaims | null> {
+  const token = c.req.query('token');
+  if (!token) return null;
+
+  // Asymmetric fail-closed: without a signing secret, or with an invalid or
+  // upload-scoped token, normal storage read rules remain authoritative.
+  const secret = c.env.JWT_USER_SECRET;
+  if (!secret) return null;
+  const verified = await verifySignedToken(token, key, bucketName, secret);
+  if (!verified.valid || verified.claims.purpose === 'upload') return null;
+  if (!verified.claims.file?.etag) throw signedDownloadPreconditionError();
+  return verified.claims;
+}
+
 function requestContentLength(c: Context<HonoEnv>): number | null {
   const header = c.req.header('content-length');
   if (!header) return null;
@@ -1276,6 +1294,7 @@ const checkFileExists = createRoute({
     200: { description: 'File exists' },
     403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
     404: { description: 'Not found', content: { 'application/json': { schema: errorResponseSchema } } },
+    412: { description: 'Signed object version changed', content: { 'application/json': { schema: errorResponseSchema } } },
   },
 });
 
@@ -1283,22 +1302,28 @@ const handleCheckFileExists = async (c: Context<HonoEnv>) => {
   const bucketName = c.req.param('bucket')!;
   const key = resolveStorageKey(c, bucketName);
   const { bucketConfig, release } = getBucketConfig(c.env, bucketName);
+  const signedClaims = await verifySignedDownloadQuery(c, bucketName, key);
 
   const fullKey = r2Key(bucketName, key);
   const obj = await getStoredObject(c.env.STORAGE, fullKey);
   if (!obj) {
     throw new EdgeBaseError(404, 'File not found.', undefined, 'not-found');
   }
+  assertSignedDownloadObjectMatches(signedClaims, obj);
+  const fileMeta = buildMetadata(obj);
 
   // Security: check read rule
-  const serviceKeyBypass = checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:read`, c.req);
-  if (!serviceKeyBypass) {
+  const serviceKeyBypass = signedClaims
+    ? false
+    : checkServiceKey(c.env, c.req.header('X-EdgeBase-Service-Key'), `storage:bucket:${bucketName}:read`, c.req);
+  if (!signedClaims && !serviceKeyBypass) {
     const auth = c.get('auth') as AuthContext | null;
-    const resource = buildMetadata(obj);
-    checkStorageRule(bucketConfig.access?.read, auth, resource, 'read', bucketName, release);
+    checkStorageRule(bucketConfig.access?.read, auth, fileMeta, 'read', bucketName, release);
   }
 
-  return c.body(null, 200);
+  const headers = createDownloadHeaders(fileMeta, signedClaims);
+  headers.set('Content-Length', String(fileMeta.size));
+  return new Response(null, { status: 200, headers });
 };
 storage.openapi(checkFileExists, handleCheckFileExists);
 
@@ -1379,23 +1404,8 @@ const handleDownloadFile = async (c: Context<HonoEnv>) => {
   const key = resolveStorageKey(c, bucketName);
   const { bucketConfig, release } = getBucketConfig(c.env, bucketName);
 
-  // Check for signed URL token
-  const token = c.req.query('token');
-  let skipRules = false;
-  let signedClaims: SignedTokenClaims | null = null;
-
-  if (token) {
-    // Asymmetric fail-closed (#99): secret 미설정 시 토큰 무시 → 보안 규칙으로 fallback
-    const secret = c.env.JWT_USER_SECRET;
-    if (secret) {
-      const verified = await verifySignedToken(token, key, bucketName, secret);
-      if (verified.valid && verified.claims.purpose !== 'upload') {
-        if (!verified.claims.file?.etag) throw signedDownloadPreconditionError();
-        skipRules = true;
-        signedClaims = verified.claims;
-      }
-    }
-  }
+  const signedClaims = await verifySignedDownloadQuery(c, bucketName, key);
+  const skipRules = signedClaims !== null;
 
   const fullKey = r2Key(bucketName, key);
   const rangeHeader = c.req.header('Range') ?? c.req.header('range');

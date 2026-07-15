@@ -26,6 +26,8 @@ import {
   computeSchemaHash,
   computeSchemaHashSync,
   generateTableDDL,
+  planSQLiteFieldUniqueIndex,
+  sqliteUniqueDuplicateError,
   META_TABLE_DDL,
   // PostgreSQL DDL
   PG_META_TABLE_DDL,
@@ -183,6 +185,67 @@ describe('generateAddColumnDDL', () => {
   it('ends with semicolon', () => {
     const ddl = generateAddColumnDDL('t', 'col', { type: 'string' });
     expect(ddl.trim()).toMatch(/;$/);
+  });
+});
+
+describe('planSQLiteFieldUniqueIndex', () => {
+  it('returns actionable duplicate-data guidance', () => {
+    expect(sqliteUniqueDuplicateError('contacts', 'email').message).toBe(
+      "Cannot enable unique for field 'contacts.email': existing non-NULL values contain duplicates. Resolve the duplicates before retrying the schema update.",
+    );
+  });
+
+  it('treats the exact managed index as idempotent and drops it only when disabled', () => {
+    const indexes = [{
+      name: 'uidx_contacts_email',
+      unique: true,
+      origin: 'c',
+      partial: false,
+      columns: ['email'],
+    }];
+
+    expect(planSQLiteFieldUniqueIndex('contacts', 'email', true, indexes))
+      .toEqual({ action: 'none', indexName: 'uidx_contacts_email' });
+    expect(planSQLiteFieldUniqueIndex('contacts', 'email', false, indexes))
+      .toEqual({
+        action: 'drop',
+        indexName: 'uidx_contacts_email',
+        ddl: 'DROP INDEX IF EXISTS "uidx_contacts_email";',
+      });
+  });
+
+  it('fails closed on a reserved-name ownership collision', () => {
+    expect(() => planSQLiteFieldUniqueIndex('contacts', 'email', true, [{
+      name: 'uidx_contacts_email',
+      unique: false,
+      origin: 'c',
+      partial: false,
+      columns: ['email'],
+    }])).toThrow(/reserved index 'uidx_contacts_email' does not match/);
+  });
+
+  it('does not mistake a composite constraint for field uniqueness', () => {
+    expect(planSQLiteFieldUniqueIndex('contacts', 'email', true, [{
+      name: 'sqlite_autoindex_contacts_2',
+      unique: true,
+      origin: 'u',
+      partial: false,
+      columns: ['email', 'tenantId'],
+    }])).toEqual({
+      action: 'create',
+      indexName: 'uidx_contacts_email',
+      ddl: 'CREATE UNIQUE INDEX "uidx_contacts_email" ON "contacts"("email");',
+    });
+  });
+
+  it('requires a table rebuild before disabling an inline constraint', () => {
+    expect(() => planSQLiteFieldUniqueIndex('contacts', 'email', false, [{
+      name: 'sqlite_autoindex_contacts_2',
+      unique: true,
+      origin: 'u',
+      partial: false,
+      columns: ['email'],
+    }])).toThrow(/Apply an explicit table-rebuild migration/);
   });
 });
 

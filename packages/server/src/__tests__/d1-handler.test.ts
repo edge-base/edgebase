@@ -15,6 +15,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ensureD1Schema, _resetD1SchemaCache } from '../lib/d1-schema-init.js';
 import { shouldRouteToD1, getD1BindingName } from '../lib/do-router.js';
+import { computeSchemaHashSync } from '../lib/schema.js';
 import type { TableConfig } from '@edge-base/shared';
 
 // ─── Mock D1 ─────────────────────────────────────────────────────────────────
@@ -197,8 +198,12 @@ describe('ensureD1Schema — schema update', () => {
     const db = createMockD1({
       // first .first() call returns stale hash, rest return null
       firstResults: [{ value: 'stale-hash' }],
-      // PRAGMA table_info returns existing columns
-      allResult: { results: [{ name: 'id' }, { name: 'title' }] },
+      allResults: [
+        // PRAGMA table_info returns existing columns
+        { results: [{ name: 'id' }, { name: 'title' }] },
+        // PRAGMA index_list returns no indexes
+        { results: [] },
+      ],
     });
 
     await ensureD1Schema(db, 'shared', {
@@ -215,17 +220,42 @@ describe('ensureD1Schema — schema update', () => {
     expect(pragmaInfo).toBeDefined();
   });
 
+  it('self-heals a missing unique index even when an older runtime stored the current hash', async () => {
+    const tableConfig: TableConfig = {
+      schema: { email: { type: 'string', unique: true } },
+    };
+    const db = createMockD1({
+      firstResults: [{ value: computeSchemaHashSync(tableConfig) }, null],
+      allResults: [
+        { results: [
+          { name: 'id' },
+          { name: 'createdAt' },
+          { name: 'updatedAt' },
+          { name: 'email' },
+        ] },
+        { results: [] },
+      ],
+    });
+
+    await ensureD1Schema(db, 'workspace', { contacts: tableConfig });
+
+    expect(db._batchStmts.some((statements) => statements.includes(
+      'CREATE UNIQUE INDEX "uidx_contacts_email" ON "contacts"("email");',
+    ))).toBe(true);
+  });
+
   it('adds unique fields with a separate index in the same transactional batch', async () => {
     const db = createMockD1({
       firstResults: [{ value: 'stale-hash' }],
-      allResult: {
-        results: [
+      allResults: [
+        { results: [
           { name: 'id' },
           { name: 'createdAt' },
           { name: 'updatedAt' },
           { name: 'pageId' },
-        ],
-      },
+        ] },
+        { results: [] },
+      ],
     });
 
     await ensureD1Schema(db, 'workspace', {
@@ -245,8 +275,134 @@ describe('ensureD1Schema — schema update', () => {
     const addColumnSQL = migrationBatch?.find((sql) => sql.includes('ADD COLUMN "mappingKey"'));
     expect(addColumnSQL).not.toMatch(/\b(?:UNIQUE|PRIMARY KEY|NOT NULL)\b/);
     expect(migrationBatch).toContain(
-      'CREATE UNIQUE INDEX IF NOT EXISTS "uidx_notion_import_mappings_mappingKey" ON "notion_import_mappings"("mappingKey");',
+      'CREATE UNIQUE INDEX "uidx_notion_import_mappings_mappingKey" ON "notion_import_mappings"("mappingKey");',
     );
+  });
+
+  it('enables unique on an existing D1 column after a duplicate-free preflight', async () => {
+    const db = createMockD1({
+      firstResults: [{ value: 'stale-hash' }, null],
+      allResults: [
+        { results: [
+          { name: 'id' },
+          { name: 'createdAt' },
+          { name: 'updatedAt' },
+          { name: 'email' },
+        ] },
+        { results: [] },
+      ],
+    });
+
+    await ensureD1Schema(db, 'workspace', {
+      contacts: {
+        schema: { email: { type: 'string', unique: true } },
+      },
+    });
+
+    expect(db._calls.some((call) =>
+      call.sql.includes('GROUP BY "email"') && call.method === 'first'
+    )).toBe(true);
+    expect(db._batchStmts.some((statements) => statements.includes(
+      'CREATE UNIQUE INDEX "uidx_contacts_email" ON "contacts"("email");',
+    ))).toBe(true);
+    expect(db._calls.some((call) =>
+      call.sql.includes('INSERT INTO "_meta"')
+      && call.bindings[0] === 'schemaHash:contacts'
+    )).toBe(true);
+  });
+
+  it('fails D1 unique enablement on duplicates without storing the new hash', async () => {
+    const db = createMockD1({
+      firstResults: [{ value: 'stale-hash' }, { duplicate: 1 }],
+      allResults: [
+        { results: [
+          { name: 'id' },
+          { name: 'createdAt' },
+          { name: 'updatedAt' },
+          { name: 'email' },
+        ] },
+        { results: [] },
+      ],
+    });
+
+    await expect(ensureD1Schema(db, 'workspace', {
+      contacts: {
+        schema: { email: { type: 'string', unique: true } },
+      },
+    })).rejects.toThrow(
+      "Cannot enable unique for field 'contacts.email': existing non-NULL values contain duplicates.",
+    );
+
+    expect(db._batchStmts.some((statements) =>
+      statements.some((sql) => sql.includes('uidx_contacts_email'))
+    )).toBe(false);
+    expect(db._calls.some((call) =>
+      call.sql.includes('INSERT INTO "_meta"')
+      && call.bindings[0] === 'schemaHash:contacts'
+    )).toBe(false);
+  });
+
+  it('drops only the managed D1 field index when unique is disabled', async () => {
+    const db = createMockD1({
+      firstResults: [{ value: 'stale-hash' }],
+      allResults: [
+        { results: [
+          { name: 'id' },
+          { name: 'createdAt' },
+          { name: 'updatedAt' },
+          { name: 'email' },
+        ] },
+        { results: [{
+          name: 'uidx_contacts_email',
+          unique: 1,
+          origin: 'c',
+          partial: 0,
+        }] },
+        { results: [{ seqno: 0, name: 'email' }] },
+      ],
+    });
+
+    await ensureD1Schema(db, 'workspace', {
+      contacts: {
+        schema: { email: { type: 'string', unique: false } },
+      },
+    });
+
+    expect(db._batchStmts.some((statements) => statements.includes(
+      'DROP INDEX IF EXISTS "uidx_contacts_email";',
+    ))).toBe(true);
+  });
+
+  it('fails D1 inline unique removal without storing the new hash', async () => {
+    const db = createMockD1({
+      firstResults: [{ value: 'stale-hash' }],
+      allResults: [
+        { results: [
+          { name: 'id' },
+          { name: 'createdAt' },
+          { name: 'updatedAt' },
+          { name: 'email' },
+        ] },
+        { results: [{
+          name: 'sqlite_autoindex_contacts_2',
+          unique: 1,
+          origin: 'u',
+          partial: 0,
+        }] },
+        { results: [{ seqno: 0, name: 'email' }] },
+      ],
+    });
+
+    await expect(ensureD1Schema(db, 'workspace', {
+      contacts: {
+        schema: { email: { type: 'string', unique: false } },
+      },
+    })).rejects.toThrow(/Apply an explicit table-rebuild migration/);
+
+    expect(db._calls.some((call) =>
+      call.sql.includes('INSERT INTO "_meta"')
+      && call.bindings[0] === 'schemaHash:contacts'
+    )).toBe(false);
   });
 });
 

@@ -187,6 +187,94 @@ export function generateSQLiteAddColumnDDLs(
   return ddls;
 }
 
+export interface SQLiteIndexState {
+  name: string;
+  unique: boolean;
+  origin: string;
+  partial: boolean;
+  columns: string[];
+}
+
+export interface SQLiteFieldUniqueIndexPlan {
+  action: 'none' | 'create' | 'drop';
+  indexName: string;
+  ddl?: string;
+}
+
+/**
+ * Reconcile the single-column index owned by SchemaField.unique.
+ *
+ * Explicit config.indexes entries, user migration indexes, primary keys, and
+ * partial/composite indexes have separate ownership and are never removed.
+ */
+export function planSQLiteFieldUniqueIndex(
+  tableName: string,
+  fieldName: string,
+  desiredUnique: boolean,
+  indexes: SQLiteIndexState[],
+): SQLiteFieldUniqueIndexPlan {
+  const indexName = `uidx_${tableName}_${fieldName}`;
+  const managedIndex = indexes.find((index) => index.name === indexName);
+  const isExpectedManagedIndex = !!managedIndex
+    && managedIndex.origin === 'c'
+    && managedIndex.unique
+    && !managedIndex.partial
+    && managedIndex.columns.length === 1
+    && managedIndex.columns[0] === fieldName;
+
+  if (managedIndex && !isExpectedManagedIndex) {
+    throw new Error(
+      `Cannot reconcile unique for field '${tableName}.${fieldName}': reserved index `
+      + `'${indexName}' does not match the expected single-column UNIQUE index. `
+      + 'Rename or remove the conflicting index before retrying the schema update.',
+    );
+  }
+
+  const exactUniqueIndexes = indexes.filter((index) =>
+    index.unique
+    && !index.partial
+    && index.columns.length === 1
+    && index.columns[0] === fieldName,
+  );
+
+  if (desiredUnique) {
+    if (exactUniqueIndexes.length > 0) {
+      return { action: 'none', indexName };
+    }
+    return {
+      action: 'create',
+      indexName,
+      ddl: `CREATE UNIQUE INDEX ${esc(indexName)} ON ${esc(tableName)}(${esc(fieldName)});`,
+    };
+  }
+
+  const inlineUniqueIndex = exactUniqueIndexes.find((index) => index.origin === 'u');
+  if (inlineUniqueIndex) {
+    throw new Error(
+      `Cannot disable unique for field '${tableName}.${fieldName}': `
+      + 'SQLite stored it as an inline UNIQUE constraint. '
+      + 'Apply an explicit table-rebuild migration before setting unique to false.',
+    );
+  }
+
+  if (isExpectedManagedIndex) {
+    return {
+      action: 'drop',
+      indexName,
+      ddl: `DROP INDEX IF EXISTS ${esc(indexName)};`,
+    };
+  }
+  return { action: 'none', indexName };
+}
+
+export function sqliteUniqueDuplicateError(tableName: string, fieldName: string): Error {
+  return new Error(
+    `Cannot enable unique for field '${tableName}.${fieldName}': `
+    + 'existing non-NULL values contain duplicates. '
+    + 'Resolve the duplicates before retrying the schema update.',
+  );
+}
+
 // ─── Index DDL ───
 
 /**
