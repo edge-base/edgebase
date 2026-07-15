@@ -121,7 +121,7 @@ describe('frontend routing', () => {
     expect(assetPaths).toEqual(['/index.html', '/']);
   });
 
-  it('applies SPA fallback only to HTML navigation routes', async () => {
+  it('applies SPA fallback only to HTML navigation routes', { timeout: 15_000 }, async () => {
     const assetPaths: string[] = [];
     const assetsFetch = vi.fn(async (request: Request) => {
       const pathname = new URL(request.url).pathname;

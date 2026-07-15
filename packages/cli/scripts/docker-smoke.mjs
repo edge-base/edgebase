@@ -10,6 +10,7 @@ const repoRoot = resolve(packageDir, '..', '..');
 const cliEntry = resolve(packageDir, 'dist', 'index.js');
 const dockerfileSource = resolve(repoRoot, 'Dockerfile');
 const cleanupTasks = [];
+const DOCKER_BUILD_TIMEOUT_MS = 10 * 60_000;
 
 function log(message) {
   process.stdout.write(`${message}\n`);
@@ -242,6 +243,7 @@ export default defineConfig({
         ...process.env,
         NO_COLOR: '1',
       },
+      timeout: DOCKER_BUILD_TIMEOUT_MS,
     },
   );
   const buildResult = JSON.parse(buildRaw.trim());
