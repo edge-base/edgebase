@@ -41,6 +41,47 @@ describe('buildFunctionStorageProxy object identity', () => {
     expect(r2.head).toHaveBeenCalledWith('uploads/report.pdf');
   });
 
+  it('exposes a bucket-scoped multipart lifecycle to app functions', async () => {
+    const uploadPart = vi.fn().mockResolvedValue({ partNumber: 2, etag: 'part-etag-2' });
+    const complete = vi.fn().mockResolvedValue({
+      key: 'files/workspaces/ws1/upload.bin',
+      size: 7,
+      etag: 'final-etag',
+      httpMetadata: { contentType: 'application/octet-stream' },
+    });
+    const abort = vi.fn().mockResolvedValue(undefined);
+    const r2 = {
+      createMultipartUpload: vi.fn().mockResolvedValue({ uploadId: 'r2-upload-1' }),
+      resumeMultipartUpload: vi.fn(() => ({ uploadPart, complete, abort })),
+    } as unknown as R2Bucket;
+    const storage = buildFunctionStorageProxy(r2, 'files', {} as Env);
+
+    await expect(storage.createMultipartUpload('workspaces/ws1/upload.bin', {
+      contentType: 'application/octet-stream',
+    })).resolves.toEqual({ uploadId: 'r2-upload-1', key: 'workspaces/ws1/upload.bin' });
+    await expect(storage.uploadMultipartPart(
+      'workspaces/ws1/upload.bin', 'r2-upload-1', 2, new ArrayBuffer(7),
+    )).resolves.toEqual({ partNumber: 2, etag: 'part-etag-2' });
+    await expect(storage.completeMultipartUpload(
+      'workspaces/ws1/upload.bin', 'r2-upload-1', [{ partNumber: 2, etag: 'part-etag-2' }],
+    )).resolves.toEqual({
+      key: 'workspaces/ws1/upload.bin',
+      size: 7,
+      etag: 'final-etag',
+      contentType: 'application/octet-stream',
+    });
+    await storage.abortMultipartUpload('workspaces/ws1/upload.bin', 'r2-upload-1');
+
+    expect(r2.createMultipartUpload).toHaveBeenCalledWith('files/workspaces/ws1/upload.bin', {
+      httpMetadata: { contentType: 'application/octet-stream' },
+      customMetadata: undefined,
+    });
+    expect(r2.resumeMultipartUpload).toHaveBeenCalledWith(
+      'files/workspaces/ws1/upload.bin', 'r2-upload-1',
+    );
+    expect(abort).toHaveBeenCalledOnce();
+  });
+
   it('refuses to create an unversioned signed URL for a missing object', async () => {
     const r2 = {
       head: vi.fn().mockResolvedValue(null),
@@ -114,6 +155,24 @@ describe('buildFunctionContext admin.db', () => {
 
     expect(ctx.env?.NOTION_IMPORT_SECRET).toBe('test-secret');
     expect(ctx.env?.CUSTOM_BINDING).toBe(env.CUSTOM_BINDING);
+  });
+
+  it('exposes HTTP background work through ExecutionContext.waitUntil', async () => {
+    const waitUntil = vi.fn();
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/background-job'),
+      auth: null,
+      databaseNamespace: {} as DurableObjectNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      config: { databases: {} },
+      executionCtx: { waitUntil } as unknown as ExecutionContext,
+    });
+    const task = Promise.resolve('done');
+
+    ctx.waitUntil(task);
+
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(waitUntil).toHaveBeenCalledWith(task);
   });
 
   it('routes table proxy calls through the worker when workerUrl is available', async () => {

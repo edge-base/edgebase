@@ -12,7 +12,12 @@
  *
  * 격리: 각 테스트는 고유 email 사용
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { setConfig } from '../../src/lib/do-router.js';
+import testConfig, {
+  getAuthSignInHookContexts,
+  resetAuthSignInHookContexts,
+} from '../../edgebase.test.config.ts';
 
 const BASE = 'http://localhost';
 const SK = 'test-service-key-for-admin';
@@ -94,6 +99,22 @@ describe('1-12 auth-hooks — beforeSignIn / afterSignIn', () => {
     const { status, data } = await api('/api/auth/signin', { email, password });
     expect(status).toBe(200);
     expect(data.user).toBeDefined();
+  });
+
+  it('password signin 훅에 인증 방식이 전달됨', async () => {
+    const contextEmail = `auth-hook-context-password-${crypto.randomUUID()}@example.com`;
+    setConfig(testConfig);
+    resetAuthSignInHookContexts(contextEmail);
+    await api('/api/auth/signup', { email: contextEmail, password });
+
+    const { status } = await api('/api/auth/signin', { email: contextEmail, password });
+    expect(status).toBe(200);
+    await vi.waitFor(() => {
+      expect(getAuthSignInHookContexts(contextEmail)).toEqual({
+        beforeSignIn: { authMethod: 'password', authProvider: null },
+        afterSignIn: { authMethod: 'password', authProvider: null },
+      });
+    });
   });
 });
 

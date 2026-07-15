@@ -2,7 +2,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { fetchMock } from 'cloudflare:test';
 import { setConfig } from '../../src/lib/do-router.js';
 import testConfig, {
+  getAuthSignInHookContexts,
   getOAuthLifecycleEventCounts,
+  resetAuthSignInHookContexts,
   resetOAuthLifecycleEventCounts,
 } from '../../edgebase.test.config.ts';
 import { getRedirectFragmentParams } from './redirect-fragment.js';
@@ -349,6 +351,30 @@ describe('auth-oauth redirect flow', () => {
       `SELECT userId FROM _oauth_accounts WHERE provider = ? AND providerUserId = ?`,
     ).bind('google', providerUserId).first<{ userId: string }>();
     expect(oauthAccount?.userId).toBe(existingUserId);
+  });
+
+  it('passes the OAuth method and provider to sign-in hooks', async () => {
+    const suffix = crypto.randomUUID();
+    const email = `auth-hook-context-oauth-${suffix}@example.com`;
+    resetAuthSignInHookContexts(email);
+    const signup = await fetchJson('POST', '/api/auth/signup', {
+      email,
+      password: 'EdgeBase!1234',
+    });
+    expect(signup.status).toBe(201);
+    const ticket = await createGoogleCompletionTicket(`oauth-hook-context-${suffix}`, email);
+
+    const exchange = await fetchJson('POST', '/api/auth/oauth/exchange', {
+      ticket,
+      oauthRecoveryNonce: RECOVERY_NONCE,
+    });
+    expect(exchange.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(getAuthSignInHookContexts(email)).toEqual({
+        beforeSignIn: { authMethod: 'oauth', authProvider: 'google' },
+        afterSignIn: { authMethod: 'oauth', authProvider: 'google' },
+      });
+    });
   });
 
   it('classifies concurrent first OAuth completions from the committed identity transition', async () => {

@@ -111,6 +111,25 @@ function hasD1Binding(env: Env | undefined, namespace: string): boolean {
   return Boolean((env as unknown as Record<string, unknown>)[bindingName]);
 }
 
+export type InternalTransportError = Error & {
+  code?: unknown;
+  details?: unknown;
+  status: number;
+};
+
+export function internalTransportError(
+  status: number,
+  payload: Record<string, unknown>,
+): InternalTransportError {
+  const error = new Error(
+    String(payload.message || `Internal request failed: ${status}`),
+  ) as InternalTransportError;
+  error.status = status;
+  if ('code' in payload) error.code = payload.code;
+  if ('details' in payload) error.details = payload.details;
+  return error;
+}
+
 export class InternalHttpTransport implements HttpTransport {
   private readonly databaseNamespace: DurableObjectNamespace;
   private readonly config: EdgeBaseConfig;
@@ -180,7 +199,7 @@ export class InternalHttpTransport implements HttpTransport {
 
     if (!res.ok) {
       const err = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      throw new Error(String(err.message || `Internal request failed: ${res.status}`));
+      throw internalTransportError(res.status, err);
     }
 
     return (await res.json()) as T;

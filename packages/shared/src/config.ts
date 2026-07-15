@@ -1871,9 +1871,31 @@ export interface FunctionStorageProxy {
     etag: string;
     customMetadata: Record<string, string>;
   } | null>;
+  createMultipartUpload(
+    key: string,
+    options?: { contentType?: string; customMetadata?: Record<string, string> },
+  ): Promise<{ uploadId: string; key: string }>;
+  uploadMultipartPart(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    value: ReadableStream | ArrayBuffer | string,
+  ): Promise<{ partNumber: number; etag: string }>;
+  completeMultipartUpload(
+    key: string,
+    uploadId: string,
+    parts: Array<{ partNumber: number; etag: string }>,
+  ): Promise<{ key: string; size: number; etag: string; contentType: string }>;
+  abortMultipartUpload(key: string, uploadId: string): Promise<void>;
 }
 
 export interface FunctionContext {
+  /**
+   * Keep background work alive after an HTTP App Function returns. In Worker
+   * runtimes this delegates to ExecutionContext.waitUntil(); self-hosted
+   * runtimes keep the promise attached to the process and observe rejection.
+   */
+  waitUntil(promise: Promise<unknown>): void;
   /** The incoming HTTP request (for HTTP-triggered functions). */
   request?: Request;
   /** URL path parameters extracted by the router. */

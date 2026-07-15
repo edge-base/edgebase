@@ -1084,7 +1084,14 @@ export async function executeAuthHook(
   ctx: ExecutionContext,
   event: AuthTrigger['event'],
   userData: Record<string, unknown>,
-  options: { blocking?: boolean; ip?: string; userAgent?: string; workerUrl?: string } = {},
+  options: {
+    blocking?: boolean;
+    ip?: string;
+    userAgent?: string;
+    workerUrl?: string;
+    authMethod?: string;
+    authProvider?: string;
+  } = {},
 ): Promise<Record<string, unknown> | void> {
   const functions = getFunctionsByTrigger('auth', { type: 'auth', event } as AuthTrigger);
   if (functions.length === 0) return;
@@ -1179,7 +1186,11 @@ export async function executeAuthHook(
           vector: (index: string) => buildFunctionVectorizeProxy(index, config, env, options.workerUrl, serviceKey),
           push: buildFunctionPushProxy(options.workerUrl, serviceKey),
         },
-        data: { after: userData },
+        data: {
+          after: userData,
+          ...(options.authMethod ? { authMethod: options.authMethod } : {}),
+          ...(options.authProvider ? { authProvider: options.authProvider } : {}),
+        },
         ...(options.ip ? { ip: options.ip } : {}),
         ...(options.userAgent ? { userAgent: options.userAgent } : {}),
       };
@@ -1660,7 +1671,11 @@ authRoute.openapi(signin, async (c) => {
   }
 
   // beforeSignIn hook — blocking, can reject signin
-  await executeAuthHook(c.env, c.executionCtx, 'beforeSignIn', authService.sanitizeUser(user), { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) });
+  await executeAuthHook(c.env, c.executionCtx, 'beforeSignIn', authService.sanitizeUser(user), {
+    blocking: true,
+    workerUrl: getWorkerUrl(c.req.url, c.env),
+    authMethod: 'password',
+  });
 
   // MFA Check
   const mfaConfig = getMfaConfig(c.env);
@@ -1684,7 +1699,10 @@ authRoute.openapi(signin, async (c) => {
 
   // afterSignIn hook — non-blocking
   c.executionCtx.waitUntil(
-    executeAuthHook(c.env, c.executionCtx, 'afterSignIn', authService.sanitizeUser(user), { workerUrl: getWorkerUrl(c.req.url, c.env) }).catch(() => {}),
+    executeAuthHook(c.env, c.executionCtx, 'afterSignIn', authService.sanitizeUser(user), {
+      workerUrl: getWorkerUrl(c.req.url, c.env),
+      authMethod: 'password',
+    }).catch(() => {}),
   );
 
   return sessionResponse(c, {

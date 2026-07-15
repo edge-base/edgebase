@@ -134,7 +134,18 @@ export interface OAuthLifecycleEventCounts {
     afterSignIn: number;
 }
 
+export interface AuthSignInHookContext {
+    authMethod: string | null;
+    authProvider: string | null;
+}
+
+export interface AuthSignInHookContexts {
+    beforeSignIn: AuthSignInHookContext | null;
+    afterSignIn: AuthSignInHookContext | null;
+}
+
 const oauthLifecycleEventCounts = new Map<string, OAuthLifecycleEventCounts>();
+const authSignInHookContexts = new Map<string, AuthSignInHookContexts>();
 
 function recordOAuthLifecycleEvent(email: string, event: keyof OAuthLifecycleEventCounts): void {
     if (!email.includes('oauth-lifecycle-race')) return;
@@ -161,6 +172,34 @@ export function getOAuthLifecycleEventCounts(email: string): OAuthLifecycleEvent
     }) };
 }
 
+function recordAuthSignInHookContext(
+    email: string,
+    event: keyof AuthSignInHookContexts,
+    data: { authMethod?: unknown; authProvider?: unknown },
+): void {
+    if (!email.includes('auth-hook-context')) return;
+    const contexts = authSignInHookContexts.get(email) ?? {
+        beforeSignIn: null,
+        afterSignIn: null,
+    };
+    contexts[event] = {
+        authMethod: typeof data.authMethod === 'string' ? data.authMethod : null,
+        authProvider: typeof data.authProvider === 'string' ? data.authProvider : null,
+    };
+    authSignInHookContexts.set(email, contexts);
+}
+
+export function resetAuthSignInHookContexts(email: string): void {
+    authSignInHookContexts.delete(email);
+}
+
+export function getAuthSignInHookContexts(email: string): AuthSignInHookContexts {
+    return { ...(authSignInHookContexts.get(email) ?? {
+        beforeSignIn: null,
+        afterSignIn: null,
+    }) };
+}
+
 const signUpGatePlugin = definePlugin<Record<string, never>>({
     name: 'test-signup-gate',
     hooks: {
@@ -177,9 +216,15 @@ const signUpGatePlugin = definePlugin<Record<string, never>>({
             }
         },
         async beforeSignIn(ctx) {
-            const after = (ctx.data?.after ?? {}) as { email?: string | null };
+            const data = (ctx.data ?? {}) as {
+                after?: { email?: string | null };
+                authMethod?: unknown;
+                authProvider?: unknown;
+            };
+            const after = data.after ?? {};
             const key = String(after.email ?? '');
             recordOAuthLifecycleEvent(key, 'beforeSignIn');
+            recordAuthSignInHookContext(key, 'beforeSignIn', data);
             if (key.includes('oauth-signin-hook-once') && !signInGateSeen.has(key)) {
                 signInGateSeen.add(key);
                 throw new Error('Blocked by test beforeSignIn (first attempt)');
@@ -190,8 +235,14 @@ const signUpGatePlugin = definePlugin<Record<string, never>>({
             recordOAuthLifecycleEvent(String(after.email ?? ''), 'afterSignUp');
         },
         async afterSignIn(ctx) {
-            const after = (ctx.data?.after ?? {}) as { email?: string | null };
-            recordOAuthLifecycleEvent(String(after.email ?? ''), 'afterSignIn');
+            const data = (ctx.data ?? {}) as {
+                after?: { email?: string | null };
+                authMethod?: unknown;
+                authProvider?: unknown;
+            };
+            const key = String(data.after?.email ?? '');
+            recordOAuthLifecycleEvent(key, 'afterSignIn');
+            recordAuthSignInHookContext(key, 'afterSignIn', data);
         },
     },
 });

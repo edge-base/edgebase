@@ -229,6 +229,22 @@ export interface FunctionStorageProxy {
     etag: string;
     customMetadata: Record<string, string>;
   } | null>;
+  createMultipartUpload(
+    key: string,
+    options?: { contentType?: string; customMetadata?: Record<string, string> },
+  ): Promise<{ uploadId: string; key: string }>;
+  uploadMultipartPart(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    value: ReadableStream | ArrayBuffer | string,
+  ): Promise<{ partNumber: number; etag: string }>;
+  completeMultipartUpload(
+    key: string,
+    uploadId: string,
+    parts: Array<{ partNumber: number; etag: string }>,
+  ): Promise<{ key: string; size: number; etag: string; contentType: string }>;
+  abortMultipartUpload(key: string, uploadId: string): Promise<void>;
 }
 
 /** KV proxy for App Functions — routes through Worker HTTP. */
@@ -325,6 +341,8 @@ export interface FunctionVectorizeProxy {
  * and `context.admin.auth` exclusively.
  */
 export interface FunctionContext {
+  /** Keep background work alive after the function response is returned. */
+  waitUntil(promise: Promise<unknown>): void;
   request: Request;
   auth: AuthContext | null;
   /**
@@ -1408,6 +1426,16 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
   };
 
   const ctx: FunctionContext = {
+    waitUntil(promise) {
+      if (options.executionCtx) {
+        options.executionCtx.waitUntil(promise);
+        return;
+      }
+      // Docker/self-hosted functions execute in a long-lived Node process.
+      // Observing the promise prevents an unhandled rejection while allowing
+      // the handler to return without awaiting the background work.
+      void promise.catch(() => {});
+    },
     request: options.request,
     auth: options.auth,
     db: admin.db,
@@ -2060,6 +2088,38 @@ export function buildFunctionStorageProxy(
         etag: obj.etag,
         customMetadata: (obj.customMetadata as Record<string, string>) ?? {},
       };
+    },
+
+    async createMultipartUpload(key, options) {
+      const upload = await r2.createMultipartUpload(prefix(key), {
+        httpMetadata: options?.contentType ? { contentType: options.contentType } : undefined,
+        customMetadata: options?.customMetadata,
+      });
+      return { uploadId: upload.uploadId, key };
+    },
+
+    async uploadMultipartPart(key, uploadId, partNumber, value) {
+      if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10_000) {
+        throw new Error('Multipart partNumber must be an integer between 1 and 10000.');
+      }
+      const upload = r2.resumeMultipartUpload(prefix(key), uploadId);
+      const part = await upload.uploadPart(partNumber, value);
+      return { partNumber: part.partNumber, etag: part.etag };
+    },
+
+    async completeMultipartUpload(key, uploadId, parts) {
+      const upload = r2.resumeMultipartUpload(prefix(key), uploadId);
+      const completed = await upload.complete(parts);
+      return {
+        key,
+        size: completed.size,
+        etag: completed.etag,
+        contentType: (completed.httpMetadata?.contentType as string) ?? 'application/octet-stream',
+      };
+    },
+
+    async abortMultipartUpload(key, uploadId) {
+      await r2.resumeMultipartUpload(prefix(key), uploadId).abort();
     },
   };
 }

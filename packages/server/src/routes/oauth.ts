@@ -382,8 +382,10 @@ function createOAuthLifecycleHooks(
   c: Context<HonoEnv>,
   completion?: OAuthSignInCompletion,
   checkpoint?: () => Promise<void>,
+  directProvider?: SupportedProvider,
 ): OAuthLifecycleHooks {
   let beforeEvent: OAuthLifecycleEvent | undefined = completion?.lifecycleBefore;
+  const authProvider = completion?.provider ?? directProvider;
   const run = async (event: OAuthLifecycleEvent, userData: Record<string, unknown>) => {
     if (completion?.lifecycleBefore) {
       if (completion.lifecycleBefore !== event) {
@@ -402,7 +404,12 @@ function createOAuthLifecycleHooks(
       c.executionCtx,
       event === 'signUp' ? 'beforeSignUp' : 'beforeSignIn',
       userData,
-      { blocking: true, workerUrl: getWorkerUrl(c.req.url, c.env) },
+      {
+        blocking: true,
+        workerUrl: getWorkerUrl(c.req.url, c.env),
+        authMethod: 'oauth',
+        ...(authProvider ? { authProvider } : {}),
+      },
     );
     if (completion) {
       completion.lifecycleBefore = event;
@@ -453,6 +460,7 @@ function scheduleOAuthAfterLifecycleHook(
   c: Context<HonoEnv>,
   event: OAuthLifecycleEvent,
   user: Record<string, unknown>,
+  authProvider: SupportedProvider,
 ): void {
   const trigger = event === 'signUp' ? 'afterSignUp' : 'afterSignIn';
   c.executionCtx.waitUntil(
@@ -461,7 +469,11 @@ function scheduleOAuthAfterLifecycleHook(
       c.executionCtx,
       trigger,
       user,
-      { workerUrl: getWorkerUrl(c.req.url, c.env) },
+      {
+        workerUrl: getWorkerUrl(c.req.url, c.env),
+        authMethod: 'oauth',
+        authProvider,
+      },
     ).catch(() => undefined),
   );
 }
@@ -1038,7 +1050,12 @@ oauthRoute.openapi(oauthExchange, async (c) => {
       JSON.stringify(cached),
       OAUTH_COMPLETION_TTL_SECONDS,
     );
-    scheduleOAuthAfterLifecycleHook(c, result.created ? 'signUp' : 'signIn', result.user);
+    scheduleOAuthAfterLifecycleHook(
+      c,
+      result.created ? 'signUp' : 'signIn',
+      result.user,
+      completion.provider,
+    );
     return oauthCompletionResponse(c, cached);
   } catch (error) {
     await heartbeat.stop();
@@ -1242,9 +1259,9 @@ async function handleOAuthCallback(c: Context<HonoEnv>, input: OAuthCallbackInpu
     c.req.raw,
     undefined,
     newUserId,
-    createOAuthLifecycleHooks(c),
+    createOAuthLifecycleHooks(c, undefined, undefined, providerName),
   );
-  scheduleOAuthAfterLifecycleHook(c, result.created ? 'signUp' : 'signIn', result.user);
+  scheduleOAuthAfterLifecycleHook(c, result.created ? 'signUp' : 'signIn', result.user, providerName);
   return authTransport === 'cookie'
     ? cookieSessionResponse(c, result, result.created ? 201 : 200)
     : c.json(result, result.created ? 201 : 200);
