@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.4.7 — 2026-07-15
+
+### Added
+
+- HTTP App Functions can schedule background work with
+  `context.waitUntil(promise)`. Worker deployments delegate to the request
+  `ExecutionContext`, while self-hosted runtimes observe the promise without
+  delaying the response.
+- App Function storage proxies now expose the complete R2 multipart-upload
+  lifecycle: create, upload part, complete, and abort. Bucket scoping and
+  metadata handling match the existing single-object storage methods.
+- Password and OAuth sign-in hooks receive `data.authMethod`; OAuth hooks also
+  receive `data.authProvider`, allowing blocking hooks to distinguish a
+  required organization provider from other sign-in paths.
+- The Web SDK exposes `client.auth.hasValidAccessToken` for callers that need
+  to distinguish a verified in-memory access token from the non-secret cookie
+  session user hint.
+
+### Fixed
+
+- Room clients retain reconnect backoff until the first authoritative sync and
+  clear transport/auth/join lifecycle state together after a close. A proxy
+  that repeatedly accepts WebSocket upgrades but closes before Room recovery
+  can no longer reset the retry bound indefinitely.
+- HttpOnly-cookie clients now reserve the entire same-tab refresh election
+  before its first asynchronous lock check, so concurrent cold-start and
+  explicit refresh calls produce one refresh request instead of serial token
+  rotations.
+- `edgebase dev` refreshes only staged function modules and their registry when
+  function sources change. A compile failure preserves the last working
+  function bundle, and function-only saves no longer recopy the served frontend
+  assets.
+- `edgebase docker run` allows bounded slow first starts on NAS and emulated
+  architectures, waiting up to 90 seconds with individually bounded health
+  probes instead of failing after 20 seconds.
+- Internal function transports preserve response status, error code, and
+  details on failures so callers can classify conflicts and authorization
+  errors instead of receiving an unstructured `Error`.
+
 ## 0.4.6 — 2026-07-14
 
 ### Fixed

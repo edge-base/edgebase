@@ -1,7 +1,7 @@
 """Auto-generated client wrapper methods — DO NOT EDIT.
 
 Regenerate: npx tsx tools/sdk-codegen/generate.ts
-Source: wrapper-config.json + openapi.json (0.4.6)
+Source: wrapper-config.json + openapi.json (0.4.7)
 """
 
 from __future__ import annotations

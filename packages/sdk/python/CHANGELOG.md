@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.7 (2026-07-15)
+
+### Changed
+
+- Synchronized `edgebase-core`, `edgebase-admin`, and the umbrella SDK package
+  metadata and compatible dependency bounds with EdgeBase 0.4.7.
+- No public Python API compatibility break is introduced.
+
 ## 0.4.6 (2026-07-14)
 
 ### Changed

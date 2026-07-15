@@ -2,7 +2,7 @@
 
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.4.6)
+// Source: openapi.json (0.4.7)
 
 declare(strict_types=1);
 
