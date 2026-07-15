@@ -1,10 +1,10 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, type SpawnOptionsWithoutStdio } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAppBundle, syncAppBundle, syncAppBundleFunctions } from '../src/lib/app-bundle.js';
 import { resolveTsxCommand } from '../src/lib/node-tools.js';
 
@@ -20,6 +20,40 @@ const CLEANUP_RETRY_OPTIONS = {
   retryDelay: 250,
 } as const;
 
+interface BufferedProcessResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+function runBufferedProcess(
+  command: string,
+  args: string[],
+  options: SpawnOptionsWithoutStdio = {},
+): Promise<BufferedProcessResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      ...options,
+      stdio: 'pipe',
+    });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.setEncoding('utf-8');
+    child.stderr.setEncoding('utf-8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once('error', reject);
+    child.once('close', (status) => {
+      resolve({ status, stdout, stderr });
+    });
+  });
+}
+
 function createTempProject(name: string): string {
   const dir = join(tmpdir(), `edgebase-build-app-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
@@ -32,7 +66,7 @@ function cleanupTemporaryDirectory(dir: string): void {
 }
 
 function runBuildApp(projectDir: string, outputDirName: string) {
-  return spawnSync(
+  return runBufferedProcess(
     tsxCommand.command,
     [
       ...tsxCommand.argsPrefix,
@@ -44,26 +78,24 @@ function runBuildApp(projectDir: string, outputDirName: string) {
     ],
     {
       cwd: projectDir,
-      encoding: 'utf-8',
       env: {
         ...process.env,
         NO_COLOR: '1',
       },
-      stdio: 'pipe',
       ...tsxExecOptions,
     },
   );
 }
 
-function inspectBundledModules(configPath: string, functionPath: string): {
+async function inspectBundledModules(configPath: string, functionPath: string): Promise<{
   metaTag?: string;
   hasGet: boolean;
   responseText?: string;
-} {
+}> {
   // Vite's SSR loader only resolves modules inside its configured filesystem
   // roots. App-bundle fixtures intentionally live in the OS temp directory,
   // so probe their generated ESM in a plain Node child process.
-  const result = spawnSync(
+  const result = await runBufferedProcess(
     process.execPath,
     [
       '--input-type=module',
@@ -83,7 +115,7 @@ function inspectBundledModules(configPath: string, functionPath: string): {
       pathToFileURL(configPath).href,
       pathToFileURL(functionPath).href,
     ],
-    { encoding: 'utf-8', stdio: 'pipe' },
+    {},
   );
   if (result.status !== 0) {
     throw new Error(`Native app-bundle probe failed: ${result.stderr || result.stdout}`);
@@ -158,6 +190,12 @@ afterEach(() => {
     cleanupTemporaryDirectory(dir);
   }
 }, 120_000);
+
+beforeEach(async () => {
+  // Vitest starts an asynchronous task-status RPC immediately before each test.
+  // Yield once so a sequence of expensive synchronous bundle copies cannot starve it.
+  await new Promise<void>((resolve) => setImmediate(resolve));
+});
 
 describe('build-app command', () => {
   it('rejects protected compile selectors while copying the source Wrangler config', () => {
@@ -249,9 +287,9 @@ export async function GET() {
 `,
     );
 
-    const result = runBuildApp(projectDir, 'app-bundle');
+    const result = await runBuildApp(projectDir, 'app-bundle');
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr || result.stdout).toBe(0);
     expect(result.stderr).toBe('');
 
     const payload = JSON.parse(result.stdout) as {
@@ -321,7 +359,7 @@ export async function GET() {
     expect(existsSync(bundledConfigPath)).toBe(true);
     expect(existsSync(bundledFunctionPath)).toBe(true);
 
-    const moduleProbe = inspectBundledModules(bundledConfigPath, bundledFunctionPath);
+    const moduleProbe = await inspectBundledModules(bundledConfigPath, bundledFunctionPath);
     expect(moduleProbe.metaTag).toBe('bundle-ok');
     expect(moduleProbe.hasGet).toBe(true);
     expect(moduleProbe.responseText).toBe('hello bundle');
