@@ -160,6 +160,8 @@ export function validateReceiptShape(receipt, expected) {
   const errors = [];
   if (receipt.schema !== RECEIPT_SCHEMA) errors.push(`receipt schema must be ${RECEIPT_SCHEMA}`);
   if (receipt.status !== 'success') errors.push('receipt status is not success');
+  if (receipt.profile !== expected.profile)
+    errors.push(`receipt profile is not ${expected.profile}`);
   if (receipt.commit !== expected.commit)
     errors.push('receipt commit does not match pushed commit');
   if (receipt.tree !== expected.tree) errors.push('receipt tree does not match pushed commit');
@@ -171,7 +173,7 @@ export function validateReceiptShape(receipt, expected) {
   if (receipt.runnerDigest !== expected.runnerDigest) errors.push('local runner digest changed');
   const actualJobs = Array.isArray(receipt.jobs) ? receipt.jobs : [];
   if (JSON.stringify(actualJobs) !== JSON.stringify(expected.jobs)) {
-    errors.push('receipt job set does not match the required full gate');
+    errors.push(`receipt job set does not match the required ${expected.profile} gate`);
   }
   return errors;
 }
@@ -187,6 +189,22 @@ export function parsePrePushInput(input) {
       const [localRef, localSha, remoteRef, remoteSha] = fields;
       return { localRef, localSha, remoteRef, remoteSha };
     });
+}
+
+export function findStableNpmReleasePush(updates) {
+  const active = updates.filter((update) => !/^0+$/.test(update.localSha));
+  const main = active.find((update) => update.remoteRef === 'refs/heads/main');
+  const tags = active.filter(
+    (update) =>
+      /^refs\/tags\/v\d+\.\d+\.\d+$/.test(update.remoteRef) &&
+      update.localRef === update.remoteRef,
+  );
+  if (!main || tags.length !== 1 || active.length !== 2) return null;
+  return {
+    main,
+    tag: tags[0],
+    version: tags[0].remoteRef.slice('refs/tags/v'.length),
+  };
 }
 
 export async function installAct(repoRoot) {

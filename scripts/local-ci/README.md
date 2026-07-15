@@ -10,18 +10,38 @@ digest-pinned Ubuntu 24.04 runner image. Each expanded job receives a fresh
 ```sh
 # First prove a focused change with the narrow test for that surface.
 
-# Commit the exact tree that will be pushed, then run the full gate.
+# Commit the exact tree that will be pushed, then run the default full gate.
 node scripts/local-ci/run.mjs
 
 # Push only after the receipt is written.
 git push
 ```
 
-The full gate refuses a dirty working tree. A successful receipt is written to
-`.edgebase/local-linux-ci/receipt.json`; this path is ignored by git. The
-receipt binds the successful run to the exact commit and tree, every public
-workflow digest, the local-runner digest, `linux/amd64`, the pinned execution
-engine and every required job.
+For an explicitly approved stable npm release, use the focused authoritative
+profile instead:
+
+```sh
+node scripts/local-ci/run.mjs --profile npm-release
+git push origin HEAD:main vMAJOR.MINOR.PATCH
+```
+
+The focused profile runs `release-version-check` and `ci-node-22`. Together
+they cover frozen installation, release/version and supply-chain contracts,
+the isolated npm package graph, dependency security audit, builds, lint, docs,
+and core CLI/server/admin tests. Node 24 is exercised by the release check via
+the repository `.nvmrc`; npm publication repeats `pnpm release:preflight` on
+GitHub before publishing.
+
+Its receipt is intentionally narrow. The pre-push hook accepts it only when
+the same push updates `main` and creates exactly one matching stable
+`vMAJOR.MINOR.PATCH` tag at the same commit, with the tag version equal to
+`package.json`. Branch-only pushes still require the full profile.
+
+Authoritative profiles refuse a dirty working tree. A successful receipt is
+written to `.edgebase/local-linux-ci/receipt.json`; this path is ignored by
+git. The receipt binds the successful run to the exact commit and tree, every
+public workflow digest, the local-runner digest, `linux/amd64`, the pinned
+execution engine and every required job.
 
 Install the managed pre-push hook once per clone:
 
@@ -39,6 +59,7 @@ missing, stale, partial or from a different commit.
 node scripts/local-ci/run.mjs --doctor
 node scripts/local-ci/run.mjs --list
 node scripts/local-ci/run.mjs --job release-version-check
+node scripts/local-ci/run.mjs --profile npm-release
 node scripts/local-ci/run.mjs --dry-run
 node scripts/local-ci/run.mjs --diagnostic
 ```

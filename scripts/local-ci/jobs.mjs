@@ -149,6 +149,22 @@ export const REMOTE_ONLY_WORKFLOW_JOBS = Object.freeze({
 
 export const FULL_GATE_JOB_IDS = Object.freeze(LOCAL_CI_JOBS.map((entry) => entry.id));
 
+export const NPM_RELEASE_JOB_IDS = Object.freeze([
+  'release-version-check',
+  'ci-node-22',
+]);
+
+export const LOCAL_CI_PROFILES = Object.freeze({
+  full: FULL_GATE_JOB_IDS,
+  'npm-release': NPM_RELEASE_JOB_IDS,
+});
+
 export function findLocalCiJob(id) {
   return LOCAL_CI_JOBS.find((entry) => entry.id === id);
+}
+
+export function jobsForLocalCiProfile(profile) {
+  const jobIds = LOCAL_CI_PROFILES[profile];
+  if (!jobIds) throw new Error(`Unknown local CI profile: ${profile}`);
+  return LOCAL_CI_JOBS.filter((entry) => jobIds.includes(entry.id));
 }

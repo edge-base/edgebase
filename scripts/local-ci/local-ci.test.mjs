@@ -3,15 +3,18 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ACT_VERSION, WORKFLOW_PATHS } from './config.mjs';
+import { ACT_VERSION, RECEIPT_SCHEMA, WORKFLOW_PATHS } from './config.mjs';
 import { needsAmd64EmulationLimit, pnpmStoreVolumeName } from './act-job.mjs';
 import {
   FULL_GATE_JOB_IDS,
   LOCAL_CI_JOBS,
+  NPM_RELEASE_JOB_IDS,
   REMOTE_ONLY_WORKFLOW_JOBS,
   VIRTUAL_WORKFLOW_JOBS,
+  jobsForLocalCiProfile,
 } from './jobs.mjs';
 import {
+  findStableNpmReleasePush,
   mutationFileList,
   parsePrePushInput,
   schedulerCapacity,
@@ -78,6 +81,19 @@ test('Linux matrices cover both Node versions and every Linux/macOS SDK matrix',
       `${sourceJob} has no local ubuntu-latest expansion`,
     );
   }
+});
+
+test('npm release profile is limited to version contracts and Node 22 core CI', () => {
+  assert.deepEqual(NPM_RELEASE_JOB_IDS, ['release-version-check', 'ci-node-22']);
+  assert.deepEqual(
+    jobsForLocalCiProfile('npm-release').map((job) => job.id),
+    NPM_RELEASE_JOB_IDS,
+  );
+  assert.deepEqual(
+    jobsForLocalCiProfile('full').map((job) => job.id),
+    FULL_GATE_JOB_IDS,
+  );
+  assert.throws(() => jobsForLocalCiProfile('unknown'), /Unknown local CI profile/);
 });
 
 test('standalone workflows remove orchestration dependencies and GitHub-only uploads', async () => {
@@ -256,6 +272,7 @@ test('weighted scheduler blocks dependants after a failed prerequisite', async (
 
 test('push receipt validation is exact for SHA, digests, platform, engine, and job set', () => {
   const expected = {
+    profile: 'full',
     commit: 'a'.repeat(40),
     tree: 'b'.repeat(40),
     workflowDigest: 'c'.repeat(64),
@@ -263,7 +280,7 @@ test('push receipt validation is exact for SHA, digests, platform, engine, and j
     jobs: FULL_GATE_JOB_IDS,
   };
   const receipt = {
-    schema: 1,
+    schema: RECEIPT_SCHEMA,
     status: 'success',
     platform: 'linux/amd64',
     engine: `act/${ACT_VERSION}`,
@@ -275,6 +292,10 @@ test('push receipt validation is exact for SHA, digests, platform, engine, and j
     /commit/,
   );
   assert.match(validateReceiptShape({ ...receipt, jobs: [] }, expected).join('\n'), /job set/);
+  assert.match(
+    validateReceiptShape({ ...receipt, profile: 'npm-release' }, expected).join('\n'),
+    /profile/,
+  );
 });
 
 test('pre-push input parser preserves ref and SHA fields', () => {
@@ -291,10 +312,43 @@ test('pre-push input parser preserves ref and SHA fields', () => {
   ]);
 });
 
+test('npm release push requires main and one matching stable tag ref', () => {
+  const mainSha = 'a'.repeat(40);
+  const tagSha = 'b'.repeat(40);
+  const updates = parsePrePushInput(
+    [
+      `HEAD ${mainSha} refs/heads/main ${'c'.repeat(40)}`,
+      `refs/tags/v0.4.7 ${tagSha} refs/tags/v0.4.7 ${'0'.repeat(40)}`,
+    ].join('\n'),
+  );
+  assert.deepEqual(findStableNpmReleasePush(updates), {
+    main: updates[0],
+    tag: updates[1],
+    version: '0.4.7',
+  });
+  assert.equal(findStableNpmReleasePush(updates.slice(0, 1)), null);
+  assert.equal(
+    findStableNpmReleasePush([
+      updates[0],
+      { ...updates[1], localRef: 'refs/tags/not-the-release-ref' },
+    ]),
+    null,
+  );
+  assert.equal(
+    findStableNpmReleasePush([
+      ...updates,
+      { ...updates[0], remoteRef: 'refs/heads/release-copy' },
+    ]),
+    null,
+  );
+});
+
 test('pre-push reads stdin as a Node 24-compatible stream', async () => {
   const source = await readFile(path.join(repoRoot, 'scripts/local-ci/pre-push.mjs'), 'utf8');
   assert.match(source, /for await \(const chunk of process\.stdin\)/);
   assert.doesNotMatch(source, /readFile\(0/);
+  assert.match(source, /mainCommit !== tagCommit/);
+  assert.match(source, /packageJson\.version !== release\.version/);
 });
 
 test('act jobs keep root and isolated release installs on the same pnpm store', async () => {

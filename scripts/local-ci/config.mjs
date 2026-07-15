@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-export const RECEIPT_SCHEMA = 1;
+export const RECEIPT_SCHEMA = 2;
 export const ACT_VERSION = '0.2.89';
 export const ACT_DOWNLOADS = Object.freeze({
   'darwin-arm64': {

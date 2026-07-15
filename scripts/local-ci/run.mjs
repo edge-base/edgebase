@@ -15,7 +15,12 @@ import {
   WORKFLOW_PATHS,
   stateDir,
 } from './config.mjs';
-import { FULL_GATE_JOB_IDS, LOCAL_CI_JOBS, findLocalCiJob } from './jobs.mjs';
+import {
+  LOCAL_CI_JOBS,
+  LOCAL_CI_PROFILES,
+  findLocalCiJob,
+  jobsForLocalCiProfile,
+} from './jobs.mjs';
 import {
   changedServerLibFiles,
   digestRef,
@@ -36,6 +41,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 function usage() {
   console.log(`Usage:
   node scripts/local-ci/run.mjs                 # authoritative full gate
+  node scripts/local-ci/run.mjs --profile npm-release
+                                                # authoritative npm release gate
   node scripts/local-ci/run.mjs --job <id>      # diagnostic job + dependencies
   node scripts/local-ci/run.mjs --diagnostic    # full gate, never writes receipt
   node scripts/local-ci/run.mjs --dry-run       # validate act workflow plans only
@@ -44,7 +51,14 @@ function usage() {
 }
 
 function parseArgs(argv) {
-  const options = { diagnostic: false, doctor: false, dryRun: false, list: false, job: null };
+  const options = {
+    diagnostic: false,
+    doctor: false,
+    dryRun: false,
+    list: false,
+    job: null,
+    profile: 'full',
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--diagnostic') options.diagnostic = true;
@@ -52,11 +66,16 @@ function parseArgs(argv) {
     else if (argument === '--dry-run') options.dryRun = true;
     else if (argument === '--list') options.list = true;
     else if (argument === '--job') options.job = argv[++index];
+    else if (argument === '--profile') options.profile = argv[++index];
     else if (argument === '--help' || argument === '-h') options.help = true;
     else throw new Error(`Unknown argument: ${argument}`);
   }
   if (options.job && !findLocalCiJob(options.job))
     throw new Error(`Unknown local CI job: ${options.job}`);
+  if (!LOCAL_CI_PROFILES[options.profile])
+    throw new Error(`Unknown local CI profile: ${options.profile}`);
+  if (options.job && options.profile !== 'full')
+    throw new Error('--job cannot be combined with --profile.');
   return options;
 }
 
@@ -134,7 +153,9 @@ async function main() {
   await mkdir(runRoot, { recursive: true });
   if (authoritative) await removeReceipt(repoRoot);
 
-  const selectedBase = dependencyClosure(options.job);
+  const selectedBase = options.job
+    ? dependencyClosure(options.job)
+    : jobsForLocalCiProfile(options.profile);
   const [workflowDigest, runnerDigest, capacity, actPath] = await Promise.all([
     digestWorktree(repoRoot, WORKFLOW_PATHS),
     digestWorktree(repoRoot, RUNNER_PATHS),
@@ -150,7 +171,7 @@ async function main() {
     : '';
   const mode = authoritative ? 'AUTHORITATIVE' : 'DIAGNOSTIC';
   console.log(
-    `[local-ci] ${mode} ${initial.commit} | ${selected.length} jobs | ` +
+    `[local-ci] ${mode} ${options.profile} ${initial.commit} | ${selected.length} jobs | ` +
       `sequential / weight ${capacity.maxWeight}`,
   );
 
@@ -221,6 +242,7 @@ async function main() {
   await writeReceiptAtomic(repoRoot, {
     schema: RECEIPT_SCHEMA,
     status: 'success',
+    profile: options.profile,
     commit: initial.commit,
     tree: initial.tree,
     platform: 'linux/amd64',
@@ -228,7 +250,7 @@ async function main() {
     engine: `act/${ACT_VERSION}`,
     workflowDigest,
     runnerDigest,
-    jobs: FULL_GATE_JOB_IDS,
+    jobs: selected.map((job) => job.id),
     completedAt: new Date().toISOString(),
     runId,
   });
