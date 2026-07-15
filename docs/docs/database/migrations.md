@@ -18,8 +18,8 @@ There are two categories of schema changes:
 
 | Change Type | Example | Handling |
 |-------------|---------|----------|
-| **Non-destructive** | Add a new column, add a new table | Automatic (Lazy Schema Init) |
-| **Destructive** | Rename column, delete column, change type | Manual migration required |
+| **Non-destructive** | Add a new column, add a new table, enable `field.unique` on duplicate-free SQLite-backed data | Automatic (Lazy Schema Init) |
+| **Destructive** | Rename column, delete column, change type, remove an inline SQLite `UNIQUE` constraint | Manual migration required |
 
 ## Lazy Schema Init
 
@@ -29,12 +29,13 @@ Every time a DB block instance receives a request, it checks whether its schema 
 DB block receives request
   → Read stored schemaHash from _meta table
   → Compute djb2 hash of the deployed config schema
-  → If hashes match → skip, serve request
+  → If hashes match → skip the schema-shape diff
   → If hashes differ → run Lazy Schema Init:
       - Missing tables → CREATE TABLE
       - Missing columns → ALTER TABLE ADD COLUMN
       - FTS5 virtual tables + triggers → CREATE IF NOT EXISTS
       - Indexes → CREATE INDEX IF NOT EXISTS
+  → D1 / Durable Object field uniqueness → always reconcile EdgeBase-owned UNIQUE indexes
   → Store new hash in _meta
 ```
 
@@ -44,8 +45,17 @@ The hash is computed using `djb2` over `JSON.stringify(deepSort({ schema: config
 
 - **New tables**: `CREATE TABLE` with the full schema
 - **New columns**: `ALTER TABLE ADD COLUMN` with defaults
+- **D1 / Durable Object field uniqueness**: add or remove EdgeBase-owned single-column unique indexes
 - **FTS5 setup**: Virtual table and insert/update/delete triggers (always re-checked regardless of hash)
 - **Index creation**: `CREATE INDEX IF NOT EXISTS` (always re-checked regardless of hash)
+
+### SQLite-backed `field.unique` Changes
+
+For an existing D1 or Durable Object column, changing `field.unique` from `false` or omitted to `true` creates a real single-column `UNIQUE` index during lazy schema initialization. Physical uniqueness is verified even when the stored schema hash already matches, which repairs databases whose hash was saved by an older runtime without creating the index. SQLite permits multiple `NULL` values in that index. If duplicate non-`NULL` values already exist, initialization fails with a duplicate-data error, the previous schema hash remains stored, and the next request retries after the data is repaired. EdgeBase never deletes or silently deduplicates records.
+
+Changing `field.unique` back to `false` or omitting it removes only the deterministic `uidx_<table>_<field>` index owned by that field option. A unique index declared separately in `table.indexes`, or created by a user migration, has separate ownership and is preserved.
+
+SQLite cannot drop an inline `UNIQUE` table constraint without rebuilding the table. If the existing table was created with inline uniqueness rather than an EdgeBase-managed `uidx_*` index, lazy schema initialization fails with explicit migration guidance instead of pretending the constraint was removed. Apply a table-rebuild migration while the old schema config is still deployed, and have that migration create the equivalent `uidx_<table>_<field>` index so uniqueness remains enforced. Then change `field.unique` in a following deploy; lazy schema initialization removes that managed index.
 
 ### What It Does Not Handle
 
@@ -53,6 +63,7 @@ The hash is computed using `djb2` over `JSON.stringify(deepSort({ schema: config
 - Column deletions
 - Column type changes
 - Table deletions
+- Inline SQLite `UNIQUE` constraint removal
 
 These **destructive changes** require explicit migrations.
 

@@ -20,6 +20,9 @@ import {
   generateIndexDDL,
   buildEffectiveSchema,
   computeSchemaHashSync,
+  planSQLiteFieldUniqueIndex,
+  sqliteUniqueDuplicateError,
+  type SQLiteIndexState,
 } from './schema.js';
 
 // Track initialized namespaces to avoid redundant checks per Worker process.
@@ -60,9 +63,12 @@ async function initD1Table(
   const storedHash = await getD1Meta(db, `schemaHash:${tableName}`);
 
   if (storedHash === currentHash) {
-    // No schema change — still check migrations
+    // No hash change — still check migrations and verify the physical schema.
+    // Older runtimes could save this hash without materializing a UNIQUE
+    // change on an existing column, so the reconciliation must be state-based.
     await ensureD1FTSAndIndexes(db, tableName, config);
     await runD1Migrations(db, tableName, config);
+    await handleD1SchemaUpdate(db, tableName, config);
     return;
   }
 
@@ -94,33 +100,83 @@ async function initD1Table(
 }
 
 /**
- * Non-destructive schema update: detect new columns and ADD COLUMN.
- * Does NOT drop columns (data safety) — mirrors database-do.ts handleSchemaUpdate().
+ * Non-destructive schema update: add columns and reconcile field-owned unique
+ * indexes. Does NOT drop columns (data safety) — mirrors DatabaseDO.
  */
 async function handleD1SchemaUpdate(
   db: D1Database,
   tableName: string,
   config: TableConfig,
 ): Promise<void> {
+  const escapedTableName = tableName.replace(/"/g, '""');
+
   // Get existing columns from PRAGMA table_info
-  const colResult = await db.prepare(`PRAGMA table_info("${tableName.replace(/"/g, '""')}")`).all();
+  const colResult = await db.prepare(`PRAGMA table_info("${escapedTableName}")`).all();
   const existingCols = new Set(
     (colResult.results ?? []).map((r: Record<string, unknown>) => r.name as string),
   );
 
+  const indexResult = await db.prepare(`PRAGMA index_list("${escapedTableName}")`).all();
+  const existingIndexes: SQLiteIndexState[] = [];
+  for (const row of (indexResult.results ?? []) as Record<string, unknown>[]) {
+    const indexName = row.name as string;
+    const escapedIndexName = indexName.replace(/"/g, '""');
+    const indexInfo = await db.prepare(`PRAGMA index_info("${escapedIndexName}")`).all();
+    const columns = ((indexInfo.results ?? []) as Record<string, unknown>[])
+      .sort((left, right) => Number(left.seqno) - Number(right.seqno))
+      .map((column) => column.name as string);
+    existingIndexes.push({
+      name: indexName,
+      unique: Number(row.unique) === 1,
+      origin: String(row.origin ?? ''),
+      partial: Number(row.partial) === 1,
+      columns,
+    });
+  }
+
   // Build effective schema with auto-fields
   const effectiveSchema = buildEffectiveSchema(config.schema);
 
-  // Add missing columns
+  // Add missing columns and reconcile field-owned unique indexes.
   const migrationDDLs: string[] = [];
   for (const [colName, field] of Object.entries(effectiveSchema)) {
     if (!existingCols.has(colName)) {
-      migrationDDLs.push(...generateSQLiteAddColumnDDLs(tableName, colName, field));
+      const [addColumnDDL] = generateSQLiteAddColumnDDLs(tableName, colName, field);
+      migrationDDLs.push(addColumnDDL);
+      if (field.unique) {
+        const uniquePlan = planSQLiteFieldUniqueIndex(
+          tableName,
+          colName,
+          true,
+          existingIndexes,
+        );
+        if (uniquePlan.ddl) migrationDDLs.push(uniquePlan.ddl);
+      }
+      continue;
     }
+
+    const plan = planSQLiteFieldUniqueIndex(
+      tableName,
+      colName,
+      !!field.unique,
+      existingIndexes,
+    );
+    if (plan.action === 'create') {
+      const escapedColName = colName.replace(/"/g, '""');
+      const duplicate = await db.prepare(
+        `SELECT 1 AS "duplicate" FROM "${escapedTableName}" `
+        + `WHERE "${escapedColName}" IS NOT NULL `
+        + `GROUP BY "${escapedColName}" HAVING COUNT(*) > 1 LIMIT 1`,
+      ).first();
+      if (duplicate) {
+        throw sqliteUniqueDuplicateError(tableName, colName);
+      }
+    }
+    if (plan.ddl) migrationDDLs.push(plan.ddl);
   }
   if (migrationDDLs.length > 0) {
-    // D1 batches are transactional, so ADD COLUMN and its separate UNIQUE
-    // index either both commit or both remain retryable.
+    // D1 batches are transactional, so column and index reconciliation either
+    // commits together or remains wholly retryable.
     await db.batch(migrationDDLs.map((ddl) => db.prepare(ddl)));
   }
 }

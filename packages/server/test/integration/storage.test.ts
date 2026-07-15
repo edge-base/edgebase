@@ -488,6 +488,36 @@ describe('1-15 storage — signed-url', () => {
     expect(res.status).toBe(200);
   });
 
+  it('private media signed-url HEAD exposes playback metadata without direct bucket read access', async () => {
+    const bucket = 'documents';
+    const privateKey = `test-signed-head-${crypto.randomUUID().slice(0, 8)}.mp4`;
+    const payload = 'synthetic-video-bytes';
+    expect((await uploadToBucket(bucket, privateKey, payload, 'video/mp4')).status).toBe(201);
+
+    const { data } = await api('POST', `/api/storage/${bucket}/signed-url`, { key: privateKey });
+    const signed = new URL(data.url);
+    const response = await (globalThis as any).SELF.fetch(
+      `${BASE}${signed.pathname}${signed.search}`,
+      { method: 'HEAD' },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('video/mp4');
+    expect(response.headers.get('content-length')).toBe(String(payload.length));
+    expect(response.headers.get('accept-ranges')).toBe('bytes');
+    expect(response.headers.get('cache-control')).toContain('private');
+    expect((await response.arrayBuffer()).byteLength).toBe(0);
+
+    expect((await uploadToBucket(bucket, privateKey, 'replacement-video!!', 'video/mp4')).status).toBe(201);
+    const staleHead = await (globalThis as any).SELF.fetch(
+      `${BASE}${signed.pathname}${signed.search}`,
+      { method: 'HEAD' },
+    );
+    expect(staleHead.status).toBe(412);
+
+    await api('DELETE', `/api/storage/${bucket}/${privateKey}`).catch(() => {});
+  });
+
   it('서명 후 같은 key가 overwrite되면 full/range 모두 412로 fail-closed', async () => {
     const versionedKey = `test-signed-version-${crypto.randomUUID().slice(0, 8)}.txt`;
     expect((await upload(versionedKey, 'first', 'text/plain')).status).toBe(201);
