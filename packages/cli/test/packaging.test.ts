@@ -1,7 +1,8 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { afterEach } from 'vitest';
 import { describe, expect, it } from 'vitest';
@@ -10,6 +11,7 @@ import { pnpmCommand } from '../src/lib/pnpm.js';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const tempDirs: string[] = [];
+const execFileAsync = promisify(execFile);
 const packageManagerExecOptions = process.platform === 'win32' ? { shell: true as const } : {};
 const packagingTestTimeout = process.env.LOCAL_CI === '1' ? 180_000 : 60_000;
 
@@ -21,27 +23,31 @@ interface PackResult {
   files: PackedFile[];
 }
 
-function getPackedPaths(): string[] {
-  execFileSync(pnpmCommand(), ['run', 'build'], {
+async function getPackedPaths(): Promise<string[]> {
+  await execFileAsync(pnpmCommand(), ['run', 'build'], {
     cwd: packageDir,
     encoding: 'utf-8',
     stdio: 'pipe',
     ...packageManagerExecOptions,
   });
 
-  const output = execFileSync(npmCommand(), ['pack', '--json', '--dry-run', '--ignore-scripts'], {
-    cwd: packageDir,
-    encoding: 'utf-8',
-    stdio: 'pipe',
-    ...packageManagerExecOptions,
-  });
+  const { stdout } = await execFileAsync(
+    npmCommand(),
+    ['pack', '--json', '--dry-run', '--ignore-scripts'],
+    {
+      cwd: packageDir,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      ...packageManagerExecOptions,
+    },
+  );
 
-  const [packResult] = JSON.parse(output) as PackResult[];
+  const [packResult] = JSON.parse(stdout) as PackResult[];
   return packResult.files.map((file) => file.path);
 }
 
-function buildCli(): void {
-  execFileSync(pnpmCommand(), ['run', 'build'], {
+async function buildCli(): Promise<void> {
+  await execFileAsync(pnpmCommand(), ['run', 'build'], {
     cwd: packageDir,
     encoding: 'utf-8',
     stdio: 'pipe',
@@ -56,8 +62,8 @@ describe('cli package tarball', () => {
     }
   });
 
-  it('ships runtime assets without source or test files', () => {
-    const paths = getPackedPaths();
+  it('ships runtime assets without source or test files', async () => {
+    const paths = await getPackedPaths();
 
     expect(paths).toContain('dist/index.js');
     expect(paths).toContain('dist/templates/plugin/README.md.tmpl');
@@ -67,14 +73,14 @@ describe('cli package tarball', () => {
     expect(paths.some((path) => path.startsWith('.turbo/'))).toBe(false);
   }, packagingTestTimeout);
 
-  it('runs create-plugin successfully from the built dist entrypoint', () => {
-    buildCli();
+  it('runs create-plugin successfully from the built dist entrypoint', async () => {
+    await buildCli();
 
     const workDir = mkdtempSync(join(tmpdir(), 'edgebase-cli-dist-'));
     const homeDir = mkdtempSync(join(tmpdir(), 'edgebase-cli-home-'));
     tempDirs.push(workDir, homeDir);
 
-    execFileSync(
+    await execFileAsync(
       process.execPath,
       [
         resolve(packageDir, 'dist', 'index.js'),

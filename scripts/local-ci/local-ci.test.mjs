@@ -374,6 +374,8 @@ test('isolated local release checks retain hosted timeouts outside local CI', as
   assert.match(cliUnitConfig, /: 20_000/);
   assert.match(cliPackagingTest, /process\.env\.LOCAL_CI === '1' \? 180_000 : 60_000/);
   assert.match(cliPackagingTest, /}, packagingTestTimeout\);/);
+  assert.match(cliPackagingTest, /promisify\(execFile\)/);
+  assert.doesNotMatch(cliPackagingTest, /execFileSync/);
   assert.match(serverUnitConfig, /testTimeout: localCiTimeout\(5_000\)/);
   assert.match(serverUnitConfig, /hookTimeout: localCiTimeout\(10_000\)/);
   assert.match(ownershipTest, /timeoutMs = localCiTimeout\(5_000\)/);
