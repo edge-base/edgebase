@@ -1,6 +1,8 @@
 const JOB_HEADER = /^  ([A-Za-z_][A-Za-z0-9_-]*):\s*$/;
 const LOCAL_TRIVY_VERSION = 'v0.70.0';
 const TRIVY_INSTALL_SCRIPT_COMMIT = '75c4dc0f45c5d7ffd05ae26df1e0c666787bdf2a';
+const ANDROID_SETUP_ACTION =
+  'android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407';
 
 export function listTopLevelJobs(source) {
   const lines = source.split(/\r?\n/);
@@ -114,6 +116,23 @@ function prepareMutationFiles(lines) {
   return lines;
 }
 
+function prepareKotlinAndroidSdk(lines) {
+  const gradleSetup = lines.findIndex((line) =>
+    line.includes('uses: gradle/actions/setup-gradle@'),
+  );
+  if (gradleSetup < 0) {
+    throw new Error('Kotlin unit workflow has no Gradle setup step.');
+  }
+  lines.splice(
+    gradleSetup,
+    0,
+    `      - uses: ${ANDROID_SETUP_ACTION}`,
+    '        with:',
+    "          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'",
+  );
+  return lines;
+}
+
 export function renderStandaloneWorkflow(source, sourceJob, localJobId, options = {}) {
   const lines = source.split(/\r?\n/);
   const jobsLine = lines.findIndex((line) => line === 'jobs:');
@@ -144,6 +163,10 @@ export function renderStandaloneWorkflow(source, sourceJob, localJobId, options 
 
   if (sourceJob === 'mutation-test') {
     block = prepareMutationFiles(block);
+  }
+
+  if (sourceJob === 'sdk-kotlin-unit') {
+    block = prepareKotlinAndroidSdk(block);
   }
 
   if (sourceJob === 'server-unit') {

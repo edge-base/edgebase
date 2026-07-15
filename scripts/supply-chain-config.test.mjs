@@ -53,6 +53,16 @@ test('CI scans the exact runtime-tested image and blocks fixable severe findings
   assert.match(workflow, /name: Remove scanned image\n\s+if: always\(\)/);
 });
 
+test('release audit uses the supported npm bulk advisory endpoint and fails closed', () => {
+  const rootManifest = JSON.parse(read('package.json'));
+  assert.equal(rootManifest.scripts?.['security:audit'], 'node ./scripts/security-audit.mjs');
+  const audit = read('scripts/security-audit.mjs');
+  assert.match(audit, /registry\.npmjs\.org\/\-\/npm\/v1\/security\/advisories\/bulk/);
+  assert.match(audit, /AbortSignal\.timeout\(AUDIT_TIMEOUT_MS\)/);
+  assert.match(audit, /if \(!response\.ok\)/);
+  assert.match(audit, /BLOCKING_SEVERITIES = new Set\(\['high', 'critical'\]\)/);
+});
+
 test('workflow containers and every external action are immutable', () => {
   assert.match(
     read('.github/workflows/semgrep.yml'),

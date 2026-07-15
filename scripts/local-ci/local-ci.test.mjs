@@ -108,6 +108,10 @@ test('standalone workflows remove orchestration dependencies and GitHub-only upl
   );
   assert.doesNotMatch(docker, /token-setup-trivy:/);
 
+  const kotlin = renderStandaloneWorkflow(testSource, 'sdk-kotlin-unit', 'sdk-kotlin-unit-linux');
+  assert.match(kotlin, /android-actions\/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407/);
+  assert.match(kotlin, /platform-tools platforms;android-34 build-tools;34\.0\.0/);
+
   const semgrepSource = await readFile(
     path.join(repoRoot, '.github/workflows/semgrep.yml'),
     'utf8',

@@ -220,7 +220,7 @@ test('Node and Wrangler release floors stay aligned with the Docker runtime', ()
 
 test('release security audit covers development tooling and keeps patched floors', () => {
   const rootManifest = JSON.parse(readFileSync(resolve(REPO_ROOT, 'package.json'), 'utf8'));
-  assert.equal(rootManifest.scripts?.['security:audit'], 'pnpm audit --audit-level high');
+  assert.equal(rootManifest.scripts?.['security:audit'], 'node ./scripts/security-audit.mjs');
   assert.equal(rootManifest.devDependencies?.turbo, '^2.9.14');
   assert.deepEqual(
     {
