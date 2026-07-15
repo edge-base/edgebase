@@ -11,6 +11,7 @@ import { pnpmCommand } from '../src/lib/pnpm.js';
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const tempDirs: string[] = [];
 const packageManagerExecOptions = process.platform === 'win32' ? { shell: true as const } : {};
+const packagingTestTimeout = process.env.LOCAL_CI === '1' ? 180_000 : 60_000;
 
 interface PackedFile {
   path: string;
@@ -64,7 +65,7 @@ describe('cli package tarball', () => {
     expect(paths.some((path) => path.startsWith('src/'))).toBe(false);
     expect(paths.some((path) => path.startsWith('test/'))).toBe(false);
     expect(paths.some((path) => path.startsWith('.turbo/'))).toBe(false);
-  }, 60000);
+  }, packagingTestTimeout);
 
   it('runs create-plugin successfully from the built dist entrypoint', () => {
     buildCli();
