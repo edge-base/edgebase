@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { dirname, join, relative, resolve } from 'node:path';
 import { buildBundleWithEsbuild } from './node-tools.js';
 import { loadConfigSafe } from './load-config.js';
@@ -230,7 +231,11 @@ function replaceBundledConfigModules(
   return bundleTestConfigModule(projectDir, outputDir, testConfigFile);
 }
 
-function bundleFunctionModules(projectDir: string, outputDir: string): ScannedFunction[] {
+function bundleFunctionModules(
+  projectDir: string,
+  outputDir: string,
+  bundledFunctionsDir = getBundledFunctionsDir(outputDir),
+): ScannedFunction[] {
   const projectFunctionsDir = join(projectDir, 'functions');
   if (!existsSync(projectFunctionsDir)) {
     return [];
@@ -239,7 +244,6 @@ function bundleFunctionModules(projectDir: string, outputDir: string): ScannedFu
   const functions = scanFunctions(projectFunctionsDir);
   validateRouteNames(functions);
 
-  const bundledFunctionsDir = getBundledFunctionsDir(outputDir);
   mkdirSync(bundledFunctionsDir, { recursive: true });
 
   for (const fn of functions) {
@@ -258,19 +262,85 @@ function bundleFunctionModules(projectDir: string, outputDir: string): ScannedFu
 }
 
 function replaceBundledFunctionModules(projectDir: string, outputDir: string): ScannedFunction[] {
-  rmSync(getBundledFunctionsDir(outputDir), { recursive: true, force: true });
-  return bundleFunctionModules(projectDir, outputDir);
+  const bundledFunctionsDir = getBundledFunctionsDir(outputDir);
+  const stagingDir = `${bundledFunctionsDir}.sync-${process.pid}-${randomBytes(6).toString('hex')}`;
+
+  try {
+    // Build the complete replacement away from Wrangler's live import paths.
+    // A failed compile must leave every currently-served function in place.
+    const functions = bundleFunctionModules(projectDir, outputDir, stagingDir);
+    mkdirSync(bundledFunctionsDir, { recursive: true });
+
+    // Each completed module replaces its live twin in one filesystem rename.
+    // New routes remain unused until the registry swap below; removed routes
+    // remain available to the old registry until pruning after that swap.
+    for (const fn of functions) {
+      const relativeOutputPath = fn.relativePath.replace(/\.ts$/, '.js');
+      const stagedPath = join(stagingDir, relativeOutputPath);
+      const livePath = join(bundledFunctionsDir, relativeOutputPath);
+      mkdirSync(dirname(livePath), { recursive: true });
+      renameSync(stagedPath, livePath);
+    }
+
+    return functions;
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true });
+  }
 }
 
 function writeBundledFunctionRegistry(outputDir: string, functions: ScannedFunction[]): void {
   const registryPath = join(getRuntimeServerSrcDir(outputDir), '_functions-registry.ts');
+  const stagingPath = `${registryPath}.sync-${process.pid}-${randomBytes(6).toString('hex')}.ts`;
   const bundledFunctionsDir = getBundledFunctionsDir(outputDir);
 
-  generateFunctionRegistry(functions, registryPath, {
-    configImportPath: './generated-config.js',
-    functionsImportBasePath: relative(dirname(registryPath), bundledFunctionsDir).replace(/\\/g, '/'),
-    resolveFunctionImportPath: (fn, baseImportPath) => `${baseImportPath}/${fn.relativePath.replace(/\.ts$/, '.js')}`,
-  });
+  try {
+    generateFunctionRegistry(functions, stagingPath, {
+      configImportPath: './generated-config.js',
+      functionsImportBasePath: relative(dirname(registryPath), bundledFunctionsDir).replace(/\\/g, '/'),
+      resolveFunctionImportPath: (fn, baseImportPath) => `${baseImportPath}/${fn.relativePath.replace(/\.ts$/, '.js')}`,
+    });
+    renameSync(stagingPath, registryPath);
+  } finally {
+    rmSync(stagingPath, { force: true });
+  }
+}
+
+function pruneBundledFunctionModules(outputDir: string, functions: ScannedFunction[]): void {
+  const bundledFunctionsDir = getBundledFunctionsDir(outputDir);
+  if (!existsSync(bundledFunctionsDir)) return;
+  const expected = new Set(functions.map((fn) => fn.relativePath.replace(/\.ts$/, '.js')));
+
+  const prune = (dir: string): boolean => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (prune(path)) rmSync(path, { recursive: true, force: true });
+        continue;
+      }
+      const relativePath = relative(bundledFunctionsDir, path).replace(/\\/g, '/');
+      if (!expected.has(relativePath)) rmSync(path, { force: true });
+    }
+    return readdirSync(dir).length === 0;
+  };
+
+  prune(bundledFunctionsDir);
+}
+
+/**
+ * Refresh only user function modules and their registry for a live dev bundle.
+ * Function-source saves must not recopy the runtime scaffold or frontend
+ * assets: Wrangler can keep serving the current SPA while the staged function
+ * build completes and swaps into place.
+ */
+export function syncAppBundleFunctions(
+  projectDir: string,
+  outputDir: string,
+): ScannedFunction[] {
+  ensureExistingOutputDir(outputDir);
+  const functions = replaceBundledFunctionModules(projectDir, outputDir);
+  writeBundledFunctionRegistry(outputDir, functions);
+  pruneBundledFunctionModules(outputDir, functions);
+  return functions;
 }
 
 function buildAppManifest(
@@ -386,8 +456,7 @@ export function syncAppBundle(
     configFile,
     testConfigFile,
   );
-  const functions = replaceBundledFunctionModules(projectDir, outputDir);
-  writeBundledFunctionRegistry(outputDir, functions);
+  const functions = syncAppBundleFunctions(projectDir, outputDir);
   if (!copyProjectWranglerToml(projectDir, outputDir)) {
     ensureOutputWranglerToml(outputDir, deriveProjectSlug(projectDir));
   }

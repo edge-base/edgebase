@@ -57,7 +57,7 @@ import {
 } from '../lib/migrator.js';
 import { isCliStructuredError, raiseCliError } from '../lib/agent-contract.js';
 import { isNonInteractive } from '../lib/cli-context.js';
-import { createAppBundle, syncAppBundle } from '../lib/app-bundle.js';
+import { createAppBundle, syncAppBundle, syncAppBundleFunctions } from '../lib/app-bundle.js';
 
 const FULL_CONFIG_EVAL = { allowRegexFallback: false } as const;
 const DEFAULT_DEV_PORT = 8787;
@@ -1139,6 +1139,20 @@ export const devCommand = new Command('dev')
         return false;
       }
     };
+    const syncDevFunctions = (): boolean => {
+      try {
+        syncAppBundleFunctions(projectDir, devBundleDir);
+        return true;
+      } catch (err) {
+        console.error(
+          chalk.red('✗'),
+          'Function bundle refresh failed:',
+          (err as Error).message?.split('\n')[0] ?? 'Unknown function bundle error.',
+        );
+        console.log(chalk.dim(`  → Check ${functionsDir}, then save again.`));
+        return false;
+      }
+    };
     let configDebounce: ReturnType<typeof setTimeout> | null = null;
     let wranglerProcess: ChildProcess | null = null;
     let lastConfigSignature = getPathSignature(configPath);
@@ -1169,7 +1183,7 @@ export const devCommand = new Command('dev')
           functionsDebounce = setTimeout(() => {
             console.log();
             console.log(chalk.blue('🔄'), `functions/${filename} changed — refreshing app bundle...`);
-            if (syncDevBundle()) {
+            if (syncDevFunctions()) {
               console.log(chalk.green('✓'), 'Dev app bundle refreshed');
             }
           }, 300);

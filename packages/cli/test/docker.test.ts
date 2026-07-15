@@ -277,6 +277,11 @@ describe('Docker build argument construction', () => {
 // ======================================================================
 
 describe('Docker run argument construction', () => {
+  it('allows slow NAS and emulated runtimes to complete bounded first startup', () => {
+    expect(_internals.DOCKER_RUNTIME_HEALTH_TIMEOUT_MS).toBe(90_000);
+    expect(_internals.DOCKER_RUNTIME_HEALTH_PROBE_TIMEOUT_MS).toBe(20_000);
+  });
+
   it('builds basic docker run command', () => {
     const options = { tag: 'edgebase:latest', port: '8787', volume: 'edgebase-data', detach: false, name: 'edgebase' };
     const args = [

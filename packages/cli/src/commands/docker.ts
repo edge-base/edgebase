@@ -25,6 +25,8 @@ import { resolveLocalDevBindings } from '../lib/project-runtime.js';
 const EDGEBASE_CONFIG_FILES = ['edgebase.config.ts', 'edgebase.config.js'];
 const SELF_HOSTING_GUIDE_URL = 'https://edgebase.fun/docs/getting-started/self-hosting';
 const RELEASE_ENV_HEADER = '# EdgeBase Production Environment Variables';
+const DOCKER_RUNTIME_HEALTH_TIMEOUT_MS = 90_000;
+const DOCKER_RUNTIME_HEALTH_PROBE_TIMEOUT_MS = 20_000;
 interface DockerProcessResult {
   stdout: string;
   stderr: string;
@@ -431,6 +433,8 @@ function printSelfHostingGuide(): void {
 }
 
 export const _internals = {
+  DOCKER_RUNTIME_HEALTH_TIMEOUT_MS,
+  DOCKER_RUNTIME_HEALTH_PROBE_TIMEOUT_MS,
   findProjectRoot,
   buildDockerBuildArgs,
   buildDockerRunArgs,
@@ -687,11 +691,15 @@ dockerCommand
     const baseUrl = `http://${loopbackHost}:${options.port}`;
 
     const waitForHealthy = async (): Promise<void> => {
-      const deadline = Date.now() + 20_000;
+      // Large application bundles and emulated/NAS architectures can spend
+      // well over 20 seconds in Wrangler startup before workerd is ready.
+      // Keep the probe bounded, but do not report a healthy slow container as
+      // failed while its first schema initialization is still progressing.
+      const deadline = Date.now() + DOCKER_RUNTIME_HEALTH_TIMEOUT_MS;
       while (Date.now() < deadline) {
         try {
           const response = await fetch(healthUrl, {
-            signal: AbortSignal.timeout(2_000),
+            signal: AbortSignal.timeout(DOCKER_RUNTIME_HEALTH_PROBE_TIMEOUT_MS),
           });
           if (response.ok) return;
         } catch {

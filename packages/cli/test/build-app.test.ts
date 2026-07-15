@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createAppBundle, syncAppBundle } from '../src/lib/app-bundle.js';
+import { createAppBundle, syncAppBundle, syncAppBundleFunctions } from '../src/lib/app-bundle.js';
 import { resolveTsxCommand } from '../src/lib/node-tools.js';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -409,6 +409,100 @@ export default defineConfig({
     expect(
       readFileSync(join(bundle.outputDir, '.edgebase', 'runtime', 'server', 'edgebase.test.config.ts'), 'utf-8'),
     ).toContain("import config from './src/generated-config.ts'");
+  });
+
+  it('keeps the live function bundle and registry intact when a refresh compile fails', () => {
+    const projectDir = createTempProject('sync-failure');
+    mkdirSync(join(projectDir, 'functions'), { recursive: true });
+    writeFileSync(
+      join(projectDir, 'edgebase.config.ts'),
+      `export default {
+  databases: {
+    shared: {
+      tables: {},
+    },
+  },
+};
+`,
+    );
+    writeFileSync(
+      join(projectDir, 'functions', 'health.ts'),
+      `export async function GET() {
+  return new Response('healthy');
+}
+`,
+    );
+
+    const bundle = createAppBundle(projectDir, {
+      outputDir: 'refreshable-bundle',
+      overwrite: true,
+    });
+    const functionPath = join(
+      bundle.outputDir,
+      '.edgebase',
+      'runtime',
+      'server',
+      'bundle',
+      'functions',
+      'health.js',
+    );
+    const registryPath = join(
+      bundle.outputDir,
+      '.edgebase',
+      'runtime',
+      'server',
+      'src',
+      '_functions-registry.ts',
+    );
+    const previousFunction = readFileSync(functionPath, 'utf-8');
+    const previousRegistry = readFileSync(registryPath, 'utf-8');
+
+    writeFileSync(join(projectDir, 'functions', 'health.ts'), 'export async function GET( {');
+
+    expect(() => syncAppBundle(projectDir, bundle.outputDir)).toThrow();
+    expect(readFileSync(functionPath, 'utf-8')).toBe(previousFunction);
+    expect(readFileSync(registryPath, 'utf-8')).toBe(previousRegistry);
+  });
+
+  it('refreshes dev functions without replacing the served frontend assets', () => {
+    const projectDir = createTempProject('function-only-sync');
+    mkdirSync(join(projectDir, 'functions'), { recursive: true });
+    mkdirSync(join(projectDir, 'web', 'dist'), { recursive: true });
+    writeFileSync(
+      join(projectDir, 'edgebase.config.ts'),
+      `export default {
+  databases: { shared: { tables: {} } },
+  frontend: { directory: './web/dist' },
+};
+`,
+    );
+    writeFileSync(join(projectDir, 'functions', 'one.ts'), 'export const GET = () => new Response("one");');
+    writeFileSync(join(projectDir, 'web', 'dist', 'index.html'), '<title>served-v1</title>');
+
+    const bundle = createAppBundle(projectDir, {
+      outputDir: 'refreshable-bundle',
+      overwrite: true,
+    });
+    const servedIndexPath = join(
+      bundle.outputDir,
+      '.edgebase',
+      'runtime',
+      'server',
+      'app-assets',
+      'index.html',
+    );
+
+    rmSync(join(projectDir, 'functions', 'one.ts'), { force: true });
+    writeFileSync(join(projectDir, 'functions', 'two.ts'), 'export const GET = () => new Response("two");');
+    writeFileSync(join(projectDir, 'web', 'dist', 'index.html'), '<title>unserved-v2</title>');
+
+    const functions = syncAppBundleFunctions(projectDir, bundle.outputDir);
+
+    expect(functions.map((fn) => fn.name)).toEqual(['two']);
+    expect(readFileSync(servedIndexPath, 'utf-8')).toContain('served-v1');
+    expect(readFileSync(servedIndexPath, 'utf-8')).not.toContain('unserved-v2');
+    expect(existsSync(join(bundle.outputDir, '.edgebase', 'runtime', 'server', 'bundle', 'functions', 'one.js'))).toBe(false);
+    expect(existsSync(join(bundle.outputDir, '.edgebase', 'runtime', 'server', 'bundle', 'functions', 'two.js'))).toBe(true);
   });
 
   it('supports slimmer copy profiles for portable and docker runtime dependencies', { timeout: process.platform === 'win32' ? 180_000 : 60_000 }, () => {
