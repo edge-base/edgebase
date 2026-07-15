@@ -55,7 +55,9 @@ import {
 import { resolveCommand } from './ci-utils.mjs';
 
 const localCiTimeout = (milliseconds) =>
-  process.env.EDGEBASE_LOCAL_CI_EMULATED_AMD64 === '1' ? milliseconds * 3 : milliseconds;
+  process.env.LOCAL_CI === '1' || process.env.EDGEBASE_LOCAL_CI_EMULATED_AMD64 === '1'
+    ? milliseconds * 3
+    : milliseconds;
 
 function spawnToolSync(command, args, options = {}) {
   const resolvedCommand = resolveCommand(command);

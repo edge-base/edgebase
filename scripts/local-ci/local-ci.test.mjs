@@ -332,7 +332,7 @@ test('Go concurrency is limited only while amd64 jobs are emulated', () => {
   assert.equal(needsAmd64EmulationLimit('x86_64'), false);
 });
 
-test('emulated amd64 release checks retain native timeouts outside local CI', async () => {
+test('isolated local release checks retain hosted timeouts outside local CI', async () => {
   const runner = await readFile(path.join(repoRoot, 'scripts/local-ci/act-job.mjs'), 'utf8');
   const releaseTest = await readFile(
     path.join(repoRoot, 'scripts/release-version.test.mjs'),
@@ -340,6 +340,10 @@ test('emulated amd64 release checks retain native timeouts outside local CI', as
   );
   const serverTimeout = await readFile(
     path.join(repoRoot, 'packages/server/vitest-local-ci-timeout.ts'),
+    'utf8',
+  );
+  const cliUnitConfig = await readFile(
+    path.join(repoRoot, 'packages/cli/vitest.config.ts'),
     'utf8',
   );
   const serverUnitConfig = await readFile(
@@ -354,10 +358,14 @@ test('emulated amd64 release checks retain native timeouts outside local CI', as
     'utf8',
   );
   assert.match(runner, /EDGEBASE_LOCAL_CI_EMULATED_AMD64=1/);
+  assert.match(releaseTest, /process\.env\.LOCAL_CI === '1'/);
   assert.match(releaseTest, /EDGEBASE_LOCAL_CI_EMULATED_AMD64 === '1'/);
   assert.match(releaseTest, /timeout: localCiTimeout\(120_000\)/);
+  assert.match(serverTimeout, /process\.env\.LOCAL_CI === '1'/);
   assert.match(serverTimeout, /EDGEBASE_LOCAL_CI_EMULATED_AMD64 === '1'/);
   assert.match(serverTimeout, /milliseconds \* 3/);
+  assert.match(cliUnitConfig, /process\.env\.LOCAL_CI === '1'/);
+  assert.match(cliUnitConfig, /testTimeout: isSlowLocalCi \? 60_000 : 20_000/);
   assert.match(serverUnitConfig, /testTimeout: localCiTimeout\(5_000\)/);
   assert.match(serverUnitConfig, /hookTimeout: localCiTimeout\(10_000\)/);
   assert.match(ownershipTest, /timeoutMs = localCiTimeout\(5_000\)/);
