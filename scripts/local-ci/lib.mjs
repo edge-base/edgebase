@@ -4,7 +4,7 @@ import { chmod, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from
 import path from 'node:path';
 import process from 'node:process';
 import { filterMutationTargets } from '../../packages/server/mutation-targets.mjs';
-import { ACT_DOWNLOADS, ACT_VERSION, RECEIPT_SCHEMA, receiptPath, stateDir } from './config.mjs';
+import { ACT_DOWNLOADS, ACT_VERSION, receiptPath, stateDir } from './config.mjs';
 
 export function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -152,61 +152,6 @@ export async function removeReceipt(repoRoot) {
   }
 }
 
-export async function readReceipt(repoRoot) {
-  return JSON.parse(await readFile(receiptPath(repoRoot), 'utf8'));
-}
-
-export function validateReceiptShape(receipt, expected) {
-  const errors = [];
-  if (receipt.schema !== RECEIPT_SCHEMA) errors.push(`receipt schema must be ${RECEIPT_SCHEMA}`);
-  if (receipt.status !== 'success') errors.push('receipt status is not success');
-  if (receipt.profile !== expected.profile)
-    errors.push(`receipt profile is not ${expected.profile}`);
-  if (receipt.commit !== expected.commit)
-    errors.push('receipt commit does not match pushed commit');
-  if (receipt.tree !== expected.tree) errors.push('receipt tree does not match pushed commit');
-  if (receipt.platform !== 'linux/amd64') errors.push('receipt platform is not linux/amd64');
-  if (receipt.engine !== `act/${ACT_VERSION}`)
-    errors.push(`receipt engine is not act/${ACT_VERSION}`);
-  if (receipt.workflowDigest !== expected.workflowDigest)
-    errors.push('public workflow digest changed');
-  if (receipt.runnerDigest !== expected.runnerDigest) errors.push('local runner digest changed');
-  const actualJobs = Array.isArray(receipt.jobs) ? receipt.jobs : [];
-  if (JSON.stringify(actualJobs) !== JSON.stringify(expected.jobs)) {
-    errors.push(`receipt job set does not match the required ${expected.profile} gate`);
-  }
-  return errors;
-}
-
-export function parsePrePushInput(input) {
-  return input
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const fields = line.split(/\s+/);
-      if (fields.length !== 4) throw new Error(`Invalid pre-push input: ${line}`);
-      const [localRef, localSha, remoteRef, remoteSha] = fields;
-      return { localRef, localSha, remoteRef, remoteSha };
-    });
-}
-
-export function findStableNpmReleasePush(updates) {
-  const active = updates.filter((update) => !/^0+$/.test(update.localSha));
-  const main = active.find((update) => update.remoteRef === 'refs/heads/main');
-  const tags = active.filter(
-    (update) =>
-      /^refs\/tags\/v\d+\.\d+\.\d+$/.test(update.remoteRef) &&
-      update.localRef === update.remoteRef,
-  );
-  if (!main || tags.length !== 1 || active.length !== 2) return null;
-  return {
-    main,
-    tag: tags[0],
-    version: tags[0].remoteRef.slice('refs/tags/v'.length),
-  };
-}
-
 export async function installAct(repoRoot) {
   const key = `${process.platform}-${process.arch}`;
   const download = ACT_DOWNLOADS[key];
@@ -254,8 +199,8 @@ export async function installAct(repoRoot) {
 export function schedulerCapacity(cpus, memoryGiB) {
   // Docker reports slightly less than its configured whole-GiB allocation.
   // One scheduling point represents roughly two GiB. Resource weights still
-  // size each isolated job, but the authoritative gate deliberately starts
-  // only one public CI job at a time.
+  // size each isolated job, but a local CI run deliberately starts only one
+  // public CI job at a time.
   const maxWeight = Math.max(
     1,
     Math.min(8, Math.floor(Number(cpus)), Math.round(Number(memoryGiB) / 2)),

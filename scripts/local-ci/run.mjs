@@ -40,11 +40,11 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 
 function usage() {
   console.log(`Usage:
-  node scripts/local-ci/run.mjs                 # authoritative full gate
+  node scripts/local-ci/run.mjs                 # recorded full Linux CI run
   node scripts/local-ci/run.mjs --profile npm-release
-                                                # authoritative npm release gate
+                                                # recorded npm release checks
   node scripts/local-ci/run.mjs --job <id>      # diagnostic job + dependencies
-  node scripts/local-ci/run.mjs --diagnostic    # full gate, never writes receipt
+  node scripts/local-ci/run.mjs --diagnostic    # full diagnostic run, no receipt
   node scripts/local-ci/run.mjs --dry-run       # validate act workflow plans only
   node scripts/local-ci/run.mjs --doctor        # verify local prerequisites
   node scripts/local-ci/run.mjs --list          # list required Linux jobs`);
@@ -140,10 +140,10 @@ async function main() {
   }
 
   const initial = await repositoryState(repoRoot);
-  const authoritative = !options.job && !options.diagnostic && !options.dryRun;
-  if (authoritative && !initial.clean) {
+  const recorded = !options.job && !options.diagnostic && !options.dryRun;
+  if (recorded && !initial.clean) {
     throw new Error(
-      `The authoritative gate only runs for an exact clean commit. Commit or stash these changes first:\n${initial.status}`,
+      `A recorded local CI run requires an exact clean commit. Commit or stash these changes first:\n${initial.status}`,
     );
   }
 
@@ -151,7 +151,7 @@ async function main() {
   const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-${initial.commit.slice(0, 12)}`;
   const runRoot = path.join(stateRoot, 'runs', runId);
   await mkdir(runRoot, { recursive: true });
-  if (authoritative) await removeReceipt(repoRoot);
+  if (recorded) await removeReceipt(repoRoot);
 
   const selectedBase = options.job
     ? dependencyClosure(options.job)
@@ -169,7 +169,7 @@ async function main() {
   const mutationFiles = selected.some((job) => job.id === 'mutation-test')
     ? await changedServerLibFiles(repoRoot, baseCommit, initial.commit)
     : '';
-  const mode = authoritative ? 'AUTHORITATIVE' : 'DIAGNOSTIC';
+  const mode = recorded ? 'RECORDED' : 'DIAGNOSTIC';
   console.log(
     `[local-ci] ${mode} ${options.profile} ${initial.commit} | ${selected.length} jobs | ` +
       `sequential / weight ${capacity.maxWeight}`,
@@ -212,8 +212,8 @@ async function main() {
     throw new Error(`Local Linux CI failed: ${failed.map(([id]) => id).join(', ')}`);
   }
 
-  if (!authoritative) {
-    console.log('[local-ci] Diagnostic run passed. No push-authorizing receipt was written.');
+  if (!recorded) {
+    console.log('[local-ci] Diagnostic run passed. No completed-run receipt was written.');
     return;
   }
 
@@ -226,7 +226,7 @@ async function main() {
       digestRef(repoRoot, initial.commit, RUNNER_PATHS),
     ]);
   if (!final.clean || final.commit !== initial.commit || final.tree !== initial.tree) {
-    throw new Error('Repository state changed during the gate; refusing to write a receipt.');
+    throw new Error('Repository state changed during local CI; refusing to write a receipt.');
   }
   if (
     workflowDigest !== finalWorkflowDigest ||
@@ -235,7 +235,7 @@ async function main() {
     runnerDigest !== committedRunnerDigest
   ) {
     throw new Error(
-      'Workflow or runner digest changed during the gate; refusing to write a receipt.',
+      'Workflow or runner digest changed during local CI; refusing to write a receipt.',
     );
   }
 

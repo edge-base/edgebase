@@ -1,28 +1,23 @@
-# EdgeBase Local Linux CI Gate
+# EdgeBase Local Linux CI
 
-The local gate executes the repository's public Linux GitHub Actions jobs before
-a product commit can be pushed. It uses the pinned `act` binary and a
-digest-pinned Ubuntu 24.04 runner image. Each expanded job receives a fresh
-`linux/amd64` container, filesystem and Docker network.
+Local CI executes the repository's public Linux GitHub Actions jobs on demand.
+It is optional and does not install a hook or block `git push`. It uses the
+pinned `act` binary and a digest-pinned Ubuntu 24.04 runner image. Each expanded
+job receives a fresh `linux/amd64` container, filesystem and Docker network.
 
-## Required flow
+## On-demand use
 
 ```sh
 # First prove a focused change with the narrow test for that surface.
 
-# Commit the exact tree that will be pushed, then run the default full gate.
+# Run the complete profile when broader Linux verification is useful.
 node scripts/local-ci/run.mjs
-
-# Push only after the receipt is written.
-git push
 ```
 
-For an explicitly approved stable npm release, use the focused authoritative
-profile instead:
+For stable npm release verification, use the focused profile:
 
 ```sh
 node scripts/local-ci/run.mjs --profile npm-release
-git push origin HEAD:main vMAJOR.MINOR.PATCH
 ```
 
 The focused profile runs `release-version-check` and `ci-node-22`. Together
@@ -32,26 +27,12 @@ and core CLI/server/admin tests. Node 24 is exercised by the release check via
 the repository `.nvmrc`; npm publication repeats `pnpm release:preflight` on
 GitHub before publishing.
 
-Its receipt is intentionally narrow. The pre-push hook accepts it only when
-the same push updates `main` and creates exactly one matching stable
-`vMAJOR.MINOR.PATCH` tag at the same commit, with the tag version equal to
-`package.json`. Branch-only pushes still require the full profile.
-
-Authoritative profiles refuse a dirty working tree. A successful receipt is
+Recorded profiles refuse a dirty working tree. A successful receipt is
 written to `.edgebase/local-linux-ci/receipt.json`; this path is ignored by
 git. The receipt binds the successful run to the exact commit and tree, every
 public workflow digest, the local-runner digest, `linux/amd64`, the pinned
-execution engine and every required job.
-
-Install the managed pre-push hook once per clone:
-
-```sh
-node scripts/local-ci/install-hook.mjs
-```
-
-The hook never uses `--no-verify` or a remote GitHub check as a substitute. It
-peels branch and tag refs to commits and rejects a push when the receipt is
-missing, stale, partial or from a different commit.
+execution engine and every completed job. The receipt is an informational run
+record only; its absence or age does not affect Git operations.
 
 ## Commands
 
@@ -64,8 +45,8 @@ node scripts/local-ci/run.mjs --dry-run
 node scripts/local-ci/run.mjs --diagnostic
 ```
 
-`--job`, `--dry-run`, and `--diagnostic` are investigation tools. They never
-write a push-authorizing receipt. A selected job automatically includes its
+`--job`, `--dry-run`, and `--diagnostic` are investigation tools. They do not
+write a completed-run receipt. A selected job automatically includes its
 declared prerequisites.
 
 ## Scheduling and isolation
@@ -96,10 +77,10 @@ job.
 
 ## Parity boundary
 
-The gate runs every repository-owned Linux build, test, packaging, E2E,
+The full profile runs every repository-owned Linux build, test, packaging, E2E,
 Semgrep, Gitleaks, mutation and benchmark job. Test-summary and SDK contract
-jobs are represented by the local dependency graph: a receipt is impossible
-unless every underlying Linux job succeeds.
+jobs are represented by the local dependency graph: the full run record is
+written only when every underlying Linux job succeeds.
 
 The mutation job receives the intersection of its configured Stryker targets
 and the host's exact committed diff against `origin/main`. Generated act
@@ -113,11 +94,9 @@ GitHub remains authoritative for the parts a Linux desktop cannot reproduce:
 - hosted artifact/SARIF transport;
 - npm trusted publishing/OIDC provenance and external split-repository syncs.
 
-Those jobs stay in the public workflows and still run after push. They confirm
-the already locally tested SHA instead of serving as the first discovery loop
-for repository-owned Linux failures.
+Those jobs stay in the public workflows and still run after push.
 
-On an ARM Docker host, the gate still executes the exact `linux/amd64` target.
+On an ARM Docker host, local CI still executes the exact `linux/amd64` target.
 It sets `GOMAXPROCS=1` inside those emulated containers to avoid a known QEMU
 race in Go-based build tools such as esbuild, and triples subprocess deadlines
 whose native 120-second budget is not meaningful under emulation. Assertions,

@@ -11,7 +11,7 @@ apply the verification rules below.
 - Prove the changed surface locally before pushing. For release or packaging
   work, run targeted CLI/package tests first, then `pnpm release:preflight`;
   add local Docker and pack smoke tests when those paths changed.
-- Treat local checks as the fast release-candidate gate. They should catch
+- Treat local checks as fast release-candidate evidence. They should catch
   deterministic build, package, dependency, and contract failures before
   remote CI consumes multi-OS runner time.
 - Do not claim that local checks replace GitHub-only evidence such as actual
@@ -35,45 +35,39 @@ apply the verification rules below.
   checks to be green. Unrelated scheduled analysis should remain visible but
   should not silently become a release blocker.
 
-## Local Linux Push Gates
+## On-Demand Local Linux CI
 
-- Public/product pushes use the complete local Linux gate for the exact
-  committed `HEAD` by default:
+- Local Linux CI is an on-demand verification tool, not a prerequisite for
+  `git push`. No managed pre-push hook or receipt check may block a push merely
+  because local CI was not run.
+- Run the complete Linux profile when the risk or requested verification scope
+  warrants it:
 
   ```sh
   node scripts/local-ci/run.mjs
   ```
 
-- An explicitly approved stable npm release may instead use the focused gate:
+- For stable npm release verification, the focused profile is available:
 
   ```sh
   node scripts/local-ci/run.mjs --profile npm-release
   ```
 
   This profile is limited to release/version/supply-chain contracts and Node
-  22 core CI. Its receipt authorizes only a single push that includes both
-  `main` and one matching `vMAJOR.MINOR.PATCH` tag at the same commit. It does
-  not authorize ordinary branch-only pushes or non-npm releases.
-
-- Install and preserve the managed hook with
-  `node scripts/local-ci/install-hook.mjs`. Never bypass it with
-  `--no-verify`.
-- The success receipt under `.edgebase/local-linux-ci/` must match the pushed
-  commit SHA and tree, all public workflow digests, the local runner digest,
-  `linux/amd64`, the selected authorized profile, and every job required by
-  that profile. Partial and diagnostic runs never authorize a push.
+  22 core CI. Its receipt records the exact commit and checks that completed;
+  it is evidence only and does not authorize or block a push.
 - Each public Linux CI job runs sequentially in its own clean container and
   network. Jobs do not share mutable application state, databases, containers
   or networks. Immutable image acquisition caches and per-job dependency
   caches may be used only when frozen dependency resolution still verifies the
   result.
-- Resource weights size each isolated job, but the local gate must start only
+- Resource weights size each isolated job, but a local CI run must start only
   one public CI job at a time. Do not reintroduce cross-job parallelism without
   explicit user approval and a new measured isolation and parity review.
-- When a public workflow or the local runner changes, update parity coverage
-  and run the gate authorized for the current push. GitHub-hosted macOS/Swift,
+- When a public workflow or the local runner changes, update parity coverage.
+  GitHub-hosted macOS/Swift,
   CodeQL/SARIF transport, npm publication credentials/provenance and external
   repository syncs remain remote-only checks; they do not replace the selected
-  local Linux gate.
+  selected local Linux checks.
 - See [`scripts/local-ci/README.md`](scripts/local-ci/README.md) for the job
   inventory, isolation model and diagnostic commands.

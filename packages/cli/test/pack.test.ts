@@ -1,11 +1,11 @@
-import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess, type SpawnOptionsWithoutStdio } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveTsxCommand } from '../src/lib/node-tools.js';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,6 +20,40 @@ const CLEANUP_RETRY_OPTIONS = {
   maxRetries: 20,
   retryDelay: 250,
 } as const;
+
+interface BufferedProcessResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+function runBufferedProcess(
+  command: string,
+  args: string[],
+  options: SpawnOptionsWithoutStdio = {},
+): Promise<BufferedProcessResult> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, {
+      ...options,
+      stdio: 'pipe',
+    });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.setEncoding('utf-8');
+    child.stderr.setEncoding('utf-8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once('error', reject);
+    child.once('close', (status) => {
+      resolvePromise({ status, stdout, stderr });
+    });
+  });
+}
 
 function createTempProject(name: string): string {
   const dir = join(tmpdir(), `edgebase-pack-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -112,7 +146,7 @@ function runPack(projectDir: string, outputDirName: string, options?: { format?:
     outputDirName,
   );
 
-  return spawnSync(
+  return runBufferedProcess(
     tsxCommand.command,
     args,
     {
@@ -136,6 +170,11 @@ afterEach(() => {
     cleanupTemporaryDirectory(dir);
   }
 }, 120_000);
+
+beforeEach(async () => {
+  // Let Vitest deliver its task-status RPC before each expensive pack operation.
+  await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+});
 
 function resolveAppDataRoot(appDataDirName: string): string {
   if (process.platform === 'darwin') {
@@ -250,7 +289,7 @@ export default defineConfig({
       ].join('\n'),
     );
 
-    const result = runPack(projectDir, 'packed');
+    const result = await runPack(projectDir, 'packed');
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
@@ -431,9 +470,9 @@ export default defineConfig({
     );
     try {
       await waitForFile(liveDevVarsPath);
-      // Let the launcher install its signal forwarders before asking it to
-      // stop, so the normal child-exit cleanup path is exercised.
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+      // The lock is published only after the launcher installs its shutdown
+      // handlers, so it is the readiness signal for exercising cleanup.
+      await waitForFile(join(liveDataRoot, 'launcher-lock.json'), 30_000);
       const liveDevVars = readFileSync(liveDevVarsPath, 'utf-8');
       const liveEnvKeys = new Set(
         liveDevVars
@@ -477,7 +516,7 @@ export default defineConfig({
       chmodSync(join(expectedWorkDir, '.dev.vars'), 0o644);
     }
 
-    const dryRun = spawnSync(
+    const dryRun = await runBufferedProcess(
       process.execPath,
       [
         join(projectDir, 'packed', 'launcher.mjs'),
@@ -545,7 +584,7 @@ export default defineConfig({
     ).toEqual([]);
 
     const failureDataRoot = join(projectDir, 'launcher-failure-data');
-    const failedLaunch = spawnSync(
+    const failedLaunch = await runBufferedProcess(
       process.execPath,
       [
         join(projectDir, 'packed', 'launcher.mjs'),
@@ -576,7 +615,7 @@ export default defineConfig({
     ).toEqual([]);
   });
 
-  it('includes configured frontend assets in the packed runtime scaffold', { timeout: 90_000 }, () => {
+  it('includes configured frontend assets in the packed runtime scaffold', { timeout: 90_000 }, async () => {
     const projectDir = createTempProject('frontend');
     mkdirSync(join(projectDir, 'functions'), { recursive: true });
     mkdirSync(join(projectDir, 'web', 'dist', 'assets'), { recursive: true });
@@ -607,7 +646,7 @@ export default defineConfig({
     writeFileSync(join(projectDir, 'web', 'dist', 'index.html'), '<!doctype html><html><body>frontend</body></html>\n');
     writeFileSync(join(projectDir, 'web', 'dist', 'assets', 'main.12345678.js'), 'console.log("frontend");\n');
 
-    const result = runPack(projectDir, 'artifact');
+    const result = await runPack(projectDir, 'artifact');
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
@@ -652,7 +691,7 @@ export default defineConfig({
     expect(manifest.launcher.defaultOpenPath).toBe('/app');
     appDataDirs.push(resolveAppDataRoot(manifest.launcher.appDataDirName));
 
-    const dryRun = spawnSync(
+    const dryRun = await runBufferedProcess(
       process.execPath,
       [join(projectDir, 'artifact', 'launcher.mjs'), '--dry-run', '--json'],
       {
@@ -668,7 +707,7 @@ export default defineConfig({
     expect(launchPlan.openUrl).toBe(`http://127.0.0.1:${launchPlan.port}/app`);
   });
 
-  it('reuses an existing launcher instance when a live lock file is present', { timeout: 90_000 }, () => {
+  it('reuses an existing launcher instance when a live lock file is present', { timeout: 90_000 }, async () => {
     const projectDir = createTempProject('single-instance');
     mkdirSync(join(projectDir, 'functions'), { recursive: true });
 
@@ -687,7 +726,7 @@ export default defineConfig({
     );
     writeFileSync(join(projectDir, 'functions', 'health.ts'), 'export default async () => new Response("ok");\n');
 
-    const result = runPack(projectDir, 'packed');
+    const result = await runPack(projectDir, 'packed');
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
@@ -708,7 +747,7 @@ export default defineConfig({
       }, null, 2) + '\n',
     );
 
-    const dryRun = spawnSync(
+    const dryRun = await runBufferedProcess(
       process.execPath,
       [join(projectDir, 'packed', 'launcher.mjs'), '--dry-run', '--json'],
       {

@@ -3,7 +3,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ACT_VERSION, RECEIPT_SCHEMA, WORKFLOW_PATHS } from './config.mjs';
+import { WORKFLOW_PATHS } from './config.mjs';
 import { needsAmd64EmulationLimit, pnpmStoreVolumeName } from './act-job.mjs';
 import {
   FULL_GATE_JOB_IDS,
@@ -14,11 +14,8 @@ import {
   jobsForLocalCiProfile,
 } from './jobs.mjs';
 import {
-  findStableNpmReleasePush,
   mutationFileList,
-  parsePrePushInput,
   schedulerCapacity,
-  validateReceiptShape,
 } from './lib.mjs';
 import { runWeightedJobs } from './scheduler.mjs';
 import { listTopLevelJobs, renderStandaloneWorkflow } from './workflow.mjs';
@@ -94,6 +91,24 @@ test('npm release profile is limited to version contracts and Node 22 core CI', 
     FULL_GATE_JOB_IDS,
   );
   assert.throws(() => jobsForLocalCiProfile('unknown'), /Unknown local CI profile/);
+});
+
+test('local CI remains on demand and ships no managed pre-push blocker', async () => {
+  const [agentGuide, localCiGuide] = await Promise.all([
+    readFile(path.join(repoRoot, 'AGENTS.md'), 'utf8'),
+    readFile(path.join(repoRoot, 'scripts/local-ci/README.md'), 'utf8'),
+  ]);
+  assert.match(agentGuide, /on-demand verification tool, not a prerequisite for/);
+  assert.match(localCiGuide, /optional and does not install a hook or block `git push`/);
+  for (const removedPath of [
+    'scripts/local-ci/install-hook.mjs',
+    'scripts/local-ci/pre-push.mjs',
+  ]) {
+    await assert.rejects(
+      readFile(path.join(repoRoot, removedPath), 'utf8'),
+      (error) => error?.code === 'ENOENT',
+    );
+  }
 });
 
 test('standalone workflows remove orchestration dependencies and GitHub-only uploads', async () => {
@@ -214,7 +229,7 @@ test('weighted scheduler respects capacity, locks, and dependencies', async () =
   );
 });
 
-test('Docker capacity keeps the local gate sequential at every supported size', () => {
+test('Docker capacity keeps local CI sequential at every supported size', () => {
   assert.deepEqual(schedulerCapacity(4, 7.7), { maxWeight: 4, maxJobs: 1 });
   assert.deepEqual(schedulerCapacity(8, 15.7), { maxWeight: 8, maxJobs: 1 });
   assert.deepEqual(schedulerCapacity(10, 64), { maxWeight: 8, maxJobs: 1 });
@@ -268,87 +283,6 @@ test('weighted scheduler blocks dependants after a failed prerequisite', async (
   assert.equal(results.get('root').state, 'failed');
   assert.equal(results.get('child').state, 'blocked');
   assert.equal(results.get('independent').state, 'success');
-});
-
-test('push receipt validation is exact for SHA, digests, platform, engine, and job set', () => {
-  const expected = {
-    profile: 'full',
-    commit: 'a'.repeat(40),
-    tree: 'b'.repeat(40),
-    workflowDigest: 'c'.repeat(64),
-    runnerDigest: 'd'.repeat(64),
-    jobs: FULL_GATE_JOB_IDS,
-  };
-  const receipt = {
-    schema: RECEIPT_SCHEMA,
-    status: 'success',
-    platform: 'linux/amd64',
-    engine: `act/${ACT_VERSION}`,
-    ...expected,
-  };
-  assert.deepEqual(validateReceiptShape(receipt, expected), []);
-  assert.match(
-    validateReceiptShape({ ...receipt, commit: 'e'.repeat(40) }, expected).join('\n'),
-    /commit/,
-  );
-  assert.match(validateReceiptShape({ ...receipt, jobs: [] }, expected).join('\n'), /job set/);
-  assert.match(
-    validateReceiptShape({ ...receipt, profile: 'npm-release' }, expected).join('\n'),
-    /profile/,
-  );
-});
-
-test('pre-push input parser preserves ref and SHA fields', () => {
-  const rows = parsePrePushInput(
-    `refs/heads/main ${'a'.repeat(40)} refs/heads/main ${'b'.repeat(40)}\n`,
-  );
-  assert.deepEqual(rows, [
-    {
-      localRef: 'refs/heads/main',
-      localSha: 'a'.repeat(40),
-      remoteRef: 'refs/heads/main',
-      remoteSha: 'b'.repeat(40),
-    },
-  ]);
-});
-
-test('npm release push requires main and one matching stable tag ref', () => {
-  const mainSha = 'a'.repeat(40);
-  const tagSha = 'b'.repeat(40);
-  const updates = parsePrePushInput(
-    [
-      `HEAD ${mainSha} refs/heads/main ${'c'.repeat(40)}`,
-      `refs/tags/v0.4.7 ${tagSha} refs/tags/v0.4.7 ${'0'.repeat(40)}`,
-    ].join('\n'),
-  );
-  assert.deepEqual(findStableNpmReleasePush(updates), {
-    main: updates[0],
-    tag: updates[1],
-    version: '0.4.7',
-  });
-  assert.equal(findStableNpmReleasePush(updates.slice(0, 1)), null);
-  assert.equal(
-    findStableNpmReleasePush([
-      updates[0],
-      { ...updates[1], localRef: 'refs/tags/not-the-release-ref' },
-    ]),
-    null,
-  );
-  assert.equal(
-    findStableNpmReleasePush([
-      ...updates,
-      { ...updates[0], remoteRef: 'refs/heads/release-copy' },
-    ]),
-    null,
-  );
-});
-
-test('pre-push reads stdin as a Node 24-compatible stream', async () => {
-  const source = await readFile(path.join(repoRoot, 'scripts/local-ci/pre-push.mjs'), 'utf8');
-  assert.match(source, /for await \(const chunk of process\.stdin\)/);
-  assert.doesNotMatch(source, /readFile\(0/);
-  assert.match(source, /mainCommit !== tagCommit/);
-  assert.match(source, /packageJson\.version !== release\.version/);
 });
 
 test('act jobs keep root and isolated release installs on the same pnpm store', async () => {
@@ -412,6 +346,10 @@ test('isolated local release checks retain hosted timeouts outside local CI', as
     path.join(repoRoot, 'packages/cli/test/build-app.test.ts'),
     'utf8',
   );
+  const cliPackTest = await readFile(
+    path.join(repoRoot, 'packages/cli/test/pack.test.ts'),
+    'utf8',
+  );
   const serverUnitConfig = await readFile(
     path.join(repoRoot, 'packages/server/vitest.unit.config.ts'),
     'utf8',
@@ -443,6 +381,10 @@ test('isolated local release checks retain hosted timeouts outside local CI', as
   assert.match(cliBuildAppTest, /function runBufferedProcess/);
   assert.match(cliBuildAppTest, /setImmediate/);
   assert.doesNotMatch(cliBuildAppTest, /execFileSync|spawnSync/);
+  assert.match(cliPackTest, /function runBufferedProcess/);
+  assert.match(cliPackTest, /setImmediate/);
+  assert.match(cliPackTest, /launcher-lock\.json/);
+  assert.doesNotMatch(cliPackTest, /execFileSync|spawnSync/);
   assert.match(serverUnitConfig, /testTimeout: localCiTimeout\(5_000\)/);
   assert.match(serverUnitConfig, /hookTimeout: localCiTimeout\(10_000\)/);
   assert.match(ownershipTest, /timeoutMs = localCiTimeout\(5_000\)/);
