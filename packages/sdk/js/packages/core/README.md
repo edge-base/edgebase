@@ -95,7 +95,11 @@ const http = new HttpClient({
 });
 
 const db = new DbRef('app', undefined, http);
-const posts = await db.table('posts').limit(10).getList();
+const posts = await db
+  .table<{ id: string; title: string; metadata: Record<string, unknown> }>('posts')
+  .select('id', 'title')
+  .limit(10)
+  .getList();
 
 const storage = new StorageClient(http);
 const bucket = storage.bucket('avatars');

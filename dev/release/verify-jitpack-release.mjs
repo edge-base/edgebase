@@ -64,7 +64,7 @@ export async function verifyJitpackRelease(version, options = {}) {
     fetchImpl = globalThis.fetch,
   } = options;
 
-  if (!version) throw new Error('Missing version. Example: pnpm release:jitpack 0.3.6 --dry-run');
+  if (!version) throw new Error('Missing version. Example: pnpm release:jitpack <version> --dry-run');
   assertPreparedRelease(version, { dryRun });
 
   const targets = resolveTargets(explicitTargets);

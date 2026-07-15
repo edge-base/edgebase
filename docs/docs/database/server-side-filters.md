@@ -16,7 +16,10 @@ Reduce bandwidth and client-side processing by letting the server evaluate filte
 
 ## Overview
 
-EdgeBase supports two filtering modes for database subscriptions. On the JavaScript/TypeScript SDK, filtered table subscriptions use server-side filtering by default. Other client SDKs can opt in with `serverFilter: true` or the equivalent language-specific option.
+EdgeBase supports two filtering modes for database subscriptions. JavaScript,
+Dart/Flutter, C#/Unity, and C++/Unreal forward chained table filters to the
+server by default. Swift, Kotlin, and Java currently apply chained subscription
+filters on the client after receiving events.
 
 | | Client-Side | Server-Side |
 |---|---|---|
@@ -45,54 +48,91 @@ const unsubscribe = client.db('app').table('posts')
 ```dart
 final subscription = client.db('app').table('posts')
   .where('status', '==', 'published')
-  .onSnapshot((event) {
-    print('Published post changed: ${event.data}');
-  }, serverFilter: true);
+  .onSnapshot()
+  .listen((event) {
+    print('Published post changed: ${event.record}');
+  });
+
+await subscription.cancel();
 ```
 
 </TabItem>
 <TabItem value="swift" label="Swift">
 
 ```swift
-let subscription = client.db("app").table("posts")
-    .where("status", "==", "published")
-    .onSnapshot(serverFilter: true) { event in
-        print("Published post changed: \(event.data)")
+// Swift currently evaluates this chained filter on the client.
+let subscription = Task {
+    let stream = client.db("app").table("posts")
+        .where("status", "==", "published")
+        .onSnapshot()
+    for await event in stream {
+        print("Published post changed: \(event.record ?? [:])")
     }
+}
+
+subscription.cancel()
 ```
 
 </TabItem>
 <TabItem value="kotlin" label="Kotlin">
 
 ```kotlin
-val subscription = client.db("app").table("posts")
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+
+// Kotlin currently evaluates this chained filter on the client.
+val subscription = CoroutineScope(Dispatchers.Default).launch {
+    client.db("app").table("posts")
+        .where("status", "==", "published")
+        .onSnapshot()
+        .collect { event ->
+            println("Published post changed: ${event.record}")
+        }
+}
+
+subscription.cancel()
+```
+
+</TabItem>
+<TabItem value="java" label="Java">
+
+```java
+// Java currently evaluates this chained filter on the client.
+var sub = client.db("app").table("posts")
     .where("status", "==", "published")
-    .onSnapshot(serverFilter = true) { event ->
-        println("Published post changed: ${event.data}")
-    }
+    .onSnapshot(event -> {
+        System.out.println("Published post changed: " + event.getRecord());
+    });
+
+sub.cancel();
 ```
 
 </TabItem>
 <TabItem value="csharp" label="C#">
 
 ```csharp
-var sub = client.Db("app").Table("posts")
+var sub = await client.Db("app").Table("posts")
     .Where("status", "==", "published")
     .OnSnapshot(change => {
         Console.WriteLine($"Published post changed: {change.Data}");
-    }, serverFilter: true);
+    });
+
+sub.Dispose();
 ```
 
 </TabItem>
 <TabItem value="cpp" label="C++">
 
 ```cpp
-int subId = client.db().onSnapshot("posts",
-    {{"status", "==", "published"}},
-    [](const eb::DbChange& change) {
-        std::cout << "Published post changed" << std::endl;
-    },
-    eb::SnapshotOptions{.serverFilter = true});
+auto posts = client.db("app").table("posts")
+    .where("status", "==", "published");
+int subId = posts.onSnapshot([](const eb::DbChange& change) {
+    std::cout << "Published post changed" << std::endl;
+});
+
+posts.unsubscribe(subId);
 ```
 
 </TabItem>
@@ -150,31 +190,23 @@ This is equivalent to: `WHERE authorId = 'user-123' AND (status = 'published' OR
 | `in` | Contained in array | `['category', 'in', ['tech', 'science']]` |
 | `contains` | Array field contains value | `['tags', 'contains', 'featured']` |
 
-## Updating Filters at Runtime
+## Changing Filters
 
-Change your filter conditions without re-subscribing using `updateFilters`:
+The high-level query API does not expose an in-place `updateFilters` handle.
+Unsubscribe and create a new filtered subscription:
 
 ```typescript
 // Initially subscribe to published posts
-const sub = client.db('app').table('posts')
+let unsubscribe = client.db('app').table('posts')
   .where('status', '==', 'published')
   .onSnapshot(handler);
 
-// Later, switch to draft posts without reconnecting
-sub.updateFilters([
-  { field: 'status', op: '==', value: 'draft' },
-]);
-
-// Remove all filters (receive everything)
-sub.updateFilters(null);
+// Later, switch to draft posts.
+unsubscribe();
+unsubscribe = client.db('app').table('posts')
+  .where('status', '==', 'draft')
+  .onSnapshot(handler);
 ```
-
-- Set a field to `null` to clear that filter type
-- No need to unsubscribe and resubscribe — filters are updated in-place
-
-:::note
-You must already be subscribed to the channel before calling `updateFilters`. Attempting to update filters on an unsubscribed channel returns a `NOT_SUBSCRIBED` error.
-:::
 
 ## Limits
 
@@ -202,4 +234,6 @@ Filters can only **restrict** which events you receive — they cannot bypass ac
 
 When a Durable Object hibernates (idle WebSocket) and wakes up, all in-memory filter state is lost. The server sends a `FILTER_RESYNC` message to all authenticated sockets, and the SDK automatically re-registers all filter conditions.
 
-This happens transparently — your `onSnapshot` callbacks continue working without interruption.
+SDK transports that registered server-side filters retain those conditions and
+re-send them automatically. This happens transparently to the active
+`onSnapshot` subscription.

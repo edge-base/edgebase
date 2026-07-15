@@ -383,8 +383,27 @@ You can combine `fields` with all other query parameters:
 GET /api/db/app/tables/posts?fields=id,title&filter=[["status","==","published"]]&sort=createdAt:desc&limit=10
 ```
 
-:::note
-Field selection is a REST API feature. SDK methods currently return all fields. If you need projected queries from an SDK, use raw SQL in [App Functions](/docs/functions).
+The JavaScript/TypeScript SDK exposes the same projection through `select()`
+for list and search queries:
+
+```typescript
+interface Post {
+  id: string;
+  title: string;
+  status: string;
+  content: string;
+}
+
+const summaries = await client.db('app').table<Post>('posts')
+  .select('id', 'title', 'status')
+  .where('status', '==', 'published')
+  .getList();
+```
+
+:::note Other SDKs
+The other language SDKs currently return all fields from their high-level
+table query builders. Use the REST `fields` parameter or raw SQL in
+[App Functions](/docs/functions) when projection is required there.
 :::
 
 ## Aggregation

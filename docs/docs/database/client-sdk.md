@@ -111,8 +111,8 @@ client.db('user', userId);              // per-user DB block
 
 ```swift
 client.db("app")                        // single-instance DB block
-client.db("workspace", "ws-456")        // workspace-isolated DB block
-client.db("user", userId)               // per-user DB block
+client.db("workspace", instanceId: "ws-456") // workspace-isolated DB block
+client.db("user", instanceId: userId)         // per-user DB block
 ```
 
 </TabItem>
@@ -240,7 +240,7 @@ import 'package:edgebase_core/edgebase_core.dart';
 try {
   await client.db('app').table('posts').getOne('nonexistent');
 } on EdgeBaseError catch (e) {
-  print(e.status);    // 404
+  print(e.statusCode); // 404
   print(e.message);   // "Not found."
 }
 ```
@@ -252,8 +252,8 @@ try {
 do {
     let post = try await client.db("app").table("posts").getOne("nonexistent")
 } catch let error as EdgeBaseError {
-    print(error.status)    // 404
-    print(error.message)   // "Not found."
+    print(error.statusCode) // 404
+    print(error.message)    // "Not found."
 }
 ```
 
@@ -264,8 +264,8 @@ do {
 try {
     val post = client.db("app").table("posts").getOne("nonexistent")
 } catch (e: EdgeBaseError) {
-    println(e.status)    // 404
-    println(e.message)   // "Not found."
+    println(e.statusCode) // 404
+    println(e.message)    // "Not found."
 }
 ```
 
@@ -276,8 +276,8 @@ try {
 try {
     var post = client.db("app").table("posts").getOne("nonexistent");
 } catch (EdgeBaseError e) {
-    System.out.println(e.getStatus());   // 404
-    System.out.println(e.getMessage());  // "Not found."
+    System.out.println(e.getStatusCode()); // 404
+    System.out.println(e.getMessage());    // "Not found."
 }
 ```
 
@@ -297,10 +297,9 @@ try {
 <TabItem value="cpp" label="C++">
 
 ```cpp
-try {
-    auto post = client.db("app").table("posts").getOne("nonexistent");
-} catch (const edgebase::EdgeBaseError& e) {
-    std::cerr << e.status() << ": " << e.what() << std::endl;
+auto result = client.db("app").table("posts").getOne("nonexistent");
+if (!result.ok) {
+    std::cerr << result.statusCode << ": " << result.error << std::endl;
 }
 ```
 

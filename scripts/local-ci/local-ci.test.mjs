@@ -3,7 +3,11 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { WORKFLOW_PATHS } from './config.mjs';
+import {
+  WORKFLOW_PATHS,
+  actRunnerImageForPlatform,
+  targetPlatformForRun,
+} from './config.mjs';
 import { needsAmd64EmulationLimit, pnpmStoreVolumeName } from './act-job.mjs';
 import {
   FULL_GATE_JOB_IDS,
@@ -14,6 +18,7 @@ import {
   jobsForLocalCiProfile,
 } from './jobs.mjs';
 import {
+  dockerPullArgs,
   mutationFileList,
   schedulerCapacity,
 } from './lib.mjs';
@@ -313,11 +318,37 @@ test('nested Docker smoke probes its child container on the isolated job network
   assert.match(smoke, /dockerNetwork \? containerName : '127\.0\.0\.1'/);
 });
 
-test('Go concurrency is limited only while amd64 jobs are emulated', () => {
-  assert.equal(needsAmd64EmulationLimit('aarch64'), true);
-  assert.equal(needsAmd64EmulationLimit('arm64'), true);
-  assert.equal(needsAmd64EmulationLimit('amd64'), false);
-  assert.equal(needsAmd64EmulationLimit('x86_64'), false);
+test('npm release checks use native Linux while the complete gate retains amd64', () => {
+  assert.equal(
+    targetPlatformForRun({ profile: 'npm-release', job: null }, 'aarch64'),
+    'linux/arm64',
+  );
+  assert.equal(
+    targetPlatformForRun({ profile: 'full', job: 'ci-node-22' }, 'arm64'),
+    'linux/arm64',
+  );
+  assert.equal(
+    targetPlatformForRun({ profile: 'full', job: 'release-version-check' }, 'amd64'),
+    'linux/amd64',
+  );
+  assert.equal(targetPlatformForRun({ profile: 'full', job: null }, 'aarch64'), 'linux/amd64');
+  assert.match(actRunnerImageForPlatform('linux/arm64'), /@sha256:[a-f0-9]{64}$/);
+  assert.deepEqual(dockerPullArgs('example.invalid/runner:arm64', 'linux/arm64'), [
+    'pull',
+    '--platform',
+    'linux/arm64',
+    'example.invalid/runner:arm64',
+  ]);
+  assert.deepEqual(dockerPullArgs('example.invalid/runner:amd64', 'linux/amd64'), [
+    'pull',
+    '--platform',
+    'linux/amd64',
+    'example.invalid/runner:amd64',
+  ]);
+  assert.throws(() => dockerPullArgs('example.invalid/runner:latest'), /explicit target platform/);
+  assert.equal(needsAmd64EmulationLimit('aarch64', 'linux/amd64'), true);
+  assert.equal(needsAmd64EmulationLimit('aarch64', 'linux/arm64'), false);
+  assert.equal(needsAmd64EmulationLimit('amd64', 'linux/amd64'), false);
 });
 
 test('isolated local release checks retain hosted timeouts outside local CI', async () => {

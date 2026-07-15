@@ -226,6 +226,43 @@ describe('TableRef', () => {
     expect(result.total).toBe(1);
   });
 
+  it('select() forwards a compact fields projection and preserves query chaining', async () => {
+    const dbSingleListRecords = vi.fn().mockResolvedValue({
+      items: [{ id: 'post-1', title: 'Hello' }],
+      total: 1,
+      page: 1,
+      perPage: 10,
+    });
+    const table = new TableRef<{ id: string; title: string; metadata: Record<string, unknown> }>(
+      { dbSingleListRecords } as any,
+      'posts',
+    );
+
+    const result = await table
+      .select('id', 'title', 'title')
+      .where('id', '==', 'post-1')
+      .limit(10)
+      .getList();
+
+    expect(result.items).toEqual([{ id: 'post-1', title: 'Hello' }]);
+    expect(dbSingleListRecords).toHaveBeenCalledWith('shared', 'posts', {
+      fields: 'id,title',
+      filter: JSON.stringify([['id', '==', 'post-1']]),
+      limit: '10',
+    });
+  });
+
+  it('select() rejects an empty projection before network I/O', () => {
+    const dbSingleListRecords = vi.fn();
+    const table = new TableRef<{ id: string }>(
+      { dbSingleListRecords } as any,
+      'posts',
+    );
+
+    expect(() => table.select()).toThrow(/one or more valid field names/);
+    expect(dbSingleListRecords).not.toHaveBeenCalled();
+  });
+
   it('sql tagged template prefers the direct SQL executor when provided', async () => {
     const sqlExecutor = vi.fn().mockResolvedValue([{ total: 3 }]);
     const httpClient = { post: vi.fn() } as any;
@@ -792,6 +829,11 @@ describe('TableRef — immutable chaining', () => {
     expect(t.search('hello')).not.toBe(t);
   });
 
+  it('select returns a new instance', () => {
+    const t = new TableRef<{ id: string; title: string }>(core, 'posts', undefined, undefined, 'shared');
+    expect(t.select('id', 'title')).not.toBe(t);
+  });
+
   it('after returns new instance', () => {
     const t = new TableRef(core, 'posts', undefined, undefined, 'shared');
     expect(t.after('cursor-abc')).not.toBe(t);
@@ -814,6 +856,7 @@ describe('TableRef — immutable chaining', () => {
       .where('status', '==', 'published')
       .where('views', '>', 100)
       .orderBy('createdAt', 'desc')
+      .select('id', 'title')
       .limit(20);
     expect(query).toBeTruthy();
   });

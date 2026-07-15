@@ -1,6 +1,6 @@
 // Auto-generated core API Core — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: openapi.json (0.4.7)
+// Source: openapi.json (0.4.8)
 
 import '../http_client.dart';
 

@@ -64,7 +64,7 @@ export function verifyGoSplitRelease(version, options = {}) {
     runGitImpl = runGit,
   } = options;
 
-  if (!version) throw new Error('Missing version. Example: pnpm release:go-verify 0.3.6 --dry-run');
+  if (!version) throw new Error('Missing version. Example: pnpm release:go-verify <version> --dry-run');
   if (GO_SPLIT_TARGET_IDS.length !== 1 || GO_SPLIT_TARGET_IDS[0] !== 'go-sdk') {
     throw new Error('Go split target contract is invalid.');
   }

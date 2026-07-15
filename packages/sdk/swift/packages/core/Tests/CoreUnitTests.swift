@@ -177,6 +177,20 @@ final class DbChangeUnitTests: XCTestCase {
         XCTAssertEqual(dc.oldRecord?["title"] as? String, "Old")
     }
 
+    func testFromJSON_databaseLiveEnvelope() {
+        let json: [String: Any] = [
+            "type": "db_change",
+            "changeType": "added",
+            "table": "posts",
+            "docId": "post-123",
+            "data": ["title": "New"]
+        ]
+        let dc = DbChange.fromJSON(json)
+        XCTAssertEqual(dc.type, "added")
+        XCTAssertEqual(dc.id, "post-123")
+        XCTAssertEqual(dc.record?["title"] as? String, "New")
+    }
+
     func testDirectInit() {
         let dc = DbChange(type: "INSERT", table: "users", id: "u-1")
         XCTAssertEqual(dc.type, "INSERT")

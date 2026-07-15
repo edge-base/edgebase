@@ -27,13 +27,15 @@ public struct DbChange: @unchecked Sendable {
     }
 
     public static func fromJSON(_ json: [String: Any]) -> DbChange {
-        let id = json["id"] as? String
+        // Database Live's WebSocket envelope uses changeType/docId/data, while
+        // callers may also decode the normalized type/id/record representation.
+        let id = (json["docId"] as? String) ?? (json["id"] as? String)
         return DbChange(
-            type: json["type"] as? String ?? "UNKNOWN",
+            type: (json["changeType"] as? String) ?? (json["type"] as? String) ?? "UNKNOWN",
             table: json["table"] as? String ?? "",
             id: id,
-            record: json["record"] as? [String: Any],
-            oldRecord: json["old_record"] as? [String: Any],
+            record: (json["data"] as? [String: Any]) ?? (json["record"] as? [String: Any]),
+            oldRecord: (json["oldRecord"] as? [String: Any]) ?? (json["old_record"] as? [String: Any]),
             timestamp: json["timestamp"] as? String
         )
     }

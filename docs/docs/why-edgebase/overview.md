@@ -121,44 +121,51 @@ EdgeBase Room is possible because Durable Objects are stateful, single-threaded 
 
 ---
 
-## Architectural Quality Guarantee
+## Contract and Drift Guardrails
 
-Most BaaS platforms break silently. You update the server, forget to update an SDK, and a mobile app crashes in production. Or the backend team adds a field but the admin dashboard doesn't know about it. EdgeBase eliminates these failures structurally.
-
-**Server code is the spec.** Every API endpoint is defined with Hono + Zod. The route definition is simultaneously the runtime validator, the OpenAPI spec, and the SDK generation source. There's no separate spec to maintain. There's nothing to forget to update.
+EdgeBase keeps its spec-backed HTTP surface close to the server implementation.
+Hono routes and Zod schemas feed the OpenAPI document, which in turn generates
+the transport core shared across the SDKs.
 
 ```
 Server route definition (Hono + Zod)
     │
-    ├──→ Runtime validation    (Zod rejects invalid requests automatically)
-    ├──→ Generated SDK cores   (14 languages, never hand-written)
-    ├──→ 129 E2E smoke tests    (auto-generated from the spec)
-    └──→ CI blocks any drift    (generated code ≠ committed code → PR rejected)
+    ├──→ Runtime validation       (where a route declares a Zod schema)
+    ├──→ OpenAPI document         (spec-backed routes)
+    ├──→ Generated SDK cores      (HTTP method/path/query/body bindings)
+    └──→ Generated smoke tests    (regenerated and diff-checked in CI)
 ```
 
-**When you add a new API endpoint**, all of the following happen automatically — you only write the server route:
+Public SDK clients also contain hand-written behavior such as token storage,
+auth side effects, database subscriptions, Room, push, CAPTCHA, and App
+Functions helpers. Those surfaces require deliberate implementation and tests;
+code generation alone cannot guarantee their parity.
 
-| Step                      | What happens                    | Who does it |
-| ------------------------- | ------------------------------- | ----------- |
-| OpenAPI spec updates      | Extracted from route definition | Automatic   |
-| 14 language SDKs update   | Core regenerated from spec      | Automatic   |
-| Smoke tests added         | Generated from spec             | Automatic   |
-| Runtime validation active | Zod schema in route             | Automatic   |
-| Missing test detected     | Meta-test export scan           | CI blocks   |
+**When adding a new spec-backed endpoint**, the repository workflow is:
+
+| Step | What happens |
+| --- | --- |
+| Define route and schema | The server owns the runtime behavior and OpenAPI contract |
+| Regenerate | SDK HTTP cores and generated smoke tests are updated from OpenAPI |
+| Expose public behavior | Hand-written client entrypoints are updated where needed |
+| Add conformance coverage | Language-specific tests cover the public surface |
+| Run CI drift checks | Regeneration must leave the committed generated paths clean |
 
 **What this means for you:**
 
-- **Every SDK always matches the server.** Not "eventually" — structurally. It's the same spec.
-- **API changes can't break silently.** Zod validates every request and response at runtime.
-- **Performance regressions are caught.** CI benchmarks block PRs that exceed P95 thresholds.
-- **Security is tested, not assumed.** 57 security tests cover IDOR, token manipulation, and scope violations.
+- **Generated transport drift is difficult to miss.** CI regenerates the cores
+  and smoke tests and rejects committed-output differences.
+- **Runtime inputs are validated where route schemas declare the contract.**
+- **Public client parity remains test-driven.** Hand-written platform behavior
+  is covered by SDK unit, E2E, and role-contract suites rather than assumed.
+- **Performance and security have dedicated checks.** Their result belongs to
+  the exact commit and CI run, not to a permanent blanket certification.
 
-|                               | Other BaaS         | **EdgeBase**                |
-| ----------------------------- | ------------------ | --------------------------- |
-| **SDK sync**                  | Manual (weeks lag) | **Automatic (same spec)**   |
-| **Runtime validation**        | Optional           | **Always on (Zod)**         |
-| **Breaking change detection** | Hope & pray        | **CI blocks automatically** |
-| **SDK count sustainable?**    | 3-5 is hard        | **30 packages, zero drift** |
+The generated core therefore makes HTTP contract drift hard; it does not make
+every public SDK surface automatically identical. See
+[SDK Architecture](/docs/sdks/architecture) and
+[SDK Verification Matrix](/docs/sdks/verification-matrix) for the exact model
+and checked-in evidence.
 
 ---
 

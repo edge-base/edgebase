@@ -1,3 +1,10 @@
+## 0.4.8
+
+- Synchronized the Flutter package with the EdgeBase 0.4.8 patch release
+- Corrected Flutter subscription guidance to use `ChangeType`, `record`, and
+  `id`
+- No public Dart API compatibility break is introduced
+
 ## 0.4.7
 
 - Synchronized the Flutter package with the EdgeBase 0.4.7 patch release

@@ -6,11 +6,13 @@ verifiers never change the source version.
 
 ## 1. Prepare and review
 
-EdgeBase 0.3.6 and later require Node.js 22 or newer. From a fresh branch:
+Current EdgeBase releases require Node.js 22 or newer. Choose the intended
+stable release version explicitly, then work from a fresh branch:
 
 ```bash
+export VERSION="<next-version>" # Replace with a stable MAJOR.MINOR.PATCH value.
 pnpm install --frozen-lockfile
-pnpm release:set 0.3.6
+pnpm release:set "$VERSION"
 # Write/review CHANGELOG.md and each gated SDK changelog.
 pnpm release:preflight
 pnpm build
@@ -21,13 +23,13 @@ pnpm test
 file-backed package manifests, internal dependency bounds, SDK wire-version
 markers, install examples, OpenAPI metadata, all generated SDK surfaces, and
 generated skill references. Review those changes, commit them, and create the
-matching `v0.3.6` tag before any external release action.
+matching `v$VERSION` tag before any external release action.
 
 The root pnpm lockfile does not encode first-party workspace package versions.
 An unchanged lockfile after a release-only bump is therefore expected; run the
 frozen install above to prove it remains valid. Never replace unrelated
-third-party `0.3.5` dependency versions merely because they resemble the
-EdgeBase release number.
+third-party dependency versions merely because they resemble the EdgeBase
+release number.
 
 ## 2. Dry-run every intended route
 
@@ -36,18 +38,18 @@ allow an uncommitted tree so the release candidate can be validated before the
 release commit. They do not rewrite source versions.
 
 ```bash
-pnpm release:npm 0.3.6 --dry-run
-pnpm release:pub 0.3.6 --dry-run
-pnpm release:pypi 0.3.6 --dry-run
-pnpm release:crates 0.3.6 --dry-run
-pnpm release:nuget 0.3.6 --dry-run
-pnpm release:rubygems 0.3.6 --dry-run
-pnpm release:hex 0.3.6 --dry-run
-pnpm release:php-sync 0.3.6 --dry-run
-pnpm release:swift-sync 0.3.6 --dry-run
-pnpm release:go-sync 0.3.6 --dry-run
-pnpm release:go-verify 0.3.6 --dry-run
-pnpm release:jitpack 0.3.6 --dry-run
+pnpm release:npm "$VERSION" --dry-run
+pnpm release:pub "$VERSION" --dry-run
+pnpm release:pypi "$VERSION" --dry-run
+pnpm release:crates "$VERSION" --dry-run
+pnpm release:nuget "$VERSION" --dry-run
+pnpm release:rubygems "$VERSION" --dry-run
+pnpm release:hex "$VERSION" --dry-run
+pnpm release:php-sync "$VERSION" --dry-run
+pnpm release:swift-sync "$VERSION" --dry-run
+pnpm release:go-sync "$VERSION" --dry-run
+pnpm release:go-verify "$VERSION" --dry-run
+pnpm release:jitpack "$VERSION" --dry-run
 ```
 
 ## 3. Perform external actions only from the committed release

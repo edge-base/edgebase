@@ -153,16 +153,16 @@ class _LivePostsWidgetState extends State<LivePostsWidget> {
     super.initState();
     _sub = client.db('app').table('posts').onSnapshot().listen((change) {
       setState(() {
-        switch (change.changeType) {
-          case 'create':
-            _posts.add(change.data!);
+        switch (change.type) {
+          case ChangeType.create:
+            _posts.add(change.record!);
             break;
-          case 'update':
-            final idx = _posts.indexWhere((p) => p['id'] == change.docId);
-            if (idx >= 0) _posts[idx] = change.data!;
+          case ChangeType.update:
+            final idx = _posts.indexWhere((p) => p['id'] == change.id);
+            if (idx >= 0) _posts[idx] = change.record!;
             break;
-          case 'delete':
-            _posts.removeWhere((p) => p['id'] == change.docId);
+          case ChangeType.delete:
+            _posts.removeWhere((p) => p['id'] == change.id);
             break;
         }
       });

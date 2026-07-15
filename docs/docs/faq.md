@@ -172,7 +172,9 @@ and MFA/TOTP. See [Authentication](/docs/authentication).
 - **Client SDKs** (browser, mobile, game engines): JavaScript (Web & React Native), Dart/Flutter, Swift, Kotlin (KMP), Java, C# (Unity), C++ (Unreal)
 - **Admin SDKs** (server-side, Service Key auth): JavaScript, Dart, Kotlin, Java, Scala, Python, Go, PHP, Rust, C#, Ruby, Elixir
 
-All SDKs are auto-generated from the same OpenAPI spec — they always match the server. See the [SDK Overview](/docs/sdks).
+The shared HTTP core and generated surfaces come from the same OpenAPI contract;
+the public, language-idiomatic clients are maintained alongside them and covered
+by SDK tests and release checks. See the [SDK Overview](/docs/sdks).
 
 ## How do access rules work?
 

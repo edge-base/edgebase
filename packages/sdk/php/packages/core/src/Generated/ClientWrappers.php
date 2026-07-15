@@ -2,7 +2,7 @@
 
 // Auto-generated client wrapper methods — DO NOT EDIT.
 // Regenerate: npx tsx tools/sdk-codegen/generate.ts
-// Source: wrapper-config.json + openapi.json (0.4.7)
+// Source: wrapper-config.json + openapi.json (0.4.8)
 
 declare(strict_types=1);
 

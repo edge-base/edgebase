@@ -415,6 +415,7 @@ export class TableRef<T = Record<string, unknown>> {
   private offsetValue?: number;
   private pageValue?: number;
   private searchQuery?: string;
+  private selectedFields?: string[];
   private afterCursor?: string;
   private beforeCursor?: string;
 
@@ -456,6 +457,7 @@ export class TableRef<T = Record<string, unknown>> {
     ref.offsetValue = this.offsetValue;
     ref.pageValue = this.pageValue;
     ref.searchQuery = this.searchQuery;
+    ref.selectedFields = this.selectedFields ? [...this.selectedFields] : undefined;
     ref.afterCursor = this.afterCursor;
     ref.beforeCursor = this.beforeCursor;
     return ref;
@@ -522,6 +524,24 @@ export class TableRef<T = Record<string, unknown>> {
   }
 
   /**
+   * Return only the selected fields from list/search queries.
+   *
+   * @example
+   * const summaries = await client.db('shared').table<Post>('posts')
+   *   .select('id', 'title')
+   *   .getList();
+   */
+  select<K extends Extract<keyof T, string>>(...fields: K[]): TableRef<Pick<T, K>> {
+    const normalized = Array.from(new Set(fields.map((field) => field.trim())));
+    if (normalized.length === 0 || normalized.some((field) => !field || field.includes(','))) {
+      throw new EdgeBaseError(400, 'select() requires one or more valid field names.');
+    }
+    const ref = this.clone();
+    ref.selectedFields = normalized;
+    return ref as unknown as TableRef<Pick<T, K>>;
+  }
+
+  /**
    * Set cursor for forward pagination.
    * Fetches records with id > cursor. Mutually exclusive with page()/offset().
    */
@@ -564,6 +584,9 @@ export class TableRef<T = Record<string, unknown>> {
     }
     if (this.sorts.length > 0) {
       query.sort = this.sorts.map(([f, d]) => `${f}:${d}`).join(',');
+    }
+    if (this.selectedFields?.length) {
+      query.fields = this.selectedFields.join(',');
     }
     if (this.limitValue !== undefined) {
       query.limit = String(this.limitValue);

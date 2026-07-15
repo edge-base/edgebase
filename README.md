@@ -92,7 +92,7 @@ How is $0 possible? These aren't discounts — the infrastructure that generates
 
 ### Why Can It Be Faster?
 
-"Runs on the edge" alone is marketing. What matters is **what actually completes at the edge** — see [Architecture](#architecture) below. Auth, DB reads, and file serves resolve locally at 300+ locations. Only writes and realtime need a single hop. Cold starts are ~0ms (V8 isolates, not containers).
+"Runs on the edge" alone is marketing. What matters is **what actually completes at the edge** — see [Architecture](#architecture) below. Stateless request handling and JWT verification run in the nearest Worker, while database and realtime operations follow the configured D1, PostgreSQL, or Durable Object route. Cold starts are ~0ms for the Worker isolate; stateful operations can still require a backing-service hop.
 
 |                    |         Firebase          |       Supabase       |   Appwrite    |      **EdgeBase**      |
 | ------------------ | :-----------------------: | :------------------: | :-----------: | :--------------------: |
@@ -205,15 +205,18 @@ EdgeBase was also designed so the backend contract can live mostly in code, not 
 ```
 [Client] → [Edge Worker — 300+ locations]
                │
-               ├── Auth (JWT verify)           ← resolved here, no hop
-               ├── DB read (D1 replica)        ← resolved here, no hop
-               ├── File serve (R2)             ← resolved here, no hop
+               ├── Auth (JWT verify)           ← local crypto in the Worker
+               ├── Static routing / API logic  ← resolved in the Worker
                │
-               ├── DB write ──→ [D1 primary]          ← single hop
-               ├── Realtime ──→ [Durable Object]      ← single hop
-               └── Instance DB ──→ [DO + SQLite]      ← single hop
+               ├── D1 read/write ──→ [D1 primary by default]
+               ├── PostgreSQL ─────→ [configured provider]
+               ├── File access ────→ [R2]
+               ├── Realtime ───────→ [Durable Object]
+               └── Instance DB ────→ [DO + SQLite]
 
-Most requests never leave the edge.
+The Worker remains globally distributed; stateful work is routed to the
+configured backing service. D1 read replication is opt-in and is not assumed
+by the high-level EdgeBase database wrappers.
 ```
 
 <details>
@@ -321,8 +324,8 @@ final posts = await client.db('app').table('posts')
     .limit(20)
     .getList();
 
-client.db('app').table('posts').onSnapshot().listen((result) {
-  print(result.items);
+client.db('app').table('posts').onSnapshot().listen((change) {
+  print(change.record);
 });
 ```
 
@@ -338,12 +341,12 @@ try await client.auth.signUp(email: "user@example.com", password: "secret123")
 
 let posts = try await client.db("app").table("posts")
     .where("status", "==", "published")
-    .orderBy("createdAt", .desc)
+    .orderBy("createdAt", "desc")
     .limit(20)
     .getList()
 
-client.db("app").table("posts").onSnapshot { result in
-    print(result.items)
+for await change in client.db("app").table("posts").onSnapshot() {
+    print(change.record ?? [:])
 }
 ```
 
@@ -363,8 +366,8 @@ val posts = client.db("app").table("posts")
     .limit(20)
     .getList()
 
-client.db("app").table("posts").onSnapshot().collect { result ->
-    println(result.items)
+client.db("app").table("posts").onSnapshot().collect { change ->
+    println(change.record)
 }
 ```
 
@@ -384,8 +387,8 @@ ListResult posts = client.db("app").table("posts")
     .limit(20)
     .getList();
 
-client.db("app").table("posts").onSnapshot(result -> {
-    System.out.println(result.getItems());
+client.db("app").table("posts").onSnapshot(change -> {
+    System.out.println(change.getRecord());
 });
 ```
 
@@ -461,7 +464,7 @@ Deep dives: [Database](https://edgebase.fun/docs/database) · [Authentication](h
 | **Scala**                   |   —    |  Yes  | Experimental |
 | **Elixir**                  |   —    |  Yes  | Experimental |
 
-All SDKs are auto-generated from the same OpenAPI spec. [Browse all SDKs](https://edgebase.fun/docs/sdks) · [Architecture](https://edgebase.fun/docs/sdks/architecture) · [Support tiers](https://edgebase.fun/docs/sdks/support-tiers)
+All SDKs share an OpenAPI-generated HTTP core. Their public clients add hand-written platform behavior for auth state, token storage, realtime, room, push, CAPTCHA, and other runtime integrations. [Browse all SDKs](https://edgebase.fun/docs/sdks) · [Architecture](https://edgebase.fun/docs/sdks/architecture) · [Support tiers](https://edgebase.fun/docs/sdks/support-tiers)
 
 </details>
 

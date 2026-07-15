@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.8
+
+- Database subscriptions now decode `changeType`, `docId`, and `data` from the
+  live WebSocket envelope into `DbChange.type`, `id`, and `record`.
+- Corrected Swift database examples to use the current argument labels,
+  string query operators, and `AsyncStream<DbChange>` subscription shape.
+- No public Swift API compatibility break is introduced.
+
 ## 0.4.7
 
 - Synchronized the Swift package with the EdgeBase 0.4.7 patch release.

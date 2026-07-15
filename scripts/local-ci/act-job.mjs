@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
-import { ACT_RUNNER_IMAGE, POSTGRES_IMAGE, SEMGREP_IMAGE } from './config.mjs';
+import { POSTGRES_IMAGE, SEMGREP_IMAGE } from './config.mjs';
 import { run, sha256 } from './lib.mjs';
 import { renderStandaloneWorkflow } from './workflow.mjs';
 
@@ -10,8 +10,8 @@ function memoryLimit(weight) {
   return { 1: '2g', 2: '3g', 3: '5g', 4: '7g' }[weight] ?? '2g';
 }
 
-export function needsAmd64EmulationLimit(architecture) {
-  return !['amd64', 'x86_64'].includes(architecture);
+export function needsAmd64EmulationLimit(architecture, targetPlatform = 'linux/amd64') {
+  return targetPlatform === 'linux/amd64' && !['amd64', 'x86_64'].includes(architecture);
 }
 
 export function pnpmStoreVolumeName(workflowDigest, jobId) {
@@ -91,7 +91,7 @@ export async function runActJob(job, context) {
     workflowPath,
     renderStandaloneWorkflow(source, job.sourceJob, job.id, {
       dryRun: context.dryRun,
-      jobContainerImage: ACT_RUNNER_IMAGE,
+      jobContainerImage: context.actRunnerImage,
       postgresImage: POSTGRES_IMAGE,
       semgrepImage: SEMGREP_IMAGE,
     }),
@@ -115,11 +115,11 @@ export async function runActJob(job, context) {
     '--defaultbranch',
     'main',
     '--container-architecture',
-    'linux/amd64',
+    context.targetPlatform,
     '--container-daemon-socket',
     context.containerDaemonSocket,
     '--platform',
-    `ubuntu-latest=${ACT_RUNNER_IMAGE}`,
+    `ubuntu-latest=${context.actRunnerImage}`,
     '--network',
     network,
     '--action-cache-path',
@@ -146,7 +146,7 @@ export async function runActJob(job, context) {
       : []),
     '--env',
     'npm_config_store_dir=/root/.local/share/pnpm/store',
-    ...(needsAmd64EmulationLimit(context.hostDockerArchitecture)
+    ...(needsAmd64EmulationLimit(context.hostDockerArchitecture, context.targetPlatform)
       ? ['--env', 'GOMAXPROCS=1', '--env', 'EDGEBASE_LOCAL_CI_EMULATED_AMD64=1']
       : []),
     '--container-options',

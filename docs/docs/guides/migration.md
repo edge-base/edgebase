@@ -25,7 +25,7 @@ Migrate from Firebase or Supabase to EdgeBase.
 | `db.table('posts').add(data)` | `admin.db('app').table('posts').insert(data)` |
 | `doc.get()` | `admin.db('app').table('posts').doc(id).get()` |
 | `query.where('field', '==', value)` | `admin.db('app').table('posts').where('field', '==', value)` |
-| `onSnapshot()` | `admin.db('app').table('posts').onSnapshot()` |
+| `onSnapshot()` | `client.db('app').table('posts').onSnapshot(callback)` |
 | `firebase.auth().signInWithEmailAndPassword()` | `client.auth.signIn({ email, password })` |
 | Firestore Rules | EdgeBase Access Rules |
 

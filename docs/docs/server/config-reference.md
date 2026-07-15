@@ -337,6 +337,8 @@ Notes:
 | `release` | Release mode — `true` enables deny-by-default, `false` (default) bypasses access checks |
 | `databases` | DB blocks (app, namespace:\{id\}...) with tables, schemas, and access policies |
 | `auth` | OAuth providers, anonymous auth settings |
+| `sms` | SMS provider settings for phone authentication and OTP delivery |
+| `frontend` | Prebuilt static frontend directory, mount path, SPA fallback, and response headers |
 | `captcha` | [CAPTCHA settings](/docs/authentication/captcha) — `true` for managed provisioning, or `{ siteKey, hostnames, failMode?, siteverifyTimeout? }`; inject `TURNSTILE_SECRET` at runtime |
 | `storage` | Bucket definitions, size/type limits, rules |
 | `serviceKeys` | [Service Key definitions, scopes, constraints](/docs/server/service-keys) |

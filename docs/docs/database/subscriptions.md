@@ -35,25 +35,28 @@ unsubscribe();
 <TabItem value="dart" label="Dart/Flutter">
 
 ```dart
-final subscription = client.db('app').table('posts').onSnapshot((event) {
-  if (event.type == ChangeType.added) {
-    print('New post: ${event.data}');
+final subscription = client.db('app').table('posts').onSnapshot().listen((event) {
+  if (event.type == ChangeType.create) {
+    print('New post: ${event.record}');
   }
 });
 
 // Stop listening
-subscription.cancel();
+await subscription.cancel();
 ```
 
 </TabItem>
 <TabItem value="swift" label="Swift">
 
 ```swift
-let subscription = client.db("app").table("posts").onSnapshot { event in
-    switch event.type {
-    case .added: print("New post: \(event.data)")
-    case .modified: print("Updated: \(event.data)")
-    case .removed: print("Deleted: \(event.docId)")
+let subscription = Task {
+    for await event in client.db("app").table("posts").onSnapshot() {
+        switch event.type {
+        case "added": print("New post: \(event.record ?? [:])")
+        case "modified": print("Updated: \(event.record ?? [:])")
+        case "removed": print("Deleted: \(event.id ?? "")")
+        default: break
+        }
     }
 }
 
@@ -64,11 +67,18 @@ subscription.cancel()
 <TabItem value="kotlin" label="Kotlin">
 
 ```kotlin
-val subscription = client.db("app").table("posts").onSnapshot { event ->
-    when (event.type) {
-        "added" -> println("New: ${event.data}")
-        "modified" -> println("Updated: ${event.data}")
-        "removed" -> println("Deleted: ${event.docId}")
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+
+val subscription = CoroutineScope(Dispatchers.Default).launch {
+    client.db("app").table("posts").onSnapshot().collect { event ->
+        when (event.event) {
+            "added" -> println("New: ${event.record}")
+            "modified" -> println("Updated: ${event.record}")
+            "removed" -> println("Deleted: ${event.id}")
+        }
     }
 }
 
@@ -80,8 +90,8 @@ subscription.cancel()
 <TabItem value="java" label="Java">
 
 ```java
-Subscription sub = client.db("app").table("posts").onSnapshot(event -> {
-    System.out.println(event.getType() + ": " + event.getData());
+var sub = client.db("app").table("posts").onSnapshot(event -> {
+    System.out.println(event.getType() + ": " + event.getRecord());
 });
 
 // Later: sub.cancel();
@@ -91,26 +101,27 @@ Subscription sub = client.db("app").table("posts").onSnapshot(event -> {
 <TabItem value="csharp" label="C#">
 
 ```csharp
-var sub = client.Db("app").Table("posts").OnSnapshot(change => {
-    if (change.Type == "added")
+var sub = await client.Db("app").Table("posts").OnSnapshot(change => {
+    if (change.ChangeType == "added")
         Console.WriteLine($"New post: {change.Data}");
 });
 
 // Stop listening
-sub.Cancel();
+sub.Dispose();
 ```
 
 </TabItem>
 <TabItem value="cpp" label="C++">
 
 ```cpp
-int subId = client.db().onSnapshot("posts", [](const eb::DbChange& change) {
+auto posts = client.db("app").table("posts");
+int subId = posts.onSnapshot([](const eb::DbChange& change) {
     if (change.changeType == "added")
         std::cout << "New post: " << change.dataJson << std::endl;
 });
 
 // Stop listening
-client.db().unsubscribe(subId);
+posts.unsubscribe(subId);
 ```
 
 </TabItem>
@@ -133,17 +144,19 @@ const unsubscribe = client.db('app').table('posts').doc('post-id').onSnapshot((p
 <TabItem value="dart" label="Dart/Flutter">
 
 ```dart
-final subscription = client.db('app').table('posts').doc('post-id').onSnapshot((event) {
-  print('Document changed: ${event.data}');
-});
+final subscription = client.db('app').table('posts').doc('post-id')
+    .onSnapshot()
+    .listen((event) => print('Document changed: ${event.record}'));
 ```
 
 </TabItem>
 <TabItem value="swift" label="Swift">
 
 ```swift
-let subscription = client.db("app").table("posts").doc("post-id").onSnapshot { event in
-    print("Document changed: \(event.data)")
+let subscription = Task {
+    for await event in client.db("app").table("posts").doc("post-id").onSnapshot() {
+        print("Document changed: \(event.record ?? [:])")
+    }
 }
 ```
 
@@ -151,8 +164,15 @@ let subscription = client.db("app").table("posts").doc("post-id").onSnapshot { e
 <TabItem value="kotlin" label="Kotlin">
 
 ```kotlin
-val subscription = client.db("app").table("posts").doc("post-id").onSnapshot { event ->
-    println("Document changed: ${event.data}")
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+
+val subscription = CoroutineScope(Dispatchers.Default).launch {
+    client.db("app").table("posts").doc("post-id").onSnapshot().collect { event ->
+        println("Document changed: ${event.record}")
+    }
 }
 ```
 
@@ -160,8 +180,8 @@ val subscription = client.db("app").table("posts").doc("post-id").onSnapshot { e
 <TabItem value="java" label="Java">
 
 ```java
-Subscription sub = client.db("app").table("posts").doc("post-id").onSnapshot(event -> {
-    System.out.println("Document changed: " + event.getData());
+var sub = client.db("app").table("posts").doc("post-id").onSnapshot(event -> {
+    System.out.println("Document changed: " + event.getRecord());
 });
 ```
 
@@ -169,7 +189,7 @@ Subscription sub = client.db("app").table("posts").doc("post-id").onSnapshot(eve
 <TabItem value="csharp" label="C#">
 
 ```csharp
-var sub = client.Db("app").Table("posts").Doc("post-id").OnSnapshot(change => {
+var sub = await client.Db("app").Table("posts").Doc("post-id").OnSnapshot(change => {
     Console.WriteLine($"Document changed: {change.Data}");
 });
 ```
@@ -178,9 +198,12 @@ var sub = client.Db("app").Table("posts").Doc("post-id").OnSnapshot(change => {
 <TabItem value="cpp" label="C++">
 
 ```cpp
-int subId = client.db().onDocSnapshot("posts", "post-id", [](const eb::DbChange& change) {
+auto post = client.db("app").table("posts").doc("post-id");
+int subId = post.onSnapshot([](const eb::DbChange& change) {
     std::cout << "Document changed: " << change.dataJson << std::endl;
 });
+
+post.unsubscribe(subId);
 ```
 
 </TabItem>
@@ -218,12 +241,16 @@ const unsubscribe = client.db('app').table('posts')
 
 ### Other Client SDKs
 
-Other client SDKs still opt in with their language-specific `serverFilter` option when you want server-side filtering.
+The Dart/Flutter, C#/Unity, and C++/Unreal query builders also forward chained
+filters to the server by default. Swift, Kotlin, and Java currently apply their
+chained subscription filters on the client after receiving events.
 
 Server-side filters support AND conditions, OR conditions, 8 comparison operators, and runtime updates. See [Server-Side Filters](./server-side-filters) for the full guide.
 
 :::note Admin SDKs
-Database subscriptions are only available in **client SDKs** (JavaScript, Dart, Swift, Kotlin, C#, C++). Server-only Admin SDKs do not support `onSnapshot`. Use [server-side broadcast](#server-side-broadcast) instead.
+Database subscriptions are only available in **client SDKs** (JavaScript,
+Dart, Swift, Kotlin, Java, C#, C++). Server-only Admin SDKs do not support
+`onSnapshot`. Use [server-side broadcast](#server-side-broadcast) instead.
 :::
 
 ## JavaScript Callback Shapes

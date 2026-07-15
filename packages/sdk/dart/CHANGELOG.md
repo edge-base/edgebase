@@ -1,3 +1,10 @@
+## 0.4.8
+
+- Synchronized the Dart workspace with the EdgeBase 0.4.8 patch release
+- Corrected Dart database subscription examples to use the current `DbChange`
+  stream fields
+- No Dart API compatibility break is introduced
+
 ## 0.4.7
 
 - Synchronized the Dart workspace with the EdgeBase 0.4.7 patch release

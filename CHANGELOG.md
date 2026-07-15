@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.8 — 2026-07-16
+
+### Added
+
+- The JavaScript/TypeScript table query builder exposes `select()` for typed
+  field projection on list and search requests.
+
+### Fixed
+
+- Patched the documentation toolchain's transitive `websocket-driver` to
+  0.7.5, which rejects oversized draft-protocol length headers covered by
+  CVE-2026-54466.
+- Swift database subscriptions decode the live WebSocket envelope's
+  `changeType`, `docId`, and `data` fields into `DbChange` instead of exposing
+  the outer transport message type and empty record fields.
+- The focused npm-release local CI profile uses native Linux ARM64 runner
+  images on ARM Docker hosts and pulls every prerequisite image for the
+  selected target platform, avoiding amd64 QEMU failures in Go-based build
+  tools.
+- Database, subscription, SDK, architecture, configuration, verification, and
+  release documentation now reflects the current public APIs and checked-in
+  evidence instead of stale callback shapes or unsupported guarantees.
+
 ## 0.4.7 — 2026-07-15
 
 ### Added

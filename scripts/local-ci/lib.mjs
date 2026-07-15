@@ -235,14 +235,19 @@ export async function dockerCapacity(repoRoot) {
   };
 }
 
-export async function ensureDockerImages(repoRoot, images) {
+export function dockerPullArgs(image, platform) {
+  if (!platform) throw new Error('Docker image pulls require an explicit target platform.');
+  return ['pull', '--platform', platform, image];
+}
+
+export async function ensureDockerImages(repoRoot, images, platform) {
   for (const image of images) {
     const present = await run('docker', ['image', 'inspect', image], {
       cwd: repoRoot,
       allowFailure: true,
     });
     if (present.code === 0) continue;
-    await run('docker', ['pull', '--platform', 'linux/amd64', image], {
+    await run('docker', dockerPullArgs(image, platform), {
       cwd: repoRoot,
       stdio: 'inherit',
     });

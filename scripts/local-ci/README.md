@@ -3,9 +3,23 @@
 Local CI executes the repository's public Linux GitHub Actions jobs on demand.
 It is optional and does not install a hook or block `git push`. It uses the
 pinned `act` binary and a digest-pinned Ubuntu 24.04 runner image. Each expanded
-job receives a fresh `linux/amd64` container, filesystem and Docker network.
+job receives a fresh Linux container, filesystem and Docker network. The full
+profile targets `linux/amd64`; the focused npm-release profile uses the Docker
+server's native `linux/amd64` or `linux/arm64` architecture.
 
 ## On-demand use
+
+Before an agent starts local CI, it asks the user to choose one of these scopes
+unless the current request already states the choice:
+
+- **Full:** `node scripts/local-ci/run.mjs` for every repository-owned Linux
+  job.
+- **Core/npm:** `node scripts/local-ci/run.mjs --profile npm-release` for the
+  release/version/supply-chain contracts and Node 22 core CI.
+
+Do not reuse a choice from an older run or silently expand a core choice into
+the full profile. Local CI remains optional and neither choice blocks Git
+operations.
 
 ```sh
 # First prove a focused change with the narrow test for that surface.
@@ -31,8 +45,10 @@ Recorded profiles refuse a dirty working tree. A successful receipt is
 written to `.edgebase/local-linux-ci/receipt.json`; this path is ignored by
 git. The receipt binds the successful run to the exact commit and tree, every
 public workflow digest, the local-runner digest, `linux/amd64`, the pinned
-execution engine and every completed job. The receipt is an informational run
-record only; its absence or age does not affect Git operations.
+execution engine and every completed job. For npm-release runs, the receipt
+records the native Linux platform actually used instead. The receipt is an
+informational run record only; its absence or age does not affect Git
+operations.
 
 ## Commands
 
@@ -48,6 +64,22 @@ node scripts/local-ci/run.mjs --diagnostic
 `--job`, `--dry-run`, and `--diagnostic` are investigation tools. They do not
 write a completed-run receipt. A selected job automatically includes its
 declared prerequisites.
+
+## Agent monitoring discipline
+
+Run a long full profile in a persistent/background process and redirect its
+complete stdout/stderr to a gitignored local log. Make one short startup check
+within the first 2–3 minutes for an immediate setup failure. After that,
+normally wake every 15 minutes and inspect only whether the run is active,
+successful, or failed through process state or a concise job summary. Do not
+consume routine log tails while the run is still active.
+
+On success, inspect the final summary and validate the exact receipt, then
+immediately delete the recurring heartbeat or monitor so no later 15-minute
+wake occurs. On failure, identify the failed job first and inspect only its
+relevant tail or exported log, widening the diagnostic window only as needed.
+After a fix and focused verification, restart the full profile and repeat the
+startup check and 15-minute cadence.
 
 ## Scheduling and isolation
 
@@ -96,10 +128,11 @@ GitHub remains authoritative for the parts a Linux desktop cannot reproduce:
 
 Those jobs stay in the public workflows and still run after push.
 
-On an ARM Docker host, local CI still executes the exact `linux/amd64` target.
-It sets `GOMAXPROCS=1` inside those emulated containers to avoid a known QEMU
-race in Go-based build tools such as esbuild, and triples subprocess deadlines
-whose native 120-second budget is not meaningful under emulation. Assertions,
-commands and dependency resolution remain unchanged. Native amd64 Linux does
-not set either adaptation and retains the hosted workflow's concurrency and
-timeouts.
+On an ARM Docker host, the npm-release profile and its two diagnostic jobs use
+the paired digest-pinned native `linux/arm64` runner image. This avoids QEMU
+heap corruption in Go-based tools such as esbuild while preserving the same
+workflow commands, assertions and frozen dependency resolution; GitHub's
+amd64 job remains the second-architecture confirmation after push. The full
+profile still targets `linux/amd64` and applies `GOMAXPROCS=1` plus extended
+subprocess deadlines when emulated. Native amd64 Linux retains the hosted
+workflow's concurrency and timeouts.

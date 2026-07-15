@@ -149,6 +149,8 @@ Add a locale:
 
 ## Versioning
 
-Docs versioning is disabled until the first public release.
+Docs versioning is currently disabled while the pre-1.0 public API and release
+cadence continue to evolve.
 
-Do not create `versioned_docs/`, `versioned_sidebars/`, or `versions.json` in the current pre-launch docs workflow.
+Do not create `versioned_docs/`, `versioned_sidebars/`, or `versions.json` until
+the project adopts an explicit documentation-versioning policy.

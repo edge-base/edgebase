@@ -254,7 +254,7 @@ import 'package:edgebase_core/edgebase_core.dart';
 try {
   await admin.db('app').table('posts').getOne('nonexistent');
 } on EdgeBaseError catch (e) {
-  print(e.status);    // 404
+  print(e.statusCode); // 404
   print(e.message);   // "Not found."
 }
 ```
@@ -266,8 +266,8 @@ try {
 try {
     val post = admin.db("app").table("posts").getOne("nonexistent")
 } catch (e: EdgeBaseError) {
-    println(e.status)    // 404
-    println(e.message)   // "Not found."
+    println(e.statusCode) // 404
+    println(e.message)    // "Not found."
 }
 ```
 
@@ -278,8 +278,8 @@ try {
 try {
     var post = admin.db("app").table("posts").getOne("nonexistent");
 } catch (EdgeBaseError e) {
-    System.out.println(e.getStatus());   // 404
-    System.out.println(e.getMessage());  // "Not found."
+    System.out.println(e.getStatusCode()); // 404
+    System.out.println(e.getMessage());    // "Not found."
 }
 ```
 
@@ -315,7 +315,7 @@ except EdgeBaseError as e:
 <TabItem value="go" label="Go">
 
 ```go
-post, err := client.DB("app", "").Table("posts").GetOne(ctx, "nonexistent")
+post, err := admin.DB("app", "").Table("posts").GetOne(ctx, "nonexistent")
 if err != nil {
     fmt.Println(err) // "HTTP 404: Not found."
 }
@@ -644,8 +644,10 @@ const ref = admin.db('app').table('posts').doc('record-id');
 await ref.get();           // Same as getOne('record-id')
 await ref.update({...});   // Same as update('record-id', {...})
 await ref.delete();        // Same as delete('record-id')
-ref.onSnapshot(callback);  // Database subscription for this document
 ```
+
+Admin SDK references do not support `onSnapshot`; database subscriptions are
+available through client SDKs.
 :::
 
 ### Get First Match

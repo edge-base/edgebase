@@ -83,7 +83,7 @@ npm install @edge-base/react-native
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.4.7")
+    .package(url: "https://github.com/edge-base/edgebase-swift", from: "0.4.8")
 ]
 ```
 
@@ -97,7 +97,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.edge-base.edgebase:edgebase-client:v0.4.7")
+    implementation("com.github.edge-base.edgebase:edgebase-client:v0.4.8")
 }
 ```
 
@@ -112,7 +112,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.4.7'
+    implementation 'com.github.edge-base.edgebase:edgebase-android-java:v0.4.8'
 }
 ```
 
@@ -293,8 +293,8 @@ try await client.db("app").table("posts").insert([
 
 // Query records
 let posts = try await client.db("app").table("posts")
-    .where("title", .contains, "Hello")
-    .orderBy("createdAt", .desc)
+    .where("title", "contains", "Hello")
+    .orderBy("createdAt", "desc")
     .limit(10)
     .getList()
 ```

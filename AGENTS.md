@@ -40,6 +40,10 @@ apply the verification rules below.
 - Local Linux CI is an on-demand verification tool, not a prerequisite for
   `git push`. No managed pre-push hook or receipt check may block a push merely
   because local CI was not run.
+- Before starting local CI, ask the user to choose the complete profile or the
+  core npm-release profile unless the current request already states the scope.
+  Name both exact commands, do not reuse a choice from an older run, and do not
+  silently expand a core choice into the complete profile.
 - Run the complete Linux profile when the risk or requested verification scope
   warrants it:
 
@@ -64,10 +68,23 @@ apply the verification rules below.
 - Resource weights size each isolated job, but a local CI run must start only
   one public CI job at a time. Do not reintroduce cross-job parallelism without
   explicit user approval and a new measured isolation and parity review.
+- On ARM Docker hosts, run the focused npm-release profile and its two
+  diagnostic jobs in native `linux/arm64` containers. Do not send Go-based
+  build tools such as esbuild through amd64 QEMU for this profile. The complete
+  parity profile retains its explicit `linux/amd64` target until that broader
+  architecture contract is changed separately.
+- Monitor a long full-profile run from a persistent/background process with
+  complete stdout/stderr in a gitignored log. Make one short startup check
+  within the first 2–3 minutes, then normally wake every 15 minutes and inspect
+  only whether the run is active, successful, or failed through process state
+  or a concise job summary. Do not consume routine log tails while it is active.
+  On failure, inspect the failed job's relevant log first, fix and run focused
+  verification, restart the full profile, and repeat the same cadence. On
+  success, validate the final summary and receipt, then immediately delete the
+  recurring heartbeat or monitor so no later 15-minute wake occurs.
 - When a public workflow or the local runner changes, update parity coverage.
-  GitHub-hosted macOS/Swift,
-  CodeQL/SARIF transport, npm publication credentials/provenance and external
-  repository syncs remain remote-only checks; they do not replace the selected
-  selected local Linux checks.
+  GitHub-hosted macOS/Swift, CodeQL/SARIF transport, npm publication
+  credentials/provenance and external repository syncs remain remote-only
+  checks; they do not replace the selected local Linux checks.
 - See [`scripts/local-ci/README.md`](scripts/local-ci/README.md) for the job
   inventory, isolation model and diagnostic commands.

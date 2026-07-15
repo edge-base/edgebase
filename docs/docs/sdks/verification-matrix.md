@@ -1,57 +1,48 @@
 ---
 sidebar_position: 2
 title: SDK Verification Matrix
-description: Checked-in certification evidence for the current EdgeBase SDK verification suites.
+description: Verification surfaces available in the public EdgeBase repository.
 ---
 
 # SDK Verification Matrix
 
-This page summarizes the certification artifacts that are currently checked into the repository. It is intentionally conservative: if a run or matrix is not present in the repo, this page does not claim it as certified.
+This page describes verification evidence that is actually present in the
+public EdgeBase repository. It does not treat private certification workspaces
+or uncommitted local artifacts as public proof.
 
 ## Current Repo State
 
-- Verification suites are maintained in a separate internal verification workspace.
-- The old `admin-sdk-platform-suite` lab referenced by earlier docs has been removed.
-- The latest checked-in certification sweep in this repo is `runtime/docker/certification/certification-sweep-20260309205738514.json`, generated on March 9, 2026.
-- That checked-in sweep is for the `database` suite on the `docker` target, using the `route-rotation-plan` and the `d1-multi-block` provider profile.
+- SDK unit and E2E test sources are checked in with their language packages.
+- Public CI definitions select and run those suites from
+  `.github/workflows/ci.yml` and `.github/workflows/test.yml`.
+- Release metadata and generated HTTP cores are checked against the versioned
+  OpenAPI contract by the repository release checks.
+- Historical `runtime/<target>/...` sweeps and
+  `artifacts/<target>/wave-*/...` certification files are **not** checked into
+  this repository. Do not cite those paths as public evidence.
 
-## What Is Checked In
+## Evidence That Is Checked In
 
-The current certification system is organized by domain:
+| Evidence | Representative paths | What it proves |
+| --- | --- | --- |
+| Public CI definitions | `.github/workflows/ci.yml`, `.github/workflows/test.yml` | Which repository-owned suites and platform matrices are configured to run |
+| SDK unit and E2E suites | `packages/sdk/*/test*`, `packages/sdk/*/tests*` | The assertions maintained for each language package |
+| Generated contract tests | `tools/sdk-codegen`, generated SDK tests | Generated HTTP paths, methods, and parameters remain tied to OpenAPI |
+| Release alignment checks | `scripts/release-version.test.mjs`, `scripts/check-release-versions.mjs` | Package, documentation, generated surface, and changelog versions stay aligned |
 
-| Suite | Coverage Area |
-| --- | --- |
-| `database` | Database behavior and data APIs |
-| `auth` | Authentication flows and account lifecycle |
-| `room` | Realtime room state and collaboration behavior |
-| `storage` | Object storage upload, download, and metadata flows |
-| `app-functions` | Function runtime behavior and server hooks |
-| `push` | Push registration, delivery plumbing, and admin flows |
-| `analytics` | Event ingestion and query behavior |
-| `plugin` | Plugin lifecycle and extension points |
-| `cli` | CLI scaffolding, deploy flows, and environment tooling |
+Checked-in test source shows what the repository intends to verify. A passing
+result belongs to the exact commit and CI or local run that produced it; the
+presence of a test file alone is not a blanket certification claim.
 
-Checked-in runtime evidence is stored under `runtime/<target>/...`, and normalized per-slot artifacts are stored under `artifacts/<target>/wave-*/...`.
+## What Is Not Publicly Certified Here
 
-## Interpreting Artifact Status
+The public repository does not preserve a current all-SDK, all-runtime
+certification sweep for `dev`, Docker, and deployed targets. If a separate
+internal verification workspace produces such a sweep, its status must be
+reported from that workspace and must not be described as checked into this
+repository.
 
-Artifact status is reported per slot, not as a blanket repo-wide pass/fail claim.
-
-| Status | Meaning |
-| --- | --- |
-| `FULL` | All checkpoints assigned to that slot passed. |
-| `THIN` | The slot ran, but one or more checkpoints failed or did not reach full coverage. |
-| `FAIL` | The slot failed its expected verification path. |
-| `UNSUPPORTED` | The SDK or target does not support that checkpoint. |
-
-For example, the checked-in artifact `artifacts/docker/wave-1/admin/AR4__elixir__d1-multi-block.json` currently records `status: "THIN"` with one failed checkpoint. Because of evidence like this, the repo does not currently justify an "all runtimes, all targets, all PASS" claim.
-
-## Source Of Truth
-
-Use these paths as the authoritative evidence:
-
-- Internal verification playbooks and suite instructions
-- Checked-in runtime sweeps: `runtime/<target>/certification/`
-- Per-wave normalized artifacts: `artifacts/<target>/wave-*/`
-
-If you need current support by language and layer, pair this page with [SDK Layer Matrix](/docs/sdks/layer-matrix). Treat certification as artifact-driven evidence, not a hand-maintained marketing matrix.
+Use the [SDK Layer Matrix](/docs/sdks/layer-matrix) for package availability and
+the [SDK Support Tiers](/docs/sdks/support-tiers) for the project's maintained
+support policy. For pass/fail evidence, inspect the CI run or local receipt for
+the exact commit being evaluated.

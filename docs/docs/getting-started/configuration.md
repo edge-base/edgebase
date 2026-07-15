@@ -24,6 +24,7 @@ Before diving in, here's how the main pieces of `edgebase.config.ts` fit togethe
 ```
 edgebase.config.ts
 ├── baseUrl            ← Canonical server URL (OAuth callbacks, email links)
+├── trustSelfHostedProxy ← Trust forwarded client IPs only behind your own proxy
 ├── release            ← Dev (false) vs production (true) — deny-by-default toggle
 ├── databases          ← DB blocks — each key is a separate namespace (name is up to you)
 │   ├── app            ← Example: single-instance block (one DB for all users)
@@ -32,7 +33,9 @@ edgebase.config.ts
 ├── auth               ← Login methods: email, OAuth, phone, passkeys, MFA
 ├── email              ← Email provider for verification, password reset, magic link
 ├── sms                ← SMS provider for phone OTP authentication
+├── frontend           ← Optional prebuilt static frontend served by EdgeBase
 ├── storage            ← File buckets with upload/download rules
+├── databaseLive       ← Database subscription transport tuning
 ├── rooms              ← Server-authoritative real-time rooms (game state, etc.)
 ├── push               ← Push notification (FCM) configuration
 ├── kv / d1 / vectorize← Native Cloudflare resources
@@ -42,6 +45,7 @@ edgebase.config.ts
 ├── captcha            ← Cloudflare Turnstile bot protection
 ├── cors               ← Cross-origin settings
 ├── rateLimiting       ← Per-group rate limits
+├── api                ← Public API endpoint exposure settings
 └── cloudflare         ← Extra Cloudflare config (cron triggers, etc.)
 ```
 
@@ -347,7 +351,7 @@ final docs = await client.db('workspace', 'ws-456').table('documents').getList()
 <TabItem value="swift" label="Swift">
 
 ```swift
-let docs = try await client.db("workspace", "ws-456").table("documents").getList()
+let docs = try await client.db("workspace", instanceId: "ws-456").table("documents").getList()
 ```
 
 </TabItem>
@@ -452,7 +456,7 @@ final notes = await client.db('user', userId).table('notes').getList();
 <TabItem value="swift" label="Swift">
 
 ```swift
-let notes = try await client.db("user", userId).table("notes").getList()
+let notes = try await client.db("user", instanceId: userId).table("notes").getList()
 ```
 
 </TabItem>

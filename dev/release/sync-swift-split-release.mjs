@@ -90,7 +90,7 @@ export function syncSwiftSplitRelease(version, options = {}) {
     env = process.env,
   } = options;
 
-  if (!version) throw new Error('Missing version. Example: pnpm release:swift-sync 0.3.6 --dry-run');
+  if (!version) throw new Error('Missing version. Example: pnpm release:swift-sync <version> --dry-run');
   if (!['tag', 'branch'].includes(syncMode)) throw new Error(`Unsupported sync mode: ${syncMode}`);
 
   const refName = syncMode === 'tag' ? (tag || `v${version}`) : 'main';

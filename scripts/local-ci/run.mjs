@@ -7,13 +7,14 @@ import { fileURLToPath } from 'node:url';
 import { runActJob } from './act-job.mjs';
 import {
   ACT_VERSION,
-  ACT_RUNNER_IMAGE,
   POSTGRES_IMAGE,
   RECEIPT_SCHEMA,
   RUNNER_PATHS,
   SEMGREP_IMAGE,
   WORKFLOW_PATHS,
+  actRunnerImageForPlatform,
   stateDir,
+  targetPlatformForRun,
 } from './config.mjs';
 import {
   LOCAL_CI_JOBS,
@@ -92,8 +93,8 @@ function dependencyClosure(jobId) {
   return LOCAL_CI_JOBS.filter((job) => selected.has(job.id));
 }
 
-function imagesForJobs(jobs) {
-  const images = [ACT_RUNNER_IMAGE];
+function imagesForJobs(jobs, actRunnerImage) {
+  const images = [actRunnerImage];
   if (jobs.some((job) => job.id === 'server-unit')) images.push(POSTGRES_IMAGE);
   if (jobs.some((job) => job.id === 'semgrep-high-severity')) images.push(SEMGREP_IMAGE);
   return images;
@@ -113,7 +114,10 @@ async function doctor() {
   console.log(
     `Scheduler: sequential jobs, weight budget ${capacity.maxWeight}`,
   );
-  console.log(`Linux target: linux/amd64`);
+  console.log(`Full Linux target: linux/amd64`);
+  console.log(
+    `npm-release Linux target: ${targetPlatformForRun({ profile: 'npm-release' }, capacity.architecture)}`,
+  );
   console.log(version.stdout.toString().trim());
 }
 
@@ -162,7 +166,14 @@ async function main() {
     dockerCapacity(repoRoot),
     installAct(repoRoot),
   ]);
-  if (!options.dryRun) await ensureDockerImages(repoRoot, imagesForJobs(selectedBase));
+  const targetPlatform = targetPlatformForRun(options, capacity.architecture);
+  const actRunnerImage = actRunnerImageForPlatform(targetPlatform);
+  if (!options.dryRun)
+    await ensureDockerImages(
+      repoRoot,
+      imagesForJobs(selectedBase, actRunnerImage),
+      targetPlatform,
+    );
 
   const baseCommit = await git(repoRoot, ['rev-parse', 'origin/main']);
   const selected = selectedBase;
@@ -172,7 +183,7 @@ async function main() {
   const mode = recorded ? 'RECORDED' : 'DIAGNOSTIC';
   console.log(
     `[local-ci] ${mode} ${options.profile} ${initial.commit} | ${selected.length} jobs | ` +
-      `sequential / weight ${capacity.maxWeight}`,
+      `${targetPlatform} / sequential / weight ${capacity.maxWeight}`,
   );
 
   const results = await runWeightedJobs(selected, {
@@ -180,6 +191,7 @@ async function main() {
     maxWeight: capacity.maxWeight,
     execute: (job) =>
       runActJob(job, {
+        actRunnerImage,
         actPath,
         baseCommit,
         branch: initial.branch,
@@ -193,6 +205,7 @@ async function main() {
         runId,
         runRoot,
         stateRoot,
+        targetPlatform,
         workflowDigest,
       }),
     onEvent(event) {
@@ -245,7 +258,7 @@ async function main() {
     profile: options.profile,
     commit: initial.commit,
     tree: initial.tree,
-    platform: 'linux/amd64',
+    platform: targetPlatform,
     hostDockerArchitecture: capacity.architecture,
     engine: `act/${ACT_VERSION}`,
     workflowDigest,

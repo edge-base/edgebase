@@ -69,8 +69,8 @@ client.db('workspace', 'ws-456');      // Per-workspace isolated DB block
 
 ```swift
 client.db("app")                       // One single-instance DB block (D1 by default)
-client.db("user", userId)              // Per-user isolated DB block
-client.db("workspace", "ws-456")       // Per-workspace isolated DB block
+client.db("user", instanceId: userId)  // Per-user isolated DB block
+client.db("workspace", instanceId: "ws-456") // Per-workspace isolated DB block
 ```
 
 </TabItem>

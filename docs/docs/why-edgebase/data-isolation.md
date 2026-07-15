@@ -210,7 +210,7 @@ final notes = await client.db('user', userId).table('notes').getList();
 <TabItem value="swift" label="Swift">
 
 ```swift
-let notes = try await client.db("user", userId).table("notes").getList()
+let notes = try await client.db("user", instanceId: userId).table("notes").getList()
 ```
 
 </TabItem>
@@ -288,7 +288,7 @@ final docs = await client.db('workspace', 'ws-456').table('documents').getList()
 <TabItem value="swift" label="Swift">
 
 ```swift
-let docs = try await client.db("workspace", "ws-456").table("documents").getList()
+let docs = try await client.db("workspace", instanceId: "ws-456").table("documents").getList()
 ```
 
 </TabItem>

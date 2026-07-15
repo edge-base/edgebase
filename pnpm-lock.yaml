@@ -41,6 +41,7 @@ overrides:
   undici@>=7.0.0 <7.28.0: 7.28.0
   uuid@<11.1.1: 11.1.1
   webpack-dev-server@<5.2.5: 5.2.5
+  websocket-driver@<0.7.5: 0.7.5
   wrangler@>=4.0.0 <4.59.1: '>=4.59.1'
   ws@>=6.0.0 <6.2.4: 6.2.4
   ws@>=7.0.0 <7.5.11: 7.5.11
@@ -9162,8 +9163,8 @@ packages:
     peerDependencies:
       webpack: 3 || 4 || 5
 
-  websocket-driver@0.7.4:
-    resolution: {integrity: sha512-b17KeDIQVjvb0ssuSDF2cYXSg2iztliJ4B9WdsuB6J952qCPKmnVq4DyW5motImXHDC1cBT/1UezrJVsKw5zjg==}
+  websocket-driver@0.7.5:
+    resolution: {integrity: sha512-ZL2+3c7kMBdIRCMz6l8jQMHyGVxj+UL+xVk74Ombiciboca8rHa15L86B19E5oh1pL9Ii/uj54gtsIrZGMo6zA==}
     engines: {node: '>=0.8.0'}
 
   websocket-extensions@0.1.4:
@@ -15599,7 +15600,7 @@ snapshots:
 
   faye-websocket@0.11.4:
     dependencies:
-      websocket-driver: 0.7.4
+      websocket-driver: 0.7.5
 
   fb-dotslash@0.5.8: {}
 
@@ -19362,7 +19363,7 @@ snapshots:
     dependencies:
       faye-websocket: 0.11.4
       uuid: 11.1.1
-      websocket-driver: 0.7.4
+      websocket-driver: 0.7.5
 
   sort-css-media-queries@2.2.0: {}
 
@@ -20204,7 +20205,7 @@ snapshots:
       webpack: 5.105.2
       wrap-ansi: 7.0.0
 
-  websocket-driver@0.7.4:
+  websocket-driver@0.7.5:
     dependencies:
       http-parser-js: 0.5.10
       safe-buffer: 5.2.1

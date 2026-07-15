@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.8
+
+### Changed
+
+- Synchronized the Kotlin SDK packages with the EdgeBase 0.4.8 patch release.
+- Corrected database subscription and error-handling examples to match the
+  current Kotlin client API.
+- No public Kotlin API compatibility break is introduced.
+
 ## 0.4.7
 
 ### Changed

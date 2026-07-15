@@ -129,7 +129,7 @@ Without the optional Room workload, the same core social-app scenario lands arou
 
 | Cost Category         | Why It Exists Elsewhere                   | Why It Doesn't Exist in EdgeBase             |
 | --------------------- | ----------------------------------------- | -------------------------------------------- |
-| Per-user auth pricing | Server manages sessions per user          | JWT verified locally, no session storage     |
+| Per-user auth pricing | Provider charges directly by MAU          | No per-MAU fee; JWT verification is local crypto |
 | Egress bandwidth      | AWS/GCP charge for outbound traffic       | R2 has $0 egress by design                   |
 | Idle database cost    | DB server runs 24/7 regardless of traffic | DOs hibernate when unused                    |
 | Connection pooling    | Shared DB needs connection management     | Each DO has its own embedded SQLite          |
@@ -151,7 +151,7 @@ The cost advantage is not limited to the 1M MAU scenario. It widens at every sca
 | **1M MAU**   | ~$4,700              | ~$2,950             | $5              | ~$12              |
 | **10M MAU**  | ~$46,000             | ~$32,000            | $5              | ~$40              |
 
-_Auth cost only. Firebase charges per-MAU after 50K; Supabase charges $0.00325/MAU after 100K. EdgeBase auth is always $0 — JWT verification is local crypto with no session storage or per-user billing. The $5/mo Workers Paid plan is account-level — one subscription covers unlimited projects._
+_Auth cost only. Firebase charges per-MAU after 50K; Supabase charges $0.00325/MAU after 100K. EdgeBase does not add per-user billing: access-token verification is local crypto, while users, refresh sessions, identities, and related auth records still consume the configured D1 or PostgreSQL resources. The $5/mo Workers Paid plan is account-level — one subscription covers unlimited projects, subject to the underlying platform's usage charges and limits._
 
 At small scales, Firebase's free tier is hard to beat. But the moment you cross 50K MAU or start serving media, EdgeBase's structural advantages ($0 per-MAU auth, $0 egress) create a widening gap. The cost curve stays flat because EdgeBase charges for compute, not for users.
 
