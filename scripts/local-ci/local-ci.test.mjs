@@ -350,6 +350,10 @@ test('isolated local release checks retain hosted timeouts outside local CI', as
     path.join(repoRoot, 'packages/cli/test/packaging.test.ts'),
     'utf8',
   );
+  const cliTelemetryTest = await readFile(
+    path.join(repoRoot, 'packages/cli/test/cli-entrypoint-telemetry.test.ts'),
+    'utf8',
+  );
   const serverUnitConfig = await readFile(
     path.join(repoRoot, 'packages/server/vitest.unit.config.ts'),
     'utf8',
@@ -376,6 +380,8 @@ test('isolated local release checks retain hosted timeouts outside local CI', as
   assert.match(cliPackagingTest, /}, packagingTestTimeout\);/);
   assert.match(cliPackagingTest, /promisify\(execFile\)/);
   assert.doesNotMatch(cliPackagingTest, /execFileSync/);
+  assert.match(cliTelemetryTest, /function runCliResult/);
+  assert.doesNotMatch(cliTelemetryTest, /execFileSync|spawnSync/);
   assert.match(serverUnitConfig, /testTimeout: localCiTimeout\(5_000\)/);
   assert.match(serverUnitConfig, /hookTimeout: localCiTimeout\(10_000\)/);
   assert.match(ownershipTest, /timeoutMs = localCiTimeout\(5_000\)/);

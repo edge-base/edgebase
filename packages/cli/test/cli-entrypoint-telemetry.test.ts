@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -17,19 +17,53 @@ function createHomeDir(): string {
   return dir;
 }
 
-function runCli(homeDir: string, args: string[]): string {
-  return execFileSync(tsxCommand.command, [...tsxCommand.argsPrefix, 'src/index.ts', ...args], {
-    cwd: packageDir,
-    encoding: 'utf-8',
-    env: {
-      ...process.env,
-      HOME: homeDir,
-      USERPROFILE: homeDir,
-      NO_COLOR: '1',
-    },
-    stdio: 'pipe',
-    ...tsxExecOptions,
+interface CliResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+function runCliResult(
+  homeDir: string,
+  args: string[],
+  extraEnv: NodeJS.ProcessEnv = {},
+): Promise<CliResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(tsxCommand.command, [...tsxCommand.argsPrefix, 'src/index.ts', ...args], {
+      cwd: packageDir,
+      env: {
+        ...process.env,
+        HOME: homeDir,
+        USERPROFILE: homeDir,
+        NO_COLOR: '1',
+        ...extraEnv,
+      },
+      stdio: 'pipe',
+      ...tsxExecOptions,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf-8');
+    child.stderr.setEncoding('utf-8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once('error', reject);
+    child.once('close', (status) => {
+      resolve({ status, stdout, stderr });
+    });
   });
+}
+
+async function runCli(homeDir: string, args: string[]): Promise<string> {
+  const result = await runCliResult(homeDir, args);
+  if (result.status !== 0) {
+    throw new Error(`CLI exited with ${result.status}: ${result.stderr}`);
+  }
+  return result.stdout;
 }
 
 function readTelemetry(homeDir: string): {
@@ -48,11 +82,11 @@ describe('CLI entrypoint telemetry', () => {
     }
   });
 
-  it('records the full subcommand path for successful commands', () => {
+  it('records the full subcommand path for successful commands', async () => {
     const homeDir = createHomeDir();
 
-    runCli(homeDir, ['telemetry', 'enable']);
-    runCli(homeDir, ['telemetry', 'status']);
+    await runCli(homeDir, ['telemetry', 'enable']);
+    await runCli(homeDir, ['telemetry', 'status']);
 
     const data = readTelemetry(homeDir);
     expect(data.enabled).toBe(true);
@@ -68,27 +102,12 @@ describe('CLI entrypoint telemetry', () => {
     ]);
   });
 
-  it('records failed commands with their requested path', () => {
+  it('records failed commands with their requested path', async () => {
     const homeDir = createHomeDir();
 
-    runCli(homeDir, ['telemetry', 'enable']);
+    await runCli(homeDir, ['telemetry', 'enable']);
 
-    const result = spawnSync(
-      tsxCommand.command,
-      [...tsxCommand.argsPrefix, 'src/index.ts', 'definitely-missing'],
-      {
-        cwd: packageDir,
-        encoding: 'utf-8',
-        env: {
-          ...process.env,
-          HOME: homeDir,
-          USERPROFILE: homeDir,
-          NO_COLOR: '1',
-        },
-        stdio: 'pipe',
-        ...tsxExecOptions,
-      },
-    );
+    const result = await runCliResult(homeDir, ['definitely-missing']);
 
     expect(result.status).toBe(1);
 
@@ -105,10 +124,10 @@ describe('CLI entrypoint telemetry', () => {
     ]);
   });
 
-  it('keeps first-run JSON mode output machine-readable', () => {
+  it('keeps first-run JSON mode output machine-readable', async () => {
     const homeDir = createHomeDir();
 
-    const output = runCli(homeDir, ['--json', 'telemetry', 'status']);
+    const output = await runCli(homeDir, ['--json', 'telemetry', 'status']);
 
     expect(JSON.parse(output)).toEqual({
       enabled: false,
@@ -116,25 +135,13 @@ describe('CLI entrypoint telemetry', () => {
     });
   });
 
-  it('fails fast with a clear error when Node.js is too old', () => {
+  it('fails fast with a clear error when Node.js is too old', async () => {
     const homeDir = createHomeDir();
 
-    const result = spawnSync(
-      tsxCommand.command,
-      [...tsxCommand.argsPrefix, 'src/index.ts', 'telemetry', 'status'],
-      {
-        cwd: packageDir,
-        encoding: 'utf-8',
-        env: {
-          ...process.env,
-          HOME: homeDir,
-          USERPROFILE: homeDir,
-          NO_COLOR: '1',
-          EDGEBASE_NODE_VERSION_OVERRIDE: '21.99.0',
-        },
-        stdio: 'pipe',
-        ...tsxExecOptions,
-      },
+    const result = await runCliResult(
+      homeDir,
+      ['telemetry', 'status'],
+      { EDGEBASE_NODE_VERSION_OVERRIDE: '21.99.0' },
     );
 
     expect(result.status).toBe(1);
