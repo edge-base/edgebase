@@ -6,6 +6,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
+import { inspectFileFunctionDefinitions, type ScannedScheduleTrigger } from './managed-schedules.js';
 
 /**
  * Scanned function metadata from file-system routing.
@@ -23,6 +24,8 @@ export interface ScannedFunction {
   hasTriggerExport?: boolean;
   /** Named `export const X = defineFunction(...)` exports (non-HTTP functions, e.g. DB triggers). */
   definedFunctionExports?: string[];
+  /** Statically verified schedule definitions exported by this file. */
+  scheduleTriggers?: ScannedScheduleTrigger[];
   /** Whether this is a middleware file (_middleware.ts). */
   isMiddleware: boolean;
 }
@@ -47,13 +50,13 @@ export function buildRouteName(relPath: string): string {
  * Detect named exports (GET, POST, PUT, PATCH, DELETE) and default export.
  * Uses regex scanning — no full TS parser needed.
  */
-export function detectExports(filePath: string): {
+export function detectExports(filePath: string, sourceText?: string): {
   methods: string[];
   hasDefaultExport: boolean;
   hasTriggerExport: boolean;
   definedFunctionExports: string[];
 } {
-  const content = readFileSync(filePath, 'utf-8');
+  const content = sourceText ?? readFileSync(filePath, 'utf-8');
   const methods: string[] = [];
   const validMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
   for (const method of validMethods) {
@@ -116,8 +119,12 @@ export function scanFunctions(functionsDir: string): ScannedFunction[] {
 
       const relPath = relative(functionsDir, fullPath).replace(/\\/g, '/');
       const routeName = buildRouteName(relPath);
-      const { methods, hasDefaultExport, hasTriggerExport, definedFunctionExports } =
-        detectExports(fullPath);
+      // Read each registry source once and share it between existing HTTP
+      // export detection and static schedule extraction.
+      const sourceText = readFileSync(fullPath, 'utf-8');
+      const { methods, hasDefaultExport, hasTriggerExport } =
+        detectExports(fullPath, sourceText);
+      const { definedFunctionExports, scheduleTriggers } = inspectFileFunctionDefinitions(fullPath, sourceText);
 
       results.push({
         name: routeName,
@@ -126,6 +133,7 @@ export function scanFunctions(functionsDir: string): ScannedFunction[] {
         hasDefaultExport,
         hasTriggerExport,
         definedFunctionExports,
+        scheduleTriggers,
         isMiddleware: false,
       });
     }

@@ -1,6 +1,22 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
-import { dirname, join, relative, resolve } from 'node:path';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readlinkSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { basename, dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildBundleWithEsbuild } from './node-tools.js';
 import { loadConfigSafe } from './load-config.js';
 import type { FrontendConfigLike } from './frontend-config.js';
@@ -23,13 +39,37 @@ import {
   assertNoProtectedWranglerRuntimeSelectors,
   normalizeLegacyEdgeBaseAssetsDirectory,
 } from './deploy-shared.js';
+import {
+  buildManagedScheduleManifest,
+  type ManagedScheduleManifest,
+} from './managed-schedules.js';
 
 const EDGEBASE_CONFIG_FILES = ['edgebase.config.ts', 'edgebase.config.js'];
 const EDGEBASE_TEST_CONFIG_FILES = ['edgebase.test.config.ts', 'edgebase.test.config.js'];
+const SELF_HOST_ASSET_ROOT = '.edgebase/self-host';
+const SELF_HOST_GATEWAY_ASSET = `${SELF_HOST_ASSET_ROOT}/self-host-gateway.mjs` as const;
+const SELF_HOST_SCHEDULE_SUPERVISOR_ASSET = `${SELF_HOST_ASSET_ROOT}/self-host-schedule-supervisor.mjs` as const;
+const SELF_HOST_DOCKER_ENTRYPOINT_ASSET = `${SELF_HOST_ASSET_ROOT}/self-host-docker-entrypoint.mjs` as const;
+
+export interface EdgeBaseSelfHostAssetManifest<Path extends string = string> {
+  path: Path;
+  digest: `sha256:${string}`;
+  bytes: number;
+}
+
+export interface EdgeBaseSelfHostManifest {
+  schemaVersion: 1;
+  generation: `sha256:${string}`;
+  gateway: EdgeBaseSelfHostAssetManifest<typeof SELF_HOST_GATEWAY_ASSET>;
+  scheduleSupervisor: EdgeBaseSelfHostAssetManifest<typeof SELF_HOST_SCHEDULE_SUPERVISOR_ASSET>;
+  dockerEntrypoint: EdgeBaseSelfHostAssetManifest<typeof SELF_HOST_DOCKER_ENTRYPOINT_ASSET>;
+}
 
 export interface EdgeBaseAppManifest {
   schemaVersion: 1;
   format: 'app-bundle';
+  /** Digest of the complete immutable bundle generation. */
+  generation: `sha256:${string}`;
   createdAt: string;
   projectName: string;
   configFile: string;
@@ -56,6 +96,8 @@ export interface EdgeBaseAppManifest {
     count: number;
     root: '.edgebase/runtime/server/bundle/functions';
   };
+  schedules: ManagedScheduleManifest;
+  selfHost: EdgeBaseSelfHostManifest;
 }
 
 export interface CreateAppBundleOptions {
@@ -66,7 +108,23 @@ export interface CreateAppBundleOptions {
   configEvaluationEnv?: NodeJS.ProcessEnv;
   portableDependencies?: boolean;
   dependencyProfile?: RuntimeDependencyProfile;
+  /** Test-only fault hook for coherent publication boundary coverage. */
+  publicationFaultInjector?: (point: AppBundlePublicationPoint) => void;
+  /** @internal Add pack/Docker-owned files before the immutable generation is published. */
+  stagedGenerationFinalizer?: (
+    stagingDir: string,
+    preliminaryManifest: EdgeBaseAppManifest,
+  ) => void;
 }
+
+export type AppBundlePublicationPoint =
+  | 'after-runtime-scaffold'
+  | 'after-self-host-assets'
+  | 'after-manifest-write'
+  | 'after-generation-fsync'
+  | 'before-current-pointer-rename'
+  | 'after-previous-rename'
+  | 'after-generation-rename';
 
 export interface CreateAppBundleResult {
   format: 'app-bundle';
@@ -74,6 +132,8 @@ export interface CreateAppBundleResult {
   outputDir: string;
   manifestPath: string;
   manifest: EdgeBaseAppManifest;
+  /** The exact filesystem registry scan used for bundling and manifest generation. */
+  functions: ScannedFunction[];
 }
 
 function hasEdgeBaseConfig(dir: string): boolean {
@@ -147,27 +207,126 @@ function resolveAppBundleOutputDir(projectDir: string, explicitOutputDir?: strin
   return join(projectDir, 'dist', 'edgebase-app');
 }
 
-function ensureOutputDir(outputDir: string, overwrite = false): void {
-  if (existsSync(outputDir)) {
-    if (overwrite) {
-      rmSync(outputDir, { recursive: true, force: true });
-      mkdirSync(outputDir, { recursive: true });
-      return;
-    }
-    const entries = readdirSync(outputDir);
-    if (entries.length > 0) {
-      throw new Error(
-        `Output directory already exists and is not empty: ${outputDir}. Choose a different --output path or empty it first.`,
-      );
-    }
-    return;
-  }
-
+function ensureExistingOutputDir(outputDir: string): void {
   mkdirSync(outputDir, { recursive: true });
 }
 
-function ensureExistingOutputDir(outputDir: string): void {
-  mkdirSync(outputDir, { recursive: true });
+function writeFileAtomic(path: string, content: string): void {
+  const stagingPath = `${path}.sync-${process.pid}-${randomBytes(6).toString('hex')}`;
+  const previousPath = `${path}.previous-${process.pid}-${randomBytes(6).toString('hex')}`;
+  try {
+    writeFileSync(stagingPath, content, 'utf-8');
+    try {
+      renameSync(stagingPath, path);
+    } catch (error) {
+      if (process.platform !== 'win32' || !existsSync(path)) throw error;
+      renameSync(path, previousPath);
+      try {
+        renameSync(stagingPath, path);
+      } catch (replacementError) {
+        renameSync(previousPath, path);
+        throw replacementError;
+      }
+      rmSync(previousPath, { force: true });
+    }
+  } finally {
+    rmSync(stagingPath, { force: true });
+    rmSync(previousPath, { force: true });
+  }
+}
+
+function resolveSelfHostGatewaySource(): string {
+  return fileURLToPath(new URL('../templates/self-host/self-host-gateway.mjs', import.meta.url));
+}
+
+function resolveSelfHostScheduleSupervisorSource(): string {
+  const compiledPath = fileURLToPath(new URL('./self-host-schedule-supervisor.js', import.meta.url));
+  if (existsSync(compiledPath)) return compiledPath;
+
+  const sourcePath = fileURLToPath(new URL('./self-host-schedule-supervisor.ts', import.meta.url));
+  if (existsSync(sourcePath)) return sourcePath;
+
+  throw new Error('Could not resolve the self-host schedule supervisor source.');
+}
+
+function resolveSelfHostDockerEntrypointSource(): string {
+  return fileURLToPath(new URL('../templates/self-host/self-host-docker-entrypoint.mjs', import.meta.url));
+}
+
+function selfHostAssetManifest<Path extends string>(
+  path: Path,
+  content: Buffer,
+): EdgeBaseSelfHostAssetManifest<Path> {
+  return {
+    path,
+    digest: `sha256:${createHash('sha256').update(content).digest('hex')}`,
+    bytes: content.byteLength,
+  };
+}
+
+function replaceSelfHostRuntimeAssets(outputDir: string): EdgeBaseSelfHostManifest {
+  const edgebaseDir = join(outputDir, '.edgebase');
+  const liveDir = join(outputDir, SELF_HOST_ASSET_ROOT);
+  const nonce = `${process.pid}-${randomBytes(6).toString('hex')}`;
+  const stagingDir = join(edgebaseDir, `.self-host.sync-${nonce}`);
+  const previousDir = join(edgebaseDir, `.self-host.previous-${nonce}`);
+  let previousMoved = false;
+  let replacementInstalled = false;
+
+  mkdirSync(stagingDir, { recursive: true });
+  try {
+    writeFileSync(
+      join(stagingDir, 'self-host-gateway.mjs'),
+      readFileSync(resolveSelfHostGatewaySource()),
+    );
+    buildBundleWithEsbuild(
+      resolveSelfHostScheduleSupervisorSource(),
+      join(stagingDir, 'self-host-schedule-supervisor.mjs'),
+      dirname(resolveSelfHostScheduleSupervisorSource()),
+    );
+    writeFileSync(
+      join(stagingDir, 'self-host-docker-entrypoint.mjs'),
+      readFileSync(resolveSelfHostDockerEntrypointSource()),
+    );
+
+    const gatewayContent = readFileSync(join(stagingDir, 'self-host-gateway.mjs'));
+    const supervisorContent = readFileSync(join(stagingDir, 'self-host-schedule-supervisor.mjs'));
+    const dockerEntrypointContent = readFileSync(join(stagingDir, 'self-host-docker-entrypoint.mjs'));
+    const assets = {
+      gateway: selfHostAssetManifest(SELF_HOST_GATEWAY_ASSET, gatewayContent),
+      scheduleSupervisor: selfHostAssetManifest(
+        SELF_HOST_SCHEDULE_SUPERVISOR_ASSET,
+        supervisorContent,
+      ),
+      dockerEntrypoint: selfHostAssetManifest(
+        SELF_HOST_DOCKER_ENTRYPOINT_ASSET,
+        dockerEntrypointContent,
+      ),
+    };
+    const generation = `sha256:${createHash('sha256').update(JSON.stringify({
+      schemaVersion: 1,
+      assets,
+    })).digest('hex')}` as const;
+
+    if (existsSync(liveDir)) {
+      renameSync(liveDir, previousDir);
+      previousMoved = true;
+    }
+
+    try {
+      renameSync(stagingDir, liveDir);
+      replacementInstalled = true;
+    } catch (error) {
+      if (previousMoved) renameSync(previousDir, liveDir);
+      throw error;
+    }
+
+    if (previousMoved) rmSync(previousDir, { recursive: true, force: true });
+    return { schemaVersion: 1, generation, ...assets };
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true });
+    if (replacementInstalled) rmSync(previousDir, { recursive: true, force: true });
+  }
 }
 
 function getRuntimeBundleDir(projectDir: string): string {
@@ -347,24 +506,28 @@ function buildAppManifest(
   projectDir: string,
   outputDir: string,
   configFile: string,
-  frontend: FrontendConfigLike | undefined,
+  config: Record<string, unknown> & { frontend?: FrontendConfigLike },
   functions: ScannedFunction[],
   hasTestConfigModule: boolean,
+  schedules: ManagedScheduleManifest,
+  selfHost: EdgeBaseSelfHostManifest,
+  generation: `sha256:${string}`,
 ): EdgeBaseAppManifest {
   return {
     schemaVersion: 1,
     format: 'app-bundle',
+    generation,
     createdAt: new Date().toISOString(),
     projectName: deriveProjectSlug(projectDir),
     configFile,
     outputDir,
-    frontend: frontend
+    frontend: config.frontend
       ? {
         enabled: true,
-        directory: frontend.directory,
-        ...(frontend.mountPath ? { mountPath: frontend.mountPath } : {}),
-        ...(typeof frontend.spaFallback === 'boolean' ? { spaFallback: frontend.spaFallback } : {}),
-        ...(frontend.headers ? { headers: frontend.headers } : {}),
+        directory: config.frontend.directory,
+        ...(config.frontend.mountPath ? { mountPath: config.frontend.mountPath } : {}),
+        ...(typeof config.frontend.spaFallback === 'boolean' ? { spaFallback: config.frontend.spaFallback } : {}),
+        ...(config.frontend.headers ? { headers: config.frontend.headers } : {}),
       }
       : { enabled: false },
     runtime: {
@@ -384,21 +547,124 @@ function buildAppManifest(
       count: functions.length,
       root: '.edgebase/runtime/server/bundle/functions',
     },
+    schedules,
+    selfHost,
   };
 }
 
-export function createAppBundle(
-  projectDir: string,
-  options: CreateAppBundleOptions = {},
-): CreateAppBundleResult {
-  const outputDir = resolveAppBundleOutputDir(projectDir, options.outputDir);
-  ensureOutputDir(outputDir, options.overwrite === true);
-  return syncAppBundle(projectDir, outputDir, options);
+function hashAppBundleTree(root: string): `sha256:${string}` {
+  const hash = createHash('sha256');
+  const visit = (directory: string): void => {
+    for (const name of readdirSync(directory).sort()) {
+      const path = join(directory, name);
+      const relativePath = relative(root, path).replace(/\\/g, '/');
+      if (relativePath === 'edgebase-app.json') continue;
+      const info = lstatSync(path);
+      if (info.isSymbolicLink()) {
+        hash.update(`L\0${relativePath}\0${readlinkSync(path)}\0`);
+      } else if (info.isDirectory()) {
+        hash.update(`D\0${relativePath}\0`);
+        visit(path);
+      } else if (info.isFile()) {
+        hash.update(`F\0${relativePath}\0${info.size}\0`);
+        hash.update(readFileSync(path));
+        hash.update('\0');
+      } else {
+        throw new Error(`App bundle contains an unsupported filesystem entry: ${path}`);
+      }
+    }
+  };
+  visit(root);
+  return `sha256:${hash.digest('hex')}`;
 }
 
-export function syncAppBundle(
+function syncFileOrDirectory(path: string): void {
+  let descriptor: number | null = null;
+  try {
+    descriptor = openSync(path, 'r');
+    fsyncSync(descriptor);
+  } catch (error) {
+    if (process.platform !== 'win32') throw error;
+  } finally {
+    if (descriptor !== null) closeSync(descriptor);
+  }
+}
+
+function syncGenerationTree(root: string): void {
+  const directories: string[] = [];
+  const visit = (directory: string): void => {
+    directories.push(directory);
+    for (const name of readdirSync(directory)) {
+      const path = join(directory, name);
+      const info = lstatSync(path);
+      if (info.isDirectory()) visit(path);
+      else if (info.isFile()) syncFileOrDirectory(path);
+    }
+  };
+  visit(root);
+  for (const directory of directories.reverse()) syncFileOrDirectory(directory);
+}
+
+function processIsAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function prepareAppBundlePublication(outputDir: string): void {
+  const parent = dirname(outputDir);
+  const outputName = basename(outputDir);
+  const generationsDir = join(parent, `.${outputName}.generations`);
+  const removeDeadOwnerEntries = (prefix: string): void => {
+    for (const entry of readdirSync(parent)) {
+      if (!entry.startsWith(prefix)) continue;
+      const pid = Number(entry.slice(prefix.length).split('-', 1)[0]);
+      if (pid === process.pid || processIsAlive(pid)) continue;
+      rmSync(join(parent, entry), { recursive: true, force: true });
+    }
+  };
+  removeDeadOwnerEntries(`.${outputName}.sync-`);
+  removeDeadOwnerEntries(`.${outputName}.current-`);
+
+  if (existsSync(outputDir) || !existsSync(generationsDir)) return;
+  const legacy = readdirSync(generationsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith('legacy-'))
+    .map((entry) => join(generationsDir, entry.name))
+    .filter((path) => existsSync(join(path, 'edgebase-app.json')))
+    .sort((left, right) => lstatSync(right).mtimeMs - lstatSync(left).mtimeMs)[0];
+  if (!legacy) return;
+
+  const recoveryPointer = join(
+    parent,
+    `.${outputName}.current-${process.pid}-${randomBytes(6).toString('hex')}`,
+  );
+  symlinkSync(relative(parent, legacy), recoveryPointer, 'dir');
+  renameSync(recoveryPointer, outputDir);
+  syncFileOrDirectory(parent);
+}
+
+function computeAppBundleGeneration(
+  outputDir: string,
+  scheduleDigest: `sha256:${string}`,
+  selfHostGeneration: `sha256:${string}`,
+): `sha256:${string}` {
+  const tree = hashAppBundleTree(outputDir);
+  return `sha256:${createHash('sha256').update(JSON.stringify({
+    schemaVersion: 1,
+    tree,
+    scheduleDigest,
+    selfHostGeneration,
+  })).digest('hex')}`;
+}
+
+function buildAppBundleGeneration(
   projectDir: string,
   outputDir: string,
+  publishedOutputDir: string,
   options: Omit<CreateAppBundleOptions, 'outputDir' | 'overwrite'> = {},
 ): CreateAppBundleResult {
   const configFile = resolveConfigFile(projectDir);
@@ -411,7 +677,7 @@ export function syncAppBundle(
   const config = loadConfigSafe(configFile, projectDir, {
     allowRegexFallback: false,
     ...(options.configEvaluationEnv ? { env: options.configEvaluationEnv } : {}),
-  }) as {
+  }) as Record<string, unknown> & {
     frontend?: FrontendConfigLike;
     release?: boolean;
     captcha?: unknown;
@@ -444,6 +710,7 @@ export function syncAppBundle(
       ? (options.dependencyProfile ?? 'portable')
       : undefined,
   });
+  options.publicationFaultInjector?.('after-runtime-scaffold');
   if (options.injectedEnv && Object.keys(options.injectedEnv).length > 0) {
     writeRuntimeConfigShim(outputDir, options.injectedEnv, {
       importPath: '../bundle/config/edgebase.config.bundle.js',
@@ -461,22 +728,182 @@ export function syncAppBundle(
     ensureOutputWranglerToml(outputDir, deriveProjectSlug(projectDir));
   }
 
-  const manifest = buildAppManifest(
-    projectDir,
+  const selfHost = replaceSelfHostRuntimeAssets(outputDir);
+  options.publicationFaultInjector?.('after-self-host-assets');
+  const schedules = buildManagedScheduleManifest(functions, config);
+  const preliminaryGeneration = computeAppBundleGeneration(
     outputDir,
+    schedules.digest,
+    selfHost.generation,
+  );
+  let manifest = buildAppManifest(
+    projectDir,
+    publishedOutputDir,
     configFile,
-    config.frontend,
+    config,
     functions,
     hasBundledTestConfigModule,
+    schedules,
+    selfHost,
+    preliminaryGeneration,
   );
   const manifestPath = join(outputDir, 'edgebase-app.json');
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+  writeFileAtomic(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  options.stagedGenerationFinalizer?.(outputDir, manifest);
+  const generation = computeAppBundleGeneration(
+    outputDir,
+    schedules.digest,
+    selfHost.generation,
+  );
+  if (generation !== preliminaryGeneration) {
+    manifest = buildAppManifest(
+      projectDir,
+      publishedOutputDir,
+      configFile,
+      config,
+      functions,
+      hasBundledTestConfigModule,
+      schedules,
+      selfHost,
+      generation,
+    );
+    writeFileAtomic(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+  options.publicationFaultInjector?.('after-manifest-write');
 
   return {
     format: 'app-bundle',
     projectDir,
-    outputDir,
-    manifestPath,
+    outputDir: publishedOutputDir,
+    manifestPath: join(publishedOutputDir, 'edgebase-app.json'),
     manifest,
+    functions,
   };
+}
+
+function publishAppBundleGeneration(
+  outputDir: string,
+  stagingDir: string,
+  faultInjector?: (point: AppBundlePublicationPoint) => void,
+): void {
+  const parent = dirname(outputDir);
+  const outputName = basename(outputDir);
+  const generationsDir = join(parent, `.${outputName}.generations`);
+  const manifest = JSON.parse(readFileSync(join(stagingDir, 'edgebase-app.json'), 'utf8')) as {
+    generation?: unknown;
+  };
+  if (typeof manifest.generation !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(manifest.generation)) {
+    throw new Error('Staged app bundle is missing its immutable generation digest.');
+  }
+  const generationDir = join(
+    generationsDir,
+    `${manifest.generation.slice('sha256:'.length)}-${process.pid}-${randomBytes(4).toString('hex')}`,
+  );
+  const pointerPath = join(
+    parent,
+    `.${outputName}.current-${process.pid}-${randomBytes(6).toString('hex')}`,
+  );
+  const legacyDir = join(
+    generationsDir,
+    `legacy-${process.pid}-${randomBytes(6).toString('hex')}`,
+  );
+  let generationMoved = false;
+  let pointerPublished = false;
+  let previousCurrentTarget: string | null = (
+    existsSync(outputDir) && lstatSync(outputDir).isSymbolicLink()
+  ) ? realpathSync(outputDir) : null;
+  try {
+    mkdirSync(generationsDir, { recursive: true });
+    renameSync(stagingDir, generationDir);
+    generationMoved = true;
+    syncGenerationTree(generationDir);
+    syncFileOrDirectory(generationsDir);
+    faultInjector?.('after-generation-fsync');
+
+    symlinkSync(relative(parent, generationDir), pointerPath, 'dir');
+    syncFileOrDirectory(parent);
+    faultInjector?.('before-current-pointer-rename');
+
+    if (existsSync(outputDir) && !lstatSync(outputDir).isSymbolicLink()) {
+      // One-time migration from the legacy directory publisher. Its complete
+      // generation is retained for deterministic recovery if the process dies
+      // before the current pointer rename below.
+      renameSync(outputDir, legacyDir);
+      previousCurrentTarget = realpathSync(legacyDir);
+      syncFileOrDirectory(generationsDir);
+      faultInjector?.('after-previous-rename');
+    }
+    renameSync(pointerPath, outputDir);
+    pointerPublished = true;
+    syncFileOrDirectory(parent);
+    faultInjector?.('after-generation-rename');
+
+    // Keep the current and one prior generation so readers that resolved the
+    // old pointer before publication cannot lose files mid-read. Interrupted
+    // cleanup is harmless because no generation is mutable after publication.
+    const currentTarget = realpathSync(outputDir);
+    const retainedSet = new Set([
+      currentTarget,
+      ...(previousCurrentTarget ? [previousCurrentTarget] : []),
+    ]);
+    for (const entry of readdirSync(generationsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const path = join(generationsDir, entry.name);
+      if (!retainedSet.has(realpathSync(path))) rmSync(path, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(pointerPath, { force: true });
+    if (!generationMoved) rmSync(stagingDir, { recursive: true, force: true });
+    if (generationMoved && !pointerPublished && !existsSync(outputDir)) {
+      // Legacy migration can be interrupted only by a catchable test fault.
+      // Real process death leaves both complete directories for the next run.
+      if (existsSync(legacyDir)) {
+        renameSync(legacyDir, outputDir);
+        syncFileOrDirectory(parent);
+      }
+    }
+  }
+}
+
+function stageAndPublishAppBundle(
+  projectDir: string,
+  outputDir: string,
+  options: Omit<CreateAppBundleOptions, 'outputDir' | 'overwrite'>,
+): CreateAppBundleResult {
+  const parent = dirname(outputDir);
+  mkdirSync(parent, { recursive: true });
+  prepareAppBundlePublication(outputDir);
+  const stagingDir = join(
+    parent,
+    `.${basename(outputDir)}.sync-${process.pid}-${randomBytes(6).toString('hex')}`,
+  );
+  mkdirSync(stagingDir, { recursive: true });
+  try {
+    const result = buildAppBundleGeneration(projectDir, stagingDir, outputDir, options);
+    publishAppBundleGeneration(outputDir, stagingDir, options.publicationFaultInjector);
+    return result;
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true });
+  }
+}
+
+export function createAppBundle(
+  projectDir: string,
+  options: CreateAppBundleOptions = {},
+): CreateAppBundleResult {
+  const outputDir = resolveAppBundleOutputDir(projectDir, options.outputDir);
+  if (existsSync(outputDir) && !options.overwrite && readdirSync(outputDir).length > 0) {
+    throw new Error(
+      `Output directory already exists and is not empty: ${outputDir}. Choose a different --output path or empty it first.`,
+    );
+  }
+  return stageAndPublishAppBundle(projectDir, outputDir, options);
+}
+
+export function syncAppBundle(
+  projectDir: string,
+  outputDir: string,
+  options: Omit<CreateAppBundleOptions, 'outputDir' | 'overwrite'> = {},
+): CreateAppBundleResult {
+  return stageAndPublishAppBundle(projectDir, outputDir, options);
 }

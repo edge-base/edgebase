@@ -114,6 +114,7 @@ function hasD1Binding(env: Env | undefined, namespace: string): boolean {
 export type InternalTransportError = Error & {
   code?: unknown;
   details?: unknown;
+  slug?: string;
   status: number;
 };
 
@@ -127,6 +128,7 @@ export function internalTransportError(
   error.status = status;
   if ('code' in payload) error.code = payload.code;
   if ('details' in payload) error.details = payload.details;
+  if (typeof payload.slug === 'string') error.slug = payload.slug;
   return error;
 }
 

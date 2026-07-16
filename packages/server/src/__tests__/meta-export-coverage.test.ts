@@ -166,13 +166,14 @@ describe('export coverage scan', () => {
   });
 
   for (const libFile of testedLibFiles) {
+    const source = readFileSync(resolve(LIB_DIR, libFile), 'utf-8');
+    const exports = extractExports(source);
+
+    // Compatibility-only re-export and type-only files have no declarations
+    // for this scanner to verify, so do not create an empty Vitest suite.
+    if (exports.length === 0) continue;
+
     describe(`lib/${libFile}`, () => {
-      const source = readFileSync(resolve(LIB_DIR, libFile), 'utf-8');
-      const exports = extractExports(source);
-
-      // Skip type/interface-only files
-      if (exports.length === 0) return;
-
       for (const name of exports) {
         // Skip known uncovered exports
         if (KNOWN_UNCOVERED_EXPORTS.has(`${libFile}:${name}`)) continue;

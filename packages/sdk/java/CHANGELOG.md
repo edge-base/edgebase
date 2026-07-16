@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.9
+
+### Changed
+
+- Synchronized the Java SDK packages with the EdgeBase 0.4.9 patch release.
+- No public Java API compatibility break is introduced.
+
 ## 0.4.8
 
 ### Changed

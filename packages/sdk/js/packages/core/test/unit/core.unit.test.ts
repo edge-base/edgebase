@@ -252,6 +252,95 @@ describe('TableRef', () => {
     });
   });
 
+  it('includeTotal(false) composes immutably and emits the existing no-count wire flag', async () => {
+    const dbSingleListRecords = vi.fn().mockResolvedValue({
+      items: [{ id: 'post-1' }],
+      total: null,
+      page: 1,
+      perPage: 10,
+    });
+    const table = new TableRef<{ id: string; status: string }>(
+      { dbSingleListRecords } as any,
+      'posts',
+    );
+    const bounded = table
+      .where('status', '==', 'pending')
+      .select('id')
+      .orderBy('id', 'asc')
+      .limit(10)
+      .includeTotal(false);
+
+    expect(bounded).not.toBe(table);
+    await bounded.getList();
+    expect(dbSingleListRecords).toHaveBeenLastCalledWith('shared', 'posts', {
+      fields: 'id',
+      filter: JSON.stringify([['status', '==', 'pending']]),
+      sort: 'id:asc',
+      limit: '10',
+      includeTotal: 'false',
+    });
+
+    await table.limit(10).getList();
+    expect(dbSingleListRecords).toHaveBeenLastCalledWith('shared', 'posts', {
+      limit: '10',
+    });
+  });
+
+  it('maxResponseBytes composes immutably and forwards bounded list/search cursors', async () => {
+    const cursor = '~edgebase-response-cursor-v1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    const dbSingleSearchRecords = vi.fn().mockResolvedValue({
+      items: [{ id: 'post-2', title: '한글🙂' }],
+      total: 2,
+      hasMore: false,
+      cursor,
+      page: null,
+      perPage: 10,
+      returnedBytes: 244,
+      cursorExpiresAt: '2026-07-23T00:00:00.000Z',
+    });
+    const table = new TableRef<{ id: string; title: string }>(
+      { dbSingleSearchRecords } as any,
+      'posts',
+    );
+    const bounded = table
+      .search('hello')
+      .select('id', 'title')
+      .limit(10)
+      .includeTotal(false)
+      .maxResponseBytes(4096)
+      .after(cursor);
+
+    expect(bounded).not.toBe(table);
+    await expect(bounded.getList()).resolves.toMatchObject({
+      returnedBytes: 244,
+      cursorExpiresAt: '2026-07-23T00:00:00.000Z',
+    });
+    expect(dbSingleSearchRecords).toHaveBeenCalledWith('shared', 'posts', {
+      fields: 'id,title',
+      sort: 'id:asc',
+      limit: '10',
+      includeTotal: 'false',
+      maxResponseBytes: '4096',
+      responseAfter: cursor,
+      search: 'hello',
+    });
+
+    const dbSingleListRecords = vi.fn().mockResolvedValue({ items: [], total: 0 });
+    await new TableRef({ dbSingleListRecords } as any, 'posts').limit(10).getList();
+    expect(dbSingleListRecords).toHaveBeenCalledWith('shared', 'posts', { limit: '10' });
+  });
+
+  it('rejects bounded offset, unstable ordering, missing id projection, and unsafe limits', async () => {
+    const dbSingleListRecords = vi.fn();
+    const table = new TableRef<{ id: string; title: string }>({ dbSingleListRecords } as any, 'posts');
+
+    expect(() => table.maxResponseBytes(511)).toThrow(/at least 512/);
+    await expect(table.offset(1).maxResponseBytes(512).getList()).rejects.toThrow(/keyset pagination/);
+    await expect(table.select('title').maxResponseBytes(512).getList()).rejects.toThrow(/include id/);
+    await expect(table.orderBy('title').maxResponseBytes(512).getList()).rejects.toThrow(/orderBy\('id'/);
+    expect(dbSingleListRecords).not.toHaveBeenCalled();
+  });
+
   it('select() rejects an empty projection before network I/O', () => {
     const dbSingleListRecords = vi.fn();
     const table = new TableRef<{ id: string }>(
@@ -322,7 +411,7 @@ describe('TableRef', () => {
 // EXPANDED TESTS — Phase 2 additions below
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { HttpClient, type HttpClientOptions } from '../../src/http.js';
+import { HttpClient } from '../../src/http.js';
 import {
   TableRef,
   DocRef,
@@ -824,6 +913,16 @@ describe('TableRef — immutable chaining', () => {
     expect(t.page(3)).not.toBe(t);
   });
 
+  it('includeTotal returns a new instance', () => {
+    const t = new TableRef(core, 'posts', undefined, undefined, 'shared');
+    expect(t.includeTotal(false)).not.toBe(t);
+  });
+
+  it('maxResponseBytes returns a new instance', () => {
+    const t = new TableRef(core, 'posts', undefined, undefined, 'shared');
+    expect(t.maxResponseBytes(512)).not.toBe(t);
+  });
+
   it('search returns new instance', () => {
     const t = new TableRef(core, 'posts', undefined, undefined, 'shared');
     expect(t.search('hello')).not.toBe(t);
@@ -1319,6 +1418,42 @@ describe('DbRef — table reference creation', () => {
 
     await expect(new DbRef(core, 'workspace', 'ws-1').transact(operations)).resolves.toEqual(result);
     expect(core.dbTransact).toHaveBeenCalledWith('workspace', 'ws-1', { operations });
+    expect(core.dbSingleTransact).not.toHaveBeenCalled();
+  });
+
+  it('transact forwards compact mode and returns the bounded acknowledgment for single-instance DBs', async () => {
+    const result = { committed: true as const, operationCount: 1 };
+    const core = {
+      dbSingleTransact: vi.fn().mockResolvedValue(result),
+      dbTransact: vi.fn(),
+    } as unknown as GeneratedDbApi;
+    const operations = [{ table: 'posts', op: 'delete' as const, id: 'post-1' }];
+
+    await expect(
+      new DbRef(core, 'shared').transact(operations, { resultMode: 'compact' }),
+    ).resolves.toEqual(result);
+    expect(core.dbSingleTransact).toHaveBeenCalledWith('shared', {
+      operations,
+      resultMode: 'compact',
+    });
+    expect(core.dbTransact).not.toHaveBeenCalled();
+  });
+
+  it('transact forwards explicit full mode through dynamic DBs without changing the result shape', async () => {
+    const result = { results: [{ deleted: true, id: 'doc-1' }] };
+    const core = {
+      dbSingleTransact: vi.fn(),
+      dbTransact: vi.fn().mockResolvedValue(result),
+    } as unknown as GeneratedDbApi;
+    const operations = [{ table: 'docs', op: 'delete' as const, id: 'doc-1' }];
+
+    await expect(
+      new DbRef(core, 'workspace', 'ws-1').transact(operations, { resultMode: 'full' }),
+    ).resolves.toEqual(result);
+    expect(core.dbTransact).toHaveBeenCalledWith('workspace', 'ws-1', {
+      operations,
+      resultMode: 'full',
+    });
     expect(core.dbSingleTransact).not.toHaveBeenCalled();
   });
 });

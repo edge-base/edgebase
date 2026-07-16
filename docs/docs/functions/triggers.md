@@ -100,11 +100,14 @@ export default defineFunction({
 });
 ```
 
-Schedule trigger ownership is config-driven at deploy time:
+Schedule inventory is build-derived:
 
-- App Function schedule triggers contribute their cron expressions to the managed deploy cron set.
-- `cloudflare.extraCrons` can add additional `scheduled()` wake-ups, but those cron entries are not attached to a specific schedule function.
-- If you add `cloudflare.extraCrons`, your Worker runtime must decide what to do when `scheduled()` fires at those times.
+- Default and named schedule exports under `functions/`, plugin schedule functions, `cloudflare.extraCrons`, and EdgeBase system schedules are collected into `edgebase-app.json` once per build.
+- Hosted deploy, Docker, and directory/portable packs consume that same manifest. Distinct function identities remain visible even when they share a cron expression; provider wake-up expressions are deduplicated.
+- `cloudflare.extraCrons` adds Worker `scheduled()` wake-ups, but is not attached to a specific App Function.
+- Schedule metadata in filesystem functions must be statically resolvable. A dynamic cron such as `process.env.CRON`, an ambiguous spread/computed declaration, an unsupported schedule export form, or an invalid expression fails the build instead of disappearing from inventory.
+
+EdgeBase accepts the portable numeric subset shared by hosted and self-hosted runtimes: five UTC fields (`minute hour day-of-month month day-of-week`) with `*`, comma lists, ranges, and positive steps. Weekdays use `1` for Sunday through `7` for Saturday. Provider-only aliases and `L`, `W`, or `#` syntax are rejected until every EdgeBase runtime can replay them consistently.
 
 ## HTTP Trigger — File-System Routing
 

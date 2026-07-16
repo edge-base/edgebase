@@ -181,6 +181,12 @@ describe('OpenAPI spec stability', () => {
       '/api/captcha/challenge',
       '/api/auth/signout',
       '/api/auth/verify-link-phone',
+      '/api/db/{namespace}/tables/{table}/search',
+      '/api/db/{namespace}/tables/{table}',
+      '/api/db/{namespace}/transact',
+      '/api/db/{namespace}/{instanceId}/tables/{table}/search',
+      '/api/db/{namespace}/{instanceId}/tables/{table}',
+      '/api/db/{namespace}/{instanceId}/transact',
     ];
     for (const path of paths) {
       expect(

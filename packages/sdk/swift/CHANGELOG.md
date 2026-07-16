@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.9
+
+- Synchronized the Swift packages with the EdgeBase 0.4.9 patch release.
+- No public Swift API compatibility break is introduced.
+
 ## 0.4.8
 
 - Database subscriptions now decode `changeType`, `docId`, and `data` from the

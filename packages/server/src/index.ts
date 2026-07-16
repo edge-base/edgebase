@@ -67,6 +67,7 @@ async function buildApp() {
     functionsModule,
     openApiModule,
     doRouterModule,
+    selfHostControlRouteModule,
   ] = await Promise.all([
     import('./lib/hono.js'),
     import('hono/http-exception'),
@@ -108,6 +109,7 @@ async function buildApp() {
     import('./lib/functions.js'),
     import('./lib/openapi.js'),
     import('./lib/do-router.js'),
+    import('./routes/self-host-control.js'),
   ]);
 
   const { OpenAPIHono } = honoModule;
@@ -131,6 +133,10 @@ async function buildApp() {
   const { normalizeOpenApiDocument } = openApiModule;
 
   const app = new OpenAPIHono<HonoEnv>({ defaultHook: zodDefaultHook });
+
+  // This loopback-only authenticated control plane must not inherit public
+  // CORS, rate-limit, auth, plugin-migration, or frontend fallthrough paths.
+  app.route('/__edgebase/internal/self-host', selfHostControlRouteModule.selfHostControlRoute);
 
   app.use('*', errorHandlerMiddleware);
   app.use('*', loggerMiddleware);
@@ -171,7 +177,6 @@ async function buildApp() {
   app.route('/api/analytics', analyticsRouteModule.analyticsApi);
   app.route('/admin/api', adminRouteModule.adminRoute);
   app.route('/admin/api/backup', backupRouteModule.backupRoute);
-
   function getFrontendConfig(env: Env): FrontendConfigLike | undefined {
     return (doRouterModule.parseConfig(env) as { frontend?: FrontendConfigLike } | undefined)?.frontend;
   }
@@ -437,123 +442,20 @@ export default {
   },
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    await ensureServerStartup();
+    void ctx;
+    const { executeManagedScheduledEnvelopes } = await import('./lib/managed-scheduled-runtime.js');
+    const report = await executeManagedScheduledEnvelopes([{
+      cron: event.cron,
+      scheduledTime: event.scheduledTime,
+    }], env, ctx);
 
-    const [
-      pluginMigrationsModule,
-      functionsModule,
-      cronModule,
-      jwtModule,
-      authServiceModule,
-      authD1Module,
-      authDbAdapterModule,
-      serviceKeyModule,
-      doRouterModule,
-      signedUploadGrantsModule,
-    ] = await Promise.all([
-      import('./lib/plugin-migrations.js'),
-      import('./lib/functions.js'),
-      import('./lib/cron.js'),
-      import('./lib/jwt.js'),
-      import('./lib/auth-d1-service.js'),
-      import('./lib/auth-d1.js'),
-      import('./lib/auth-db-adapter.js'),
-      import('./lib/service-key.js'),
-      import('./lib/do-router.js'),
-      import('./lib/signed-upload-grants.js'),
-    ]);
-
-    const { executePluginMigrations } = pluginMigrationsModule;
-    const { getFunctionsByTrigger, buildFunctionContext, getWorkerUrl } = functionsModule;
-    const { parseCron, matchesCron } = cronModule;
-    const { parseDuration } = jwtModule;
-    const { ensureAuthSchema, deleteAnon } = authD1Module;
-    const { resolveAuthDb } = authDbAdapterModule;
-    const { resolveRootServiceKey } = serviceKeyModule;
-    const { cleanupExpiredSignedUploadGrants } = signedUploadGrantsModule;
-
-    const config = doRouterModule.parseConfig(env);
-    if (config.plugins?.length) {
-      await executePluginMigrations(
-        config.plugins,
-        env,
-        config,
-        getWorkerUrl('http://internal/scheduled', env),
+    if (!report.complete) {
+      throw new Error(
+        `Scheduled delivery '${event.cron}' did not complete: ${report.outcomes
+          .filter(({ status }) => status !== 'succeeded' && status !== 'duplicate')
+          .map(({ itemId, status }) => `${itemId}=${status}`)
+          .join(', ')}.`,
       );
-    }
-    const scheduleFns = getFunctionsByTrigger('schedule');
-
-    const now = new Date(event.scheduledTime);
-    const timeoutStr = config.functions?.scheduleFunctionTimeout ?? '10s';
-    const timeoutMs = parseDuration(timeoutStr) * 1000;
-
-    ctx.waitUntil(
-      (async () => {
-        try {
-          const authDb = resolveAuthDb(env as unknown as Record<string, unknown>);
-          await ensureAuthSchema(authDb);
-          await authServiceModule.cleanExpiredSessions(authDb);
-          if (config?.auth?.anonymousAuth) {
-            const retentionDays = config.auth.anonymousRetentionDays ?? 30;
-            const deletedIds = await authServiceModule.cleanStaleAnonymousAccounts(authDb, retentionDays);
-            for (const id of deletedIds) {
-              await deleteAnon(authDb, id).catch(() => {});
-            }
-          }
-        } catch (err) {
-          console.error('[EdgeBase] Session/anonymous cleanup failed:', err);
-        }
-        try {
-          if (env.STORAGE) {
-            await cleanupExpiredSignedUploadGrants(env.STORAGE, event.scheduledTime);
-          }
-        } catch (err) {
-          console.error('[EdgeBase] Signed-upload grant cleanup failed:', err);
-        }
-      })(),
-    );
-
-    if (scheduleFns.length === 0) return;
-
-    for (const { name, definition } of scheduleFns) {
-      const trigger = definition.trigger as { type: 'schedule'; cron: string };
-      try {
-        const schedule = parseCron(trigger.cron);
-        if (!matchesCron(now, schedule)) continue;
-
-        const fnCtx = buildFunctionContext({
-          request: new Request(`http://internal/schedule/${name}`),
-          auth: null,
-          databaseNamespace: env.DATABASE,
-          authNamespace: env.AUTH,
-          d1Database: env.AUTH_DB,
-          kvNamespace: env.KV,
-          env: env as never,
-          executionCtx: ctx as never,
-          config,
-          serviceKey: resolveRootServiceKey(config, env),
-          data: {
-            before: undefined,
-            after: { scheduledTime: now.toISOString(), cron: trigger.cron },
-          },
-        });
-
-        ctx.waitUntil(
-          Promise.race([
-            definition.handler(fnCtx),
-            new Promise((_, reject) =>
-              setTimeout(
-                () => reject(new Error(`Schedule function '${name}' timed out (${timeoutStr})`)),
-                timeoutMs,
-              ),
-            ),
-          ]).catch((err) => {
-            console.error(`[EdgeBase] Schedule function '${name}' failed:`, err);
-          }),
-        );
-      } catch (err) {
-        console.error(`[EdgeBase] Schedule function '${name}' failed:`, err);
-      }
     }
   },
 };

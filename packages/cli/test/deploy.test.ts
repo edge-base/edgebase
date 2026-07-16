@@ -2417,7 +2417,6 @@ describe('mergePluginTables', () => {
 
 const {
   generateTempWranglerToml,
-  collectManagedCronSchedules,
   buildMergedKvConfig,
   buildMergedD1Config,
   parseWranglerJsonOutput,
@@ -3104,24 +3103,14 @@ describe('generateTempWranglerToml', () => {
   });
 });
 
-describe('collectManagedCronSchedules', () => {
-  it('combines schedule triggers, cloudflare.extraCrons, and the system cron without duplicates', () => {
-    const crons = collectManagedCronSchedules({
-      functions: {
-        nightly: { trigger: { type: 'schedule', cron: '0 2 * * *' } },
-        duplicate: { trigger: { type: 'schedule', cron: '0 2 * * *' } },
-        httpHandler: { trigger: { type: 'http' } },
-      },
-      cloudflare: {
-        extraCrons: ['15 * * * *', '0 2 * * *', '15 * * * *'],
-      },
-    });
-
-    expect(crons).toEqual(['0 2 * * *', '15 * * * *', '0 3 * * *']);
-  });
-
-  it('returns the system cron when no config-defined schedules exist', () => {
-    expect(collectManagedCronSchedules(undefined)).toEqual(['0 3 * * *']);
+describe('hosted managed schedule authority', () => {
+  it('reads deploy cron triggers from the built app manifest', () => {
+    const source = readFileSync(new URL('../src/commands/deploy.ts', import.meta.url), 'utf-8');
+    expect(source).toContain('deployBundle.manifest.schedules.crons');
+    expect(source).toContain('const functions = deployBundle.functions');
+    expect(source).not.toContain('function collectManagedCronSchedules');
+    expect(source).not.toContain('collectManagedCronSchedules(configJson)');
+    expect(source).not.toContain('functions = scanFunctions(functionsDir)');
   });
 });
 

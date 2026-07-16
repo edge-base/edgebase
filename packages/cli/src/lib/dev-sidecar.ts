@@ -44,49 +44,66 @@ let neonProjectsCache: {
   loadedAt: number;
   items: NeonProjectOption[];
 } | null = null;
-type PostgresPool = {
+export interface SidecarPostgresQueryResult {
+  fields?: Array<{ name: string }>;
+  rows?: Record<string, unknown>[];
+  rowCount?: number | null;
+}
+
+export type SidecarPostgresExecutor = (
+  sql: string,
+  params?: unknown[],
+) => Promise<{
+  columns: string[];
+  rows: Record<string, unknown>[];
+  rowCount: number;
+}>;
+
+export interface SidecarPostgresClient {
   query(
     sql: string,
     params?: unknown[],
-  ): Promise<{
-    fields?: Array<{ name: string }>;
-    rows?: Record<string, unknown>[];
-    rowCount?: number | null;
-  }>;
+  ): Promise<SidecarPostgresQueryResult>;
+  release(): void;
+}
+
+export interface SidecarPostgresPool {
+  query(
+    sql: string,
+    params?: unknown[],
+  ): Promise<SidecarPostgresQueryResult>;
+  connect(): Promise<SidecarPostgresClient>;
   end(): Promise<void>;
-};
+}
 
 type PgModule = {
-  Pool: new (options: { connectionString: string; max: number }) => PostgresPool;
+  Pool: new (options: { connectionString: string; max: number }) => SidecarPostgresPool;
 };
 
+type SidecarPostgresTables = Record<
+  string,
+  {
+    schema?: Record<string, unknown>;
+    indexes?: unknown[];
+    fts?: unknown[];
+    migrations?: unknown[];
+  }
+>;
+
+export type SidecarPostgresSchemaEnsure = (
+  connectionString: string,
+  namespace: string,
+  tables: SidecarPostgresTables,
+  queryExecutor?: SidecarPostgresExecutor,
+) => Promise<void>;
+
 type PgSchemaInitModule = {
-  ensurePgSchema: (
-    connectionString: string,
-    namespace: string,
-    tables: Record<
-      string,
-      {
-        schema?: Record<string, unknown>;
-        indexes?: unknown[];
-        fts?: unknown[];
-        migrations?: unknown[];
-      }
-    >,
-    queryExecutor?: (
-      sql: string,
-      params?: unknown[],
-    ) => Promise<{
-      columns: string[];
-      rows: Record<string, unknown>[];
-      rowCount: number;
-    }>,
-  ) => Promise<void>;
+  ensurePgSchema: SidecarPostgresSchemaEnsure;
 };
 
 let pgModulePromise: Promise<PgModule> | null = null;
 let pgSchemaInitModulePromise: Promise<PgSchemaInitModule> | null = null;
-const postgresPoolCache = new Map<string, PostgresPool>();
+const postgresPoolCache = new Map<string, SidecarPostgresPool>();
 const LOCAL_ENV_HEADER = '# EdgeBase local development secrets';
 const RELEASE_ENV_HEADER = '# EdgeBase production secrets';
 const MANAGED_AUTH_ENV_KEYS = ['EDGEBASE_AUTH_ALLOWED_OAUTH_PROVIDERS'];
@@ -480,7 +497,7 @@ async function loadPgSchemaInitModule(opts: SidecarOptions): Promise<PgSchemaIni
   return pgSchemaInitModulePromise;
 }
 
-async function getSidecarPostgresPool(connectionString: string): Promise<PostgresPool> {
+async function getSidecarPostgresPool(connectionString: string): Promise<SidecarPostgresPool> {
   let pool = postgresPoolCache.get(connectionString);
   if (!pool) {
     const { Pool } = await loadPgModule();
@@ -491,6 +508,38 @@ async function getSidecarPostgresPool(connectionString: string): Promise<Postgre
     postgresPoolCache.set(connectionString, pool);
   }
   return pool;
+}
+
+/**
+ * Schema initialization includes BEGIN/COMMIT and must never run through
+ * pool.query(), where consecutive statements may lease different clients.
+ */
+export async function ensurePostgresSchemaWithDedicatedClient(
+  pool: SidecarPostgresPool,
+  ensurePgSchema: SidecarPostgresSchemaEnsure,
+  connectionString: string,
+  namespace: string,
+  tables: SidecarPostgresTables,
+): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await ensurePgSchema(
+      connectionString,
+      namespace,
+      tables,
+      async (sql, params = []) => {
+        const result = await client.query(sql, params);
+        const rows = (result.rows ?? []) as Record<string, unknown>[];
+        return {
+          columns: (result.fields ?? []).map((field) => field.name),
+          rows,
+          rowCount: result.rowCount ?? rows.length,
+        };
+      },
+    );
+  } finally {
+    client.release();
+  }
 }
 
 async function ensureSidecarPostgresSchema(opts: SidecarOptions, namespace: string): Promise<void> {
@@ -508,19 +557,12 @@ async function ensureSidecarPostgresSchema(opts: SidecarOptions, namespace: stri
   const pool = await getSidecarPostgresPool(connectionString);
   const { ensurePgSchema } = await loadPgSchemaInitModule(opts);
 
-  await ensurePgSchema(
+  await ensurePostgresSchemaWithDedicatedClient(
+    pool,
+    ensurePgSchema,
     connectionString,
     namespace,
     dbBlock.tables ?? {},
-    async (sql, params = []) => {
-      const result = await pool.query(sql, params);
-      const rows = (result.rows ?? []) as Record<string, unknown>[];
-      return {
-        columns: (result.fields ?? []).map((field: { name: string }) => field.name),
-        rows,
-        rowCount: result.rowCount ?? rows.length,
-      };
-    },
   );
 }
 

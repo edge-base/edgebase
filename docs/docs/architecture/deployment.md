@@ -4,7 +4,9 @@ sidebar_position: 5
 
 # Deployment Architecture
 
-How EdgeBase runs identically across Cloudflare Edge, Docker, and Node.js — using the same codebase and the same `workerd` runtime.
+How EdgeBase runs the same application bundle across Cloudflare Edge and the
+protected Docker/pack self-host launchers, with `edgebase dev` reserved for
+local development.
 
 ## Three Deployment Modes
 
@@ -14,7 +16,7 @@ EdgeBase runs on `workerd`, Cloudflare's open-source Workers runtime. Because `w
 | -------------------- | ------------------------- | --------------------- | ---------------------------------- |
 | **Cloudflare Edge**  | `npx edgebase deploy`     | Cloudflare Workers    | Production, global ~0ms cold start |
 | **Docker**           | `npx edgebase docker run` | workerd in container  | Self-hosted, full data control     |
-| **Node.js (Direct)** | `npx edgebase dev`        | workerd via Miniflare | Local development, VPS deployment  |
+| **Local development** | `npx edgebase dev`      | workerd via Miniflare | Hot reload and local iteration     |
 
 All three modes execute the same middleware chain, the same Durable Object classes, the same security rules, and the same SQLite-based storage. The differences are only in how state is persisted and how infrastructure services (KV, R2, D1) are provided.
 
@@ -109,20 +111,22 @@ npx edgebase deploy
 
 The deploy process:
 
-1. Bundle `edgebase.config.ts` into the Worker
+1. Build the app bundle and its immutable managed-schedule manifest from filesystem functions, plugin functions, `cloudflare.extraCrons`, and system schedules
 2. Provision internal D1 bindings (`AUTH_DB`, `CONTROL_DB`) plus any user-defined native resources (`config.kv`, `config.d1`, `config.vectorize`) via Wrangler CLI
 3. For DB blocks or auth configured with `provider: 'postgres'`, provision or reuse the matching Hyperdrive bindings automatically (legacy `provider: 'neon'` configs are still accepted during transition)
 4. If `captcha: true`, acquire an expiring remote `CONTROL_DB` lease, re-read authoritative Worker state, keep the live Turnstile site-key/secret tuple, stage `old∪new` hostnames with pre/post live-version checks, publish the version-bound Worker secret and exact runtime policy, renew the lease after Wrangler and immediately before the final PUT, verify the reported version alone serves 100% of traffic, finalize exact widget hostnames, and release the lease
-5. Generate temporary `wrangler.toml` with all bindings
+5. Generate temporary `wrangler.toml` with all bindings and the expression-deduplicated cron list from `edgebase-app.json`
 6. Run `wrangler deploy`
-7. Generate Cloudflare Cron Triggers from the managed cron set (system cron `0 3 * * *` + user schedule crons + `cloudflare.extraCrons`)
 
 Notes on config ownership:
 
-- `edgebase.config.ts` is the source of truth for EdgeBase-managed topology during `dev` and `deploy`, including DB block routing, managed native-resource bindings, and deploy-managed cron triggers.
+- Source files and evaluated `edgebase.config.ts` declarations are build inputs. The resulting `edgebase-app.json` schedule manifest is the single deploy/package authority for managed cron triggers.
 - `wrangler.toml` is treated as the base Cloudflare runtime template for Worker-level settings such as the Worker name, compatibility flags, assets, and advanced Wrangler-only fields.
 - `wrangler.toml` `[triggers]` is generated deploy input, not a manually merged schedule registry.
 - `cloudflare.extraCrons` adds extra wake-ups for the Worker's `scheduled()` handler; it does not automatically route execution into a specific App Function.
+- Docker and directory/portable pack manifests carry the same schedule manifest digest as the app bundle, so self-hosted runtimes do not rescan project source.
+- Generated Docker and pack launchers verify the manifest plus SHA-256/byte contracts for the gateway, schedule supervisor, and Docker entrypoint before launch. They bind Wrangler to loopback HTTP, prove ownership through a fresh authenticated control secret, validate schedule state, run the first supervisor pass, and only then open the external gateway. The gateway is the sole public listener and blocks every internal/scheduled control path for HTTP and WebSocket requests.
+- `edgebase dev` and the server package's `dev:raw` command are development tools, not claimed self-host deployment launchers. They intentionally omit the external gateway and long-lived self-host schedule supervisor. Cloudflare deploys instead use provider cron events; production self-hosting must use the generated Docker or pack launcher.
 
 Infrastructure services:
 
@@ -185,6 +189,25 @@ A single container includes the full EdgeBase stack — no sidecars, no external
 npx edgebase docker run
 ```
 
+The generated container exposes only the gateway port. Wrangler listens on a
+separate loopback-only HTTP port, and the container will not open external
+admission if the authenticated runtime readiness check, runtime-asset digest,
+schedule manifest, or durable schedule-state validation fails. `LOCAL_PROTOCOL=https`
+terminates TLS at this gateway and requires `HTTPS_CERT_PATH` plus
+`HTTPS_KEY_PATH`. When a reverse proxy terminates TLS, list only its exact peer
+addresses in `EDGEBASE_TRUSTED_PROXY_CIDRS`; untrusted peers cannot supply
+forwarded client, protocol, or host authority. The launcher also injects a
+fresh internal gateway proof into every Worker request, so a client cannot make
+forged forwarding headers authoritative by copying the public header name.
+
+Custom Dockerfiles remain supported only when the final image still launches
+the generated protected entrypoint. `edgebase docker build` checks the final
+Dockerfile stage, the built image's effective JSON `Entrypoint`/`Cmd`, and the
+required bundle files. A shell-form command, a later command that shadows the
+entrypoint, or an image that bypasses
+`.edgebase/self-host/self-host-docker-entrypoint.mjs` is rejected. Raw custom
+Wrangler containers are outside the supported production self-host contract.
+
 ### Persistence Path Mapping
 
 All state persists under a single `/data` directory, which maps to a Docker Named Volume:
@@ -228,31 +251,41 @@ docker run \
 
 ### Health Check
 
-Docker containers expose `GET /api/health` for liveness probes:
+Docker and pack gateways expose `GET /__edgebase/health` as the protected
+runtime readiness endpoint:
 
 ```yaml
 # docker-compose.yml
 healthcheck:
-  test: ['CMD', 'curl', '-f', 'http://localhost:8787/api/health']
+  test: ['CMD', 'curl', '-f', 'http://localhost:8787/__edgebase/health']
   interval: 30s
   timeout: 10s
   retries: 3
 ```
 
-Use `/api/health` as a liveness signal only. For App Functions release verification, also call a real function route and at least one service-key-backed admin check.
+The response uses schema version 1 and reports `outcome: "ok"` or
+`"degraded"` with the scheduler status when admission and structural scheduler
+readiness are available. It returns `503` with `outcome: "blocked"` before
+admission, after a structural scheduler failure, or during shutdown. A
+degraded item is visible but does not make the structurally healthy runtime
+unreachable. `/api/health`, when your app defines it, remains an application
+check rather than launcher readiness. For release verification, also call a
+real function route and at least one service-key-backed admin check.
 
-## Node.js Direct Execution
+## Local Node.js Development
 
-The simplest mode — runs workerd via Miniflare directly on the host machine:
+This development mode runs workerd via Miniflare directly on the host machine:
 
 ```bash
 npx edgebase dev
 ```
 
-This is the recommended mode for:
-
-- **Local development**: Fast iteration with hot-reload
-- **VPS deployment**: Run on any Linux/macOS server with Node.js
+Use it for fast local iteration and hot reload. It does not install the
+production self-host gateway, authenticated control plane, durable schedule
+supervisor, or bounded shutdown ownership. For a Node-distributed production
+artifact, use `npx edgebase pack`; for a container, use
+`npx edgebase docker run`. The server package's `dev:raw` command is also a
+development tool and is not a supported production launcher.
 
 Infrastructure services are emulated locally:
 

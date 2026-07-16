@@ -46,7 +46,7 @@ export function getTrustedClientIp(
   // the one the proxy writes to X-Forwarded-For. `cf-connecting-ip` must NOT be
   // trusted in this mode — Cloudflare is not the one setting it, so a client can
   // forge it to spoof rate-limit keys and service-key IP/CIDR constraints.
-  if (mode === 'self-hosted' && trustsSelfHostedProxyHeaders(env)) {
+  if (mode === 'self-hosted' && trustsSelfHostedProxyHeaders(env, reader)) {
     return parseForwardedIp(
       readHeader(reader, 'x-forwarded-for') ?? readHeader(reader, 'X-Forwarded-For'),
     );

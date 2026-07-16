@@ -1,7 +1,18 @@
 import { spawn, type SpawnOptionsWithoutStdio } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+import { constants as osConstants, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -22,6 +33,7 @@ const CLEANUP_RETRY_OPTIONS = {
 
 interface BufferedProcessResult {
   status: number | null;
+  signal: NodeJS.Signals | null;
   stdout: string;
   stderr: string;
 }
@@ -48,8 +60,8 @@ function runBufferedProcess(
       stderr += chunk;
     });
     child.once('error', reject);
-    child.once('close', (status) => {
-      resolve({ status, stdout, stderr });
+    child.once('close', (status, signal) => {
+      resolve({ status, signal, stdout, stderr });
     });
   });
 }
@@ -125,6 +137,41 @@ async function inspectBundledModules(configPath: string, functionPath: string): 
     hasGet: boolean;
     responseText?: string;
   };
+}
+
+async function inspectBundledSupervisor(supervisorPath: string): Promise<string> {
+  const result = await runBufferedProcess(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      'const module = await import(process.argv[1]); console.log(typeof module.createSelfHostScheduleSupervisor);',
+      pathToFileURL(supervisorPath).href,
+    ],
+  );
+  if (result.status !== 0) {
+    throw new Error(`Standalone supervisor probe failed: ${result.stderr || result.stdout}`);
+  }
+  return result.stdout.trim();
+}
+
+async function validateBundledSelfHostManifest(
+  supervisorPath: string,
+  manifestPath: string,
+): Promise<void> {
+  const result = await runBufferedProcess(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      'const module = await import(process.argv[1]); await module.readSelfHostAppManifest(process.argv[2]);',
+      pathToFileURL(supervisorPath).href,
+      manifestPath,
+    ],
+  );
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || 'Self-host manifest validation failed.');
+  }
 }
 
 function hasBundledPnpmPackage(runtimeNodeModulesDir: string, entryPrefix: string, packagePath: string[]): boolean {
@@ -235,6 +282,290 @@ describe('build-app command', () => {
       overwrite: true,
     })).toThrow(/cannot bundle captcha\.secretKey/i);
   });
+
+  it('emits one deterministic managed schedule manifest for filesystem, plugin, extra, and system sources', async () => {
+    const projectDir = createTempProject('managed-schedules');
+    mkdirSync(join(projectDir, 'functions'), { recursive: true });
+    writeFileSync(
+      join(projectDir, 'edgebase.config.ts'),
+      `import { defineConfig, defineFunction } from '@edge-base/shared';
+
+export default defineConfig({
+  databases: { shared: { tables: {} } },
+  plugins: [{
+    name: 'synthetic-plugin',
+    pluginApiVersion: 1,
+    config: {},
+    functions: {
+      cleanup: defineFunction({
+        trigger: { type: 'schedule', cron: '0 2 * * *' },
+        handler: async () => undefined,
+      }),
+    },
+  }],
+  cloudflare: { extraCrons: ['15 * * * *', ' 15  * * * * '] },
+});
+`,
+    );
+    writeFileSync(
+      join(projectDir, 'functions', 'nightly.ts'),
+      `import { defineFunction } from '@edge-base/shared';
+export default defineFunction({
+  trigger: { type: 'schedule', cron: '0 2 * * *' },
+  handler: async () => undefined,
+});
+export const quarterHour = defineFunction({
+  trigger: { type: 'schedule', cron: '15 * * * *' },
+  handler: async () => undefined,
+});
+`,
+    );
+
+    const first = createAppBundle(projectDir, { outputDir: 'first', overwrite: true });
+    const second = createAppBundle(projectDir, { outputDir: 'second', overwrite: true });
+    const onDisk = JSON.parse(readFileSync(first.manifestPath, 'utf-8')) as typeof first.manifest;
+    const gatewaySourcePath = join(
+      packageDir,
+      'src',
+      'templates',
+      'self-host',
+      'self-host-gateway.mjs',
+    );
+    const firstSelfHostDir = join(first.outputDir, '.edgebase', 'self-host');
+    const secondSelfHostDir = join(second.outputDir, '.edgebase', 'self-host');
+    const firstGatewayPath = join(firstSelfHostDir, 'self-host-gateway.mjs');
+    const firstSupervisorPath = join(firstSelfHostDir, 'self-host-schedule-supervisor.mjs');
+    const firstDockerEntrypointPath = join(firstSelfHostDir, 'self-host-docker-entrypoint.mjs');
+
+    expect(onDisk.schedules).toEqual(first.manifest.schedules);
+    expect(onDisk.selfHost).toEqual(first.manifest.selfHost);
+    expect(readdirSync(firstSelfHostDir).sort()).toEqual([
+      'self-host-docker-entrypoint.mjs',
+      'self-host-gateway.mjs',
+      'self-host-schedule-supervisor.mjs',
+    ]);
+    for (const asset of [
+      onDisk.selfHost.gateway,
+      onDisk.selfHost.scheduleSupervisor,
+      onDisk.selfHost.dockerEntrypoint,
+    ]) {
+      const content = readFileSync(join(first.outputDir, asset.path));
+      expect(asset.bytes).toBe(content.byteLength);
+      expect(asset.digest).toBe(`sha256:${createHash('sha256').update(content).digest('hex')}`);
+    }
+    expect(readFileSync(firstGatewayPath)).toEqual(readFileSync(gatewaySourcePath));
+    expect(readFileSync(firstGatewayPath)).toEqual(
+      readFileSync(join(secondSelfHostDir, 'self-host-gateway.mjs')),
+    );
+    expect(readFileSync(firstSupervisorPath)).toEqual(
+      readFileSync(join(secondSelfHostDir, 'self-host-schedule-supervisor.mjs')),
+    );
+    expect(readFileSync(firstDockerEntrypointPath)).toEqual(
+      readFileSync(join(secondSelfHostDir, 'self-host-docker-entrypoint.mjs')),
+    );
+    await expect(inspectBundledSupervisor(firstSupervisorPath)).resolves.toBe('function');
+    await expect(validateBundledSelfHostManifest(
+      firstSupervisorPath,
+      first.manifestPath,
+    )).resolves.toBeUndefined();
+    const gatewayBeforeTamper = readFileSync(firstGatewayPath);
+    writeFileSync(firstGatewayPath, Buffer.concat([gatewayBeforeTamper, Buffer.from('\n// tamper\n')]));
+    await expect(validateBundledSelfHostManifest(
+      firstSupervisorPath,
+      first.manifestPath,
+    )).rejects.toThrow(/byte length|digest/i);
+    writeFileSync(firstGatewayPath, gatewayBeforeTamper);
+    expect(second.manifest.schedules.digest).toBe(first.manifest.schedules.digest);
+    expect(second.manifest.selfHost).toEqual(first.manifest.selfHost);
+    expect(first.manifest.schedules.entries.map((entry) => entry.id)).toEqual([
+      'app-function:nightly#default',
+      'app-function:nightly#quarterHour',
+      'extra-cron:15 * * * *',
+      'plugin-function:synthetic-plugin/cleanup',
+      'system:maintenance',
+    ]);
+    expect(first.manifest.schedules.crons).toEqual(['0 2 * * *', '0 3 * * *', '15 * * * *']);
+
+    writeFileSync(
+      join(projectDir, 'functions', 'future.ts'),
+      `import { defineFunction } from '@edge-base/shared';
+export default defineFunction({
+  trigger: { type: 'schedule', cron: '5 6 * * *' },
+  handler: async () => undefined,
+});
+`,
+    );
+    writeFileSync(join(firstSelfHostDir, 'stale-asset.mjs'), 'throw new Error("stale");\n');
+    const refreshed = syncAppBundle(projectDir, first.outputDir);
+    expect(readdirSync(firstSelfHostDir).sort()).toEqual([
+      'self-host-docker-entrypoint.mjs',
+      'self-host-gateway.mjs',
+      'self-host-schedule-supervisor.mjs',
+    ]);
+    expect(readFileSync(firstGatewayPath)).toEqual(readFileSync(gatewaySourcePath));
+    expect(readFileSync(firstSupervisorPath)).toEqual(
+      readFileSync(join(secondSelfHostDir, 'self-host-schedule-supervisor.mjs')),
+    );
+    expect(
+      readdirSync(join(first.outputDir, '.edgebase'))
+        .filter((entry) => entry.startsWith('.self-host.')),
+    ).toEqual([]);
+    expect(
+      readdirSync(first.outputDir)
+        .filter((entry) => entry.startsWith('edgebase-app.json.sync-')
+          || entry.startsWith('edgebase-app.json.previous-')),
+    ).toEqual([]);
+    expect(refreshed.manifest.schedules.entries.map((entry) => entry.id))
+      .toContain('app-function:future#default');
+    expect(refreshed.manifest.schedules.digest).not.toBe(first.manifest.schedules.digest);
+  });
+
+  it.each(['after-self-host-assets', 'after-previous-rename', 'after-generation-rename'] as const)(
+    'keeps a coherent generation after a %s publication fault',
+    (faultPoint) => {
+      const projectDir = createTempProject(`atomic-${faultPoint}`);
+      writeFileSync(
+        join(projectDir, 'edgebase.config.ts'),
+        'export default { databases: { shared: { tables: {} } } };\n',
+      );
+      const initial = createAppBundle(projectDir, { outputDir: 'live', overwrite: true });
+      if (faultPoint === 'after-previous-rename') {
+        const currentGeneration = realpathSync(initial.outputDir);
+        rmSync(initial.outputDir, { force: true });
+        renameSync(currentGeneration, initial.outputDir);
+        expect(lstatSync(initial.outputDir).isDirectory()).toBe(true);
+      }
+      const manifestBefore = readFileSync(initial.manifestPath);
+      const assetsBefore = Object.fromEntries(
+        Object.entries(initial.manifest.selfHost)
+          .filter((entry): entry is [string, { path: string }] => (
+            typeof entry[1] === 'object' && entry[1] !== null && 'path' in entry[1]
+          ))
+          .map(([name, asset]) => [name, readFileSync(join(initial.outputDir, asset.path))]),
+      );
+      writeFileSync(
+        join(projectDir, 'edgebase.config.ts'),
+        'export default { databases: { shared: { tables: {} } }, cloudflare: { extraCrons: ["5 6 * * *"] } };\n',
+      );
+
+      expect(() => syncAppBundle(projectDir, initial.outputDir, {
+        publicationFaultInjector(point) {
+          if (point === faultPoint) throw new Error(`synthetic ${faultPoint}`);
+        },
+      })).toThrow(`synthetic ${faultPoint}`);
+
+      const manifestAfter = readFileSync(initial.manifestPath);
+      if (faultPoint === 'after-generation-rename') {
+        expect(manifestAfter).not.toEqual(manifestBefore);
+        expect(JSON.parse(manifestAfter.toString('utf8'))).toMatchObject({
+          schedules: { crons: expect.arrayContaining(['5 6 * * *']) },
+        });
+      } else {
+        expect(manifestAfter).toEqual(manifestBefore);
+      }
+      for (const [name, content] of Object.entries(assetsBefore)) {
+        const asset = initial.manifest.selfHost[name as keyof typeof initial.manifest.selfHost];
+        if (typeof asset === 'object' && asset !== null && 'path' in asset) {
+          expect(readFileSync(join(initial.outputDir, asset.path))).toEqual(content);
+        }
+      }
+      expect(readdirSync(projectDir).filter((name) => (
+        name.startsWith('.live.sync-') || name.startsWith('.live.previous-')
+      ))).toEqual([]);
+    },
+  );
+
+  it.each([
+    'after-manifest-write',
+    'after-generation-fsync',
+    'before-current-pointer-rename',
+    'after-generation-rename',
+  ] as const)(
+    'keeps a complete current generation after a real SIGKILL at %s',
+    { timeout: 180_000 },
+    async (faultPoint) => {
+      if (process.platform === 'win32') return;
+      const projectDir = createTempProject(`hard-crash-${faultPoint}`);
+      writeFileSync(
+        join(projectDir, 'edgebase.config.ts'),
+        'export default { databases: { shared: { tables: {} } } };\n',
+      );
+      const initial = createAppBundle(projectDir, { outputDir: 'live', overwrite: true });
+      expect(lstatSync(initial.outputDir).isSymbolicLink()).toBe(true);
+      const initialGeneration = initial.manifest.generation;
+      writeFileSync(
+        join(projectDir, 'edgebase.config.ts'),
+        'export default { databases: { shared: { tables: {} } }, cloudflare: { extraCrons: ["5 6 * * *"] } };\n',
+      );
+      const crashScript = join(projectDir, 'crash-publication.mts');
+      const appBundleModule = pathToFileURL(
+        resolve(packageDir, 'src', 'lib', 'app-bundle.ts'),
+      ).href;
+      writeFileSync(crashScript, [
+        `import { syncAppBundle } from ${JSON.stringify(appBundleModule)};`,
+        'const [projectDir, outputDir, faultPoint] = process.argv.slice(2);',
+        'syncAppBundle(projectDir, outputDir, {',
+        '  publicationFaultInjector(point) {',
+        "    if (point === faultPoint) process.kill(process.pid, 'SIGKILL');",
+        '  },',
+        '});',
+      ].join('\n'));
+
+      const crashed = await runBufferedProcess(
+        tsxCommand.command,
+        [
+          ...tsxCommand.argsPrefix,
+          crashScript,
+          projectDir,
+          initial.outputDir,
+          faultPoint,
+        ],
+        { ...tsxExecOptions },
+      );
+      const killedBySigkill = (
+        (crashed.status === null && crashed.signal === 'SIGKILL')
+        || (
+          crashed.signal === null
+          && crashed.status === 128 + osConstants.signals.SIGKILL
+        )
+      );
+      expect(
+        killedBySigkill,
+        `hard-crash child status=${String(crashed.status)} signal=${String(crashed.signal)}; `
+          + `stderr (first 2048 characters): ${crashed.stderr.slice(0, 2_048)}`,
+      ).toBe(true);
+      expect(existsSync(initial.outputDir)).toBe(true);
+      expect(lstatSync(initial.outputDir).isSymbolicLink()).toBe(true);
+      const currentManifest = JSON.parse(readFileSync(initial.manifestPath, 'utf-8')) as {
+        generation: string;
+        schedules: { crons: string[] };
+        selfHost: { scheduleSupervisor: { path: string } };
+      };
+      if (faultPoint === 'after-generation-rename') {
+        expect(currentManifest.schedules.crons).toContain('5 6 * * *');
+        expect(currentManifest.generation).not.toBe(initialGeneration);
+      } else {
+        expect(currentManifest.schedules.crons).not.toContain('5 6 * * *');
+        expect(currentManifest.generation).toBe(initialGeneration);
+      }
+      await expect(validateBundledSelfHostManifest(
+        join(initial.outputDir, currentManifest.selfHost.scheduleSupervisor.path),
+        initial.manifestPath,
+      )).resolves.toBeUndefined();
+
+      const recovered = syncAppBundle(projectDir, initial.outputDir);
+      expect(recovered.manifest.schedules.crons).toContain('5 6 * * *');
+      expect(
+        readdirSync(projectDir).filter((name) => (
+          name.startsWith('.live.sync-') || name.startsWith('.live.current-')
+        )),
+      ).toEqual([]);
+      expect(
+        readdirSync(join(projectDir, '.live.generations'), { withFileTypes: true })
+          .filter((entry) => entry.isDirectory()),
+      ).toHaveLength(2);
+    },
+  );
 
   it('builds a self-contained app bundle that does not rely on project config or function source files', async () => {
     const projectDir = createTempProject('self-contained');

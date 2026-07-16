@@ -54,6 +54,7 @@ import { summarizeValidationErrors, validateInsert, validateUpdate } from '../li
 import { hookRejectedError, validationError, notFoundError, normalizeDatabaseError } from '../lib/errors.js';
 import {
   executeDbTriggers,
+  getFunctionsByTrigger,
   getRegisteredFunctions,
   buildFunctionContext,
 } from '../lib/functions.js';
@@ -64,6 +65,21 @@ import { resolveRootServiceKey } from '../lib/service-key.js';
 import { resolveDbLiveBatchThreshold } from '../lib/database-live-config.js';
 import { buildTableHookRuntimeServices } from '../lib/table-hook-runtime.js';
 import { ensureServerStartup } from '../lib/runtime-startup.js';
+import {
+  SQLITE_RESPONSE_CURSOR_EXPIRY_INDEX_DDL,
+  SQLITE_RESPONSE_CURSOR_TABLE_DDL,
+  createSqliteResponseCursorStore,
+} from '../lib/response-cursor-store.js';
+import {
+  buildBoundedPageResponse,
+  prepareBoundedQuery,
+  type ResponseCursorStore,
+} from '../lib/response-byte-limit.js';
+import {
+  MAX_TRANSACT_OPERATIONS,
+  compactTransactResult,
+  parseTransactResultMode,
+} from '../lib/transact-result.js';
 import type { Env } from '../types.js';
 
 // ─── Types ───
@@ -98,6 +114,22 @@ export class DatabaseDO extends DurableObject<DOEnv> {
   private app: Hono;
   private config: EdgeBaseConfig;
   private initialized = false;
+  private boundedResponseCursorStore?: ResponseCursorStore;
+
+  private getBoundedResponseCursorStore(): ResponseCursorStore {
+    if (!this.boundedResponseCursorStore) {
+      this.boundedResponseCursorStore = createSqliteResponseCursorStore(
+        async (sql, params) => [
+          ...this.sql(sql, ...params),
+        ] as Record<string, unknown>[],
+        async () => {
+          this.execMulti(SQLITE_RESPONSE_CURSOR_TABLE_DDL);
+          this.execMulti(SQLITE_RESPONSE_CURSOR_EXPIRY_INDEX_DDL);
+        },
+      );
+    }
+    return this.boundedResponseCursorStore;
+  }
   private doName = '';
   private runtimeReadyPromise: Promise<void> | null = null;
 
@@ -330,24 +362,43 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         : 1;
       this.setMeta(`migration_version:${name}`, String(maxVersion));
       this.setMeta(hashKey, newHash);
-    } else if (currentHash !== newHash) {
-      // Schema changed — detect new columns (non-destructive only)
-      this.handleSchemaUpdate(name, config);
-      this.setMeta(hashKey, newHash);
-
-      // Run pending migrations
-      this.runMigrations(name, config);
     } else {
-      // No hash change — run migrations first, then verify the physical schema.
-      // This self-heals databases whose hash was saved by an older runtime
-      // before existing-column UNIQUE changes were materialized.
-      this.runMigrations(name, config);
-      this.handleSchemaUpdate(name, config);
+      // Existing-table upgrades use one bounded provider transaction. Missing
+      // columns are made available first, pending data migrations run second,
+      // and physical UNIQUE/index reconciliation is finalized last. The hash
+      // and migration metadata therefore cannot get ahead of committed data.
+      this.ctx.storage.transactionSync(() => {
+        if (currentHash !== newHash) {
+          this.prepareSchemaUpdate(name, config);
+        }
+        this.runMigrations(name, config);
+        this.handleSchemaUpdate(name, config);
+        this.ensureFTS5AndIndexes(name, config);
+        if (currentHash !== newHash) {
+          this.setMeta(hashKey, newHash);
+        }
+      });
+      return;
     }
 
     // Always ensure FTS5 + indexes exist (idempotent IF NOT EXISTS DDL).
     // Covers case where initial creation failed silently but hash was saved.
     this.ensureFTS5AndIndexes(name, config);
+  }
+
+  /** Add only missing columns so pending data migrations can safely backfill. */
+  private prepareSchemaUpdate(name: string, config: TableConfig): void {
+    const existingCols = new Set<string>();
+    for (const row of this.sql(`PRAGMA table_info(${escapeIdentifier(name)})`)) {
+      existingCols.add(row.name as string);
+    }
+
+    const effectiveSchema = buildEffectiveSchema(config.schema);
+    for (const [colName, field] of Object.entries(effectiveSchema)) {
+      if (existingCols.has(colName)) continue;
+      const [addColumnDDL] = generateSQLiteAddColumnDDLs(name, colName, field);
+      this.execMulti(addColumnDDL);
+    }
   }
 
   private handleSchemaUpdate(name: string, config: TableConfig): void {
@@ -410,13 +461,11 @@ export class DatabaseDO extends DurableObject<DOEnv> {
     }
 
     if (migrationDDLs.length > 0) {
-      // Keep column and index reconciliation atomic. If any DDL fails, a later
-      // request can safely retry without a partially constrained schema.
-      this.ctx.storage.transactionSync(() => {
-        for (const ddl of migrationDDLs) {
-          this.execMulti(ddl);
-        }
-      });
+      // initTable owns the provider transaction for existing tables, so these
+      // DDLs commit together with data migrations and metadata.
+      for (const ddl of migrationDDLs) {
+        this.execMulti(ddl);
+      }
     }
   }
 
@@ -508,7 +557,9 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       this.ensureTableExists(name);
 
       const queryParams = Object.fromEntries(new URL(c.req.url).searchParams);
-      const options = parseQueryParams(queryParams);
+      const responseCursorStore = this.getBoundedResponseCursorStore();
+      const boundedQuery = await prepareBoundedQuery(queryParams, name, responseCursorStore);
+      const options = parseQueryParams(boundedQuery.params);
       const { sql, params, countSql, countParams } = buildListQuery(name, options);
 
       const tableConfig = this.getTableConfig(name);
@@ -559,6 +610,22 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         response.cursor = normalizedRows[normalizedRows.length - 1].id;
       }
 
+      if (boundedQuery.maxResponseBytes !== undefined) {
+        return buildBoundedPageResponse({
+          maxResponseBytes: boundedQuery.maxResponseBytes,
+          tableName: name,
+          items: enrichedRows,
+          cursorRecordIds: normalizedRows.map((row) => String(row.id ?? '')),
+          sourceCursorRecordId: normalizedRows.length > 0
+            ? String(normalizedRows[normalizedRows.length - 1]!.id ?? '') || undefined
+            : undefined,
+          total: (response.total as number | null | undefined) ?? null,
+          perPage: limit,
+          sourceHasMore: hasMore,
+          cursorStore: responseCursorStore,
+        });
+      }
+
       return c.json(response);
     });
 
@@ -584,9 +651,28 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       this.ensureTableExists(name);
 
       const queryParams = Object.fromEntries(new URL(c.req.url).searchParams);
-      const options = parseQueryParams(queryParams);
+      const responseCursorStore = this.getBoundedResponseCursorStore();
+      const boundedQuery = await prepareBoundedQuery(
+        queryParams,
+        name,
+        responseCursorStore,
+        { search: true },
+      );
+      const options = parseQueryParams(boundedQuery.params);
       const q = options.search || '';
       if (!q) {
+        if (boundedQuery.maxResponseBytes !== undefined) {
+          return buildBoundedPageResponse({
+            maxResponseBytes: boundedQuery.maxResponseBytes,
+            tableName: name,
+            items: [],
+            cursorRecordIds: [],
+            total: 0,
+            perPage: options.pagination?.limit ?? options.pagination?.perPage ?? 100,
+            sourceHasMore: false,
+            cursorStore: responseCursorStore,
+          });
+        }
         return c.json({ items: [] });
       }
 
@@ -611,11 +697,12 @@ export class DatabaseDO extends DurableObject<DOEnv> {
 
       try {
         let rows = [...this.sql(searchQuery.sql, ...searchQuery.params)] as Record<string, unknown>[];
-        let total = Number(
+        const includeTotal = !['0', 'false'].includes((c.req.query('includeTotal') ?? '').toLowerCase());
+        let total: number | null = includeTotal ? Number(
           searchQuery.countSql
             ? [...this.sql(searchQuery.countSql, ...(searchQuery.countParams ?? []))][0]?.total ?? rows.length
             : rows.length,
-        );
+        ) : null;
         if (rows.length === 0) {
           const fallback = buildSubstringSearchQuery(name, q, {
             pagination: options.pagination,
@@ -625,11 +712,11 @@ export class DatabaseDO extends DurableObject<DOEnv> {
             fields: ftsFields,
           });
           rows = [...this.sql(fallback.sql, ...fallback.params)] as Record<string, unknown>[];
-          total = Number(
+          total = includeTotal ? Number(
             fallback.countSql
               ? [...this.sql(fallback.countSql, ...(fallback.countParams ?? []))][0]?.total ?? rows.length
               : rows.length,
-          );
+          ) : null;
         }
         const tableConfig = this.getTableConfig(name);
         const normalizedSearch = this.normalizeRows(rows, tableConfig);
@@ -653,7 +740,23 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         const searchEnrichAuth = this.parseAuthContext(c.req.raw);
         const enrichedSearch = await this.enrichRecords(name, normalizedSearch, searchEnrichAuth);
 
-        return c.json({ items: enrichedSearch, total, hasMore: total > offset + enrichedSearch.length, cursor: null, page: null, perPage: limit });
+        if (boundedQuery.maxResponseBytes !== undefined) {
+          return buildBoundedPageResponse({
+            maxResponseBytes: boundedQuery.maxResponseBytes,
+            tableName: name,
+            items: enrichedSearch,
+            cursorRecordIds: normalizedSearch.map((row) => String(row.id ?? '')),
+            sourceCursorRecordId: normalizedSearch.length > 0
+              ? String(normalizedSearch[normalizedSearch.length - 1]!.id ?? '') || undefined
+              : undefined,
+            total,
+            perPage: limit,
+            sourceHasMore: normalizedSearch.length === limit,
+            cursorStore: responseCursorStore,
+          });
+        }
+
+        return c.json({ items: enrichedSearch, total, hasMore: total !== null && total > offset + enrichedSearch.length, cursor: null, page: null, perPage: limit });
       } catch (err) {
         if (err instanceof EdgeBaseError) throw err;
         return c.json({ items: [], error: 'FTS5 not configured for this table.' }, 400);
@@ -1745,15 +1848,22 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         where?: unknown;
         exists?: unknown;
       }
-      const body = await c.req.json<{ operations?: TransactOp[] }>();
+      const body = await c.req.json<{ operations?: TransactOp[]; resultMode?: unknown }>();
+      const resultMode = parseTransactResultMode(body.resultMode);
+      if (resultMode === null) {
+        return c.json({
+          code: 400,
+          slug: 'invalid-transact-result-mode',
+          message: "transact resultMode must be 'full' or 'compact'.",
+        }, 400);
+      }
       const operations = body.operations;
       if (!Array.isArray(operations) || operations.length === 0) {
         throw validationError('transact requires a non-empty operations array.');
       }
-      const MAX_TRANSACT_OPS = 500;
-      if (operations.length > MAX_TRANSACT_OPS) {
+      if (operations.length > MAX_TRANSACT_OPERATIONS) {
         throw validationError(
-          `Transact limit exceeded: ${operations.length} operations (max ${MAX_TRANSACT_OPS}).`,
+          `Transact limit exceeded: ${operations.length} operations (max ${MAX_TRANSACT_OPERATIONS}).`,
         );
       }
 
@@ -1847,6 +1957,23 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         action: 'insert' | 'update' | 'delete';
         payload: { before?: Record<string, unknown>; after?: Record<string, unknown> };
       }> = [];
+      const hasDbLiveConsumer = Boolean(this.env.DATABASE_LIVE);
+      const triggerConsumers = new Map<string, boolean>();
+      const hasTriggerConsumer = (
+        table: string,
+        event: 'insert' | 'update' | 'delete',
+      ): boolean => {
+        const key = `${table}:${event}`;
+        const cached = triggerConsumers.get(key);
+        if (cached !== undefined) return cached;
+        const present = getFunctionsByTrigger('db', {
+          type: 'db',
+          table,
+          event,
+        }).length > 0;
+        triggerConsumers.set(key, present);
+        return present;
+      };
 
       this.ctx.storage.transactionSync(() => {
         const now = new Date().toISOString();
@@ -1888,9 +2015,11 @@ export class DatabaseDO extends DurableObject<DOEnv> {
                   : value,
               );
             }
+            const needsProbeRow = resultMode === 'full'
+              || (!isSK && rules?.read !== undefined);
             const rows = [
               ...this.sql(
-                `SELECT * FROM "${name}" WHERE ${clauses.join(' AND ')} LIMIT 1`,
+                `SELECT ${needsProbeRow ? '*' : '1 AS "matched"'} FROM "${name}" WHERE ${clauses.join(' AND ')} LIMIT 1`,
                 ...params,
               ),
             ];
@@ -1923,7 +2052,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
                 `Transaction expectation failed: expected no matching row in "${name}".`,
               );
             }
-            results.push({ expected: true });
+            if (resultMode === 'full') results.push({ expected: true });
             continue;
           }
 
@@ -1978,9 +2107,13 @@ export class DatabaseDO extends DurableObject<DOEnv> {
             const placeholders = columns.map(() => '?').join(', ');
             const colStr = columns.map((col) => escapeIdentifier(col)).join(', ');
             this.sql(`INSERT INTO "${name}" (${colStr}) VALUES (${placeholders})`, ...values);
-            results.push({ inserted: record });
-            liveChanges.push({ table: name, type: 'added', docId: id, data: record });
-            triggerOps.push({ table: name, action: 'insert', payload: { after: record } });
+            if (resultMode === 'full') results.push({ inserted: record });
+            if (resultMode === 'full' || hasDbLiveConsumer) {
+              liveChanges.push({ table: name, type: 'added', docId: id, data: record });
+            }
+            if (resultMode === 'full' || hasTriggerConsumer(name, 'insert')) {
+              triggerOps.push({ table: name, action: 'insert', payload: { after: record } });
+            }
             continue;
           }
 
@@ -1999,7 +2132,14 @@ export class DatabaseDO extends DurableObject<DOEnv> {
                 ),
               );
             }
-            const beforeRows = [...this.sql(`SELECT * FROM "${name}" WHERE "id" = ?`, id)];
+            const hasUpdateTrigger = hasTriggerConsumer(name, 'update');
+            const needsBeforeRow = resultMode === 'full'
+              || hasDbLiveConsumer
+              || hasUpdateTrigger
+              || (!isSK && rules?.update !== undefined);
+            const beforeRows = needsBeforeRow
+              ? [...this.sql(`SELECT * FROM "${name}" WHERE "id" = ?`, id)]
+              : [];
             const beforeRow = beforeRows[0] as Record<string, unknown> | undefined;
             if (!isSK && beforeRow && rules?.update && typeof rules.update === 'function') {
               let canUpdate = false;
@@ -2053,26 +2193,41 @@ export class DatabaseDO extends DurableObject<DOEnv> {
               params.push(id);
               this.sql(`UPDATE "${name}" SET ${setClauses.join(', ')} WHERE "id" = ?`, ...params);
             }
-            const afterRows = [...this.sql(`SELECT * FROM "${name}" WHERE "id" = ?`, id)];
-            const afterRow =
-              afterRows.length > 0
+            const needsAfterRow = resultMode === 'full' || hasDbLiveConsumer || hasUpdateTrigger;
+            const afterRows = needsAfterRow
+              ? [...this.sql(`SELECT * FROM "${name}" WHERE "id" = ?`, id)]
+              : [];
+            const afterRow = needsAfterRow
+              ? (afterRows.length > 0
                 ? (afterRows[0] as Record<string, unknown>)
-                : { id, ...data };
-            results.push({ updated: afterRow });
+                : { id, ...data })
+              : undefined;
+            if (resultMode === 'full') results.push({ updated: afterRow });
             if (beforeRow) {
-              liveChanges.push({ table: name, type: 'modified', docId: id, data: afterRow });
-              triggerOps.push({
-                table: name,
-                action: 'update',
-                payload: { before: beforeRow, after: afterRow },
-              });
+              if ((resultMode === 'full' || hasDbLiveConsumer) && afterRow) {
+                liveChanges.push({ table: name, type: 'modified', docId: id, data: afterRow });
+              }
+              if ((resultMode === 'full' || hasUpdateTrigger) && afterRow) {
+                triggerOps.push({
+                  table: name,
+                  action: 'update',
+                  payload: { before: beforeRow, after: afterRow },
+                });
+              }
             }
             continue;
           }
 
           // delete
           const id = op.id as string;
-          const existing = [...this.sql(`SELECT * FROM "${name}" WHERE "id" = ?`, id)];
+          const hasDeleteTrigger = hasTriggerConsumer(name, 'delete');
+          const needsExistingRow = resultMode === 'full'
+            || hasDbLiveConsumer
+            || hasDeleteTrigger
+            || (!isSK && rules?.delete !== undefined);
+          const existing = needsExistingRow
+            ? [...this.sql(`SELECT * FROM "${name}" WHERE "id" = ?`, id)]
+            : [];
           if (existing.length > 0) {
             if (!isSK && rules?.delete && typeof rules.delete === 'function') {
               let canDelete = false;
@@ -2090,15 +2245,19 @@ export class DatabaseDO extends DurableObject<DOEnv> {
                 );
               }
             }
-            liveChanges.push({ table: name, type: 'removed', docId: id, data: null });
-            triggerOps.push({
-              table: name,
-              action: 'delete',
-              payload: { before: existing[0] as Record<string, unknown> },
-            });
+            if (resultMode === 'full' || hasDbLiveConsumer) {
+              liveChanges.push({ table: name, type: 'removed', docId: id, data: null });
+            }
+            if (resultMode === 'full' || hasDeleteTrigger) {
+              triggerOps.push({
+                table: name,
+                action: 'delete',
+                payload: { before: existing[0] as Record<string, unknown> },
+              });
+            }
           }
           this.sql(`DELETE FROM "${name}" WHERE "id" = ?`, id);
-          results.push({ deleted: true, id });
+          if (resultMode === 'full') results.push({ deleted: true, id });
         }
       });
 
@@ -2148,7 +2307,11 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         );
       }
 
-      return c.json({ results });
+      return c.json(
+        resultMode === 'compact'
+          ? compactTransactResult(operations.length)
+          : { results },
+      );
     });
 
     // INTERNAL: POST /internal/sql — raw SQL execution for server SDK

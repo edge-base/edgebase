@@ -15,6 +15,8 @@ import {
 import { resolveLocalDevBindings } from './project-runtime.js';
 
 const EDGEBASE_CONFIG_FILES = ['edgebase.config.ts', 'edgebase.config.js'];
+const PACK_RUNTIME_MAIN = '.edgebase/runtime/server/src/index.ts';
+const PACK_DEFAULT_COMPATIBILITY_DATE = '2025-02-10';
 
 export interface EdgeBasePackManifest {
   schemaVersion: 1;
@@ -27,6 +29,8 @@ export interface EdgeBasePackManifest {
   runtime: EdgeBaseAppManifest['runtime'];
   config: EdgeBaseAppManifest['config'];
   functions: EdgeBaseAppManifest['functions'];
+  schedules: EdgeBaseAppManifest['schedules'];
+  selfHost: EdgeBaseAppManifest['selfHost'];
   launcher: {
     entry: 'launcher.mjs';
     unix: 'run.sh';
@@ -128,13 +132,22 @@ function isPriorPackArtifactDir(dir: string): boolean {
   });
 }
 
-function assertArtifactSymlinksContained(artifactRoot: string): void {
+function assertArtifactSymlinksContained(
+  artifactRoot: string,
+  options: { allowGenerationPointerRoot?: boolean } = {},
+): void {
   const rootStat = lstatSync(artifactRoot);
-  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+  if (
+    (!rootStat.isDirectory() && !rootStat.isSymbolicLink())
+    || (rootStat.isSymbolicLink() && !options.allowGenerationPointerRoot)
+  ) {
     throw new Error(`Portable artifact root must be a real directory: ${artifactRoot}`);
   }
 
   const canonicalRoot = realpathSync(artifactRoot);
+  if (!lstatSync(canonicalRoot).isDirectory()) {
+    throw new Error(`Portable artifact root must resolve to a directory: ${artifactRoot}`);
+  }
   const symlinkTraversalStaysWithinRoot = (linkPath: string, linkTarget: string): boolean => {
     if (isAbsolute(linkTarget)) return false;
     const parentRelative = relative(canonicalRoot, dirname(linkPath));
@@ -261,6 +274,8 @@ function buildPackManifest(
     runtime: appManifest.runtime,
     config: appManifest.config,
     functions: appManifest.functions,
+    schedules: appManifest.schedules,
+    selfHost: appManifest.selfHost,
     launcher: {
       entry: 'launcher.mjs',
       unix: 'run.sh',
@@ -665,6 +680,24 @@ export function createArchiveFromPortableArtifact(sourcePath: string, archivePat
   return 'tar.gz';
 }
 
+function ensurePackRuntimeMain(wranglerToml: string): string {
+  const firstSection = /^[ \t]*\[/m.exec(wranglerToml);
+  const rootEnd = firstSection?.index ?? wranglerToml.length;
+  let root = wranglerToml.slice(0, rootEnd);
+  const remainder = wranglerToml.slice(rootEnd);
+  const mainAssignment = /^[ \t]*main[ \t]*=.*$/m;
+  const normalizedMain = `main = "${PACK_RUNTIME_MAIN}"`;
+  if (mainAssignment.test(root)) {
+    root = root.replace(mainAssignment, normalizedMain);
+  } else {
+    root = `${root.replace(/\s*$/, '')}\n${normalizedMain}\n`;
+  }
+  if (!/^[ \t]*compatibility_date[ \t]*=/m.test(root)) {
+    root = `${root.replace(/\s*$/, '')}\ncompatibility_date = "${PACK_DEFAULT_COMPATIBILITY_DATE}"\n`;
+  }
+  return `${root}${remainder}`;
+}
+
 function finalizePackWrangler(projectDir: string, outputDir: string): void {
   const configFile = EDGEBASE_CONFIG_FILES
     .map((name) => join(projectDir, name))
@@ -684,21 +717,22 @@ function finalizePackWrangler(projectDir: string, outputDir: string): void {
     requiredCompatibilityFlags: RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS,
   });
 
-  if (!generatedPath) return;
-
-  writeFileSync(wranglerPath, readFileSync(generatedPath, 'utf-8'), 'utf-8');
-  rmSync(generatedPath, { force: true });
+  const finalized = ensurePackRuntimeMain(
+    readFileSync(generatedPath ?? wranglerPath, 'utf-8'),
+  );
+  writeFileSync(wranglerPath, finalized, 'utf-8');
+  if (generatedPath) rmSync(generatedPath, { force: true });
 }
 
 function buildLauncherSource(manifest: EdgeBasePackManifest): string {
   return `#!/usr/bin/env node
-import { randomBytes } from 'node:crypto';
-import { createWriteStream, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { createWriteStream, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const DEFAULT_HOST = ${JSON.stringify(manifest.launcher.defaultHost)};
 const DEFAULT_PORT = ${manifest.launcher.defaultPort};
@@ -708,6 +742,11 @@ const DEFAULT_STATE_DIR = ${JSON.stringify(manifest.launcher.stateDir)};
 const DEFAULT_RUNTIME_DIR = ${JSON.stringify(manifest.launcher.runtimeDir)};
 const SINGLE_INSTANCE = ${manifest.launcher.singleInstance ? 'true' : 'false'};
 const PORT_SEARCH_LIMIT = ${manifest.launcher.portSearchLimit};
+const INTERNAL_HOST = '127.0.0.1';
+const GATEWAY_DRAIN_TIMEOUT_MS = 5_000;
+const RUNTIME_READY_TIMEOUT_MS = 30_000;
+const SHUTDOWN_TIMEOUT_MS = 10_000;
+const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const RUNTIME_ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const RUNTIME_ENV_ALLOWLIST_KEY = 'EDGEBASE_RUNTIME_ENV_ALLOWLIST';
 const NEVER_FORWARD_PROCESS_ENV_KEYS = new Set([
@@ -718,7 +757,15 @@ const NEVER_FORWARD_PROCESS_ENV_KEYS = new Set([
   'EDGEBASE_HOST',
   'EDGEBASE_OPEN',
   'EDGEBASE_PORT',
+  'EDGEBASE_SELF_HOST_CONTROL_SECRET',
+  'EDGEBASE_SELF_HOST_GATEWAY_SECRET',
+  'EDGEBASE_SELF_HOST_APP_GENERATION',
+  'EDGEBASE_SELF_HOST_SCHEDULE_DIGEST',
+  'EDGEBASE_TRUSTED_PROXY_CIDRS',
   'HOST',
+  'HTTPS_CERT_PATH',
+  'HTTPS_KEY_PATH',
+  'LOCAL_PROTOCOL',
   'PERSIST_DIR',
   'PORT',
   RUNTIME_ENV_ALLOWLIST_KEY,
@@ -825,6 +872,47 @@ function readJson(filePath) {
   } catch {
     return null;
   }
+}
+
+function verifySelfHostAssets(manifestPath, artifactRoot) {
+  const source = readFileSync(manifestPath);
+  if (source.byteLength > 4 * 1024 * 1024) throw new Error('edgebase-app manifest is too large.');
+  const appManifest = JSON.parse(source.toString('utf8'));
+  if (!SHA256_PATTERN.test(appManifest?.generation)) {
+    throw new Error('Invalid immutable app generation.');
+  }
+  if (!SHA256_PATTERN.test(appManifest?.schedules?.digest)) {
+    throw new Error('Invalid managed schedule digest.');
+  }
+  const selfHost = appManifest?.selfHost;
+  if (!selfHost || selfHost.schemaVersion !== 1) throw new Error('Invalid self-host manifest.');
+  const expected = {
+    gateway: '.edgebase/self-host/self-host-gateway.mjs',
+    scheduleSupervisor: '.edgebase/self-host/self-host-schedule-supervisor.mjs',
+    dockerEntrypoint: '.edgebase/self-host/self-host-docker-entrypoint.mjs',
+  };
+  const assets = {};
+  for (const [name, expectedPath] of Object.entries(expected)) {
+    const asset = selfHost[name];
+    if (!asset || asset.path !== expectedPath || !/^sha256:[a-f0-9]{64}$/.test(asset.digest)
+      || !Number.isSafeInteger(asset.bytes) || asset.bytes < 1 || asset.bytes > 2 * 1024 * 1024) {
+      throw new Error('Invalid self-host ' + name + ' asset manifest.');
+    }
+    const assetPath = join(artifactRoot, asset.path);
+    const fileStat = lstatSync(assetPath);
+    if (!fileStat.isFile() || fileStat.isSymbolicLink() || fileStat.size !== asset.bytes) {
+      throw new Error('Self-host ' + name + ' asset does not match its file contract.');
+    }
+    const digest = 'sha256:' + createHash('sha256').update(readFileSync(assetPath)).digest('hex');
+    if (digest !== asset.digest) throw new Error('Self-host ' + name + ' asset digest mismatch.');
+    assets[name] = { path: asset.path, digest: asset.digest, bytes: asset.bytes };
+  }
+  const generation = 'sha256:' + createHash('sha256').update(JSON.stringify({
+    schemaVersion: 1,
+    assets,
+  })).digest('hex');
+  if (generation !== selfHost.generation) throw new Error('Self-host generation digest mismatch.');
+  return { appManifest, assets };
 }
 
 function parseEnvFile(filePath) {
@@ -958,19 +1046,75 @@ function isProcessAlive(pid) {
   }
 }
 
-function terminateProcessTree(pid) {
+function signalProcessTree(pid, signal) {
   if (!Number.isInteger(pid) || pid <= 0) return;
 
   if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore' });
+    const args = ['/pid', String(pid), '/t'];
+    if (signal === 'SIGKILL') args.push('/f');
+    spawnSync('taskkill', args, { stdio: 'ignore' });
     return;
   }
 
   try {
-    process.kill(pid, 'SIGTERM');
+    process.kill(-pid, signal);
   } catch {
-    // best-effort cleanup only
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // The complete owned group has already exited.
+    }
   }
+}
+
+function processGroupAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  if (process.platform === 'win32') return isProcessAlive(pid);
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function remainingMs(deadline) {
+  return Math.max(0, deadline - Date.now());
+}
+
+async function waitForProcessGroupExit(pid, deadline) {
+  while (processGroupAlive(pid) && remainingMs(deadline) > 0) {
+    await new Promise((resolveDelay) => setTimeout(
+      resolveDelay,
+      Math.min(50, remainingMs(deadline)),
+    ));
+  }
+  return !processGroupAlive(pid);
+}
+
+async function waitUntil(promise, timeoutMs) {
+  if (timeoutMs <= 0) return false;
+  let timer = null;
+  try {
+    return await Promise.race([
+      promise.then(() => true, () => true),
+      new Promise((resolveTimeout) => {
+        timer = setTimeout(() => resolveTimeout(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function childTerminalError(outcome, context) {
+  if (outcome.kind === 'error') {
+    return new Error('Wrangler failed during ' + context + '.', { cause: outcome.error });
+  }
+  return new Error(
+    'Wrangler exited during ' + context
+      + ' (code=' + String(outcome.code) + ', signal=' + String(outcome.signal) + ').',
+  );
 }
 
 function resolveDataRoot(dataDir) {
@@ -1004,8 +1148,15 @@ async function probePort(port, host) {
 
 async function resolveSelectedPort(host, explicitPort, statePath) {
   if (explicitPort) {
+    const port = Number(String(explicitPort));
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+      throw new Error('Explicit port must be an integer between 1 and 65535.');
+    }
+    if (!(await probePort(port, host))) {
+      throw new Error('Explicit gateway port ' + port + ' is not available on ' + host + '.');
+    }
     return {
-      port: Number.parseInt(String(explicitPort), 10),
+      port,
       source: 'explicit',
     };
   }
@@ -1030,6 +1181,75 @@ async function resolveSelectedPort(host, explicitPort, statePath) {
   throw new Error(
     \`Could not find an available port in the range \${preferredPort}-\${preferredPort + PORT_SEARCH_LIMIT - 1}.\`,
   );
+}
+
+async function reserveInternalPort(excludedPort) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const server = createServer();
+    const port = await new Promise((resolvePort, reject) => {
+      server.once('error', reject);
+      server.once('listening', () => {
+        const address = server.address();
+        if (!address || typeof address === 'string') {
+          reject(new Error('Could not resolve the reserved internal Wrangler port.'));
+          return;
+        }
+        resolvePort(address.port);
+      });
+      server.listen({ port: 0, host: INTERNAL_HOST, exclusive: true });
+    });
+
+    if (port === excludedPort) {
+      await new Promise((resolveClose) => server.close(resolveClose));
+      continue;
+    }
+
+    let released = false;
+    return {
+      port,
+      async release() {
+        if (released) return;
+        released = true;
+        await new Promise((resolveClose, reject) => {
+          server.close((error) => error ? reject(error) : resolveClose());
+        });
+      },
+    };
+  }
+
+  throw new Error('Could not reserve an internal Wrangler port distinct from the gateway.');
+}
+
+async function waitForInternalRuntime(port, controlSecret, authority, raceChild, signal) {
+  const deadline = Date.now() + RUNTIME_READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (signal.aborted) throw signal.reason ?? new Error('Runtime readiness wait aborted.');
+    try {
+      const response = await raceChild(fetch(
+        'http://' + INTERNAL_HOST + ':' + port + '/__edgebase/internal/self-host/ready',
+        {
+          headers: { 'x-edgebase-self-host-control': controlSecret },
+          signal: AbortSignal.any([signal, AbortSignal.timeout(500)]),
+        },
+      ), 'authenticated readiness');
+      if (response.ok) {
+        const body = await raceChild(response.json(), 'authenticated readiness body');
+        if (
+          body?.outcome === 'ok'
+          && body?.runtime === 'edgebase-self-host'
+          && body?.generation === authority.generation
+          && body?.scheduleDigest === authority.scheduleDigest
+        ) return;
+      }
+    } catch (error) {
+      if (signal.aborted) throw error;
+    }
+    await raceChild(
+      new Promise((resolveDelay) => setTimeout(resolveDelay, 100)),
+      'readiness retry',
+    );
+  }
+  throw new Error('Timed out waiting for authenticated internal Wrangler readiness.');
 }
 
 function readActiveInstance(lockPath, host) {
@@ -1096,6 +1316,26 @@ function openBrowser(url) {
 const artifactRoot = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = join(artifactRoot, '.edgebase', 'runtime', 'server');
 const runtimeNodeModules = join(runtimeRoot, 'node_modules');
+const appManifestPath = join(artifactRoot, 'edgebase-app.json');
+const verifiedSelfHost = verifySelfHostAssets(appManifestPath, artifactRoot);
+const verifiedSelfHostAssets = verifiedSelfHost.assets;
+const gatewayModule = await import(pathToFileURL(join(
+  artifactRoot,
+  verifiedSelfHostAssets.gateway.path,
+)).href);
+const supervisorModule = await import(pathToFileURL(join(
+  artifactRoot,
+  verifiedSelfHostAssets.scheduleSupervisor.path,
+)).href);
+const validatedAppManifest = await supervisorModule.readSelfHostAppManifest(appManifestPath);
+if (
+  validatedAppManifest.generation !== verifiedSelfHost.appManifest.generation
+  || validatedAppManifest.schedules.digest !== verifiedSelfHost.appManifest.schedules.digest
+) {
+  throw new Error('Self-host manifest authority changed during startup validation.');
+}
+const { startSelfHostGateway } = gatewayModule;
+const { createSelfHostScheduleSupervisor } = supervisorModule;
 const options = parseArgs(process.argv.slice(2));
 const dataRoot = resolveDataRoot(options.dataDir);
 const workDir = join(dataRoot, DEFAULT_RUNTIME_DIR);
@@ -1105,6 +1345,7 @@ const persistDir = options.persistTo
 const statePath = join(dataRoot, 'launcher-state.json');
 const lockPath = join(dataRoot, 'launcher-lock.json');
 const logPath = join(dataRoot, 'launcher.log');
+const scheduleStatePath = join(dataRoot, 'self-host-schedule-state.json');
 mkdirSync(dataRoot, { recursive: true });
 mkdirSync(workDir, { recursive: true });
 mkdirSync(persistDir, { recursive: true });
@@ -1138,6 +1379,16 @@ for (const key of Object.keys(mergedEnv)) {
 // This launcher always runs locally. Do not let an env file relabel a
 // self-hosted ingress as Cloudflare and make client-supplied CF headers trusted.
 mergedEnv.EDGEBASE_RUNTIME_MODE = 'self-hosted';
+const controlSecret = randomBytes(32).toString('hex');
+const gatewaySecret = randomBytes(32).toString('hex');
+const runtimeAuthority = {
+  generation: validatedAppManifest.generation,
+  scheduleDigest: validatedAppManifest.schedules.digest,
+};
+mergedEnv.EDGEBASE_SELF_HOST_CONTROL_SECRET = controlSecret;
+mergedEnv.EDGEBASE_SELF_HOST_GATEWAY_SECRET = gatewaySecret;
+mergedEnv.EDGEBASE_SELF_HOST_APP_GENERATION = runtimeAuthority.generation;
+mergedEnv.EDGEBASE_SELF_HOST_SCHEDULE_DIGEST = runtimeAuthority.scheduleDigest;
 
 const devVarsPath = join(workDir, '.dev.vars');
 const wranglerBin = resolveWranglerBin(runtimeNodeModules);
@@ -1145,9 +1396,28 @@ const existingInstance = readActiveInstance(lockPath, options.host);
 const selectedPort = existingInstance && !options.port
   ? { port: existingInstance.port, source: 'existing' }
   : await resolveSelectedPort(options.host, options.port, statePath);
+const focusingExistingInstance = Boolean(existingInstance && !options.port);
+const internalReservation = focusingExistingInstance
+  ? null
+  : await reserveInternalPort(selectedPort.port);
+const internalPort = focusingExistingInstance
+  ? (Number.isInteger(existingInstance.internalPort) ? existingInstance.internalPort : null)
+  : internalReservation.port;
+const gatewayProtocol = process.env.LOCAL_PROTOCOL || 'http';
+if (gatewayProtocol !== 'http' && gatewayProtocol !== 'https') {
+  throw new Error('LOCAL_PROTOCOL must be http or https.');
+}
+const trustedProxyCidrs = String(process.env.EDGEBASE_TRUSTED_PROXY_CIDRS || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
 saveJson(statePath, {
   host: options.host,
   port: selectedPort.port,
+  externalHost: options.host,
+  externalPort: selectedPort.port,
+  internalHost: INTERNAL_HOST,
+  internalPort,
   updatedAt: new Date().toISOString(),
 });
 const wranglerArgs = [
@@ -1158,13 +1428,13 @@ const wranglerArgs = [
   '--env-file',
   devVarsPath,
   '--port',
-  String(selectedPort.port),
+  String(internalPort ?? '<existing-instance>'),
   '--ip',
-  options.host,
+  INTERNAL_HOST,
   '--persist-to',
   persistDir,
 ];
-const openUrl = \`http://\${options.host}:\${selectedPort.port}\${DEFAULT_OPEN_PATH}\`;
+const openUrl = gatewayProtocol + '://' + options.host + ':' + selectedPort.port + DEFAULT_OPEN_PATH;
 let devVarsOwnerMarker = '';
 let devVarsMode = null;
 
@@ -1172,6 +1442,16 @@ const cleanupRuntimeEnv = () => {
   removeOwnedEnvFile(devVarsPath, devVarsOwnerMarker);
   devVarsOwnerMarker = '';
 };
+const cleanupLock = () => {
+  const current = readJson(lockPath);
+  if (current?.pid === process.pid) {
+    removeFileIfExists(lockPath);
+  }
+};
+process.on('exit', () => {
+  cleanupLock();
+  cleanupRuntimeEnv();
+});
 
 // A second launcher that only focuses an already-running instance must not
 // replace that instance's transient binding file.
@@ -1183,6 +1463,7 @@ if (!(existingInstance && !options.port)) {
 }
 
 if (options.dryRun) {
+  await internalReservation?.release();
   const payload = {
     status: 'success',
     artifactRoot,
@@ -1194,6 +1475,15 @@ if (options.dryRun) {
     wranglerArgs,
     host: options.host,
     port: selectedPort.port,
+    protocol: gatewayProtocol,
+    externalHost: options.host,
+    externalPort: selectedPort.port,
+    internalHost: INTERNAL_HOST,
+    internalPort,
+    gatewayUpstream: internalPort === null ? null : 'http://' + INTERNAL_HOST + ':' + internalPort,
+    supervisorRuntimeOrigin: internalPort === null ? null : 'http://' + INTERNAL_HOST + ':' + internalPort,
+    appManifestPath,
+    scheduleStatePath,
     persistDir,
     devVarsPath,
     devVarsMode,
@@ -1206,10 +1496,17 @@ if (options.dryRun) {
   process.exit(0);
 }
 
-if (existingInstance && !options.port) {
+if (focusingExistingInstance) {
   openBrowser(openUrl);
   process.exit(0);
 }
+
+const runtimeOrigin = 'http://' + INTERNAL_HOST + ':' + internalPort;
+let gateway = null;
+let scheduleSupervisor = null;
+let runtimeAdmitted = false;
+let shutdownPromise = null;
+const supervisorAbortController = new AbortController();
 
 const wranglerEnv = {
   ...process.env,
@@ -1226,12 +1523,60 @@ if (process.env.CI && !wranglerEnv.WRANGLER_CI_DISABLE_CONFIG_WATCHING) {
   wranglerEnv.WRANGLER_CI_DISABLE_CONFIG_WATCHING = 'true';
 }
 
+await internalReservation.release();
 const child = spawn(process.execPath, wranglerArgs, {
   cwd: workDir,
   stdio: ['ignore', 'pipe', 'pipe'],
   env: wranglerEnv,
   detached: process.platform !== 'win32',
 });
+const childTerminal = new Promise((resolveTerminal) => {
+  child.once('error', (error) => resolveTerminal({ kind: 'error', error }));
+  child.once('exit', (code, signal) => resolveTerminal({ kind: 'exit', code, signal }));
+});
+const raceChild = (operation, context) => Promise.race([
+  operation,
+  childTerminal.then((outcome) => { throw childTerminalError(outcome, context); }),
+]);
+
+const stopRuntimeSurfaces = async (deadline) => {
+  runtimeAdmitted = false;
+  void gateway?.stopAdmission();
+  supervisorAbortController.abort(new Error('Packed runtime is shutting down.'));
+  const stops = Promise.allSettled([
+    scheduleSupervisor?.stop({ timeoutMs: Math.max(1, remainingMs(deadline)) })
+      ?? Promise.resolve(),
+    gateway?.stop({
+      drainTimeoutMs: Math.min(GATEWAY_DRAIN_TIMEOUT_MS, remainingMs(deadline)),
+    }) ?? Promise.resolve(),
+  ]);
+  await waitUntil(stops, remainingMs(deadline));
+};
+
+const beginShutdown = (signal = 'SIGTERM') => {
+  if (shutdownPromise) {
+    signalProcessTree(child.pid, 'SIGKILL');
+    return shutdownPromise;
+  }
+  shutdownPromise = (async () => {
+    const deadline = Date.now() + SHUTDOWN_TIMEOUT_MS;
+    cleanupLock();
+    cleanupRuntimeEnv();
+    await stopRuntimeSurfaces(deadline).catch((error) => {
+      logStream.write('[EdgeBase] runtime surface stop error: ' + String(error?.stack || error) + '\\n');
+    });
+    signalProcessTree(child.pid, signal);
+    const exited = await waitForProcessGroupExit(child.pid, deadline);
+    if (!exited) {
+      signalProcessTree(child.pid, 'SIGKILL');
+      await waitForProcessGroupExit(child.pid, deadline);
+    }
+  })();
+  return shutdownPromise;
+};
+
+process.on('SIGINT', () => void beginShutdown('SIGINT'));
+process.on('SIGTERM', () => void beginShutdown('SIGTERM'));
 
 const shouldMirrorStdIo = Boolean(process.stdout?.isTTY || process.stderr?.isTTY);
 
@@ -1248,58 +1593,111 @@ const relayOutput = (stream, writer) => {
 relayOutput(child.stdout, process.stdout);
 relayOutput(child.stderr, process.stderr);
 
-const cleanupLock = () => {
-  const current = readJson(lockPath);
-  if (current?.pid === process.pid) {
-    removeFileIfExists(lockPath);
+try {
+  await waitForInternalRuntime(
+    internalPort,
+    controlSecret,
+    runtimeAuthority,
+    raceChild,
+    supervisorAbortController.signal,
+  );
+  await raceChild(
+    supervisorModule.readSelfHostScheduleState(scheduleStatePath),
+    'schedule state validation',
+  );
+  let tls;
+  if (gatewayProtocol === 'https') {
+    if (!process.env.HTTPS_CERT_PATH || !process.env.HTTPS_KEY_PATH) {
+      throw new Error('HTTPS_CERT_PATH and HTTPS_KEY_PATH are required for LOCAL_PROTOCOL=https.');
+    }
+    tls = {
+      cert: readFileSync(process.env.HTTPS_CERT_PATH),
+      key: readFileSync(process.env.HTTPS_KEY_PATH),
+    };
   }
-};
-
-process.on('exit', cleanupLock);
+  scheduleSupervisor = createSelfHostScheduleSupervisor({
+    manifestPath: appManifestPath,
+    statePath: scheduleStatePath,
+    runtimeOrigin,
+    controlSecret,
+    signal: supervisorAbortController.signal,
+    fetch: (input, init = {}) => globalThis.fetch(input, {
+      ...init,
+      signal: init.signal
+        ? AbortSignal.any([init.signal, supervisorAbortController.signal])
+        : supervisorAbortController.signal,
+    }),
+    onReport: (report) => {
+      for (const outcome of report.outcomes) {
+        logStream.write('[EdgeBase] schedule outcome ' + JSON.stringify(outcome) + '\\n');
+      }
+    },
+    onError: (error) => {
+      logStream.write('[EdgeBase] schedule supervisor degraded: ' + String(error?.stack || error) + '\\n');
+    },
+  });
+  const initialReport = await raceChild(
+    scheduleSupervisor.runOnce(),
+    'initial schedule pass',
+  );
+  if (initialReport.structuralReady !== true || !scheduleSupervisor.getStatus().structuralReady) {
+    throw new Error('Initial schedule pass did not establish structural readiness.');
+  }
+  for (const outcome of initialReport.outcomes) {
+    logStream.write('[EdgeBase] schedule outcome ' + JSON.stringify(outcome) + '\\n');
+  }
+  gateway = await raceChild(startSelfHostGateway({
+    host: options.host,
+    port: selectedPort.port,
+    upstreamPort: internalPort,
+    protocol: gatewayProtocol,
+    ...(tls ? { tls } : {}),
+    trustedProxyCidrs,
+    workerTrustSecret: gatewaySecret,
+    healthProvider: () => scheduleSupervisor?.getStatus() ?? {
+      state: 'idle',
+      structuralReady: false,
+      itemFailureCount: 0,
+      lastAttemptAt: null,
+      lastSuccessfulPassAt: null,
+      lastError: null,
+    },
+    admissionGuard: () => (
+      runtimeAdmitted
+      && child.exitCode === null
+      && child.signalCode === null
+      && scheduleSupervisor?.getStatus().structuralReady === true
+    ),
+    drainTimeoutMs: GATEWAY_DRAIN_TIMEOUT_MS,
+  }), 'gateway bind');
+  await raceChild(Promise.resolve(), 'final admission check');
+  if (child.exitCode !== null || child.signalCode !== null) {
+    throw childTerminalError(
+      { kind: 'exit', code: child.exitCode, signal: child.signalCode },
+      'final admission check',
+    );
+  }
+  runtimeAdmitted = true;
+  scheduleSupervisor.start();
+  logStream.write(
+    '[EdgeBase] ingress external=' + gatewayProtocol + '://' + options.host + ':' + selectedPort.port
+      + ' gateway=' + gateway.protocol
+      + ' wrangler=' + runtimeOrigin
+      + ' supervisor=' + runtimeOrigin
+      + ' manifest=' + appManifestPath
+      + ' state=' + scheduleStatePath
+      + '\\n',
+  );
+} catch (error) {
+  await beginShutdown('SIGTERM');
+  logStream.write('[EdgeBase] self-host startup failed: ' + String(error?.stack || error) + '\\n');
+  logStream.end();
+  throw error;
+}
 
 if (options.open) {
   setTimeout(() => openBrowser(openUrl), 1500);
 }
-
-const forward = (signal) => {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  if (process.platform === 'win32') {
-    terminateProcessTree(child.pid);
-    return;
-  }
-  try {
-    // Wrangler is deliberately launched as a new process-group leader. Signal
-    // the whole owned group so esbuild/workerd cannot outlive the launcher.
-    process.kill(-child.pid, signal);
-  } catch {
-    child.kill(signal);
-  }
-};
-
-let shutdownStarted = false;
-let shutdownTimer = null;
-const beginShutdown = (signal) => {
-  if (shutdownStarted) {
-    forward('SIGKILL');
-    return;
-  }
-  shutdownStarted = true;
-  // Stop advertising this instance before forwarding the signal. This keeps a
-  // stale lock from surviving if the OS terminates the app while descendants
-  // are still unwinding.
-  cleanupLock();
-  cleanupRuntimeEnv();
-  forward(signal);
-  shutdownTimer = setTimeout(() => {
-    forward('SIGKILL');
-    cleanupLock();
-    cleanupRuntimeEnv();
-    process.exit(1);
-  }, 10_000);
-};
-
-process.on('SIGINT', () => beginShutdown('SIGINT'));
-process.on('SIGTERM', () => beginShutdown('SIGTERM'));
 
 // Publish the single-instance lock only after shutdown handlers are installed.
 // A controller that observes this file may immediately ask the app to stop.
@@ -1309,51 +1707,30 @@ saveJson(lockPath, {
   childProcessGroupId: process.platform === 'win32' ? null : (child.pid ?? null),
   host: options.host,
   port: selectedPort.port,
+  externalHost: options.host,
+  externalPort: selectedPort.port,
+  internalHost: INTERNAL_HOST,
+  internalPort,
+  gatewayProtocol: gateway.protocol,
+  gatewayUpstream: runtimeOrigin,
+  supervisorRuntimeOrigin: runtimeOrigin,
+  appManifestPath,
+  scheduleStatePath,
   createdAt: new Date().toISOString(),
 });
 
-child.on('error', (error) => {
-  cleanupLock();
-  logStream.write(String(error.stack || error) + '\\n');
-  logStream.end();
-  process.stderr.write(String(error.stack || error) + '\\n');
-  process.exit(1);
-});
-
-child.on('exit', async (code, signal) => {
-  if (process.platform !== 'win32' && child.pid) {
-    try {
-      // The group can briefly retain Wrangler descendants after the leader
-      // exits. Give every owned descendant a final graceful signal, then
-      // escalate before the launcher releases its lock and exits.
-      process.kill(-child.pid, 'SIGTERM');
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
-        try {
-          process.kill(-child.pid, 0);
-        } catch {
-          break;
-        }
-      }
-      try {
-        process.kill(-child.pid, 0);
-        process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        // The complete owned process group has exited.
-      }
-    } catch {
-      // The complete owned process group has already exited.
-    }
-  }
-  if (shutdownTimer) clearTimeout(shutdownTimer);
-  cleanupLock();
-  logStream.end();
-  if (signal) {
-    process.exit(1);
-    return;
-  }
-  process.exit(code ?? 0);
-});
+const childOutcome = await childTerminal;
+await beginShutdown('SIGTERM');
+cleanupLock();
+cleanupRuntimeEnv();
+if (childOutcome.kind === 'error') {
+  logStream.write(String(childOutcome.error?.stack || childOutcome.error) + '\\n');
+  process.stderr.write(String(childOutcome.error?.stack || childOutcome.error) + '\\n');
+  process.exitCode = 1;
+} else {
+  process.exitCode = childOutcome.signal ? 1 : (childOutcome.code ?? 0);
+}
+logStream.end();
 `;
 }
 
@@ -1408,8 +1785,7 @@ function createMacPortableArtifact(
   cpSync(dirArtifact.outputDir, bundledAppDir, {
     recursive: true,
     force: true,
-    dereference: false,
-    verbatimSymlinks: true,
+    dereference: true,
   });
   copyPortableNodeRuntime(embeddedNodePath, {
     macFrameworksDir: frameworksDir,
@@ -1503,8 +1879,7 @@ function createPortableDirectoryArtifact(
   cpSync(dirArtifact.outputDir, bundledAppDir, {
     recursive: true,
     force: true,
-    dereference: false,
-    verbatimSymlinks: true,
+    dereference: true,
   });
   copyPortableNodeRuntime(embeddedNodePath, {
     portableLibDir: process.platform === 'linux' ? join(outputPath, 'lib') : undefined,
@@ -1568,17 +1943,24 @@ export function createDirPackArtifact(
   projectDir: string,
   options: CreateDirPackArtifactOptions = {},
 ): CreateDirPackArtifactResult {
+  let manifest: EdgeBasePackManifest | null = null;
   const appBundle = createAppBundle(projectDir, {
     ...options,
     portableDependencies: true,
     dependencyProfile: 'portable',
+    stagedGenerationFinalizer(stagingDir, preliminaryManifest) {
+      finalizePackWrangler(projectDir, stagingDir);
+      manifest = buildPackManifest(
+        preliminaryManifest.outputDir,
+        preliminaryManifest,
+      );
+      writePackManifest(join(stagingDir, 'edgebase-pack.json'), manifest);
+      writeLauncherFiles(stagingDir, manifest);
+    },
   });
-  finalizePackWrangler(projectDir, appBundle.outputDir);
-  const manifest = buildPackManifest(appBundle.outputDir, appBundle.manifest);
+  if (!manifest) throw new Error('Pack generation finalizer did not produce a manifest.');
   const manifestPath = join(appBundle.outputDir, 'edgebase-pack.json');
-  writePackManifest(manifestPath, manifest);
-  writeLauncherFiles(appBundle.outputDir, manifest);
-  assertArtifactSymlinksContained(appBundle.outputDir);
+  assertArtifactSymlinksContained(appBundle.outputDir, { allowGenerationPointerRoot: true });
 
   return {
     format: 'dir',

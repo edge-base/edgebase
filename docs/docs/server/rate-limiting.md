@@ -167,11 +167,15 @@ That means the soft counter is often **more consistent per process** in local/se
 :::danger Reverse Proxy Required for IP-Based Rate Limiting
 On a CLI-declared Cloudflare runtime, the tamper-proof `CF-Connecting-IP`
 header identifies clients. Docker and packaged runtimes ignore that
-client-supplied header. Self-hosted EdgeBase only uses `X-Forwarded-For` when
-`trustSelfHostedProxy: true` is enabled, and that header **must be overwritten
-by a trusted reverse proxy** (Nginx or Caddy).
+client-supplied header. Their generated gateway strips spoofed forwarding and
+internal-proof headers, writes an authoritative set, and injects a fresh proof
+before the Worker accepts it.
 
-**Without a reverse proxy**, leave `trustSelfHostedProxy: false` so client-supplied `X-Forwarded-For` headers are ignored. If you need per-client rate limiting while self-hosting, enable `trustSelfHostedProxy: true` and configure the proxy to overwrite `X-Forwarded-For`. See the [Self-Hosting Guide](/docs/getting-started/self-hosting#3-https-reverse-proxy) for proper proxy configuration.
+Behind Nginx or Caddy, list only the exact immediate proxy peers in
+`EDGEBASE_TRUSTED_PROXY_CIDRS` and configure the proxy to overwrite the full
+forwarded set. Without a reverse proxy, leave the CIDR list empty; the gateway
+uses the direct socket peer and ignores client-provided forwarding authority.
+See the [Self-Hosting Guide](/docs/getting-started/self-hosting#3-https-reverse-proxy).
 :::
 
 :::tip Why not just use Bindings for everything?

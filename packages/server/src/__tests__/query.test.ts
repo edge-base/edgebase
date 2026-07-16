@@ -521,6 +521,10 @@ describe('QUERY_PARAM_KEYS ↔ parseQueryParams sync', () => {
     before: 'cursor-xyz',
     fields: 'x,y',
     search: 'test',
+    includeTotal: 'false',
+    maxResponseBytes: '4096',
+    responseAfter: '~edgebase-response-cursor-v1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    responseBefore: '~edgebase-response-cursor-v1.BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
   };
 
   const emptyOpts = JSON.stringify(parseQueryParams({}));

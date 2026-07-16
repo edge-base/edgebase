@@ -213,6 +213,7 @@ export class AuthClient {
   private readonly onlineHandler = () => {
     this.cancelScheduledSignOutRetry();
     void this.retryPendingSignOut();
+    void this.tokenManager.revalidateCookieSessionOnReconnect();
     this.retryNewestPendingOAuthTicket();
   };
 

@@ -153,6 +153,116 @@ describe('buildFunctionContext admin.db D1 routing', () => {
     expect(databaseFetch).not.toHaveBeenCalled();
   });
 
+  it('preserves bounded list query params through the direct D1 handler', async () => {
+    const handleD1Request = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        items: [{ id: 'sig-1' }],
+        total: null,
+        hasMore: false,
+        cursor: null,
+        page: null,
+        perPage: 5,
+        returnedBytes: 132,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.doMock('../lib/d1-handler.js', () => ({ handleD1Request }));
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('worker fetch should not be used')));
+
+    const { buildFunctionContext } = await import('../lib/functions.js');
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/list-signals'),
+      auth: null,
+      databaseNamespace: {} as DurableObjectNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      d1Database: {} as D1Database,
+      env: {
+        DATABASE: {} as DurableObjectNamespace,
+        AUTH: {} as DurableObjectNamespace,
+        AUTH_DB: {} as D1Database,
+        DB_D1_SHARED: {} as D1Database,
+      } as never,
+      config: {
+        databases: {
+          shared: {
+            provider: 'd1',
+            tables: { signals: { schema: { title: { type: 'string' } } } },
+          },
+        },
+      },
+    });
+
+    await ctx.admin
+      .db('shared')
+      .table('signals')
+      .select('id')
+      .limit(5)
+      .includeTotal(false)
+      .maxResponseBytes(4096)
+      .getList();
+
+    const handlerContext = handleD1Request.mock.calls[0]?.[0] as { req: { url: string } };
+    expect(handlerContext.req.url).toBe(
+      'http://internal/api/db/shared/tables/signals?fields=id&limit=5&includeTotal=false&maxResponseBytes=4096',
+    );
+  });
+
+  it('preserves bounded list query params through the direct PostgreSQL handler', async () => {
+    const handlePgRequest = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        items: [{ id: 'sig-1' }],
+        total: null,
+        hasMore: false,
+        cursor: null,
+        page: null,
+        perPage: 5,
+        returnedBytes: 132,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.doMock('../lib/postgres-handler.js', () => ({ handlePgRequest }));
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('worker fetch should not be used')));
+
+    const { buildFunctionContext } = await import('../lib/functions.js');
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/list-signals'),
+      auth: null,
+      databaseNamespace: {} as DurableObjectNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      d1Database: {} as D1Database,
+      env: {
+        DB_POSTGRES_SHARED_URL: 'postgres://edgebase:test@localhost/shared',
+      } as never,
+      config: {
+        databases: {
+          shared: {
+            provider: 'postgres',
+            connectionString: 'DB_POSTGRES_SHARED_URL',
+            tables: { signals: { schema: { title: { type: 'string' } } } },
+          },
+        },
+      },
+    });
+
+    await ctx.admin
+      .db('shared')
+      .table('signals')
+      .select('id')
+      .limit(5)
+      .includeTotal(false)
+      .maxResponseBytes(4096)
+      .getList();
+
+    const handlerContext = handlePgRequest.mock.calls[0]?.[0] as { req: { url: string } };
+    expect(handlerContext.req.url).toBe(
+      'http://internal/api/db/shared/tables/signals?fields=id&limit=5&includeTotal=false&maxResponseBytes=4096',
+    );
+  });
+
   it('routes admin DB proxy through handleD1Request without an execution context', async () => {
     const handleD1Request = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: 'sig-2', title: 'Upserted without execution context', action: 'inserted' }), {
@@ -279,14 +389,20 @@ describe('buildFunctionContext admin.db D1 routing', () => {
       },
     });
 
-    const result = await ctx.admin.db('shared').table('signals').getList();
+    const result = await ctx.admin
+      .db('shared')
+      .table('signals')
+      .limit(5)
+      .includeTotal(false)
+      .maxResponseBytes(4096)
+      .getList();
 
     expect(result.items).toEqual([{ id: 'sig-do', title: 'Read via DO' }]);
     expect(handleD1Request).not.toHaveBeenCalled();
     expect(workerFetch).not.toHaveBeenCalled();
     expect(databaseNamespace.idFromName).toHaveBeenCalledWith('shared');
     expect(databaseFetch).toHaveBeenCalledWith(
-      'http://do/tables/signals',
+      'http://do/tables/signals?limit=5&includeTotal=false&maxResponseBytes=4096',
       expect.objectContaining({
         method: 'GET',
         headers: expect.objectContaining({

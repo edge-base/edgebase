@@ -5,7 +5,7 @@ slug: /getting-started
 
 # Introduction
 
-**EdgeBase** is an open-source edge-native BaaS built on Workers, Durable Objects, D1, and R2. Auth, Database, Realtime, Storage, and Functions share one serverless edge architecture, while shared blocks can switch to PostgreSQL when you need it. Run the same app locally on Node.js, self-host with Docker, or deploy globally on Cloudflare's edge. No vendor lock-in, MIT licensed.
+**EdgeBase** is an open-source edge-native BaaS built on Workers, Durable Objects, D1, and R2. Auth, Database, Realtime, Storage, and Functions share one serverless edge architecture, while shared blocks can switch to PostgreSQL when you need it. Develop locally on Node.js, then run the built app with Docker or a Pack artifact, or deploy globally on Cloudflare's edge. No vendor lock-in, MIT licensed.
 
 ## Why EdgeBase?
 
@@ -15,7 +15,7 @@ slug: /getting-started
 | **Auth Cost** | $275/100K MAU | Included in $25/mo | Free | **Free** |
 | **Cold Start** | ~200ms | ~500ms | N/A | **~0ms** |
 | **Egress** | $0.12/GB | $0.09/GB | Server-dependent | **$0** |
-| **Self-Host** | No | Complex | Single binary | **3 ways** |
+| **Self-Host** | No | Complex | Single binary | **Docker + Pack** |
 | **Live Subscriptions** | Yes | Yes | Yes | **Yes** |
 | **Edge Deploy** | No | No | No | **Yes** |
 | **Open Source** | No | Yes (AGPL) | Yes (MIT) | **Yes (MIT)** |
@@ -32,9 +32,11 @@ Deploy your backend in whichever way suits your project:
 |---|---|---|---|
 | **Cloud Edge** | `npx edgebase deploy` | Cloudflare account | Production, global low-latency |
 | **Docker** | `npx edgebase docker run` | Docker | Self-hosted, single container |
-| **Node.js** | `npx edgebase dev` | Node.js | Local development, VPS |
+| **Pack artifact** | `npx edgebase pack --format portable` | Target platform | Self-hosted without Docker |
+| **Local development** | `npx edgebase dev` | Node.js | Hot reload and local iteration |
 
-Same code, same behavior across all three modes. No vendor lock-in.
+Cloud Edge and the generated Docker/pack launchers run the same built
+application contract. `dev` is the local iteration surface. No vendor lock-in.
 
 ### Costs Scale with Compute, Not Users
 
@@ -82,7 +84,7 @@ DB blocks come in two types. **Single-instance** blocks (no instance ID) default
 
 Tables that need SQL JOINs share the same Durable Object by being defined under the same `databases.{namespace}.tables` block.
 
-The same architecture runs identically on cloud edge, Docker, and Node.js. KV and R2 are emulated locally in Docker/Node.js mode.
+The same built application contract runs on cloud edge, the generated Docker container, and the generated Pack launcher. `edgebase dev` is local development only; the generated self-host launchers provide the production lifecycle. KV and R2 are emulated by the self-host runtime.
 
 ## SDK Support
 

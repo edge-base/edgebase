@@ -735,6 +735,24 @@ export class TokenManager {
     this.cookieRevalidationHandler = handler;
   }
 
+  /**
+   * Revalidate a retained HttpOnly-cookie session after browser connectivity
+   * returns. Repeated online signals join the existing principal revalidation,
+   * which itself uses the normal same-tab/cross-tab refresh coordination.
+   */
+  async revalidateCookieSessionOnReconnect(): Promise<void> {
+    if (
+      !this.usesHttpOnlyCookie
+      || this.hasValidAccessToken
+      || !this.getSessionUserIdHint()
+      || this.hasPendingSignOut()
+    ) {
+      return;
+    }
+    this.scheduleCookiePrincipalRevalidation();
+    await (this.cookiePrincipalRevalidation ?? Promise.resolve());
+  }
+
   private scheduleCookiePrincipalRevalidation(): void {
     if (
       !this.usesHttpOnlyCookie

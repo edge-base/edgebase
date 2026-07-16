@@ -216,6 +216,32 @@ describe('defineConfig', () => {
     ).toThrow(/cloudflare\.extraCrons\[1\]/);
   });
 
+  it('should reject provider-only cron grammar that self-hosted runtimes cannot replay', () => {
+    expect(() =>
+      defineConfig({
+        cloudflare: {
+          extraCrons: ['0 3 L * *'],
+        },
+      }),
+    ).toThrow(/portable EdgeBase cron/);
+  });
+
+  it('should validate plugin schedule crons with the shared portable grammar', () => {
+    expect(() => defineConfig({
+      plugins: [{
+        name: 'synthetic-plugin',
+        pluginApiVersion: 1,
+        config: {},
+        functions: {
+          invalidSchedule: defineFunction({
+            trigger: { type: 'schedule', cron: '0 3 * * MON' },
+            handler: async () => undefined,
+          }),
+        },
+      }],
+    })).toThrow(/synthetic-plugin.*invalidSchedule.*invalid cron/);
+  });
+
   it('should accept empty config', () => {
     const config = defineConfig({});
     expect(config).toEqual({});

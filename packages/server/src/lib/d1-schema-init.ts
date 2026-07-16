@@ -63,12 +63,21 @@ async function initD1Table(
   const storedHash = await getD1Meta(db, `schemaHash:${tableName}`);
 
   if (storedHash === currentHash) {
-    // No hash change — still check migrations and verify the physical schema.
-    // Older runtimes could save this hash without materializing a UNIQUE
-    // change on an existing column, so the reconciliation must be state-based.
+    const pending = await getPendingD1Migrations(db, tableName, config);
+    if (pending.length > 0) {
+      await runD1ExistingTableUpgrade(
+        db,
+        tableName,
+        config,
+        pending,
+        null,
+      );
+    } else {
+      // Older runtimes could save this hash without materializing a UNIQUE
+      // change on an existing column, so reconciliation remains state-based.
+      await handleD1SchemaUpdate(db, tableName, config);
+    }
     await ensureD1FTSAndIndexes(db, tableName, config);
-    await runD1Migrations(db, tableName, config);
-    await handleD1SchemaUpdate(db, tableName, config);
     return;
   }
 
@@ -87,12 +96,25 @@ async function initD1Table(
       await setD1Meta(db, `migration_version:${tableName}`, String(maxVersion));
     }
   } else {
-    // Schema changed — detect new columns and add them (non-destructive)
+    const pending = await getPendingD1Migrations(db, tableName, config);
+    if (pending.length > 0) {
+      // D1 has no interactive transaction API. Build one bounded batch from a
+      // single physical-schema snapshot so additive columns, pending data
+      // migrations, final constraints, and both metadata writes commit or
+      // roll back together in provider order.
+      await runD1ExistingTableUpgrade(
+        db,
+        tableName,
+        config,
+        pending,
+        currentHash,
+      );
+      await ensureD1FTSAndIndexes(db, tableName, config);
+      return;
+    }
+
     await handleD1SchemaUpdate(db, tableName, config);
-    // Re-apply FTS and indexes to pick up new field additions
     await ensureD1FTSAndIndexes(db, tableName, config);
-    // Run pending migrations after schema update
-    await runD1Migrations(db, tableName, config);
   }
 
   // Store new hash
@@ -108,6 +130,27 @@ async function handleD1SchemaUpdate(
   tableName: string,
   config: TableConfig,
 ): Promise<void> {
+  const plan = await planD1SchemaUpdate(db, tableName, config, true);
+  const migrationDDLs = [...plan.additiveDDLs, ...plan.constraintDDLs];
+  if (migrationDDLs.length > 0) {
+    // D1 batches are transactional, so column and index reconciliation either
+    // commits together or remains wholly retryable.
+    await db.batch(migrationDDLs.map((ddl) => db.prepare(ddl)));
+  }
+}
+
+interface D1SchemaUpdatePlan {
+  additiveDDLs: string[];
+  constraintDDLs: string[];
+  createdUniqueFields: string[];
+}
+
+async function planD1SchemaUpdate(
+  db: D1Database,
+  tableName: string,
+  config: TableConfig,
+  preflightUnique: boolean,
+): Promise<D1SchemaUpdatePlan> {
   const escapedTableName = tableName.replace(/"/g, '""');
 
   // Get existing columns from PRAGMA table_info
@@ -137,12 +180,13 @@ async function handleD1SchemaUpdate(
   // Build effective schema with auto-fields
   const effectiveSchema = buildEffectiveSchema(config.schema);
 
-  // Add missing columns and reconcile field-owned unique indexes.
-  const migrationDDLs: string[] = [];
+  const additiveDDLs: string[] = [];
+  const constraintDDLs: string[] = [];
+  const createdUniqueFields: string[] = [];
   for (const [colName, field] of Object.entries(effectiveSchema)) {
     if (!existingCols.has(colName)) {
       const [addColumnDDL] = generateSQLiteAddColumnDDLs(tableName, colName, field);
-      migrationDDLs.push(addColumnDDL);
+      additiveDDLs.push(addColumnDDL);
       if (field.unique) {
         const uniquePlan = planSQLiteFieldUniqueIndex(
           tableName,
@@ -150,7 +194,10 @@ async function handleD1SchemaUpdate(
           true,
           existingIndexes,
         );
-        if (uniquePlan.ddl) migrationDDLs.push(uniquePlan.ddl);
+        if (uniquePlan.ddl) {
+          constraintDDLs.push(uniquePlan.ddl);
+          createdUniqueFields.push(colName);
+        }
       }
       continue;
     }
@@ -161,7 +208,7 @@ async function handleD1SchemaUpdate(
       !!field.unique,
       existingIndexes,
     );
-    if (plan.action === 'create') {
+    if (plan.action === 'create' && preflightUnique) {
       const escapedColName = colName.replace(/"/g, '""');
       const duplicate = await db.prepare(
         `SELECT 1 AS "duplicate" FROM "${escapedTableName}" `
@@ -172,13 +219,13 @@ async function handleD1SchemaUpdate(
         throw sqliteUniqueDuplicateError(tableName, colName);
       }
     }
-    if (plan.ddl) migrationDDLs.push(plan.ddl);
+    if (plan.ddl) {
+      constraintDDLs.push(plan.ddl);
+      if (plan.action === 'create') createdUniqueFields.push(colName);
+    }
   }
-  if (migrationDDLs.length > 0) {
-    // D1 batches are transactional, so column and index reconciliation either
-    // commits together or remains wholly retryable.
-    await db.batch(migrationDDLs.map((ddl) => db.prepare(ddl)));
-  }
+
+  return { additiveDDLs, constraintDDLs, createdUniqueFields };
 }
 
 /**
@@ -232,34 +279,79 @@ async function ensureD1FTSAndIndexes(
 
 // ─── Migration Engine ───
 
-/**
- * Run pending migrations for a D1 table.
- * Mirrors database-do.ts runMigrations() — uses SQLite `up` field.
- */
-async function runD1Migrations(
+async function getPendingD1Migrations(
   db: D1Database,
   tableName: string,
   config: TableConfig,
-): Promise<void> {
-  if (!config.migrations?.length) return;
+): Promise<MigrationConfig[]> {
+  if (!config.migrations?.length) return [];
 
   const versionKey = `migration_version:${tableName}`;
   const currentVersionStr = await getD1Meta(db, versionKey);
   const currentVersion = parseInt(currentVersionStr || '1', 10);
 
-  const pending = config.migrations
+  return config.migrations
     .filter((m: MigrationConfig) => m.version > currentVersion)
     .sort((a: MigrationConfig, b: MigrationConfig) => a.version - b.version);
+}
 
+/**
+ * Commit an existing-table D1 upgrade as one ordered provider batch.
+ * Migrations intentionally precede all target UNIQUE/config indexes.
+ */
+async function runD1ExistingTableUpgrade(
+  db: D1Database,
+  tableName: string,
+  config: TableConfig,
+  pending: MigrationConfig[],
+  nextSchemaHash: string | null,
+): Promise<void> {
+  const plan = await planD1SchemaUpdate(db, tableName, config, false);
+  const statements: D1PreparedStatement[] = [];
+
+  for (const ddl of plan.additiveDDLs) {
+    statements.push(db.prepare(ddl));
+  }
   for (const migration of pending) {
-    try {
-      // D1 uses SQLite — use `up` field (not upPg)
-      await db.prepare(migration.up).run();
-      await setD1Meta(db, versionKey, String(migration.version));
-    } catch (err) {
-      console.error(`D1 Migration v${migration.version} failed for ${tableName}:`, err);
-      throw new Error(`D1 Migration v${migration.version} failed: ${(err as Error).message}`);
+    statements.push(db.prepare(migration.up));
+  }
+  for (const ddl of plan.constraintDDLs) {
+    statements.push(db.prepare(ddl));
+  }
+  if (config.indexes?.length) {
+    for (const ddl of generateIndexDDL(tableName, config.indexes)) {
+      statements.push(db.prepare(ddl));
     }
+  }
+  for (const migration of pending) {
+    statements.push(prepareD1Meta(
+      db,
+      `migration_version:${tableName}`,
+      String(migration.version),
+    ));
+  }
+  if (nextSchemaHash !== null) {
+    statements.push(prepareD1Meta(db, `schemaHash:${tableName}`, nextSchemaHash));
+  }
+
+  try {
+    if (statements.length > 0) {
+      await db.batch(statements);
+    }
+  } catch (err) {
+    if (
+      plan.createdUniqueFields.length > 0
+      && /unique constraint|is not unique/i.test((err as Error).message)
+    ) {
+      throw sqliteUniqueDuplicateError(tableName, plan.createdUniqueFields[0]!);
+    }
+    const firstVersion = pending[0]?.version;
+    const lastVersion = pending[pending.length - 1]?.version;
+    const versionLabel = firstVersion === lastVersion
+      ? `v${firstVersion}`
+      : `v${firstVersion}-v${lastVersion}`;
+    console.error(`D1 Migration ${versionLabel} failed for ${tableName}:`, err);
+    throw new Error(`D1 Migration ${versionLabel} failed: ${(err as Error).message}`);
   }
 }
 
@@ -281,6 +373,16 @@ async function setD1Meta(
   await db.prepare(
     'INSERT INTO "_meta" ("key", "value") VALUES (?, ?) ON CONFLICT ("key") DO UPDATE SET "value" = ?',
   ).bind(key, value, value).run();
+}
+
+function prepareD1Meta(
+  db: D1Database,
+  key: string,
+  value: string,
+): D1PreparedStatement {
+  return db.prepare(
+    'INSERT INTO "_meta" ("key", "value") VALUES (?, ?) ON CONFLICT ("key") DO UPDATE SET "value" = ?',
+  ).bind(key, value, value);
 }
 
 /** Reset initialized state (for testing). */

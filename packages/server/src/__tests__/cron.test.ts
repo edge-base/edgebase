@@ -128,8 +128,8 @@ describe('parseCron', () => {
     expect(sched.minutes.has(3)).toBe(false);
   });
 
-  it('every Monday at 02:30', () => {
-    const sched = parseCron('30 2 * * 1');
+  it('every Monday at 02:30 (Cloudflare weekday 2)', () => {
+    const sched = parseCron('30 2 * * 2');
     expect(sched.minutes.has(30)).toBe(true);
     expect(sched.hours.has(2)).toBe(true);
     expect(sched.daysOfWeek.has(1)).toBe(true);
@@ -182,7 +182,7 @@ describe('matchesCron', () => {
   });
 
   it('day of week matters', () => {
-    const sched = parseCron('0 0 * * 1'); // Monday only
+    const sched = parseCron('0 0 * * 2'); // Monday only (1=Sunday)
     // 2024-06-17 is Monday
     expect(matchesCron(new Date('2024-06-17T00:00:00Z'), sched)).toBe(true);
     // 2024-06-18 is Tuesday
@@ -233,7 +233,7 @@ describe('getNextFireTime', () => {
   });
 
   it('skips to correct day of week', () => {
-    const sched = parseCron('0 0 * * 1'); // Monday only
+    const sched = parseCron('0 0 * * 2'); // Monday only (1=Sunday)
     // 2024-06-15 is Saturday → next Monday is June 17
     const from = new Date('2024-06-15T00:00:00Z');
     const next = getNextFireTime(sched, from);

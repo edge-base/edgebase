@@ -664,4 +664,50 @@ describe('refresh cookie session transport', () => {
       expect(spoofed.headers.get('Set-Cookie')).toBeNull();
     }
   });
+
+  it('accepts forwarded HTTPS only with the exact CLI gateway proof when configured', async () => {
+    const secret = 'a'.repeat(64);
+    setConfig({
+      release: true,
+      trustSelfHostedProxy: true,
+      auth: {
+        session: {
+          cookie: { enabled: true, name: 'gateway-refresh', sameSite: 'strict' },
+        },
+      },
+    });
+    const env = {
+      EDGEBASE_RUNTIME_MODE: 'self-hosted',
+      EDGEBASE_SELF_HOST_GATEWAY_SECRET: secret,
+    };
+    const headers = {
+      Origin: 'https://api.example.com',
+      'X-Forwarded-Proto': 'https',
+      'X-EdgeBase-Auth-Transport': 'cookie',
+    };
+
+    for (const supplied of [undefined, 'b'.repeat(64)]) {
+      const response = await createApp().request('http://api.example.com/issue', {
+        method: 'POST',
+        headers: {
+          ...headers,
+          ...(supplied ? { 'X-EdgeBase-Self-Host-Gateway': supplied } : {}),
+        },
+      }, env);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ slug: 'insecure-cookie-config' });
+      expect(response.headers.get('Set-Cookie')).toBeNull();
+    }
+
+    const proven = await createApp().request('http://api.example.com/issue', {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'X-EdgeBase-Self-Host-Gateway': secret,
+      },
+    }, env);
+    expect(proven.status).toBe(200);
+    expect(proven.headers.get('Set-Cookie')).toContain('__Host-gateway-refresh=');
+    expect(proven.headers.get('Set-Cookie')).toContain('Secure');
+  });
 });

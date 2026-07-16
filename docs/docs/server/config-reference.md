@@ -287,18 +287,26 @@ Links.
 
 ## Trusted Proxy Headers
 
-Set `trustSelfHostedProxy: true` only when EdgeBase is running behind a reverse proxy that overwrites `X-Forwarded-For` with the real client IP.
+Generated Docker and pack launchers own the production proxy boundary. Set
+`EDGEBASE_TRUSTED_PROXY_CIDRS` to the exact immediate reverse-proxy peers; the
+gateway overwrites forwarding headers for every other peer and injects a fresh
+internal proof before the Worker trusts them.
+
+`trustSelfHostedProxy: true` is the legacy explicit opt-in for local/manual
+development setups that do not have a generated gateway secret. Use it only
+behind a proxy that overwrites `X-Forwarded-For` with the real client IP.
 
 The CLI also injects an internal `EDGEBASE_RUNTIME_MODE` binding. It is
 `cloudflare` for deploys, `local-development` for `edgebase dev`, and
 `self-hosted` for Docker/pack. In `self-hosted` mode, `CF-Connecting-IP` is
-never trusted; without the proxy opt-in above, no forwarded IP is accepted.
-Missing or unrecognized runtime modes fail closed. Only raw manual Wrangler
-setups need to supply this binding themselves.
+never trusted. Generated launchers require their exact gateway proof; when a
+gateway secret is configured, a config boolean cannot bypass a missing or
+incorrect proof. Missing or unrecognized runtime modes fail closed.
 
 - Default: `false`
 - Trusted only in CLI-declared Cloudflare/local-development modes: `CF-Connecting-IP`
-- Trusted only when `trustSelfHostedProxy: true`: `X-Forwarded-For` in self-hosted deployments
+- Trusted in generated self-host launchers only with the exact gateway proof: gateway-sanitized `X-Forwarded-For`
+- Trusted in legacy manual development only when `trustSelfHostedProxy: true`: proxy-overwritten `X-Forwarded-For`
 
 This setting affects IP-based features such as:
 - [Rate limiting](/docs/server/rate-limiting)

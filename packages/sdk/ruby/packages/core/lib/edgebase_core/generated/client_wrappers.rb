@@ -3,7 +3,7 @@
 # Auto-generated client wrapper methods — DO NOT EDIT.
 #
 # Regenerate: npx tsx tools/sdk-codegen/generate.ts
-# Source: wrapper-config.json + openapi.json (0.4.8)
+# Source: wrapper-config.json + openapi.json (0.4.9)
 
 module EdgebaseCore
   class GeneratedAuthMethods

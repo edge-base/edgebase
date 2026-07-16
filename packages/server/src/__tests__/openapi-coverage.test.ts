@@ -25,6 +25,9 @@ const ROUTES_DIR = resolve(fileURLToPath(new URL('../routes', import.meta.url)))
 const ALLOWED_NON_OPENAPI = new Set([
   // User-defined function HTTP trigger — wildcard .all(), cannot be expressed as a fixed OpenAPI path
   'functions.ts:functionsRoute.all(',
+  // Authenticated loopback-only self-host control plane; these are not public API routes.
+  'self-host-control.ts:selfHostControlRoute.get(',
+  'self-host-control.ts:selfHostControlRoute.post(',
 ]);
 
 // ─── Detect .get/.post/.put/.delete/.patch/.all route registrations ──────────

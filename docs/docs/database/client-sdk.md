@@ -1114,6 +1114,44 @@ Every list request runs a separate `COUNT` query to populate `total`. On large t
 
 This behaves identically across all storage providers (Durable Objects, D1, and PostgreSQL).
 
+#### Bounding exact response bytes (JavaScript)
+
+Long-running maintenance jobs can cap the exact serialized UTF-8 size of each list or search response with `.maxResponseBytes()`. The reported `returnedBytes` includes the complete JSON body, including the digits of `returnedBytes` itself, and never exceeds the requested cap.
+
+```typescript
+const baseQuery = client.db('app').table('posts')
+  .select('id', 'title')
+  .orderBy('id', 'asc')
+  .limit(250)
+  .includeTotal(false)
+  .maxResponseBytes(256 * 1024);
+
+let cursor: string | undefined;
+do {
+  const page = await (cursor ? baseQuery.after(cursor) : baseQuery).getList();
+
+  for (const post of page.items) {
+    await processPost(post);
+  }
+
+  // One source row could not fit even by itself. EdgeBase returns an empty
+  // page and advances the opaque cursor past that row, so the job cannot loop.
+  if (page.oversizedItem) reportOversizedSourceRow();
+
+  cursor = page.hasMore ? page.cursor ?? undefined : undefined;
+} while (cursor);
+```
+
+Bounded list/search requests have a few deliberate constraints:
+
+- The minimum cap is 512 bytes. Projections must include `id`, and ordering must be the stable `id` keyset order (`asc` for `.after()`, `desc` for `.before()`). `page()` and `offset()` are rejected.
+- The returned cursor is provider-owned and opaque. Pass it back through `.after(page.cursor)` or `.before(page.cursor)`; the SDK sends it as `responseAfter` or `responseBefore` and resends `maxResponseBytes`.
+- `cursorExpiresAt` reports a seven-day sliding expiry. Successfully resolving or reissuing a cursor extends that expiry.
+- Access-rule filtering and `onEnrich` hooks run before byte measurement, so the cap applies to what the caller actually receives.
+- If one row cannot fit, the response has `items: []`, `oversizedItem: true`, and a cursor positioned after that row. This guarantees forward progress without exposing a raw record ID in the cursor.
+
+The option is strictly opt-in. Omitting `.maxResponseBytes()` preserves the existing response shape and read-only provider path; EdgeBase lazily creates and writes its private cursor table only for bounded requests.
+
 ### Count
 
 Get the count of records without fetching them:
@@ -1451,6 +1489,29 @@ await client.db('app').transact([
 ]);
 ```
 
+The default response contains one full result entry per operation. For writes
+that can touch very large rows, request the compact acknowledgment before the
+transaction starts:
+
+```typescript
+const acknowledgment = await client.db('app').transact(
+  [
+    { table: 'documents', op: 'update', id: documentId, data: { indexed: true } },
+    { table: 'audit_events', op: 'insert', data: { action: 'document.indexed' } },
+  ],
+  { resultMode: 'compact' },
+);
+
+// { committed: true, operationCount: 2 }
+```
+
+`resultMode: 'compact'` is selected and validated before any write. Its success
+body is exactly `{ committed: true, operationCount: n }` and is at most **39
+UTF-8 bytes** at the 500-operation limit. It does not serialize mutated rows,
+so a committed transaction cannot become an oversized success response. Omit
+the option (or pass `{ resultMode: 'full' }`) to preserve the existing ordered
+`{ results: [...] }` response.
+
 Operation shapes:
 
 | `op` | Fields | Result entry |
@@ -1466,6 +1527,7 @@ instead of applying a stale write.
 
 :::info transact support & semantics
 - **Maximum 500 operations** per call; results return in request order.
+- **Compact result**: `{ resultMode: 'compact' }` returns only the bounded commit acknowledgment; transaction, validation, conflict, retry, and access-rule semantics are unchanged.
 - **Providers**: Durable Object (`transactionSync()`), D1 (single `db.batch()` transaction), and PostgreSQL (`BEGIN`/`COMMIT` on a session-scoped connection; the local dev PG sidecar returns an error because its statements run on independent connections).
 - **Access rules**: table-level `insert` rules run before the transaction; `update`/`delete` (and `expect` probes via the `read` rule) are evaluated per row. Service Key requests bypass rules as usual.
 - `expect.where` supports `'=='` comparisons only.

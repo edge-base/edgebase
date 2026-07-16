@@ -332,6 +332,60 @@ describe('HttpOnly-cookie TokenManager', () => {
     manager.destroy();
   });
 
+  it('coalesces repeated online signals into one cookie-session revalidation', async () => {
+    const { store, dispatch } = installBrowserMocks();
+    vi.stubGlobal('navigator', { onLine: true });
+    store.set('edgebase:cookie-session', JSON.stringify({
+      version: 1,
+      userId: 'reconnect-user',
+    }));
+    let finishRefresh!: () => void;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      if (!String(input).endsWith('/api/auth/refresh')) {
+        return Promise.resolve(new Response('{}', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      return new Promise<Response>((resolve) => {
+        finishRefresh = () => resolve(new Response(JSON.stringify({
+          user: { id: 'reconnect-user' },
+          accessToken: makeJwt('reconnect-user'),
+          refreshToken: '',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }));
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createClient('https://api.example.com', {
+      refreshTokenTransport: 'httpOnlyCookie',
+    });
+
+    expect(client.auth.currentUser).toBeNull();
+    dispatch('online');
+    dispatch('online');
+    dispatch('online');
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => (
+        String(input).endsWith('/api/auth/refresh')
+      ))).toHaveLength(1);
+    });
+
+    finishRefresh();
+    await vi.waitFor(() => {
+      expect(client.auth.currentUser?.id).toBe('reconnect-user');
+    });
+    dispatch('online');
+    await Promise.resolve();
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      String(input).endsWith('/api/auth/refresh')
+    ))).toHaveLength(1);
+
+    client.destroy();
+  });
+
   it('removes a stale online marker after the server definitively rejects the cookie session', async () => {
     const { store } = installBrowserMocks();
     vi.stubGlobal('navigator', { onLine: true });

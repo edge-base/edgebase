@@ -4,7 +4,9 @@ sidebar_position: 4
 
 # Self-Hosting Guide
 
-Self-host EdgeBase using Docker containers or direct Node.js execution.
+Self-host EdgeBase using the protected Docker or pack launcher. `edgebase dev`
+and the server package's `dev:raw` command are local-development tools, not
+production self-host launchers.
 
 ## Why Self-Hosting is Still Fast
 
@@ -21,14 +23,14 @@ SQLite runs in the same thread as the application, so single-query latency is si
 
 ## Deployment Methods
 
-|                   | **Cloud Edge**                                | **Docker**                         | **Direct**                               |
-| ----------------- | --------------------------------------------- | ---------------------------------- | ---------------------------------------- |
-| **Command**       | `npx edgebase deploy`                         | `npx edgebase docker run`          | `npx edgebase dev`                       |
-| **Requires**      | Cloudflare account                            | Docker                             | Node.js 22+ (24.x recommended)           |
-| **Pros**          | Global edge, auto-scale, no server management | Single container, data sovereignty | Simplest, run on any VPS                 |
-| **Cons**          | Cloud account required                        | Docker required                    | Process management needed for production |
-| **Cost**          | ~$5/mo                                        | VPS only (~$5/mo)                  | VPS only                                 |
-| **Data Location** | Edge data centers                             | Local server                       | Local server                             |
+|                   | **Cloud Edge**                                | **Docker**                         | **Pack artifact**                         |
+| ----------------- | --------------------------------------------- | ---------------------------------- | ----------------------------------------- |
+| **Command**       | `npx edgebase deploy`                         | `npx edgebase docker run`          | `npx edgebase pack --format portable`     |
+| **Requires**      | Cloudflare account                            | Docker                             | Target-platform host                      |
+| **Pros**          | Global edge, auto-scale, no server management | Single container, data sovereignty | Protected launcher without a container    |
+| **Cons**          | Cloud account required                        | Docker required                    | Build separately for each target platform |
+| **Cost**          | ~$5/mo                                        | VPS only (~$5/mo)                  | VPS only                                  |
+| **Data Location** | Edge data centers                             | Local server                       | Local server                              |
 
 ---
 
@@ -57,6 +59,13 @@ health-check script, put them in a project-level `docker-context/` directory.
 EdgeBase copies those files into its synthetic build context. The generated
 `Dockerfile`, `.dockerignore`, and `.edgebase/` bundle are reserved and cannot be
 overridden from that directory.
+
+If you provide a custom Dockerfile, its final stage must still execute the
+generated protected entrypoint. The CLI rejects shell-form or shadowed final
+commands, verifies the built image's effective JSON `Entrypoint`/`Cmd`, and
+checks that the referenced bundle files exist inside the image. Bypassing
+`.edgebase/self-host/self-host-docker-entrypoint.mjs` is not a supported
+production configuration.
 
 ### Docker Compose
 
@@ -138,45 +147,46 @@ All data is stored in the `/data` volume:
 
 ---
 
-## 2. Direct workerd Execution
+## 2. Packed Host Execution
 
-Run directly through the EdgeBase CLI (which starts `wrangler dev`) on a machine with Node.js:
+Build a protected directory or portable artifact for the target host:
 
 ```bash
-# Clone or initialize a EdgeBase project
+# Clone or initialize an EdgeBase project
 npm create edgebase@latest my-project
 cd my-project
 
-# Start the local workerd runtime
-npx edgebase dev --port 8787
+# Directory artifact (requires Node.js on the target host)
+npx edgebase pack --format dir --output ./dist/my-app
+node ./dist/my-app/launcher.mjs
 
-# Advanced/manual: only when you provide a complete Wrangler config yourself
-npx wrangler dev --config ./wrangler.toml --port 8787 --persist-to ./data \
-  --var EDGEBASE_RUNTIME_MODE:self-hosted
+# Or a target-platform artifact with an embedded runtime
+npx edgebase pack --format portable --output ./dist/my-app
 ```
 
-`npx edgebase dev` is the recommended path. It evaluates `edgebase.config.ts` and injects the managed bindings needed for local development before starting Wrangler.
+The generated launcher verifies one immutable app generation, starts Wrangler
+only on loopback, authenticates the exact runtime generation and schedule
+digest, validates durable schedule state, completes the first supervisor pass,
+and opens the public gateway last. It owns the complete child process group and
+removes temporary runtime-secret files on normal startup failure or shutdown.
 
-Use raw `wrangler dev` only for explicit manual setups, such as a dedicated test config, or when your `wrangler.toml` already includes every binding your project needs.
-
-The EdgeBase CLI owns an internal `EDGEBASE_RUNTIME_MODE` binding: Cloudflare
-deploys use `cloudflare`, CLI development uses `local-development`, and
-Docker/packaged runtimes use `self-hosted`. Raw Wrangler self-hosting must set
-`self-hosted` as shown above. Missing or invalid modes deliberately trust no
-forwarded client-IP header.
+Do not replace the launcher with raw `wrangler dev`. Raw Wrangler, `edgebase
+dev`, and `dev:raw` omit production gateway admission, durable managed-schedule
+supervision, and bounded process-group shutdown. They remain useful for local
+development and dedicated tests only.
 
 If `frontend` is configured, the local runtime can also serve that prebuilt bundle.
 
 For `mountPath`, `spaFallback`, and route behavior, see [Static Frontend Guide](/docs/getting-started/static-frontend).
 
-### Process Management (PM2 Recommended)
+### Process Management
 
 ```bash
 # Install PM2
 npm install -g pm2
 
-# Start EdgeBase
-pm2 start "npx edgebase dev --port 8787" --name edgebase
+# Start the generated launcher
+pm2 start ./dist/my-app/launcher.mjs --interpreter node --name edgebase
 
 # Configure auto-restart
 pm2 startup
@@ -189,24 +199,28 @@ pm2 save
 
 HTTPS is required for production. Use Caddy or Nginx as a reverse proxy.
 
-:::danger Security: Reverse Proxy Required
-EdgeBase uses the client IP address for **rate limiting** and **brute-force protection**. On a CLI-declared Cloudflare runtime, it trusts `CF-Connecting-IP`. Docker and packaged runtimes ignore client-supplied `CF-Connecting-IP` and only trust `X-Forwarded-For` when you set `trustSelfHostedProxy: true` in `edgebase.config.ts`.
+:::danger Security: Name Every Trusted Proxy Peer
+EdgeBase uses the client IP address for **rate limiting** and **brute-force
+protection**. Generated Docker and pack gateways discard client-supplied
+forwarding headers and write their own values. They preserve an upstream
+`X-Forwarded-For`, `X-Forwarded-Proto`, and `X-Forwarded-Host` set only when the
+immediate peer matches `EDGEBASE_TRUSTED_PROXY_CIDRS`.
 
-**If EdgeBase is exposed directly to the internet without a reverse proxy**, leave `trustSelfHostedProxy: false` so spoofed `X-Forwarded-For` headers are ignored. **If you do run behind Nginx or Caddy**, enable `trustSelfHostedProxy: true` and make sure the proxy overwrites `X-Forwarded-For`.
-
-Without `trustSelfHostedProxy: true`, self-hosted deployments collapse requests
-into a fail-closed unknown-client bucket for IP-based features. That prevents a
-client from rotating forged forwarding headers to evade limits or satisfy a
-Service Key CIDR constraint, but it is less precise operationally.
+Set that variable to the exact Caddy/Nginx peer addresses or CIDRs. Do not use
+a broad private network when other workloads can connect from it. The gateway
+adds a fresh internal proof before forwarding to the Worker, and strips any
+client copy of that proof first. A matching public header alone therefore
+cannot establish proxy authority.
 :::
 
-```typescript title="edgebase.config.ts"
-import { defineConfig } from '@edge-base/shared';
-
-export default defineConfig({
-  trustSelfHostedProxy: true,
-});
+```bash title=".env.release"
+# Example only: use the actual immediate proxy peers for your topology.
+EDGEBASE_TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128
 ```
+
+For direct TLS at the generated gateway, set `LOCAL_PROTOCOL=https` together
+with both `HTTPS_CERT_PATH` and `HTTPS_KEY_PATH`. The production launcher does
+not generate or silently fall back to a self-signed certificate.
 
 ### Caddy (Recommended — Auto HTTPS)
 
@@ -220,8 +234,8 @@ Caddyfile configuration:
 ```
 your-domain.com {
     reverse_proxy localhost:8787 {
-        # EdgeBase reads X-Forwarded-For only when trustSelfHostedProxy: true.
-        # Overwrite the header with the real client IP.
+        # EdgeBase preserves this set only when Caddy's peer address is listed
+        # in EDGEBASE_TRUSTED_PROXY_CIDRS.
         header_up X-Forwarded-For {remote_host}
     }
 }
@@ -231,7 +245,10 @@ your-domain.com {
 sudo systemctl reload caddy
 ```
 
-> Caddy automatically configures Let's Encrypt. No manual SSL certificate management needed. When `trustSelfHostedProxy: true` is enabled, EdgeBase uses the overwritten `X-Forwarded-For` value for IP-based features.
+> Caddy automatically configures Let's Encrypt. No manual SSL certificate
+> management is needed. Add Caddy's immediate peer address to
+> `EDGEBASE_TRUSTED_PROXY_CIDRS`; the generated gateway then preserves Caddy's
+> overwritten forwarding set and proves that gateway hop to the Worker.
 
 ### Nginx + Let's Encrypt
 
@@ -272,7 +289,9 @@ sudo systemctl reload nginx
 The `Upgrade` header configuration is required for WebSocket support.
 :::
 
-If you enable Service Key `ipCidr` constraints or rely on per-client rate limiting while self-hosting, `trustSelfHostedProxy: true` plus a correctly configured reverse proxy is required.
+If you enable Service Key `ipCidr` constraints or rely on per-client rate
+limiting behind a reverse proxy, exact `EDGEBASE_TRUSTED_PROXY_CIDRS` peer
+configuration plus overwritten forwarding headers is required.
 
 ---
 
@@ -282,12 +301,13 @@ EdgeBase provides two backup methods:
 
 | Method                  | Use Case                                                           | Speed    |
 | ----------------------- | ------------------------------------------------------------------ | -------- |
-| **Volume Copy**         | Restore within the same environment (Docker→Docker, Direct→Direct) | Fast     |
-| **CLI Portable Backup** | Cross-environment migration (Edge↔Docker↔Direct)                   | Moderate |
+| **Volume/data copy**    | Restore within the same environment (Docker→Docker, pack→pack) | Fast     |
+| **CLI Portable Backup** | Cross-environment migration (Edge↔Docker↔pack)                | Moderate |
 
 ### 4.1 Volume Backup (Same Environment)
 
-The fastest method — directly copy Docker volumes or the `.wrangler/state/` directory.
+The fastest method is to stop the launcher and copy its Docker volume or pack
+data directory as one coherent unit.
 
 #### Docker Volume Backup
 
@@ -301,18 +321,23 @@ docker run --rm -v edgebase-data:/data -v $(pwd):/backup \
   alpine tar xzf /backup/edgebase-backup-20260213.tar.gz -C /
 ```
 
-#### Direct Execution Backup
+#### Pack Launcher Data Backup
 
 ```bash
-# Backup the .wrangler/state/ directory
-tar czf edgebase-backup-$(date +%Y%m%d).tar.gz .wrangler/state/
+# Launch with an explicit, easy-to-back-up data root
+node ./dist/my-app/launcher.mjs --data-dir ./edgebase-data
+
+# After stopping the launcher, back up that complete directory
+tar czf edgebase-backup-$(date +%Y%m%d).tar.gz edgebase-data/
 
 # Restore
 tar xzf edgebase-backup-20260213.tar.gz
 ```
 
 :::warning
-Volume copies only work within the same environment (Docker→Docker, Direct→Direct). For cross-environment migration (e.g., Docker→Edge), use the CLI portable backup below.
+Filesystem copies only work within the same runtime/storage environment. For
+cross-environment migration (for example Docker→Edge or pack→Docker), use the
+CLI portable backup below.
 :::
 
 ### 4.2 CLI Portable Backup (Cross-Environment)
@@ -362,9 +387,19 @@ echo "0 3 * * * docker run --rm -v edgebase-data:/data -v /backups:/backup alpin
 ### Health Check
 
 ```bash
+curl http://localhost:8787/__edgebase/health
+# → {"schemaVersion":1,"outcome":"ok","product":"proxy-ready","scheduler":{...}}
+
+# Check the EdgeBase application runtime separately.
 curl http://localhost:8787/api/health
-# → {"status":"ok","version":"0.4.8","timestamp":"2026-03-17T12:00:00.000Z"}
+# → {"status":"ok","version":"0.4.9"}
 ```
+
+The endpoint returns `200` for structurally ready `ready`, `running`, or
+`degraded` scheduler states, and `503` with `outcome: "blocked"` before
+admission, after a structural failure, or during shutdown. A degraded item
+remains visible in the scheduler payload without hiding the healthy product
+surface. Use a real application route as a separate functional check.
 
 ### Docker Logs
 

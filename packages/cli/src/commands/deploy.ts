@@ -710,39 +710,6 @@ export function validateConfig(
   }
 }
 
-export function collectManagedCronSchedules(
-  config: Record<string, unknown> | null | undefined,
-): string[] {
-  const cronSchedules: string[] = [];
-
-  const maybeFunctions = config?.functions;
-  if (maybeFunctions && typeof maybeFunctions === 'object') {
-    const fns = maybeFunctions as Record<string, { trigger?: { type: string; cron?: string } }>;
-    for (const fn of Object.values(fns)) {
-      if (fn?.trigger?.type === 'schedule' && fn.trigger.cron && !cronSchedules.includes(fn.trigger.cron)) {
-        cronSchedules.push(fn.trigger.cron);
-      }
-    }
-  }
-
-  const extraCrons = (
-    (config?.cloudflare as { extraCrons?: unknown } | undefined)?.extraCrons
-  );
-  if (Array.isArray(extraCrons)) {
-    for (const cron of extraCrons) {
-      if (typeof cron === 'string' && !cronSchedules.includes(cron)) {
-        cronSchedules.push(cron);
-      }
-    }
-  }
-
-  if (!cronSchedules.includes('0 3 * * *')) {
-    cronSchedules.push('0 3 * * *');
-  }
-
-  return cronSchedules;
-}
-
 /** Exported for testing */
 export const _internals = {
   buildRouteName,
@@ -788,7 +755,6 @@ export const _internals = {
   provisionTurnstile,
   injectCaptchaSiteKey,
   extractDatabases,
-  collectManagedCronSchedules,
   isPostgresProvider,
   isHyperdriveAlreadyExistsError,
   resolveAdminUrlFromRuntime,
@@ -2370,23 +2336,7 @@ export const deployCommand = new Command('deploy')
       console.log();
     }
 
-    // ─── Functions Bundling ───
-    // Plugin functions are registered at runtime from config.plugins[] (Explicit Import Pattern).
-    // No auto-discovery needed — esbuild bundles plugin handlers via import graph.
-
-    // Track function count for dry-run summary
-    let functionsCount = 0;
-    let functions: ReturnType<typeof scanFunctions> = [];
-
     const functionsDir = join(projectDir, 'functions');
-    if (existsSync(functionsDir)) {
-      functions = scanFunctions(functionsDir);
-      validateRouteNames(functions);
-      functionsCount = functions.length;
-      if (functions.length === 0) {
-        console.log(chalk.yellow('⚠'), 'functions/ directory exists but no .ts files found.');
-      }
-    }
 
     if (!isDryRun && isTTY && !isJson() && !isNonInteractive()) {
       await promptToSyncAuthReleaseEnv(projectDir);
@@ -2642,6 +2592,10 @@ export const deployCommand = new Command('deploy')
         projectDir,
         join('.edgebase', 'targets', 'deploy-app-dry-run'),
       );
+      const functionsCount = dryRunBundle.functions.length;
+      if (existsSync(functionsDir) && functionsCount === 0) {
+        console.log(chalk.yellow('⚠'), 'functions/ directory exists but no .ts files found.');
+      }
 
       if (isJson()) {
         const result: Record<string, unknown> = {
@@ -2714,6 +2668,10 @@ export const deployCommand = new Command('deploy')
       projectDir,
       join('.edgebase', 'targets', 'deploy-app'),
     );
+    const functions = deployBundle.functions;
+    if (existsSync(functionsDir) && functions.length === 0) {
+      console.log(chalk.yellow('⚠'), 'functions/ directory exists but no .ts files found.');
+    }
     const deployRuntimeDir = deployBundle.outputDir;
     const deployWranglerPath = join(deployRuntimeDir, 'wrangler.toml');
     const postHookPreviousManifest = readCloudflareDeployManifest(projectDir);
@@ -2765,7 +2723,9 @@ export const deployCommand = new Command('deploy')
     }
 
     // ─── Cron Schedule Extraction ───
-    const cronSchedules = collectManagedCronSchedules(configJson);
+    // The app bundle is the sole managed-schedule authority. Hosted deploy
+    // consumes the same immutable manifest embedded in Docker and pack output.
+    const cronSchedules = [...deployBundle.manifest.schedules.crons];
 
     // ─── Cloudflare Resource Provisioning ───
     const provisionedBindings: ProvisionedBinding[] = [];

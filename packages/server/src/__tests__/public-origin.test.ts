@@ -3,6 +3,7 @@ import { defineConfig, EdgeBaseError } from '@edge-base/shared';
 import { setConfig } from '../lib/do-router.js';
 import { OpenAPIHono, type HonoEnv } from '../lib/hono.js';
 import {
+  SELF_HOST_GATEWAY_AUTHORITY_HEADER,
   resolvePublicRequestOrigin,
   trustsSelfHostedProxyHeaders,
 } from '../lib/public-origin.js';
@@ -43,6 +44,39 @@ describe('public request origin trust boundary', () => {
     });
 
     expect(resolvePublicRequestOrigin(env, request)).toBe('https://files.example.com');
+  });
+
+  it('requires the CLI gateway proof whenever a gateway secret is configured', () => {
+    const secret = 'a'.repeat(64);
+    const env = {
+      EDGEBASE_RUNTIME_MODE: 'self-hosted',
+      EDGEBASE_SELF_HOST_GATEWAY_SECRET: secret,
+      trustSelfHostedProxy: true,
+    };
+    const headers = {
+      'X-Forwarded-Proto': 'https',
+      'X-Forwarded-Host': 'files.example.com',
+    };
+
+    for (const supplied of [undefined, 'b'.repeat(64), 'invalid']) {
+      const request = new Request('http://127.0.0.1:8787/upload', {
+        headers: {
+          ...headers,
+          ...(supplied ? { 'X-EdgeBase-Self-Host-Gateway': supplied } : {}),
+        },
+      });
+      expect(trustsSelfHostedProxyHeaders(env, request)).toBe(false);
+      expect(resolvePublicRequestOrigin(env, request)).toBe('http://127.0.0.1:8787');
+    }
+
+    const proven = new Request('http://127.0.0.1:8787/upload', {
+      headers: {
+        ...headers,
+        [SELF_HOST_GATEWAY_AUTHORITY_HEADER]: secret,
+      },
+    });
+    expect(trustsSelfHostedProxyHeaders(env, proven)).toBe(true);
+    expect(resolvePublicRequestOrigin(env, proven)).toBe('https://files.example.com');
   });
 
   it('returns an HTTPS signed upload URL from an HTTP trusted-proxy upstream request', async () => {

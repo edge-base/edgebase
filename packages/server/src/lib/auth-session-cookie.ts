@@ -43,7 +43,7 @@ function cookieConfig(c: AuthContext): SessionCookieConfig {
 
 function isSecureRequest(c: AuthContext): boolean {
   if (new URL(c.req.url).protocol === 'https:') return true;
-  if (!trustsSelfHostedProxyHeaders(c.env)) return false;
+  if (!trustsSelfHostedProxyHeaders(c.env, c.req)) return false;
   const forwardedProto = c.req.header('X-Forwarded-Proto')
     ?.split(',')[0]
     ?.trim()

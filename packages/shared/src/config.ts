@@ -1,3 +1,5 @@
+import { normalizeCronExpression } from './cron.js';
+
 // ─── Schema Field Types ───
 
 export type FieldType = 'string' | 'text' | 'number' | 'boolean' | 'datetime' | 'json';
@@ -814,9 +816,10 @@ export interface FunctionsConfig {
 
 export interface CloudflareConfig {
   /**
-   * Additional raw Wrangler cron triggers to include at deploy time.
+   * Additional portable numeric cron triggers to include at deploy time.
    * These wake the Worker's scheduled() handler even when not tied to a
-   * specific schedule function.
+   * specific schedule function. Uses five UTC fields with 1=Sunday through
+   * 7=Saturday; provider-only aliases and L/W/# syntax are rejected.
    */
   extraCrons?: string[];
 }
@@ -1801,6 +1804,7 @@ export interface HttpTrigger {
 
 export interface ScheduleTrigger {
   type: 'schedule';
+  /** Portable five-field UTC cron; numeric weekdays use 1=Sunday through 7=Saturday. */
   cron: string;
 }
 
@@ -2110,6 +2114,13 @@ function validateCloudflareConfig(cloudflare: CloudflareConfig): void {
   for (const [index, cron] of cloudflare.extraCrons.entries()) {
     if (typeof cron !== 'string' || cron.trim().length === 0) {
       throw new Error(`cloudflare.extraCrons[${index}] must be a non-empty cron string.`);
+    }
+    try {
+      normalizeCronExpression(cron);
+    } catch (error) {
+      throw new Error(
+        `cloudflare.extraCrons[${index}] is not a portable EdgeBase cron: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 }
@@ -2498,6 +2509,17 @@ export function defineConfig(config: EdgeBaseConfig): EdgeBaseConfig {
       }
       if (seen.has(p.name)) throw new Error(`Duplicate plugin: '${p.name}'.`);
       seen.add(p.name);
+
+      for (const [functionName, definition] of Object.entries(p.functions ?? {})) {
+        if (definition.trigger.type !== 'schedule') continue;
+        try {
+          normalizeCronExpression(definition.trigger.cron);
+        } catch (error) {
+          throw new Error(
+            `Plugin '${p.name}' schedule function '${functionName}' has an invalid cron: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
     }
 
     // Validate provider consistency: plugin provider must match its target dbBlock provider

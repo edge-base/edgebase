@@ -37,7 +37,18 @@ export interface ListResult<T> {
   perPage: number | null;
   hasMore: boolean | null;
   cursor: string | null;
+  /** Exact UTF-8 bytes of the serialized bounded response, including this field. */
+  returnedBytes?: number;
+  /** Expiry of the provider-owned keyset cursor returned by a bounded response. */
+  cursorExpiresAt?: string;
+  /** True when one item was too large to return and `cursor` resumes after it. */
+  oversizedItem?: boolean;
 }
+
+/** Minimum legal maxResponseBytes value; reserves bounded continuation metadata. */
+export const MIN_MAX_RESPONSE_BYTES = 512;
+/** Prefix used only for provider-owned bounded keyset cursors. */
+export const RESPONSE_CURSOR_PREFIX = '~edgebase-response-cursor-v1.';
 
 /** Snapshot delivered by TableRef.onSnapshot() */
 export interface TableSnapshot<T> {
@@ -81,12 +92,36 @@ export type TransactOperation =
       where?: FilterTuple[];
       /** true: a matching row must exist; false: no matching row may exist. */
       exists: boolean;
+      /**
+       * Required for a negative predicate in a write transaction unless the
+       * same transaction inserts the exact missing id. The named row must be
+       * guarded by an earlier revision equality and actually change that
+       * revision before this expectation runs.
+       */
+      fencedBy?: { table: string; id: string; field: string };
     };
 
 /** Result of db.transact() — one entry per operation, in request order. */
 export interface TransactResult {
   results: Array<Record<string, unknown>>;
 }
+
+export const MAX_COMPACT_TRANSACT_RESPONSE_BYTES = 39;
+
+export interface CompactTransactResult {
+  committed: true;
+  operationCount: number;
+}
+
+export interface TransactFullOptions {
+  resultMode?: 'full';
+}
+
+export interface TransactCompactOptions {
+  resultMode: 'compact';
+}
+
+export type TransactOptions = TransactFullOptions | TransactCompactOptions;
 
 export type TableSqlExecutor = (
   namespace: string,
@@ -414,6 +449,8 @@ export class TableRef<T = Record<string, unknown>> {
   private limitValue?: number;
   private offsetValue?: number;
   private pageValue?: number;
+  private includeTotalValue?: boolean;
+  private maxResponseBytesValue?: number;
   private searchQuery?: string;
   private selectedFields?: string[];
   private afterCursor?: string;
@@ -456,6 +493,8 @@ export class TableRef<T = Record<string, unknown>> {
     ref.limitValue = this.limitValue;
     ref.offsetValue = this.offsetValue;
     ref.pageValue = this.pageValue;
+    ref.includeTotalValue = this.includeTotalValue;
+    ref.maxResponseBytesValue = this.maxResponseBytesValue;
     ref.searchQuery = this.searchQuery;
     ref.selectedFields = this.selectedFields ? [...this.selectedFields] : undefined;
     ref.afterCursor = this.afterCursor;
@@ -513,6 +552,39 @@ export class TableRef<T = Record<string, unknown>> {
   page(n: number): TableRef<T> {
     const ref = this.clone();
     ref.pageValue = n;
+    return ref;
+  }
+
+  /**
+   * Choose whether list/search responses calculate the total matching count.
+   * The default remains true on the server. Bounded maintenance and cursor
+   * consumers that never read `total` should opt out to avoid a full COUNT.
+   */
+  includeTotal(include: boolean): TableRef<T> {
+    if (typeof include !== 'boolean') {
+      throw new EdgeBaseError(400, 'includeTotal() requires a boolean.');
+    }
+    const ref = this.clone();
+    ref.includeTotalValue = include;
+    return ref;
+  }
+
+  /**
+   * Bound the exact serialized UTF-8 list/search response size.
+   *
+   * Bounded queries use provider-owned keyset cursors and therefore require
+   * id projection, id ordering, and cursor pagination rather than offsets.
+   * Omitting this option preserves the existing response and read-only path.
+   */
+  maxResponseBytes(maxBytes: number): TableRef<T> {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < MIN_MAX_RESPONSE_BYTES) {
+      throw new EdgeBaseError(
+        400,
+        `maxResponseBytes() requires a safe integer of at least ${MIN_MAX_RESPONSE_BYTES}.`,
+      );
+    }
+    const ref = this.clone();
+    ref.maxResponseBytesValue = maxBytes;
     return ref;
   }
 
@@ -575,6 +647,32 @@ export class TableRef<T = Record<string, unknown>> {
       );
     }
 
+    if (this.maxResponseBytesValue !== undefined) {
+      if (hasOffset) {
+        throw new EdgeBaseError(
+          400,
+          'maxResponseBytes() requires keyset pagination; page() and offset() are not supported.',
+        );
+      }
+      if (this.selectedFields && !this.selectedFields.includes('id')) {
+        throw new EdgeBaseError(
+          400,
+          'maxResponseBytes() projections must include id so the provider can resume by keyset.',
+        );
+      }
+      const expectedDirection = this.beforeCursor !== undefined ? 'desc' : 'asc';
+      if (
+        this.sorts.length > 1
+        || (this.sorts.length === 1
+          && (this.sorts[0]![0] !== 'id' || this.sorts[0]![1] !== expectedDirection))
+      ) {
+        throw new EdgeBaseError(
+          400,
+          `maxResponseBytes() requires orderBy('id', '${expectedDirection}') for stable keyset continuation.`,
+        );
+      }
+    }
+
     const query: Record<string, string> = {};
     if (this.filters.length > 0) {
       query.filter = JSON.stringify(this.filters);
@@ -584,6 +682,8 @@ export class TableRef<T = Record<string, unknown>> {
     }
     if (this.sorts.length > 0) {
       query.sort = this.sorts.map(([f, d]) => `${f}:${d}`).join(',');
+    } else if (this.maxResponseBytesValue !== undefined && this.searchQuery) {
+      query.sort = this.beforeCursor !== undefined ? 'id:desc' : 'id:asc';
     }
     if (this.selectedFields?.length) {
       query.fields = this.selectedFields.join(',');
@@ -594,14 +694,20 @@ export class TableRef<T = Record<string, unknown>> {
     if (this.pageValue !== undefined) {
       query.page = String(this.pageValue);
     }
+    if (this.includeTotalValue !== undefined) {
+      query.includeTotal = String(this.includeTotalValue);
+    }
+    if (this.maxResponseBytesValue !== undefined) {
+      query.maxResponseBytes = String(this.maxResponseBytesValue);
+    }
     if (this.offsetValue !== undefined) {
       query.offset = String(this.offsetValue);
     }
     if (this.afterCursor !== undefined) {
-      query.after = this.afterCursor;
+      query[this.afterCursor.startsWith(RESPONSE_CURSOR_PREFIX) ? 'responseAfter' : 'after'] = this.afterCursor;
     }
     if (this.beforeCursor !== undefined) {
-      query.before = this.beforeCursor;
+      query[this.beforeCursor.startsWith(RESPONSE_CURSOR_PREFIX) ? 'responseBefore' : 'before'] = this.beforeCursor;
     }
     return query;
   }
@@ -655,6 +761,13 @@ export class TableRef<T = Record<string, unknown>> {
       perPage: data.perPage !== undefined ? (data.perPage as number) : null,
       hasMore: data.hasMore !== undefined ? (data.hasMore as boolean) : null,
       cursor: data.cursor !== undefined ? (data.cursor as string) : null,
+      ...(data.returnedBytes !== undefined ? { returnedBytes: data.returnedBytes as number } : {}),
+      ...(data.cursorExpiresAt !== undefined
+        ? { cursorExpiresAt: data.cursorExpiresAt as string }
+        : {}),
+      ...(data.oversizedItem !== undefined
+        ? { oversizedItem: data.oversizedItem as boolean }
+        : {}),
     };
   }
 
@@ -1116,13 +1229,35 @@ export class DbRef<Tables extends EdgeBaseTableMap = EdgeBaseTableMap> {
    *   { table: 'audit_events', op: 'insert', data: { action: 'grant' } },
    * ]);
    */
-  async transact(operations: TransactOperation[]): Promise<TransactResult> {
-    if (this.instanceId) {
-      return (await this.core.dbTransact(this.namespace, this.instanceId, {
-        operations,
-      })) as TransactResult;
+  transact(operations: TransactOperation[]): Promise<TransactResult>;
+  transact(operations: TransactOperation[], options: TransactFullOptions): Promise<TransactResult>;
+  transact(
+    operations: TransactOperation[],
+    options: TransactCompactOptions,
+  ): Promise<CompactTransactResult>;
+  transact(
+    operations: TransactOperation[],
+    options: TransactOptions,
+  ): Promise<TransactResult | CompactTransactResult>;
+  async transact(
+    operations: TransactOperation[],
+    options: TransactOptions = {},
+  ): Promise<TransactResult | CompactTransactResult> {
+    if (options.resultMode !== undefined && options.resultMode !== 'full' && options.resultMode !== 'compact') {
+      throw new EdgeBaseError(
+        400,
+        "transact resultMode must be 'full' or 'compact'.",
+      );
     }
-    return (await this.core.dbSingleTransact(this.namespace, { operations })) as TransactResult;
+    const body = options.resultMode === undefined
+      ? { operations }
+      : { operations, resultMode: options.resultMode };
+    if (this.instanceId) {
+      return (await this.core.dbTransact(this.namespace, this.instanceId, body)) as
+        TransactResult | CompactTransactResult;
+    }
+    return (await this.core.dbSingleTransact(this.namespace, body)) as
+      TransactResult | CompactTransactResult;
   }
 }
 

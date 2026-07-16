@@ -23,7 +23,12 @@ import type {
   HookCtx,
   DbBlock,
 } from '@edge-base/shared';
-import { EdgeBaseError, getTableAccess, getTableHooks } from '@edge-base/shared';
+import {
+  EdgeBaseError,
+  getTableAccess,
+  getTableHooks,
+  validateNegativeTransactExpectations,
+} from '@edge-base/shared';
 import { parseConfig } from './do-router.js';
 import {
   ensureLocalDevPostgresSchema,
@@ -48,10 +53,20 @@ import {
   preparePgUpdateData,
   stripInternalPgFields,
 } from './postgres-table-utils.js';
+import { createPostgresResponseCursorStore } from './response-cursor-store.js';
+import {
+  buildBoundedPageResponse,
+  prepareBoundedQuery,
+} from './response-byte-limit.js';
 import { isTrustedInternalContext } from './internal-request.js';
 import { executeDbTriggers } from './functions.js';
 import { parseUpdateBody } from './op-parser.js';
 import { buildTableHookRuntimeServices } from './table-hook-runtime.js';
+import {
+  MAX_TRANSACT_OPERATIONS,
+  compactTransactResult,
+  parseTransactResultMode,
+} from './transact-result.js';
 
 // ─── Types ───
 
@@ -374,35 +389,47 @@ async function handleList(
     return c.json(error.toJSON(), error.status as 403);
   }
 
-  const queryOpts = parseQueryParams(Object.fromEntries(new URL(c.req.url).searchParams));
+  const responseCursorStore = createPostgresResponseCursorStore(query);
+  const boundedQuery = await prepareBoundedQuery(
+    Object.fromEntries(new URL(c.req.url).searchParams),
+    tableName,
+    responseCursorStore,
+  );
+  const queryOpts = parseQueryParams(boundedQuery.params);
   const { sql, params, countSql, countParams } = buildListQuery(tableName, queryOpts, 'postgres');
   const result = await query(sql, params);
 
   // Apply read rules per row
-  let items = result.rows.map(r => stripInternalPgFields(r as Record<string, unknown>));
+  const sourceItems = result.rows.map(r => stripInternalPgFields(r as Record<string, unknown>));
+  const sourceCursorRecordId = sourceItems.length > 0
+    ? String(sourceItems[sourceItems.length - 1]!.id ?? '') || undefined
+    : undefined;
+  let entries = sourceItems.map((item) => ({ item, cursorId: String(item.id ?? '') }));
   const tableHooks = getTableHooks(tableConfig);
   if (!isServiceKey && tableAccess?.read !== undefined) {
-    const filtered: Record<string, unknown>[] = [];
-    for (const row of items) {
-      if (await evalRowRule(tableAccess.read, auth, row)) {
-        filtered.push(row);
+    const filtered: typeof entries = [];
+    for (const entry of entries) {
+      if (await evalRowRule(tableAccess.read, auth, entry.item)) {
+        filtered.push(entry);
       }
     }
-    items = filtered;
+    entries = filtered;
   }
 
   // Apply onEnrich hook
   if (tableHooks?.onEnrich) {
     const hookCtx = buildHookCtx(resolved.connectionString, c.env, c.executionCtx, query);
-    for (let i = 0; i < items.length; i++) {
+    for (const entry of entries) {
       try {
-        const enriched = await tableHooks.onEnrich(auth, items[i], hookCtx);
-        if (enriched && typeof enriched === 'object') items[i] = { ...items[i], ...enriched };
+        const enriched = await tableHooks.onEnrich(auth, entry.item, hookCtx);
+        if (enriched && typeof enriched === 'object') entry.item = { ...entry.item, ...enriched };
       } catch (err) {
         console.error(`[EdgeBase] onEnrich hook error for table "${tableName}":`, err);
       }
     }
   }
+  const items = entries.map(({ item }) => item);
+  const cursorRecordIds = entries.map(({ cursorId }) => cursorId);
 
   // Get total count
   let total: number | null = null;
@@ -420,6 +447,20 @@ async function handleList(
   const cursor = hasMore && items.length > 0
     ? String((items[items.length - 1] as Record<string, unknown>).id ?? '')
     : null;
+
+  if (boundedQuery.maxResponseBytes !== undefined) {
+    return buildBoundedPageResponse({
+      maxResponseBytes: boundedQuery.maxResponseBytes,
+      tableName,
+      items,
+      cursorRecordIds,
+      sourceCursorRecordId,
+      total,
+      perPage,
+      sourceHasMore: sourceItems.length === perPage,
+      cursorStore: responseCursorStore,
+    });
+  }
 
   return c.json({ items, total, hasMore, cursor, page: hasMore !== null ? null : page, perPage });
 }
@@ -465,11 +506,30 @@ async function handleSearch(
     return c.json(error.toJSON(), error.status as 403);
   }
 
-  const queryOpts = parseQueryParams(Object.fromEntries(new URL(c.req.url).searchParams));
+  const responseCursorStore = createPostgresResponseCursorStore(query);
+  const boundedQuery = await prepareBoundedQuery(
+    Object.fromEntries(new URL(c.req.url).searchParams),
+    tableName,
+    responseCursorStore,
+    { search: true },
+  );
+  const queryOpts = parseQueryParams(boundedQuery.params);
   const searchTerm = queryOpts.search || '';
   if (!searchTerm) {
     // Missing/empty search term — return empty result (same as D1/DO handler;
     // the ?search= query param is optional per openapi.json).
+    if (boundedQuery.maxResponseBytes !== undefined) {
+      return buildBoundedPageResponse({
+        maxResponseBytes: boundedQuery.maxResponseBytes,
+        tableName,
+        items: [],
+        cursorRecordIds: [],
+        total: 0,
+        perPage: queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 100,
+        sourceHasMore: false,
+        cursorStore: responseCursorStore,
+      });
+    }
     return c.json({ items: [] });
   }
 
@@ -488,25 +548,60 @@ async function handleSearch(
   }, 'postgres');
 
   const result = await query(searchQuery.sql, searchQuery.params);
-  let items = result.rows.map(r => stripInternalPgFields(r as Record<string, unknown>));
-  let total = items.length;
-  if (searchQuery.countSql) {
+  const sourceItems = result.rows.map(r => stripInternalPgFields(r as Record<string, unknown>));
+  let total: number | null = sourceItems.length;
+  const includeTotal = !['0', 'false'].includes((c.req.query('includeTotal') ?? '').toLowerCase());
+  if (includeTotal && searchQuery.countSql) {
     const countResult = await query(searchQuery.countSql, searchQuery.countParams ?? []);
-    total = Number(countResult.rows[0]?.total ?? items.length);
+    total = Number(countResult.rows[0]?.total ?? sourceItems.length);
+  } else if (!includeTotal) {
+    total = null;
   }
 
   // Apply read rules
+  const sourceCursorRecordId = sourceItems.length > 0
+    ? String(sourceItems[sourceItems.length - 1]!.id ?? '') || undefined
+    : undefined;
+  let entries = sourceItems.map((item) => ({ item, cursorId: String(item.id ?? '') }));
   if (!isServiceKey && tableAccess?.read !== undefined) {
-    const filtered: Record<string, unknown>[] = [];
-    for (const row of items) {
-      if (await evalRowRule(tableAccess.read, auth, row)) {
-        filtered.push(row);
+    const filtered: typeof entries = [];
+    for (const entry of entries) {
+      if (await evalRowRule(tableAccess.read, auth, entry.item)) {
+        filtered.push(entry);
       }
     }
-    items = filtered;
+    entries = filtered;
   }
 
-  return c.json({ items, total, hasMore: total > offset + items.length, cursor: null, page: null, perPage: limit });
+  if (boundedQuery.maxResponseBytes !== undefined) {
+    const tableHooks = getTableHooks(tableConfig);
+    if (tableHooks?.onEnrich) {
+      const hookCtx = buildHookCtx(resolved.connectionString, c.env, c.executionCtx, query);
+      for (const entry of entries) {
+        try {
+          const enriched = await tableHooks.onEnrich(auth, entry.item, hookCtx);
+          if (enriched && typeof enriched === 'object') entry.item = { ...entry.item, ...enriched };
+        } catch (err) {
+          console.error(`[EdgeBase] onEnrich hook error for table "${tableName}":`, err);
+        }
+      }
+    }
+    return buildBoundedPageResponse({
+      maxResponseBytes: boundedQuery.maxResponseBytes,
+      tableName,
+      items: entries.map(({ item }) => item),
+      cursorRecordIds: entries.map(({ cursorId }) => cursorId),
+      sourceCursorRecordId,
+      total,
+      perPage: limit,
+      sourceHasMore: sourceItems.length === limit,
+      cursorStore: responseCursorStore,
+    });
+  }
+
+  const items = entries.map(({ item }) => item);
+
+  return c.json({ items, total, hasMore: total !== null && total > offset + items.length, cursor: null, page: null, perPage: limit });
 }
 
 // ─── GET ───
@@ -1172,13 +1267,47 @@ interface PgTransactOp {
   data?: unknown;
   where?: unknown;
   exists?: unknown;
+  fencedBy?: unknown;
+}
+
+interface PgTransactLiveChange {
+  table: string;
+  type: 'added' | 'modified' | 'removed';
+  docId: string;
+  data: Record<string, unknown> | null;
+}
+
+const POSTGRES_TRANSACT_MAX_ATTEMPTS = 3;
+const POSTGRES_RETRYABLE_TRANSACTION_SQLSTATES = new Set(['40001', '40P01']);
+
+function isRetryablePostgresTransactionError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && POSTGRES_RETRYABLE_TRANSACTION_SQLSTATES.has(code);
+}
+
+function postgresTransactWriteConflict(
+  operation: 'update' | 'delete',
+  tableName: string,
+  id: string,
+): EdgeBaseError {
+  return new EdgeBaseError(
+    409,
+    `Transaction conflict: ${operation} target "${tableName}/${id}" did not affect exactly one row.`,
+  );
 }
 
 /**
  * Multi-table atomic writes on a single session-scoped connection via
- * BEGIN/COMMIT. `expect` ops run real SELECTs inside the transaction, so
- * assertions hold at commit time under PostgreSQL's isolation, and any
- * failure rolls the whole batch back.
+ * SERIALIZABLE BEGIN/COMMIT. Existing rows found by `expect` are locked until
+ * commit. Serialization failures and deadlocks restart the complete ordered
+ * operation list within a small fixed attempt bound.
+ *
+ * An absent predicate has no row to lock. A shared existing-row expect keeps
+ * concurrent lock holders out of the critical section, but a SERIALIZABLE
+ * snapshot is fixed by the first data statement. Callers that require strict
+ * post-wait freshness must also change/version that anchor so a stale waiter
+ * aborts and replays the complete operation list with a fresh snapshot.
  */
 async function handleTransact(
   c: Context<HonoEnv>,
@@ -1187,19 +1316,26 @@ async function handleTransact(
   isServiceKey: boolean,
   query: PostgresExecutor,
 ): Promise<Response> {
-  let body: { operations?: PgTransactOp[] };
+  let body: { operations?: PgTransactOp[]; resultMode?: unknown };
   try {
     body = await c.req.json();
   } catch {
     return c.json({ code: 400, message: postgresInvalidJsonMessage('transact operations', '(multi-table)') }, 400);
   }
+  const resultMode = parseTransactResultMode(body.resultMode);
+  if (resultMode === null) {
+    return c.json({
+      code: 400,
+      message: "transact resultMode must be 'full' or 'compact'.",
+      slug: 'invalid-transact-result-mode',
+    }, 400);
+  }
   const operations = body.operations;
   if (!Array.isArray(operations) || operations.length === 0) {
     return c.json({ code: 400, message: 'transact requires a non-empty operations array.' }, 400);
   }
-  const MAX_TRANSACT_OPS = 500;
-  if (operations.length > MAX_TRANSACT_OPS) {
-    return c.json({ code: 400, message: `Transact limit exceeded: ${operations.length} operations (max ${MAX_TRANSACT_OPS}).` }, 400);
+  if (operations.length > MAX_TRANSACT_OPERATIONS) {
+    return c.json({ code: 400, message: `Transact limit exceeded: ${operations.length} operations (max ${MAX_TRANSACT_OPERATIONS}).` }, 400);
   }
 
   const tables = resolved.dbBlock.tables ?? {};
@@ -1238,6 +1374,10 @@ async function handleTransact(
       tableCtx.set(op.table, tableConfig);
     }
   }
+  const unsafeNegativeExpectation = validateNegativeTransactExpectations(operations);
+  if (unsafeNegativeExpectation) {
+    return c.json({ code: 400, message: unsafeNegativeExpectation }, 400);
+  }
 
   // Table-level insert rules (matches batch semantics).
   if (!isServiceKey) {
@@ -1252,16 +1392,13 @@ async function handleTransact(
     }
   }
 
-  const results: Record<string, unknown>[] = [];
-  const liveChanges: Array<{
-    table: string;
-    type: 'added' | 'modified' | 'removed';
-    docId: string;
-    data: Record<string, unknown> | null;
-  }> = [];
-
-  await query('BEGIN');
-  try {
+  const executeAttempt = async (): Promise<{
+    results: Record<string, unknown>[];
+    liveChanges: PgTransactLiveChange[];
+  }> => {
+    const results: Record<string, unknown>[] = [];
+    const liveChanges: PgTransactLiveChange[] = [];
+    const hasDbLiveConsumer = Boolean(c.env.DATABASE_LIVE);
     for (const op of operations) {
       const name = op.table as string;
       const tableConfig = tableCtx.get(name)!;
@@ -1294,13 +1431,14 @@ async function handleTransact(
           params.push(value);
           clauses.push(`${escapePgIdentifier(field)} = $${params.length}`);
         }
+        const access = !isServiceKey ? getTableAccess(tableConfig) : undefined;
+        const needsProbeRow = resultMode === 'full' || access?.read !== undefined;
         const probe = await query(
-          `SELECT * FROM ${escapePgIdentifier(name)} WHERE ${clauses.join(' AND ')} LIMIT 1`,
+          `SELECT ${needsProbeRow ? '*' : '1 AS "matched"'} FROM ${escapePgIdentifier(name)} WHERE ${clauses.join(' AND ')} LIMIT 1 FOR UPDATE`,
           params,
         );
         // Read rule guards expect probes so they cannot leak row existence.
         if (!isServiceKey && probe.rows.length > 0) {
-          const access = getTableAccess(tableConfig);
           if (
             access?.read !== undefined
             && !(await evalRowRule(access.read, auth, probe.rows[0] as Record<string, unknown>))
@@ -1314,7 +1452,7 @@ async function handleTransact(
         if (op.exists === false && probe.rows.length > 0) {
           throw new EdgeBaseError(409, `Transaction expectation failed: expected no matching row in "${name}".`);
         }
-        results.push({ expected: true });
+        if (resultMode === 'full') results.push({ expected: true });
         continue;
       }
 
@@ -1332,13 +1470,24 @@ async function handleTransact(
         const columns = Object.keys(data);
         const values = columns.map((col) => data[col] ?? null);
         const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
-        const sql = `INSERT INTO ${escapePgIdentifier(name)} (${columns.map(escapePgIdentifier).join(', ')}) VALUES (${placeholders}) RETURNING *`;
+        const needsInsertedRow = resultMode === 'full' || hasDbLiveConsumer;
+        const sql = `INSERT INTO ${escapePgIdentifier(name)} (${columns.map(escapePgIdentifier).join(', ')}) VALUES (${placeholders})${needsInsertedRow ? ' RETURNING *' : ''}`;
         const inserted = await query(sql, values);
-        const row = inserted.rows.length > 0
-          ? stripInternalPgFields(inserted.rows[0] as Record<string, unknown>)
-          : { ...data };
-        results.push({ inserted: row });
-        liveChanges.push({ table: name, type: 'added', docId: String(row.id ?? ''), data: row });
+        if (
+          resultMode === 'compact'
+          && (inserted.rowCount !== 1 || (hasDbLiveConsumer && inserted.rows.length !== 1))
+        ) {
+          throw new EdgeBaseError(409, `Transaction conflict: insert into "${name}" did not affect exactly one row.`);
+        }
+        if (needsInsertedRow) {
+          const row = inserted.rows.length > 0
+            ? stripInternalPgFields(inserted.rows[0] as Record<string, unknown>)
+            : { ...data };
+          if (resultMode === 'full') results.push({ inserted: row });
+          if (resultMode === 'full' || hasDbLiveConsumer) {
+            liveChanges.push({ table: name, type: 'added', docId: String(row.id ?? ''), data: row });
+          }
+        }
         continue;
       }
 
@@ -1367,7 +1516,14 @@ async function handleTransact(
         }
         const { data } = preparePgUpdateData(bodyData, tableConfig);
         if (Object.keys(data).length === 0) {
-          results.push({ updated: { id } });
+          const current = await query(
+            `SELECT "id" FROM ${escapePgIdentifier(name)} WHERE "id" = $1 LIMIT 1 FOR UPDATE`,
+            [id],
+          );
+          if (current.rowCount !== 1 || current.rows.length !== 1) {
+            throw postgresTransactWriteConflict('update', name, id);
+          }
+          if (resultMode === 'full') results.push({ updated: { id } });
           continue;
         }
         const { setClauses, params, nextParamIndex } = parseUpdateBody(
@@ -1375,14 +1531,18 @@ async function handleTransact(
           ['id'],
           { dialect: 'postgres', startIndex: 1 },
         );
-        const sql = `UPDATE ${escapePgIdentifier(name)} SET ${setClauses.join(', ')} WHERE "id" = $${nextParamIndex} RETURNING *`;
+        const needsUpdatedRow = resultMode === 'full' || hasDbLiveConsumer;
+        const sql = `UPDATE ${escapePgIdentifier(name)} SET ${setClauses.join(', ')} WHERE "id" = $${nextParamIndex}${needsUpdatedRow ? ' RETURNING *' : ''}`;
         const updated = await query(sql, [...params, id]);
-        const row = updated.rows.length > 0
-          ? stripInternalPgFields(updated.rows[0] as Record<string, unknown>)
-          : { id, ...bodyData };
-        results.push({ updated: row });
-        if (updated.rows.length > 0) {
-          liveChanges.push({ table: name, type: 'modified', docId: id, data: row });
+        if (updated.rowCount !== 1 || (needsUpdatedRow && updated.rows.length !== 1)) {
+          throw postgresTransactWriteConflict('update', name, id);
+        }
+        if (needsUpdatedRow) {
+          const row = stripInternalPgFields(updated.rows[0] as Record<string, unknown>);
+          if (resultMode === 'full') results.push({ updated: row });
+          if (resultMode === 'full' || hasDbLiveConsumer) {
+            liveChanges.push({ table: name, type: 'modified', docId: id, data: row });
+          }
         }
         continue;
       }
@@ -1401,25 +1561,56 @@ async function handleTransact(
         }
       }
       const deleted = await query(
-        `DELETE FROM ${escapePgIdentifier(name)} WHERE "id" = $1 RETURNING "id"`,
+        `DELETE FROM ${escapePgIdentifier(name)} WHERE "id" = $1${resultMode === 'full' ? ' RETURNING "id"' : ''}`,
         [id],
       );
-      if (deleted.rows.length > 0) {
+      if (deleted.rowCount !== 1 || (resultMode === 'full' && deleted.rows.length !== 1)) {
+        throw postgresTransactWriteConflict('delete', name, id);
+      }
+      if (resultMode === 'full' || hasDbLiveConsumer) {
         liveChanges.push({ table: name, type: 'removed', docId: id, data: null });
       }
-      results.push({ deleted: true, id });
+      if (resultMode === 'full') results.push({ deleted: true, id });
     }
-    await query('COMMIT');
-  } catch (error) {
+    return { results, liveChanges };
+  };
+
+  let results: Record<string, unknown>[] = [];
+  let liveChanges: PgTransactLiveChange[] = [];
+  for (let attempt = 1; attempt <= POSTGRES_TRANSACT_MAX_ATTEMPTS; attempt += 1) {
+    let began = false;
     try {
-      await query('ROLLBACK');
-    } catch {
-      // connection-level failure — the transaction dies with the session
+      await query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+      began = true;
+      const attempted = await executeAttempt();
+      await query('COMMIT');
+      results = attempted.results;
+      liveChanges = attempted.liveChanges;
+      break;
+    } catch (error) {
+      if (began) {
+        try {
+          await query('ROLLBACK');
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            'PostgreSQL transaction rollback failed.',
+          );
+        }
+      }
+      if (error instanceof EdgeBaseError) {
+        return c.json(error.toJSON(), error.status as 400);
+      }
+      if (isRetryablePostgresTransactionError(error)) {
+        if (attempt < POSTGRES_TRANSACT_MAX_ATTEMPTS) continue;
+        const conflict = new EdgeBaseError(
+          409,
+          `PostgreSQL transaction conflict persisted for ${POSTGRES_TRANSACT_MAX_ATTEMPTS} attempts. Retry the request.`,
+        );
+        return c.json(conflict.toJSON(), 409);
+      }
+      throw error;
     }
-    if (error instanceof EdgeBaseError) {
-      return c.json(error.toJSON(), error.status as 400);
-    }
-    throw error;
   }
 
   // Emit database-live events grouped per table (same thresholds as batch).
@@ -1454,7 +1645,11 @@ async function handleTransact(
     }
   }
 
-  return c.json({ results });
+  return c.json(
+    resultMode === 'compact'
+      ? compactTransactResult(operations.length)
+      : { results },
+  );
 }
 
 // ─── BATCH BY FILTER ───

@@ -5,6 +5,7 @@ import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MAX_MANAGED_SCHEDULE_ENTRIES } from '@edge-base/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveTsxCommand } from '../src/lib/node-tools.js';
 
@@ -104,6 +105,76 @@ async function findFreePort(): Promise<number> {
   });
 }
 
+async function canBindPort(port: number): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    const server = createServer();
+    server.once('error', () => resolvePromise(false));
+    server.listen(port, '127.0.0.1', () => {
+      server.close(() => resolvePromise(true));
+    });
+  });
+}
+
+async function waitForHttpStatus(url: string, status: number, timeoutMs = 30_000): Promise<Response> {
+  const startedAt = Date.now();
+  let lastError: unknown;
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await fetch(url, {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(1_000),
+      });
+      if (response.status === status) return response;
+      lastError = new Error(`Expected HTTP ${status}, received ${response.status}.`);
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  }
+  throw new Error(`Timed out waiting for ${url}.`, { cause: lastError });
+}
+
+async function waitForSuccessfulScheduleState(filePath: string, timeoutMs = 30_000): Promise<Record<string, unknown>> {
+  const startedAt = Date.now();
+  let lastObservation = 'state file not created';
+  while (Date.now() - startedAt < timeoutMs) {
+    if (existsSync(filePath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as {
+          schemaVersion?: unknown;
+          targets?: unknown;
+        };
+        if (
+          parsed.schemaVersion === 2
+          && typeof parsed.targets === 'object'
+          && parsed.targets !== null
+          && !Array.isArray(parsed.targets)
+        ) {
+          const targets = Object.values(parsed.targets as Record<string, unknown>);
+          const bounded = targets.length <= MAX_MANAGED_SCHEDULE_ENTRIES;
+          const successful = bounded && targets.some((entry) => (
+            typeof entry === 'object'
+            && entry !== null
+            && Number.isSafeInteger((entry as { lastSuccessfulBoundary?: unknown }).lastSuccessfulBoundary)
+            && Number((entry as { lastSuccessfulBoundary: number }).lastSuccessfulBoundary) >= 0
+          ));
+          lastObservation = `schemaVersion=2 targets=${targets.length} successful=${String(successful)}`;
+          if (successful) return parsed as Record<string, unknown>;
+        } else {
+          lastObservation = `schemaVersion=${String(parsed.schemaVersion)} targets=invalid`;
+        }
+      } catch (error) {
+        lastObservation = `state read failed: ${error instanceof Error ? error.message : String(error)}`
+          .slice(0, 2_048);
+      }
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  }
+  throw new Error(
+    `Timed out waiting for a successful schedule state at ${filePath}. Last observation: ${lastObservation}`,
+  );
+}
+
 async function waitForFile(filePath: string, timeoutMs = 10_000): Promise<void> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -113,7 +184,10 @@ async function waitForFile(filePath: string, timeoutMs = 10_000): Promise<void> 
   throw new Error(`Timed out waiting for launcher file: ${filePath}`);
 }
 
-async function stopChild(child: ChildProcess, timeoutMs = 10_000): Promise<void> {
+// The packed launcher owns a 10-second shutdown deadline. Leave an outer-test
+// margin for its final SIGKILL/process-group reap and Node's child `exit` event,
+// especially on loaded ARM CI hosts.
+async function stopChild(child: ChildProcess, timeoutMs = 15_000): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   await new Promise<void>((resolvePromise, reject) => {
     const timeout = setTimeout(() => {
@@ -125,6 +199,24 @@ async function stopChild(child: ChildProcess, timeoutMs = 10_000): Promise<void>
       resolvePromise();
     });
     child.kill('SIGTERM');
+  });
+}
+
+async function waitForChildExit(child: ChildProcess, timeoutMs = 15_000): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolvePromise, reject) => {
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error('Timed out waiting for the packed launcher to exit.'));
+    }, timeoutMs);
+    child.once('exit', () => {
+      clearTimeout(timeout);
+      resolvePromise();
+    });
+    child.once('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
   });
 }
 
@@ -291,7 +383,7 @@ export default defineConfig({
 
     const result = await runPack(projectDir, 'packed');
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr || result.stdout).toBe(0);
     expect(result.stderr).toBe('');
 
     const payload = JSON.parse(result.stdout) as {
@@ -307,7 +399,7 @@ export default defineConfig({
 
     expect(payload).toMatchObject({
       status: 'success',
-      outputDir: realpathSync(join(projectDir, 'packed')),
+      outputDir: join(realpathSync(projectDir), 'packed'),
       manifest: {
         format: 'dir',
         frontend: { enabled: false },
@@ -322,6 +414,14 @@ export default defineConfig({
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
       frontend: { enabled: boolean };
       runtime: { registry: string; bundleDir: string };
+      schedules: { digest: string; crons: string[] };
+      selfHost: {
+        schemaVersion: number;
+        generation: string;
+        gateway: { path: string; digest: string; bytes: number };
+        scheduleSupervisor: { path: string; digest: string; bytes: number };
+        dockerEntrypoint: { path: string; digest: string; bytes: number };
+      };
       launcher: {
         entry: string;
         unix: string;
@@ -341,6 +441,28 @@ export default defineConfig({
     expect(manifest.frontend.enabled).toBe(false);
     expect(manifest.runtime.registry).toBe('.edgebase/runtime/server/src/_functions-registry.ts');
     expect(manifest.runtime.bundleDir).toBe('.edgebase/runtime/server/bundle');
+    const appManifest = JSON.parse(
+      readFileSync(join(projectDir, 'packed', 'edgebase-app.json'), 'utf-8'),
+    ) as {
+      schedules: { digest: string };
+      selfHost: {
+        schemaVersion: number;
+        generation: string;
+        gateway: { path: string; digest: string; bytes: number };
+        scheduleSupervisor: { path: string; digest: string; bytes: number };
+        dockerEntrypoint: { path: string; digest: string; bytes: number };
+      };
+    };
+    expect(manifest.schedules.digest).toBe(appManifest.schedules.digest);
+    expect(manifest.schedules.crons).toContain('0 3 * * *');
+    expect(manifest.selfHost).toEqual(appManifest.selfHost);
+    expect(manifest.selfHost).toMatchObject({
+      schemaVersion: 1,
+      generation: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      gateway: { path: '.edgebase/self-host/self-host-gateway.mjs' },
+      scheduleSupervisor: { path: '.edgebase/self-host/self-host-schedule-supervisor.mjs' },
+      dockerEntrypoint: { path: '.edgebase/self-host/self-host-docker-entrypoint.mjs' },
+    });
     expect(manifest.launcher).toMatchObject({
       entry: 'launcher.mjs',
       unix: 'run.sh',
@@ -361,6 +483,9 @@ export default defineConfig({
     appDataDirs.push(appDataRoot);
     expect(existsSync(join(projectDir, 'packed', 'edgebase-app.json'))).toBe(true);
     expect(existsSync(join(projectDir, 'packed', 'launcher.mjs'))).toBe(true);
+    expect(existsSync(join(projectDir, 'packed', manifest.selfHost.gateway.path))).toBe(true);
+    expect(existsSync(join(projectDir, 'packed', manifest.selfHost.scheduleSupervisor.path))).toBe(true);
+    expect(existsSync(join(projectDir, 'packed', manifest.selfHost.dockerEntrypoint.path))).toBe(true);
     expect(existsSync(join(projectDir, 'packed', 'run.sh'))).toBe(true);
     expect(existsSync(join(projectDir, 'packed', 'run.cmd'))).toBe(true);
     expect(existsSync(join(projectDir, 'packed', 'edgebase.config.ts'))).toBe(false);
@@ -410,9 +535,40 @@ export default defineConfig({
     expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).not.toContain('directory = ".edgebase/runtime/server/admin-build"');
     expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).toContain('EDGEBASE_RUNTIME_MODE = "self-hosted"');
     expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).toContain(
+      'main = ".edgebase/runtime/server/src/index.ts"',
+    );
+    expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).toContain(
+      'compatibility_date = "2025-02-10"',
+    );
+    expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).toContain(
       'compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]',
     );
     expect(existsSync(join(projectDir, 'packed', '.env.release'))).toBe(false);
+    const launcherSource = readFileSync(join(projectDir, 'packed', 'launcher.mjs'), 'utf-8');
+    expect(launcherSource).toContain('verifySelfHostAssets(appManifestPath, artifactRoot)');
+    expect(launcherSource).toContain("'/__edgebase/internal/self-host/ready'");
+    expect(launcherSource).not.toContain('/cdn-cgi/handler/scheduled');
+    expect(launcherSource).toContain('EDGEBASE_SELF_HOST_GATEWAY_SECRET');
+    expect(launcherSource).toContain('workerTrustSecret: gatewaySecret');
+    expect(launcherSource).toContain('healthProvider: () => scheduleSupervisor?.getStatus()');
+    expect(launcherSource).toContain('admissionGuard: () => (');
+    expect(launcherSource).toContain('const childTerminal = new Promise');
+    expect(launcherSource).toContain("detached: process.platform !== 'win32'");
+    expect(launcherSource).toContain('process.kill(-pid, signal)');
+    expect(launcherSource).toContain('signalProcessTree(child.pid, signal)');
+    expect(launcherSource).toContain("signalProcessTree(child.pid, 'SIGKILL')");
+    const launcherReady = launcherSource.indexOf('await waitForInternalRuntime(');
+    const launcherState = launcherSource.indexOf(
+      'supervisorModule.readSelfHostScheduleState(scheduleStatePath)',
+    );
+    const launcherPass = launcherSource.indexOf(
+      'const initialReport = await raceChild(',
+    );
+    const launcherGateway = launcherSource.indexOf('gateway = await raceChild(startSelfHostGateway');
+    expect(launcherReady).toBeGreaterThanOrEqual(0);
+    expect(launcherReady).toBeLessThan(launcherState);
+    expect(launcherState).toBeLessThan(launcherPass);
+    expect(launcherPass).toBeLessThan(launcherGateway);
     for (const artifactPath of [
       join(projectDir, 'packed', '.edgebase', 'runtime', 'server', 'src', 'generated-config.ts'),
       join(projectDir, 'packed', '.edgebase', 'runtime', 'server', 'bundle', 'config', 'edgebase.config.bundle.js'),
@@ -438,6 +594,8 @@ export default defineConfig({
     if (process.platform !== 'win32') {
       chmodSync(liveDevVarsPath, 0o644);
     }
+    const liveGatewayPort = await findFreePort();
+    let liveInternalPort = 0;
     const launcher = spawn(
       process.execPath,
       [
@@ -445,7 +603,7 @@ export default defineConfig({
         '--host',
         '127.0.0.1',
         '--port',
-        String(await findFreePort()),
+        String(liveGatewayPort),
         '--data-dir',
         liveDataRoot,
         '--persist-to',
@@ -472,7 +630,66 @@ export default defineConfig({
       await waitForFile(liveDevVarsPath);
       // The lock is published only after the launcher installs its shutdown
       // handlers, so it is the readiness signal for exercising cleanup.
-      await waitForFile(join(liveDataRoot, 'launcher-lock.json'), 30_000);
+      const liveLockPath = join(liveDataRoot, 'launcher-lock.json');
+      await waitForFile(liveLockPath, 30_000);
+      const liveLock = JSON.parse(readFileSync(liveLockPath, 'utf-8')) as {
+        externalHost: string;
+        externalPort: number;
+        internalHost: string;
+        internalPort: number;
+        gatewayProtocol: string;
+        gatewayUpstream: string;
+        supervisorRuntimeOrigin: string;
+        appManifestPath: string;
+        scheduleStatePath: string;
+      };
+      liveInternalPort = liveLock.internalPort;
+      expect(liveLock).toMatchObject({
+        externalHost: '127.0.0.1',
+        externalPort: liveGatewayPort,
+        internalHost: '127.0.0.1',
+        gatewayProtocol: 'http',
+        appManifestPath: realpathSync(join(projectDir, 'packed', 'edgebase-app.json')),
+        scheduleStatePath: join(liveDataRoot, 'self-host-schedule-state.json'),
+      });
+      expect(liveLock.internalPort).not.toBe(liveGatewayPort);
+      expect(liveLock.gatewayUpstream).toBe(`http://127.0.0.1:${liveLock.internalPort}`);
+      expect(liveLock.supervisorRuntimeOrigin).toBe(liveLock.gatewayUpstream);
+
+      const blockedControl = await fetch(
+        `http://127.0.0.1:${liveGatewayPort}/cdn-cgi/handler/scheduled?time=0&cron=*`,
+      );
+      expect(blockedControl.status).toBe(404);
+      const gatewayHealth = await fetch(
+        `http://127.0.0.1:${liveGatewayPort}/__edgebase/health`,
+      );
+      expect(gatewayHealth.status).toBe(200);
+      await expect(gatewayHealth.json()).resolves.toMatchObject({
+        schemaVersion: 1,
+        outcome: 'ok',
+        product: 'proxy-ready',
+        scheduler: {
+          state: 'ready',
+          structuralReady: true,
+        },
+      });
+      try {
+        await expect(waitForHttpStatus(
+          `http://127.0.0.1:${liveGatewayPort}/api/health`,
+          200,
+        )).resolves.toBeInstanceOf(Response);
+      } catch (error) {
+        const launcherLogPath = join(liveDataRoot, 'launcher.log');
+        throw new Error(
+          existsSync(launcherLogPath) ? readFileSync(launcherLogPath, 'utf-8') : 'launcher log missing',
+          { cause: error },
+        );
+      }
+      const scheduleState = await waitForSuccessfulScheduleState(liveLock.scheduleStatePath);
+      expect(scheduleState.manifestDigest).toBe(appManifest.schedules.digest);
+      if (process.platform !== 'win32') {
+        expect(statSync(liveLock.scheduleStatePath).mode & 0o777).toBe(0o600);
+      }
       const liveDevVars = readFileSync(liveDevVarsPath, 'utf-8');
       const liveEnvKeys = new Set(
         liveDevVars
@@ -507,7 +724,42 @@ export default defineConfig({
       await stopChild(launcher);
     }
     expect(existsSync(liveDevVarsPath)).toBe(false);
+    expect(existsSync(join(liveDataRoot, 'launcher-lock.json'))).toBe(false);
+    await expect(canBindPort(liveGatewayPort)).resolves.toBe(true);
+    await expect(canBindPort(liveInternalPort)).resolves.toBe(true);
     expect(readdirSync(liveWorkDir).filter((entry) => entry.startsWith('.dev.vars.'))).toEqual([]);
+
+    const childDeathDataRoot = join(projectDir, 'launcher-child-death-data');
+    const childDeathGatewayPort = await findFreePort();
+    const childDeathLauncher = spawn(
+      process.execPath,
+      [
+        join(projectDir, 'packed', 'launcher.mjs'),
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(childDeathGatewayPort),
+        '--data-dir',
+        childDeathDataRoot,
+      ],
+      {
+        cwd: join(projectDir, 'packed'),
+        env: { ...process.env, EDGEBASE_OPEN: '0' },
+        stdio: 'ignore',
+      },
+    );
+    const childDeathLockPath = join(childDeathDataRoot, 'launcher-lock.json');
+    await waitForFile(childDeathLockPath, 30_000);
+    const childDeathLock = JSON.parse(readFileSync(childDeathLockPath, 'utf-8')) as {
+      childPid: number;
+      internalPort: number;
+    };
+    const childDeathExit = waitForChildExit(childDeathLauncher);
+    process.kill(childDeathLock.childPid, 'SIGTERM');
+    await childDeathExit;
+    expect(existsSync(childDeathLockPath)).toBe(false);
+    await expect(canBindPort(childDeathGatewayPort)).resolves.toBe(true);
+    await expect(canBindPort(childDeathLock.internalPort)).resolves.toBe(true);
 
     const expectedWorkDir = join(appDataRoot, manifest.launcher.runtimeDir);
     mkdirSync(expectedWorkDir, { recursive: true });
@@ -551,11 +803,29 @@ export default defineConfig({
       openUrl: string;
       wranglerBin: string;
       wranglerArgs: string[];
+      protocol: string;
+      externalHost: string;
+      externalPort: number;
+      internalHost: string;
+      internalPort: number;
+      gatewayUpstream: string;
+      supervisorRuntimeOrigin: string;
+      appManifestPath: string;
+      scheduleStatePath: string;
     };
 
     expect(launchPlan.artifactRoot).toBe(realpathSync(join(projectDir, 'packed')));
     expect(launchPlan.host).toBe('127.0.0.1');
     expect(launchPlan.port).toBe(manifest.launcher.defaultPort);
+    expect(launchPlan.protocol).toBe('http');
+    expect(launchPlan.externalHost).toBe('127.0.0.1');
+    expect(launchPlan.externalPort).toBe(manifest.launcher.defaultPort);
+    expect(launchPlan.internalHost).toBe('127.0.0.1');
+    expect(launchPlan.internalPort).not.toBe(launchPlan.externalPort);
+    expect(launchPlan.gatewayUpstream).toBe(`http://127.0.0.1:${launchPlan.internalPort}`);
+    expect(launchPlan.supervisorRuntimeOrigin).toBe(launchPlan.gatewayUpstream);
+    expect(launchPlan.appManifestPath).toBe(realpathSync(join(projectDir, 'packed', 'edgebase-app.json')));
+    expect(launchPlan.scheduleStatePath).toBe(join(appDataRoot, 'self-host-schedule-state.json'));
     expect(launchPlan.dataRoot).toBe(appDataRoot);
     expect(launchPlan.workDir).toBe(join(appDataRoot, manifest.launcher.runtimeDir));
     expect(launchPlan.persistDir).toBe(join(appDataRoot, manifest.launcher.stateDir));
@@ -573,7 +843,12 @@ export default defineConfig({
       join(appDataRoot, manifest.launcher.runtimeDir, '.dev.vars'),
       '--persist-to',
       join(appDataRoot, manifest.launcher.stateDir),
+      '--port',
+      String(launchPlan.internalPort),
+      '--ip',
+      '127.0.0.1',
     ]));
+    expect(launchPlan.wranglerArgs).not.toContain(String(launchPlan.externalPort));
     if (process.platform !== 'win32') {
       expect(launchPlan.devVarsMode).toBe(0o600);
     }
@@ -613,6 +888,51 @@ export default defineConfig({
       readdirSync(join(failureDataRoot, manifest.launcher.runtimeDir))
         .filter((entry) => entry.startsWith('.dev.vars.')),
     ).toEqual([]);
+
+    const occupiedGateway = createServer();
+    const occupiedPort = await new Promise<number>((resolvePort, reject) => {
+      occupiedGateway.once('error', reject);
+      occupiedGateway.listen(0, '127.0.0.1', () => {
+        const address = occupiedGateway.address();
+        if (!address || typeof address === 'string') {
+          reject(new Error('Could not resolve occupied gateway test port.'));
+          return;
+        }
+        resolvePort(address.port);
+      });
+    });
+    const collisionDataRoot = join(projectDir, 'launcher-collision-data');
+    try {
+      const collidedLaunch = await runBufferedProcess(
+        process.execPath,
+        [
+          join(projectDir, 'packed', 'launcher.mjs'),
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(occupiedPort),
+          '--data-dir',
+          collisionDataRoot,
+        ],
+        {
+          cwd: join(projectDir, 'packed'),
+          encoding: 'utf-8',
+          timeout: 30_000,
+        },
+      );
+      expect(collidedLaunch.status).not.toBe(0);
+      expect(collidedLaunch.stderr).toContain(
+        `Explicit gateway port ${occupiedPort} is not available on 127.0.0.1.`,
+      );
+      expect(existsSync(join(collisionDataRoot, 'launcher-lock.json'))).toBe(false);
+      expect(existsSync(join(
+        collisionDataRoot,
+        manifest.launcher.runtimeDir,
+        '.dev.vars',
+      ))).toBe(false);
+    } finally {
+      await new Promise<void>((resolveClose) => occupiedGateway.close(() => resolveClose()));
+    }
   });
 
   it('includes configured frontend assets in the packed runtime scaffold', { timeout: 90_000 }, async () => {
@@ -648,7 +968,7 @@ export default defineConfig({
 
     const result = await runPack(projectDir, 'artifact');
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr || result.stdout).toBe(0);
     expect(result.stderr).toBe('');
 
     const payload = JSON.parse(result.stdout) as {
@@ -728,7 +1048,7 @@ export default defineConfig({
 
     const result = await runPack(projectDir, 'packed');
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr || result.stdout).toBe(0);
     expect(result.stderr).toBe('');
 
     const manifest = JSON.parse(readFileSync(join(projectDir, 'packed', 'edgebase-pack.json'), 'utf-8')) as {
@@ -743,6 +1063,13 @@ export default defineConfig({
         pid: process.pid,
         host: '127.0.0.1',
         port: 49091,
+        externalHost: '127.0.0.1',
+        externalPort: 49091,
+        internalHost: '127.0.0.1',
+        internalPort: 49191,
+        gatewayProtocol: 'http',
+        gatewayUpstream: 'http://127.0.0.1:49191',
+        supervisorRuntimeOrigin: 'http://127.0.0.1:49191',
         createdAt: new Date().toISOString(),
       }, null, 2) + '\n',
     );
@@ -762,10 +1089,18 @@ export default defineConfig({
       existingInstance: boolean;
       openUrl: string;
       statePath: string;
+      externalPort: number;
+      internalPort: number;
+      gatewayUpstream: string;
+      supervisorRuntimeOrigin: string;
     };
     expect(launchPlan.port).toBe(49091);
     expect(launchPlan.existingInstance).toBe(true);
     expect(launchPlan.openUrl).toBe('http://127.0.0.1:49091/admin');
+    expect(launchPlan.externalPort).toBe(49091);
+    expect(launchPlan.internalPort).toBe(49191);
+    expect(launchPlan.gatewayUpstream).toBe('http://127.0.0.1:49191');
+    expect(launchPlan.supervisorRuntimeOrigin).toBe(launchPlan.gatewayUpstream);
 
     const savedState = JSON.parse(readFileSync(launchPlan.statePath, 'utf-8')) as {
       host: string;

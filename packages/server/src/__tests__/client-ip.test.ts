@@ -46,6 +46,25 @@ describe('trusted client IP runtime boundary', () => {
     }, forged)).toBe('10.0.0.8');
   });
 
+  it('requires the exact gateway proof before trusting X-Forwarded-For', () => {
+    const secret = 'a'.repeat(64);
+    const env = {
+      EDGEBASE_RUNTIME_MODE: 'self-hosted',
+      EDGEBASE_SELF_HOST_GATEWAY_SECRET: secret,
+      trustSelfHostedProxy: true,
+    };
+    expect(getTrustedClientIp(env, forged)).toBeUndefined();
+    expect(getTrustedClientIp(env, requestHeaders({
+      'x-edgebase-self-host-gateway': 'b'.repeat(64),
+      'x-forwarded-for': '10.0.0.8',
+    }))).toBeUndefined();
+    expect(getTrustedClientIp(env, requestHeaders({
+      'x-edgebase-self-host-gateway': secret,
+      'x-forwarded-for': '10.0.0.8, 10.0.0.9',
+      'cf-connecting-ip': '127.0.0.1',
+    }))).toBe('10.0.0.8');
+  });
+
   it('does not let a forged CF header satisfy a loopback-only anonymous-auth rule', () => {
     const ip = getTrustedClientIp({ EDGEBASE_RUNTIME_MODE: 'self-hosted' }, forged);
     const loopbackOnlyAnonymousAuth = ip === '::1' || ip?.startsWith('127.') === true;

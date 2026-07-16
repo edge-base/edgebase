@@ -27,6 +27,8 @@ const SELF_HOSTING_GUIDE_URL = 'https://edgebase.fun/docs/getting-started/self-h
 const RELEASE_ENV_HEADER = '# EdgeBase Production Environment Variables';
 const DOCKER_RUNTIME_HEALTH_TIMEOUT_MS = 90_000;
 const DOCKER_RUNTIME_HEALTH_PROBE_TIMEOUT_MS = 20_000;
+const PROTECTED_ENTRYPOINT_PATH = '/usr/local/bin/edgebase-entrypoint.sh';
+const PROTECTED_ENTRYPOINT_MODULE = '/app/.edgebase/self-host/self-host-docker-entrypoint.mjs';
 interface DockerProcessResult {
   stdout: string;
   stderr: string;
@@ -173,6 +175,114 @@ function assertImageExists(tag: string): void {
   }
 }
 
+interface DockerExecutionConfig {
+  Entrypoint?: unknown;
+  Cmd?: unknown;
+}
+
+function normalizeExecVector(value: unknown, context: string): string[] | null {
+  if (value === null || value === undefined) return null;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new Error(`${context} must use JSON exec form.`);
+  }
+  return value as string[];
+}
+
+function consumesProtectedEntrypoint(config: DockerExecutionConfig): boolean {
+  const entrypoint = normalizeExecVector(config.Entrypoint, 'Docker ENTRYPOINT');
+  const command = normalizeExecVector(config.Cmd, 'Docker CMD');
+  const vector = entrypoint && entrypoint.length > 0 ? entrypoint : command;
+  if (!vector) return false;
+  return (vector.length === 1 && vector[0] === PROTECTED_ENTRYPOINT_PATH)
+    || (vector.length === 2 && vector[0] === 'node' && vector[1] === PROTECTED_ENTRYPOINT_MODULE);
+}
+
+function dockerfileLogicalLines(source: string): string[] {
+  const lines: string[] = [];
+  let pending = '';
+  for (const rawLine of source.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!pending && (!trimmed || trimmed.startsWith('#'))) continue;
+    const continued = /\\\s*$/.test(trimmed);
+    const part = trimmed.replace(/\\\s*$/, '').trim();
+    pending = pending ? `${pending} ${part}` : part;
+    if (!continued) {
+      if (pending) lines.push(pending);
+      pending = '';
+    }
+  }
+  if (pending) throw new Error('Dockerfile ends with an unterminated continuation.');
+  return lines;
+}
+
+function readDockerfileExecInstruction(
+  value: string,
+  context: 'ENTRYPOINT' | 'CMD',
+): string[] {
+  if (!value.startsWith('[')) {
+    throw new Error(`Final-stage ${context} must use JSON exec form.`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error) {
+    throw new Error(`Final-stage ${context} is not valid JSON exec form.`, { cause: error });
+  }
+  return normalizeExecVector(parsed, `Final-stage ${context}`) ?? [];
+}
+
+function assertProtectedDockerfile(source: string): void {
+  const lines = dockerfileLogicalLines(source);
+  let sawFrom = false;
+  let entrypoint: string[] | null = null;
+  let command: string[] | null = null;
+  for (const line of lines) {
+    const instruction = /^([A-Za-z]+)\s+([\s\S]+)$/.exec(line);
+    if (!instruction) continue;
+    const name = instruction[1]?.toUpperCase();
+    const value = instruction[2]?.trim() ?? '';
+    if (name === 'FROM') {
+      sawFrom = true;
+      entrypoint = null;
+      command = null;
+      continue;
+    }
+    if (!sawFrom) continue;
+    if (name === 'ENTRYPOINT') entrypoint = readDockerfileExecInstruction(value, 'ENTRYPOINT');
+    if (name === 'CMD') command = readDockerfileExecInstruction(value, 'CMD');
+  }
+  if (!sawFrom) throw new Error('Dockerfile has no build stage.');
+  if (!/\.edgebase\/targets\/docker-app(?:\/|\s)/.test(source)) {
+    throw new Error('Dockerfile must consume the generated .edgebase/targets/docker-app bundle.');
+  }
+  if (!consumesProtectedEntrypoint({ Entrypoint: entrypoint, Cmd: command })) {
+    throw new Error(
+      `Final image execution must consume ${PROTECTED_ENTRYPOINT_PATH} `
+        + `or node ${PROTECTED_ENTRYPOINT_MODULE} in JSON exec form.`,
+    );
+  }
+}
+
+function assertProtectedDockerImage(
+  tag: string,
+  runner: typeof execFileSync = execFileSync,
+): void {
+  const raw = runner(
+    'docker',
+    ['image', 'inspect', tag, '--format', '{{json .Config}}'],
+    { encoding: 'utf-8', stdio: 'pipe' },
+  );
+  const config = JSON.parse(String(raw)) as DockerExecutionConfig;
+  if (!consumesProtectedEntrypoint(config)) {
+    throw new Error(`Docker image '${tag}' does not consume the protected self-host entrypoint.`);
+  }
+  runner('docker', [
+    'run', '--rm', '--network', 'none', '--read-only',
+    '--entrypoint', '/bin/sh', tag, '-c',
+    `test -x ${PROTECTED_ENTRYPOINT_PATH} && test -f ${PROTECTED_ENTRYPOINT_MODULE}`,
+  ], { stdio: 'ignore', timeout: 30_000 });
+}
+
 function hasEdgeBaseConfig(dir: string): boolean {
   return EDGEBASE_CONFIG_FILES.some((name) => existsSync(resolve(dir, name)));
 }
@@ -290,8 +400,7 @@ function prepareDockerBuildContext(projectDir: string, dockerBundleDir: string):
   cpSync(dockerBundleDir, contextBundleDir, {
     recursive: true,
     force: true,
-    dereference: false,
-    verbatimSymlinks: true,
+    dereference: true,
   });
   copyProjectDockerContextFiles(projectDir, contextDir);
 
@@ -438,6 +547,9 @@ export const _internals = {
   findProjectRoot,
   buildDockerBuildArgs,
   buildDockerRunArgs,
+  assertProtectedDockerfile,
+  assertProtectedDockerImage,
+  consumesProtectedEntrypoint,
   finalizeDockerWrangler,
   prepareDockerBuildContext,
   isDockerDaemonResponsive,
@@ -462,6 +574,15 @@ dockerCommand
         hint: 'Run the command from an EdgeBase project directory with a Dockerfile.',
       });
     }
+    try {
+      assertProtectedDockerfile(readFileSync(dockerfilePath, 'utf-8'));
+    } catch (error) {
+      raiseCliError({
+        code: 'docker_entrypoint_unprotected',
+        message: error instanceof Error ? error.message : String(error),
+        hint: 'Use the protected EdgeBase Dockerfile contract; raw Wrangler/custom command images are unsupported by `edgebase docker build`.',
+      });
+    }
 
     if (!options.contextOnly) {
       ensureDockerAvailable();
@@ -474,6 +595,9 @@ dockerCommand
         overwrite: true,
         portableDependencies: true,
         dependencyProfile: 'docker',
+        stagedGenerationFinalizer(stagingDir) {
+          finalizeDockerWrangler(projectDir, stagingDir);
+        },
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -483,8 +607,6 @@ dockerCommand
         hint: 'Run the command from an EdgeBase app project with edgebase.config.ts, then retry `npx edgebase docker build`.',
       });
     }
-    finalizeDockerWrangler(projectDir, dockerBundle.outputDir);
-
     const args = buildDockerBuildArgs(options);
     const contextDir = prepareDockerBuildContext(projectDir, dockerBundle.outputDir);
 
@@ -523,6 +645,7 @@ dockerCommand
         cwd: contextDir,
         inheritOutput: !isJson(),
       });
+      assertProtectedDockerImage(options.tag);
     } catch (error) {
       const failure = extractCommandFailure(error);
       raiseCliError({
@@ -610,6 +733,15 @@ dockerCommand
 
     ensureDockerAvailable();
     assertImageExists(options.tag);
+    try {
+      assertProtectedDockerImage(options.tag);
+    } catch (error) {
+      raiseCliError({
+        code: 'docker_entrypoint_unprotected',
+        message: error instanceof Error ? error.message : String(error),
+        hint: 'Rebuild the image with `npx edgebase docker build`; raw/custom commands are not a protected EdgeBase runtime.',
+      });
+    }
 
     if (dockerContainerExists(options.name)) {
       if (options.replace) {
@@ -687,7 +819,8 @@ dockerCommand
 
     const loopbackHost = '127.0.0.1';
     const dashboardUrl = `http://${loopbackHost}:${options.port}/admin`;
-    const healthUrl = `http://${loopbackHost}:${options.port}/api/health`;
+    const healthProtocol = envVars.LOCAL_PROTOCOL === 'https' ? 'https' : 'http';
+    const healthUrl = `${healthProtocol}://${loopbackHost}:${options.port}/__edgebase/health`;
     const baseUrl = `http://${loopbackHost}:${options.port}`;
 
     const waitForHealthy = async (): Promise<void> => {

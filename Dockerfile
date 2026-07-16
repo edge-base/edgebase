@@ -1,8 +1,9 @@
 FROM node:22-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf
 
 # workerd requires glibc, so use Debian slim instead of Alpine. Keep npm pinned
-# to the audited release used by consumer runtime images. The container invokes
-# Wrangler directly and does not need a package-manager CLI at runtime. Workerd
+# to the audited release used by consumer runtime images. The generated
+# self-host entrypoint owns Wrangler, its gateway, and schedule supervisor and
+# does not need a package-manager CLI at runtime. Workerd
 # uses the system trust store for outbound HTTPS, so keep the public CA bundle
 # in the otherwise-minimal image.
 RUN apt-get update && \
@@ -52,7 +53,7 @@ RUN { \
     echo 'export EDGEBASE_RUNTIME_MODE=self-hosted'; \
     echo ''; \
     echo 'cd /app'; \
-    echo 'exec su -s /bin/sh edgebase -c '\''exec wrangler dev --config "$WRANGLER_CONFIG" --port "$PORT" --ip "$HOST" --persist-to "$PERSIST_DIR" --show-interactive-dev-session=false'\'''; \
+    echo 'exec su -s /bin/sh edgebase -c '\''exec node /app/.edgebase/self-host/self-host-docker-entrypoint.mjs'\'''; \
   } > /usr/local/bin/edgebase-entrypoint.sh && chmod +x /usr/local/bin/edgebase-entrypoint.sh
 
 # Default environment variables
@@ -68,7 +69,7 @@ VOLUME ["/data"]
 EXPOSE 8787
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD node -e "const http=require('http');const r=http.get('http://localhost:'+process.env.PORT+'/api/health',s=>{process.exit(s.statusCode===200?0:1)});r.on('error',()=>process.exit(1));r.setTimeout(3000,()=>process.exit(1));"
+  CMD node -e "const s=process.env.LOCAL_PROTOCOL==='https';const p=s?require('https'):require('http');const r=p.get('http'+(s?'s':'')+'://localhost:'+process.env.PORT+'/__edgebase/health',s?{rejectUnauthorized:false}:{},x=>{process.exit(x.statusCode===200?0:1)});r.on('error',()=>process.exit(1));r.setTimeout(3000,()=>process.exit(1));"
 
 USER root
 

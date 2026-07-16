@@ -460,6 +460,117 @@ describe('ensureD1Schema — migrations', () => {
     expect(versionSet).toBeDefined();
     expect(versionSet!.bindings[1]).toBe('2');
   });
+
+  it('runs a pending D1 duplicate repair before finalizing a new unique index', async () => {
+    const db = createMockD1({
+      firstResults: [
+        { value: 'stale-hash' },
+        { value: '1' },
+        null,
+      ],
+      allResults: [
+        { results: [
+          { name: 'id' },
+          { name: 'createdAt' },
+          { name: 'updatedAt' },
+          { name: 'email' },
+        ] },
+        { results: [] },
+        { results: [
+          { name: 'id' },
+          { name: 'createdAt' },
+          { name: 'updatedAt' },
+          { name: 'email' },
+        ] },
+        { results: [] },
+      ],
+    });
+
+    await ensureD1Schema(db, 'workspace', {
+      contacts: {
+        schema: { email: { type: 'string', unique: true } },
+        migrations: [{
+          version: 2,
+          description: 'Remove the older duplicate email row',
+          up: `DELETE FROM contacts WHERE id = 'older'`,
+        }],
+      },
+    });
+
+    const migrationBatch = db._batchStmts.find((statements) =>
+      statements.some((sql) => sql.includes("id = 'older'")),
+    );
+    expect(migrationBatch).toBeDefined();
+    const migrationPosition = migrationBatch!.findIndex((sql) => sql.includes("id = 'older'"));
+    const uniquePosition = migrationBatch!.findIndex((sql) =>
+      sql.includes('CREATE UNIQUE INDEX "uidx_contacts_email"'),
+    );
+    expect(uniquePosition).toBeGreaterThan(migrationPosition);
+    expect(migrationBatch!.filter((sql) => sql.includes('INSERT INTO "_meta"')))
+      .toHaveLength(2);
+
+    const versionWrite = db._calls.find((call) =>
+      call.sql.includes('INSERT INTO "_meta"')
+      && call.bindings[0] === 'migration_version:contacts',
+    );
+    const hashWrite = db._calls.find((call) =>
+      call.sql.includes('INSERT INTO "_meta"')
+      && call.bindings[0] === 'schemaHash:contacts',
+    );
+    expect(versionWrite?.bindings[1]).toBe('2');
+    expect(hashWrite?.bindings[1]).toBeTruthy();
+  });
+
+  it('makes a missing preparation column available before its D1 data migration', async () => {
+    const db = createMockD1({
+      firstResults: [{ value: 'stale-hash' }, { value: '1' }, null],
+      allResults: [
+        { results: [
+          { name: 'id' },
+          { name: 'createdAt' },
+          { name: 'updatedAt' },
+          { name: 'email' },
+        ] },
+        { results: [] },
+        { results: [
+          { name: 'id' },
+          { name: 'createdAt' },
+          { name: 'updatedAt' },
+          { name: 'email' },
+          { name: 'normalizedEmail' },
+        ] },
+        { results: [] },
+      ],
+    });
+
+    await ensureD1Schema(db, 'workspace', {
+      contacts: {
+        schema: {
+          email: { type: 'string' },
+          normalizedEmail: { type: 'string', unique: true },
+        },
+        migrations: [{
+          version: 2,
+          description: 'Backfill normalized email values',
+          up: 'UPDATE contacts SET normalizedEmail = lower(email)',
+        }],
+      },
+    });
+
+    const orderedSql = db._batchStmts.flat();
+    const addColumnPosition = orderedSql.findIndex((sql) =>
+      sql.includes('ADD COLUMN "normalizedEmail"'),
+    );
+    const migrationPosition = orderedSql.findIndex((sql) =>
+      sql.includes('SET normalizedEmail = lower(email)'),
+    );
+    const uniquePosition = orderedSql.findIndex((sql) =>
+      sql.includes('CREATE UNIQUE INDEX "uidx_contacts_normalizedEmail"'),
+    );
+    expect(addColumnPosition).toBeGreaterThanOrEqual(0);
+    expect(migrationPosition).toBeGreaterThan(addColumnPosition);
+    expect(uniquePosition).toBeGreaterThan(migrationPosition);
+  });
 });
 
 // ─── D. Multiple tables in single namespace ─────────────────────────────────

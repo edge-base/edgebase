@@ -19,6 +19,12 @@ function main() {
   const sdkLanguageCount = metadata.sdkLanguages.length;
   const oauthProviderCount = metadata.oauthProviderCount;
   const deployModeCount = metadata.deployModes.length;
+  const expectedDeployModes = ['Edge', 'Docker', 'Pack'];
+
+  assert(
+    JSON.stringify(metadata.deployModes) === JSON.stringify(expectedDeployModes),
+    `site-metadata.json deployModes must equal: ${expectedDeployModes.join(', ')}`
+  );
 
   const checks = [
     {
@@ -31,8 +37,15 @@ function main() {
         'const docsEntryPoints = siteMetadata.docsEntryPoints;',
         '<h2>Choose Your Path</h2>',
         '{docsEntryPoints.map((entry) => (',
-        `<h2>One Codebase, {deployModeCount} Deploy Modes</h2>`,
+        `<h2>One Codebase, {deployModeCount} Production Modes</h2>`,
+        `<h3>Pack artifact</h3>`,
+        `npx edgebase pack --format portable`,
+        `local dev remains the iteration surface`,
         `{siteMetadata.sdkPackageHeadline} SDK packages across {sdkLanguageCount} languages`,
+      ],
+      forbiddenSnippets: [
+        `<h3>Node.js</h3>`,
+        `<li>Dev & production</li>`,
       ],
     },
     {
@@ -49,7 +62,9 @@ function main() {
       snippets: [
         `SDKs for **${sdkLanguageCount} languages**`,
         `OAuth (${oauthProviderCount} providers:`,
-        `all three modes`,
+        `**Pack artifact**`,
+        `**Local development**`,
+        `edgebase dev\` is local development only`,
       ],
     },
     {
@@ -68,10 +83,13 @@ function main() {
     },
   ];
 
-  for (const { file, snippets } of checks) {
+  for (const { file, snippets, forbiddenSnippets = [] } of checks) {
     const content = read(file);
     for (const snippet of snippets) {
       assert(content.includes(snippet), `${path.relative(docsRoot, file)} must include: ${snippet}`);
+    }
+    for (const snippet of forbiddenSnippets) {
+      assert(!content.includes(snippet), `${path.relative(docsRoot, file)} must not include: ${snippet}`);
     }
   }
 

@@ -357,6 +357,113 @@ describe('DatabaseDO existing-table schema migration', () => {
     }
   });
 
+  it('runs a pending duplicate repair before finalizing a new unique constraint', async () => {
+    const db = new DatabaseSync(':memory:');
+    const executedSQL: string[] = [];
+
+    try {
+      db.exec(`
+        CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE contacts (
+          id TEXT PRIMARY KEY,
+          createdAt TEXT,
+          updatedAt TEXT,
+          email TEXT
+        );
+        INSERT INTO contacts (id, email) VALUES
+          ('older', 'duplicate@example.com'),
+          ('newer', 'duplicate@example.com');
+        INSERT INTO _meta (key, value) VALUES
+          ('schemaHash:contacts', 'stale-schema-hash'),
+          ('migration_version:contacts', '1');
+      `);
+
+      const config = createWorkspaceConfig('contacts', {
+        schema: { email: { type: 'string', unique: true } },
+        migrations: [{
+          version: 2,
+          description: 'Keep the newest contact for each email',
+          up: `DELETE FROM contacts WHERE id = 'older'`,
+        }],
+      });
+
+      const response = await initializeExistingWorkspace(db, executedSQL, config);
+
+      expect(response.status).toBe(404);
+      expect(db.prepare('SELECT id, email FROM contacts').all()).toEqual([
+        { id: 'newer', email: 'duplicate@example.com' },
+      ]);
+      expect(
+        db.prepare('SELECT value FROM _meta WHERE key = ?').get('migration_version:contacts'),
+      ).toMatchObject({ value: '2' });
+      expect(
+        db.prepare('SELECT value FROM _meta WHERE key = ?').get('schemaHash:contacts'),
+      ).toMatchObject({ value: computeSchemaHashSync(config.databases!.workspace!.tables!.contacts!) });
+      expect(
+        db.prepare('PRAGMA index_list("contacts")').all()
+          .find((row) => row.name === 'uidx_contacts_email'),
+      ).toMatchObject({ unique: 1 });
+
+      const migrationPosition = executedSQL.findIndex((sql) => sql.includes("id = 'older'"));
+      const uniquePosition = executedSQL.findIndex((sql) =>
+        sql.startsWith('CREATE UNIQUE INDEX "uidx_contacts_email"'),
+      );
+      expect(migrationPosition).toBeGreaterThanOrEqual(0);
+      expect(uniquePosition).toBeGreaterThan(migrationPosition);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('rolls back migration data and metadata when a pending migration fails', async () => {
+    const db = new DatabaseSync(':memory:');
+    const executedSQL: string[] = [];
+
+    try {
+      db.exec(`
+        CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE contacts (
+          id TEXT PRIMARY KEY,
+          createdAt TEXT,
+          updatedAt TEXT,
+          email TEXT
+        );
+        INSERT INTO contacts (id, email) VALUES
+          ('older', 'duplicate@example.com'),
+          ('newer', 'duplicate@example.com');
+        INSERT INTO _meta (key, value) VALUES
+          ('schemaHash:contacts', 'stale-schema-hash'),
+          ('migration_version:contacts', '1');
+      `);
+
+      await expect(initializeExistingWorkspace(
+        db,
+        executedSQL,
+        createWorkspaceConfig('contacts', {
+          schema: { email: { type: 'string', unique: true } },
+          migrations: [{
+            version: 2,
+            description: 'A failing duplicate repair',
+            up: `DELETE FROM contacts WHERE id = 'older'; INSERT INTO missing_table VALUES ('x')`,
+          }],
+        }),
+      )).rejects.toThrow();
+
+      expect(db.prepare('SELECT id FROM contacts ORDER BY id').all()).toEqual([
+        { id: 'newer' },
+        { id: 'older' },
+      ]);
+      expect(
+        db.prepare('SELECT value FROM _meta WHERE key = ?').get('migration_version:contacts'),
+      ).toMatchObject({ value: '1' });
+      expect(
+        db.prepare('SELECT value FROM _meta WHERE key = ?').get('schemaHash:contacts'),
+      ).toMatchObject({ value: 'stale-schema-hash' });
+    } finally {
+      db.close();
+    }
+  });
+
   it('disables only field-owned unique indexes and preserves config.indexes ownership', async () => {
     const db = new DatabaseSync(':memory:');
     const executedSQL: string[] = [];

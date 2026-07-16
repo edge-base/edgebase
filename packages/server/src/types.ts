@@ -77,6 +77,14 @@ export interface Env {
    * `local-development`, and Docker/portable runtimes use `self-hosted`.
    */
   EDGEBASE_RUNTIME_MODE?: 'cloudflare' | 'local-development' | 'self-hosted';
+  /** Ephemeral launcher-owned authentication for loopback self-host control. */
+  EDGEBASE_SELF_HOST_CONTROL_SECRET?: string;
+  /** Exact immutable app generation admitted by the protected launcher. */
+  EDGEBASE_SELF_HOST_APP_GENERATION?: string;
+  /** Exact managed-schedule authority digest admitted by the protected launcher. */
+  EDGEBASE_SELF_HOST_SCHEDULE_DIGEST?: string;
+  /** Ephemeral proof that forwarding headers came from the verified gateway hop. */
+  EDGEBASE_SELF_HOST_GATEWAY_SECRET?: string;
 
   // ─── Push Secrets ───
   /** FCM Service Account JSON string */

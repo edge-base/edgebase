@@ -24,6 +24,7 @@ Technical limits for EdgeBase Database. Limits marked **configurable** can be ch
 |-------|---------|:---:|-------|
 | Batch size (inserts + updates + deletes) | **500** per request | No | All-or-nothing transaction via `transactionSync()` |
 | `db.transact()` operations (multi-table) | **500** per request | No | All-or-nothing across tables. DO: `transactionSync()`; D1: single `db.batch()` transaction; PostgreSQL: `BEGIN`/`COMMIT` on a session-scoped connection (local dev sidecar unsupported). |
+| `db.transact(..., { resultMode: 'compact' })` success body | **39 UTF-8 bytes maximum** | Per request | Exact shape `{ committed: true, operationCount: n }`; the default full-row result remains unchanged. |
 | `batch-by-filter` per iteration | **500** rows | No | SDK auto-repeats until `processed === 0` (max 100 iterations) |
 | `insertMany` chunk size | **500** | No | SDK auto-chunks; each chunk is an independent transaction |
 | Rule evaluation timeout (Worker-level) | **50 ms** | No | Fail-closed — timeout = deny. Applies to insert/update/delete access rule checks evaluated in the Worker. |
@@ -31,6 +32,8 @@ Technical limits for EdgeBase Database. Limits marked **configurable** can be ch
 | OR filter conditions | **5** per `.or()` group | No | |
 | Default page size | **20** rows | Yes | `limit` query parameter |
 | Max page size | **No enforcement** (default 20, recommended max 500) | No | Batch operations enforce 500-item limit separately |
+| Bounded list/search response | **512 bytes minimum** | Per request | `.maxResponseBytes(n)` caps the exact serialized UTF-8 body; omitted by default |
+| Bounded response cursor lifetime | **7 days, sliding** | No | Successful use extends expiry; cursor state is created lazily only for bounded requests |
 
 ## Backend-Specific Cloudflare Limits
 

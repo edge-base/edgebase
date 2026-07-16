@@ -121,6 +121,37 @@ describe('transact — cross-table atomic writes', () => {
     expect(status).toBe(400);
     expect(await postCount()).toBe(before);
   });
+
+  it('returns a compact acknowledgment through the public D1 HTTP route', async () => {
+    const id = `compact-d1-${crypto.randomUUID()}`;
+    createdPostIds.push(id);
+    const { status, data } = await api('POST', '/api/db/shared/transact', {
+      resultMode: 'compact',
+      operations: [
+        { table: 'posts', op: 'insert', data: { id, title: 'TX compact D1' } },
+      ],
+    });
+
+    expect(status).toBe(200);
+    expect(data).toEqual({ committed: true, operationCount: 1 });
+    expect((await api('GET', `/api/db/shared/tables/posts/${id}`)).data.title)
+      .toBe('TX compact D1');
+  });
+
+  it('rejects an invalid result mode before the public D1 route mutates data', async () => {
+    const id = `invalid-mode-${crypto.randomUUID()}`;
+    const { status, data } = await api('POST', '/api/db/shared/transact', {
+      resultMode: 'verbose',
+      operations: [
+        { table: 'posts', op: 'insert', data: { id, title: 'must not exist' } },
+      ],
+    });
+
+    expect(status).toBe(400);
+    expect(data).toMatchObject({ code: 400 });
+    expect(data.message).toContain('resultMode');
+    expect((await api('GET', `/api/db/shared/tables/posts/${id}`)).status).toBe(404);
+  });
 });
 
 describe('transact — expect assertions', () => {
@@ -246,6 +277,22 @@ describe('transact — Durable Object provider (txdo namespace)', () => {
 
     await api('DELETE', `/api/db/txdo/tables/tx_posts/${id}`);
   });
+
+  it('returns a compact acknowledgment through the public DO HTTP route', async () => {
+    const id = `compact-do-${crypto.randomUUID()}`;
+    const { status, data } = await api('POST', '/api/db/txdo/transact', {
+      resultMode: 'compact',
+      operations: [
+        { table: 'tx_posts', op: 'insert', data: { id, title: 'DO TX compact' } },
+      ],
+    });
+
+    expect(status).toBe(200);
+    expect(data).toEqual({ committed: true, operationCount: 1 });
+    expect((await api('GET', `/api/db/txdo/tables/tx_posts/${id}`)).data.title)
+      .toBe('DO TX compact');
+    await api('DELETE', `/api/db/txdo/tables/tx_posts/${id}`);
+  });
 });
 
 describe('transact — dynamic per-instance namespace (txws)', () => {
@@ -314,6 +361,22 @@ describe('transact — dynamic per-instance namespace (txws)', () => {
     expect(status).toBe(403);
     const countAfter = (await api('GET', `/api/db/txws/${instanceA}/tables/ws_pages/count`)).data.total;
     expect(countAfter).toBe(countBefore);
+  });
+
+  it('bootstraps and commits compact mode through the dynamic public HTTP route', async () => {
+    const instance = `compact-${crypto.randomUUID().slice(0, 8)}`;
+    const id = `page-${crypto.randomUUID()}`;
+    const { status, data } = await api('POST', `/api/db/txws/${instance}/transact`, {
+      resultMode: 'compact',
+      operations: [
+        { table: 'ws_pages', op: 'insert', data: { id, title: 'Dynamic compact page' } },
+      ],
+    });
+
+    expect(status).toBe(200);
+    expect(data).toEqual({ committed: true, operationCount: 1 });
+    expect((await api('GET', `/api/db/txws/${instance}/tables/ws_pages/${id}`)).data.title)
+      .toBe('Dynamic compact page');
   });
 });
 

@@ -45,9 +45,18 @@ Retrieve a list of records from a table. Supports filtering, sorting, and two pa
 | `after`         | string | `01J...`                             | Cursor pagination (forward)                                     |
 | `before`        | string | `01J...`                             | Cursor pagination (backward)                                    |
 | `orFilter`      | JSON   | `[["type","==","news"],["featured","==",true]]` | OR condition filter (maximum 5 conditions)                      |
+| `fields`        | string | `id,title`                           | Comma-separated projection; bounded responses must include `id` |
+| `includeTotal`  | boolean/string | `false`                       | Set `false` or `0` to skip `COUNT`; `total` is `null`            |
+| `maxResponseBytes` | number | `262144`                          | Opt in to an exact serialized UTF-8 response cap (minimum 512)   |
+| `responseAfter` | string | `~edgebase-response-cursor-v1...`    | Opaque forward cursor returned by a bounded request              |
+| `responseBefore` | string | `~edgebase-response-cursor-v1...`   | Opaque backward cursor returned by a bounded request             |
 
 :::warning
 `page`/`offset` and `after`/`before` are mutually exclusive. Using both in the same request will result in an error.
+:::
+
+:::warning Bounded responses
+`maxResponseBytes` requires stable `id` keyset pagination, an `id` projection, and no `page`/`offset`. Resend the same cap with `responseAfter` or `responseBefore`; do not decode or replace the provider-owned cursor. Its sliding expiry is returned as `cursorExpiresAt`.
 :::
 
 :::tip Offset-based pagination
@@ -100,6 +109,23 @@ curl "https://your-project.edgebase.fun/api/db/shared/tables/posts?filter=[[\"st
   "cursor": "01J..."
 }
 ```
+
+**Response** `200` (Bounded mode -- when using `maxResponseBytes`)
+
+```json
+{
+  "items": [{ "id": "01J...", "title": "Hello" }],
+  "total": null,
+  "page": null,
+  "perPage": 250,
+  "hasMore": true,
+  "cursor": "~edgebase-response-cursor-v1...",
+  "cursorExpiresAt": "2026-07-23T00:00:00.000Z",
+  "returnedBytes": 247
+}
+```
+
+`returnedBytes` is the exact byte length of the serialized UTF-8 body, including that field. Access rules and enrichment hooks are applied before measurement. If one source row cannot fit by itself, EdgeBase returns `items: []`, `oversizedItem: true`, and an opaque cursor after that row so the next request continues instead of looping. Without `maxResponseBytes`, the existing response shape and write-free read path are unchanged.
 
 ---
 
@@ -399,6 +425,41 @@ curl -X POST https://your-project.edgebase.fun/api/db/shared/tables/posts/batch 
   "deleted": []
 }
 ```
+
+---
+
+## Multi-table Transaction
+
+### `POST /api/db/:namespace/transact`
+
+Apply up to 500 ordered `insert`, `update`, `delete`, and `expect` operations
+atomically across tables in one database. Dynamic databases use
+`/api/db/:namespace/:instanceId/transact`.
+
+The optional `resultMode` is validated before any write:
+
+```json
+{
+  "resultMode": "compact",
+  "operations": [
+    { "table": "documents", "op": "update", "id": "doc-1", "data": { "indexed": true } },
+    { "table": "audit_events", "op": "insert", "data": { "action": "document.indexed" } }
+  ]
+}
+```
+
+With `"resultMode": "compact"`, a successful response is the fixed-shape
+acknowledgment below. It is at most 39 UTF-8 bytes at the 500-operation limit
+and does not echo mutated rows:
+
+```json
+{ "committed": true, "operationCount": 2 }
+```
+
+Omitting `resultMode` (or setting it to `"full"`) preserves the existing
+`{ "results": [...] }` response with one ordered entry per operation. Compact
+mode changes only success serialization; validation, access rules, atomic
+rollback, conflicts, and provider retry behavior remain the same.
 
 ---
 

@@ -97,7 +97,7 @@ describe('Docker build argument construction', () => {
     );
     writeFileSync(
       join(tmpDir, 'Dockerfile'),
-      'FROM node:22\nCOPY .edgebase/targets/docker-app/ /app/\n',
+      'FROM node:22\nCOPY .edgebase/targets/docker-app/ /app/\nCMD ["node", "/app/.edgebase/self-host/self-host-docker-entrypoint.mjs"]\n',
     );
 
     const fakeBinDir = join(tmpDir, 'fake-bin');
@@ -156,6 +156,15 @@ describe('Docker build argument construction', () => {
       'docker-app',
       'edgebase-app.json',
     ))).toBe(true);
+    const appManifest = JSON.parse(readFileSync(join(
+      payload.contextDir,
+      '.edgebase',
+      'targets',
+      'docker-app',
+      'edgebase-app.json',
+    ), 'utf-8')) as { schedules: { digest: string; crons: string[] } };
+    expect(appManifest.schedules.digest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(appManifest.schedules.crons).toContain('0 3 * * *');
   });
 
   it('creates a minimal docker build context with the bundled app payload', () => {
@@ -270,6 +279,67 @@ describe('Docker build argument construction', () => {
     });
     expect(result).toBe(false);
   });
+
+  it('accepts only final-stage JSON execution that consumes the protected bundle entrypoint', () => {
+    expect(() => _internals.assertProtectedDockerfile(readFileSync(dockerfilePath, 'utf-8')))
+      .not.toThrow();
+    expect(() => _internals.assertProtectedDockerfile([
+      'FROM node:22 AS build',
+      'COPY .edgebase/targets/docker-app/ /app/',
+      'CMD ["wrangler", "dev"]',
+      'FROM node:22',
+      'COPY --from=build /app /app',
+      'ENTRYPOINT ["node", "/app/.edgebase/self-host/self-host-docker-entrypoint.mjs"]',
+    ].join('\n'))).not.toThrow();
+  });
+
+  it.each([
+    [
+      'missing command',
+      'FROM node:22\nCOPY .edgebase/targets/docker-app/ /app/\n',
+    ],
+    [
+      'raw Wrangler command',
+      'FROM node:22\nCOPY .edgebase/targets/docker-app/ /app/\nCMD ["wrangler", "dev"]\n',
+    ],
+    [
+      'shell form',
+      'FROM node:22\nCOPY .edgebase/targets/docker-app/ /app/\nCMD /usr/local/bin/edgebase-entrypoint.sh\n',
+    ],
+    [
+      'shadowed command',
+      'FROM node:22\nCOPY .edgebase/targets/docker-app/ /app/\nCMD ["/usr/local/bin/edgebase-entrypoint.sh"]\nCMD ["node", "other.mjs"]\n',
+    ],
+    [
+      'unprotected final stage',
+      'FROM node:22 AS protected\nCOPY .edgebase/targets/docker-app/ /app/\nCMD ["/usr/local/bin/edgebase-entrypoint.sh"]\nFROM node:22\nCMD ["node", "other.mjs"]\n',
+    ],
+    [
+      'bundle not consumed',
+      'FROM node:22\nCMD ["/usr/local/bin/edgebase-entrypoint.sh"]\n',
+    ],
+  ])('rejects %s Dockerfiles', (_label, dockerfile) => {
+    expect(() => _internals.assertProtectedDockerfile(dockerfile)).toThrow();
+  });
+
+  it('validates the effective built image execution vector independently of Dockerfile text', () => {
+    expect(_internals.consumesProtectedEntrypoint({
+      Entrypoint: null,
+      Cmd: ['/usr/local/bin/edgebase-entrypoint.sh'],
+    })).toBe(true);
+    expect(_internals.consumesProtectedEntrypoint({
+      Entrypoint: ['node', '/app/.edgebase/self-host/self-host-docker-entrypoint.mjs'],
+      Cmd: [],
+    })).toBe(true);
+    expect(_internals.consumesProtectedEntrypoint({
+      Entrypoint: ['/bin/sh', '-c'],
+      Cmd: ['/usr/local/bin/edgebase-entrypoint.sh'],
+    })).toBe(false);
+    expect(_internals.consumesProtectedEntrypoint({
+      Entrypoint: null,
+      Cmd: ['wrangler', 'dev'],
+    })).toBe(false);
+  });
 });
 
 // ======================================================================
@@ -378,14 +448,34 @@ describe('Dockerfile detection', () => {
 
   it('bootstraps writable persistence before dropping to the edgebase user', () => {
     const dockerfile = readFileSync(dockerfilePath, 'utf-8');
+    const runtimeEntrypoint = readFileSync(
+      join(cliPackageDir, 'src', 'templates', 'self-host', 'self-host-docker-entrypoint.mjs'),
+      'utf-8',
+    );
 
     expect(dockerfile).toContain('edgebase-entrypoint.sh');
     expect(dockerfile).toContain('chown -R edgebase:edgebase "${PERSIST_DIR}" /home/edgebase/.config');
     expect(dockerfile).toContain('exec su -s /bin/sh edgebase -c');
-    expect(dockerfile).toContain('exec wrangler dev --config "$WRANGLER_CONFIG"');
-    expect(dockerfile).toContain('--show-interactive-dev-session=false');
+    expect(dockerfile).toContain('exec node /app/.edgebase/self-host/self-host-docker-entrypoint.mjs');
+    expect(dockerfile).not.toContain('exec wrangler dev --config "$WRANGLER_CONFIG"');
     expect(dockerfile).toContain('> /usr/local/bin/edgebase-entrypoint.sh && chmod +x');
+    expect(dockerfile).toContain('/__edgebase/health');
     expect(dockerfile).toContain('USER root');
+    expect(runtimeEntrypoint).toContain("'--ip', '127.0.0.1'");
+    expect(runtimeEntrypoint).toContain('x-edgebase-self-host-control');
+    expect(runtimeEntrypoint).toContain('EDGEBASE_SELF_HOST_GATEWAY_SECRET');
+    expect(runtimeEntrypoint).toContain('EDGEBASE_SELF_HOST_APP_GENERATION');
+    expect(runtimeEntrypoint).toContain('workerTrustSecret: gatewaySecret');
+    expect(runtimeEntrypoint).toContain('healthProvider: () => supervisor?.getStatus()');
+    expect(runtimeEntrypoint).toContain('waitForOwnedProcessGroupExit');
+    const ready = runtimeEntrypoint.indexOf('await waitForOwnedRuntime(');
+    const state = runtimeEntrypoint.indexOf('supervisorModule.readSelfHostScheduleState(scheduleStatePath)');
+    const firstPass = runtimeEntrypoint.indexOf('const initialReport = await raceChild(supervisor.runOnce()');
+    const gateway = runtimeEntrypoint.indexOf('gateway = await raceChild(gatewayModule.startSelfHostGateway');
+    expect(ready).toBeGreaterThanOrEqual(0);
+    expect(ready).toBeLessThan(state);
+    expect(state).toBeLessThan(firstPass);
+    expect(firstPass).toBeLessThan(gateway);
   });
 
   it('detects edgebase.config.ts as a project root marker', () => {

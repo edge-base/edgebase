@@ -28,7 +28,7 @@ function rawTransport(c: AdminAuthContext): string | null {
 
 function isSecureRequest(c: AdminAuthContext): boolean {
   if (new URL(c.req.url).protocol === 'https:') return true;
-  if (!trustsSelfHostedProxyHeaders(c.env)) return false;
+  if (!trustsSelfHostedProxyHeaders(c.env, c.req)) return false;
   const forwardedProto = c.req.header('X-Forwarded-Proto')
     ?.split(',')[0]
     ?.trim()

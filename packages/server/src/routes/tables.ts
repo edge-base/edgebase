@@ -81,6 +81,13 @@ const insertQuerySchema = z.object({
   conflictTarget: z.string().optional().openapi({ description: 'Column to use for conflict detection in upsert mode' }),
 });
 
+const countQueryParamsSchema = queryParamsSchema.omit({
+  includeTotal: true,
+  maxResponseBytes: true,
+  responseAfter: true,
+  responseBefore: true,
+});
+
 // ======================================================================
 //  SINGLE-INSTANCE DB: /{namespace}/tables/*
 //  Must be registered BEFORE dynamic /:namespace/:instanceId routes.
@@ -97,7 +104,7 @@ const dbSingleCountRecords = createRoute({
   summary: 'Count records in a single-instance table',
   request: {
     params: singleInstanceTableParams,
-    query: queryParamsSchema,
+    query: countQueryParamsSchema,
   },
   responses: {
     200: { description: 'Count result', content: { 'application/json': { schema: jsonResponseSchema } } },
@@ -335,7 +342,7 @@ const dbCountRecords = createRoute({
   summary: 'Count records in dynamic table',
   request: {
     params: dynamicTableParams,
-    query: queryParamsSchema,
+    query: countQueryParamsSchema,
   },
   responses: {
     200: { description: 'Count result', content: { 'application/json': { schema: jsonResponseSchema } } },
@@ -576,6 +583,9 @@ const transactBodySchema = z.object({
   operations: z.array(z.record(z.string(), z.unknown())).openapi({
     description: 'Ordered insert | update | delete | expect operations applied atomically.',
   }),
+  resultMode: z.enum(['full', 'compact']).optional().openapi({
+    description: "'compact' returns a fixed acknowledgment of at most 39 UTF-8 bytes instead of mutated rows.",
+  }),
 });
 
 const dbSingleTransact = createRoute({
@@ -591,7 +601,7 @@ const dbSingleTransact = createRoute({
     body: { content: { 'application/json': { schema: transactBodySchema } }, required: true },
   },
   responses: {
-    200: { description: 'Ordered per-operation results', content: { 'application/json': { schema: jsonResponseSchema } } },
+    200: { description: 'Ordered per-operation results, or a compact bounded acknowledgment', content: { 'application/json': { schema: jsonResponseSchema } } },
     400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
     403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
     409: { description: 'Expectation failed', content: { 'application/json': { schema: errorResponseSchema } } },
@@ -613,7 +623,7 @@ const dbTransact = createRoute({
     body: { content: { 'application/json': { schema: transactBodySchema } }, required: true },
   },
   responses: {
-    200: { description: 'Ordered per-operation results', content: { 'application/json': { schema: jsonResponseSchema } } },
+    200: { description: 'Ordered per-operation results, or a compact bounded acknowledgment', content: { 'application/json': { schema: jsonResponseSchema } } },
     400: { description: 'Bad request', content: { 'application/json': { schema: errorResponseSchema } } },
     403: { description: 'Forbidden', content: { 'application/json': { schema: errorResponseSchema } } },
     409: { description: 'Expectation failed', content: { 'application/json': { schema: errorResponseSchema } } },

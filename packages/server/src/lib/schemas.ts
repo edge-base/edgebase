@@ -26,6 +26,20 @@ export const queryParamsSchema = z.object({
   orFilter: z.string().optional().openapi({ description: 'JSON-encoded OR filter tuples' }),
   fields: z.string().optional().openapi({ description: 'Comma-separated field names to return' }),
   search: z.string().optional().openapi({ description: 'Full-text search query' }),
+  includeTotal: z.string().optional().openapi({
+    description: 'Set to "false" or "0" to skip the COUNT query; total is null',
+    example: 'false',
+  }),
+  maxResponseBytes: z.string().optional().openapi({
+    description: 'Exact maximum UTF-8 JSON response bytes (minimum 512); requires stable id-keyset pagination',
+    example: '4096',
+  }),
+  responseAfter: z.string().optional().openapi({
+    description: 'Opaque forward cursor for a maxResponseBytes request',
+  }),
+  responseBefore: z.string().optional().openapi({
+    description: 'Opaque backward cursor for a maxResponseBytes request',
+  }),
 });
 
 // ─── Response Schemas ───────────────────────────────────────────────────────
@@ -38,6 +52,15 @@ export const listResponseSchema = z.object({
   cursor: z.string().nullable().openapi({ description: 'Cursor for next page' }),
   page: z.number().nullable().openapi({ description: 'Current page (offset mode)' }),
   perPage: z.number().nullable().openapi({ description: 'Items per page (offset mode)' }),
+  returnedBytes: z.number().int().optional().openapi({
+    description: 'Exact serialized UTF-8 response bytes, including this field; present for maxResponseBytes requests',
+  }),
+  cursorExpiresAt: z.string().optional().openapi({
+    description: 'Sliding expiry of the provider-owned opaque bounded cursor',
+  }),
+  oversizedItem: z.boolean().optional().openapi({
+    description: 'True when one oversized source row was isolated as an empty page and the cursor resumes after it',
+  }),
 });
 
 /** Standard error response. */
@@ -60,7 +83,7 @@ export const successResponseSchema = z.object({
 export const healthResponseSchema = z.object({
   status: z.string().openapi({ example: 'ok' }),
   timestamp: z.string().openapi({ example: '2026-01-01T00:00:00.000Z' }),
-  version: z.string().optional().openapi({ example: '0.4.8' }),
+  version: z.string().optional().openapi({ example: '0.4.9' }),
 });
 
 // ─── Shared Parameter Schemas ─────────────────────────────────────────────

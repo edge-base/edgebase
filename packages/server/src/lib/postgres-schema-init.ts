@@ -18,11 +18,14 @@ import {
 import {
   PG_META_TABLE_DDL,
   generatePgTableDDL,
-  generatePgAddColumnDDL,
+  generatePgPreparationColumnDDL,
   generatePgFTSDDL,
   generatePgIndexDDL,
   buildEffectiveSchema,
   computeSchemaHashSync,
+  planPostgresFieldUniqueIndex,
+  postgresUniqueDuplicateError,
+  type PostgresIndexState,
 } from './schema.js';
 
 // Track schema initialization promises so CRUD requests do not re-run the full
@@ -177,10 +180,16 @@ async function initPgTable(
   const storedHash = await getMeta(connectionString, `schemaHash:${tableName}`, query);
 
   if (storedHash === currentHash) {
-    // No schema change — still check migrations (user may add new migrations
-    // without changing the schema, same as database-do.ts)
-    await ensurePgFTSAndIndexes(connectionString, tableName, config, query);
-    await runPgMigrations(connectionString, tableName, config, query);
+    // Reconcile physical state even if an older runtime stored the current
+    // hash before materializing an existing-column UNIQUE change.
+    await runPgExistingTableUpgrade(
+      connectionString,
+      tableName,
+      config,
+      query,
+      false,
+      null,
+    );
     return;
   }
 
@@ -198,12 +207,15 @@ async function initPgTable(
       await setMeta(connectionString, `migration_version:${tableName}`, String(maxVersion), query);
     }
   } else {
-    // Schema changed — detect new columns and add them (non-destructive)
-    await handlePgSchemaUpdate(connectionString, tableName, config, query);
-    // Re-apply FTS and indexes to pick up new field additions
-    await ensurePgFTSAndIndexes(connectionString, tableName, config, query);
-    // Run pending migrations after schema update
-    await runPgMigrations(connectionString, tableName, config, query);
+    await runPgExistingTableUpgrade(
+      connectionString,
+      tableName,
+      config,
+      query,
+      true,
+      currentHash,
+    );
+    return;
   }
 
   // Store new hash
@@ -214,8 +226,7 @@ async function initPgTable(
  * Non-destructive schema update: detect new columns and ADD COLUMN.
  * Does NOT drop columns (data safety) — mirrors database-do.ts handleSchemaUpdate().
  */
-async function handlePgSchemaUpdate(
-  connectionString: string,
+async function preparePgSchemaUpdate(
   tableName: string,
   config: TableConfig,
   query: PostgresExecutor,
@@ -235,9 +246,140 @@ async function handlePgSchemaUpdate(
   // Add missing columns
   for (const [colName, field] of Object.entries(effectiveSchema)) {
     if (!existingCols.has(colName)) {
-      const ddl = generatePgAddColumnDDL(tableName, colName, field);
+      const ddl = generatePgPreparationColumnDDL(tableName, colName, field);
       await query(ddl, []);
     }
+  }
+}
+
+async function getPgIndexState(
+  tableName: string,
+  query: PostgresExecutor,
+): Promise<PostgresIndexState[]> {
+  const result = await query(
+    `SELECT
+       index_class.relname AS index_name,
+       index_state.indisunique AS is_unique,
+       index_state.indisprimary AS is_primary,
+       constraint_state.conname AS constraint_name,
+       constraint_state.contype AS constraint_type,
+       (index_state.indpred IS NOT NULL) AS is_partial,
+       array_agg(attribute_state.attname ORDER BY key_state.ordinality)
+         FILTER (WHERE attribute_state.attname IS NOT NULL) AS columns
+     FROM pg_catalog.pg_class AS table_class
+     JOIN pg_catalog.pg_namespace AS namespace_state
+       ON namespace_state.oid = table_class.relnamespace
+     JOIN pg_catalog.pg_index AS index_state
+       ON index_state.indrelid = table_class.oid
+     JOIN pg_catalog.pg_class AS index_class
+       ON index_class.oid = index_state.indexrelid
+     LEFT JOIN pg_catalog.pg_constraint AS constraint_state
+       ON constraint_state.conindid = index_class.oid
+     LEFT JOIN LATERAL unnest(index_state.indkey)
+       WITH ORDINALITY AS key_state(attnum, ordinality)
+       ON key_state.ordinality <= index_state.indnkeyatts
+     LEFT JOIN pg_catalog.pg_attribute AS attribute_state
+       ON attribute_state.attrelid = table_class.oid
+      AND attribute_state.attnum = key_state.attnum
+     WHERE namespace_state.nspname = current_schema()
+       AND table_class.relname = $1
+     GROUP BY index_class.relname, index_state.indisunique,
+       index_state.indisprimary, constraint_state.conname,
+       constraint_state.contype, (index_state.indpred IS NOT NULL)`,
+    [tableName],
+  );
+
+  return result.rows.map((rawRow) => {
+    const row = rawRow as Record<string, unknown>;
+    return {
+      name: String(row.index_name),
+      unique: row.is_unique === true || row.is_unique === 't',
+      primary: row.is_primary === true || row.is_primary === 't',
+      constraintName: row.constraint_name == null ? null : String(row.constraint_name),
+      constraintType: row.constraint_type == null ? null : String(row.constraint_type),
+      partial: row.is_partial === true || row.is_partial === 't',
+      columns: Array.isArray(row.columns)
+        ? row.columns.map((column) => String(column))
+        : [],
+    };
+  });
+}
+
+async function reconcilePgFieldUniqueIndexes(
+  tableName: string,
+  config: TableConfig,
+  query: PostgresExecutor,
+): Promise<void> {
+  const indexes = await getPgIndexState(tableName, query);
+  const effectiveSchema = buildEffectiveSchema(config.schema);
+  const escapedTableName = tableName.replace(/"/g, '""');
+
+  for (const [fieldName, field] of Object.entries(effectiveSchema)) {
+    const plan = planPostgresFieldUniqueIndex(
+      tableName,
+      fieldName,
+      !!field.unique,
+      indexes,
+    );
+    if (plan.action === 'create') {
+      const escapedFieldName = fieldName.replace(/"/g, '""');
+      const duplicate = await query(
+        `SELECT 1 AS "duplicate" FROM "${escapedTableName}" `
+        + `WHERE "${escapedFieldName}" IS NOT NULL `
+        + `GROUP BY "${escapedFieldName}" HAVING COUNT(*) > 1 LIMIT 1`,
+        [],
+      );
+      if (duplicate.rows.length > 0) {
+        throw postgresUniqueDuplicateError(tableName, fieldName);
+      }
+    }
+    if (!plan.ddl) continue;
+
+    await query(plan.ddl, []);
+    if (plan.action === 'create') {
+      indexes.push({
+        name: plan.indexName,
+        unique: true,
+        primary: false,
+        constraintName: null,
+        constraintType: null,
+        partial: false,
+        columns: [fieldName],
+      });
+    } else if (plan.action === 'drop') {
+      const indexPosition = indexes.findIndex((index) => index.name === plan.indexName);
+      if (indexPosition >= 0) indexes.splice(indexPosition, 1);
+    }
+  }
+}
+
+async function runPgExistingTableUpgrade(
+  connectionString: string,
+  tableName: string,
+  config: TableConfig,
+  query: PostgresExecutor,
+  prepareColumns: boolean,
+  nextSchemaHash: string | null,
+): Promise<void> {
+  await query('BEGIN', []);
+  try {
+    if (prepareColumns) {
+      await preparePgSchemaUpdate(tableName, config, query);
+    }
+    await runPgMigrations(connectionString, tableName, config, query);
+    await reconcilePgFieldUniqueIndexes(tableName, config, query);
+    await ensurePgFTSAndIndexes(connectionString, tableName, config, query);
+    if (nextSchemaHash !== null) {
+      await setMeta(connectionString, `schemaHash:${tableName}`, nextSchemaHash, query);
+    }
+    await query('COMMIT', []);
+  } catch (error) {
+    try {
+      await query('ROLLBACK', []);
+    } catch (rollbackError) {
+      console.error(`PG schema rollback failed for ${tableName}:`, rollbackError);
+    }
+    throw error;
   }
 }
 

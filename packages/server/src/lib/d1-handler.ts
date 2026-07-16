@@ -41,6 +41,16 @@ import { isTrustedInternalContext } from './internal-request.js';
 import { executeDbTriggers } from './functions.js';
 import { forbiddenError, hookRejectedError, normalizeDatabaseError } from './errors.js';
 import { buildTableHookRuntimeServices } from './table-hook-runtime.js';
+import { createD1ResponseCursorStore } from './response-cursor-store.js';
+import {
+  buildBoundedPageResponse,
+  prepareBoundedQuery,
+} from './response-byte-limit.js';
+import {
+  MAX_TRANSACT_OPERATIONS,
+  compactTransactResult,
+  parseTransactResultMode,
+} from './transact-result.js';
 
 // ─── Types ───
 
@@ -425,7 +435,13 @@ async function handleList(
     return c.json(error.toJSON(), error.status as 403);
   }
 
-  const queryOpts = parseQueryParams(Object.fromEntries(new URL(c.req.url).searchParams));
+  const responseCursorStore = createD1ResponseCursorStore(resolved.db);
+  const boundedQuery = await prepareBoundedQuery(
+    Object.fromEntries(new URL(c.req.url).searchParams),
+    tableName,
+    responseCursorStore,
+  );
+  const queryOpts = parseQueryParams(boundedQuery.params);
   let query = buildListQuery(tableName, queryOpts, 'sqlite');
   let result;
   try {
@@ -449,30 +465,36 @@ async function handleList(
   const { countSql, countParams } = query;
 
   // Apply read rules per row + normalize booleans/JSON
-  let items = result.rows.map(r => normalizeRow(stripInternalFields(r), tableConfig));
+  const sourceItems = result.rows.map(r => normalizeRow(stripInternalFields(r), tableConfig));
+  const sourceCursorRecordId = sourceItems.length > 0
+    ? String(sourceItems[sourceItems.length - 1]!.id ?? '') || undefined
+    : undefined;
+  let entries = sourceItems.map((item) => ({ item, cursorId: String(item.id ?? '') }));
   const tableHooks = getTableHooks(tableConfig);
   if (!isServiceKey && tableAccess?.read !== undefined) {
-    const filtered: Record<string, unknown>[] = [];
-    for (const row of items) {
-      if (await evalRowRule(tableAccess.read, auth, row)) {
-        filtered.push(row);
+    const filtered: typeof entries = [];
+    for (const entry of entries) {
+      if (await evalRowRule(tableAccess.read, auth, entry.item)) {
+        filtered.push(entry);
       }
     }
-    items = filtered;
+    entries = filtered;
   }
 
   // Apply onEnrich hook
   if (tableHooks?.onEnrich) {
     const hookCtx = buildHookCtx(resolved.db, c.env, c.executionCtx);
-    for (let i = 0; i < items.length; i++) {
+    for (const entry of entries) {
       try {
-        const enriched = await tableHooks.onEnrich(auth, items[i], hookCtx);
-        if (enriched && typeof enriched === 'object') items[i] = { ...items[i], ...enriched };
+        const enriched = await tableHooks.onEnrich(auth, entry.item, hookCtx);
+        if (enriched && typeof enriched === 'object') entry.item = { ...entry.item, ...enriched };
       } catch (err) {
         console.error(`[EdgeBase] onEnrich hook error for table "${tableName}":`, err);
       }
     }
   }
+  const items = entries.map(({ item }) => item);
+  const cursorRecordIds = entries.map(({ cursorId }) => cursorId);
 
   // Get total count — skip the COUNT query when ?includeTotal=0/false (total stays null)
   let total: number | null = null;
@@ -489,6 +511,20 @@ async function handleList(
   const cursor = hasMore && items.length > 0
     ? String((items[items.length - 1]).id ?? '')
     : null;
+
+  if (boundedQuery.maxResponseBytes !== undefined) {
+    return buildBoundedPageResponse({
+      maxResponseBytes: boundedQuery.maxResponseBytes,
+      tableName,
+      items,
+      cursorRecordIds,
+      sourceCursorRecordId,
+      total,
+      perPage,
+      sourceHasMore: sourceItems.length === perPage,
+      cursorStore: responseCursorStore,
+    });
+  }
 
   return c.json({ items, total, hasMore, cursor, page, perPage });
 }
@@ -532,9 +568,28 @@ async function handleSearch(
     return c.json(error.toJSON(), error.status as 403);
   }
 
-  const queryOpts = parseQueryParams(Object.fromEntries(new URL(c.req.url).searchParams));
+  const responseCursorStore = createD1ResponseCursorStore(resolved.db);
+  const boundedQuery = await prepareBoundedQuery(
+    Object.fromEntries(new URL(c.req.url).searchParams),
+    tableName,
+    responseCursorStore,
+    { search: true },
+  );
+  const queryOpts = parseQueryParams(boundedQuery.params);
   const searchTerm = queryOpts.search || '';
   if (!searchTerm) {
+    if (boundedQuery.maxResponseBytes !== undefined) {
+      return buildBoundedPageResponse({
+        maxResponseBytes: boundedQuery.maxResponseBytes,
+        tableName,
+        items: [],
+        cursorRecordIds: [],
+        total: 0,
+        perPage: queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 100,
+        sourceHasMore: false,
+        cursorStore: responseCursorStore,
+      });
+    }
     return c.json({ items: [] });
   }
 
@@ -542,8 +597,8 @@ async function handleSearch(
     ? tableConfig.fts
     : getTextFields(tableConfig);
 
-  let items: Record<string, unknown>[];
-  let total = 0;
+  let sourceItems: Record<string, unknown>[];
+  let total: number | null = 0;
   const limit = queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 100;
   const offset = queryOpts.pagination?.offset ?? ((queryOpts.pagination?.page ?? 1) - 1) * limit;
   const searchQuery = buildSearchQuery(tableName, searchTerm, {
@@ -555,16 +610,19 @@ async function handleSearch(
   }, 'sqlite');
   try {
     const result = await executeD1Query(resolved.db, searchQuery.sql, searchQuery.params);
-    items = result.rows.map(r => normalizeRow(stripInternalFields(r), tableConfig));
-    if (searchQuery.countSql) {
+    sourceItems = result.rows.map(r => normalizeRow(stripInternalFields(r), tableConfig));
+    const includeTotal = !['0', 'false'].includes((c.req.query('includeTotal') ?? '').toLowerCase());
+    if (includeTotal && searchQuery.countSql) {
       const countResult = await executeD1Query(resolved.db, searchQuery.countSql, searchQuery.countParams ?? []);
-      total = Number(countResult.rows[0]?.total ?? items.length);
+      total = Number(countResult.rows[0]?.total ?? sourceItems.length);
+    } else if (!includeTotal) {
+      total = null;
     }
   } catch {
-    items = [];
+    sourceItems = [];
   }
 
-  if (items.length === 0 && ftsFields.length > 0) {
+  if (sourceItems.length === 0 && ftsFields.length > 0) {
     const fallback = buildSubstringSearchQuery(tableName, searchTerm, {
       pagination: queryOpts.pagination,
       filters: queryOpts.filters,
@@ -573,25 +631,60 @@ async function handleSearch(
       fields: ftsFields,
     }, 'sqlite');
     const result = await executeD1Query(resolved.db, fallback.sql, fallback.params);
-    items = result.rows.map((row) => normalizeRow(stripInternalFields(row), tableConfig));
-    if (fallback.countSql) {
+    sourceItems = result.rows.map((row) => normalizeRow(stripInternalFields(row), tableConfig));
+    const includeTotal = !['0', 'false'].includes((c.req.query('includeTotal') ?? '').toLowerCase());
+    if (includeTotal && fallback.countSql) {
       const countResult = await executeD1Query(resolved.db, fallback.countSql, fallback.countParams ?? []);
-      total = Number(countResult.rows[0]?.total ?? items.length);
+      total = Number(countResult.rows[0]?.total ?? sourceItems.length);
+    } else if (!includeTotal) {
+      total = null;
     }
   }
 
   // Apply read rules
+  const sourceCursorRecordId = sourceItems.length > 0
+    ? String(sourceItems[sourceItems.length - 1]!.id ?? '') || undefined
+    : undefined;
+  let entries = sourceItems.map((item) => ({ item, cursorId: String(item.id ?? '') }));
   if (!isServiceKey && tableAccess?.read !== undefined) {
-    const filtered: Record<string, unknown>[] = [];
-    for (const row of items) {
-      if (await evalRowRule(tableAccess.read, auth, row)) {
-        filtered.push(row);
+    const filtered: typeof entries = [];
+    for (const entry of entries) {
+      if (await evalRowRule(tableAccess.read, auth, entry.item)) {
+        filtered.push(entry);
       }
     }
-    items = filtered;
+    entries = filtered;
   }
 
-  return c.json({ items, total, hasMore: total > offset + items.length, cursor: null, page: null, perPage: limit });
+  if (boundedQuery.maxResponseBytes !== undefined) {
+    const tableHooks = getTableHooks(tableConfig);
+    if (tableHooks?.onEnrich) {
+      const hookCtx = buildHookCtx(resolved.db, c.env, c.executionCtx);
+      for (const entry of entries) {
+        try {
+          const enriched = await tableHooks.onEnrich(auth, entry.item, hookCtx);
+          if (enriched && typeof enriched === 'object') entry.item = { ...entry.item, ...enriched };
+        } catch (err) {
+          console.error(`[EdgeBase] onEnrich hook error for table "${tableName}":`, err);
+        }
+      }
+    }
+    return buildBoundedPageResponse({
+      maxResponseBytes: boundedQuery.maxResponseBytes,
+      tableName,
+      items: entries.map(({ item }) => item),
+      cursorRecordIds: entries.map(({ cursorId }) => cursorId),
+      sourceCursorRecordId,
+      total,
+      perPage: limit,
+      sourceHasMore: sourceItems.length === limit,
+      cursorStore: responseCursorStore,
+    });
+  }
+
+  const items = entries.map(({ item }) => item);
+
+  return c.json({ items, total, hasMore: total !== null && total > offset + items.length, cursor: null, page: null, perPage: limit });
 }
 
 // ─── GET ───
@@ -1280,6 +1373,9 @@ async function handleBatch(
  * the assertion at commit time, not merely at pre-read time.
  */
 const TX_GUARD_TABLE = '_edgebase_tx_guard';
+// Compact Database Live rows are compatible post-commit reads. Keep each D1
+// query bounded while draining all pending ids without another collection wait.
+const D1_COMPACT_POST_FETCH_CHUNK_SIZE = 100;
 
 interface D1TransactOp {
   table?: unknown;
@@ -1296,19 +1392,26 @@ async function handleTransact(
   auth: AuthContext | null,
   isServiceKey: boolean,
 ): Promise<Response> {
-  let body: { operations?: D1TransactOp[] };
+  let body: { operations?: D1TransactOp[]; resultMode?: unknown };
   try {
     body = await c.req.json();
   } catch {
     return c.json({ code: 400, message: invalidD1BodyMessage('transact operations') }, 400);
   }
+  const resultMode = parseTransactResultMode(body.resultMode);
+  if (resultMode === null) {
+    return c.json({
+      code: 400,
+      slug: 'invalid-transact-result-mode',
+      message: "transact resultMode must be 'full' or 'compact'.",
+    }, 400);
+  }
   const operations = body.operations;
   if (!Array.isArray(operations) || operations.length === 0) {
     return c.json({ code: 400, message: 'transact requires a non-empty operations array.' }, 400);
   }
-  const MAX_TRANSACT_OPS = 500;
-  if (operations.length > MAX_TRANSACT_OPS) {
-    return c.json({ code: 400, message: `Transact limit exceeded: ${operations.length} operations (max ${MAX_TRANSACT_OPS}).` }, 400);
+  if (operations.length > MAX_TRANSACT_OPERATIONS) {
+    return c.json({ code: 400, message: `Transact limit exceeded: ${operations.length} operations (max ${MAX_TRANSACT_OPERATIONS}).` }, 400);
   }
 
   const tables = resolved.dbBlock.tables ?? {};
@@ -1369,6 +1472,7 @@ async function handleTransact(
   }
 
   const now = new Date().toISOString();
+  const hasDbLiveConsumer = Boolean(c.env.DATABASE_LIVE);
   const stmts: D1PreparedStatement[] = [];
   // Post-commit result builders aligned with op order.
   const resultBuilders: Array<() => Promise<Record<string, unknown>>> = [];
@@ -1378,7 +1482,12 @@ async function handleTransact(
     docId: string;
     data: Record<string, unknown> | null;
   }> = [];
-  const postFetchChanges: Array<{ table: string; id: string; type: 'added' | 'modified'; resultIndex: number }> = [];
+  const postFetchChanges: Array<{
+    table: string;
+    id: string;
+    type: 'added' | 'modified';
+    resultIndex?: number;
+  }> = [];
 
   const escapeCondField = (field: string) => esc(field);
 
@@ -1441,7 +1550,9 @@ async function handleTransact(
         `INSERT INTO ${esc(TX_GUARD_TABLE)} ("id") SELECT NULL WHERE ${guardCondition}`,
       );
       stmts.push(params.length > 0 ? guard.bind(...params) : guard);
-      resultBuilders.push(async () => ({ expected: true }));
+      if (resultMode === 'full') {
+        resultBuilders.push(async () => ({ expected: true }));
+      }
       continue;
     }
 
@@ -1472,14 +1583,18 @@ async function handleTransact(
       const colStr = columns.map(esc).join(', ');
       const stmt = resolved.db.prepare(`INSERT INTO ${esc(name)} (${colStr}) VALUES (${placeholders})`);
       stmts.push(values.length > 0 ? stmt.bind(...values) : stmt);
-      postFetchChanges.push({ table: name, id, type: 'added', resultIndex: resultBuilders.length });
-      resultBuilders.push(async () => {
-        const fetched = await executeD1Query(resolved.db, `SELECT * FROM ${esc(name)} WHERE "id" = ?`, [id]);
-        const row = fetched.rows.length > 0
-          ? normalizeRow(stripInternalFields(fetched.rows[0]), tableConfig)
-          : { id, ...record };
-        return { inserted: row };
-      });
+      if (resultMode === 'full') {
+        postFetchChanges.push({ table: name, id, type: 'added', resultIndex: resultBuilders.length });
+        resultBuilders.push(async () => {
+          const fetched = await executeD1Query(resolved.db, `SELECT * FROM ${esc(name)} WHERE "id" = ?`, [id]);
+          const row = fetched.rows.length > 0
+            ? normalizeRow(stripInternalFields(fetched.rows[0]), tableConfig)
+            : { id, ...record };
+          return { inserted: row };
+        });
+      } else if (hasDbLiveConsumer) {
+        postFetchChanges.push({ table: name, id, type: 'added' });
+      }
       continue;
     }
 
@@ -1526,14 +1641,18 @@ async function handleTransact(
         const stmt = resolved.db.prepare(`UPDATE ${esc(name)} SET ${setClauses.join(', ')} WHERE "id" = ?`);
         stmts.push(stmt.bind(...params, id));
       }
-      postFetchChanges.push({ table: name, id, type: 'modified', resultIndex: resultBuilders.length });
-      resultBuilders.push(async () => {
-        const fetched = await executeD1Query(resolved.db, `SELECT * FROM ${esc(name)} WHERE "id" = ?`, [id]);
-        const row = fetched.rows.length > 0
-          ? normalizeRow(stripInternalFields(fetched.rows[0]), tableConfig)
-          : { id, ...(op.data as Record<string, unknown>) };
-        return { updated: row };
-      });
+      if (resultMode === 'full') {
+        postFetchChanges.push({ table: name, id, type: 'modified', resultIndex: resultBuilders.length });
+        resultBuilders.push(async () => {
+          const fetched = await executeD1Query(resolved.db, `SELECT * FROM ${esc(name)} WHERE "id" = ?`, [id]);
+          const row = fetched.rows.length > 0
+            ? normalizeRow(stripInternalFields(fetched.rows[0]), tableConfig)
+            : { id, ...(op.data as Record<string, unknown>) };
+          return { updated: row };
+        });
+      } else if (hasDbLiveConsumer) {
+        postFetchChanges.push({ table: name, id, type: 'modified' });
+      }
       continue;
     }
 
@@ -1553,8 +1672,12 @@ async function handleTransact(
     }
     const stmt = resolved.db.prepare(`DELETE FROM ${esc(name)} WHERE "id" = ?`);
     stmts.push(stmt.bind(id));
-    allChanges.push({ table: name, type: 'removed', docId: id, data: null });
-    resultBuilders.push(async () => ({ deleted: true, id }));
+    if (resultMode === 'full' || hasDbLiveConsumer) {
+      allChanges.push({ table: name, type: 'removed', docId: id, data: null });
+    }
+    if (resultMode === 'full') {
+      resultBuilders.push(async () => ({ deleted: true, id }));
+    }
   }
 
   // Lazy guard table, then apply the whole transaction in ONE db.batch().
@@ -1570,47 +1693,106 @@ async function handleTransact(
     throw err;
   }
 
+  const materializePostFetchChanges = async () => {
+    const changes = [...allChanges];
+    const idsByTable = new Map<string, Set<string>>();
+    for (const change of postFetchChanges) {
+      const ids = idsByTable.get(change.table) ?? new Set<string>();
+      ids.add(change.id);
+      idsByTable.set(change.table, ids);
+    }
+    const rowsByTable = new Map<string, Map<string, Record<string, unknown>>>();
+    for (const [table, idSet] of idsByTable) {
+      const ids = [...idSet];
+      const rowsById = new Map<string, Record<string, unknown>>();
+      const tableConfig = tableCtx.get(table)!.tableConfig;
+      for (let offset = 0; offset < ids.length; offset += D1_COMPACT_POST_FETCH_CHUNK_SIZE) {
+        const chunk = ids.slice(offset, offset + D1_COMPACT_POST_FETCH_CHUNK_SIZE);
+        const fetched = await executeD1Query(
+          resolved.db,
+          `SELECT * FROM ${esc(table)} WHERE "id" IN (${chunk.map(() => '?').join(', ')})`,
+          chunk,
+        );
+        for (const rawRow of fetched.rows) {
+          const row = normalizeRow(stripInternalFields(rawRow), tableConfig);
+          rowsById.set(String(row.id ?? ''), row);
+        }
+      }
+      rowsByTable.set(table, rowsById);
+    }
+    for (const change of postFetchChanges) {
+      const row = rowsByTable.get(change.table)?.get(change.id) ?? null;
+      changes.push({
+        table: change.table,
+        type: change.type,
+        docId: change.id,
+        data: row,
+      });
+    }
+    return changes;
+  };
+
+  const emitChanges = async (changes: typeof allChanges) => {
+    const changesByTable = new Map<string, typeof allChanges>();
+    for (const change of changes) {
+      const list = changesByTable.get(change.table) ?? [];
+      list.push(change);
+      changesByTable.set(change.table, list);
+    }
+    await Promise.all([...changesByTable].map(([tableName, tableChanges]) =>
+      tableChanges.length >= 10
+        ? emitDbLiveBatchEvent(
+          c.env,
+          resolved.namespace,
+          tableName,
+          tableChanges.map(({ type, docId, data }) => ({ type, docId, data })),
+        )
+        : Promise.all(
+          tableChanges.map((change) =>
+            emitDbLiveEvent(
+              c.env,
+              resolved.namespace,
+              tableName,
+              change.type,
+              change.docId,
+              change.data,
+            ),
+          ),
+        ).then(() => undefined),
+    ));
+  };
+
+  if (resultMode === 'compact') {
+    // Full post-commit row fetches are response work in full mode. Compact mode
+    // skips them entirely when Database Live is absent; when it is present,
+    // the rows are consumed only by background event delivery and cannot turn
+    // a committed mutation into a failed HTTP response.
+    if (hasDbLiveConsumer) {
+      scheduleDbLive(
+        c.executionCtx,
+        materializePostFetchChanges().then(emitChanges),
+        `emit compact transact changes ${resolved.namespace} (${operations.length})`,
+      );
+    }
+    return c.json(compactTransactResult(operations.length));
+  }
+
   const results: Record<string, unknown>[] = [];
   for (const build of resultBuilders) {
     results.push(await build());
   }
   for (const change of postFetchChanges) {
+    if (change.resultIndex === undefined) continue;
     const built = results[change.resultIndex];
     const row = built ? (((built.inserted ?? built.updated) as Record<string, unknown>) ?? null) : null;
     allChanges.push({ table: change.table, type: change.type, docId: change.id, data: row });
   }
 
-  // Emit database-live events grouped per table (same thresholds as handleBatch).
-  const changesByTable = new Map<string, typeof allChanges>();
-  for (const change of allChanges) {
-    const list = changesByTable.get(change.table) ?? [];
-    list.push(change);
-    changesByTable.set(change.table, list);
-  }
-  for (const [tableName, changes] of changesByTable) {
-    if (changes.length >= 10) {
-      scheduleDbLive(
-        c.executionCtx,
-        emitDbLiveBatchEvent(
-          c.env,
-          resolved.namespace,
-          tableName,
-          changes.map(({ type, docId, data }) => ({ type, docId, data })),
-        ),
-        `emit transact batch ${resolved.namespace}.${tableName} (${changes.length} changes)`,
-      );
-    } else {
-      scheduleDbLive(
-        c.executionCtx,
-        Promise.all(
-          changes.map((ch) =>
-            emitDbLiveEvent(c.env, resolved.namespace, tableName, ch.type, ch.docId, ch.data),
-          ),
-        ).then(() => undefined),
-        `emit transact fan-out ${resolved.namespace}.${tableName} (${changes.length} changes)`,
-      );
-    }
-  }
+  scheduleDbLive(
+    c.executionCtx,
+    emitChanges(allChanges),
+    `emit transact changes ${resolved.namespace} (${operations.length})`,
+  );
 
   return c.json({ results });
 }

@@ -46,6 +46,13 @@ interface LauncherLock {
   pid: number;
   childPid?: number | null;
   childProcessGroupId?: number | null;
+  externalHost?: string;
+  externalPort?: number;
+  internalHost?: string;
+  internalPort?: number;
+  gatewayProtocol?: string;
+  gatewayUpstream?: string;
+  supervisorRuntimeOrigin?: string;
 }
 
 function readLauncherLock(dataDir: string): LauncherLock | null {
@@ -488,6 +495,14 @@ export default defineConfig({
         embeddedNodePath: string;
       };
       packManifest: {
+        schedules: { digest: string };
+        selfHost: {
+          schemaVersion: number;
+          generation: string;
+          gateway: { path: string; digest: string; bytes: number };
+          scheduleSupervisor: { path: string; digest: string; bytes: number };
+          dockerEntrypoint: { path: string; digest: string; bytes: number };
+        };
         launcher: {
           defaultOpenPath: string;
           defaultPort: number;
@@ -501,6 +516,32 @@ export default defineConfig({
     expect(payload.status).toBe('success');
     expect(payload.format).toBe('portable');
     expect(payload.packManifest.launcher.defaultOpenPath).toBe('/admin');
+    const portableAppManifest = JSON.parse(
+      readFileSync(join(payload.bundledAppDir, 'edgebase-app.json'), 'utf-8'),
+    ) as {
+      schedules: { digest: string };
+      selfHost: {
+        schemaVersion: number;
+        generation: string;
+        gateway: { path: string; digest: string; bytes: number };
+        scheduleSupervisor: { path: string; digest: string; bytes: number };
+        dockerEntrypoint: { path: string; digest: string; bytes: number };
+      };
+    };
+    expect(payload.packManifest.schedules.digest).toBe(portableAppManifest.schedules.digest);
+    expect(payload.packManifest.selfHost).toEqual(portableAppManifest.selfHost);
+    expect(existsSync(join(
+      payload.bundledAppDir,
+      payload.packManifest.selfHost.gateway.path,
+    ))).toBe(true);
+    expect(existsSync(join(
+      payload.bundledAppDir,
+      payload.packManifest.selfHost.scheduleSupervisor.path,
+    ))).toBe(true);
+    expect(existsSync(join(
+      payload.bundledAppDir,
+      payload.packManifest.selfHost.dockerEntrypoint.path,
+    ))).toBe(true);
     const appDataRoot = resolveAppDataRoot(payload.packManifest.launcher.appDataDirName);
     appDataDirs.push(appDataRoot);
 
@@ -802,6 +843,23 @@ export default defineConfig({
       );
     }
     expect(healthText).toContain('"status":"ok"');
+
+    const blockedControl = await fetch(
+      `http://127.0.0.1:${launchPort}/cdn-cgi/handler/scheduled?time=0&cron=*`,
+    );
+    expect(blockedControl.status).toBe(404);
+    const runtimeLock = readLauncherLock(dataDir);
+    expect(runtimeLock).toMatchObject({
+      externalHost: '127.0.0.1',
+      externalPort: launchPort,
+      internalHost: '127.0.0.1',
+      gatewayProtocol: 'http',
+    });
+    expect(runtimeLock?.internalPort).not.toBe(launchPort);
+    expect(runtimeLock?.gatewayUpstream).toBe(
+      `http://127.0.0.1:${runtimeLock?.internalPort}`,
+    );
+    expect(runtimeLock?.supervisorRuntimeOrigin).toBe(runtimeLock?.gatewayUpstream);
 
     await stopPortableLauncher(child, () => stderr);
   });

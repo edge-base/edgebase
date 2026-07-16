@@ -202,11 +202,18 @@ describe('buildFunctionContext admin.db', () => {
       workerUrl: 'http://localhost:8787',
     });
 
-    const result = await ctx.admin.db('shared').table('posts').limit(5).getList();
+    const result = await ctx.admin
+      .db('shared')
+      .table('posts')
+      .select('id')
+      .limit(5)
+      .includeTotal(false)
+      .maxResponseBytes(4096)
+      .getList();
 
     expect(result.items).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8787/api/db/shared/tables/posts?limit=5',
+      'http://localhost:8787/api/db/shared/tables/posts?fields=id&limit=5&includeTotal=false&maxResponseBytes=4096',
       expect.objectContaining({
         method: 'GET',
         headers: expect.objectContaining({

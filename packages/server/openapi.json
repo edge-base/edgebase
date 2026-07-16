@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgeBase API",
-    "version": "0.4.8"
+    "version": "0.4.9"
   },
   "components": {
     "schemas": {},
@@ -54,7 +54,7 @@
                     },
                     "version": {
                       "type": "string",
-                      "example": "0.4.8"
+                      "example": "0.4.9"
                     }
                   },
                   "required": [
@@ -6107,6 +6107,48 @@
             "description": "Full-text search query",
             "name": "search",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
+              "example": "false"
+            },
+            "required": false,
+            "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
+            "name": "includeTotal",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Exact maximum UTF-8 JSON response bytes (minimum 512); requires stable id-keyset pagination",
+              "example": "4096"
+            },
+            "required": false,
+            "description": "Exact maximum UTF-8 JSON response bytes (minimum 512); requires stable id-keyset pagination",
+            "name": "maxResponseBytes",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Opaque forward cursor for a maxResponseBytes request"
+            },
+            "required": false,
+            "description": "Opaque forward cursor for a maxResponseBytes request",
+            "name": "responseAfter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Opaque backward cursor for a maxResponseBytes request"
+            },
+            "required": false,
+            "description": "Opaque backward cursor for a maxResponseBytes request",
+            "name": "responseBefore",
+            "in": "query"
           }
         ],
         "responses": {
@@ -6159,6 +6201,18 @@
                         "null"
                       ],
                       "description": "Items per page (offset mode)"
+                    },
+                    "returnedBytes": {
+                      "type": "integer",
+                      "description": "Exact serialized UTF-8 response bytes, including this field; present for maxResponseBytes requests"
+                    },
+                    "cursorExpiresAt": {
+                      "type": "string",
+                      "description": "Sliding expiry of the provider-owned opaque bounded cursor"
+                    },
+                    "oversizedItem": {
+                      "type": "boolean",
+                      "description": "True when one oversized source row was isolated as an empty page and the cursor resumes after it"
                     }
                   },
                   "required": [
@@ -6717,6 +6771,48 @@
             "description": "Full-text search query",
             "name": "search",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
+              "example": "false"
+            },
+            "required": false,
+            "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
+            "name": "includeTotal",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Exact maximum UTF-8 JSON response bytes (minimum 512); requires stable id-keyset pagination",
+              "example": "4096"
+            },
+            "required": false,
+            "description": "Exact maximum UTF-8 JSON response bytes (minimum 512); requires stable id-keyset pagination",
+            "name": "maxResponseBytes",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Opaque forward cursor for a maxResponseBytes request"
+            },
+            "required": false,
+            "description": "Opaque forward cursor for a maxResponseBytes request",
+            "name": "responseAfter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Opaque backward cursor for a maxResponseBytes request"
+            },
+            "required": false,
+            "description": "Opaque backward cursor for a maxResponseBytes request",
+            "name": "responseBefore",
+            "in": "query"
           }
         ],
         "responses": {
@@ -6769,6 +6865,18 @@
                         "null"
                       ],
                       "description": "Items per page (offset mode)"
+                    },
+                    "returnedBytes": {
+                      "type": "integer",
+                      "description": "Exact serialized UTF-8 response bytes, including this field; present for maxResponseBytes requests"
+                    },
+                    "cursorExpiresAt": {
+                      "type": "string",
+                      "description": "Sliding expiry of the provider-owned opaque bounded cursor"
+                    },
+                    "oversizedItem": {
+                      "type": "boolean",
+                      "description": "True when one oversized source row was isolated as an empty page and the cursor resumes after it"
                     }
                   },
                   "required": [
@@ -7620,6 +7728,48 @@
             "description": "Full-text search query",
             "name": "search",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
+              "example": "false"
+            },
+            "required": false,
+            "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
+            "name": "includeTotal",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Exact maximum UTF-8 JSON response bytes (minimum 512); requires stable id-keyset pagination",
+              "example": "4096"
+            },
+            "required": false,
+            "description": "Exact maximum UTF-8 JSON response bytes (minimum 512); requires stable id-keyset pagination",
+            "name": "maxResponseBytes",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Opaque forward cursor for a maxResponseBytes request"
+            },
+            "required": false,
+            "description": "Opaque forward cursor for a maxResponseBytes request",
+            "name": "responseAfter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Opaque backward cursor for a maxResponseBytes request"
+            },
+            "required": false,
+            "description": "Opaque backward cursor for a maxResponseBytes request",
+            "name": "responseBefore",
+            "in": "query"
           }
         ],
         "responses": {
@@ -7672,6 +7822,18 @@
                         "null"
                       ],
                       "description": "Items per page (offset mode)"
+                    },
+                    "returnedBytes": {
+                      "type": "integer",
+                      "description": "Exact serialized UTF-8 response bytes, including this field; present for maxResponseBytes requests"
+                    },
+                    "cursorExpiresAt": {
+                      "type": "string",
+                      "description": "Sliding expiry of the provider-owned opaque bounded cursor"
+                    },
+                    "oversizedItem": {
+                      "type": "boolean",
+                      "description": "True when one oversized source row was isolated as an empty page and the cursor resumes after it"
                     }
                   },
                   "required": [
@@ -8274,6 +8436,48 @@
             "description": "Full-text search query",
             "name": "search",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
+              "example": "false"
+            },
+            "required": false,
+            "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
+            "name": "includeTotal",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Exact maximum UTF-8 JSON response bytes (minimum 512); requires stable id-keyset pagination",
+              "example": "4096"
+            },
+            "required": false,
+            "description": "Exact maximum UTF-8 JSON response bytes (minimum 512); requires stable id-keyset pagination",
+            "name": "maxResponseBytes",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Opaque forward cursor for a maxResponseBytes request"
+            },
+            "required": false,
+            "description": "Opaque forward cursor for a maxResponseBytes request",
+            "name": "responseAfter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Opaque backward cursor for a maxResponseBytes request"
+            },
+            "required": false,
+            "description": "Opaque backward cursor for a maxResponseBytes request",
+            "name": "responseBefore",
+            "in": "query"
           }
         ],
         "responses": {
@@ -8326,6 +8530,18 @@
                         "null"
                       ],
                       "description": "Items per page (offset mode)"
+                    },
+                    "returnedBytes": {
+                      "type": "integer",
+                      "description": "Exact serialized UTF-8 response bytes, including this field; present for maxResponseBytes requests"
+                    },
+                    "cursorExpiresAt": {
+                      "type": "string",
+                      "description": "Sliding expiry of the provider-owned opaque bounded cursor"
+                    },
+                    "oversizedItem": {
+                      "type": "boolean",
+                      "description": "True when one oversized source row was isolated as an empty page and the cursor resumes after it"
                     }
                   },
                   "required": [
@@ -8862,6 +9078,14 @@
                       "additionalProperties": {}
                     },
                     "description": "Ordered insert | update | delete | expect operations applied atomically."
+                  },
+                  "resultMode": {
+                    "type": "string",
+                    "enum": [
+                      "full",
+                      "compact"
+                    ],
+                    "description": "'compact' returns a fixed acknowledgment of at most 39 UTF-8 bytes instead of mutated rows."
                   }
                 },
                 "required": [
@@ -8873,7 +9097,7 @@
         },
         "responses": {
           "200": {
-            "description": "Ordered per-operation results",
+            "description": "Ordered per-operation results, or a compact bounded acknowledgment",
             "content": {
               "application/json": {
                 "schema": {
@@ -9036,6 +9260,14 @@
                       "additionalProperties": {}
                     },
                     "description": "Ordered insert | update | delete | expect operations applied atomically."
+                  },
+                  "resultMode": {
+                    "type": "string",
+                    "enum": [
+                      "full",
+                      "compact"
+                    ],
+                    "description": "'compact' returns a fixed acknowledgment of at most 39 UTF-8 bytes instead of mutated rows."
                   }
                 },
                 "required": [
@@ -9047,7 +9279,7 @@
         },
         "responses": {
           "200": {
-            "description": "Ordered per-operation results",
+            "description": "Ordered per-operation results, or a compact bounded acknowledgment",
             "content": {
               "application/json": {
                 "schema": {

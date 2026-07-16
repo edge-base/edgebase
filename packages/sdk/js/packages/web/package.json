@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/web",
-    "version": "0.4.8",
+    "version": "0.4.9",
     "description": "EdgeBase web SDK — browser client with database-live subscriptions, room, and auth persistence",
     "license": "MIT",
     "repository": {

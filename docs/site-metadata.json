@@ -57,7 +57,7 @@
       "description": "Jump straight to the REST surface for auth, database, storage, database subscriptions, functions, admin, and system endpoints."
     }
   ],
-  "deployModes": ["Edge", "Docker", "Node.js"],
+  "deployModes": ["Edge", "Docker", "Pack"],
   "searchContexts": [
     { "label": "Why EdgeBase", "path": "/docs/why-edgebase" },
     { "label": "Getting Started", "path": "/docs/getting-started" },

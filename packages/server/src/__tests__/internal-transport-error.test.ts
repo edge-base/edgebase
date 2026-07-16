@@ -8,12 +8,14 @@ describe('internal transport errors', () => {
       code: 'record_conflict',
       details: { table: 'pages' },
       message: 'Record already exists.',
+      slug: 'response-cursor-expired',
     });
 
     expect(error).toMatchObject({
       code: 'record_conflict',
       details: { table: 'pages' },
       message: 'Record already exists.',
+      slug: 'response-cursor-expired',
       status: 409,
     });
   });

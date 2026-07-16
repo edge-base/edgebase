@@ -21,6 +21,7 @@ const createAppBundle = vi.fn((projectDir: string, _options?: Record<string, unk
       count: 1,
     },
   },
+  functions: [{ name: 'health' }],
 }));
 const loadConfigSafe = vi.fn(() => ({
   release: true,

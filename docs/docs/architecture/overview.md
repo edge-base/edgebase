@@ -150,17 +150,19 @@ Server-authoritative real-time state channel for multiplayer games, collaborativ
 
 Most KV usage in EdgeBase is ephemeral or cache-like. Persistent, strongly consistent state should live in D1, Durable Objects, or a database provider instead.
 
-## Three Deployment Modes
+## Deployment and Development Modes
 
 The same codebase runs identically across three environments because Cloudflare's `workerd` runtime is open source:
 
-| Mode        | Command                   | Runtime               | Best For                  |
-| ----------- | ------------------------- | --------------------- | ------------------------- |
-| **Edge**    | `npx edgebase deploy`     | Cloudflare Workers    | Global, ~0ms cold start   |
-| **Docker**  | `npx edgebase docker run` | workerd in container  | Self-hosted, full control |
-| **Node.js** | `npx edgebase dev`        | workerd via Miniflare | Development, VPS          |
+| Mode                  | Command                               | Runtime               | Best For                        |
+| --------------------- | ------------------------------------- | --------------------- | ------------------------------- |
+| **Edge**              | `npx edgebase deploy`                 | Cloudflare Workers    | Global, ~0ms cold start         |
+| **Docker**            | `npx edgebase docker run`             | workerd in container  | Self-hosted, full control       |
+| **Pack artifact**     | `npx edgebase pack --format portable` | workerd + launcher    | Self-hosted without a container |
+| **Local development** | `npx edgebase dev`                    | workerd via Miniflare | Hot reload and local iteration  |
 
-All state persists in a single `/data` directory (Docker) or Cloudflare's infrastructure (Edge). No external database server is required.
+Production self-hosting uses the generated Docker or pack launcher; `dev` is
+not a production process manager. No external database server is required.
 
 ## Next Steps
 

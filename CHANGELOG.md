@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.9 — 2026-07-17
+
+### Added
+
+- Self-hosted Docker and packed deployments now use a protected launcher with
+  authenticated gateway admission, exact trusted-proxy handling, bounded
+  process-group shutdown, and durable managed-schedule supervision.
+- JavaScript/TypeScript list and search queries can opt out of total counts and
+  enforce exact serialized response-byte limits with provider-owned keyset
+  continuation cursors.
+- Transactions support compact commit receipts and portable revision fences
+  for safe negative-existence expectations.
+
+### Fixed
+
+- SQLite and PostgreSQL schema initialization now reconcile generated objects,
+  index ownership, and migration state consistently across repeated starts.
+- Scheduled delivery, transaction results, and bounded query responses now
+  preserve provider parity and explicit wire-size limits.
+- HttpOnly cookie sessions clear stale client hints when the server rejects the
+  session, and self-hosted client-IP forwarding requires a verified gateway hop.
+
 ## 0.4.8 — 2026-07-16
 
 ### Added

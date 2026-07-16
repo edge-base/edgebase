@@ -24,6 +24,21 @@ export {
   materializeConfig,
   resolveCaptchaHostnames,
 } from './config.js';
+export {
+  SYSTEM_MAINTENANCE_CRON,
+  SYSTEM_MAINTENANCE_SCHEDULE_ID,
+  appFunctionScheduleIdentity,
+  extraCronScheduleIdentity,
+  getNextAlarm,
+  getNextFireTime,
+  getPreviousFireTime,
+  matchesCron,
+  normalizeCronExpression,
+  parseCron,
+  parseCronField,
+  pluginFunctionScheduleIdentity,
+} from './cron.js';
+export type { CronSchedule, ParsedScheduleFunction } from './cron.js';
 export type {
   // ─── Core Config ───
   EdgeBaseConfig,
@@ -163,4 +178,35 @@ export type {
 export { EdgeBaseError, createErrorResponse, FunctionError, FunctionErrorCode } from './errors.js';
 export type { ErrorResponse, FieldError, FunctionErrorCodeType } from './errors.js';
 
+export {
+  UNSAFE_NEGATIVE_EXPECTATION_MESSAGE,
+  validateNegativeTransactExpectations,
+} from './transact.js';
+export type { RawTransactOperation, TransactRevisionFence } from './transact.js';
+
 export type { FilterOperator, SortDirection } from './types.js';
+
+export {
+  SELF_HOST_SCHEDULE_PROTOCOL_VERSION,
+  MAX_MANAGED_CRON_UTF8_BYTES,
+  MAX_MANAGED_SCHEDULE_TARGET_ID_UTF8_BYTES,
+  MAX_MANAGED_SCHEDULE_ENTRIES,
+  MAX_SELF_HOST_SCHEDULE_ENVELOPES_PER_REQUEST,
+  MAX_SELF_HOST_SCHEDULE_TARGETS_PER_REQUEST,
+  MAX_SELF_HOST_SCHEDULE_REQUEST_BYTES,
+  MAX_SELF_HOST_SCHEDULE_RESPONSE_BYTES,
+  MAX_SELF_HOST_SCHEDULE_ERROR_UTF8_BYTES,
+  utf8ByteLength,
+  truncateUtf8,
+  assertManagedCronWireBound,
+  assertManagedScheduleTargetIdWireBound,
+} from './self-host-schedule.js';
+export type {
+  SelfHostScheduleRequestMode,
+  SelfHostScheduleRequestTarget,
+  SelfHostScheduleRequestEnvelope,
+  SelfHostScheduleControlRequest,
+  SelfHostScheduleWireOutcomeStatus,
+  SelfHostScheduleWireOutcome,
+  SelfHostScheduleControlResponse,
+} from './self-host-schedule.js';

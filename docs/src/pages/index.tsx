@@ -41,7 +41,7 @@ const homeStats = [
   },
   {
     value: String(deployModeCount),
-    label: 'Deploy Modes',
+    label: 'Production Modes',
     sub: siteMetadata.deployModes.join(' · '),
   },
 ];
@@ -58,7 +58,7 @@ function HeroSection() {
       <p className="hero-tagline">
         Open-source edge-native BaaS for Database, Auth, Storage, Functions, Room, and Admin UI.
         <br />
-        Same app, same behavior — local, self-hosted, or global edge.
+        Develop locally, then run the same built app on Docker, Pack, or the global edge.
       </p>
       <div className="hero-code">
         <code>npm create edgebase@latest my-app</code>
@@ -202,7 +202,7 @@ function CostSection() {
       </div>
       <p className="section-subtitle" style={{ marginTop: '1rem', fontSize: '0.8rem' }}>
         1M MAU social app scenario — ~$149/mo. $5/mo is account-level — one subscription covers
-        unlimited projects. Self-hosted (Docker / Node.js): VPS cost only.
+        unlimited projects. Self-hosted (Docker / Pack): VPS cost only.
       </p>
     </section>
   );
@@ -356,9 +356,9 @@ function FeaturesSection() {
 function DeploySection() {
   return (
     <section className="deploy-section">
-      <h2>One Codebase, {deployModeCount} Deploy Modes</h2>
+      <h2>One Codebase, {deployModeCount} Production Modes</h2>
       <p className="section-subtitle">
-        The same code runs identically everywhere — no rewrites, no vendor lock-in.
+        Edge, Docker, and Pack share one built application contract; local dev remains the iteration surface.
       </p>
       <div className="deploy-grid">
         <div className="deploy-card">
@@ -389,15 +389,15 @@ function DeploySection() {
         </div>
         <div className="deploy-card">
           <div className="deploy-card-header">
-            <span className="deploy-icon">💻</span>
-            <h3>Node.js</h3>
+            <span className="deploy-icon">📦</span>
+            <h3>Pack artifact</h3>
           </div>
-          <code className="deploy-cmd">npx edgebase dev</code>
+          <code className="deploy-cmd">npx edgebase pack --format portable</code>
           <ul className="deploy-features">
-            <li>Zero dependencies</li>
-            <li>Dev & production</li>
-            <li>Local filesystem</li>
-            <li>Free</li>
+            <li>Production launcher</li>
+            <li>No container required</li>
+            <li>Target-platform artifact</li>
+            <li>VPS cost only</li>
           </ul>
         </div>
       </div>
@@ -503,7 +503,7 @@ function ComparisonSection() {
               <td>⚠️ Complex</td>
               <td>✅</td>
               <td>
-                <strong>✅ 3 ways</strong>
+                <strong>✅ Docker + Pack</strong>
               </td>
             </tr>
             <tr>

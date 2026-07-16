@@ -38,8 +38,8 @@ The CLI never accesses DO data directly. All data flows through the Worker API.
 
 | Path             | Use Case                               | Method                                             |
 | ---------------- | -------------------------------------- | -------------------------------------------------- |
-| **Volume Copy**  | Same environment (Docker→Docker)       | Copy `$PERSIST_DIR` or `.wrangler/state/` directly |
-| **CLI Portable** | Cross-environment (Edge↔Docker↔Direct) | JSON serialization via API                         |
+| **Volume/data copy** | Same environment (Docker→Docker or pack→pack) | Copy `$PERSIST_DIR` or the stopped launcher's data root |
+| **CLI Portable** | Cross-environment (Edge↔Docker↔pack) | JSON serialization via API                         |
 
 ### What Gets Backed Up
 

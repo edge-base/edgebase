@@ -551,6 +551,114 @@ export function generatePgAddColumnDDL(
   return `ALTER TABLE ${esc(tableName)} ADD COLUMN ${buildPgColumnDef(name, field)};`;
 }
 
+/**
+ * Generate the additive PostgreSQL phase for an existing table. A new field's
+ * UNIQUE flag is finalized only after pending data migrations have run, so a
+ * backfill/deduplication migration cannot be blocked by the target constraint.
+ */
+export function generatePgPreparationColumnDDL(
+  tableName: string,
+  name: string,
+  field: SchemaField,
+): string {
+  return generatePgAddColumnDDL(tableName, name, {
+    ...field,
+    unique: false,
+  });
+}
+
+export interface PostgresIndexState {
+  name: string;
+  unique: boolean;
+  primary: boolean;
+  constraintName: string | null;
+  constraintType: string | null;
+  partial: boolean;
+  columns: string[];
+}
+
+export interface PostgresFieldUniqueIndexPlan {
+  action: 'none' | 'create' | 'drop';
+  indexName: string;
+  ddl?: string;
+}
+
+/**
+ * Reconcile the PostgreSQL single-column index owned by SchemaField.unique.
+ * Constraint-owned and custom indexes are authority boundaries: they can
+ * satisfy unique=true, but only an explicit migration may remove them.
+ */
+export function planPostgresFieldUniqueIndex(
+  tableName: string,
+  fieldName: string,
+  desiredUnique: boolean,
+  indexes: PostgresIndexState[],
+): PostgresFieldUniqueIndexPlan {
+  const indexName = `uidx_${tableName}_${fieldName}`;
+  const managedIndex = indexes.find((index) => index.name === indexName);
+  const isExpectedManagedIndex = !!managedIndex
+    && managedIndex.unique
+    && !managedIndex.primary
+    && managedIndex.constraintName === null
+    && !managedIndex.partial
+    && managedIndex.columns.length === 1
+    && managedIndex.columns[0] === fieldName;
+
+  if (managedIndex && !isExpectedManagedIndex) {
+    throw new Error(
+      `Cannot reconcile unique for field '${tableName}.${fieldName}': reserved index `
+      + `'${indexName}' does not match the expected single-column UNIQUE index. `
+      + 'Rename or remove the conflicting index before retrying the schema update.',
+    );
+  }
+
+  const exactUniqueIndexes = indexes.filter((index) =>
+    index.unique
+    && !index.partial
+    && index.columns.length === 1
+    && index.columns[0] === fieldName,
+  );
+
+  if (desiredUnique) {
+    if (exactUniqueIndexes.length > 0) {
+      return { action: 'none', indexName };
+    }
+    return {
+      action: 'create',
+      indexName,
+      ddl: `CREATE UNIQUE INDEX ${esc(indexName)} ON ${esc(tableName)}(${esc(fieldName)});`,
+    };
+  }
+
+  const constraintOwnedUnique = exactUniqueIndexes.find((index) =>
+    !index.primary && index.constraintName !== null,
+  );
+  if (constraintOwnedUnique) {
+    throw new Error(
+      `Cannot disable unique for field '${tableName}.${fieldName}': PostgreSQL stored it as `
+      + `constraint '${constraintOwnedUnique.constraintName}'. `
+      + 'Apply an explicit constraint-removal migration before setting unique to false.',
+    );
+  }
+
+  if (isExpectedManagedIndex) {
+    return {
+      action: 'drop',
+      indexName,
+      ddl: `DROP INDEX IF EXISTS ${esc(indexName)};`,
+    };
+  }
+  return { action: 'none', indexName };
+}
+
+export function postgresUniqueDuplicateError(tableName: string, fieldName: string): Error {
+  return new Error(
+    `Cannot enable unique for field '${tableName}.${fieldName}': `
+    + 'existing non-NULL values contain duplicates. '
+    + 'Resolve the duplicates before retrying the schema update.',
+  );
+}
+
 // ─── PostgreSQL Index DDL ───
 
 /**

@@ -40,6 +40,11 @@ export interface QueryOptions {
   pagination?: PaginationOptions;
   fields?: string[];
   search?: string; // FTS5 search term
+  /** Request metadata consumed by list/search handlers, not SQL builders. */
+  includeTotal?: boolean;
+  maxResponseBytes?: number;
+  responseAfter?: string;
+  responseBefore?: string;
 }
 
 export interface QueryResult {
@@ -681,6 +686,8 @@ export const QUERY_PARAM_KEYS = [
   'after', 'before',
   'sort', 'filter', 'orFilter',
   'fields', 'search',
+  'includeTotal',
+  'maxResponseBytes', 'responseAfter', 'responseBefore',
 ] as const;
 
 // ─── Parse Query Parameters ───
@@ -757,6 +764,21 @@ export function parseQueryParams(params: Record<string, string>): QueryOptions {
   if (params.search) {
     options.search = params.search;
   }
+
+  // List/search response metadata. Providers consume these around the SQL
+  // query, but keeping them parsed preserves the public query-key invariant.
+  if (params.includeTotal !== undefined) {
+    options.includeTotal = !['0', 'false'].includes(params.includeTotal.toLowerCase());
+  }
+  if (params.maxResponseBytes !== undefined) {
+    const maxResponseBytes = Number(params.maxResponseBytes);
+    if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 512) {
+      throw new EdgeBaseError(400, 'Invalid maxResponseBytes parameter: must be a safe integer of at least 512');
+    }
+    options.maxResponseBytes = maxResponseBytes;
+  }
+  if (params.responseAfter) options.responseAfter = params.responseAfter;
+  if (params.responseBefore) options.responseBefore = params.responseBefore;
 
   return options;
 }

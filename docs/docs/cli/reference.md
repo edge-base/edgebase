@@ -68,6 +68,8 @@ Long-running commands still treat `Ctrl+C` as an immediate cancellation. If a us
 | `CLOUDFLARE_API_TOKEN` | Non-interactive Cloudflare deploy/destroy and operations that touch account-level resources |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare operations that need account scoping, especially backup and plugin cleanup flows |
 | `NEON_API_KEY` | Optional `edgebase neon setup` helper when you want non-interactive Neon provisioning |
+| `EDGEBASE_TRUSTED_PROXY_CIDRS` | Docker/pack launcher peers whose complete forwarded header set may be preserved |
+| `LOCAL_PROTOCOL`, `HTTPS_CERT_PATH`, `HTTPS_KEY_PATH` | Explicit TLS termination at the generated Docker/pack gateway |
 
 ## Project Lifecycle
 
@@ -107,6 +109,12 @@ Boot the local runtime with config and function hot reload. The default local su
 If `edgebase.config.ts` defines `frontend.directory`, `dev` also serves that prebuilt bundle from the same local origin. Build the frontend before starting the runtime.
 
 `dev` now runs from a self-contained bundle staged under `.edgebase/targets/dev-app`, so local execution no longer depends on Wrangler importing your source tree directly at runtime.
+
+`dev` is intentionally local-development only. It does not install the
+production self-host gateway, authenticated control authority, durable schedule
+supervisor, or bounded child-process-group shutdown. Use `docker run` or a
+generated `pack` launcher for production self-hosting. The server package's
+`dev:raw` script has the same development-only status.
 
 If a generated config shim contains injected development values, the CLI
 writes it with owner-only (`0600`) permissions on supported platforms. Shims
@@ -461,6 +469,13 @@ Use `docker build --context-only` to prepare the portable bundle and the synthet
 
 If the project Dockerfile needs additional build-time files, place them under a project-level `docker-context/` directory. EdgeBase copies its contents into the synthetic context after generating the portable bundle. `Dockerfile`, `.dockerignore`, and `.edgebase/` remain generator-owned; matching entries under `docker-context/` are ignored so they cannot replace the generated build inputs.
 
+A custom Dockerfile's final stage must preserve the generated protected
+entrypoint. Build validates the final-stage Dockerfile command, the built
+image's effective JSON `Entrypoint`/`Cmd`, and the required files inside an
+isolated read-only container. Shell-form, missing, shadowed, or raw Wrangler
+commands that bypass `.edgebase/self-host/self-host-docker-entrypoint.mjs` fail
+the build instead of producing an unsupported production image.
+
 ### `pack`
 
 ```bash
@@ -505,6 +520,25 @@ The launcher materializes those bindings in a temporary, owner-only
 `.dev.vars` file inside its runtime data directory. It writes the file
 atomically with mode `0600` on Unix-like systems and removes the file after a
 normal exit or launch failure.
+
+Before binding its public port, the launcher validates one coherent generated
+runtime generation (manifest plus asset byte lengths and SHA-256 digests),
+starts Wrangler on loopback HTTP, and accepts readiness only from the exact
+instance that presents its fresh control secret. It validates durable schedule
+state and runs the manifest-derived supervisor before opening the gateway. The
+gateway is the only external listener; direct HTTP and WebSocket requests to
+internal or scheduled control paths receive `404`. Use `LOCAL_PROTOCOL=https`
+with `HTTPS_CERT_PATH` and `HTTPS_KEY_PATH` for direct TLS, or set
+`EDGEBASE_TRUSTED_PROXY_CIDRS` to exact reverse-proxy peers so their single
+complete forwarded client/protocol/host set can be preserved. Forwarding
+headers from every other peer are overwritten. The gateway strips any supplied
+internal-proof header and injects a fresh launcher-owned proof before each HTTP
+or WebSocket request reaches the Worker.
+
+`GET /__edgebase/health` is the launcher readiness endpoint. It returns schema
+version 1, `200` with `outcome: "ok"` or `"degraded"` only when external
+admission is open and the scheduler is structurally ready, and `503` with
+`outcome: "blocked"` otherwise. Application health routes are separate checks.
 
 For packed launchers, the default runtime model is now:
 
