@@ -71,51 +71,51 @@ kotlin {
     sourceSets {
         val commonMain by getting {
             dependencies {
-                api("io.ktor:ktor-client-core:3.1.0")
-                implementation("io.ktor:ktor-client-content-negotiation:3.1.0")
-                implementation("io.ktor:ktor-serialization-kotlinx-json:3.1.0")
-                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+                api("io.ktor:ktor-client-core:3.5.1")
+                implementation("io.ktor:ktor-client-content-negotiation:3.5.1")
+                implementation("io.ktor:ktor-serialization-kotlinx-json:3.5.1")
+                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
             }
         }
 
         val androidMain by getting {
             dependencies {
-                implementation("io.ktor:ktor-client-okhttp:3.1.0")
+                implementation("io.ktor:ktor-client-okhttp:3.5.1")
             }
         }
 
         val appleMain by getting {
             dependencies {
-                implementation("io.ktor:ktor-client-darwin:3.1.0")
+                implementation("io.ktor:ktor-client-darwin:3.5.1")
             }
         }
 
         val jsMain by getting {
             dependencies {
-                implementation("io.ktor:ktor-client-js:3.1.0")
+                implementation("io.ktor:ktor-client-js:3.5.1")
             }
         }
 
         val jvmMain by getting {
             dependencies {
-                implementation("io.ktor:ktor-client-cio:3.1.0")
+                implementation("io.ktor:ktor-client-cio:3.5.1")
             }
         }
 
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
             }
         }
 
         val jvmTest by getting {
             dependencies {
-                implementation("org.junit.jupiter:junit-jupiter-api:5.10.1")
-                implementation("org.junit.jupiter:junit-jupiter-params:5.10.1")
-                implementation("io.ktor:ktor-client-mock:3.1.0")
-                runtimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.1")
+                implementation("org.junit.jupiter:junit-jupiter-api:6.1.1")
+                implementation("org.junit.jupiter:junit-jupiter-params:6.1.1")
+                implementation("io.ktor:ktor-client-mock:3.5.1")
+                runtimeOnly("org.junit.jupiter:junit-jupiter-engine:6.1.1")
             }
         }
 
@@ -124,7 +124,7 @@ kotlin {
                 implementation("junit:junit:4.13.2")
                 // Provide real org.json implementation to replace Android stubs in unit tests.
                 // Android SDK's org.json.JSONObject throws RuntimeException when not mocked.
-                implementation("org.json:json:20240303")
+                implementation("org.json:json:20260522")
             }
         }
     }
