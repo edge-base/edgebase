@@ -30,12 +30,12 @@ subprojects {
     }
 
     dependencies {
-        "implementation"("org.scala-lang:scala-library:2.13.16")
-        "implementation"("com.squareup.okhttp3:okhttp:4.12.0")
-        "implementation"("com.google.code.gson:gson:2.11.0")
-        "implementation"("org.json:json:20231013")
-        "testImplementation"("org.scalatest:scalatest_2.13:3.2.19")
-        "testImplementation"("org.junit.jupiter:junit-jupiter:5.11.0")
+        "implementation"("org.scala-lang:scala-library:3.8.4")
+        "implementation"("com.squareup.okhttp3:okhttp:5.4.0")
+        "implementation"("com.google.code.gson:gson:2.14.0")
+        "implementation"("org.json:json:20260522")
+        "testImplementation"("org.scalatest:scalatest_2.13:3.2.20")
+        "testImplementation"("org.junit.jupiter:junit-jupiter:6.1.1")
         "testRuntimeOnly"("org.junit.platform:junit-platform-launcher")
     }
 

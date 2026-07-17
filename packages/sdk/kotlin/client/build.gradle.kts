@@ -87,26 +87,26 @@ kotlin {
         val commonMain by getting {
             dependencies {
                 api(project(":core"))
-                implementation("io.ktor:ktor-client-core:3.1.0")
-                implementation("io.ktor:ktor-client-websockets:3.1.0")
-                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+                implementation("io.ktor:ktor-client-core:3.5.1")
+                implementation("io.ktor:ktor-client-websockets:3.5.1")
+                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
             }
         }
 
         val androidMain by getting {
             dependencies {
-                implementation("io.ktor:ktor-client-okhttp:3.1.0")
-                implementation("com.google.firebase:firebase-messaging:24.1.0")
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+                implementation("io.ktor:ktor-client-okhttp:3.5.1")
+                implementation("com.google.firebase:firebase-messaging:25.1.1")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0")
                 implementation("androidx.fragment:fragment:1.6.2")
-                implementation("androidx.core:core:1.12.0")
+                implementation("androidx.core:core:1.19.0")
             }
         }
 
         val appleMain by getting {
             dependencies {
-                implementation("io.ktor:ktor-client-darwin:3.1.0")
+                implementation("io.ktor:ktor-client-darwin:3.5.1")
             }
         }
 
@@ -114,36 +114,36 @@ kotlin {
 
         val jsMain by getting {
             dependencies {
-                implementation("io.ktor:ktor-client-js:3.1.0")
+                implementation("io.ktor:ktor-client-js:3.5.1")
             }
         }
 
         val jvmMain by getting {
             dependencies {
-                implementation("io.ktor:ktor-client-cio:3.1.0")
+                implementation("io.ktor:ktor-client-cio:3.5.1")
             }
         }
 
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
             }
         }
 
         val jvmTest by getting {
             dependencies {
-                implementation("org.junit.jupiter:junit-jupiter-api:5.10.2")
-                implementation("org.junit.jupiter:junit-jupiter:5.10.2")
-                implementation("io.ktor:ktor-client-mock:3.1.0")
-                runtimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.2")
+                implementation("org.junit.jupiter:junit-jupiter-api:6.1.1")
+                implementation("org.junit.jupiter:junit-jupiter:6.1.1")
+                implementation("io.ktor:ktor-client-mock:3.5.1")
+                runtimeOnly("org.junit.jupiter:junit-jupiter-engine:6.1.1")
             }
         }
 
         val androidUnitTest by getting {
             dependencies {
                 implementation("junit:junit:4.13.2")
-                implementation("org.robolectric:robolectric:4.13")
+                implementation("org.robolectric:robolectric:4.16.1")
                 // Robolectric 4.x pins Conscrypt 2.5.2, whose native bundle
                 // omits Linux/macOS arm64. 2.6.0 supplies both arm64 binaries,
                 // so Activity lifecycle regression tests run on Apple Silicon
