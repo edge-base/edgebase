@@ -10,6 +10,6 @@
   <ItemGroup>
     <ProjectReference Include="../packages/core/EdgeBase.Core.csproj" />
     <ProjectReference Include="../packages/unity/EdgeBase.Unity.csproj" />
-    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="System.Text.Json" Version="10.0.9" />
   </ItemGroup>
 </Project>
