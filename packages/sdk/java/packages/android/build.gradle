@@ -15,19 +15,19 @@ def projectPath = { String monorepoPath, String standalonePath ->
 dependencies {
     api project(projectPath(':packages:core', ':core'))
     api project(projectPath(':packages:admin', ':admin'))
-    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-    implementation 'com.google.code.gson:gson:2.11.0'
+    implementation 'com.squareup.okhttp3:okhttp:5.4.0'
+    implementation 'com.google.code.gson:gson:2.14.0'
     // Modern Android API stubs for host-side SDK compilation. The obsolete
     // Android 4.1 Maven stub omits WebView failure/process callbacks and can
     // silently let release code drift from the supported Android runtime.
     compileOnly 'org.robolectric:android-all:14-robolectric-10818077'
-    compileOnly 'org.json:json:20231013'
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
+    compileOnly 'org.json:json:20260522'
+    testImplementation 'org.junit.jupiter:junit-jupiter:6.1.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     // Android stubs needed at test runtime — TurnstileProvider imports android.* at class level
     // (compileOnly is not available during `gradle test` JVM execution → NoClassDefFoundError)
     testImplementation 'org.robolectric:android-all:14-robolectric-10818077'
-    testImplementation 'org.json:json:20231013'
+    testImplementation 'org.json:json:20260522'
 }
 
 tasks.test {
