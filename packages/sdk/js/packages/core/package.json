@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/core",
-    "version": "0.4.9",
+    "version": "0.5.0",
     "description": "EdgeBase core SDK — platform-agnostic client for auth, database, storage, and functions",
     "license": "MIT",
     "repository": {
@@ -37,7 +37,8 @@
     "scripts": {
         "build": "tsc",
         "dev": "tsc --watch",
-        "test": "vitest run test/unit/",
+        "test": "pnpm run test:types && vitest run test/unit/",
+        "test:types": "tsc -p tsconfig.types.json",
         "prepack": "pnpm run build"
     },
     "dependencies": {

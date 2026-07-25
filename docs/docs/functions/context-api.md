@@ -378,6 +378,10 @@ await context.admin.push.broadcast({
 Send email from App Functions through the configured EdgeBase `email` provider.
 This uses the same EmailProvider adapter as auth emails, including Cloudflare
 Email Service Workers `send_email` bindings and REST fallback when configured.
+`email.supportsIdempotency` is `true` only when the configured adapter can
+guarantee provider-side deduplication. On those providers, pass a stable,
+non-empty `idempotencyKey` of at most 256 characters when a durable outbox may
+retry an ambiguous request.
 
 ```typescript
 export const POST = defineFunction(async ({ email, request }) => {
@@ -390,6 +394,9 @@ export const POST = defineFunction(async ({ email, request }) => {
     to: body.to,
     subject: 'You were invited',
     html: '<p>Open your workspace invitation.</p>',
+    ...(email.supportsIdempotency
+      ? { idempotencyKey: `workspace-invite-${body.inviteId}` }
+      : {}),
   });
 
   return Response.json(result);

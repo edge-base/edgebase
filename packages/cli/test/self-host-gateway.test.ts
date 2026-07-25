@@ -22,19 +22,59 @@ interface GatewayHandle {
   protocol: 'http' | 'https';
   upstreamHost: string;
   upstreamPort: number;
+  maxConnections: number;
+  maxRequestBodyBytes: number;
+  headersTimeoutMs: number;
+  requestTimeoutMs: number;
+  idleTimeoutMs: number;
+  keepAliveTimeoutMs: number;
+  upstreamTimeoutMs: number;
   stopAdmission(): Promise<void>;
   stop(options?: { drainTimeoutMs?: number }): Promise<void>;
 }
 
 type StartGateway = (options: Record<string, unknown>) => Promise<GatewayHandle>;
 
+interface MemoryAdmissionController {
+  decision(): true | {
+    allowed: false;
+    reason: 'memory_pressure';
+    retryAfterSeconds: number;
+  };
+  status(): Record<string, unknown>;
+}
+
+type CreateMemoryAdmissionController = (
+  options?: Record<string, unknown>,
+) => MemoryAdmissionController;
+
+interface FilesystemCapacityAdmissionController {
+  decision(): true | {
+    allowed: false;
+    reason: 'storage_pressure' | 'storage_probe_failed';
+    retryAfterSeconds: number;
+  };
+  status(): Record<string, unknown>;
+}
+
+type CreateFilesystemCapacityAdmissionController = (
+  options: Record<string, unknown>,
+) => FilesystemCapacityAdmissionController;
+
 const gatewayAssetPath = resolve(
   import.meta.dirname,
   '../src/templates/self-host/self-host-gateway.mjs',
 );
-const { startSelfHostGateway } = await import(pathToFileURL(gatewayAssetPath).href) as {
+const gatewayModule = await import(pathToFileURL(gatewayAssetPath).href) as {
   startSelfHostGateway: StartGateway;
+  createCgroupMemoryAdmissionController?: CreateMemoryAdmissionController;
+  createFilesystemCapacityAdmissionController?: CreateFilesystemCapacityAdmissionController;
 };
+const {
+  startSelfHostGateway,
+  createCgroupMemoryAdmissionController,
+  createFilesystemCapacityAdmissionController,
+} = gatewayModule;
 const WORKER_TRUST_SECRET = 'a'.repeat(64);
 
 const TEST_CERTIFICATE = `-----BEGIN CERTIFICATE-----
@@ -133,6 +173,28 @@ async function listen(server: Server): Promise<number> {
   return (server.address() as AddressInfo).port;
 }
 
+function serverConnectionCount(server: Server): Promise<number> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    server.getConnections((error, count) => {
+      if (error) rejectPromise(error);
+      else resolvePromise(count);
+    });
+  });
+}
+
+async function waitForServerConnectionCount(
+  server: Server,
+  expected: number,
+  timeoutMs = 3_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await serverConnectionCount(server) === expected) return;
+    await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+  }
+  throw new Error(`Timed out waiting for server connection count ${expected}.`);
+}
+
 async function startGateway(
   upstreamPort: number,
   overrides: Record<string, unknown> = {},
@@ -171,6 +233,355 @@ afterEach(async () => {
   for (const server of servers.splice(0).reverse()) {
     await closeServer(server).catch(() => {});
   }
+});
+
+describe('self-host cgroup memory admission', () => {
+  it('recovers a default 1536-MiB appliance after startup pressure leaves finite headroom', () => {
+    const mib = 1024 ** 2;
+    let now = 0;
+    let current = String(1_240 * mib);
+    const controller = createCgroupMemoryAdmissionController!({
+      now: () => now,
+      readFile: (path: string) => {
+        if (path === '/sys/fs/cgroup/memory.current') return current;
+        if (path === '/sys/fs/cgroup/memory.max') return String(1_536 * mib);
+        throw new Error(`unexpected path ${path}`);
+      },
+    });
+
+    expect(controller.decision()).toMatchObject({
+      allowed: false,
+      reason: 'memory_pressure',
+    });
+    current = String(1_180 * mib);
+    now = 250;
+    expect(controller.decision()).toMatchObject({
+      allowed: false,
+      reason: 'memory_pressure',
+    });
+    current = String(1_120 * mib);
+    now = 500;
+    expect(controller.decision()).toBe(true);
+    expect(controller.status()).toMatchObject({
+      source: 'cgroup-v2',
+      outcome: 'ready',
+      currentBytes: 1_120 * mib,
+      limitBytes: 1_536 * mib,
+    });
+
+    let compactCurrent = String(780 * mib);
+    now = 0;
+    const compactController = createCgroupMemoryAdmissionController!({
+      now: () => now,
+      readFile: (path: string) => {
+        if (path === '/sys/fs/cgroup/memory.current') return compactCurrent;
+        if (path === '/sys/fs/cgroup/memory.max') return String(1_024 * mib);
+        throw new Error(`unexpected path ${path}`);
+      },
+    });
+    expect(compactController.decision()).toMatchObject({
+      allowed: false,
+      reason: 'memory_pressure',
+    });
+    compactCurrent = String(750 * mib);
+    now = 250;
+    expect(compactController.decision()).toMatchObject({
+      allowed: false,
+      reason: 'memory_pressure',
+    });
+    compactCurrent = String(710 * mib);
+    now = 500;
+    expect(compactController.decision()).toBe(true);
+  });
+
+  it('shares bounded v2 samples and uses high/recovery hysteresis', () => {
+    expect(createCgroupMemoryAdmissionController).toBeTypeOf('function');
+    let now = 0;
+    let current = '790';
+    let limit = '1000';
+    const reads: string[] = [];
+    const controller = createCgroupMemoryAdmissionController!({
+      now: () => now,
+      readFile: (path: string) => {
+        reads.push(path);
+        if (path === '/sys/fs/cgroup/memory.current') return current;
+        if (path === '/sys/fs/cgroup/memory.max') return limit;
+        throw new Error(`unexpected path ${path}`);
+      },
+      sampleIntervalMs: 250,
+      limitRefreshIntervalMs: 5_000,
+      highWatermarkRatio: 0.8,
+      recoveryWatermarkRatio: 0.7,
+      minimumHeadroomBytes: 100,
+      retryAfterSeconds: 2,
+    });
+
+    expect(controller.decision()).toBe(true);
+    expect(controller.decision()).toBe(true);
+    expect(reads).toHaveLength(3);
+
+    current = '810';
+    now = 249;
+    expect(controller.decision()).toBe(true);
+    expect(reads).toHaveLength(3);
+    now = 250;
+    expect(controller.decision()).toEqual({
+      allowed: false,
+      reason: 'memory_pressure',
+      retryAfterSeconds: 2,
+    });
+    expect(reads.filter((path) => path.endsWith('memory.current'))).toHaveLength(2);
+    expect(reads.filter((path) => path.endsWith('memory.max'))).toHaveLength(1);
+
+    current = '750';
+    now = 500;
+    expect(controller.decision()).toMatchObject({ allowed: false, reason: 'memory_pressure' });
+    current = '690';
+    now = 750;
+    expect(controller.decision()).toBe(true);
+    expect(controller.status()).toMatchObject({
+      source: 'cgroup-v2',
+      outcome: 'ready',
+      currentBytes: 690,
+      limitBytes: 1000,
+    });
+
+    current = '1500';
+    limit = '2000';
+    now = 5_750;
+    expect(controller.decision()).toBe(true);
+    expect(reads.filter((path) => path.endsWith('memory.max'))).toHaveLength(2);
+  });
+
+  it('supports finite cgroup v1 and allows unlimited or unavailable sensors', () => {
+    expect(createCgroupMemoryAdmissionController).toBeTypeOf('function');
+    const v1 = createCgroupMemoryAdmissionController!({
+      readFile: (path: string) => {
+        if (path === '/sys/fs/cgroup/memory/memory.usage_in_bytes') return '850';
+        if (path === '/sys/fs/cgroup/memory/memory.limit_in_bytes') return '1000';
+        throw new Error('v2 unavailable');
+      },
+      highWatermarkRatio: 0.8,
+      recoveryWatermarkRatio: 0.7,
+      minimumHeadroomBytes: 100,
+    });
+    expect(v1.decision()).toMatchObject({ allowed: false, reason: 'memory_pressure' });
+    expect(v1.status()).toMatchObject({ source: 'cgroup-v1', outcome: 'shedding' });
+
+    const unlimited = createCgroupMemoryAdmissionController!({
+      readFile: (path: string) => path.endsWith('memory.max') ? 'max' : '900',
+    });
+    expect(unlimited.decision()).toBe(true);
+    expect(unlimited.status()).toMatchObject({ source: 'cgroup-v2', outcome: 'unlimited' });
+
+    const unavailable = createCgroupMemoryAdmissionController!({
+      readFile: () => {
+        throw new Error('sensor unavailable');
+      },
+    });
+    expect(unavailable.decision()).toBe(true);
+    expect(unavailable.status()).toMatchObject({ source: null, outcome: 'unavailable' });
+  });
+
+  it('recovers a cgroup v1 container when reclaimable inactive file cache leaves a safe working set', () => {
+    let now = 0;
+    let current = '1350000000';
+    const limit = '1610612736';
+    let inactiveFile = '0';
+    const controller = createCgroupMemoryAdmissionController!({
+      now: () => now,
+      readFile: (path: string) => {
+        if (path === '/sys/fs/cgroup/memory/memory.usage_in_bytes') return current;
+        if (path === '/sys/fs/cgroup/memory/memory.limit_in_bytes') return limit;
+        if (path === '/sys/fs/cgroup/memory/memory.stat') {
+          return [
+            'cache 344956928',
+            'rss 903041024',
+            `total_inactive_file ${inactiveFile}`,
+          ].join('\n');
+        }
+        throw new Error('v2 unavailable');
+      },
+    });
+
+    expect(controller.decision()).toMatchObject({
+      allowed: false,
+      reason: 'memory_pressure',
+    });
+    current = '1247985664';
+    inactiveFile = '256913408';
+    now = 250;
+    expect(controller.decision()).toBe(true);
+    expect(controller.status()).toMatchObject({
+      source: 'cgroup-v1',
+      outcome: 'ready',
+      currentBytes: 991072256,
+      rawCurrentBytes: 1247985664,
+      inactiveFileBytes: 256913408,
+      limitBytes: 1610612736,
+    });
+  });
+
+  it('uses v2 inactive file working set and safely falls back or clamps malformed stats', () => {
+    const mib = 1024 ** 2;
+    const create = (stat: string | Error, current = 1_240 * mib) =>
+      createCgroupMemoryAdmissionController!({
+        readFile: (path: string) => {
+          if (path === '/sys/fs/cgroup/memory.current') return String(current);
+          if (path === '/sys/fs/cgroup/memory.max') return String(1_536 * mib);
+          if (path === '/sys/fs/cgroup/memory.stat') {
+            if (stat instanceof Error) throw stat;
+            return stat;
+          }
+          throw new Error(`unexpected path ${path}`);
+        },
+      });
+
+    const adjusted = create(`inactive_file ${200 * mib}`);
+    expect(adjusted.decision()).toBe(true);
+    expect(adjusted.status()).toMatchObject({
+      source: 'cgroup-v2',
+      currentBytes: 1_040 * mib,
+      rawCurrentBytes: 1_240 * mib,
+      inactiveFileBytes: 200 * mib,
+    });
+
+    const missing = create(new Error('memory.stat unavailable'));
+    expect(missing.decision()).toMatchObject({
+      allowed: false,
+      reason: 'memory_pressure',
+    });
+    expect(missing.status()).toMatchObject({
+      currentBytes: 1_240 * mib,
+      rawCurrentBytes: 1_240 * mib,
+      inactiveFileBytes: null,
+    });
+
+    const malformed = create('inactive_file nope');
+    expect(malformed.decision()).toMatchObject({
+      allowed: false,
+      reason: 'memory_pressure',
+    });
+
+    const clamped = create(`inactive_file ${2_000 * mib}`, 900 * mib);
+    expect(clamped.decision()).toBe(true);
+    expect(clamped.status()).toMatchObject({
+      currentBytes: 0,
+      rawCurrentBytes: 900 * mib,
+      inactiveFileBytes: 2_000 * mib,
+    });
+  });
+
+  it('keeps shedding across a transient current sensor failure and recovers from a valid sample', () => {
+    let now = 0;
+    let current: string | Error = '850';
+    const controller = createCgroupMemoryAdmissionController!({
+      now: () => now,
+      readFile: (path: string) => {
+        if (path === '/sys/fs/cgroup/memory.max') return '1000';
+        if (path === '/sys/fs/cgroup/memory.current') {
+          if (current instanceof Error) throw current;
+          return current;
+        }
+        throw new Error(`unexpected path ${path}`);
+      },
+      highWatermarkRatio: 0.8,
+      recoveryWatermarkRatio: 0.7,
+      minimumHeadroomBytes: 100,
+    });
+
+    expect(controller.decision()).toMatchObject({ allowed: false, reason: 'memory_pressure' });
+    current = new Error('transient current read failure');
+    now = 250;
+    expect(controller.decision()).toMatchObject({ allowed: false, reason: 'memory_pressure' });
+    expect(controller.status()).toMatchObject({
+      source: 'cgroup-v2',
+      outcome: 'shedding',
+      currentBytes: null,
+      limitBytes: 1000,
+    });
+
+    current = '690';
+    now = 500;
+    expect(controller.decision()).toBe(true);
+    expect(controller.status()).toMatchObject({
+      source: 'cgroup-v2',
+      outcome: 'ready',
+      currentBytes: 690,
+      limitBytes: 1000,
+    });
+  });
+});
+
+describe('self-host filesystem capacity admission', () => {
+  it('shares bounded statfs samples, stays closed through hysteresis, and fails closed on probe loss', () => {
+    expect(createFilesystemCapacityAdmissionController).toBeTypeOf('function');
+    let now = 0;
+    let available: bigint | Error = 600n;
+    let reads = 0;
+    const controller = createFilesystemCapacityAdmissionController!({
+      path: '/data',
+      now: () => now,
+      readStatfs: () => {
+        reads += 1;
+        if (available instanceof Error) throw available;
+        return { bavail: available, bsize: 1n };
+      },
+      sampleIntervalMs: 250,
+      minimumFreeBytes: 500,
+      recoveryFreeBytes: 700,
+      retryAfterSeconds: 5,
+    });
+
+    expect(controller.decision()).toBe(true);
+    expect(controller.decision()).toBe(true);
+    expect(reads).toBe(1);
+
+    available = 499n;
+    now = 249;
+    expect(controller.decision()).toBe(true);
+    expect(reads).toBe(1);
+    now = 250;
+    expect(controller.decision()).toEqual({
+      allowed: false,
+      reason: 'storage_pressure',
+      retryAfterSeconds: 5,
+    });
+
+    available = 600n;
+    now = 500;
+    expect(controller.decision()).toMatchObject({
+      allowed: false,
+      reason: 'storage_pressure',
+    });
+    available = 701n;
+    now = 750;
+    expect(controller.decision()).toBe(true);
+    expect(controller.status()).toMatchObject({
+      path: '/data',
+      outcome: 'ready',
+      availableBytes: 701,
+      minimumFreeBytes: 500,
+      recoveryFreeBytes: 700,
+    });
+
+    available = new Error('synthetic statfs failure');
+    now = 1_000;
+    expect(controller.decision()).toEqual({
+      allowed: false,
+      reason: 'storage_probe_failed',
+      retryAfterSeconds: 5,
+    });
+    expect(controller.status()).toMatchObject({
+      path: '/data',
+      outcome: 'unavailable',
+      availableBytes: null,
+    });
+
+    available = 800n;
+    now = 1_250;
+    expect(controller.decision()).toBe(true);
+  });
 });
 
 interface CollectedResponse {
@@ -214,6 +625,34 @@ function httpRoundTrip(
     });
     request.once('error', rejectPromise);
     request.end(options.body);
+  });
+}
+
+function chunkedRoundTrip(
+  port: number,
+  path: string,
+  chunks: string[],
+): Promise<CollectedResponse> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    let settled = false;
+    const request = requestHttp({
+      hostname: '127.0.0.1',
+      port,
+      path,
+      method: 'POST',
+      agent: false,
+    }, (response) => {
+      void collectIncomingResponse(response).then((value) => {
+        settled = true;
+        resolvePromise(value);
+      }, rejectPromise);
+    });
+    request.once('error', (error) => {
+      if (!settled) rejectPromise(error);
+    });
+    request.flushHeaders();
+    for (const chunk of chunks) request.write(chunk);
+    request.end();
   });
 }
 
@@ -624,6 +1063,375 @@ describe('self-host gateway HTTP fidelity', () => {
     expect(continued).toBe(true);
     expect(response.body).toBe('continued:ping');
     await expect(upstreamBody.promise).resolves.toBe('ping');
+  });
+});
+
+describe('self-host gateway resource and observability bounds', () => {
+  it('installs finite compatibility-preserving defaults on every external server', async () => {
+    const upstreamPort = await listen(createServer((_request, response) => response.end('ok')));
+    const gateway = await startGateway(upstreamPort);
+
+    expect.soft(gateway.server.maxConnections).toBe(512);
+    expect.soft(gateway.server.headersTimeout).toBe(15_000);
+    expect.soft(gateway.server.requestTimeout).toBe(15 * 60_000);
+    expect.soft(gateway.server.timeout).toBe(30_000);
+    expect.soft(gateway.server.keepAliveTimeout).toBe(5_000);
+    expect.soft(gateway.maxConnections).toBe(512);
+    expect.soft(gateway.maxRequestBodyBytes).toBe(5 * 1024 ** 3);
+    expect.soft(gateway.headersTimeoutMs).toBe(15_000);
+    expect.soft(gateway.requestTimeoutMs).toBe(15 * 60_000);
+    expect.soft(gateway.idleTimeoutMs).toBe(30_000);
+    expect.soft(gateway.keepAliveTimeoutMs).toBe(5_000);
+    expect.soft(gateway.upstreamTimeoutMs).toBe(5 * 60_000);
+  });
+
+  it.each([
+    ['maxConnections', { maxConnections: 0 }, 'maxConnections'],
+    ['maxRequestBodyBytes', { maxRequestBodyBytes: 0 }, 'maxRequestBodyBytes'],
+    ['headersTimeoutMs', { headersTimeoutMs: 0 }, 'headersTimeoutMs'],
+    ['requestTimeoutMs', { requestTimeoutMs: 0 }, 'requestTimeoutMs'],
+    ['idleTimeoutMs', { idleTimeoutMs: 0 }, 'idleTimeoutMs'],
+    ['keepAliveTimeoutMs', { keepAliveTimeoutMs: 0 }, 'keepAliveTimeoutMs'],
+    ['upstreamTimeoutMs', { upstreamTimeoutMs: 0 }, 'upstreamTimeoutMs'],
+    ['onEvent', { onEvent: 'not-a-function' }, 'onEvent'],
+  ])('rejects invalid %s before external admission', async (_label, override, message) => {
+    const upstreamPort = await listen(createServer((_request, response) => response.end('ok')));
+    await expect(startGateway(upstreamPort, override)).rejects.toThrow(message);
+  });
+
+  it('rejects declared and chunked bodies without forwarding a byte beyond the cap', async () => {
+    const observed = new Map<string, { bytes: number; ended: boolean; aborted: boolean }>();
+    const upstreamPort = await listen(createServer((request, response) => {
+      const state = { bytes: 0, ended: false, aborted: false };
+      observed.set(request.url ?? '', state);
+      request.on('data', (chunk) => {
+        state.bytes += chunk.length;
+      });
+      request.once('aborted', () => {
+        state.aborted = true;
+      });
+      request.once('end', () => {
+        state.ended = true;
+        response.end('ok');
+      });
+    }));
+    const events: Array<Record<string, unknown>> = [];
+    const gateway = await startGateway(upstreamPort, {
+      maxRequestBodyBytes: 8,
+      onEvent: (event: Record<string, unknown>) => events.push(event),
+    });
+
+    const declared = await httpRoundTrip(gateway.port, '/declared-over', {
+      method: 'POST',
+      headers: { 'Content-Length': '9' },
+      body: '123456789',
+    });
+    const chunked = await chunkedRoundTrip(gateway.port, '/chunked-over', ['12345', '6789']);
+    const exact = await httpRoundTrip(gateway.port, '/exact', {
+      method: 'POST',
+      headers: { 'Content-Length': '8' },
+      body: '12345678',
+    });
+    await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+
+    expect.soft(declared.statusCode).toBe(413);
+    expect.soft(observed.has('/declared-over')).toBe(false);
+    expect.soft(chunked.statusCode).toBe(413);
+    expect.soft(observed.get('/chunked-over')).toEqual({ bytes: 5, ended: false, aborted: true });
+    expect.soft(exact).toMatchObject({ statusCode: 200, body: 'ok' });
+    expect.soft(observed.get('/exact')).toEqual({ bytes: 8, ended: true, aborted: false });
+    expect.soft(events.filter((event) => event.reason === 'request_body_too_large')).toHaveLength(2);
+  });
+
+  it('bounds idle client and loopback-upstream waits without affecting sibling requests', async () => {
+    const upstreamPort = await listen(createServer((request, response) => {
+      if (request.url === '/ok') response.end('ok');
+    }));
+    const events: Array<Record<string, unknown>> = [];
+    const gateway = await startGateway(upstreamPort, {
+      idleTimeoutMs: 25,
+      upstreamTimeoutMs: 25,
+      eventCoalesceWindowMs: 20,
+      onEvent: (event: Record<string, unknown>) => events.push(event),
+    });
+
+    const timedOut = await fetch(`http://127.0.0.1:${gateway.port}/upstream-stall`, {
+      signal: AbortSignal.timeout(250),
+    }).then((response) => response.status, () => 0);
+    const sibling = await httpRoundTrip(gateway.port, '/ok');
+
+    const idleSocket = trackOpenSocket(connect({ host: '127.0.0.1', port: gateway.port }));
+    await once(idleSocket, 'connect');
+    const idleClosed = withTimeout(
+      once(idleSocket, 'close').then(() => true),
+      'idle client close',
+      250,
+    ).catch(() => false);
+    idleSocket.write(
+      'POST /idle-upload HTTP/1.1\r\nHost: edgebase.test\r\n'
+      + 'Transfer-Encoding: chunked\r\n\r\n1\r\na\r\n',
+    );
+
+    expect.soft(timedOut).toBe(504);
+    expect.soft(sibling).toMatchObject({ statusCode: 200, body: 'ok' });
+    expect.soft(await idleClosed).toBe(true);
+    if (!idleSocket.destroyed) idleSocket.destroy();
+    expect.soft(events.some((event) => event.reason === 'upstream_idle_timeout')).toBe(true);
+    expect.soft(events.some((event) => event.reason === 'socket_idle_timeout')).toBe(true);
+  });
+
+  it('drops only excess connections and admits new work after capacity returns', async () => {
+    const upstreamPort = await listen(createServer((_request, response) => response.end('ok')));
+    const events: Array<Record<string, unknown>> = [];
+    const gateway = await startGateway(upstreamPort, {
+      maxConnections: 1,
+      onEvent: (event: Record<string, unknown>) => events.push(event),
+    });
+    const held = trackOpenSocket(connect({ host: '127.0.0.1', port: gateway.port }));
+    await once(held, 'connect');
+
+    const excess = await rawRoundTrip(
+      gateway.port,
+      'GET /excess HTTP/1.1\r\nHost: edgebase.test\r\nConnection: close\r\n\r\n',
+    ).then((response) => response, () => 'connection-rejected');
+    const heldClosed = once(held, 'close');
+    held.destroy();
+    await heldClosed;
+    await waitForServerConnectionCount(gateway.server, 0);
+    const afterRelease = await httpRoundTrip(gateway.port, '/after-release');
+
+    expect.soft(excess).not.toContain(' 200 OK\r\n');
+    expect.soft(afterRelease).toMatchObject({ statusCode: 200, body: 'ok' });
+    expect.soft(events.some((event) => event.reason === 'connection_limit')).toBe(true);
+  });
+
+  it('emits redacted coalesced failure events and isolates logger exceptions', async () => {
+    let admitted = true;
+    const events: Array<Record<string, unknown>> = [];
+    const upstreamPort = await listen(createServer((_request, response) => response.end('ok')));
+    const gateway = await startGateway(upstreamPort, {
+      admissionGuard: () => admitted,
+      eventCoalesceWindowMs: 25,
+      onEvent: (event: Record<string, unknown>) => events.push(event),
+    });
+
+    await httpRoundTrip(gateway.port, '/__scheduled?credential=must-not-log');
+    await httpRoundTrip(gateway.port, '/__scheduled?credential=must-not-log');
+    admitted = false;
+    await httpRoundTrip(gateway.port, '/private?token=must-not-log');
+    await httpRoundTrip(gateway.port, '/private?token=must-not-log');
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 35));
+    await httpRoundTrip(gateway.port, '/__scheduled?credential=must-not-log');
+    await gateway.stop({ drainTimeoutMs: 0 });
+
+    const blocked = events.filter((event) => event.reason === 'blocked_target');
+    const stopping = events.filter((event) => event.reason === 'admission_closed');
+    expect.soft(blocked).toHaveLength(2);
+    expect.soft(blocked).toEqual([
+      expect.objectContaining({
+        schemaVersion: 1,
+        level: 'warning',
+        event: 'gateway_request_rejected',
+        reason: 'blocked_target',
+        statusCode: 404,
+        occurrences: 1,
+        suppressed: 0,
+      }),
+      expect.objectContaining({ occurrences: 2, suppressed: 1 }),
+    ]);
+    expect.soft(stopping).toEqual([
+      expect.objectContaining({ occurrences: 1, suppressed: 0 }),
+      expect.objectContaining({ occurrences: 1, suppressed: 1, summary: true }),
+    ]);
+    expect.soft(JSON.stringify(events)).not.toMatch(/must-not-log|credential|token|headers|body/i);
+
+    const throwingGateway = await startGateway(upstreamPort, {
+      onEvent: () => {
+        throw new Error('synthetic logger failure');
+      },
+    });
+    await expect(httpRoundTrip(throwingGateway.port, '/__scheduled')).resolves.toMatchObject({
+      statusCode: 404,
+    });
+    await expect(throwingGateway.stop({ drainTimeoutMs: 0 })).resolves.toBeUndefined();
+  });
+
+  it('reports a refused loopback upstream without exposing request metadata', async () => {
+    const reservation = createServer();
+    const unavailablePort = await listen(reservation);
+    await closeServer(reservation);
+    const events: Array<Record<string, unknown>> = [];
+    const gateway = await startGateway(unavailablePort, {
+      onEvent: (event: Record<string, unknown>) => events.push(event),
+    });
+
+    const response = await httpRoundTrip(gateway.port, '/secret?token=must-not-log');
+    expect.soft(response.statusCode).toBe(502);
+    expect.soft(events).toEqual([
+      expect.objectContaining({
+        schemaVersion: 1,
+        level: 'error',
+        event: 'gateway_upstream_failure',
+        reason: 'upstream_error',
+        statusCode: 502,
+        errorCode: 'ECONNREFUSED',
+        occurrences: 1,
+        suppressed: 0,
+      }),
+    ]);
+    expect.soft(JSON.stringify(events)).not.toMatch(/secret|token|must-not-log/i);
+  });
+});
+
+describe('self-host gateway memory pressure admission', () => {
+  it('returns bounded 429 responses without proxying HTTP, HEAD, or WebSocket work', async () => {
+    let upstreamRequests = 0;
+    const events: Array<Record<string, unknown>> = [];
+    const upstreamPort = await listen(createServer((_request, response) => {
+      upstreamRequests += 1;
+      response.end('must-not-run');
+    }));
+    const pressureDecision = Object.freeze({
+      allowed: false,
+      reason: 'memory_pressure',
+      retryAfterSeconds: 2,
+    });
+    const gateway = await startGateway(upstreamPort, {
+      memoryAdmissionController: {
+        decision: () => pressureDecision,
+        status: () => ({ source: 'synthetic', outcome: 'shedding' }),
+      },
+      onEvent: (event: Record<string, unknown>) => events.push(event),
+    });
+
+    const get = await httpRoundTrip(gateway.port, '/api/functions/probe');
+    expect(get).toMatchObject({
+      statusCode: 429,
+      body: 'Container memory pressure. Retry later.\n',
+    });
+    expect(get.headers['retry-after']).toBe('2');
+    expect(get.headers['cache-control']).toBe('no-store');
+
+    const head = await httpRoundTrip(gateway.port, '/api/functions/probe', { method: 'HEAD' });
+    expect(head.statusCode).toBe(429);
+    expect(head.body).toBe('');
+    expect(head.headers['retry-after']).toBe('2');
+
+    const webSocket = await rawRoundTrip(
+      gateway.port,
+      'GET /api/room/page-1 HTTP/1.1\r\nHost: edgebase.test\r\n'
+        + 'Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n',
+    );
+    expect(webSocket).toContain(' 429 Too Many Requests\r\n');
+    expect(webSocket.toLowerCase()).toContain('retry-after: 2\r\n');
+
+    const health = await httpRoundTrip(gateway.port, '/__edgebase/health');
+    expect(health.statusCode).toBe(503);
+    expect(JSON.parse(health.body)).toEqual({
+      schemaVersion: 1,
+      outcome: 'blocked',
+      product: 'proxy-ready',
+      scheduler: null,
+    });
+    expect(upstreamRequests).toBe(0);
+    expect(events).toContainEqual(expect.objectContaining({
+      event: 'gateway_request_rejected',
+      reason: 'memory_pressure',
+      statusCode: 429,
+      occurrences: 1,
+      suppressed: 0,
+    }));
+    expect(JSON.stringify(events)).not.toMatch(/probe|page-1|headers|body/i);
+  });
+});
+
+describe('self-host gateway filesystem pressure admission', () => {
+  it('returns bounded 507 responses without proxying HTTP, HEAD, or WebSocket work', async () => {
+    let upstreamRequests = 0;
+    const events: Array<Record<string, unknown>> = [];
+    const upstreamPort = await listen(createServer((_request, response) => {
+      upstreamRequests += 1;
+      response.end('must-not-run');
+    }));
+    const pressureDecision = Object.freeze({
+      allowed: false,
+      reason: 'storage_pressure',
+      retryAfterSeconds: 5,
+    });
+    const gateway = await startGateway(upstreamPort, {
+      storageAdmissionController: {
+        decision: () => pressureDecision,
+        status: () => ({ path: '/data', outcome: 'shedding' }),
+      },
+      onEvent: (event: Record<string, unknown>) => events.push(event),
+    });
+
+    const post = await httpRoundTrip(gateway.port, '/api/functions/probe', { method: 'POST' });
+    expect(post).toMatchObject({
+      statusCode: 507,
+      body: 'Persistence storage is too full. Free disk space and retry.\n',
+    });
+    expect(post.headers['retry-after']).toBe('5');
+    expect(post.headers['cache-control']).toBe('no-store');
+
+    const head = await httpRoundTrip(gateway.port, '/api/functions/probe', { method: 'HEAD' });
+    expect(head.statusCode).toBe(507);
+    expect(head.body).toBe('');
+    expect(head.headers['retry-after']).toBe('5');
+
+    const webSocket = await rawRoundTrip(
+      gateway.port,
+      'GET /api/room/page-1 HTTP/1.1\r\nHost: edgebase.test\r\n'
+        + 'Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n',
+    );
+    expect(webSocket).toContain(' 507 Insufficient Storage\r\n');
+    expect(webSocket.toLowerCase()).toContain('retry-after: 5\r\n');
+
+    const health = await httpRoundTrip(gateway.port, '/__edgebase/health');
+    expect(health.statusCode).toBe(503);
+    expect(upstreamRequests).toBe(0);
+    expect(events).toContainEqual(expect.objectContaining({
+      event: 'gateway_request_rejected',
+      reason: 'storage_pressure',
+      statusCode: 507,
+      occurrences: 1,
+      suppressed: 0,
+    }));
+    expect(JSON.stringify(events)).not.toMatch(/probe|page-1|headers|body/i);
+  });
+
+  it('fails closed with a distinct response when the configured filesystem probe is unavailable', async () => {
+    let upstreamRequests = 0;
+    const events: Array<Record<string, unknown>> = [];
+    const upstreamPort = await listen(createServer((_request, response) => {
+      upstreamRequests += 1;
+      response.end('must-not-run');
+    }));
+    const gateway = await startGateway(upstreamPort, {
+      storageAdmissionController: {
+        decision: () => ({
+          allowed: false,
+          reason: 'storage_probe_failed',
+          retryAfterSeconds: 5,
+        }),
+        status: () => ({ path: '/data', outcome: 'unavailable' }),
+      },
+      onEvent: (event: Record<string, unknown>) => events.push(event),
+    });
+
+    const response = await httpRoundTrip(gateway.port, '/api/functions/probe', {
+      method: 'POST',
+    });
+    expect(response).toMatchObject({
+      statusCode: 503,
+      body: 'Persistence storage is unavailable. Retry later.\n',
+    });
+    expect(response.headers['retry-after']).toBe('5');
+    expect(upstreamRequests).toBe(0);
+    expect(events).toContainEqual(expect.objectContaining({
+      reason: 'storage_probe_failed',
+      statusCode: 503,
+    }));
   });
 });
 

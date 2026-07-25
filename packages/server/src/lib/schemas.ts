@@ -27,8 +27,8 @@ export const queryParamsSchema = z.object({
   fields: z.string().optional().openapi({ description: 'Comma-separated field names to return' }),
   search: z.string().optional().openapi({ description: 'Full-text search query' }),
   includeTotal: z.string().optional().openapi({
-    description: 'Set to "false" or "0" to skip the COUNT query; total is null',
-    example: 'false',
+    description: 'Set to "true" to run the exact COUNT query; omitted, "false", or "0" returns total null',
+    example: 'true',
   }),
   maxResponseBytes: z.string().optional().openapi({
     description: 'Exact maximum UTF-8 JSON response bytes (minimum 512); requires stable id-keyset pagination',
@@ -83,7 +83,7 @@ export const successResponseSchema = z.object({
 export const healthResponseSchema = z.object({
   status: z.string().openapi({ example: 'ok' }),
   timestamp: z.string().openapi({ example: '2026-01-01T00:00:00.000Z' }),
-  version: z.string().optional().openapi({ example: '0.4.9' }),
+  version: z.string().optional().openapi({ example: '0.5.0' }),
 });
 
 // ─── Shared Parameter Schemas ─────────────────────────────────────────────

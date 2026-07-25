@@ -144,6 +144,13 @@ When validation fails, the server returns `400` with per-field error details:
 
 The `references` option creates a SQLite foreign key constraint when the target table lives in the same DB block. You can use the short string form or the full object form with cascade options:
 
+Physical reference fields automatically receive a non-unique single-column
+index so child lookups and parent constraint checks do not scan the whole
+table. EdgeBase does not add a redundant index when the field is a primary key
+or `unique`, or when an explicit index already starts with that field. A
+composite index only covers the reference when the reference is its first
+field.
+
 ### String Form (Simple)
 
 ```typescript
@@ -178,7 +185,7 @@ comments: {
 ```
 
 :::note
-Foreign keys only work between tables in the same DB block, because they must share the same backing SQLite database. That means same D1 database for single-instance blocks, or the same Durable Object-backed SQLite instance for dynamic blocks. Cross-block foreign keys, including auth-user references such as `references: 'users'`, are silently excluded from the DDL and remain logical references only.
+Foreign keys only work between tables in the same DB block, because they must share the same backing SQLite database. That means same D1 database for single-instance blocks, or the same Durable Object-backed SQLite instance for dynamic blocks. Cross-block foreign keys, including auth-user references such as `references: 'users'`, are silently excluded from the DDL and remain logical references only; those logical-only references do not receive an automatic index.
 :::
 
 ## Auto Fields

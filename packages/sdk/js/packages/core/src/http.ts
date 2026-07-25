@@ -7,6 +7,7 @@ import { parseErrorResponse, networkError, requestTimeoutError } from './errors.
 import type { ITokenManager, ITokenPair } from './types.js';
 
 const COOKIE_AUTH_REQUEST_TIMEOUT_MS = 15_000;
+const MAX_ERROR_RESPONSE_BYTES = 64 * 1024;
 
 class RequestTimeoutError extends Error {
   readonly timeoutMs: number;
@@ -41,9 +42,126 @@ function isRetryableNetworkError(err: unknown): boolean {
     msg.includes('abort');
 }
 
-/** Sleep for given milliseconds */
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function abortReason(signal: AbortSignal): unknown {
+  if (signal.reason !== undefined) return signal.reason;
+  const error = new Error('The operation was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortReason(signal);
+}
+
+function waitForPromiseOrAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  throwIfAborted(signal);
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      callback();
+    };
+    const onAbort = () => finish(() => reject(abortReason(signal)));
+
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      value => finish(() => resolve(value)),
+      error => finish(() => reject(error)),
+    );
+  });
+}
+
+async function readBoundedErrorBody(
+  response: Response,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  if (!response.body) return null;
+  const declaredLength = Number(response.headers.get('Content-Length'));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_ERROR_RESPONSE_BYTES) {
+    await response.body.cancel().catch(() => {});
+    return null;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  let overflow = false;
+  try {
+    while (true) {
+      throwIfAborted(signal);
+      const { done, value } = await reader.read();
+      throwIfAborted(signal);
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_ERROR_RESPONSE_BYTES) {
+        overflow = true;
+        await reader.cancel().catch(() => {});
+        break;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (overflow || totalBytes === 0) return null;
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const text = new TextDecoder().decode(bytes).trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
+/** Sleep for given milliseconds while retaining caller cancellation. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return new Promise(resolve => setTimeout(resolve, ms));
+  throwIfAborted(signal);
+
+  return new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(abortReason(signal));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function combineSignals(first: AbortSignal, second: AbortSignal): AbortSignal {
+  if (typeof AbortSignal.any === 'function') {
+    return AbortSignal.any([first, second]);
+  }
+
+  const controller = new AbortController();
+  const forwardAbort = (source: AbortSignal) => {
+    if (!controller.signal.aborted) controller.abort(abortReason(source));
+  };
+  if (first.aborted) {
+    forwardAbort(first);
+  } else {
+    first.addEventListener('abort', () => forwardAbort(first), { once: true });
+  }
+  if (second.aborted) {
+    forwardAbort(second);
+  } else {
+    second.addEventListener('abort', () => forwardAbort(second), { once: true });
+  }
+  return controller.signal;
 }
 
 export interface HttpClientOptions {
@@ -64,6 +182,25 @@ export interface HttpClientOptions {
    * out mutation has an unknown outcome and is never transport-retried.
    */
   requestTimeoutMs?: number;
+}
+
+interface HttpRequestOptions {
+  skipAuth?: boolean;
+  query?: Record<string, string>;
+  captchaToken?: string;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  /** Return a successful response before reading its caller-owned body. */
+  preserveSuccessfulBody?: boolean;
+}
+
+function validateFunctionCaptchaToken(captchaToken?: string): void {
+  if (
+    captchaToken !== undefined
+    && (typeof captchaToken !== 'string' || captchaToken.length === 0 || captchaToken.length > 2048)
+  ) {
+    throw new Error('captchaToken must be a non-empty string of at most 2048 characters.');
+  }
 }
 
 export class HttpClient {
@@ -115,7 +252,11 @@ export class HttpClient {
   }
 
   /** Build headers for a request */
-  private async buildHeaders(skipAuth = false): Promise<Record<string, string>> {
+  private async buildHeaders(
+    skipAuth = false,
+    signal?: AbortSignal,
+  ): Promise<Record<string, string>> {
+    throwIfAborted(signal);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
@@ -132,9 +273,13 @@ export class HttpClient {
     // genuinely no session (proceed anonymously); it throws when a refresh was
     // required and failed — we surface that.
     if (!skipAuth && this.tokenManager) {
-      const token = await this.tokenManager.getAccessToken((refreshToken) =>
-        this.refreshToken(refreshToken),
+      const token = await waitForPromiseOrAbort(
+        Promise.resolve(
+          this.tokenManager.getAccessToken((refreshToken) => this.refreshToken(refreshToken)),
+        ),
+        signal,
       );
+      throwIfAborted(signal);
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
@@ -201,7 +346,10 @@ export class HttpClient {
     input: string,
     init: RequestInit,
     requestTimeoutMs?: number,
+    preserveSuccessfulBody = false,
+    callerSignal?: AbortSignal,
   ): Promise<Response> {
+    throwIfAborted(callerSignal);
     const url = new URL(input, this.baseUrl);
     const shouldBoundCookieAuth = this.refreshTokenTransport === 'httpOnlyCookie'
       && /(?:^|\/)api\/auth(?:\/|$)/.test(url.pathname)
@@ -209,23 +357,34 @@ export class HttpClient {
     const timeoutMs = shouldBoundCookieAuth
       ? Math.min(requestTimeoutMs ?? COOKIE_AUTH_REQUEST_TIMEOUT_MS, COOKIE_AUTH_REQUEST_TIMEOUT_MS)
       : requestTimeoutMs;
-    if (timeoutMs === undefined) return fetch(input, init);
+    if (timeoutMs === undefined) {
+      const fetchOptions = callerSignal ? { ...init, signal: callerSignal } : init;
+      return waitForPromiseOrAbort(fetch(input, fetchOptions), callerSignal);
+    }
 
     const controller = new AbortController();
+    const requestSignal = callerSignal
+      ? combineSignals(callerSignal, controller.signal)
+      : controller.signal;
     let timedOut = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<Response>((_resolve, reject) => {
       timeout = setTimeout(() => {
         timedOut = true;
-        controller.abort();
+        controller.abort(new RequestTimeoutError(timeoutMs));
         reject(new RequestTimeoutError(timeoutMs));
       }, timeoutMs);
     });
 
     try {
-      return await Promise.race([
+      return await waitForPromiseOrAbort(Promise.race([
         (async () => {
-          const response = await fetch(input, { ...init, signal: controller.signal });
+          const response = await fetch(input, { ...init, signal: requestSignal });
+          // Raw callers own successful response consumption. Returning here
+          // preserves the exact Response and its unread stream while still
+          // applying the deadline until response headers arrive. Errors keep
+          // the ordinary bounded body-read path so they can be normalized.
+          if (preserveSuccessfulBody && response.ok) return response;
           // Keep the timeout alive through body consumption. Some proxies can
           // deliver 200 headers and then stall the JSON stream indefinitely.
           const bytes = await response.arrayBuffer();
@@ -236,7 +395,7 @@ export class HttpClient {
           });
         })(),
         timeoutPromise,
-      ]);
+      ]), callerSignal);
     } catch (error) {
       if (timedOut) throw new RequestTimeoutError(timeoutMs);
       throw error;
@@ -262,17 +421,13 @@ export class HttpClient {
   }
 
   /** Core request method with 429 retry, transport retry, and 401 token refresh */
-  private async request<T>(
+  private async requestResponse(
     method: string,
     path: string,
     body?: unknown,
-    options: {
-      skipAuth?: boolean;
-      query?: Record<string, string>;
-      captchaToken?: string;
-      timeoutMs?: number;
-    } = {},
-  ): Promise<T> {
+    options: HttpRequestOptions = {},
+  ): Promise<Response> {
+    throwIfAborted(options.signal);
     const url = new URL(path, this.baseUrl);
     const requestLabel = `${method.toUpperCase()} ${url.pathname}`;
     if (options.query) {
@@ -298,8 +453,9 @@ export class HttpClient {
     }
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      throwIfAborted(options.signal);
       let refreshFailure: Error | null = null;
-      const headers = await this.buildHeaders(options.skipAuth);
+      const headers = await this.buildHeaders(options.skipAuth, options.signal);
       if (options.captchaToken) {
         headers['X-EdgeBase-Captcha-Token'] = options.captchaToken;
       }
@@ -318,8 +474,11 @@ export class HttpClient {
           url.toString(),
           fetchOptions,
           requestTimeoutMs,
+          options.preserveSuccessfulBody,
+          options.signal,
         );
       } catch (err) {
+        throwIfAborted(options.signal);
         if (err instanceof RequestTimeoutError) {
           const unknownOutcome = methodUpper === 'GET'
             ? ''
@@ -337,7 +496,7 @@ export class HttpClient {
           && !options.captchaToken
           && isRetryableNetworkError(err)
         ) {
-          await sleep(50 * (attempt + 1));
+          await sleep(50 * (attempt + 1), options.signal);
           continue;
         }
         throw networkError(
@@ -346,10 +505,12 @@ export class HttpClient {
         );
       }
 
+      throwIfAborted(options.signal);
+
       // 429 retry with Retry-After header and exponential backoff + jitter
       if (response.status === 429 && attempt < maxRetries) {
         const delay = parseRetryAfter(response.headers.get('Retry-After'), attempt);
-        await sleep(delay);
+        await sleep(delay, options.signal);
         continue;
       }
 
@@ -360,6 +521,7 @@ export class HttpClient {
         && !this.serviceKey
         && !options.captchaToken
       ) {
+        throwIfAborted(options.signal);
         // Route the refresh through the token manager's SAME deduped /
         // leader-elected path (via getAccessToken) rather than calling
         // refreshToken() directly. Otherwise concurrent 401s — and multiple
@@ -368,20 +530,26 @@ export class HttpClient {
         let refreshedAccessToken: string | null = null;
         this.tokenManager?.invalidateAccessToken();
         try {
-          refreshedAccessToken = (await this.tokenManager?.getAccessToken((refreshToken) =>
-            this.refreshToken(refreshToken),
+          const refreshPromise = Promise.resolve(
+            this.tokenManager?.getAccessToken((refreshToken) => this.refreshToken(refreshToken))
+              ?? null,
+          );
+          refreshedAccessToken = (await waitForPromiseOrAbort(
+            refreshPromise,
+            options.signal,
           )) ?? null;
           if (!refreshedAccessToken) {
             refreshFailure = new Error('No refresh token was available.');
           }
         } catch (error) {
+          throwIfAborted(options.signal);
           refreshFailure = error instanceof Error
             ? error
             : new Error(String(error));
         }
 
         try {
-          const newHeaders = await this.buildHeaders(true);
+          const newHeaders = await this.buildHeaders(true, options.signal);
           if (options.captchaToken) {
             newHeaders['X-EdgeBase-Captcha-Token'] = options.captchaToken;
           }
@@ -402,13 +570,15 @@ export class HttpClient {
             url.toString(),
             retryOptions,
             requestTimeoutMs,
+            options.preserveSuccessfulBody,
+            options.signal,
           );
           if (retryResponse.ok) {
-            if (retryResponse.status === 204) return undefined as T;
-            return (await retryResponse.json()) as T;
+            return retryResponse;
           }
           response = retryResponse;
         } catch (error) {
+          throwIfAborted(options.signal);
           if (error instanceof RequestTimeoutError) {
             const unknownOutcome = methodUpper === 'GET'
               ? ''
@@ -425,7 +595,14 @@ export class HttpClient {
       }
 
       if (!response.ok) {
-        const errorBody = await response.json().catch(() => null);
+        let errorBody: unknown = null;
+        try {
+          errorBody = await readBoundedErrorBody(response, options.signal);
+        } catch (error) {
+          throwIfAborted(options.signal);
+          void error;
+        }
+        throwIfAborted(options.signal);
         const parsed = parseErrorResponse(response.status, errorBody);
         if (response.status === 401 && refreshFailure) {
           parsed.message = `${parsed.message} Token refresh also failed: ${refreshFailure.message}`;
@@ -433,14 +610,32 @@ export class HttpClient {
         throw parsed;
       }
 
-      if (response.status === 204) return undefined as T;
-      return (await response.json()) as T;
+      return response;
     }
 
     // Should not reach here
     throw networkError(
       `${requestLabel} failed after ${maxRetries + 1} attempts. The server may be unavailable or repeatedly rate-limiting requests.`,
     );
+  }
+
+  /** Core JSON request method layered on the shared response transport. */
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    options: HttpRequestOptions = {},
+  ): Promise<T> {
+    const response = await this.requestResponse(method, path, body, options);
+    if (response.status === 204) return undefined as T;
+    try {
+      const value = (await response.json()) as T;
+      throwIfAborted(options.signal);
+      return value;
+    } catch (error) {
+      throwIfAborted(options.signal);
+      throw error;
+    }
   }
 
   /** GET request */
@@ -485,17 +680,39 @@ export class HttpClient {
     query?: Record<string, string>,
     captchaToken?: string,
     timeoutMs?: number,
+    signal?: AbortSignal,
   ): Promise<T> {
-    if (
-      captchaToken !== undefined
-      && (typeof captchaToken !== 'string' || captchaToken.length === 0 || captchaToken.length > 2048)
-    ) {
-      throw new Error('captchaToken must be a non-empty string of at most 2048 characters.');
-    }
+    validateFunctionCaptchaToken(captchaToken);
     return this.request<T>(method, path, method === 'GET' ? undefined : body, {
       query,
       captchaToken,
       timeoutMs,
+      signal,
+    });
+  }
+
+  /**
+   * App Function request that returns an exact successful Response without
+   * reading its body. An explicit deadline applies until response headers are
+   * handed to the caller; stream consumption and cancellation are then owned
+   * by the caller.
+   */
+  async requestFunctionRaw(
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    path: string,
+    body?: unknown,
+    query?: Record<string, string>,
+    captchaToken?: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    validateFunctionCaptchaToken(captchaToken);
+    return this.requestResponse(method, path, method === 'GET' ? undefined : body, {
+      query,
+      captchaToken,
+      timeoutMs,
+      signal,
+      preserveSuccessfulBody: true,
     });
   }
 

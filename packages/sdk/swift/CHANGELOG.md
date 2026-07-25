@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- Synchronized the Swift packages and generated API surfaces with EdgeBase
+  0.5.0.
+- No Swift-specific API compatibility break is introduced.
+
 ## 0.4.9
 
 - Synchronized the Swift packages with the EdgeBase 0.4.9 patch release.

@@ -1,3 +1,9 @@
+## 0.5.0
+
+- Synchronized package metadata, generated API surfaces, and the
+  `edgebase_core` dependency range with EdgeBase 0.5.0
+- No Dart-specific API compatibility break is introduced
+
 ## 0.4.9
 
 - Synchronized package metadata and the `edgebase_core` dependency range with

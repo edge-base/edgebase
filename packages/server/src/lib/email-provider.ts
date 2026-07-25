@@ -13,6 +13,7 @@ export interface EmailSendOptions {
   to: string;
   subject: string;
   html: string;
+  idempotencyKey?: string;
 }
 
 export interface EmailSendResult {
@@ -21,6 +22,7 @@ export interface EmailSendResult {
 }
 
 export interface EmailProvider {
+  readonly supportsIdempotency: boolean;
   send(options: EmailSendOptions): Promise<EmailSendResult>;
 }
 
@@ -101,6 +103,8 @@ function parseSesCredentials(apiKey: string): SESCredentials | null {
 // ─── Resend Provider (Recommended, 3,000/month free) ───
 
 export class ResendProvider implements EmailProvider {
+  readonly supportsIdempotency = true;
+
   constructor(
     private apiKey: string,
     private from: string,
@@ -112,6 +116,9 @@ export class ResendProvider implements EmailProvider {
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json',
+        ...(options.idempotencyKey
+          ? { 'Idempotency-Key': options.idempotencyKey }
+          : {}),
       },
       body: JSON.stringify({
         from: this.from,
@@ -133,6 +140,8 @@ export class ResendProvider implements EmailProvider {
 }
 
 export class MockEmailProvider implements EmailProvider {
+  readonly supportsIdempotency = true;
+
   private endpoint: string;
 
   constructor(
@@ -147,6 +156,9 @@ export class MockEmailProvider implements EmailProvider {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(options.idempotencyKey
+          ? { 'Idempotency-Key': options.idempotencyKey }
+          : {}),
       },
       body: JSON.stringify({
         from: this.from,
@@ -170,6 +182,8 @@ export class MockEmailProvider implements EmailProvider {
 // ─── SendGrid Provider (100/day free) ───
 
 export class SendGridProvider implements EmailProvider {
+  readonly supportsIdempotency = false;
+
   constructor(
     private apiKey: string,
     private from: string,
@@ -207,6 +221,8 @@ export class SendGridProvider implements EmailProvider {
 // ─── Mailgun Provider (1,000/month free for 3 months) ───
 
 export class MailgunProvider implements EmailProvider {
+  readonly supportsIdempotency = false;
+
   private domain: string;
 
   constructor(
@@ -250,6 +266,8 @@ export class MailgunProvider implements EmailProvider {
 // ─── AWS SES Provider ($0.10/1,000 emails) ───
 
 export class SESProvider implements EmailProvider {
+  readonly supportsIdempotency = false;
+
   constructor(
     private apiKey: string,
     private from: string,
@@ -352,6 +370,8 @@ export class SESProvider implements EmailProvider {
 // ─── Cloudflare Email Service Provider ───
 
 export class CloudflareEmailProvider implements EmailProvider {
+  readonly supportsIdempotency = false;
+
   private apiBaseUrl: string;
 
   constructor(

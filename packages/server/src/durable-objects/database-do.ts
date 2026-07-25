@@ -29,14 +29,20 @@ import {
   META_TABLE_DDL,
   generateTableDDL,
   generateSQLiteAddColumnDDLs,
-  generateFTS5DDL,
-  generateFTS5Triggers,
+  generateFTS5RebuildDDLs,
   generateIndexDDL,
+  resolveTableIndexes,
   buildEffectiveSchema,
   computeSchemaHashSync,
+  computeSQLiteFtsSignature,
+  generateSQLiteForeignKeyRebuildDDLs,
+  getDeclaredSQLiteForeignKeys,
+  normalizeSQLiteForeignKeyRows,
   planSQLiteFieldUniqueIndex,
+  sqliteForeignKeysMatch,
   sqliteUniqueDuplicateError,
   type SQLiteIndexState,
+  type SQLiteSchemaArtifact,
 } from '../lib/schema.js';
 
 import { generateId } from '../lib/uuid.js';
@@ -47,16 +53,23 @@ import {
   buildCountQuery,
   buildSearchQuery,
   buildSubstringSearchQuery,
+  buildSqliteFtsArtifactQuery,
+  normalizeSQLiteBooleanQueryOptions,
   parseQueryParams,
+  inspectSqliteFtsArtifacts,
+  sqliteFtsArtifactsAreHealthy,
+  sqliteFtsNeedsSubstringFallback,
   type FilterTuple,
 } from '../lib/query-engine.js';
 import { summarizeValidationErrors, validateInsert, validateUpdate } from '../lib/validation.js';
 import { hookRejectedError, validationError, notFoundError, normalizeDatabaseError } from '../lib/errors.js';
 import {
+  executeDbTriggerBatch,
   executeDbTriggers,
   getFunctionsByTrigger,
   getRegisteredFunctions,
   buildFunctionContext,
+  type BuildFunctionContextOptions,
 } from '../lib/functions.js';
 import { parseDbDoName, parseConfig as getGlobalConfig, isDynamicDbBlock } from '../lib/do-router.js';
 import { parseDuration } from '../lib/jwt.js';
@@ -81,6 +94,11 @@ import {
   parseTransactResultMode,
 } from '../lib/transact-result.js';
 import type { Env } from '../types.js';
+import {
+  createSearchRelatedCursor,
+  validateSearchRelatedInput,
+  type SearchRelatedInput,
+} from '../lib/related-search-constraint.js';
 
 // ─── Types ───
 
@@ -92,6 +110,8 @@ interface DOEnv {
   KV?: KVNamespace;
   SERVICE_KEY?: string;
 }
+
+const DO_LIST_RULE_CONCURRENCY = 8;
 
 // ─── Rule-rejection wording ───
 
@@ -106,6 +126,18 @@ function doRuleRejectedMessage(tableName: string, action: string, id?: string): 
     return `Access denied. The '${action}' access rule for table '${tableName}' rejected record '${id}'.`;
   }
   return `Access denied. The '${action}' access rule for table '${tableName}' rejected this request.`;
+}
+
+function getDoTextSearchFields(config: TableConfig | null): string[] {
+  if (!config?.schema) return ['id'];
+  const fields: string[] = [];
+  for (const [name, field] of Object.entries(config.schema)) {
+    if (field === false) continue;
+    if (field.type === 'string' || field.type === 'text') {
+      fields.push(name);
+    }
+  }
+  return fields.length > 0 ? fields : ['id'];
 }
 
 // ─── DatabaseDO Class ───
@@ -141,6 +173,22 @@ export class DatabaseDO extends DurableObject<DOEnv> {
 
   private getServiceKey(): string | undefined {
     return resolveRootServiceKey(this.config, this.env as unknown as Env);
+  }
+
+  private buildDbTriggerContext(): Omit<
+    BuildFunctionContextOptions,
+    'data' | 'request' | 'auth'
+  > {
+    return {
+      databaseNamespace: this.env.DATABASE,
+      authNamespace: this.env.AUTH,
+      d1Database: this.env.AUTH_DB,
+      kvNamespace: this.env.KV,
+      config: this.config,
+      serviceKey: this.getServiceKey(),
+      env: this.env as unknown as Env,
+      executionCtx: this.ctx as unknown as ExecutionContext,
+    };
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -350,6 +398,9 @@ export class DatabaseDO extends DurableObject<DOEnv> {
     const newHash = computeSchemaHashSync(config);
 
     if (!currentHash) {
+      if (config.fts?.length) {
+        this.assertFTS5RebuildSafe(name, config.fts);
+      }
       // First time — create table with all DDL
       const ddlStatements = generateTableDDL(name, config);
       for (const ddl of ddlStatements) {
@@ -372,8 +423,12 @@ export class DatabaseDO extends DurableObject<DOEnv> {
           this.prepareSchemaUpdate(name, config);
         }
         this.runMigrations(name, config);
-        this.handleSchemaUpdate(name, config);
-        this.ensureFTS5AndIndexes(name, config);
+        const rebuiltTable = this.handleSchemaUpdate(name, config);
+        if (rebuiltTable && config.fts?.length) {
+          this.setMeta(`fts_signature:${name}`, computeSQLiteFtsSignature(config.fts));
+        } else if (!rebuiltTable) {
+          this.ensureFTS5AndIndexes(name, config);
+        }
         if (currentHash !== newHash) {
           this.setMeta(hashKey, newHash);
         }
@@ -381,8 +436,8 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       return;
     }
 
-    // Always ensure FTS5 + indexes exist (idempotent IF NOT EXISTS DDL).
-    // Covers case where initial creation failed silently but hash was saved.
+    // Always reconcile FTS5 + indexes. This also repairs incomplete artifacts
+    // and field-list drift that idempotent creation alone cannot change.
     this.ensureFTS5AndIndexes(name, config);
   }
 
@@ -401,7 +456,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
     }
   }
 
-  private handleSchemaUpdate(name: string, config: TableConfig): void {
+  private handleSchemaUpdate(name: string, config: TableConfig): boolean {
     // Add new columns and reconcile field-owned UNIQUE indexes.
     const existingCols = new Set<string>();
     for (const row of this.sql(`PRAGMA table_info(${escapeIdentifier(name)})`)) {
@@ -423,6 +478,12 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       });
     }
 
+    const actualForeignKeys = normalizeSQLiteForeignKeyRows([
+      ...this.sql(`PRAGMA foreign_key_list(${escapeIdentifier(name)})`),
+    ]);
+    const desiredForeignKeys = getDeclaredSQLiteForeignKeys(config);
+    const rebuiltTable = !sqliteForeignKeysMatch(actualForeignKeys, desiredForeignKeys);
+
     const effectiveSchema = buildEffectiveSchema(config.schema);
     const migrationDDLs: string[] = [];
     for (const [colName, field] of Object.entries(effectiveSchema)) {
@@ -436,7 +497,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
             true,
             existingIndexes,
           );
-          if (uniquePlan.ddl) migrationDDLs.push(uniquePlan.ddl);
+          if (uniquePlan.ddl && !rebuiltTable) migrationDDLs.push(uniquePlan.ddl);
         }
         continue;
       }
@@ -457,7 +518,47 @@ export class DatabaseDO extends DurableObject<DOEnv> {
           throw sqliteUniqueDuplicateError(name, colName);
         }
       }
-      if (plan.ddl) migrationDDLs.push(plan.ddl);
+      if (plan.ddl && !rebuiltTable) migrationDDLs.push(plan.ddl);
+    }
+
+    if (rebuiltTable) {
+      const inventoryRows = [...this.sql(
+        'SELECT \'artifact\' AS "kind", "type", "name", "sql", '
+        + 'NULL AS "childTable", NULL AS "childColumn" FROM "sqlite_master" '
+        + 'WHERE "tbl_name" = ? AND "type" IN (\'index\', \'trigger\') '
+        + 'UNION ALL '
+        + 'SELECT \'inbound\' AS "kind", NULL AS "type", NULL AS "name", '
+        + 'NULL AS "sql", child."name" AS "childTable", '
+        + 'fk."from" AS "childColumn" FROM "sqlite_master" AS child '
+        + 'JOIN pragma_foreign_key_list(child."name") AS fk '
+        + 'WHERE child."type" = \'table\' AND child."name" <> ? AND fk."table" = ? '
+        + 'ORDER BY "kind", "name", "childTable", "childColumn"',
+        name,
+        name,
+        name,
+      )];
+      const artifacts = inventoryRows
+        .filter((row) => row.kind === 'artifact')
+        .map((row): SQLiteSchemaArtifact => ({
+          type: row.type as SQLiteSchemaArtifact['type'],
+          name: String(row.name ?? ''),
+          sql: row.sql === null || row.sql === undefined ? null : String(row.sql),
+        }));
+      migrationDDLs.push(...generateSQLiteForeignKeyRebuildDDLs(
+        name,
+        config,
+        {
+          columns: [...existingCols],
+          indexes: existingIndexes,
+          artifacts,
+          inboundForeignKeys: inventoryRows
+            .filter((row) => row.kind === 'inbound')
+            .map((row) => ({
+              childTable: String(row.childTable ?? ''),
+              childColumn: String(row.childColumn ?? ''),
+            })),
+        },
+      ));
     }
 
     if (migrationDDLs.length > 0) {
@@ -467,32 +568,68 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         this.execMulti(ddl);
       }
     }
+    return rebuiltTable;
   }
 
   /**
-   * Ensure FTS5 virtual tables, triggers, and indexes exist.
-   * All DDL uses IF NOT EXISTS / IF NOT EXISTS — safe to run idempotently.
-   * This is called on EVERY initTable path, so even if initial creation
-   * silently failed (e.g., trigram tokenizer unavailable), subsequent DO
-   * wake-ups will retry and self-heal.
+   * Ensure FTS5 virtual tables, triggers, field definitions, and indexes agree
+   * with configuration.
+   * This is called on every existing-table init path so incomplete legacy
+   * setup is retried transactionally on subsequent DO wake-ups.
    */
   private ensureFTS5AndIndexes(name: string, config: TableConfig): void {
     if (config.fts?.length) {
-      try {
-        this.execMulti(generateFTS5DDL(name, config.fts));
-        for (const triggerDDL of generateFTS5Triggers(name, config.fts)) {
-          this.execMulti(triggerDDL);
+      const inspection = this.inspectFTS5Artifacts(name, config.fts);
+      if (!inspection.rebuildSafe) {
+        throw new Error(
+          `SQLite FTS artifact collision for '${name}': reserved-name objects are not `
+          + 'owned by the configured table; refusing destructive repair.',
+        );
+      }
+      const desiredSignature = computeSQLiteFtsSignature(config.fts);
+      const storedSignature = this.getMeta(`fts_signature:${name}`);
+
+      if (!inspection.healthy || storedSignature !== desiredSignature) {
+        for (const ddl of generateFTS5RebuildDDLs(name, config.fts)) {
+          this.execMulti(ddl);
         }
-      } catch {
-        // FTS5 may not be supported in this SQLite build — log and continue
+        this.setMeta(`fts_signature:${name}`, desiredSignature);
       }
     }
 
-    if (config.indexes?.length) {
-      for (const indexDDL of generateIndexDDL(name, config.indexes)) {
+    const indexes = resolveTableIndexes(config);
+    if (indexes.length > 0) {
+      for (const indexDDL of generateIndexDDL(name, indexes)) {
         this.execMulti(indexDDL);
       }
     }
+  }
+
+  private inspectFTS5Artifacts(
+    name: string,
+    desiredFields: readonly string[],
+  ): ReturnType<typeof inspectSqliteFtsArtifacts> {
+    const artifactQuery = buildSqliteFtsArtifactQuery(name);
+    const artifactRows = [
+      ...this.sql(artifactQuery.sql, ...artifactQuery.params),
+    ] as Record<string, unknown>[];
+    const ftsTableRows = artifactRows.filter((row) => (
+      row.name === `${name}_fts` && row.type === 'table'
+    ));
+    const actualFields = ftsTableRows.length === 1
+      ? [...this.sql(`PRAGMA table_info(${escapeIdentifier(`${name}_fts`)})`)]
+        .sort((left, right) => Number(left.cid) - Number(right.cid))
+        .map((row) => String(row.name))
+      : null;
+    return inspectSqliteFtsArtifacts(name, desiredFields, actualFields, artifactRows);
+  }
+
+  private assertFTS5RebuildSafe(name: string, desiredFields: readonly string[]): void {
+    if (this.inspectFTS5Artifacts(name, desiredFields).rebuildSafe) return;
+    throw new Error(
+      `SQLite FTS artifact collision for '${name}': reserved-name objects are not `
+      + 'owned by the configured table; refusing destructive repair.',
+    );
   }
 
   /**
@@ -559,10 +696,13 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       const queryParams = Object.fromEntries(new URL(c.req.url).searchParams);
       const responseCursorStore = this.getBoundedResponseCursorStore();
       const boundedQuery = await prepareBoundedQuery(queryParams, name, responseCursorStore);
-      const options = parseQueryParams(boundedQuery.params);
+      const tableConfig = this.getTableConfig(name);
+      const options = normalizeSQLiteBooleanQueryOptions(
+        parseQueryParams(boundedQuery.params),
+        tableConfig?.schema,
+      );
       const { sql, params, countSql, countParams } = buildListQuery(name, options);
 
-      const tableConfig = this.getTableConfig(name);
       const rows = [...this.sql(sql, ...params)] as Record<string, unknown>[];
       const normalizedRows = this.normalizeRows(rows, tableConfig);
 
@@ -570,14 +710,13 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       const listRules = getTableAccess(tableConfig ?? undefined) as TableRules | undefined;
       if (listRules?.read && !this.isServiceKeyRequest(c.req.raw)) {
         const listAuth = this.parseAuthContext(c.req.raw);
-        for (const row of normalizedRows) {
-          const canRead = await this.evalRowRule(listRules.read, listAuth, row);
-          if (!canRead) {
-            throw new EdgeBaseError(
-              403,
-              doRuleRejectedMessage(name, 'read', String(row.id)),
-            );
-          }
+        const allowed = await this.evalRowRulesBounded(listRules.read, listAuth, normalizedRows);
+        const deniedIndex = allowed.findIndex((canRead) => !canRead);
+        if (deniedIndex >= 0) {
+          throw new EdgeBaseError(
+            403,
+            doRuleRejectedMessage(name, 'read', String(normalizedRows[deniedIndex]!.id)),
+          );
         }
       }
 
@@ -588,10 +727,9 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       // Build response
       const response: Record<string, unknown> = { items: enrichedRows };
 
-      // Offset pagination: include total, page, perPage.
-      // ?includeTotal=0/false skips the COUNT query — total comes back null.
+      // Offset pagination: exact totals are opt-in; omission/false stays null.
       if (countSql && countParams) {
-        const includeTotal = !['0', 'false'].includes((c.req.query('includeTotal') ?? '').toLowerCase());
+        const includeTotal = options.includeTotal === true;
         const total = includeTotal
           ? ((([...this.sql(countSql, ...countParams)])[0]?.total as number) ?? 0)
           : null;
@@ -636,7 +774,11 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       this.ensureTableExists(name);
 
       const queryParams = Object.fromEntries(new URL(c.req.url).searchParams);
-      const options = parseQueryParams(queryParams);
+      const tableConfig = this.getTableConfig(name);
+      const options = normalizeSQLiteBooleanQueryOptions(
+        parseQueryParams(queryParams),
+        tableConfig?.schema,
+      );
 
       const { sql, params } = buildCountQuery(name, options.filters, options.orFilters);
       const rows = [...this.sql(sql, ...params)];
@@ -658,7 +800,11 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         responseCursorStore,
         { search: true },
       );
-      const options = parseQueryParams(boundedQuery.params);
+      const tableConfig = this.getTableConfig(name);
+      const options = normalizeSQLiteBooleanQueryOptions(
+        parseQueryParams(boundedQuery.params),
+        tableConfig?.schema,
+      );
       const q = options.search || '';
       if (!q) {
         if (boundedQuery.maxResponseBytes !== undefined) {
@@ -667,7 +813,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
             tableName: name,
             items: [],
             cursorRecordIds: [],
-            total: 0,
+            total: options.includeTotal === true ? 0 : null,
             perPage: options.pagination?.limit ?? options.pagination?.perPage ?? 100,
             sourceHasMore: false,
             cursorStore: responseCursorStore,
@@ -679,45 +825,73 @@ export class DatabaseDO extends DurableObject<DOEnv> {
       const limit = options.pagination?.limit ?? options.pagination?.perPage ?? 100;
       const offset = options.pagination?.offset ?? ((options.pagination?.page ?? 1) - 1) * limit;
 
-      const tableConfig = this.getTableConfig(name);
-      const ftsFields = tableConfig?.fts;
+      const configuredFtsFields = tableConfig?.fts?.length ? tableConfig.fts : null;
+      const searchFields = configuredFtsFields ?? getDoTextSearchFields(tableConfig);
 
       const highlightPre = c.req.query('highlightPre') || '<mark>';
       const highlightPost = c.req.query('highlightPost') || '</mark>';
 
-      const searchQuery = buildSearchQuery(name, q, {
+      const buildIndexedQuery = () => buildSearchQuery(name, q, {
         pagination: options.pagination,
         filters: options.filters,
         orFilters: options.orFilters,
         sort: options.sort,
-        ftsFields,
+        ftsFields: configuredFtsFields ?? undefined,
         highlightPre,
         highlightPost,
       });
+      const buildFallbackQuery = () => buildSubstringSearchQuery(name, q, {
+        pagination: options.pagination,
+        filters: options.filters,
+        orFilters: options.orFilters,
+        sort: options.sort,
+        fields: searchFields,
+      });
 
       try {
-        let rows = [...this.sql(searchQuery.sql, ...searchQuery.params)] as Record<string, unknown>[];
-        const includeTotal = !['0', 'false'].includes((c.req.query('includeTotal') ?? '').toLowerCase());
-        let total: number | null = includeTotal ? Number(
-          searchQuery.countSql
-            ? [...this.sql(searchQuery.countSql, ...(searchQuery.countParams ?? []))][0]?.total ?? rows.length
+        let ftsArtifactsHealthy = false;
+        if (configuredFtsFields) {
+          const artifactQuery = buildSqliteFtsArtifactQuery(name);
+          const artifacts = [
+            ...this.sql(artifactQuery.sql, ...artifactQuery.params),
+          ] as Record<string, unknown>[];
+          ftsArtifactsHealthy = sqliteFtsArtifactsAreHealthy(
+            name,
+            configuredFtsFields,
+            artifacts,
+          );
+        }
+
+        const needsSubstringFallback = sqliteFtsNeedsSubstringFallback(q);
+        if (configuredFtsFields && !needsSubstringFallback && !ftsArtifactsHealthy) {
+          throw new EdgeBaseError(
+            503,
+            `Indexed search for table '${name}' is unavailable because its FTS artifacts are unhealthy.`,
+          );
+        }
+        const useIndexedFts = !!configuredFtsFields && !needsSubstringFallback;
+        const effectiveSearchQuery = useIndexedFts ? buildIndexedQuery() : buildFallbackQuery();
+        let rows: Record<string, unknown>[];
+        try {
+          rows = [
+            ...this.sql(effectiveSearchQuery.sql, ...effectiveSearchQuery.params),
+          ] as Record<string, unknown>[];
+        } catch (error) {
+          if (!useIndexedFts) throw error;
+          throw new EdgeBaseError(
+            503,
+            `Indexed search for table '${name}' failed; refusing an unindexed full-table fallback.`,
+          );
+        }
+        const includeTotal = options.includeTotal === true;
+        const total: number | null = includeTotal ? Number(
+          effectiveSearchQuery.countSql
+            ? [...this.sql(
+              effectiveSearchQuery.countSql,
+              ...(effectiveSearchQuery.countParams ?? []),
+            )][0]?.total ?? rows.length
             : rows.length,
         ) : null;
-        if (rows.length === 0) {
-          const fallback = buildSubstringSearchQuery(name, q, {
-            pagination: options.pagination,
-            filters: options.filters,
-            orFilters: options.orFilters,
-            sort: options.sort,
-            fields: ftsFields,
-          });
-          rows = [...this.sql(fallback.sql, ...fallback.params)] as Record<string, unknown>[];
-          total = includeTotal ? Number(
-            fallback.countSql
-              ? [...this.sql(fallback.countSql, ...(fallback.countParams ?? []))][0]?.total ?? rows.length
-              : rows.length,
-          ) : null;
-        }
         const tableConfig = this.getTableConfig(name);
         const normalizedSearch = this.normalizeRows(rows, tableConfig);
 
@@ -756,11 +930,132 @@ export class DatabaseDO extends DurableObject<DOEnv> {
           });
         }
 
-        return c.json({ items: enrichedSearch, total, hasMore: total !== null && total > offset + enrichedSearch.length, cursor: null, page: null, perPage: limit });
+        // Without COUNT, a full page is conservatively probeable; exact-N
+        // drains terminate on the next empty page instead of scanning to count.
+        const hasMore = total !== null
+          ? total > offset + normalizedSearch.length
+          : normalizedSearch.length === limit;
+        return c.json({ items: enrichedSearch, total, hasMore, cursor: null, page: null, perPage: limit });
       } catch (err) {
         if (err instanceof EdgeBaseError) throw err;
         return c.json({ items: [], error: 'FTS5 not configured for this table.' }, 400);
       }
+    });
+
+    // TRUSTED RELATED SEARCH: POST /tables/:name/search-related
+    // Kept server-only: the Worker injects the internal/service-key marker
+    // after validation, and public callers cannot opt into this authority DSL.
+    app.post('/tables/:name/search-related', async (c) => {
+      const name = c.req.param('name');
+      this.ensureTableExists(name);
+      if (!this.isServiceKeyRequest(c.req.raw)) {
+        throw new EdgeBaseError(
+          403,
+          'Related search is available only to trusted server code.',
+        );
+      }
+
+      let rawInput: unknown;
+      try {
+        rawInput = await c.req.json();
+      } catch {
+        throw new EdgeBaseError(
+          400,
+          `Invalid JSON body for related search on table '${name}'.`,
+        );
+      }
+      const input: SearchRelatedInput = validateSearchRelatedInput(
+        rawInput,
+        name,
+        this.getMyTables(),
+      );
+      const tableConfig = this.getTableConfig(name);
+      if (!tableConfig) {
+        throw notFoundError(`Table "${name}" not found in this DO.`);
+      }
+
+      const configuredFtsFields = tableConfig.fts?.length ? tableConfig.fts : null;
+      const searchFields = configuredFtsFields ?? getDoTextSearchFields(tableConfig);
+      const pagination = {
+        // Read one bounded overflow row so an exactly-full terminal page does
+        // not invent a continuation. The extra row is never returned.
+        limit: input.limit + 1,
+      };
+      const needsSubstringFallback = [input.query, ...(input.queryVariants ?? [])]
+        .some(sqliteFtsNeedsSubstringFallback);
+
+      let ftsArtifactsHealthy = false;
+      if (configuredFtsFields) {
+        const artifactQuery = buildSqliteFtsArtifactQuery(name);
+        const artifacts = [
+          ...this.sql(artifactQuery.sql, ...artifactQuery.params),
+        ] as Record<string, unknown>[];
+        ftsArtifactsHealthy = sqliteFtsArtifactsAreHealthy(
+          name,
+          configuredFtsFields,
+          artifacts,
+        );
+      }
+      if (configuredFtsFields && !needsSubstringFallback && !ftsArtifactsHealthy) {
+        throw new EdgeBaseError(
+          503,
+          `Indexed search for table '${name}' is unavailable because its FTS artifacts are unhealthy.`,
+        );
+      }
+
+      const useIndexedFts = !!configuredFtsFields && !needsSubstringFallback;
+      const searchQuery = useIndexedFts
+        ? buildSearchQuery(name, input.query, {
+          pagination,
+          sort: input.order,
+          ftsFields: configuredFtsFields ?? undefined,
+          queryVariants: input.queryVariants,
+          searchRelatedKeyset: { order: input.order, after: input.after },
+          relatedSearch: input.relation,
+        })
+        : buildSubstringSearchQuery(name, input.query, {
+          pagination,
+          sort: input.order,
+          fields: searchFields,
+          queryVariants: input.queryVariants,
+          searchRelatedKeyset: { order: input.order, after: input.after },
+          relatedSearch: input.relation,
+        });
+
+      let sourceRows: Record<string, unknown>[];
+      try {
+        sourceRows = [
+          ...this.sql(searchQuery.sql, ...searchQuery.params),
+        ] as Record<string, unknown>[];
+      } catch (error) {
+        if (!useIndexedFts) throw error;
+        throw new EdgeBaseError(
+          503,
+          `Indexed search for table '${name}' failed; refusing an unindexed full-table fallback.`,
+        );
+      }
+      const normalizedItems = this.normalizeRows(sourceRows, tableConfig);
+
+      let total: number | null = null;
+      if (input.includeTotal && searchQuery.countSql) {
+        total = Number([
+          ...this.sql(searchQuery.countSql, ...(searchQuery.countParams ?? [])),
+        ][0]?.total ?? normalizedItems.length);
+      }
+      const hasMore = normalizedItems.length > input.limit;
+      const items = normalizedItems.slice(0, input.limit);
+      const cursor = hasMore && items.length > 0
+        ? createSearchRelatedCursor(items[items.length - 1]!, input.order)
+        : null;
+
+      return c.json({
+        items,
+        total,
+        hasMore,
+        cursor,
+        page: null,
+        perPage: input.limit,
+      });
     });
 
     // GET: GET /tables/:name/:id
@@ -968,13 +1263,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
           name,
           triggerEvent,
           triggerData,
-          {
-            databaseNamespace: this.env.DATABASE,
-            authNamespace: this.env.AUTH,
-            kvNamespace: this.env.KV,
-            config: this.config,
-            serviceKey: this.getServiceKey(),
-          },
+          this.buildDbTriggerContext(),
           doOrigin,
         ),
       );
@@ -1166,13 +1455,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
             before: existing[0] as Record<string, unknown>,
             after: updated[0] as Record<string, unknown>,
           },
-          {
-            databaseNamespace: this.env.DATABASE,
-            authNamespace: this.env.AUTH,
-            kvNamespace: this.env.KV,
-            config: this.config,
-            serviceKey: this.getServiceKey(),
-          },
+          this.buildDbTriggerContext(),
           doOriginUpdate,
         ),
       );
@@ -1253,13 +1536,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
           name,
           'delete',
           { before: existing[0] as Record<string, unknown> },
-          {
-            databaseNamespace: this.env.DATABASE,
-            authNamespace: this.env.AUTH,
-            kvNamespace: this.env.KV,
-            config: this.config,
-            serviceKey: this.getServiceKey(),
-          },
+          this.buildDbTriggerContext(),
           doOriginDelete,
         ),
       );
@@ -1603,43 +1880,35 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         }
       }
 
-      // Fire DB triggers asynchronously for batch items
+      // Fire DB triggers asynchronously under one bounded owner.
       const doOriginBatch = this.doName ? parseDbDoName(this.doName) : { namespace: 'shared' };
-      const triggerContext = {
-        databaseNamespace: this.env.DATABASE,
-        authNamespace: this.env.AUTH,
-        kvNamespace: this.env.KV,
-        config: this.config,
-        serviceKey: this.getServiceKey(),
-      };
+      const triggerContext = this.buildDbTriggerContext();
+      const batchTriggerItems = [];
       if (Array.isArray(batchResults.inserted)) {
         for (const item of batchResults.inserted as Record<string, unknown>[]) {
-          this.ctx.waitUntil(
-            executeDbTriggers(name, 'insert', { after: item }, triggerContext, doOriginBatch),
-          );
+          batchTriggerItems.push({ table: name, event: 'insert' as const, data: { after: item } });
         }
       }
       if (Array.isArray(batchResults.updated)) {
         for (const item of batchResults.updated as Record<string, unknown>[]) {
           const beforeRow = updateBeforeRows.get(item.id as string);
-          this.ctx.waitUntil(
-            executeDbTriggers(
-              name,
-              'update',
-              { before: beforeRow, after: item },
-              triggerContext,
-              doOriginBatch,
-            ),
-          );
+          batchTriggerItems.push({
+            table: name,
+            event: 'update' as const,
+            data: { before: beforeRow, after: item },
+          });
         }
       }
       // Use full row data for delete triggers (BUG-012)
       if (deletedRows.length > 0) {
         for (const row of deletedRows) {
-          this.ctx.waitUntil(
-            executeDbTriggers(name, 'delete', { before: row }, triggerContext, doOriginBatch),
-          );
+          batchTriggerItems.push({ table: name, event: 'delete' as const, data: { before: row } });
         }
+      }
+      if (batchTriggerItems.length > 0) {
+        this.ctx.waitUntil(
+          executeDbTriggerBatch(batchTriggerItems, triggerContext, doOriginBatch),
+        );
       }
 
       return c.json(results);
@@ -1716,11 +1985,15 @@ export class DatabaseDO extends DurableObject<DOEnv> {
 
       this.ctx.storage.transactionSync(() => {
         // Find matching records
-        const { sql: selectSql, params: selectParams } = buildListQuery(name, {
+        const batchQueryOptions = normalizeSQLiteBooleanQueryOptions({
           filters: body.filter,
           orFilters: body.orFilter,
           pagination: { limit },
-        });
+        }, tableConfig.schema);
+        const { sql: selectSql, params: selectParams } = buildListQuery(
+          name,
+          batchQueryOptions,
+        );
 
         const allRows = [...this.sql(selectSql, ...selectParams)];
         processed = allRows.length;
@@ -2023,13 +2296,16 @@ export class DatabaseDO extends DurableObject<DOEnv> {
                 ...params,
               ),
             ];
+            const probeRow = needsProbeRow && rows.length > 0
+              ? this.normalizeRow(rows[0] as Record<string, unknown>, tableConfig)
+              : undefined;
             // Read rule guards expect probes so they cannot leak row existence.
-            if (!isSK && rows.length > 0 && rules?.read && typeof rules.read === 'function') {
+            if (!isSK && probeRow && rules?.read && typeof rules.read === 'function') {
               let canRead = false;
               try {
                 canRead = (
                   rules.read as (a: AuthContext | null, row: Record<string, unknown>) => boolean
-                )(auth, rows[0] as Record<string, unknown>);
+                )(auth, probeRow);
               } catch {
                 canRead = false;
               }
@@ -2140,7 +2416,9 @@ export class DatabaseDO extends DurableObject<DOEnv> {
             const beforeRows = needsBeforeRow
               ? [...this.sql(`SELECT * FROM "${name}" WHERE "id" = ?`, id)]
               : [];
-            const beforeRow = beforeRows[0] as Record<string, unknown> | undefined;
+            const beforeRow = beforeRows.length > 0
+              ? this.normalizeRow(beforeRows[0] as Record<string, unknown>, tableConfig)
+              : undefined;
             if (!isSK && beforeRow && rules?.update && typeof rules.update === 'function') {
               let canUpdate = false;
               try {
@@ -2199,7 +2477,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
               : [];
             const afterRow = needsAfterRow
               ? (afterRows.length > 0
-                ? (afterRows[0] as Record<string, unknown>)
+                ? this.normalizeRow(afterRows[0] as Record<string, unknown>, tableConfig)
                 : { id, ...data })
               : undefined;
             if (resultMode === 'full') results.push({ updated: afterRow });
@@ -2228,13 +2506,16 @@ export class DatabaseDO extends DurableObject<DOEnv> {
           const existing = needsExistingRow
             ? [...this.sql(`SELECT * FROM "${name}" WHERE "id" = ?`, id)]
             : [];
-          if (existing.length > 0) {
+          const existingRow = existing.length > 0
+            ? this.normalizeRow(existing[0] as Record<string, unknown>, tableConfig)
+            : undefined;
+          if (existingRow) {
             if (!isSK && rules?.delete && typeof rules.delete === 'function') {
               let canDelete = false;
               try {
                 canDelete = (
                   rules.delete as (a: AuthContext | null, row: Record<string, unknown>) => boolean
-                )(auth, existing[0] as Record<string, unknown>);
+                )(auth, existingRow);
               } catch {
                 canDelete = false;
               }
@@ -2252,7 +2533,7 @@ export class DatabaseDO extends DurableObject<DOEnv> {
               triggerOps.push({
                 table: name,
                 action: 'delete',
-                payload: { before: existing[0] as Record<string, unknown> },
+                payload: { before: existingRow },
               });
             }
           }
@@ -2286,21 +2567,17 @@ export class DatabaseDO extends DurableObject<DOEnv> {
         }
       }
 
-      // Post-commit: DB triggers per operation (same shape as /batch).
+      // Post-commit: one bounded DB-trigger owner for the complete transaction.
       const doOriginTransact = this.doName ? parseDbDoName(this.doName) : { namespace: 'shared' };
-      const transactTriggerContext = {
-        databaseNamespace: this.env.DATABASE,
-        authNamespace: this.env.AUTH,
-        kvNamespace: this.env.KV,
-        config: this.config,
-        serviceKey: this.getServiceKey(),
-      };
-      for (const trig of triggerOps) {
+      const transactTriggerContext = this.buildDbTriggerContext();
+      if (triggerOps.length > 0) {
         this.ctx.waitUntil(
-          executeDbTriggers(
-            trig.table,
-            trig.action,
-            trig.payload,
+          executeDbTriggerBatch(
+            triggerOps.map((trig) => ({
+              table: trig.table,
+              event: trig.action,
+              data: trig.payload,
+            })),
             transactTriggerContext,
             doOriginTransact,
           ),
@@ -2913,6 +3190,30 @@ export class DatabaseDO extends DurableObject<DOEnv> {
     } catch {
       return false; // timeout or error → deny (fail-closed)
     }
+  }
+
+  /**
+   * Evaluate one materialized list page with a fixed worker pool. Every row is
+   * settled before the caller chooses the first source-order denial.
+   */
+  private async evalRowRulesBounded(
+    rule: NonNullable<TableRules['read']>,
+    auth: AuthContext | null,
+    rows: Record<string, unknown>[],
+  ): Promise<boolean[]> {
+    const allowed = new Array<boolean>(rows.length);
+    let nextIndex = 0;
+    const workerCount = Math.min(DO_LIST_RULE_CONCURRENCY, rows.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= rows.length) return;
+        allowed[index] = await this.evalRowRule(rule, auth, rows[index]!);
+      }
+    });
+    await Promise.all(workers);
+    return allowed;
   }
 
   /** Normalize an array of rows. */

@@ -194,7 +194,7 @@ test('Node and Wrangler release floors stay aligned with the Docker runtime', ()
   for (const path of ['packages/cli/package.json', 'packages/server/package.json']) {
     const manifest = JSON.parse(readFileSync(resolve(REPO_ROOT, path), 'utf8'));
     const wranglerRange = manifest.dependencies?.wrangler ?? manifest.devDependencies?.wrangler;
-    assert.equal(wranglerRange, '4.103.0', `${path} must pin the audited Wrangler build`);
+    assert.equal(wranglerRange, '4.114.0', `${path} must pin the audited Wrangler build`);
   }
 
   const serverManifest = JSON.parse(
@@ -217,7 +217,7 @@ test('Node and Wrangler release floors stay aligned with the Docker runtime', ()
   const dockerfile = readFileSync(resolve(REPO_ROOT, 'Dockerfile'), 'utf8');
   assert.match(dockerfile, /^FROM node:22-slim@sha256:[a-f0-9]{64}$/m);
   assert.match(dockerfile, /npm install -g npm@12\.0\.1/);
-  assert.match(dockerfile, /npm install -g wrangler@4\.103\.0/);
+  assert.match(dockerfile, /npm install -g wrangler@4\.114\.0/);
 });
 
 test('release security audit covers development tooling and keeps patched floors', () => {

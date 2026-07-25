@@ -268,7 +268,8 @@ The `conflictTarget` field must have a `unique: true` constraint in your schema.
 
 ## Full-Text Search
 
-Search across text fields using SQLite FTS5. Enable FTS in your config:
+Search across configured fields with the provider's indexed search corpus. Enable
+search indexing in your config:
 
 ```typescript
 // edgebase.config.ts
@@ -284,12 +285,21 @@ databases: {
 }
 ```
 
+SQLite-backed D1 and Durable Object databases use FTS5 trigram indexes. Search
+terms whose effective tokens are shorter than three Unicode characters use a
+substring compatibility path because the trigram tokenizer cannot match
+them. Configured longer searches require a healthy provider-owned FTS artifact
+set and fail closed rather than silently scanning the base table. PostgreSQL
+uses a `pg_trgm` GIN index over one maintained text corpus, so the same
+substring search does not scan each configured source column.
+
 <Tabs groupId="sdk-language">
 <TabItem value="js" label="JavaScript" default>
 
 ```typescript
 const results = await admin.db('app').table('posts').search('typescript tutorial').getList();
-// results.items → ranked by relevance
+// results.items → matching records
+// SQLite FTS results can include:
 // results.items[0].highlight → { title: "...<mark>TypeScript</mark> <mark>Tutorial</mark>..." }
 ```
 

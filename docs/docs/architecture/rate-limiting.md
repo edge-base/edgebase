@@ -44,16 +44,22 @@ The primary defense. A per-isolate **Fixed Window Counter** in memory, configure
 
 | Group | Default Limit | Key | What It Protects |
 |---|---|---|---|
-| `global` | 10,000,000 / 60s | IP | Overall API/control request ceiling |
-| `db` | 100 / 60s | IP | Database CRUD operations |
-| `storage` | 50 / 60s | IP | File upload/download |
-| `functions` | 50 / 60s | IP | App Functions execution |
+| `global` | 10,000,000 / 60s | verified user / IP fallback | Overall API/control request ceiling |
+| `db` | 100 / 60s | verified user / IP fallback | Database CRUD operations |
+| `storage` | 50 / 60s | verified user / IP fallback | File upload/download |
+| `functions` | 50 / 60s | verified user / IP fallback | App Functions execution |
 | `auth` | 30 / 60s | IP | All auth endpoints |
 | `authSignin` | 10 / 60s | email | Sign-in brute force protection |
 | `authSignup` | 10 / 60s | IP | Sign-up spam prevention |
-| `events` | 100 / 60s | IP | Analytics event endpoints |
+| `events` | 100 / 60s | verified user / IP fallback | Analytics event endpoints |
 
-Most groups use the client's **IP address** as the rate limit key because the middleware runs before authentication (no `auth.id` is available yet). The `authSignin` group is the exception — it uses the **email address** to prevent credential stuffing against specific accounts.
+Standard API requests with a valid EdgeBase access token use the stable signed
+**user ID** for both layers. The limiter verifies that signature before any
+session/database read and passes the payload to auth middleware for reuse.
+Invalid/expired tokens, anonymous traffic, auth/admin/control routes, and custom
+Bearer Functions use the runtime-authoritative **IP address**. `authSignin`
+additionally uses the **email address** to prevent credential stuffing against
+specific accounts.
 
 When a limit is exceeded, the server returns `429 Too Many Requests` with a `Retry-After` header.
 
@@ -199,7 +205,7 @@ This policy allows server-to-server operations (bulk migrations, admin scripts, 
                     ┌─────────── HTTP Request ───────────┐
                     │                                     │
                     ▼                                     │
-          Global Rate Limit (IP, 10M/60s)                │
+          Global Rate Limit (verified user / IP fallback)│
                     │                                     │
                     ▼                                     │
           Group Rate Limit (db/storage/auth/etc.)        │

@@ -21,16 +21,24 @@ import {
   generateCreateTableDDL,
   generateAddColumnDDL,
   generateIndexDDL,
+  resolveTableIndexes,
   generateFTS5DDL,
+  generateFTS5RebuildDDLs,
   generateFTS5Triggers,
+  computeSQLiteFtsSignature,
   computeSchemaHash,
   computeSchemaHashSync,
   generateTableDDL,
+  generateSQLiteForeignKeyRebuildDDLs,
+  getDeclaredSQLiteForeignKeys,
+  normalizeSQLiteForeignKeyRows,
   planSQLiteFieldUniqueIndex,
+  sqliteForeignKeysMatch,
   sqliteUniqueDuplicateError,
   META_TABLE_DDL,
   // PostgreSQL DDL
   PG_META_TABLE_DDL,
+  buildPgFtsTriggerFunctionBody,
   generatePgCreateTableDDL,
   generatePgAddColumnDDL,
   generatePgIndexDDL,
@@ -249,7 +257,210 @@ describe('planSQLiteFieldUniqueIndex', () => {
   });
 });
 
+describe('SQLite foreign-key reconciliation', () => {
+  it('normalizes declared and physical references while excluding logical auth references', () => {
+    const config = {
+      schema: {
+        orderId: { type: 'string', references: 'orders' },
+        categoryId: { type: 'string', references: 'categories(cid)' },
+        workspaceId: {
+          type: 'string',
+          references: {
+            table: 'workspaces',
+            onDelete: 'CASCADE',
+            onUpdate: 'RESTRICT',
+          },
+        },
+        userId: { type: 'string', references: 'users(id)' },
+      },
+    } as TableConfig;
+
+    const desired = getDeclaredSQLiteForeignKeys(config);
+    const actual = normalizeSQLiteForeignKeyRows([
+      {
+        from: 'workspaceId',
+        table: 'workspaces',
+        to: 'id',
+        on_update: 'RESTRICT',
+        on_delete: 'CASCADE',
+        match: 'NONE',
+      },
+      {
+        from: 'orderId',
+        table: 'orders',
+        to: 'id',
+        on_update: 'NO ACTION',
+        on_delete: 'SET NULL',
+        match: 'NONE',
+      },
+      {
+        from: 'categoryId',
+        table: 'categories',
+        to: 'cid',
+        on_update: 'NO ACTION',
+        on_delete: 'CASCADE',
+        match: 'NONE',
+      },
+    ]);
+
+    expect(desired).toHaveLength(3);
+    expect(sqliteForeignKeysMatch(actual, desired)).toBe(true);
+  });
+
+  it('plans one data-preserving rebuild and regenerates only owned artifacts', () => {
+    const ddls = generateSQLiteForeignKeyRebuildDDLs(
+      'notifications',
+      {
+        schema: {
+          workspaceId: {
+            type: 'string',
+            references: { table: 'workspaces', onDelete: 'CASCADE' },
+          },
+          message: { type: 'string', unique: true },
+        },
+        indexes: [{ fields: ['workspaceId'] }],
+        fts: ['message'],
+      },
+      {
+        columns: ['id', 'createdAt', 'updatedAt', 'workspaceId', 'message'],
+        indexes: [],
+        artifacts: [
+          {
+            type: 'index',
+            name: 'legacy_notifications_message',
+            sql: 'CREATE INDEX legacy_notifications_message ON notifications(message)',
+          },
+          {
+            type: 'index',
+            name: 'idx_notifications_old',
+            sql: 'CREATE INDEX idx_notifications_old ON notifications(message)',
+          },
+          {
+            type: 'trigger',
+            name: 'notifications_audit',
+            sql: 'CREATE TRIGGER notifications_audit AFTER INSERT ON notifications BEGIN SELECT 1; END',
+          },
+          {
+            type: 'trigger',
+            name: 'notifications_ai',
+            sql: 'CREATE TRIGGER notifications_ai AFTER INSERT ON notifications BEGIN SELECT 2; END',
+          },
+        ],
+        inboundForeignKeys: [],
+      },
+    );
+
+    expect(ddls[0]).toMatch(/^CREATE TABLE "__edgebase_rebuild_notifications"/);
+    expect(ddls).toContain(
+      'CREATE INDEX legacy_notifications_message ON notifications(message)',
+    );
+    expect(ddls).not.toContain('CREATE INDEX idx_notifications_old ON notifications(message)');
+    expect(ddls).toContain(
+      'CREATE INDEX IF NOT EXISTS "idx_notifications_workspaceId" ON "notifications"("workspaceId");',
+    );
+    expect(ddls).toContain(
+      'CREATE TRIGGER notifications_audit AFTER INSERT ON notifications BEGIN SELECT 1; END',
+    );
+    expect(ddls).not.toContain(
+      'CREATE TRIGGER notifications_ai AFTER INSERT ON notifications BEGIN SELECT 2; END',
+    );
+    expect(ddls.at(-1)).toBe(
+      'INSERT INTO "notifications_fts"("notifications_fts") VALUES (\'rebuild\');',
+    );
+  });
+
+  it('fails closed instead of dropping physical columns absent from config', () => {
+    expect(() => generateSQLiteForeignKeyRebuildDDLs(
+      'notifications',
+      { schema: { message: { type: 'string' } } },
+      {
+        columns: ['id', 'createdAt', 'updatedAt', 'message', 'legacyPayload'],
+        indexes: [],
+        artifacts: [],
+        inboundForeignKeys: [],
+      },
+    )).toThrow(/physical columns 'legacyPayload' are absent from config/);
+  });
+
+  it('fails closed when another table references the rebuild target', () => {
+    expect(() => generateSQLiteForeignKeyRebuildDDLs(
+      'notifications',
+      { schema: { message: { type: 'string' } } },
+      {
+        columns: ['id', 'createdAt', 'updatedAt', 'message'],
+        indexes: [],
+        artifacts: [],
+        inboundForeignKeys: [{ childTable: 'deliveries', childColumn: 'notificationId' }],
+      },
+    )).toThrow(/referenced by 'deliveries.notificationId'/);
+  });
+
+  it('remaps self references to the temporary table and defers their check', () => {
+    const ddls = generateSQLiteForeignKeyRebuildDDLs(
+      'folders',
+      {
+        schema: {
+          parentId: {
+            type: 'string',
+            references: { table: 'folders', onDelete: 'CASCADE' },
+          },
+        },
+      },
+      {
+        columns: ['id', 'createdAt', 'updatedAt', 'parentId'],
+        indexes: [],
+        artifacts: [],
+        inboundForeignKeys: [],
+      },
+    );
+
+    expect(ddls[0]).toBe('PRAGMA defer_foreign_keys = ON;');
+    expect(ddls[1]).toContain(
+      'REFERENCES "__edgebase_rebuild_folders"("id") ON DELETE CASCADE',
+    );
+  });
+
+  it('fails closed on an unrepresented inline UNIQUE constraint', () => {
+    expect(() => generateSQLiteForeignKeyRebuildDDLs(
+      'notifications',
+      { schema: { message: { type: 'string' } } },
+      {
+        columns: ['id', 'createdAt', 'updatedAt', 'message'],
+        indexes: [{
+          name: 'sqlite_autoindex_notifications_2',
+          unique: true,
+          origin: 'u',
+          partial: false,
+          columns: ['message'],
+        }],
+        artifacts: [],
+        inboundForeignKeys: [],
+      },
+    )).toThrow(/inline UNIQUE index 'sqlite_autoindex_notifications_2'/);
+  });
+});
+
 // ─── D. generateIndexDDL ─────────────────────────────────────────────────────
+
+describe('resolveTableIndexes', () => {
+  it('keeps explicit order and appends one index per uncovered physical reference', () => {
+    const explicit = [{ fields: ['coveredId', 'createdAt'] }];
+    const config = {
+      schema: {
+        parentId: { type: 'string', references: 'parents' },
+        coveredId: { type: 'string', references: 'parents' },
+        userId: { type: 'string', references: 'users' },
+      },
+      indexes: explicit,
+    } as TableConfig;
+
+    expect(resolveTableIndexes(config)).toEqual([
+      explicit[0],
+      { fields: ['parentId'] },
+    ]);
+    expect(config.indexes).toBe(explicit);
+  });
+});
 
 describe('generateIndexDDL', () => {
   it('single-field index', () => {
@@ -352,6 +563,27 @@ describe('generateFTS5Triggers', () => {
   });
 });
 
+describe('FTS5 definition reconciliation', () => {
+  it('signs the ordered configured field list', () => {
+    expect(computeSQLiteFtsSignature(['plainText', 'content']))
+      .not.toBe(computeSQLiteFtsSignature(['content', 'plainText']));
+  });
+
+  it('drops all old artifacts before recreating and backfilling the desired definition', () => {
+    const ddls = generateFTS5RebuildDDLs('blocks', ['plainText', 'content']);
+    expect(ddls.slice(0, 4)).toEqual([
+      'DROP TRIGGER IF EXISTS "blocks_ai";',
+      'DROP TRIGGER IF EXISTS "blocks_ad";',
+      'DROP TRIGGER IF EXISTS "blocks_au";',
+      'DROP TABLE IF EXISTS "blocks_fts";',
+    ]);
+    expect(ddls[4]).toContain('fts5(plainText, content');
+    expect(ddls.at(-1)).toBe(
+      'INSERT INTO "blocks_fts"("blocks_fts") VALUES (\'rebuild\');',
+    );
+  });
+});
+
 // ─── G. computeSchemaHash (async SHA-256) ────────────────────────────────────
 
 describe('computeSchemaHash', () => {
@@ -424,6 +656,45 @@ describe('generateTableDDL', () => {
       indexes: [{ fields: ['status'] }],
     } as TableConfig);
     expect(ddls.some((d) => d.includes('CREATE INDEX'))).toBe(true);
+  });
+
+  it('auto-indexes only uncovered physical reference fields in deterministic order', () => {
+    const ddls = generateTableDDL('records', {
+      schema: {
+        workspaceId: { type: 'string', references: 'workspaces' },
+        qualifiedId: { type: 'string', references: 'categories(id)' },
+        objectId: { type: 'string', references: { table: 'objects' } },
+        userId: { type: 'string', references: 'users' },
+        uniqueId: { type: 'string', unique: true, references: 'unique_parents' },
+        leftCovered: { type: 'string', references: 'parents' },
+        laterOnly: { type: 'string', references: 'parents' },
+      },
+      indexes: [
+        { fields: ['leftCovered', 'createdAt'] },
+        { fields: ['createdAt', 'laterOnly'] },
+      ],
+    } as TableConfig);
+
+    expect(ddls.filter((ddl) => ddl.startsWith('CREATE INDEX'))).toEqual([
+      'CREATE INDEX IF NOT EXISTS "idx_records_leftCovered_createdAt" ON "records"("leftCovered", "createdAt");',
+      'CREATE INDEX IF NOT EXISTS "idx_records_createdAt_laterOnly" ON "records"("createdAt", "laterOnly");',
+      'CREATE INDEX IF NOT EXISTS "idx_records_workspaceId" ON "records"("workspaceId");',
+      'CREATE INDEX IF NOT EXISTS "idx_records_qualifiedId" ON "records"("qualifiedId");',
+      'CREATE INDEX IF NOT EXISTS "idx_records_objectId" ON "records"("objectId");',
+      'CREATE INDEX IF NOT EXISTS "idx_records_laterOnly" ON "records"("laterOnly");',
+    ]);
+  });
+
+  it('does not add a redundant reference index for a primary-key field', () => {
+    const ddls = generateTableDDL('edges', {
+      schema: {
+        id: false,
+        parentId: { type: 'string', primaryKey: true, references: 'parents' },
+      },
+    } as TableConfig);
+
+    expect(ddls).toHaveLength(1);
+    expect(ddls[0]).toContain('"parentId" TEXT PRIMARY KEY REFERENCES "parents"("id")');
   });
 
   it('with FTS → includes CREATE VIRTUAL TABLE + 3 triggers', () => {
@@ -1156,78 +1427,97 @@ describe('generatePgIndexDDL', () => {
 // ─── Q. generatePgFTSDDL ────────────────────────────────────────────────────
 
 describe('generatePgFTSDDL', () => {
-  it('returns 5 DDL statements', () => {
+  it('uses the exact ownership body exposed to PostgreSQL catalog inspection', () => {
+    const body = buildPgFtsTriggerFunctionBody(['title', 'body']);
     const ddls = generatePgFTSDDL('posts', ['title', 'body']);
-    expect(ddls).toHaveLength(5);
+
+    expect(body).toContain('NEW."_fts_text" := coalesce(NEW."title"::text, \'\')');
+    expect(body).toContain("NEW.\"_fts\" := to_tsvector('simple', NEW.\"_fts_text\")");
+    expect(ddls[5]).toContain(`$$${body}$$`);
   });
 
-  it('step 1: ALTER TABLE ADD COLUMN _fts tsvector', () => {
-    const ddls = generatePgFTSDDL('posts', ['title']);
-    expect(ddls[0]).toContain('ALTER TABLE "posts" ADD COLUMN IF NOT EXISTS "_fts" tsvector');
-  });
-
-  it('step 2: GIN index on _fts column', () => {
-    const ddls = generatePgFTSDDL('posts', ['title']);
-    expect(ddls[1]).toContain('CREATE INDEX IF NOT EXISTS');
-    expect(ddls[1]).toContain('USING gin');
-    expect(ddls[1]).toContain('"_fts"');
-  });
-
-  it('step 2: GIN index name includes _fts suffix', () => {
-    const ddls = generatePgFTSDDL('posts', ['title']);
-    expect(ddls[1]).toContain('"idx_posts_fts"');
-  });
-
-  it('step 3: trigger function with to_tsvector', () => {
+  it('returns 8 additive DDL statements', () => {
     const ddls = generatePgFTSDDL('posts', ['title', 'body']);
-    expect(ddls[2]).toContain('CREATE OR REPLACE FUNCTION');
-    expect(ddls[2]).toContain('"posts_fts_trigger"');
-    expect(ddls[2]).toContain("to_tsvector('simple'");
-    expect(ddls[2]).toContain('RETURNS trigger');
-    expect(ddls[2]).toContain('plpgsql');
+    expect(ddls).toHaveLength(8);
   });
 
-  it('step 3: trigger function coalesces all fields', () => {
-    const ddls = generatePgFTSDDL('posts', ['title', 'body']);
-    expect(ddls[2]).toContain('coalesce(NEW."title", \'\')');
-    expect(ddls[2]).toContain('coalesce(NEW."body", \'\')');
-  });
-
-  it('step 4: BEFORE INSERT OR UPDATE trigger', () => {
+  it('step 1: enables the trusted pg_trgm extension', () => {
     const ddls = generatePgFTSDDL('posts', ['title']);
-    expect(ddls[3]).toContain('DROP TRIGGER IF EXISTS');
-    expect(ddls[3]).toContain('CREATE TRIGGER');
-    expect(ddls[3]).toContain('BEFORE INSERT OR UPDATE');
-    expect(ddls[3]).toContain('FOR EACH ROW');
-    expect(ddls[3]).toContain('EXECUTE FUNCTION');
+    expect(ddls[0]).toBe('CREATE EXTENSION IF NOT EXISTS pg_trgm;');
   });
 
-  it('step 4: trigger name is tableName_fts_update', () => {
+  it('steps 2-3: retains _fts and adds the substring text corpus', () => {
     const ddls = generatePgFTSDDL('posts', ['title']);
-    expect(ddls[3]).toContain('"posts_fts_update"');
+    expect(ddls[1]).toContain('ALTER TABLE "posts" ADD COLUMN IF NOT EXISTS "_fts" tsvector');
+    expect(ddls[2]).toContain('ALTER TABLE "posts" ADD COLUMN IF NOT EXISTS "_fts_text" TEXT');
   });
 
-  it('step 5: backfill UPDATE with bare coalesce', () => {
+  it('steps 4-5: retains legacy GIN and adds pg_trgm GIN on the corpus', () => {
+    const ddls = generatePgFTSDDL('posts', ['title']);
+    expect(ddls[3]).toContain('"idx_posts_fts"');
+    expect(ddls[3]).toContain('USING gin("_fts")');
+    expect(ddls[4]).toContain('"idx_posts_fts_text_trgm"');
+    expect(ddls[4]).toContain('USING gin("_fts_text" gin_trgm_ops)');
+  });
+
+  it('step 6: trigger function maintains both helper columns', () => {
     const ddls = generatePgFTSDDL('posts', ['title', 'body']);
-    expect(ddls[4]).toContain('UPDATE "posts" SET "_fts"');
-    expect(ddls[4]).toContain("to_tsvector('simple'");
-    expect(ddls[4]).toContain('coalesce("title", \'\')');
-    expect(ddls[4]).toContain('coalesce("body", \'\')');
+    expect(ddls[5]).toContain('CREATE OR REPLACE FUNCTION');
+    expect(ddls[5]).toContain('"posts_fts_trigger"');
+    expect(ddls[5]).toContain('NEW."_fts_text" :=');
+    expect(ddls[5]).toContain("NEW.\"_fts\" := to_tsvector('simple', NEW.\"_fts_text\")");
+    expect(ddls[5]).toContain('RETURNS trigger');
+    expect(ddls[5]).toContain('plpgsql');
+  });
+
+  it('step 6: trigger function coalesces all fields', () => {
+    const ddls = generatePgFTSDDL('posts', ['title', 'body']);
+    expect(ddls[5]).toContain('coalesce(NEW."title"::text, \'\')');
+    expect(ddls[5]).toContain('coalesce(NEW."body"::text, \'\')');
+  });
+
+  it('casts configured JSONB fields into the shared text corpus', () => {
+    const ddls = generatePgFTSDDL('blocks', ['plainText', 'content']);
+    expect(ddls[5]).toContain('coalesce(NEW."content"::text, \'\')');
+    expect(ddls[7]).toContain('coalesce("content"::text, \'\')');
+    expect(ddls[5]).not.toContain('coalesce(NEW."content",');
+  });
+
+  it('step 7: BEFORE INSERT OR UPDATE trigger', () => {
+    const ddls = generatePgFTSDDL('posts', ['title']);
+    expect(ddls[6]).toContain('DROP TRIGGER IF EXISTS');
+    expect(ddls[6]).toContain('CREATE TRIGGER');
+    expect(ddls[6]).toContain('BEFORE INSERT OR UPDATE');
+    expect(ddls[6]).toContain('FOR EACH ROW');
+    expect(ddls[6]).toContain('EXECUTE FUNCTION');
+  });
+
+  it('step 7: trigger name is tableName_fts_update', () => {
+    const ddls = generatePgFTSDDL('posts', ['title']);
+    expect(ddls[6]).toContain('"posts_fts_update"');
+  });
+
+  it('step 8: backfills both helpers with the bare corpus expression', () => {
+    const ddls = generatePgFTSDDL('posts', ['title', 'body']);
+    expect(ddls[7]).toContain('UPDATE "posts" SET "_fts_text"');
+    expect(ddls[7]).toContain('"_fts" = to_tsvector(\'simple\'');
+    expect(ddls[7]).toContain('coalesce("title"::text, \'\')');
+    expect(ddls[7]).toContain('coalesce("body"::text, \'\')');
     // Backfill should NOT have NEW. prefix
-    expect(ddls[4]).not.toContain('NEW.');
+    expect(ddls[7]).not.toContain('NEW.');
   });
 
   it('single field FTS', () => {
     const ddls = generatePgFTSDDL('t', ['body']);
-    expect(ddls[2]).toContain('coalesce(NEW."body", \'\')');
+    expect(ddls[5]).toContain('coalesce(NEW."body"::text, \'\')');
     // No concatenation with || when single field
-    expect(ddls[2]).not.toContain("|| ' ' ||");
+    expect(ddls[5]).not.toContain("|| ' ' ||");
   });
 
   it('multiple fields joined with space separator', () => {
     const ddls = generatePgFTSDDL('t', ['a', 'b', 'c']);
     // Trigger function should concatenate with || ' ' ||
-    expect(ddls[2]).toContain("|| ' ' ||");
+    expect(ddls[5]).toContain("|| ' ' ||");
   });
 });
 
@@ -1248,13 +1538,36 @@ describe('generatePgTableDDL', () => {
     expect(ddls.some(d => d.includes('CREATE INDEX'))).toBe(true);
   });
 
+  it('matches SQLite physical-reference index coverage and deduplication', () => {
+    const ddls = generatePgTableDDL('records', {
+      schema: {
+        workspaceId: { type: 'string', references: 'workspaces' },
+        userId: { type: 'string', references: 'users' },
+        uniqueId: { type: 'string', unique: true, references: 'unique_parents' },
+        leftCovered: { type: 'string', references: 'parents' },
+        laterOnly: { type: 'string', references: 'parents' },
+      },
+      indexes: [
+        { fields: ['leftCovered', 'createdAt'] },
+        { fields: ['createdAt', 'laterOnly'] },
+      ],
+    } as TableConfig);
+
+    expect(ddls.filter((ddl) => ddl.startsWith('CREATE INDEX'))).toEqual([
+      'CREATE INDEX IF NOT EXISTS "idx_records_leftCovered_createdAt" ON "records"("leftCovered", "createdAt");',
+      'CREATE INDEX IF NOT EXISTS "idx_records_createdAt_laterOnly" ON "records"("createdAt", "laterOnly");',
+      'CREATE INDEX IF NOT EXISTS "idx_records_workspaceId" ON "records"("workspaceId");',
+      'CREATE INDEX IF NOT EXISTS "idx_records_laterOnly" ON "records"("laterOnly");',
+    ]);
+  });
+
   it('with FTS → includes tsvector + GIN + trigger', () => {
     const ddls = generatePgTableDDL('posts', {
       schema: { title: { type: 'string' } },
       fts: ['title'],
     } as TableConfig);
-    // 1 CREATE TABLE + 5 FTS DDLs = 6
-    expect(ddls).toHaveLength(6);
+    // 1 CREATE TABLE + 8 additive FTS/search DDLs = 9
+    expect(ddls).toHaveLength(9);
     expect(ddls.some(d => d.includes('tsvector'))).toBe(true);
     expect(ddls.some(d => d.includes('gin'))).toBe(true);
     expect(ddls.some(d => d.includes('TRIGGER'))).toBe(true);
@@ -1277,8 +1590,8 @@ describe('generatePgTableDDL', () => {
       indexes: [{ fields: ['status'] }],
       fts: ['title'],
     } as TableConfig);
-    // 1 CREATE TABLE + 1 INDEX + 5 FTS = 7
-    expect(ddls).toHaveLength(7);
+    // 1 CREATE TABLE + 1 INDEX + 8 FTS/search DDLs = 10
+    expect(ddls).toHaveLength(10);
   });
 
   it('empty indexes array → no CREATE INDEX', () => {

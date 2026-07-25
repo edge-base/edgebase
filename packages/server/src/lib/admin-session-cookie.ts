@@ -5,7 +5,10 @@ import type { Env } from '../types.js';
 import { parseConfig } from './do-router.js';
 import { parseDuration } from './jwt.js';
 import { matchOrigin } from '../middleware/cors.js';
-import { trustsSelfHostedProxyHeaders } from './public-origin.js';
+import {
+  resolvePublicRequestOrigin,
+  trustsSelfHostedProxyHeaders,
+} from './public-origin.js';
 import { getTrustedClientIp } from './client-ip.js';
 
 const AUTH_TRANSPORT_HEADER = 'X-EdgeBase-Auth-Transport';
@@ -46,9 +49,7 @@ function isExplicitLocalDevelopmentLoopback(c: AdminAuthContext): boolean {
 }
 
 function requestOrigin(c: AdminAuthContext): URL {
-  const url = new URL(c.req.url);
-  if (url.protocol === 'http:' && isSecureRequest(c)) url.protocol = 'https:';
-  return url;
+  return new URL(resolvePublicRequestOrigin(c.env, c.req));
 }
 
 function browserOrigin(c: AdminAuthContext): URL | null {

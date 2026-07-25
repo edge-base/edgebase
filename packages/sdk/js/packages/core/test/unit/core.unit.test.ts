@@ -252,7 +252,7 @@ describe('TableRef', () => {
     });
   });
 
-  it('includeTotal(false) composes immutably and emits the existing no-count wire flag', async () => {
+  it('includeTotal() composes immutably and emits exact opt-in/opt-out wire flags', async () => {
     const dbSingleListRecords = vi.fn().mockResolvedValue({
       items: [{ id: 'post-1' }],
       total: null,
@@ -278,6 +278,14 @@ describe('TableRef', () => {
       sort: 'id:asc',
       limit: '10',
       includeTotal: 'false',
+    });
+
+    const counted = table.limit(10).includeTotal(true);
+    expect(counted).not.toBe(table);
+    await counted.getList();
+    expect(dbSingleListRecords).toHaveBeenLastCalledWith('shared', 'posts', {
+      limit: '10',
+      includeTotal: 'true',
     });
 
     await table.limit(10).getList();
@@ -460,6 +468,51 @@ describe('HttpClient — constructor', () => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
+});
+
+describe('HttpClient — bounded non-JSON error responses', () => {
+  it('preserves a plain-text worker-loss 503 while JSON and empty controls keep their messages', async () => {
+    const cases = [
+      {
+        body: '{"message":"Structured service failure."}',
+        contentType: 'application/json',
+        expected: 'Structured service failure.',
+      },
+      {
+        body: null,
+        contentType: null,
+        expected: 'Server error. Check the EdgeBase server logs and retry.',
+      },
+      {
+        body: 'The local worker connection was lost. This request was not retried.',
+        contentType: 'text/plain; charset=utf-8',
+        expected: 'The local worker connection was lost. This request was not retried.',
+      },
+      {
+        body: 'x'.repeat((64 * 1024) + 1),
+        contentType: 'text/plain; charset=utf-8',
+        expected: 'Server error. Check the EdgeBase server logs and retry.',
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const cm = new ContextManager();
+      const client = new HttpClient({ baseUrl: 'https://api.example.test', contextManager: cm });
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(testCase.body, {
+          status: 503,
+          headers: testCase.contentType ? { 'Content-Type': testCase.contentType } : {},
+        }),
+      );
+
+      await expect(client.post('/api/functions/file-mutation', {
+        action: 'completeUpload',
+      })).rejects.toMatchObject({
+        code: 503,
+        message: testCase.expected,
+      });
+    }
+  });
 });
 
 describe('HttpClient — bodyless JSON requests', () => {
@@ -1045,6 +1098,51 @@ describe('TableRef.onSnapshot', () => {
     }]);
   });
 
+  it('keeps client-side null equality and inequality filters complementary', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const equalLive = createDatabaseLiveHarness();
+    const notEqualLive = createDatabaseLiveHarness();
+    const equalSnapshots: string[][] = [];
+    const notEqualSnapshots: string[][] = [];
+
+    new TableRef<Record<string, unknown>>(
+      {} as never,
+      'schedules',
+      equalLive.subscriber as never,
+      undefined,
+      'shared',
+    )
+      .where('nextRunAt', '==', null)
+      .onSnapshot((snapshot) => {
+        equalSnapshots.push(snapshot.items.map((item) => String(item.id)));
+      }, { serverFilter: false });
+
+    new TableRef<Record<string, unknown>>(
+      {} as never,
+      'schedules',
+      notEqualLive.subscriber as never,
+      undefined,
+      'shared',
+    )
+      .where('nextRunAt', '!=', null)
+      .onSnapshot((snapshot) => {
+        notEqualSnapshots.push(snapshot.items.map((item) => String(item.id)));
+      }, { serverFilter: false });
+
+    const nullRow = { id: 'null-next', nextRunAt: null };
+    const futureRow = { id: 'future-next', nextRunAt: '2026-07-24T00:00:00.000Z' };
+    equalLive.emit({ changeType: 'added', docId: 'null-next', data: nullRow });
+    equalLive.emit({ changeType: 'added', docId: 'future-next', data: futureRow });
+    notEqualLive.emit({ changeType: 'added', docId: 'null-next', data: nullRow });
+    notEqualLive.emit({ changeType: 'added', docId: 'future-next', data: futureRow });
+
+    await vi.runAllTimersAsync();
+
+    expect(equalSnapshots).toEqual([['null-next']]);
+    expect(notEqualSnapshots).toEqual([['future-next']]);
+  });
+
   it('emits removed when a tracked item stops matching client-side filters', async () => {
     vi.useFakeTimers();
     const live = createDatabaseLiveHarness();
@@ -1455,6 +1553,31 @@ describe('DbRef — table reference creation', () => {
       resultMode: 'full',
     });
     expect(core.dbSingleTransact).not.toHaveBeenCalled();
+  });
+
+  it('transact consumers adopt the committed insert row instead of the input object', async () => {
+    const input = { title: 'Synthetic post' };
+    const committed = {
+      id: 'post-1',
+      title: input.title,
+      createdAt: '2026-07-21T00:00:00.100Z',
+      updatedAt: '2026-07-21T00:00:00.100Z',
+    };
+    const core = {
+      dbSingleTransact: vi.fn().mockResolvedValue({ results: [{ inserted: committed }] }),
+      dbTransact: vi.fn(),
+    } as unknown as GeneratedDbApi;
+
+    const transaction = await new DbRef<{
+      posts: typeof committed;
+    }>(core, 'shared').transact([
+      { table: 'posts', op: 'insert', data: input },
+    ]);
+    const canonical = transaction.results[0]?.inserted;
+
+    expect(input).toEqual({ title: 'Synthetic post' });
+    expect(canonical).toEqual(committed);
+    expect(canonical).not.toBe(input);
   });
 });
 

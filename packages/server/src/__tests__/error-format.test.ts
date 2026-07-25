@@ -291,6 +291,23 @@ describe('normalizeDatabaseError', () => {
   it('returns null for unrelated runtime errors', () => {
     expect(normalizeDatabaseError(new Error('socket hang up'))).toBeNull();
   });
+
+  it('maps filesystem and SQLite capacity exhaustion to one sanitized 507 response', () => {
+    const cases = [
+      Object.assign(new Error('/data/private/path: no space left on device'), { code: 'ENOSPC' }),
+      { message: 'outer storage wrapper', cause: { code: 'EDQUOT', message: 'quota exceeded' } },
+      new Error('D1_ERROR: SQLITE_FULL: database or disk is full'),
+    ];
+
+    for (const input of cases) {
+      const err = normalizeDatabaseError(input);
+      expect(err).toBeInstanceOf(EdgeBaseError);
+      expect(err?.code).toBe(507);
+      expect(err?.slug).toBe('insufficient-storage');
+      expect(err?.message).toBe('Persistence storage is full. Free disk space and retry.');
+      expect(JSON.stringify(err?.toJSON())).not.toMatch(/private\/path|quota exceeded|SQLITE_FULL/i);
+    }
+  });
 });
 
 // ─── C. Error 구조 직렬화 ────────────────────────────────────────────────────

@@ -28,7 +28,8 @@ Compare with the deployed config's schema hash
   │
   ▼
 FTS5 + Index self-healing (always runs):
-  ├─ Create FTS5 virtual tables + triggers (IF NOT EXISTS)
+  ├─ Verify the virtual table, trigger set, and configured field signature
+  ├─ Rebuild drifted or incomplete FTS5 artifacts from the base table
   └─ Create indexes (IF NOT EXISTS)
   │
   ▼
@@ -263,7 +264,21 @@ The default `unicode61` tokenizer splits text on whitespace, which does not work
 
 ### FTS Self-Healing
 
-FTS virtual tables and their associated triggers are recreated on every schema init pass (using `IF NOT EXISTS`), regardless of whether the schema hash changed. This ensures FTS stays in sync even after edge cases like partial initialization failures.
+On each SQLite schema initialization pass, EdgeBase checks the exact FTS virtual
+table and three-trigger artifact set with a bounded catalog query. Object kind,
+owner, and generated SQL are checked as well as names, so a custom same-name
+table or trigger is never dropped. A persisted field-list signature and the
+virtual table columns detect configuration drift. Missing or drifted artifacts
+are replaced transactionally and rebuilt from the authoritative base table only
+when every present artifact is proven provider-owned; collisions fail closed.
+
+PostgreSQL maintains one internal `_fts_text` corpus for configured fields and
+indexes it with `pg_trgm`. The legacy `_fts` tsvector remains additive for
+existing databases. A definition signature makes ordinary corpus backfill a
+one-time migration step instead of work repeated on every cold initialization;
+a bounded catalog check still repairs missing or invalid helper artifacts even
+when that signature matches. Reserved index-name collisions fail closed without
+dropping an index owned by another table.
 
 ### Search API
 
@@ -271,7 +286,13 @@ FTS virtual tables and their associated triggers are recreated on every schema i
 const results = await client.db('app').table('posts').search('query text').limit(20).getList();
 ```
 
-The server executes a FTS5 `MATCH` query, wrapping the search term in double quotes to ensure literal matching (preventing special characters like `-` or `*` from being interpreted as FTS5 operators).
+SQLite executes a literal FTS5 `MATCH` query when every effective search token
+has at least three Unicode characters. Short tokens use substring matching. A
+configured long-token search fails closed when its managed artifacts are
+unhealthy instead of silently scanning the base table, while a healthy zero-hit
+result is terminal. PostgreSQL searches its indexed `_fts_text` corpus with the
+same literal substring semantics, including when the term contains `%`, `_`, or
+a backslash.
 
 ## System Tables
 

@@ -131,6 +131,47 @@ docker run --env-file .env.development -p 8787:8787 -v edgebase-data:/data edgeb
 
 :::
 
+### Gateway Resource Bounds
+
+Generated Docker and pack launchers put the public gateway in front of the
+loopback Wrangler process. The defaults are finite and can only be replaced by
+validated integer environment variables; an invalid value stops startup before
+the public port opens.
+
+| Variable | Default | Allowed range |
+| --- | ---: | ---: |
+| `EDGEBASE_GATEWAY_MAX_CONNECTIONS` | 512 | 1–65,535 |
+| `EDGEBASE_GATEWAY_MAX_REQUEST_BODY_BYTES` | 5 GiB | 1 byte–5 GiB |
+| `EDGEBASE_GATEWAY_HEADERS_TIMEOUT_MS` | 15 seconds | 1–300,000 ms |
+| `EDGEBASE_GATEWAY_REQUEST_TIMEOUT_MS` | 15 minutes | 1–86,400,000 ms |
+| `EDGEBASE_GATEWAY_IDLE_TIMEOUT_MS` | 30 seconds | 1–3,600,000 ms |
+| `EDGEBASE_GATEWAY_KEEP_ALIVE_TIMEOUT_MS` | 5 seconds | 1–300,000 ms |
+| `EDGEBASE_GATEWAY_UPSTREAM_TIMEOUT_MS` | 5 minutes | 1–3,600,000 ms |
+| `EDGEBASE_GATEWAY_EVENT_COALESCE_WINDOW_MS` | 5 seconds | 1–60,000 ms |
+| `EDGEBASE_GATEWAY_MIN_FREE_BYTES` | 512 MiB | Nonnegative safe integer bytes |
+| `EDGEBASE_GATEWAY_RECOVERY_FREE_BYTES` | minimum + 128 MiB | Safe integer bytes greater than the minimum |
+
+The request limit is counted while streaming and rejects a declared or chunked
+request before any byte beyond the cap reaches Wrangler. Five GiB preserves the
+public maximum multipart-part contract; the standard JavaScript SDK uses 5 MiB
+parts. Established WebSocket connections are exempt from HTTP idle and upstream
+timeouts, while the connection admission cap still bounds the listening socket.
+
+Gateway-generated warnings and errors contain only controlled event metadata,
+such as the event class, reason, status, count, and a sanitized error code. They
+never include a request URL, query, headers, body, credentials, or client
+identity. The first event in a class is written immediately; repeats within the
+collection window are summarized by the next event or during shutdown.
+
+The gateway samples the persistence filesystem at a shared 250 ms cadence. It
+stops admitting new HTTP, HEAD, and WebSocket work with `507 Insufficient
+Storage` before free space crosses the configured reserve, reports blocked
+health, and resumes only after the recovery watermark is reached. Existing
+admitted work drains normally. A filesystem probe failure stays closed with a
+retryable `503`; neither response exposes filesystem paths or request data.
+These values reserve operating headroom only and do not impose an application
+storage quota.
+
 ### Data Persistence
 
 All data is stored in the `/data` volume:
@@ -169,6 +210,16 @@ only on loopback, authenticates the exact runtime generation and schedule
 digest, validates durable schedule state, completes the first supervisor pass,
 and opens the public gateway last. It owns the complete child process group and
 removes temporary runtime-secret files on normal startup failure or shutdown.
+It uses the same gateway resource variables and metadata-only operational
+events described above.
+
+Schedule state is a rebuildable launcher cursor; the runtime's separate durable
+delivery keys remain the execution authority. If a regular state file is
+truncated, oversized, or belongs to an incompatible schema, the launcher moves
+its exact bytes to one fixed `.corrupt` sibling, logs that path, and regenerates
+state from the signed manifest. A later incident replaces that one sidecar, so
+quarantine history cannot grow without bound. Permission failures, non-regular
+paths, and a sidecar that cannot be replaced still fail startup closed.
 
 Do not replace the launcher with raw `wrangler dev`. Raw Wrangler, `edgebase
 dev`, and `dev:raw` omit production gateway admission, durable managed-schedule
@@ -200,8 +251,10 @@ pm2 save
 HTTPS is required for production. Use Caddy or Nginx as a reverse proxy.
 
 :::danger Security: Name Every Trusted Proxy Peer
-EdgeBase uses the client IP address for **rate limiting** and **brute-force
-protection**. Generated Docker and pack gateways discard client-supplied
+EdgeBase uses a verified user ID for ordinary authenticated API limits, and the
+client IP address for anonymous/auth/custom-Bearer limits, brute-force
+protection, and service-key network constraints. Generated Docker and pack
+gateways discard client-supplied
 forwarding headers and write their own values. They preserve an upstream
 `X-Forwarded-For`, `X-Forwarded-Proto`, and `X-Forwarded-Host` set only when the
 immediate peer matches `EDGEBASE_TRUSTED_PROXY_CIDRS`.
@@ -392,7 +445,7 @@ curl http://localhost:8787/__edgebase/health
 
 # Check the EdgeBase application runtime separately.
 curl http://localhost:8787/api/health
-# → {"status":"ok","version":"0.4.9"}
+# → {"status":"ok","version":"0.5.0"}
 ```
 
 The endpoint returns `200` for structurally ready `ready`, `running`, or

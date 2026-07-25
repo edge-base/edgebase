@@ -9,6 +9,7 @@ export function escapePgIdentifier(name: string): string {
 export function stripInternalPgFields(row: Record<string, unknown>): Record<string, unknown> {
   const cleaned = { ...row };
   delete cleaned._fts;
+  delete cleaned._fts_text;
   return cleaned;
 }
 

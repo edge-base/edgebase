@@ -55,6 +55,27 @@ retrying. To apply one default to JSON API calls, pass `requestTimeoutMs` to
 `createClient`. It is intentionally opt-in so long-running functions keep their
 existing behavior.
 
+Use an `AbortController` when the application supersedes a Function call, for
+example when a newer search replaces an older one:
+
+```typescript
+const controller = new AbortController();
+
+const result = client.functions.call('reports/search', {
+  method: 'GET',
+  query: { q: 'quarterly' },
+  signal: controller.signal,
+});
+
+controller.abort();
+await result;
+```
+
+An already-aborted signal performs no request. Cancellation also stops an
+in-flight body read or retry wait and rejects with the caller's abort reason
+(normally an `AbortError`), rather than a normalized network error. A configured
+`timeoutMs` remains a separate `request-timeout` error when the deadline wins.
+
 </TabItem>
 <TabItem value="dart" label="Dart/Flutter">
 
@@ -372,6 +393,36 @@ single-use, so a CAPTCHA-protected Function call is never automatically replayed
 after a transport error or HTTP 401/429 response. Reconcile the operation with
 an application idempotency key or status read, acquire a new token, and retry
 explicitly.
+
+## Streaming And Binary Responses (JavaScript)
+
+JavaScript clients can use `callRaw()` when a Function returns a ZIP, PDF,
+image, server-sent stream, or another non-JSON payload:
+
+```typescript
+const response = await client.functions.callRaw('reports/archive', {
+  method: 'POST',
+  body: { reportId: 'report-1' },
+  query: { disposition: 'attachment' },
+  timeoutMs: 20_000,
+});
+
+if (!response.body) throw new Error('The archive response has no body.');
+await response.body.pipeTo(downloadDestination);
+```
+
+`callRaw()` uses the same auth injection, one-time 401 refresh, locale and
+CAPTCHA headers, normalized non-success errors, rate-limit policy, and
+GET-versus-mutation replay rules as `call()`. A successful response is returned
+unchanged with its body unread; the SDK does not buffer, clone, or decode it.
+
+For a raw call, `timeoutMs` covers the request until response headers are
+received. After the `Response` is returned, the application owns stream
+consumption, size limits, cancellation, and any later deadline. JSON calls keep
+their existing header-and-body deadline. Passing `signal` to `callRaw()` keeps
+the returned response body bound to that caller signal after header handoff.
+The raw-response helper is currently specific to the JavaScript SDKs; other
+SDKs retain their JSON Function helpers.
 
 ## Authentication
 

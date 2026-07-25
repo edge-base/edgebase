@@ -134,6 +134,20 @@ async function waitForHttpStatus(url: string, status: number, timeoutMs = 30_000
   throw new Error(`Timed out waiting for ${url}.`, { cause: lastError });
 }
 
+async function observeDatabaseLiveUpgrade(url: string): Promise<{ opened: boolean; error: string | null }> {
+  const socket = new WebSocket(url);
+  return new Promise((resolvePromise) => {
+    const settle = (opened: boolean, error: string | null) => {
+      clearTimeout(timer);
+      if (socket.readyState === WebSocket.OPEN) socket.close();
+      resolvePromise({ opened, error });
+    };
+    const timer = setTimeout(() => settle(false, 'upgrade timed out'), 5_000);
+    socket.addEventListener('open', () => settle(true, null), { once: true });
+    socket.addEventListener('error', () => settle(false, 'upgrade failed'), { once: true });
+  });
+}
+
 async function waitForSuccessfulScheduleState(filePath: string, timeoutMs = 30_000): Promise<Record<string, unknown>> {
   const startedAt = Date.now();
   let lastObservation = 'state file not created';
@@ -184,6 +198,80 @@ async function waitForFile(filePath: string, timeoutMs = 10_000): Promise<void> 
   throw new Error(`Timed out waiting for launcher file: ${filePath}`);
 }
 
+async function waitForJsonFile<T>(filePath: string, timeoutMs = 30_000): Promise<T> {
+  const startedAt = Date.now();
+  let lastError: unknown = new Error('file not created');
+  while (Date.now() - startedAt < timeoutMs) {
+    if (existsSync(filePath)) {
+      try {
+        return JSON.parse(readFileSync(filePath, 'utf-8')) as T;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+  }
+  throw new Error(`Timed out waiting for valid launcher JSON: ${filePath}`, { cause: lastError });
+}
+
+async function canAcquireLauncherClaim(filePath: string): Promise<boolean> {
+  const probe = await runBufferedProcess(
+    process.execPath,
+    [
+      '--no-warnings',
+      '-e',
+      [
+        "const { DatabaseSync } = require('node:sqlite');",
+        'const database = new DatabaseSync(process.argv[1]);',
+        'try {',
+        "  database.exec('PRAGMA busy_timeout = 0; BEGIN IMMEDIATE; ROLLBACK;');",
+        '  process.exitCode = 0;',
+        '} catch (error) {',
+        '  if (error && error.errcode === 5) process.exitCode = 2;',
+        '  else throw error;',
+        '} finally {',
+        '  database.close();',
+        '}',
+      ].join('\n'),
+      filePath,
+    ],
+    { encoding: 'utf-8' },
+  );
+  if (probe.status === 0) return true;
+  if (probe.status === 2) return false;
+  throw new Error(`Launcher claim probe failed: ${probe.stderr || probe.stdout}`);
+}
+
+async function waitForCondition(
+  check: () => boolean | Promise<boolean>,
+  description: string,
+  timeoutMs = 15_000,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await check()) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+  }
+  throw new Error(`Timed out waiting for ${description}.`);
+}
+
+async function forceStopProcessTree(pid: number): Promise<void> {
+  if (process.platform === 'win32') {
+    await runBufferedProcess('taskkill', ['/pid', String(pid), '/t', '/f'], { encoding: 'utf-8' });
+    return;
+  }
+
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // The exact owned process group already exited.
+    }
+  }
+}
+
 // The packed launcher owns a 10-second shutdown deadline. Leave an outer-test
 // margin for its final SIGKILL/process-group reap and Node's child `exit` event,
 // especially on loaded ARM CI hosts.
@@ -218,6 +306,15 @@ async function waitForChildExit(child: ChildProcess, timeoutMs = 15_000): Promis
       reject(error);
     });
   });
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
 }
 
 function runPack(projectDir: string, outputDirName: string, options?: { format?: 'dir' | 'portable' | 'archive'; appName?: string }) {
@@ -276,16 +373,6 @@ function resolveAppDataRoot(appDataDirName: string): string {
     return join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), appDataDirName);
   }
   return join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), appDataDirName);
-}
-
-function hasBundledPnpmPackage(runtimeNodeModulesDir: string, entryPrefix: string, packagePath: string[]): boolean {
-  const pnpmDir = join(runtimeNodeModulesDir, '.pnpm');
-  if (!existsSync(pnpmDir)) return false;
-
-  return readdirSync(pnpmDir).some((entry) => (
-    entry.startsWith(entryPrefix)
-    && existsSync(join(pnpmDir, entry, 'node_modules', ...packagePath, 'package.json'))
-  ));
 }
 
 function readBundledPackageVersion(runtimeNodeModulesDir: string, packageName: string): string | null {
@@ -350,7 +437,9 @@ describe('pack command', () => {
 export default defineConfig({
   databases: {
     shared: {
-      tables: {},
+      tables: {
+        posts: { schema: { title: { type: 'string' } } },
+      },
     },
   },
 });
@@ -421,6 +510,8 @@ export default defineConfig({
         gateway: { path: string; digest: string; bytes: number };
         scheduleSupervisor: { path: string; digest: string; bytes: number };
         dockerEntrypoint: { path: string; digest: string; bytes: number };
+        wranglerRuntime: { path: string; digest: string; bytes: number };
+        proxyWorker: { path: string; digest: string; bytes: number };
       };
       launcher: {
         entry: string;
@@ -451,6 +542,8 @@ export default defineConfig({
         gateway: { path: string; digest: string; bytes: number };
         scheduleSupervisor: { path: string; digest: string; bytes: number };
         dockerEntrypoint: { path: string; digest: string; bytes: number };
+        wranglerRuntime: { path: string; digest: string; bytes: number };
+        proxyWorker: { path: string; digest: string; bytes: number };
       };
     };
     expect(manifest.schedules.digest).toBe(appManifest.schedules.digest);
@@ -462,6 +555,8 @@ export default defineConfig({
       gateway: { path: '.edgebase/self-host/self-host-gateway.mjs' },
       scheduleSupervisor: { path: '.edgebase/self-host/self-host-schedule-supervisor.mjs' },
       dockerEntrypoint: { path: '.edgebase/self-host/self-host-docker-entrypoint.mjs' },
+      wranglerRuntime: { path: '.edgebase/self-host/self-host-wrangler-runtime.mjs' },
+      proxyWorker: { path: '.edgebase/self-host/self-host-proxy-worker.js' },
     });
     expect(manifest.launcher).toMatchObject({
       entry: 'launcher.mjs',
@@ -486,6 +581,8 @@ export default defineConfig({
     expect(existsSync(join(projectDir, 'packed', manifest.selfHost.gateway.path))).toBe(true);
     expect(existsSync(join(projectDir, 'packed', manifest.selfHost.scheduleSupervisor.path))).toBe(true);
     expect(existsSync(join(projectDir, 'packed', manifest.selfHost.dockerEntrypoint.path))).toBe(true);
+    expect(existsSync(join(projectDir, 'packed', manifest.selfHost.wranglerRuntime.path))).toBe(true);
+    expect(existsSync(join(projectDir, 'packed', manifest.selfHost.proxyWorker.path))).toBe(true);
     expect(existsSync(join(projectDir, 'packed', 'run.sh'))).toBe(true);
     expect(existsSync(join(projectDir, 'packed', 'run.cmd'))).toBe(true);
     expect(existsSync(join(projectDir, 'packed', 'edgebase.config.ts'))).toBe(false);
@@ -515,7 +612,7 @@ export default defineConfig({
     expect(readBundledPackageVersion(runtimeNodeModulesDir, 'miniflare')).toBe(expectedPortableMiniflareVersion);
     expect(resolveBundledWranglerMiniflareVersion(runtimeNodeModulesDir)).toBe(expectedPortableMiniflareVersion);
     expect(bundledPortableMiniflareEntries).toEqual(
-      bundledPortableMiniflareEntries.map((entry) => (
+      bundledPortableMiniflareEntries.map(() => (
         expect.stringMatching(new RegExp(`^miniflare@${escapeRegExp(expectedPortableMiniflareVersion)}`))
       )),
     );
@@ -543,6 +640,19 @@ export default defineConfig({
     expect(readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8')).toContain(
       'compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]',
     );
+    const packedWrangler = readFileSync(join(projectDir, 'packed', 'wrangler.toml'), 'utf-8');
+    for (const [binding, className] of [
+      ['DATABASE', 'DatabaseDO'],
+      ['AUTH', 'AuthDO'],
+      ['DATABASE_LIVE', 'DatabaseLiveDO'],
+      ['ROOMS', 'RoomsDO'],
+      ['LOGS', 'LogsDO'],
+    ]) {
+      expect.soft(packedWrangler).toContain(`name = "${binding}"`);
+      expect.soft(packedWrangler).toContain(`class_name = "${className}"`);
+    }
+    expect.soft(packedWrangler).toContain('binding = "KV"');
+    expect.soft(packedWrangler).toContain('binding = "STORAGE"');
     expect(existsSync(join(projectDir, 'packed', '.env.release'))).toBe(false);
     const launcherSource = readFileSync(join(projectDir, 'packed', 'launcher.mjs'), 'utf-8');
     expect(launcherSource).toContain('verifySelfHostAssets(appManifestPath, artifactRoot)');
@@ -552,6 +662,17 @@ export default defineConfig({
     expect(launcherSource).toContain('workerTrustSecret: gatewaySecret');
     expect(launcherSource).toContain('healthProvider: () => scheduleSupervisor?.getStatus()');
     expect(launcherSource).toContain('admissionGuard: () => (');
+    expect.soft(launcherSource).toContain('maxConnections: process.env.EDGEBASE_GATEWAY_MAX_CONNECTIONS');
+    expect.soft(launcherSource).toContain('maxRequestBodyBytes: process.env.EDGEBASE_GATEWAY_MAX_REQUEST_BODY_BYTES');
+    expect.soft(launcherSource).toContain('headersTimeoutMs: process.env.EDGEBASE_GATEWAY_HEADERS_TIMEOUT_MS');
+    expect.soft(launcherSource).toContain('requestTimeoutMs: process.env.EDGEBASE_GATEWAY_REQUEST_TIMEOUT_MS');
+    expect.soft(launcherSource).toContain('idleTimeoutMs: process.env.EDGEBASE_GATEWAY_IDLE_TIMEOUT_MS');
+    expect.soft(launcherSource).toContain('upstreamTimeoutMs: process.env.EDGEBASE_GATEWAY_UPSTREAM_TIMEOUT_MS');
+    expect.soft(launcherSource).toContain('onEvent: reportGatewayEvent');
+    expect.soft(launcherSource).toContain("logStream.write('[EdgeBase] gateway '");
+    expect(launcherSource).toContain('createSelfHostScheduleOutcomeLogger');
+    expect(launcherSource).not.toContain('for (const outcome of report.outcomes)');
+    expect(launcherSource).not.toContain('for (const outcome of initialReport.outcomes)');
     expect(launcherSource).toContain('const childTerminal = new Promise');
     expect(launcherSource).toContain("detached: process.platform !== 'win32'");
     expect(launcherSource).toContain('process.kill(-pid, signal)');
@@ -673,6 +794,10 @@ export default defineConfig({
           structuralReady: true,
         },
       });
+      const databaseLive = await observeDatabaseLiveUpgrade(
+        `ws://127.0.0.1:${liveGatewayPort}/api/db/subscribe?namespace=shared&table=posts`,
+      );
+      expect.soft(databaseLive).toEqual({ opened: true, error: null });
       try {
         await expect(waitForHttpStatus(
           `http://127.0.0.1:${liveGatewayPort}/api/health`,
@@ -935,6 +1060,170 @@ export default defineConfig({
     }
   });
 
+  it('fails closed and cleans up when another listener wins the internal port handoff', { timeout: 90_000 }, async () => {
+    const projectDir = createTempProject('internal-port-handoff');
+    mkdirSync(join(projectDir, 'functions'), { recursive: true });
+    writeFileSync(
+      join(projectDir, 'edgebase.config.ts'),
+      `import { defineConfig } from '@edge-base/shared';
+
+export default defineConfig({
+  databases: {
+    shared: {
+      tables: {},
+    },
+  },
+});
+`,
+    );
+    writeFileSync(join(projectDir, 'functions', 'health.ts'), 'export default async () => new Response("ok");\n');
+
+    const result = await runPack(projectDir, 'packed');
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+    expect(result.stderr).toBe('');
+
+    const launcherPath = join(projectDir, 'packed', 'launcher.mjs');
+    const dataRoot = join(projectDir, 'handoff-data');
+    const runtimeDir = join(dataRoot, 'runtime');
+    const lockPath = join(dataRoot, 'launcher-lock.json');
+    const claimPath = join(dataRoot, 'launcher-claim.sqlite');
+    const devVarsPath = join(runtimeDir, '.dev.vars');
+    const handoffPath = join(projectDir, 'competing-handoff.json');
+    const spawnedChildPath = join(projectDir, 'spawned-child.json');
+    const preloadPath = join(projectDir, 'competing-handoff.cjs');
+    writeFileSync(
+      preloadPath,
+      [
+        "const childProcess = require('node:child_process');",
+        "const fs = require('node:fs');",
+        "const net = require('node:net');",
+        "const { syncBuiltinESMExports } = require('node:module');",
+        'const originalCreateServer = net.createServer;',
+        'const originalSpawn = childProcess.spawn;',
+        'const handoffPath = process.env.EDGEBASE_TEST_HANDOFF_PATH;',
+        'const spawnedChildPath = process.env.EDGEBASE_TEST_SPAWNED_CHILD_PATH;',
+        'let handoffInjected = false;',
+        'net.createServer = function patchedCreateServer(...createArgs) {',
+        '  const server = originalCreateServer.apply(this, createArgs);',
+        '  const originalListen = server.listen;',
+        '  const originalClose = server.close;',
+        '  let internalReservation = false;',
+        '  server.listen = function patchedListen(...listenArgs) {',
+        '    const options = listenArgs[0];',
+        '    internalReservation = Boolean(',
+        '      options',
+        '      && typeof options === "object"',
+        '      && options.port === 0',
+        '      && options.host === "127.0.0.1"',
+        '      && options.exclusive === true',
+        '    );',
+        '    return originalListen.apply(this, listenArgs);',
+        '  };',
+        '  server.close = function patchedClose(callback) {',
+        '    if (!internalReservation || handoffInjected) {',
+        '      return originalClose.call(this, callback);',
+        '    }',
+        '    handoffInjected = true;',
+        '    const address = server.address();',
+        '    return originalClose.call(this, (error) => {',
+        '      if (error || !address || typeof address === "string") {',
+        '        callback?.(error || new Error("Missing reserved internal address."));',
+        '        return;',
+        '      }',
+        '      const competitor = originalCreateServer();',
+        '      competitor.once("error", (competitorError) => callback?.(competitorError));',
+        '      competitor.listen({',
+        '        port: address.port,',
+        '        host: "127.0.0.1",',
+        '        exclusive: true,',
+        '      }, () => {',
+        '        competitor.unref();',
+        '        fs.writeFileSync(',
+        '          handoffPath,',
+        '          JSON.stringify({ port: address.port, ownerPid: process.pid }) + "\\n",',
+        '        );',
+        '        callback?.();',
+        '      });',
+        '    });',
+        '  };',
+        '  return server;',
+        '};',
+        'childProcess.spawn = function patchedSpawn(...spawnArgs) {',
+        '  const child = originalSpawn.apply(this, spawnArgs);',
+        '  fs.writeFileSync(',
+        '    spawnedChildPath,',
+        '    JSON.stringify({ pid: child.pid, command: String(spawnArgs[0]) }) + "\\n",',
+        '  );',
+        '  return child;',
+        '};',
+        'syncBuiltinESMExports();',
+        '',
+      ].join('\n'),
+    );
+
+    const gatewayPort = await findFreePort();
+    const failedLaunch = await runBufferedProcess(
+      process.execPath,
+      [
+        '--require',
+        preloadPath,
+        launcherPath,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(gatewayPort),
+        '--data-dir',
+        dataRoot,
+      ],
+      {
+        cwd: join(projectDir, 'packed'),
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          EDGEBASE_OPEN: '0',
+          EDGEBASE_TEST_HANDOFF_PATH: handoffPath,
+          EDGEBASE_TEST_SPAWNED_CHILD_PATH: spawnedChildPath,
+        },
+        timeout: 45_000,
+      },
+    );
+
+    expect(failedLaunch.status, failedLaunch.stderr || failedLaunch.stdout).not.toBe(0);
+    expect(failedLaunch.stderr).toMatch(
+      /Wrangler exited during (?:authenticated readiness|readiness retry) \(code=1, signal=null\)/,
+    );
+    const handoff = JSON.parse(readFileSync(handoffPath, 'utf-8')) as {
+      port: number;
+      ownerPid: number;
+    };
+    const spawnedChild = JSON.parse(readFileSync(spawnedChildPath, 'utf-8')) as {
+      pid: number;
+      command: string;
+    };
+    expect(handoff.ownerPid).toBeGreaterThan(0);
+    expect(handoff.port).not.toBe(gatewayPort);
+    expect(spawnedChild.pid).toBeGreaterThan(0);
+    expect(spawnedChild.command).toBe(process.execPath);
+    await waitForCondition(
+      () => !isProcessAlive(spawnedChild.pid),
+      'the Wrangler child from the lost handoff to exit',
+    );
+
+    expect(existsSync(lockPath)).toBe(false);
+    expect(existsSync(devVarsPath)).toBe(false);
+    expect(
+      existsSync(runtimeDir)
+        ? readdirSync(runtimeDir).filter((entry) => entry.startsWith('.dev.vars.'))
+        : [],
+    ).toEqual([]);
+    expect(existsSync(claimPath)).toBe(true);
+    await expect(canAcquireLauncherClaim(claimPath)).resolves.toBe(true);
+    await expect(canBindPort(gatewayPort)).resolves.toBe(true);
+    await expect(canBindPort(handoff.port)).resolves.toBe(true);
+    expect(readFileSync(join(dataRoot, 'launcher.log'), 'utf-8'))
+      .toContain('self-host startup failed');
+  });
+
   it('includes configured frontend assets in the packed runtime scaffold', { timeout: 90_000 }, async () => {
     const projectDir = createTempProject('frontend');
     mkdirSync(join(projectDir, 'functions'), { recursive: true });
@@ -1025,6 +1314,297 @@ export default defineConfig({
     expect(launchPlan.port).toBeGreaterThanOrEqual(manifest.launcher.defaultPort);
     expect(launchPlan.port).toBeLessThan(manifest.launcher.defaultPort + manifest.launcher.portSearchLimit);
     expect(launchPlan.openUrl).toBe(`http://127.0.0.1:${launchPlan.port}/app`);
+  });
+
+  it('claims one data root before concurrent launchers mutate shared runtime state', { timeout: 120_000 }, async () => {
+    const projectDir = createTempProject('single-instance-claim');
+    mkdirSync(join(projectDir, 'functions'), { recursive: true });
+    writeFileSync(
+      join(projectDir, 'edgebase.config.ts'),
+      `import { defineConfig } from '@edge-base/shared';
+
+export default defineConfig({
+  databases: {
+    shared: {
+      tables: {},
+    },
+  },
+});
+`,
+    );
+    writeFileSync(join(projectDir, 'functions', 'health.ts'), 'export default async () => new Response("ok");\n');
+
+    const result = await runPack(projectDir, 'packed');
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+    expect(result.stderr).toBe('');
+
+    const launcherPath = join(projectDir, 'packed', 'launcher.mjs');
+    const dataRoot = join(projectDir, 'concurrent-launch-data');
+    const runtimeDir = join(dataRoot, 'runtime');
+    const lockPath = join(dataRoot, 'launcher-lock.json');
+    const claimPath = join(dataRoot, 'launcher-claim.sqlite');
+    const statePath = join(dataRoot, 'launcher-state.json');
+    const devVarsPath = join(runtimeDir, '.dev.vars');
+    const barrierDir = join(projectDir, 'launcher-claim-barrier');
+    mkdirSync(barrierDir, { recursive: true });
+
+    const preloadPath = join(projectDir, 'launcher-claim-barrier.cjs');
+    writeFileSync(
+      preloadPath,
+      [
+        "const fs = require('node:fs');",
+        "const childProcess = require('node:child_process');",
+        "const path = require('node:path');",
+        "const { syncBuiltinESMExports } = require('node:module');",
+        'const originalExistsSync = fs.existsSync;',
+        'const originalWriteFileSync = fs.writeFileSync;',
+        'const originalRenameSync = fs.renameSync;',
+        'const originalSpawn = childProcess.spawn;',
+        'const lockPath = process.env.EDGEBASE_TEST_LAUNCHER_LOCK_PATH;',
+        'const statePath = process.env.EDGEBASE_TEST_LAUNCHER_STATE_PATH;',
+        'const devVarsPath = process.env.EDGEBASE_TEST_LAUNCHER_DEV_VARS_PATH;',
+        'const barrierDir = process.env.EDGEBASE_TEST_LAUNCHER_BARRIER_DIR;',
+        'const role = process.env.EDGEBASE_TEST_LAUNCHER_ROLE;',
+        'const delayMs = Number(process.env.EDGEBASE_TEST_LAUNCHER_DELAY_MS || 0);',
+        'const releasePath = path.join(barrierDir, "release");',
+        'const waitCell = new Int32Array(new SharedArrayBuffer(4));',
+        'let held = false;',
+        'fs.existsSync = function patchedExistsSync(target) {',
+        '  const result = originalExistsSync(target);',
+        '  if (!held && String(target) === lockPath) {',
+        '    held = true;',
+        '    originalWriteFileSync(path.join(barrierDir, "arrived-" + role), String(process.pid) + "\\n");',
+        '    const deadline = Date.now() + 20_000;',
+        '    while (!originalExistsSync(releasePath)) {',
+        '      if (Date.now() >= deadline) throw new Error("launcher claim barrier timed out");',
+        '      Atomics.wait(waitCell, 0, 0, 10);',
+        '    }',
+        '    if (delayMs > 0) Atomics.wait(waitCell, 0, 0, delayMs);',
+        '  }',
+        '  return result;',
+        '};',
+        'fs.writeFileSync = function patchedWriteFileSync(target, ...args) {',
+        '  if (String(target) === statePath) {',
+        '    originalWriteFileSync(path.join(barrierDir, "state-write-" + role), String(process.pid) + "\\n");',
+        '  }',
+        '  return originalWriteFileSync.call(this, target, ...args);',
+        '};',
+        'fs.renameSync = function patchedRenameSync(source, destination) {',
+        '  if (String(destination) === devVarsPath) {',
+        '    originalWriteFileSync(path.join(barrierDir, "env-write-" + role), String(process.pid) + "\\n");',
+        '  }',
+        '  return originalRenameSync.call(this, source, destination);',
+        '};',
+        'childProcess.spawn = function patchedSpawn(command, args, options) {',
+        '  originalWriteFileSync(',
+        '    path.join(barrierDir, "spawned-" + role),',
+        '    JSON.stringify({ pid: process.pid, command: String(command), args }) + "\\n",',
+        '  );',
+        '  return originalSpawn.call(this, command, args, options);',
+        '};',
+        'syncBuiltinESMExports();',
+        '',
+      ].join('\n'),
+    );
+
+    const envAPath = join(projectDir, 'launcher-a.env');
+    const envBPath = join(projectDir, 'launcher-b.env');
+    writeFileSync(envAPath, 'RACE_OWNER=launcher-a\n');
+    writeFileSync(envBPath, 'RACE_OWNER=launcher-b\n');
+    const gatewayPort = await findFreePort();
+
+    const startLauncher = (role: 'launcher-a' | 'launcher-b', envPath: string, delayMs: number) => {
+      const child = spawn(
+        process.execPath,
+        [
+          '--require',
+          preloadPath,
+          launcherPath,
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(gatewayPort),
+          '--data-dir',
+          dataRoot,
+          '--persist-to',
+          join(dataRoot, 'state'),
+          '--env-file',
+          envPath,
+        ],
+        {
+          cwd: join(projectDir, 'packed'),
+          env: {
+            ...process.env,
+            EDGEBASE_OPEN: '0',
+            EDGEBASE_TEST_LAUNCHER_BARRIER_DIR: barrierDir,
+            EDGEBASE_TEST_LAUNCHER_DELAY_MS: String(delayMs),
+            EDGEBASE_TEST_LAUNCHER_DEV_VARS_PATH: devVarsPath,
+            EDGEBASE_TEST_LAUNCHER_LOCK_PATH: lockPath,
+            EDGEBASE_TEST_LAUNCHER_ROLE: role,
+            EDGEBASE_TEST_LAUNCHER_STATE_PATH: statePath,
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      let stdout = '';
+      let stderr = '';
+      child.stdout?.setEncoding('utf-8');
+      child.stderr?.setEncoding('utf-8');
+      child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
+      child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+      return {
+        role,
+        child,
+        output: () => `stdout:\n${stdout}\nstderr:\n${stderr}`,
+      };
+    };
+
+    const launcherA = startLauncher('launcher-a', envAPath, 0);
+    const launcherB = startLauncher('launcher-b', envBPath, 750);
+    let winner: typeof launcherA | null = null;
+    let loser: typeof launcherA | null = null;
+    let winnerLock: {
+      pid: number;
+      childPid: number;
+      childProcessGroupId: number | null;
+      internalPort: number;
+      claimOwnerToken?: string;
+    } | null = null;
+    try {
+      await Promise.all([
+        waitForFile(join(barrierDir, 'arrived-launcher-a'), 20_000),
+        waitForFile(join(barrierDir, 'arrived-launcher-b'), 20_000),
+      ]);
+      writeFileSync(join(barrierDir, 'release'), 'release\n');
+
+      const lock = await waitForJsonFile<{
+        pid: number;
+        childPid: number;
+        childProcessGroupId: number | null;
+        internalPort: number;
+        claimOwnerToken?: string;
+      }>(lockPath, 45_000);
+      winnerLock = lock;
+      winner = lock.pid === launcherA.child.pid ? launcherA : launcherB;
+      loser = winner === launcherA ? launcherB : launcherA;
+      expect(lock.pid, `${launcherA.output()}\n${launcherB.output()}`).toBe(winner.child.pid);
+
+      await waitForChildExit(loser.child, 30_000);
+      expect(loser.child.exitCode, loser.output()).not.toBe(0);
+      expect(loser.output()).toContain('Another EdgeBase launcher is already starting for this data directory.');
+      expect(existsSync(join(barrierDir, `spawned-${winner.role}`)), winner.output()).toBe(true);
+      expect(existsSync(join(barrierDir, `spawned-${loser.role}`)), loser.output()).toBe(false);
+      expect(existsSync(join(barrierDir, `state-write-${winner.role}`)), winner.output()).toBe(true);
+      expect(existsSync(join(barrierDir, `state-write-${loser.role}`)), loser.output()).toBe(false);
+      expect(existsSync(join(barrierDir, `env-write-${winner.role}`)), winner.output()).toBe(true);
+      expect(existsSync(join(barrierDir, `env-write-${loser.role}`)), loser.output()).toBe(false);
+
+      expect(lock.claimOwnerToken).toMatch(/^[a-f0-9]{64}$/);
+      expect(existsSync(claimPath)).toBe(true);
+      await expect(canAcquireLauncherClaim(claimPath)).resolves.toBe(false);
+      expect(readFileSync(devVarsPath, 'utf-8')).toContain(`RACE_OWNER=${winner.role}`);
+      expect(readFileSync(devVarsPath, 'utf-8')).not.toContain(`RACE_OWNER=${loser.role}`);
+      expect(readFileSync(statePath, 'utf-8')).toContain(`"port": ${gatewayPort}`);
+
+      process.kill(winner.child.pid!, 'SIGKILL');
+      await waitForChildExit(winner.child);
+      expect(existsSync(lockPath)).toBe(true);
+      expect(existsSync(devVarsPath)).toBe(true);
+      await waitForCondition(
+        () => canAcquireLauncherClaim(claimPath),
+        'the crashed launcher claim to be released',
+      );
+      await forceStopProcessTree(lock.childProcessGroupId ?? lock.childPid);
+      await waitForCondition(
+        async () => (
+          await canBindPort(gatewayPort)
+          && await canBindPort(lock.internalPort)
+        ),
+        'the crashed launcher ports to be reusable',
+      );
+
+      const restartEnvPath = join(projectDir, 'launcher-restart.env');
+      writeFileSync(restartEnvPath, 'RACE_OWNER=launcher-restart\n');
+      const restarted = await runBufferedProcess(
+        process.execPath,
+        [
+          launcherPath,
+          '--dry-run',
+          '--json',
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(gatewayPort),
+          '--data-dir',
+          dataRoot,
+          '--persist-to',
+          join(dataRoot, 'state'),
+          '--env-file',
+          restartEnvPath,
+        ],
+        {
+          cwd: join(projectDir, 'packed'),
+          encoding: 'utf-8',
+          env: { ...process.env, EDGEBASE_OPEN: '0' },
+        },
+      );
+      expect(restarted.status, restarted.stderr || restarted.stdout).toBe(0);
+      expect(JSON.parse(restarted.stdout)).toMatchObject({
+        existingInstance: false,
+        claimPath,
+        port: gatewayPort,
+      });
+      expect(existsSync(lockPath)).toBe(false);
+      expect(existsSync(devVarsPath)).toBe(false);
+    } finally {
+      await Promise.allSettled([
+        stopChild(launcherA.child),
+        stopChild(launcherB.child),
+      ]);
+    }
+
+    expect(winner).not.toBeNull();
+    expect(loser).not.toBeNull();
+    expect(winnerLock).not.toBeNull();
+    expect(existsSync(lockPath)).toBe(false);
+    expect(existsSync(claimPath)).toBe(true);
+    await expect(canAcquireLauncherClaim(claimPath)).resolves.toBe(true);
+    expect(existsSync(devVarsPath)).toBe(false);
+    await expect(canBindPort(gatewayPort)).resolves.toBe(true);
+
+    const independentA = join(projectDir, 'independent-a');
+    const independentB = join(projectDir, 'independent-b');
+    const independentPortA = await findFreePort();
+    const independentPortB = await findFreePort();
+    const [dryA, dryB] = await Promise.all([
+      runBufferedProcess(
+        process.execPath,
+        [launcherPath, '--dry-run', '--json', '--port', String(independentPortA), '--data-dir', independentA],
+        { cwd: join(projectDir, 'packed'), encoding: 'utf-8' },
+      ),
+      runBufferedProcess(
+        process.execPath,
+        [launcherPath, '--dry-run', '--json', '--port', String(independentPortB), '--data-dir', independentB],
+        { cwd: join(projectDir, 'packed'), encoding: 'utf-8' },
+      ),
+    ]);
+    expect(dryA.status, dryA.stderr || dryA.stdout).toBe(0);
+    expect(dryB.status, dryB.stderr || dryB.stdout).toBe(0);
+    expect(JSON.parse(dryA.stdout).dataRoot).toBe(independentA);
+    expect(JSON.parse(dryB.stdout).dataRoot).toBe(independentB);
+
+    const malformedDataRoot = join(projectDir, 'malformed-claim-data');
+    mkdirSync(malformedDataRoot, { recursive: true });
+    writeFileSync(join(malformedDataRoot, 'launcher-claim.sqlite'), 'not a sqlite database\n');
+    const malformed = await runBufferedProcess(
+      process.execPath,
+      [launcherPath, '--dry-run', '--json', '--data-dir', malformedDataRoot],
+      { cwd: join(projectDir, 'packed'), encoding: 'utf-8' },
+    );
+    expect(malformed.status).not.toBe(0);
+    expect(malformed.stderr).toContain('file is not a database');
+    expect(existsSync(join(malformedDataRoot, 'launcher-state.json'))).toBe(false);
+    expect(existsSync(join(malformedDataRoot, 'runtime', '.dev.vars'))).toBe(false);
   });
 
   it('reuses an existing launcher instance when a live lock file is present', { timeout: 90_000 }, async () => {

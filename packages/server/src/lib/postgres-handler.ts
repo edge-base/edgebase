@@ -40,8 +40,8 @@ import {
 } from './postgres-executor.js';
 import { ensurePgSchema } from './postgres-schema-init.js';
 import {
-  buildListQuery, buildCountQuery, buildGetQuery, buildSearchQuery,
-  parseQueryParams,
+  buildListQuery, buildCountQuery, buildGetQuery, buildSearchQuery, buildSubstringSearchQuery,
+  parseQueryParams, sqliteFtsNeedsSubstringFallback,
   type FilterTuple,
 } from './query-engine.js';
 import { summarizeValidationErrors, validateInsert, validateUpdate } from './validation.js';
@@ -62,6 +62,11 @@ import { isTrustedInternalContext } from './internal-request.js';
 import { executeDbTriggers } from './functions.js';
 import { parseUpdateBody } from './op-parser.js';
 import { buildTableHookRuntimeServices } from './table-hook-runtime.js';
+import {
+  createSearchRelatedCursor,
+  validateSearchRelatedInput,
+  type SearchRelatedInput,
+} from './related-search-constraint.js';
 import {
   MAX_TRANSACT_OPERATIONS,
   compactTransactResult,
@@ -178,6 +183,29 @@ export async function handlePgRequest(
       }
 
       if (method === 'POST') {
+        if (pathSuffix === '/search-related') {
+          if (!isServiceKey) {
+            return c.json({
+              code: 403,
+              message: 'Related search is available only to trusted server code.',
+            }, 403);
+          }
+          let rawInput: unknown;
+          try {
+            rawInput = await c.req.json();
+          } catch {
+            return c.json({
+              code: 400,
+              message: postgresInvalidJsonMessage('related search', tableName),
+            }, 400);
+          }
+          const input = validateSearchRelatedInput(
+            rawInput,
+            tableName,
+            resolved.dbBlock.tables ?? {},
+          );
+          return handleSearchRelated(c, tableName, tableConfig, input, query);
+        }
         if (pathSuffix === '/batch') {
           return handleBatch(c, resolved, tableName, tableConfig, auth, isServiceKey, query);
         }
@@ -201,6 +229,74 @@ export async function handlePgRequest(
     },
     localDevOptions,
   );
+}
+
+async function handleSearchRelated(
+  c: Context<HonoEnv>,
+  tableName: string,
+  tableConfig: TableConfig,
+  input: SearchRelatedInput,
+  query: PostgresExecutor,
+): Promise<Response> {
+  const configuredFtsFields = tableConfig.fts?.length ? tableConfig.fts : null;
+  const searchFields = configuredFtsFields ?? getTextFields(tableConfig);
+  const pagination = {
+    // Read one bounded overflow row so an exactly-full terminal page does not
+    // invent a continuation. The extra row is never returned to the caller.
+    limit: input.limit + 1,
+  };
+  const needsSubstringFallback = [input.query, ...(input.queryVariants ?? [])]
+    .some(sqliteFtsNeedsSubstringFallback);
+  const useIndexedSearch = !!configuredFtsFields && !needsSubstringFallback;
+  const searchQuery = useIndexedSearch
+    ? buildSearchQuery(tableName, input.query, {
+      pagination,
+      sort: input.order,
+      ftsFields: configuredFtsFields ?? undefined,
+      queryVariants: input.queryVariants,
+      searchRelatedKeyset: { order: input.order, after: input.after },
+      relatedSearch: input.relation,
+    }, 'postgres')
+    : buildSubstringSearchQuery(tableName, input.query, {
+      pagination,
+      sort: input.order,
+      fields: searchFields,
+      queryVariants: input.queryVariants,
+      searchRelatedKeyset: { order: input.order, after: input.after },
+      relatedSearch: input.relation,
+    }, 'postgres');
+
+  let sourceItems: Record<string, unknown>[];
+  try {
+    const result = await query(searchQuery.sql, searchQuery.params);
+    sourceItems = result.rows.map((row) => stripInternalPgFields(row as Record<string, unknown>));
+  } catch (error) {
+    if (!useIndexedSearch) throw error;
+    throw new EdgeBaseError(
+      503,
+      `Indexed search for table '${tableName}' failed; refusing an unindexed full-table fallback.`,
+    );
+  }
+
+  let total: number | null = null;
+  if (input.includeTotal && searchQuery.countSql) {
+    const countResult = await query(searchQuery.countSql, searchQuery.countParams ?? []);
+    total = Number(countResult.rows[0]?.total ?? sourceItems.length);
+  }
+  const hasMore = sourceItems.length > input.limit;
+  const items = sourceItems.slice(0, input.limit);
+  const cursor = hasMore && items.length > 0
+    ? createSearchRelatedCursor(items[items.length - 1]!, input.order)
+    : null;
+
+  return c.json({
+    items,
+    total,
+    hasMore,
+    cursor,
+    page: null,
+    perPage: input.limit,
+  });
 }
 
 // ─── Connection Resolution ───
@@ -431,9 +527,9 @@ async function handleList(
   const items = entries.map(({ item }) => item);
   const cursorRecordIds = entries.map(({ cursorId }) => cursorId);
 
-  // Get total count
+  // Exact totals are opt-in; omission/false stays null.
   let total: number | null = null;
-  const includeTotal = !['0', 'false'].includes((c.req.query('includeTotal') ?? '').toLowerCase());
+  const includeTotal = queryOpts.includeTotal === true;
   if (includeTotal && countSql && countParams) {
     const countResult = await query(countSql, countParams);
     total = Number(countResult.rows[0]?.total ?? 0);
@@ -524,7 +620,7 @@ async function handleSearch(
         tableName,
         items: [],
         cursorRecordIds: [],
-        total: 0,
+        total: queryOpts.includeTotal === true ? 0 : null,
         perPage: queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 100,
         sourceHasMore: false,
         cursorStore: responseCursorStore,
@@ -533,29 +629,33 @@ async function handleSearch(
     return c.json({ items: [] });
   }
 
-  // Use FTS fields from config, or fallback to text columns from schema
-  const ftsFields = tableConfig.fts?.length
-    ? tableConfig.fts
-    : getTextFields(tableConfig);
+  const configuredFtsFields = tableConfig.fts?.length ? tableConfig.fts : null;
+  const searchFields = configuredFtsFields ?? getTextFields(tableConfig);
   const limit = queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 100;
   const offset = queryOpts.pagination?.offset ?? ((queryOpts.pagination?.page ?? 1) - 1) * limit;
-  const searchQuery = buildSearchQuery(tableName, searchTerm, {
-    pagination: queryOpts.pagination,
-    filters: queryOpts.filters,
-    orFilters: queryOpts.orFilters,
-    sort: queryOpts.sort,
-    ftsFields,
-  }, 'postgres');
+  const searchQuery = configuredFtsFields
+    ? buildSearchQuery(tableName, searchTerm, {
+      pagination: queryOpts.pagination,
+      filters: queryOpts.filters,
+      orFilters: queryOpts.orFilters,
+      sort: queryOpts.sort,
+      ftsFields: configuredFtsFields,
+    }, 'postgres')
+    : buildSubstringSearchQuery(tableName, searchTerm, {
+      pagination: queryOpts.pagination,
+      filters: queryOpts.filters,
+      orFilters: queryOpts.orFilters,
+      sort: queryOpts.sort,
+      fields: searchFields,
+    }, 'postgres');
 
   const result = await query(searchQuery.sql, searchQuery.params);
   const sourceItems = result.rows.map(r => stripInternalPgFields(r as Record<string, unknown>));
-  let total: number | null = sourceItems.length;
-  const includeTotal = !['0', 'false'].includes((c.req.query('includeTotal') ?? '').toLowerCase());
+  let total: number | null = null;
+  const includeTotal = queryOpts.includeTotal === true;
   if (includeTotal && searchQuery.countSql) {
     const countResult = await query(searchQuery.countSql, searchQuery.countParams ?? []);
     total = Number(countResult.rows[0]?.total ?? sourceItems.length);
-  } else if (!includeTotal) {
-    total = null;
   }
 
   // Apply read rules
@@ -601,7 +701,12 @@ async function handleSearch(
 
   const items = entries.map(({ item }) => item);
 
-  return c.json({ items, total, hasMore: total !== null && total > offset + items.length, cursor: null, page: null, perPage: limit });
+  // Without COUNT, a full page is conservatively probeable; exact-N drains
+  // terminate on the next empty page instead of scanning to count.
+  const hasMore = total !== null
+    ? total > offset + sourceItems.length
+    : sourceItems.length === limit;
+  return c.json({ items, total, hasMore, cursor: null, page: null, perPage: limit });
 }
 
 // ─── GET ───

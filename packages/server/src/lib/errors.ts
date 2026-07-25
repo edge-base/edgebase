@@ -95,29 +95,42 @@ export function hookRejectedError(
 export function normalizeDatabaseError(error: unknown): EdgeBaseError | null {
   if (error instanceof EdgeBaseError) return error;
 
-  const objectMessage = (
-    error
-    && typeof error === 'object'
-    && typeof (error as { message?: unknown }).message === 'string'
-  )
-    ? (error as { message: string }).message.trim()
-    : '';
-  const causeMessage = (
-    error
-    && typeof error === 'object'
-    && typeof (error as { cause?: { message?: unknown } }).cause?.message === 'string'
-  )
-    ? (error as { cause: { message: string } }).cause.message.trim()
-    : '';
-  const message = error instanceof Error
-    ? error.message.trim()
-    : typeof error === 'string'
-      ? error.trim()
-      : objectMessage || causeMessage;
+  const messages: string[] = [];
+  const codes = new Set<string>();
+  const visited = new Set<object>();
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth += 1) {
+    if (typeof current === 'string') {
+      const message = current.trim();
+      if (message) messages.push(message);
+      break;
+    }
+    if (typeof current !== 'object' || visited.has(current)) break;
+    visited.add(current);
+    const candidate = current as { message?: unknown; code?: unknown; cause?: unknown };
+    if (typeof candidate.message === 'string' && candidate.message.trim()) {
+      messages.push(candidate.message.trim());
+    }
+    if (typeof candidate.code === 'string') codes.add(candidate.code.toUpperCase());
+    current = candidate.cause;
+  }
+  const message = messages[0] ?? '';
+
+  const haystack = messages.join('\n');
+  if (
+    codes.has('ENOSPC')
+    || codes.has('EDQUOT')
+    || /\bSQLITE_FULL\b|\bdatabase or disk is full\b|\bno space left on device\b|\bdisk quota exceeded\b/i.test(haystack)
+  ) {
+    return new EdgeBaseError(
+      507,
+      'Persistence storage is full. Free disk space and retry.',
+      undefined,
+      'insufficient-storage',
+    );
+  }
 
   if (!message) return null;
-
-  const haystack = `${message}\n${causeMessage}`.trim();
 
   // Matches both SQLite/D1 ("FOREIGN KEY constraint failed: table.column") and
   // PostgreSQL ('... violates foreign key constraint "table_col_fkey"') phrasings.

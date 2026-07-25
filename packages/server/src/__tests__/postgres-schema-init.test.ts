@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TableConfig } from '@edge-base/shared';
 import type { PostgresExecutor, PostgresQueryResult } from '../lib/postgres-executor.js';
-import { resolvePgInitOrder } from '../lib/postgres-schema-init.js';
+import { buildPgFtsArtifactQuery, resolvePgInitOrder } from '../lib/postgres-schema-init.js';
 import {
 	computeSchemaHashSync,
+	computePgFtsSignature,
 	generatePgPreparationColumnDDL,
 	planPostgresFieldUniqueIndex,
 	postgresUniqueDuplicateError,
@@ -24,6 +25,25 @@ interface PgIndexRow extends Record<string, unknown> {
 	columns: string[];
 }
 
+interface PgFtsArtifactOverrides extends Record<string, unknown> {
+	legacyColumn?: boolean;
+	legacyColumnPresent?: boolean;
+	textColumn?: boolean;
+	textColumnPresent?: boolean;
+	maintenanceFunction?: boolean;
+	maintenanceFunctionNameOccupied?: boolean;
+	maintenanceFunctionRepairable?: boolean;
+	maintenanceTrigger?: boolean;
+	maintenanceTriggerNameOccupied?: boolean;
+	maintenanceTriggerRepairable?: boolean;
+	legacyIndex?: boolean;
+	legacyIndexNameOccupied?: boolean;
+	legacyIndexRepairable?: boolean;
+	trigramIndex?: boolean;
+	trigramIndexNameOccupied?: boolean;
+	trigramIndexRepairable?: boolean;
+}
+
 function pgResult(rows: Record<string, unknown>[] = []): PostgresQueryResult {
 	return {
 		columns: rows.length > 0 ? Object.keys(rows[0]!) : [],
@@ -35,6 +55,9 @@ function pgResult(rows: Record<string, unknown>[] = []): PostgresQueryResult {
 function createExistingContactsExecutor(options: {
 	schemaHash?: string;
 	migrationVersion?: string;
+	ftsSignature?: string | null;
+	ftsHealthy?: boolean;
+	ftsArtifactOverrides?: PgFtsArtifactOverrides;
 	duplicates?: boolean;
 	indexes?: PgIndexRow[];
 } = {}): {
@@ -43,6 +66,9 @@ function createExistingContactsExecutor(options: {
 	state: {
 		schemaHash: string;
 		migrationVersion: string;
+		ftsSignature: string | null;
+		ftsHealthy: boolean;
+		ftsArtifactOverrides: PgFtsArtifactOverrides;
 		duplicates: boolean;
 		indexes: PgIndexRow[];
 	};
@@ -51,6 +77,9 @@ function createExistingContactsExecutor(options: {
 	const state = {
 		schemaHash: options.schemaHash ?? 'stale-schema-hash',
 		migrationVersion: options.migrationVersion ?? '1',
+		ftsSignature: options.ftsSignature ?? null,
+		ftsHealthy: options.ftsHealthy ?? false,
+		ftsArtifactOverrides: { ...(options.ftsArtifactOverrides ?? {}) },
 		duplicates: options.duplicates ?? false,
 		indexes: [...(options.indexes ?? [])],
 	};
@@ -74,6 +103,9 @@ function createExistingContactsExecutor(options: {
 			if (transactionSnapshot) {
 				state.schemaHash = transactionSnapshot.schemaHash;
 				state.migrationVersion = transactionSnapshot.migrationVersion;
+				state.ftsSignature = transactionSnapshot.ftsSignature;
+				state.ftsHealthy = transactionSnapshot.ftsHealthy;
+				state.ftsArtifactOverrides = transactionSnapshot.ftsArtifactOverrides;
 				state.duplicates = transactionSnapshot.duplicates;
 				state.indexes = transactionSnapshot.indexes;
 			}
@@ -87,6 +119,9 @@ function createExistingContactsExecutor(options: {
 			if (key === 'migration_version:contacts') {
 				return pgResult([{ value: state.migrationVersion }]);
 			}
+			if (key === 'fts_signature:contacts' && state.ftsSignature !== null) {
+				return pgResult([{ value: state.ftsSignature }]);
+			}
 			return pgResult();
 		}
 		if (sql.includes('information_schema.columns')) {
@@ -96,6 +131,30 @@ function createExistingContactsExecutor(options: {
 				{ column_name: 'updatedAt' },
 				{ column_name: 'email' },
 			]);
+		}
+		if (sql.includes('WITH target AS MATERIALIZED')) {
+			const healthy = state.ftsHealthy;
+			return pgResult([{
+				schemaName: 'public',
+				tableFound: true,
+				legacyColumnPresent: healthy,
+				legacyColumn: healthy,
+				textColumnPresent: healthy,
+				textColumn: healthy,
+				maintenanceFunction: healthy,
+				maintenanceFunctionNameOccupied: healthy,
+				maintenanceFunctionRepairable: healthy,
+				maintenanceTrigger: healthy,
+				maintenanceTriggerNameOccupied: healthy,
+				maintenanceTriggerRepairable: healthy,
+				legacyIndex: healthy,
+				legacyIndexNameOccupied: healthy,
+				legacyIndexRepairable: false,
+				trigramIndex: healthy,
+				trigramIndexNameOccupied: healthy,
+				trigramIndexRepairable: false,
+				...state.ftsArtifactOverrides,
+			}]);
 		}
 		if (sql.includes('pg_index')) {
 			return pgResult(state.indexes);
@@ -131,6 +190,12 @@ function createExistingContactsExecutor(options: {
 			const value = String(params[1]);
 			if (key === 'schemaHash:contacts') state.schemaHash = value;
 			if (key === 'migration_version:contacts') state.migrationVersion = value;
+			if (key === 'fts_signature:contacts') state.ftsSignature = value;
+			return pgResult();
+		}
+		if (sql.startsWith('UPDATE "contacts" SET "_fts_text"')) {
+			state.ftsHealthy = true;
+			state.ftsArtifactOverrides = {};
 			return pgResult();
 		}
 
@@ -369,6 +434,21 @@ describe('PostgreSQL existing-column unique reconciliation', () => {
 			.toBe(true);
 	});
 
+	it('self-heals a missing physical-reference index when the current hash was already stored', async () => {
+		const table: TableConfig = {
+			schema: { email: { type: 'string', references: 'categories' } },
+		};
+		const { query, calls } = createExistingContactsExecutor({
+			schemaHash: computeSchemaHashSync(table),
+		});
+
+		await ensureContacts(table, query);
+
+		expect(calls.filter((call) => call.sql ===
+			'CREATE INDEX IF NOT EXISTS "idx_contacts_email" ON "contacts"("email");'
+		)).toHaveLength(1);
+	});
+
 	it('drops only the managed field index when unique is disabled', async () => {
 		const { query, state } = createExistingContactsExecutor({
 			indexes: [{
@@ -486,5 +566,240 @@ describe('PostgreSQL existing-column unique reconciliation', () => {
 		}, query)).rejects.toThrow(/reserved index 'uidx_contacts_email' does not match/);
 
 		expect(state.schemaHash).toBe('stale-schema-hash');
+	});
+});
+
+describe('PostgreSQL indexed substring corpus migration', () => {
+	it('backfills once and persists the FTS definition signature last', async () => {
+		const table: TableConfig = {
+			schema: { email: { type: 'string' } },
+			fts: ['email'],
+		};
+		const { query, calls, state } = createExistingContactsExecutor({
+			schemaHash: computeSchemaHashSync(table),
+		});
+
+		await ensureContacts(table, query, 'workspace-fts-first');
+		await ensureContacts(table, query, 'workspace-fts-second');
+
+		const backfills = calls.filter((call) => (
+			call.sql.startsWith('UPDATE "contacts" SET "_fts_text"')
+		));
+		expect(backfills).toHaveLength(1);
+		expect(calls.filter((call) => /CREATE EXTENSION IF NOT EXISTS pg_trgm/i.test(call.sql)))
+			.toHaveLength(1);
+		expect(state.ftsSignature).toBe(computePgFtsSignature(['email']));
+
+		const backfillPosition = calls.findIndex((call) => call === backfills[0]);
+		const signaturePosition = calls.findIndex((call) => (
+			call.sql.includes('INSERT INTO "_meta"')
+			&& call.params[0] === 'fts_signature:contacts'
+		));
+		expect(signaturePosition).toBeGreaterThan(backfillPosition);
+	});
+
+	it('repairs physical FTS artifacts even when the definition signature matches', async () => {
+		const table: TableConfig = {
+			schema: { email: { type: 'string' } },
+			fts: ['email'],
+		};
+		const signature = computePgFtsSignature(['email']);
+		const { query, calls, state } = createExistingContactsExecutor({
+			schemaHash: computeSchemaHashSync(table),
+			ftsSignature: signature,
+			ftsHealthy: false,
+		});
+
+		await ensureContacts(table, query, 'workspace-fts-artifact-repair');
+
+		const artifactQuery = calls.find((call) => (
+			call.sql.includes('WITH target AS MATERIALIZED')
+		));
+		expect(artifactQuery?.params.slice(0, 5)).toEqual([
+			'contacts',
+			'contacts_fts_update',
+			'contacts_fts_trigger',
+			'idx_contacts_fts',
+			'idx_contacts_fts_text_trgm',
+		]);
+		expect(artifactQuery?.params).toHaveLength(7);
+		expect(artifactQuery?.sql).toContain('n.nspname = pg_catalog.current_schema()');
+		expect(artifactQuery?.sql).not.toContain('to_regclass($1)');
+		expect(calls.some((call) => call.sql.startsWith('DROP INDEX'))).toBe(false);
+		expect(calls.some((call) => (
+			call.sql.startsWith('UPDATE "contacts" SET "_fts_text"')
+		))).toBe(true);
+		expect(state.ftsHealthy).toBe(true);
+		expect(state.ftsSignature).toBe(signature);
+	});
+
+	it('recognizes the prior generated function body while upgrading configured fields', async () => {
+		const table: TableConfig = {
+			schema: {
+				email: { type: 'string' },
+				displayName: { type: 'string' },
+			},
+			fts: ['email', 'displayName'],
+		};
+		const { query, calls, state } = createExistingContactsExecutor({
+			schemaHash: computeSchemaHashSync(table),
+			ftsSignature: computePgFtsSignature(['email']),
+			ftsHealthy: true,
+			ftsArtifactOverrides: {
+				maintenanceFunction: false,
+				maintenanceFunctionNameOccupied: true,
+				maintenanceFunctionRepairable: true,
+				maintenanceTrigger: false,
+				maintenanceTriggerNameOccupied: true,
+				maintenanceTriggerRepairable: true,
+			},
+		});
+
+		await ensureContacts(table, query, 'workspace-fts-field-drift');
+
+		const artifactQuery = calls.find((call) => call.sql.includes('WITH target AS MATERIALIZED'))!;
+		expect(artifactQuery.params[5]).toContain('NEW."displayName"');
+		expect(artifactQuery.params[6]).not.toContain('NEW."displayName"');
+		expect(calls.some((call) => call.sql.includes('DROP TRIGGER IF EXISTS'))).toBe(true);
+		expect(calls.some((call) => call.sql.startsWith('UPDATE "contacts" SET "_fts_text"')))
+			.toBe(true);
+		expect(state.ftsSignature).toBe(computePgFtsSignature(['email', 'displayName']));
+	});
+
+	it('drops only an exact-shape target-owned invalid trigram index before repair', async () => {
+		const table: TableConfig = {
+			schema: { email: { type: 'string' } },
+			fts: ['email'],
+		};
+		const signature = computePgFtsSignature(['email']);
+		const { query, calls } = createExistingContactsExecutor({
+			schemaHash: computeSchemaHashSync(table),
+			ftsSignature: signature,
+			ftsArtifactOverrides: {
+				legacyColumnPresent: true,
+				legacyColumn: true,
+				textColumnPresent: true,
+				textColumn: true,
+				maintenanceTrigger: true,
+				legacyIndex: true,
+				legacyIndexNameOccupied: true,
+				trigramIndexNameOccupied: true,
+				trigramIndexRepairable: true,
+			},
+		});
+
+		await ensureContacts(table, query, 'workspace-fts-invalid-index');
+
+		expect(calls.some((call) => (
+			call.sql === 'DROP INDEX IF EXISTS "public"."idx_contacts_fts_text_trgm"'
+		))).toBe(true);
+		expect(calls.some((call) => (
+			call.sql === 'DROP INDEX IF EXISTS "public"."idx_contacts_fts"'
+		))).toBe(false);
+	});
+
+	it('fails closed without DROP when a reserved FTS index name belongs elsewhere', async () => {
+		const table: TableConfig = {
+			schema: { email: { type: 'string' } },
+			fts: ['email'],
+		};
+		const signature = computePgFtsSignature(['email']);
+		const { query, calls, state } = createExistingContactsExecutor({
+			schemaHash: computeSchemaHashSync(table),
+			ftsSignature: signature,
+			ftsArtifactOverrides: {
+				legacyColumnPresent: true,
+				legacyColumn: true,
+				textColumnPresent: true,
+				textColumn: true,
+				maintenanceTrigger: true,
+				legacyIndex: true,
+				legacyIndexNameOccupied: true,
+				trigramIndexNameOccupied: true,
+				trigramIndexRepairable: false,
+			},
+		});
+
+		await expect(ensureContacts(table, query, 'workspace-fts-index-collision'))
+			.rejects.toThrow(/index name collision/);
+
+		expect(calls.some((call) => call.sql.startsWith('DROP INDEX'))).toBe(false);
+		expect(calls.some((call) => call.sql.startsWith('UPDATE "contacts" SET "_fts_text"')))
+			.toBe(false);
+		expect(state.ftsSignature).toBe(signature);
+	});
+
+	it('preserves a custom same-name maintenance trigger instead of replacing it', async () => {
+		const table: TableConfig = {
+			schema: { email: { type: 'string' } },
+			fts: ['email'],
+		};
+		const signature = computePgFtsSignature(['email']);
+		const { query, calls, state } = createExistingContactsExecutor({
+			schemaHash: computeSchemaHashSync(table),
+			ftsSignature: signature,
+			ftsHealthy: true,
+			ftsArtifactOverrides: {
+				maintenanceTrigger: false,
+				maintenanceTriggerNameOccupied: true,
+				maintenanceTriggerRepairable: false,
+			},
+		});
+
+		await expect(ensureContacts(table, query, 'workspace-fts-trigger-collision'))
+			.rejects.toThrow(/trigger name collision/);
+
+		expect(calls.some((call) => call.sql.includes('DROP TRIGGER'))).toBe(false);
+		expect(calls.some((call) => call.sql.startsWith('CREATE OR REPLACE FUNCTION')))
+			.toBe(false);
+		expect(calls.some((call) => call.sql.startsWith('UPDATE "contacts" SET "_fts_text"')))
+			.toBe(false);
+		expect(state.ftsSignature).toBe(signature);
+	});
+
+	it('preserves a custom same-signature function instead of CREATE OR REPLACE', async () => {
+		const table: TableConfig = {
+			schema: { email: { type: 'string' } },
+			fts: ['email'],
+		};
+		const signature = computePgFtsSignature(['email']);
+		const { query, calls } = createExistingContactsExecutor({
+			schemaHash: computeSchemaHashSync(table),
+			ftsSignature: signature,
+			ftsHealthy: true,
+			ftsArtifactOverrides: {
+				maintenanceFunction: false,
+				maintenanceFunctionNameOccupied: true,
+				maintenanceFunctionRepairable: false,
+				maintenanceTrigger: false,
+				maintenanceTriggerNameOccupied: false,
+			},
+		});
+
+		await expect(ensureContacts(table, query, 'workspace-fts-function-collision'))
+			.rejects.toThrow(/function name collision/);
+
+		expect(calls.some((call) => call.sql.startsWith('CREATE OR REPLACE FUNCTION')))
+			.toBe(false);
+		expect(calls.some((call) => call.sql.includes('DROP TRIGGER'))).toBe(false);
+		expect(calls.some((call) => call.sql.startsWith('UPDATE "contacts" SET "_fts_text"')))
+			.toBe(false);
+	});
+
+	it('resolves special table names by exact pg_class relname rather than regclass parsing', () => {
+		const query = buildPgFtsArtifactQuery('plugin-a/events', ['content']);
+		expect(query.params.slice(0, 5)).toEqual([
+			'plugin-a/events',
+			'plugin-a/events_fts_update',
+			'plugin-a/events_fts_trigger',
+			'idx_plugin-a/events_fts',
+			'idx_plugin-a/events_fts_text_trgm',
+		]);
+		expect(query.params).toHaveLength(7);
+		expect(query.params[5]).toContain('NEW."content"');
+		expect(query.sql).toContain('c.relname = $1');
+		expect(query.sql).toContain('p.prosrc = $6');
+		expect(query.sql).toContain('p.prosrc IN ($6, $7)');
+		expect(query.sql).not.toContain('to_regclass($1)');
 	});
 });

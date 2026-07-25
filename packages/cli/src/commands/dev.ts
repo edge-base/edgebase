@@ -24,7 +24,7 @@ import { checkWranglerAuth } from '../lib/cf-auth.js';
 import { parseDevVars } from '../lib/dev-sidecar.js';
 import { upsertEnvFile, writeLocalSecrets } from '../lib/local-secrets.js';
 import {
-  resolveWranglerCommand,
+  prepareWranglerDevTool,
 } from '../lib/runtime-scaffold.js';
 import { resolveLocalDevBindings } from '../lib/project-runtime.js';
 import {
@@ -1433,7 +1433,7 @@ export const devCommand = new Command('dev')
         }));
         return;
       }
-      const wranglerTool = resolveWranglerCommand();
+      const wranglerTool = prepareWranglerDevTool(projectDir);
 
       const wranglerArgs = [...wranglerTool.argsPrefix, 'dev', '--port', String(resolvedPorts.port)];
       if (options.host) {

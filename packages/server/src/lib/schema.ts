@@ -195,6 +195,289 @@ export interface SQLiteIndexState {
   columns: string[];
 }
 
+export interface SQLiteForeignKeyState {
+  from: string;
+  table: string;
+  to: string;
+  onUpdate: string;
+  onDelete: string;
+  match: string;
+}
+
+export interface SQLiteSchemaArtifact {
+  type: 'index' | 'trigger';
+  name: string;
+  sql: string | null;
+}
+
+export interface SQLiteInboundForeignKeyState {
+  childTable: string;
+  childColumn: string;
+}
+
+export interface SQLiteForeignKeyRebuildState {
+  columns: readonly string[];
+  indexes: readonly SQLiteIndexState[];
+  artifacts: readonly SQLiteSchemaArtifact[];
+  inboundForeignKeys: readonly SQLiteInboundForeignKeyState[];
+}
+
+function normalizeSQLiteForeignKeyAction(value: unknown): string {
+  return String(value ?? 'NO ACTION').trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+function sortSQLiteForeignKeys(foreignKeys: SQLiteForeignKeyState[]): SQLiteForeignKeyState[] {
+  return foreignKeys.sort((left, right) => {
+    const leftKey = [
+      left.from,
+      left.table,
+      left.to,
+      left.onUpdate,
+      left.onDelete,
+      left.match,
+    ].join('\u0000');
+    const rightKey = [
+      right.from,
+      right.table,
+      right.to,
+      right.onUpdate,
+      right.onDelete,
+      right.match,
+    ].join('\u0000');
+    return leftKey.localeCompare(rightKey);
+  });
+}
+
+/** Normalize SQLite PRAGMA foreign_key_list rows for stable state comparison. */
+export function normalizeSQLiteForeignKeyRows(
+  rows: readonly Record<string, unknown>[],
+): SQLiteForeignKeyState[] {
+  return sortSQLiteForeignKeys(rows.map((row) => ({
+    from: String(row.from ?? ''),
+    table: String(row.table ?? ''),
+    to: String(row.to ?? ''),
+    onUpdate: normalizeSQLiteForeignKeyAction(row.on_update ?? row.onUpdate),
+    onDelete: normalizeSQLiteForeignKeyAction(row.on_delete ?? row.onDelete),
+    match: normalizeSQLiteForeignKeyAction(row.match ?? 'NONE'),
+  })));
+}
+
+/** Resolve the physical SQLite foreign keys declared by the current config. */
+export function getDeclaredSQLiteForeignKeys(config: TableConfig): SQLiteForeignKeyState[] {
+  const foreignKeys: SQLiteForeignKeyState[] = [];
+
+  for (const [fieldName, field] of Object.entries(buildEffectiveSchema(config.schema))) {
+    const reference = field.references;
+    if (!reference || isLogicalOnlyReference(reference)) continue;
+
+    if (typeof reference === 'string') {
+      const ref = reference.trim();
+      if (ref.includes('(')) {
+        const match = ref.match(/^(\w+)\((\w+)\)$/);
+        if (!match) continue;
+        foreignKeys.push({
+          from: fieldName,
+          table: match[1]!,
+          to: match[2]!,
+          onUpdate: 'NO ACTION',
+          onDelete: 'CASCADE',
+          match: 'NONE',
+        });
+      } else {
+        foreignKeys.push({
+          from: fieldName,
+          table: ref,
+          to: 'id',
+          onUpdate: 'NO ACTION',
+          onDelete: 'SET NULL',
+          match: 'NONE',
+        });
+      }
+      continue;
+    }
+
+    foreignKeys.push({
+      from: fieldName,
+      table: reference.table,
+      to: reference.column ?? 'id',
+      onUpdate: normalizeSQLiteForeignKeyAction(reference.onUpdate),
+      onDelete: normalizeSQLiteForeignKeyAction(reference.onDelete),
+      match: 'NONE',
+    });
+  }
+
+  return sortSQLiteForeignKeys(foreignKeys);
+}
+
+export function sqliteForeignKeysMatch(
+  actual: readonly SQLiteForeignKeyState[],
+  desired: readonly SQLiteForeignKeyState[],
+): boolean {
+  if (actual.length !== desired.length) return false;
+  return actual.every((foreignKey, index) => {
+    const target = desired[index];
+    return target !== undefined
+      && foreignKey.from === target.from
+      && foreignKey.table === target.table
+      && foreignKey.to === target.to
+      && foreignKey.onUpdate === target.onUpdate
+      && foreignKey.onDelete === target.onDelete
+      && foreignKey.match === target.match;
+  });
+}
+
+function remapSQLiteSelfReferences(
+  tableName: string,
+  temporaryTableName: string,
+  config: TableConfig,
+): TableConfig {
+  if (!config.schema) return config;
+
+  const schema: Record<string, SchemaField | false> = {};
+  for (const [fieldName, field] of Object.entries(config.schema)) {
+    if (field === false || !field.references) {
+      schema[fieldName] = field;
+      continue;
+    }
+
+    if (typeof field.references === 'string') {
+      const reference = field.references.trim();
+      const qualified = reference.match(/^(\w+)\((\w+)\)$/);
+      if (reference === tableName) {
+        schema[fieldName] = { ...field, references: temporaryTableName };
+      } else if (qualified?.[1] === tableName) {
+        schema[fieldName] = {
+          ...field,
+          references: `${temporaryTableName}(${qualified[2]})`,
+        };
+      } else {
+        schema[fieldName] = field;
+      }
+      continue;
+    }
+
+    schema[fieldName] = field.references.table === tableName
+      ? {
+        ...field,
+        references: { ...field.references, table: temporaryTableName },
+      }
+      : field;
+  }
+
+  return { ...config, schema };
+}
+
+/**
+ * Rebuild a SQLite table when its physical foreign keys no longer match config.
+ *
+ * Removed config fields intentionally remain a non-destructive manual-migration
+ * boundary: rebuilding from config must never silently discard an older column.
+ * User-created indexes and triggers are replayed from sqlite_master, while
+ * EdgeBase-owned indexes/FTS triggers are regenerated from current config.
+ */
+export function generateSQLiteForeignKeyRebuildDDLs(
+  tableName: string,
+  config: TableConfig,
+  state: SQLiteForeignKeyRebuildState,
+): string[] {
+  const effectiveSchema = buildEffectiveSchema(config.schema);
+  const desiredColumns = Object.keys(effectiveSchema);
+  const desiredColumnSet = new Set(desiredColumns);
+  const extraColumns = state.columns.filter((column) => !desiredColumnSet.has(column));
+  if (extraColumns.length > 0) {
+    throw new Error(
+      `Cannot reconcile foreign keys for table '${tableName}': physical columns `
+      + `${extraColumns.map((column) => `'${column}'`).join(', ')} are absent from config. `
+      + 'Apply an explicit data-preserving table migration before retrying.',
+    );
+  }
+
+  if (state.inboundForeignKeys.length > 0) {
+    const dependents = state.inboundForeignKeys
+      .map((foreignKey) => `'${foreignKey.childTable}.${foreignKey.childColumn}'`)
+      .join(', ');
+    throw new Error(
+      `Cannot reconcile foreign keys for table '${tableName}': it is referenced by `
+      + `${dependents}. Apply an explicit multi-table migration before retrying so `
+      + 'referencing rows cannot be deleted by the table rebuild.',
+    );
+  }
+
+  const desiredUniqueIndexes = [
+    ...Object.entries(effectiveSchema)
+      .filter(([, field]) => field.unique)
+      .map(([fieldName]) => [fieldName]),
+    ...(config.indexes ?? [])
+      .filter((index) => index.unique)
+      .map((index) => index.fields),
+  ];
+  const unrepresentedInlineUnique = state.indexes.find((index) =>
+    index.origin === 'u'
+    && !desiredUniqueIndexes.some((desired) =>
+      desired.length === index.columns.length
+      && desired.every((column, position) => column === index.columns[position]),
+    ),
+  );
+  if (unrepresentedInlineUnique) {
+    throw new Error(
+      `Cannot reconcile foreign keys for table '${tableName}': inline UNIQUE index `
+      + `'${unrepresentedInlineUnique.name}' is not represented by current config. `
+      + 'Apply an explicit data-preserving table migration before retrying.',
+    );
+  }
+
+  const temporaryTableName = `__edgebase_rebuild_${tableName}`;
+  const rebuildConfig = remapSQLiteSelfReferences(tableName, temporaryTableName, config);
+  const createTableDDL = generateCreateTableDDL(temporaryTableName, rebuildConfig)
+    .replace(/^CREATE TABLE IF NOT EXISTS /, 'CREATE TABLE ');
+  const escapedColumns = desiredColumns.map(esc).join(', ');
+  const managedIndexPrefixes = [`idx_${tableName}_`, `uidx_${tableName}_`];
+  const managedFTSTriggers = new Set([
+    `${tableName}_ai`,
+    `${tableName}_ad`,
+    `${tableName}_au`,
+  ]);
+
+  const preservedIndexes = state.artifacts
+    .filter((artifact) => artifact.type === 'index' && artifact.sql)
+    .filter((artifact) => !managedIndexPrefixes.some((prefix) => artifact.name.startsWith(prefix)))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((artifact) => artifact.sql!);
+  const preservedTriggers = state.artifacts
+    .filter((artifact) => artifact.type === 'trigger' && artifact.sql)
+    .filter((artifact) => !managedFTSTriggers.has(artifact.name))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((artifact) => artifact.sql!);
+
+  const ddls: string[] = [];
+  if (getDeclaredSQLiteForeignKeys(config).some((foreignKey) => foreignKey.table === tableName)) {
+    ddls.push('PRAGMA defer_foreign_keys = ON;');
+  }
+  ddls.push(
+    createTableDDL,
+    `INSERT INTO ${esc(temporaryTableName)} (${escapedColumns}) `
+      + `SELECT ${escapedColumns} FROM ${esc(tableName)};`,
+    `DROP TABLE ${esc(tableName)};`,
+    `ALTER TABLE ${esc(temporaryTableName)} RENAME TO ${esc(tableName)};`,
+    ...preservedIndexes,
+    ...generateIndexDDL(tableName, resolveTableIndexes(config)),
+    ...preservedTriggers,
+  );
+
+  if (config.fts?.length) {
+    ddls.push(
+      generateFTS5DDL(tableName, config.fts),
+      ...generateFTS5Triggers(tableName, config.fts),
+    );
+    const ftsTableName = `${tableName}_fts`;
+    ddls.push(
+      `INSERT INTO ${esc(ftsTableName)}(${esc(ftsTableName)}) VALUES ('rebuild');`,
+    );
+  }
+
+  return ddls;
+}
+
 export interface SQLiteFieldUniqueIndexPlan {
   action: 'none' | 'create' | 'drop';
   indexName: string;
@@ -278,6 +561,44 @@ export function sqliteUniqueDuplicateError(tableName: string, fieldName: string)
 // ─── Index DDL ───
 
 /**
+ * Resolve explicit indexes plus the single-column indexes required by physical
+ * foreign-key fields.
+ *
+ * A primary key, a field-level UNIQUE constraint, or an explicit index whose
+ * leftmost field is the reference already supports equality lookups and parent
+ * constraint checks. Logical auth references emit no physical FK and therefore
+ * do not acquire an implicit index here.
+ */
+export function resolveTableIndexes(config: TableConfig): IndexConfig[] {
+  const explicitIndexes = config.indexes ?? [];
+  const coveredFields = new Set<string>();
+
+  for (const index of explicitIndexes) {
+    const [leftmostField] = index.fields;
+    if (leftmostField) coveredFields.add(leftmostField);
+  }
+
+  const automaticIndexes: IndexConfig[] = [];
+  for (const [fieldName, field] of Object.entries(buildEffectiveSchema(config.schema))) {
+    if (
+      field.primaryKey
+      || field.unique
+      || coveredFields.has(fieldName)
+      || buildReferenceClause(field.references) === null
+    ) {
+      continue;
+    }
+
+    automaticIndexes.push({ fields: [fieldName] });
+    coveredFields.add(fieldName);
+  }
+
+  return automaticIndexes.length > 0
+    ? [...explicitIndexes, ...automaticIndexes]
+    : explicitIndexes;
+}
+
+/**
  * Generate CREATE INDEX DDL for indexes.
  */
 export function generateIndexDDL(
@@ -334,6 +655,33 @@ END;`,
   INSERT INTO ${esc(ftsTableName)}(${esc(ftsTableName)}, rowid, ${ftsFields.map(esc).join(', ')}) VALUES ('delete', old.rowid, ${oldFields});
   INSERT INTO ${esc(ftsTableName)}(rowid, ${ftsFields.map(esc).join(', ')}) VALUES (new.rowid, ${newFields});
 END;`,
+  ];
+}
+
+const SQLITE_FTS_DEFINITION_VERSION = 'fts5-trigram-v1';
+
+/** Persistent signature includes field order because highlight indexes use it. */
+export function computeSQLiteFtsSignature(ftsFields: string[]): string {
+  return `${SQLITE_FTS_DEFINITION_VERSION}:${JSON.stringify(ftsFields)}`;
+}
+
+/**
+ * Replace an incomplete or field-drifted external-content FTS definition and
+ * rebuild it from the authoritative base table.
+ */
+export function generateFTS5RebuildDDLs(
+  tableName: string,
+  ftsFields: string[],
+): string[] {
+  const ftsTableName = `${tableName}_fts`;
+  return [
+    `DROP TRIGGER IF EXISTS ${esc(`${tableName}_ai`)};`,
+    `DROP TRIGGER IF EXISTS ${esc(`${tableName}_ad`)};`,
+    `DROP TRIGGER IF EXISTS ${esc(`${tableName}_au`)};`,
+    `DROP TABLE IF EXISTS ${esc(ftsTableName)};`,
+    generateFTS5DDL(tableName, ftsFields),
+    ...generateFTS5Triggers(tableName, ftsFields),
+    `INSERT INTO ${esc(ftsTableName)}(${esc(ftsTableName)}) VALUES ('rebuild');`,
   ];
 }
 
@@ -450,8 +798,9 @@ export function generateTableDDL(
   ddl.push(generateCreateTableDDL(tableName, config));
 
   // 2. Indexes
-  if (config.indexes?.length) {
-    ddl.push(...generateIndexDDL(tableName, config.indexes));
+  const indexes = resolveTableIndexes(config);
+  if (indexes.length > 0) {
+    ddl.push(...generateIndexDDL(tableName, indexes));
   }
 
   // 3. FTS5
@@ -677,18 +1026,37 @@ export function generatePgIndexDDL(
   });
 }
 
-// ─── PostgreSQL FTS (tsvector + GIN) ───
+// ─── PostgreSQL FTS (legacy tsvector + indexed substring corpus) ───
+
+const POSTGRES_FTS_TEXT_COLUMN = '_fts_text';
+const POSTGRES_FTS_DDL_VERSION = 'pg-trgm-substring-v1';
+
+/** Persistent signature used to run corpus backfills once per definition. */
+export function computePgFtsSignature(ftsFields: string[]): string {
+  return `${POSTGRES_FTS_DDL_VERSION}:${JSON.stringify(ftsFields)}`;
+}
+
+/** Exact pg_proc.prosrc body used to prove ownership before replacement. */
+export function buildPgFtsTriggerFunctionBody(ftsFields: readonly string[]): string {
+  const newCoalesce = ftsFields
+    .map(f => `coalesce(NEW.${esc(f)}::text, '')`)
+    .join(` || ' ' || `);
+  return `\nBEGIN\n  NEW.${esc(POSTGRES_FTS_TEXT_COLUMN)} := ${newCoalesce};\n`
+    + `  NEW.${esc('_fts')} := to_tsvector('simple', NEW.${esc(POSTGRES_FTS_TEXT_COLUMN)});\n`
+    + '  RETURN NEW;\nEND;\n';
+}
 
 /**
- * Generate PostgreSQL full-text search DDL:
- * 1. Add `_fts` tsvector column to the table
- * 2. Create GIN index on the tsvector column
- * 3. Create trigger function to auto-update tsvector on write
- * 4. Create BEFORE INSERT OR UPDATE trigger
- * 5. Backfill existing rows (harmless on empty tables)
+ * Generate PostgreSQL full-text/search DDL:
+ * 1. Ensure pg_trgm is available
+ * 2. Retain the legacy `_fts` tsvector column and GIN index
+ * 3. Add one `_fts_text` corpus with a trigram GIN index
+ * 4. Maintain both helper columns from one trigger
+ * 5. Backfill existing rows once per persisted FTS definition signature
  *
- * Uses 'simple' text search config for language-agnostic matching
- * (closest equivalent to SQLite FTS5 trigram tokenizer).
+ * `_fts` remains additive for existing installations while `.search()` uses
+ * `_fts_text` so PostgreSQL substring semantics actually hit the generated
+ * pg_trgm index.
  */
 export function generatePgFTSDDL(
   tableName: string,
@@ -696,41 +1064,56 @@ export function generatePgFTSDDL(
 ): string[] {
   const ddl: string[] = [];
   const ftsCol = '_fts';
+  const ftsTextCol = POSTGRES_FTS_TEXT_COLUMN;
   const triggerName = `${tableName}_fts_update`;
   const funcName = `${tableName}_fts_trigger`;
   const indexName = `idx_${tableName}_fts`;
+  const trigramIndexName = `idx_${tableName}_fts_text_trgm`;
 
-  // Coalesce expression: coalesce(NEW."field", '') || ' ' || ...
-  const newCoalesce = ftsFields
-    .map(f => `coalesce(NEW.${esc(f)}, '')`)
-    .join(` || ' ' || `);
+  // Cast every configured field because JSON/JSONB and numeric columns cannot
+  // be passed directly to coalesce(text) or concatenated with text in PG.
   const bareCoalesce = ftsFields
-    .map(f => `coalesce(${esc(f)}, '')`)
+    .map(f => `coalesce(${esc(f)}::text, '')`)
     .join(` || ' ' || `);
 
-  // 1. Add tsvector column (IF NOT EXISTS — PG 9.6+)
+  // 1. pg_trgm is a trusted extension on supported PostgreSQL/Neon targets.
+  ddl.push('CREATE EXTENSION IF NOT EXISTS pg_trgm;');
+
+  // 2. Retain the legacy tsvector helper (IF NOT EXISTS — PG 9.6+).
   ddl.push(
     `ALTER TABLE ${esc(tableName)} ADD COLUMN IF NOT EXISTS ${esc(ftsCol)} tsvector;`,
   );
 
-  // 2. GIN index for fast @@ queries
+  // 3. Add the substring corpus without changing the legacy helper's type.
+  ddl.push(
+    `ALTER TABLE ${esc(tableName)} ADD COLUMN IF NOT EXISTS ${esc(ftsTextCol)} TEXT;`,
+  );
+
+  // 4. Retain the legacy GIN index.
   ddl.push(
     `CREATE INDEX IF NOT EXISTS ${esc(indexName)} ON ${esc(tableName)} USING gin(${esc(ftsCol)});`,
   );
 
-  // 3. Trigger function — builds tsvector from indexed fields
+  // 5. pg_trgm accelerates the same ILIKE substring predicate used at read time.
   ddl.push(
-    `CREATE OR REPLACE FUNCTION ${esc(funcName)}() RETURNS trigger AS $$\nBEGIN\n  NEW.${esc(ftsCol)} := to_tsvector('simple', ${newCoalesce});\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql;`,
+    `CREATE INDEX IF NOT EXISTS ${esc(trigramIndexName)} ON ${esc(tableName)} USING gin(${esc(ftsTextCol)} gin_trgm_ops);`,
   );
 
-  // 4. Trigger (drop + create to handle field list changes)
+  // 6. One trigger function keeps both internal projections coherent.
+  const triggerFunctionBody = buildPgFtsTriggerFunctionBody(ftsFields);
+  ddl.push(
+    `CREATE OR REPLACE FUNCTION ${esc(funcName)}() RETURNS trigger AS $$${triggerFunctionBody}$$ LANGUAGE plpgsql;`,
+  );
+
+  // 7. Recreate the trigger when the configured field list changes.
   ddl.push(
     `DROP TRIGGER IF EXISTS ${esc(triggerName)} ON ${esc(tableName)};\nCREATE TRIGGER ${esc(triggerName)} BEFORE INSERT OR UPDATE ON ${esc(tableName)}\n  FOR EACH ROW EXECUTE FUNCTION ${esc(funcName)}();`,
   );
 
-  // 5. Backfill existing rows
+  // 8. Existing-table migration backfill; schema init signatures prevent this
+  // UPDATE from running on every Worker cold start.
   ddl.push(
-    `UPDATE ${esc(tableName)} SET ${esc(ftsCol)} = to_tsvector('simple', ${bareCoalesce});`,
+    `UPDATE ${esc(tableName)} SET ${esc(ftsTextCol)} = ${bareCoalesce}, ${esc(ftsCol)} = to_tsvector('simple', ${bareCoalesce});`,
   );
 
   return ddl;
@@ -752,8 +1135,9 @@ export function generatePgTableDDL(
   ddl.push(generatePgCreateTableDDL(tableName, config));
 
   // 2. Indexes
-  if (config.indexes?.length) {
-    ddl.push(...generatePgIndexDDL(tableName, config.indexes));
+  const indexes = resolveTableIndexes(config);
+  if (indexes.length > 0) {
+    ddl.push(...generatePgIndexDDL(tableName, indexes));
   }
 
   // 3. FTS (tsvector + GIN + trigger)

@@ -175,8 +175,7 @@ describe('1-05 crud — list', () => {
     const { status, data } = await api('GET', '/api/db/shared/tables/posts');
     expect(status).toBe(200);
     expect(Array.isArray(data.items)).toBe(true);
-    expect(typeof data.total).toBe('number');
-    expect(data.total).toBeGreaterThanOrEqual(5);
+    expect(data.total).toBeNull();
   });
 
   it('limit=2 → items 최대 2개', async () => {
@@ -188,6 +187,48 @@ describe('1-05 crud — list', () => {
     const filter = JSON.stringify([['isPublished', '==', true]]);
     const { data } = await api('GET', `/api/db/shared/tables/posts?filter=${encodeURIComponent(filter)}`);
     expect(data.items.every((r: any) => r.isPublished === true)).toBe(true);
+  });
+
+  it('boolean false/true filters and count match exact stored rows', async () => {
+    const marker = `Boolean Filter ${crypto.randomUUID()}`;
+    const { data: disabled } = await api('POST', '/api/db/shared/tables/posts', {
+      title: marker,
+      isPublished: false,
+    });
+    const { data: published } = await api('POST', '/api/db/shared/tables/posts', {
+      title: marker,
+      isPublished: true,
+    });
+    createdIds.push(disabled.id, published.id);
+
+    const disabledFilter = JSON.stringify([
+      ['title', '==', marker],
+      ['isPublished', '==', false],
+    ]);
+    const publishedFilter = JSON.stringify([
+      ['title', '==', marker],
+      ['isPublished', '==', true],
+    ]);
+    const disabledList = await api(
+      'GET',
+      `/api/db/shared/tables/posts?filter=${encodeURIComponent(disabledFilter)}&limit=10`,
+    );
+    const publishedList = await api(
+      'GET',
+      `/api/db/shared/tables/posts?filter=${encodeURIComponent(publishedFilter)}&limit=10`,
+    );
+    const disabledCount = await api(
+      'GET',
+      `/api/db/shared/tables/posts/count?filter=${encodeURIComponent(disabledFilter)}`,
+    );
+
+    expect(disabledList.status).toBe(200);
+    expect(disabledList.data.items.map((row: any) => row.id)).toEqual([disabled.id]);
+    expect(disabledList.data.items[0].isPublished).toBe(false);
+    expect(publishedList.status).toBe(200);
+    expect(publishedList.data.items.map((row: any) => row.id)).toEqual([published.id]);
+    expect(publishedList.data.items[0].isPublished).toBe(true);
+    expect(disabledCount).toMatchObject({ status: 200, data: { total: 1 } });
   });
 
   it('sort=views:desc → views 내림차순', async () => {
@@ -707,6 +748,7 @@ describe('1-05 crud — list (extended)', () => {
         views: i * 5,
         isPublished: i < 4,
         content: i % 2 === 0 ? 'even-content' : 'odd-content',
+        tags: i % 2 === 0 ? ['hot', `tag-${i}`] : ['cold', `tag-${i}`],
       });
       extListIds.push(data.id);
       createdIds.push(data.id);
@@ -748,6 +790,52 @@ describe('1-05 crud — list (extended)', () => {
     const filter = JSON.stringify([['views', 'in', [0, 5, 10]]]);
     const { data } = await api('GET', `/api/db/shared/tables/posts?filter=${encodeURIComponent(filter)}`);
     expect(data.items.every((r: any) => [0, 5, 10].includes(r.views))).toBe(true);
+  });
+
+  it('100-value in plus offset stays within SQLite bind budget', async () => {
+    const values = Array.from({ length: 100 }, (_, index) => index * 5);
+    const filter = JSON.stringify([['views', 'in', values]]);
+    const { status, data } = await api(
+      'GET',
+      `/api/db/shared/tables/posts?filter=${encodeURIComponent(filter)}&limit=100&offset=0`,
+    );
+    expect(status).toBe(200);
+    expect(data.items.every((row: any) => values.includes(row.views))).toBe(true);
+  });
+
+  it('contains-any uses the same one-bind SQLite set semantics', async () => {
+    const filter = JSON.stringify([['tags', 'contains-any', ['hot', 'missing']]]);
+    const { status, data } = await api(
+      'GET',
+      `/api/db/shared/tables/posts?filter=${encodeURIComponent(filter)}&limit=100`,
+    );
+    expect(status).toBe(200);
+    expect(data.items.some((row: any) => extListIds.includes(row.id))).toBe(true);
+    expect(
+      data.items
+        .filter((row: any) => extListIds.includes(row.id))
+        .every((row: any) => row.tags.includes('hot')),
+    ).toBe(true);
+  });
+
+  it('empty SQLite sets preserve in, not-in, and contains-any semantics', async () => {
+    const inEmpty = encodeURIComponent(JSON.stringify([['views', 'in', []]]));
+    const notInEmpty = encodeURIComponent(JSON.stringify([['views', 'not in', []]]));
+    const containsAnyEmpty = encodeURIComponent(JSON.stringify([['tags', 'contains-any', []]]));
+
+    const [included, excluded, containsAny] = await Promise.all([
+      api('GET', `/api/db/shared/tables/posts?filter=${inEmpty}&limit=100`),
+      api('GET', `/api/db/shared/tables/posts?filter=${notInEmpty}&limit=100`),
+      api('GET', `/api/db/shared/tables/posts?filter=${containsAnyEmpty}&limit=100`),
+    ]);
+    expect(included.status).toBe(200);
+    expect(included.data.items).toEqual([]);
+    expect(excluded.status).toBe(200);
+    expect(
+      extListIds.every((id) => excluded.data.items.some((row: any) => row.id === id)),
+    ).toBe(true);
+    expect(containsAny.status).toBe(200);
+    expect(containsAny.data.items).toEqual([]);
   });
 
   it('sort=title:asc → title 오름차순', async () => {
@@ -1161,7 +1249,10 @@ describe('1-05 crud — search FTS (extended)', () => {
 
   it('search — filter 파라미터를 함께 적용', async () => {
     const filter = encodeURIComponent(JSON.stringify([['title', '==', 'FTS Beta Unique987']]));
-    const { status, data } = await api('GET', `/api/db/shared/tables/posts/search?search=Unique987&filter=${filter}`);
+    const { status, data } = await api(
+      'GET',
+      `/api/db/shared/tables/posts/search?search=Unique987&filter=${filter}&includeTotal=true`,
+    );
     expect(status).toBe(200);
     expect(data.total).toBe(1);
     expect(data.items).toHaveLength(1);

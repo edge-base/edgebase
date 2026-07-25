@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/shared",
-    "version": "0.4.9",
+    "version": "0.5.0",
     "description": "EdgeBase shared helpers for config, functions, and runtime contracts",
     "license": "MIT",
     "repository": {

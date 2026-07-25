@@ -17,6 +17,7 @@ import {
   computeSelfHostScheduleManifestDigest,
   createSelfHostScheduleSupervisor,
   dispatchSelfHostScheduleBatch,
+  readSelfHostScheduleState,
   reconcileSelfHostScheduleState,
   runSelfHostSchedulePass,
   validateSelfHostAppManifest,
@@ -25,6 +26,8 @@ import {
   type SelfHostManagedScheduleEntry,
   type SelfHostManagedSchedulePayload,
   type SelfHostScheduleBoundary,
+  type SelfHostScheduleDispatchOutcome,
+  type SelfHostSchedulePassReport,
   type SelfHostScheduleState,
   type SelfHostScheduleStateStore,
   type ValidatedSelfHostAppManifest,
@@ -53,6 +56,16 @@ function selfHostRuntimeManifest() {
     dockerEntrypoint: {
       path: '.edgebase/self-host/self-host-docker-entrypoint.mjs',
       digest: `sha256:${'3'.repeat(64)}`,
+      bytes: 1,
+    },
+    wranglerRuntime: {
+      path: '.edgebase/self-host/self-host-wrangler-runtime.mjs',
+      digest: `sha256:${'4'.repeat(64)}`,
+      bytes: 1,
+    },
+    proxyWorker: {
+      path: '.edgebase/self-host/self-host-proxy-worker.js',
+      digest: `sha256:${'5'.repeat(64)}`,
       bytes: 1,
     },
   } as const;
@@ -267,6 +280,92 @@ describe('self-host schedule manifest and durable target authority', () => {
 });
 
 describe('bounded target execution and recovery', () => {
+  it('keeps steady success quiet while failures and one recovery remain observable', async () => {
+    const scheduleModule = await import('../src/lib/self-host-schedule-supervisor.js');
+    const candidate = (scheduleModule as Record<string, unknown>)
+      .createSelfHostScheduleOutcomeLogger;
+    if (typeof candidate !== 'function') {
+      expect(typeof candidate).toBe('function');
+      return;
+    }
+    const createLogger = candidate as (options: {
+      prefix: string;
+      writeInfo(line: string): void;
+      writeError(line: string): void;
+    }) => {
+      report(report: SelfHostSchedulePassReport, options?: { initial?: boolean }): void;
+    };
+    const info: string[] = [];
+    const errors: string[] = [];
+    const logger = createLogger({
+      prefix: '[Fixture]',
+      writeInfo: (line) => info.push(line),
+      writeError: (line) => errors.push(line),
+    });
+    const firstGeneration = `sha256:${'6'.repeat(64)}` as const;
+    const secondGeneration = `sha256:${'7'.repeat(64)}` as const;
+    const manifestDigest = `sha256:${'5'.repeat(64)}` as const;
+    const outcome = (
+      targetId: string,
+      status: SelfHostScheduleDispatchOutcome['status'],
+    ): SelfHostScheduleDispatchOutcome => ({
+      cron: '* * * * *',
+      scheduledTime: Date.parse('2026-07-22T00:00:00.000Z'),
+      targetId,
+      mode: 'execute',
+      status,
+      runtimeStatus: status === 'ambiguous' ? 'timed_out' : status,
+      attempt: status === 'succeeded' ? 0 : 1,
+      nextAttemptAt: status === 'succeeded' ? 0 : Date.parse('2026-07-22T00:01:00.000Z'),
+      ...(status === 'failed' ? { error: 'synthetic failure' } : {}),
+    });
+    const report = (
+      generation: `sha256:${string}`,
+      outcomes: SelfHostScheduleDispatchOutcome[],
+    ): SelfHostSchedulePassReport => ({
+      generation,
+      manifestDigest,
+      observedAt: Date.parse('2026-07-22T00:00:00.000Z'),
+      structuralReady: true,
+      itemFailureCount: outcomes.filter(({ status }) => status !== 'succeeded').length,
+      outcomes,
+      state: {
+        schemaVersion: 2,
+        generation,
+        manifestDigest,
+        targets: {},
+      },
+    });
+    const healthy = outcome('app-function:healthy#default', 'succeeded');
+    const recovering = outcome('app-function:recovering#default', 'succeeded');
+
+    logger.report(report(firstGeneration, [healthy, recovering]), { initial: true });
+    logger.report(report(firstGeneration, [healthy, recovering]));
+    expect(info).toHaveLength(2);
+    expect(info.every((line) => line.includes('[Fixture] initial schedule outcome'))).toBe(true);
+    expect(errors).toEqual([]);
+
+    logger.report(report(firstGeneration, [
+      outcome(healthy.targetId, 'failed'),
+      outcome(recovering.targetId, 'ambiguous'),
+    ]));
+    expect(errors).toHaveLength(2);
+    expect(errors[0]).toContain('schedule outcome failed');
+    expect(errors[1]).toContain('schedule outcome ambiguous');
+    expect(errors.join('\n')).toContain(healthy.targetId);
+    expect(errors.join('\n')).toContain(recovering.targetId);
+
+    logger.report(report(firstGeneration, [healthy, recovering]));
+    logger.report(report(firstGeneration, [healthy, recovering]));
+    expect(info).toHaveLength(4);
+    expect(info.slice(2).every((line) => line.includes('schedule outcome recovered'))).toBe(true);
+
+    logger.report(report(firstGeneration, [outcome(healthy.targetId, 'failed')]));
+    logger.report(report(secondGeneration, [healthy]));
+    expect(errors).toHaveLength(3);
+    expect(info).toHaveLength(4);
+  });
+
   it('dispatches duplicate-cron targets independently with a strict concurrency ceiling', async () => {
     const entries = Array.from({ length: 7 }, (_, index) => appEntry(`target-${index}`));
     const state = createMemoryStateStore();
@@ -510,6 +609,30 @@ describe('authenticated protocol-v2 batching', () => {
     })).rejects.toThrow(/unreadable bounded response/i);
   });
 
+  it('accepts a complete response at the exact byte cap', async () => {
+    const manifest = buildManifest([appEntry('exact-response')]);
+    const boundary = {
+      cron: manifest.schedules.entries[0]!.cron,
+      scheduledTime: Date.parse('2026-07-16T12:30:00.000Z'),
+      targetId: manifest.schedules.entries[0]!.id,
+      mode: 'execute' as const,
+    };
+    const base = await successResponse(manifest, [boundary]).text();
+    const body = `${base}${' '.repeat(MAX_SELF_HOST_SCHEDULE_RESPONSE_BYTES - Buffer.byteLength(base))}`;
+    expect(Buffer.byteLength(body)).toBe(MAX_SELF_HOST_SCHEDULE_RESPONSE_BYTES);
+
+    await expect(dispatchSelfHostScheduleBatch({
+      manifest,
+      boundaries: [boundary],
+      runtimeOrigin: 'http://127.0.0.1:8788',
+      controlSecret: CONTROL_SECRET,
+      fetch: (async () => new Response(body, {
+        status: 200,
+        headers: { 'content-length': String(Buffer.byteLength(body)) },
+      })) as typeof fetch,
+    })).resolves.toMatchObject([{ itemId: boundary.targetId }]);
+  });
+
   it.each([1, 64, 65, 130])('drains %i targets in bounded chunks without loss', async (count) => {
     const entries = Array.from({ length: count }, (_, index) => appEntry(`chunk-${index}`));
     const manifest = buildManifest(entries);
@@ -572,6 +695,84 @@ describe('authenticated protocol-v2 batching', () => {
 });
 
 describe('state durability and supervisor health', () => {
+  it('quarantines invalid regular state into one bounded sidecar and treats it as missing', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'edgebase-schedule-state-recovery-'));
+    cleanupPaths.push(directory);
+    const path = join(directory, 'state.json');
+    const quarantinePath = `${path}.corrupt`;
+    const notices: Array<{ path: string; quarantinePath: string; reason: string }> = [];
+    const readRecoverableState = readSelfHostScheduleState as unknown as (
+      statePath: string,
+      options?: {
+        onQuarantine(event: { path: string; quarantinePath: string; reason: string }): void;
+      },
+    ) => Promise<SelfHostScheduleState | null>;
+    const invalidSources = [
+      '{"schemaVersion":2',
+      'x'.repeat((4 * 1024 * 1024) + 1),
+      JSON.stringify({
+        schemaVersion: 1,
+        generation: `sha256:${'1'.repeat(64)}`,
+        manifestDigest: `sha256:${'2'.repeat(64)}`,
+        targets: {},
+      }),
+      JSON.stringify({
+        schemaVersion: 2,
+        generation: `sha256:${'1'.repeat(64)}`,
+        manifestDigest: `sha256:${'2'.repeat(64)}`,
+        targets: {},
+        future: true,
+      }),
+    ];
+
+    for (const source of invalidSources) {
+      await writeFile(path, source);
+      await expect(readRecoverableState(path, {
+        onQuarantine: (event) => notices.push(event),
+      })).resolves.toBeNull();
+      await expect(readFile(path, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readFile(quarantinePath, 'utf8')).toBe(source);
+      expect(await readdir(directory)).toEqual(['state.json.corrupt']);
+    }
+
+    expect(notices).toHaveLength(invalidSources.length);
+    expect(notices.every((event) => (
+      event.path === path
+      && event.quarantinePath === quarantinePath
+      && event.reason.length > 0
+      && !event.reason.includes(invalidSources[0]!)
+    ))).toBe(true);
+    await expect(readRecoverableState(path, {
+      onQuarantine: (event) => notices.push(event),
+    })).resolves.toBeNull();
+    expect(notices).toHaveLength(invalidSources.length);
+  });
+
+  it('keeps a non-regular schedule-state path fatal and untouched', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'edgebase-schedule-state-nonfile-'));
+    cleanupPaths.push(directory);
+    const path = join(directory, 'state.json');
+    await mkdir(path);
+
+    await expect(readSelfHostScheduleState(path)).rejects.toThrow(/not a regular file/i);
+    expect((await stat(path)).isDirectory()).toBe(true);
+    expect(await readdir(directory)).toEqual(['state.json']);
+  });
+
+  it('fails closed without deleting invalid state when its quarantine sidecar is unsafe', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'edgebase-schedule-state-blocked-recovery-'));
+    cleanupPaths.push(directory);
+    const path = join(directory, 'state.json');
+    const quarantinePath = `${path}.corrupt`;
+    const source = '{"schemaVersion":2';
+    await writeFile(path, source);
+    await mkdir(quarantinePath);
+
+    await expect(readSelfHostScheduleState(path)).rejects.toThrow(/could not quarantine/i);
+    expect(await readFile(path, 'utf8')).toBe(source);
+    expect((await stat(quarantinePath)).isDirectory()).toBe(true);
+  });
+
   it('atomically commits owner-only state without leaving temporary files', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'edgebase-schedule-state-'));
     cleanupPaths.push(directory);
@@ -704,6 +905,8 @@ async function writeManifestFixture(
     ['gateway', 'self-host-gateway.mjs', 'export const gateway = true;\n'],
     ['scheduleSupervisor', 'self-host-schedule-supervisor.mjs', 'export const supervisor = true;\n'],
     ['dockerEntrypoint', 'self-host-docker-entrypoint.mjs', 'export const entrypoint = true;\n'],
+    ['wranglerRuntime', 'self-host-wrangler-runtime.mjs', 'export const runtime = true;\n'],
+    ['proxyWorker', 'self-host-proxy-worker.js', 'export const proxy = true;\n'],
   ] as const;
   const assets: Record<string, { path: string; digest: `sha256:${string}`; bytes: number }> = {};
   for (const [name, filename, content] of definitions) {

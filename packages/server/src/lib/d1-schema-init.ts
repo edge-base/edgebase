@@ -15,15 +15,25 @@ import {
   META_TABLE_DDL,
   generateTableDDL,
   generateSQLiteAddColumnDDLs,
-  generateFTS5DDL,
-  generateFTS5Triggers,
+  computeSQLiteFtsSignature,
+  generateFTS5RebuildDDLs,
   generateIndexDDL,
+  resolveTableIndexes,
   buildEffectiveSchema,
   computeSchemaHashSync,
+  generateSQLiteForeignKeyRebuildDDLs,
+  getDeclaredSQLiteForeignKeys,
+  normalizeSQLiteForeignKeyRows,
   planSQLiteFieldUniqueIndex,
+  sqliteForeignKeysMatch,
   sqliteUniqueDuplicateError,
   type SQLiteIndexState,
+  type SQLiteSchemaArtifact,
 } from './schema.js';
+import {
+  buildSqliteFtsArtifactQuery,
+  inspectSqliteFtsArtifacts,
+} from './query-engine.js';
 
 // Track initialized namespaces to avoid redundant checks per Worker process.
 const _initialized = new Set<string>();
@@ -65,29 +75,46 @@ async function initD1Table(
   if (storedHash === currentHash) {
     const pending = await getPendingD1Migrations(db, tableName, config);
     if (pending.length > 0) {
-      await runD1ExistingTableUpgrade(
+      const rebuiltTable = await runD1ExistingTableUpgrade(
         db,
         tableName,
         config,
         pending,
         null,
       );
+      if (rebuiltTable) {
+        await recordD1FtsSignatureAfterRebuild(db, tableName, config);
+      } else {
+        await ensureD1FTSAndIndexes(db, tableName, config);
+      }
     } else {
       // Older runtimes could save this hash without materializing a UNIQUE
       // change on an existing column, so reconciliation remains state-based.
-      await handleD1SchemaUpdate(db, tableName, config);
+      const rebuiltTable = await handleD1SchemaUpdate(db, tableName, config);
+      if (rebuiltTable) {
+        await recordD1FtsSignatureAfterRebuild(db, tableName, config);
+      } else {
+        await ensureD1FTSAndIndexes(db, tableName, config);
+      }
     }
-    await ensureD1FTSAndIndexes(db, tableName, config);
     return;
   }
 
   if (!storedHash) {
+    if (config.fts?.length) {
+      const inspection = await inspectD1FTSArtifacts(db, tableName, config.fts);
+      assertD1FtsRebuildSafe(tableName, inspection.rebuildSafe);
+    }
     // First time — create table + indexes + FTS5
     const ddls = generateTableDDL(tableName, config);
     const stmts = ddls.map(ddl => db.prepare(ddl));
     if (stmts.length > 0) {
       await db.batch(stmts);
     }
+
+    // Reconcile once more with a missing signature so a pre-existing base
+    // table is backfilled instead of trusting idempotent CREATE statements.
+    await ensureD1FTSAndIndexes(db, tableName, config);
 
     // Set initial migration version if migrations exist (skip running them —
     // fresh table already has the latest schema)
@@ -102,19 +129,27 @@ async function initD1Table(
       // single physical-schema snapshot so additive columns, pending data
       // migrations, final constraints, and both metadata writes commit or
       // roll back together in provider order.
-      await runD1ExistingTableUpgrade(
+      const rebuiltTable = await runD1ExistingTableUpgrade(
         db,
         tableName,
         config,
         pending,
         currentHash,
       );
-      await ensureD1FTSAndIndexes(db, tableName, config);
+      if (rebuiltTable) {
+        await recordD1FtsSignatureAfterRebuild(db, tableName, config);
+      } else {
+        await ensureD1FTSAndIndexes(db, tableName, config);
+      }
       return;
     }
 
-    await handleD1SchemaUpdate(db, tableName, config);
-    await ensureD1FTSAndIndexes(db, tableName, config);
+    const rebuiltTable = await handleD1SchemaUpdate(db, tableName, config);
+    if (rebuiltTable) {
+      await recordD1FtsSignatureAfterRebuild(db, tableName, config);
+    } else {
+      await ensureD1FTSAndIndexes(db, tableName, config);
+    }
   }
 
   // Store new hash
@@ -129,7 +164,7 @@ async function handleD1SchemaUpdate(
   db: D1Database,
   tableName: string,
   config: TableConfig,
-): Promise<void> {
+): Promise<boolean> {
   const plan = await planD1SchemaUpdate(db, tableName, config, true);
   const migrationDDLs = [...plan.additiveDDLs, ...plan.constraintDDLs];
   if (migrationDDLs.length > 0) {
@@ -137,12 +172,14 @@ async function handleD1SchemaUpdate(
     // commits together or remains wholly retryable.
     await db.batch(migrationDDLs.map((ddl) => db.prepare(ddl)));
   }
+  return plan.rebuiltTable;
 }
 
 interface D1SchemaUpdatePlan {
   additiveDDLs: string[];
   constraintDDLs: string[];
   createdUniqueFields: string[];
+  rebuiltTable: boolean;
 }
 
 async function planD1SchemaUpdate(
@@ -177,6 +214,15 @@ async function planD1SchemaUpdate(
     });
   }
 
+  const foreignKeyResult = await db
+    .prepare(`PRAGMA foreign_key_list("${escapedTableName}")`)
+    .all();
+  const actualForeignKeys = normalizeSQLiteForeignKeyRows(
+    (foreignKeyResult.results ?? []) as Record<string, unknown>[],
+  );
+  const desiredForeignKeys = getDeclaredSQLiteForeignKeys(config);
+  const rebuiltTable = !sqliteForeignKeysMatch(actualForeignKeys, desiredForeignKeys);
+
   // Build effective schema with auto-fields
   const effectiveSchema = buildEffectiveSchema(config.schema);
 
@@ -195,7 +241,7 @@ async function planD1SchemaUpdate(
           existingIndexes,
         );
         if (uniquePlan.ddl) {
-          constraintDDLs.push(uniquePlan.ddl);
+          if (!rebuiltTable) constraintDDLs.push(uniquePlan.ddl);
           createdUniqueFields.push(colName);
         }
       }
@@ -219,13 +265,56 @@ async function planD1SchemaUpdate(
         throw sqliteUniqueDuplicateError(tableName, colName);
       }
     }
-    if (plan.ddl) {
+    if (plan.ddl && !rebuiltTable) {
       constraintDDLs.push(plan.ddl);
       if (plan.action === 'create') createdUniqueFields.push(colName);
+    } else if (plan.action === 'create') {
+      createdUniqueFields.push(colName);
     }
   }
 
-  return { additiveDDLs, constraintDDLs, createdUniqueFields };
+  if (rebuiltTable) {
+    const inventoryResult = await db
+      .prepare(
+        'SELECT \'artifact\' AS "kind", "type", "name", "sql", '
+        + 'NULL AS "childTable", NULL AS "childColumn" FROM "sqlite_master" '
+        + 'WHERE "tbl_name" = ? AND "type" IN (\'index\', \'trigger\') '
+        + 'UNION ALL '
+        + 'SELECT \'inbound\' AS "kind", NULL AS "type", NULL AS "name", '
+        + 'NULL AS "sql", child."name" AS "childTable", '
+        + 'fk."from" AS "childColumn" FROM "sqlite_master" AS child '
+        + 'JOIN pragma_foreign_key_list(child."name") AS fk '
+        + 'WHERE child."type" = \'table\' AND child."name" <> ? AND fk."table" = ? '
+        + 'ORDER BY "kind", "name", "childTable", "childColumn"',
+      )
+      .bind(tableName, tableName, tableName)
+      .all();
+    const inventoryRows = (inventoryResult.results ?? []) as Record<string, unknown>[];
+    const artifacts = inventoryRows
+      .filter((row) => row.kind === 'artifact')
+      .map((row): SQLiteSchemaArtifact => ({
+        type: row.type as SQLiteSchemaArtifact['type'],
+        name: String(row.name ?? ''),
+        sql: row.sql === null || row.sql === undefined ? null : String(row.sql),
+      }));
+    constraintDDLs.push(...generateSQLiteForeignKeyRebuildDDLs(
+      tableName,
+      config,
+      {
+        columns: [...existingCols],
+        indexes: existingIndexes,
+        artifacts,
+        inboundForeignKeys: inventoryRows
+          .filter((row) => row.kind === 'inbound')
+          .map((row) => ({
+            childTable: String(row.childTable ?? ''),
+            childColumn: String(row.childColumn ?? ''),
+          })),
+      },
+    ));
+  }
+
+  return { additiveDDLs, constraintDDLs, createdUniqueFields, rebuiltTable };
 }
 
 /**
@@ -237,44 +326,82 @@ async function ensureD1FTSAndIndexes(
   config: TableConfig,
 ): Promise<void> {
   const stmts: D1PreparedStatement[] = [];
-  let needsFtsRebuild = false;
 
   // Re-apply indexes (CREATE IF NOT EXISTS is idempotent)
-  if (config.indexes?.length) {
-    const indexDDLs = generateIndexDDL(tableName, config.indexes);
+  const indexes = resolveTableIndexes(config);
+  if (indexes.length > 0) {
+    const indexDDLs = generateIndexDDL(tableName, indexes);
     for (const ddl of indexDDLs) {
       stmts.push(db.prepare(ddl));
     }
   }
 
-  // Re-apply FTS5
+  // Reconcile the complete FTS definition. CREATE IF NOT EXISTS cannot repair
+  // a virtual table or triggers whose configured field list has changed.
   if (config.fts?.length) {
-    const ftsArtifacts = [`${tableName}_fts`, `${tableName}_ai`, `${tableName}_ad`, `${tableName}_au`];
-    const placeholders = ftsArtifacts.map(() => '?').join(', ');
-    const artifactRows = await db
-      .prepare(`SELECT name FROM sqlite_master WHERE name IN (${placeholders})`)
-      .bind(...ftsArtifacts)
-      .all();
-    const existingArtifacts = new Set(
-      (artifactRows.results ?? []).map((row: Record<string, unknown>) => row.name as string),
-    );
-    needsFtsRebuild = ftsArtifacts.some((name) => !existingArtifacts.has(name));
+    const inspection = await inspectD1FTSArtifacts(db, tableName, config.fts);
+    assertD1FtsRebuildSafe(tableName, inspection.rebuildSafe);
+    const desiredSignature = computeSQLiteFtsSignature(config.fts);
+    const storedSignature = await getD1Meta(db, `fts_signature:${tableName}`);
 
-    stmts.push(db.prepare(generateFTS5DDL(tableName, config.fts)));
-    const triggerDDLs = generateFTS5Triggers(tableName, config.fts);
-    for (const ddl of triggerDDLs) {
-      stmts.push(db.prepare(ddl));
+    if (!inspection.healthy || storedSignature !== desiredSignature) {
+      for (const ddl of generateFTS5RebuildDDLs(tableName, config.fts)) {
+        stmts.push(db.prepare(ddl));
+      }
+      // The signature is deliberately the final statement in the same D1
+      // batch, so metadata can never get ahead of a failed rebuild/backfill.
+      stmts.push(prepareD1Meta(db, `fts_signature:${tableName}`, desiredSignature));
     }
   }
 
   if (stmts.length > 0) {
     await db.batch(stmts);
   }
+}
 
-  if (config.fts?.length && needsFtsRebuild) {
-    const ftsTableName = `${tableName}_fts`.replace(/"/g, '""');
-    await db.prepare(`INSERT INTO "${ftsTableName}"("${ftsTableName}") VALUES ('rebuild')`).run();
+async function inspectD1FTSArtifacts(
+  db: D1Database,
+  tableName: string,
+  desiredFields: readonly string[],
+): Promise<ReturnType<typeof inspectSqliteFtsArtifacts>> {
+  const artifactQuery = buildSqliteFtsArtifactQuery(tableName);
+  const artifactResult = await db.prepare(artifactQuery.sql)
+    .bind(...artifactQuery.params)
+    .all();
+  const artifactRows = (artifactResult.results ?? []) as Array<Record<string, unknown>>;
+  const ftsTableRows = artifactRows.filter((row) => (
+    row.name === `${tableName}_fts` && row.type === 'table'
+  ));
+  let actualFields: string[] | null = null;
+  if (ftsTableRows.length === 1) {
+    const escapedFtsTable = `${tableName}_fts`.replace(/"/g, '""');
+    const fieldRows = await db.prepare(`PRAGMA table_info("${escapedFtsTable}")`).all();
+    actualFields = ((fieldRows.results ?? []) as Array<Record<string, unknown>>)
+      .sort((left, right) => Number(left.cid) - Number(right.cid))
+      .map((row) => String(row.name));
   }
+  return inspectSqliteFtsArtifacts(tableName, desiredFields, actualFields, artifactRows);
+}
+
+function assertD1FtsRebuildSafe(tableName: string, rebuildSafe: boolean): void {
+  if (rebuildSafe) return;
+  throw new Error(
+    `SQLite FTS artifact collision for '${tableName}': reserved-name objects are not `
+    + 'owned by the configured table; refusing destructive repair.',
+  );
+}
+
+async function recordD1FtsSignatureAfterRebuild(
+  db: D1Database,
+  tableName: string,
+  config: TableConfig,
+): Promise<void> {
+  if (!config.fts?.length) return;
+  await setD1Meta(
+    db,
+    `fts_signature:${tableName}`,
+    computeSQLiteFtsSignature(config.fts),
+  );
 }
 
 // ─── Migration Engine ───
@@ -305,7 +432,7 @@ async function runD1ExistingTableUpgrade(
   config: TableConfig,
   pending: MigrationConfig[],
   nextSchemaHash: string | null,
-): Promise<void> {
+): Promise<boolean> {
   const plan = await planD1SchemaUpdate(db, tableName, config, false);
   const statements: D1PreparedStatement[] = [];
 
@@ -318,8 +445,9 @@ async function runD1ExistingTableUpgrade(
   for (const ddl of plan.constraintDDLs) {
     statements.push(db.prepare(ddl));
   }
-  if (config.indexes?.length) {
-    for (const ddl of generateIndexDDL(tableName, config.indexes)) {
+  const indexes = resolveTableIndexes(config);
+  if (!plan.rebuiltTable && indexes.length > 0) {
+    for (const ddl of generateIndexDDL(tableName, indexes)) {
       statements.push(db.prepare(ddl));
     }
   }
@@ -353,6 +481,7 @@ async function runD1ExistingTableUpgrade(
     console.error(`D1 Migration ${versionLabel} failed for ${tableName}:`, err);
     throw new Error(`D1 Migration ${versionLabel} failed: ${(err as Error).message}`);
   }
+  return plan.rebuiltTable;
 }
 
 // ─── _meta Helpers ───

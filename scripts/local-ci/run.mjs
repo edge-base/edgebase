@@ -23,6 +23,7 @@ import {
   jobsForLocalCiProfile,
 } from './jobs.mjs';
 import {
+  assertDockerCapacityRequirements,
   changedServerLibFiles,
   digestRef,
   digestWorktree,
@@ -106,6 +107,7 @@ function formatDuration(durationMs) {
 
 async function doctor() {
   const capacity = await dockerCapacity(repoRoot);
+  assertDockerCapacityRequirements(capacity);
   const actPath = await installAct(repoRoot);
   const version = await run(actPath, ['--version']);
   console.log(
@@ -151,6 +153,8 @@ async function main() {
     );
   }
 
+  const capacity = await dockerCapacity(repoRoot);
+  assertDockerCapacityRequirements(capacity);
   const stateRoot = stateDir(repoRoot);
   const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-${initial.commit.slice(0, 12)}`;
   const runRoot = path.join(stateRoot, 'runs', runId);
@@ -160,10 +164,9 @@ async function main() {
   const selectedBase = options.job
     ? dependencyClosure(options.job)
     : jobsForLocalCiProfile(options.profile);
-  const [workflowDigest, runnerDigest, capacity, actPath] = await Promise.all([
+  const [workflowDigest, runnerDigest, actPath] = await Promise.all([
     digestWorktree(repoRoot, WORKFLOW_PATHS),
     digestWorktree(repoRoot, RUNNER_PATHS),
-    dockerCapacity(repoRoot),
     installAct(repoRoot),
   ]);
   const targetPlatform = targetPlatformForRun(options, capacity.architecture);

@@ -50,6 +50,8 @@ const SELF_HOST_ASSET_ROOT = '.edgebase/self-host';
 const SELF_HOST_GATEWAY_ASSET = `${SELF_HOST_ASSET_ROOT}/self-host-gateway.mjs` as const;
 const SELF_HOST_SCHEDULE_SUPERVISOR_ASSET = `${SELF_HOST_ASSET_ROOT}/self-host-schedule-supervisor.mjs` as const;
 const SELF_HOST_DOCKER_ENTRYPOINT_ASSET = `${SELF_HOST_ASSET_ROOT}/self-host-docker-entrypoint.mjs` as const;
+const SELF_HOST_WRANGLER_RUNTIME_ASSET = `${SELF_HOST_ASSET_ROOT}/self-host-wrangler-runtime.mjs` as const;
+const SELF_HOST_PROXY_WORKER_ASSET = `${SELF_HOST_ASSET_ROOT}/self-host-proxy-worker.js` as const;
 
 export interface EdgeBaseSelfHostAssetManifest<Path extends string = string> {
   path: Path;
@@ -63,6 +65,8 @@ export interface EdgeBaseSelfHostManifest {
   gateway: EdgeBaseSelfHostAssetManifest<typeof SELF_HOST_GATEWAY_ASSET>;
   scheduleSupervisor: EdgeBaseSelfHostAssetManifest<typeof SELF_HOST_SCHEDULE_SUPERVISOR_ASSET>;
   dockerEntrypoint: EdgeBaseSelfHostAssetManifest<typeof SELF_HOST_DOCKER_ENTRYPOINT_ASSET>;
+  wranglerRuntime: EdgeBaseSelfHostAssetManifest<typeof SELF_HOST_WRANGLER_RUNTIME_ASSET>;
+  proxyWorker: EdgeBaseSelfHostAssetManifest<typeof SELF_HOST_PROXY_WORKER_ASSET>;
 }
 
 export interface EdgeBaseAppManifest {
@@ -253,6 +257,14 @@ function resolveSelfHostDockerEntrypointSource(): string {
   return fileURLToPath(new URL('../templates/self-host/self-host-docker-entrypoint.mjs', import.meta.url));
 }
 
+function resolveSelfHostWranglerRuntimeSource(): string {
+  return fileURLToPath(new URL('../templates/self-host/self-host-wrangler-runtime.mjs', import.meta.url));
+}
+
+function resolveSelfHostProxyWorkerSource(): string {
+  return fileURLToPath(new URL('../templates/edgebase-dev-proxy-worker.js', import.meta.url));
+}
+
 function selfHostAssetManifest<Path extends string>(
   path: Path,
   content: Buffer,
@@ -288,10 +300,20 @@ function replaceSelfHostRuntimeAssets(outputDir: string): EdgeBaseSelfHostManife
       join(stagingDir, 'self-host-docker-entrypoint.mjs'),
       readFileSync(resolveSelfHostDockerEntrypointSource()),
     );
+    writeFileSync(
+      join(stagingDir, 'self-host-wrangler-runtime.mjs'),
+      readFileSync(resolveSelfHostWranglerRuntimeSource()),
+    );
+    writeFileSync(
+      join(stagingDir, 'self-host-proxy-worker.js'),
+      readFileSync(resolveSelfHostProxyWorkerSource()),
+    );
 
     const gatewayContent = readFileSync(join(stagingDir, 'self-host-gateway.mjs'));
     const supervisorContent = readFileSync(join(stagingDir, 'self-host-schedule-supervisor.mjs'));
     const dockerEntrypointContent = readFileSync(join(stagingDir, 'self-host-docker-entrypoint.mjs'));
+    const wranglerRuntimeContent = readFileSync(join(stagingDir, 'self-host-wrangler-runtime.mjs'));
+    const proxyWorkerContent = readFileSync(join(stagingDir, 'self-host-proxy-worker.js'));
     const assets = {
       gateway: selfHostAssetManifest(SELF_HOST_GATEWAY_ASSET, gatewayContent),
       scheduleSupervisor: selfHostAssetManifest(
@@ -301,6 +323,14 @@ function replaceSelfHostRuntimeAssets(outputDir: string): EdgeBaseSelfHostManife
       dockerEntrypoint: selfHostAssetManifest(
         SELF_HOST_DOCKER_ENTRYPOINT_ASSET,
         dockerEntrypointContent,
+      ),
+      wranglerRuntime: selfHostAssetManifest(
+        SELF_HOST_WRANGLER_RUNTIME_ASSET,
+        wranglerRuntimeContent,
+      ),
+      proxyWorker: selfHostAssetManifest(
+        SELF_HOST_PROXY_WORKER_ASSET,
+        proxyWorkerContent,
       ),
     };
     const generation = `sha256:${createHash('sha256').update(JSON.stringify({

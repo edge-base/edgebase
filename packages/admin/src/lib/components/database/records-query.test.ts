@@ -30,5 +30,22 @@ describe('buildRecordsQuery', () => {
 
 		expect(params.has('search')).toBe(false);
 		expect(params.has('sort')).toBe(false);
+		expect(params.has('includeTotal')).toBe(false);
+	});
+
+	it('serializes explicit total opt-in and opt-out choices', () => {
+		const withTotal = new URLSearchParams(buildRecordsQuery({
+			limit: 20,
+			offset: 0,
+			includeTotal: true,
+		}));
+		const withoutTotal = new URLSearchParams(buildRecordsQuery({
+			limit: 20,
+			offset: 0,
+			includeTotal: false,
+		}));
+
+		expect(withoutTotal.get('includeTotal')).toBe('0');
+		expect(withTotal.get('includeTotal')).toBe('true');
 	});
 });

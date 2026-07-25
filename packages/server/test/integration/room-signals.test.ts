@@ -193,6 +193,110 @@ describe('Rooms runtime — signals', () => {
     receiver.ws.close();
   });
 
+  it('correlates the exact signal-rate rejection after mutual join and resets it per connection', async () => {
+    const roomId = `signals-rate-${uid()}`;
+    const senderSession = await createSession();
+    const sender = await connectToRoomWithToken(
+      'test-signal-rate-limit',
+      roomId,
+      senderSession.accessToken,
+    );
+    const senderMutual = waitForFrame(
+      sender.ws,
+      (msg) => msg.type === 'members_sync' && msg.members?.length === 2,
+    );
+    const receiver = await connectToRoom('test-signal-rate-limit', roomId);
+    await senderMutual;
+
+    const firstDelivery = waitForFrame(
+      receiver.ws,
+      (msg) => msg.type === 'signal' && msg.event === 'authorized.first',
+    );
+    sender.ws.send(JSON.stringify({
+      type: 'signal',
+      event: 'authorized.first',
+      payload: { sequence: 1 },
+      requestId: 'rate-authorized-1',
+    }));
+    const firstSent = await waitForFrame(
+      sender.ws,
+      (msg) => msg.type === 'signal_sent' && msg.requestId === 'rate-authorized-1',
+    );
+    const firstReceived = await firstDelivery;
+    expect(firstSent.event).toBe('authorized.first');
+    expect(firstReceived.payload).toEqual({ sequence: 1 });
+
+    const rejectedDelivery = collectFrames(
+      receiver.ws,
+      (msg) => msg.type === 'signal' && msg.event === 'authorized.rate-limited',
+      250,
+    );
+    sender.ws.send(JSON.stringify({
+      type: 'signal',
+      event: 'authorized.rate-limited',
+      payload: { sequence: 2 },
+      requestId: 'rate-rejected-2',
+    }));
+    const rateError = await waitForFrame(
+      sender.ws,
+      (msg) => msg.type === 'signal_error' && msg.requestId === 'rate-rejected-2',
+    );
+    expect(rateError).toMatchObject({
+      event: 'authorized.rate-limited',
+      message: 'Rate limited',
+      requestId: 'rate-rejected-2',
+    });
+    expect(await rejectedDelivery).toHaveLength(0);
+
+    const deniedSender = await connectToRoom('test-signal-rate-limit', roomId);
+    const deniedDelivery = collectFrames(
+      receiver.ws,
+      (msg) => msg.type === 'signal' && msg.event === 'denied.by.access',
+      250,
+    );
+    deniedSender.ws.send(JSON.stringify({
+      type: 'signal',
+      event: 'denied.by.access',
+      payload: { denied: true },
+      requestId: 'fresh-access-denied',
+    }));
+    const accessError = await waitForFrame(
+      deniedSender.ws,
+      (msg) => msg.type === 'signal_error' && msg.requestId === 'fresh-access-denied',
+    );
+    expect(accessError.message).toBe('Denied by room signal access rule');
+    expect(await deniedDelivery).toHaveLength(0);
+
+    sender.ws.close();
+    const reconnected = await connectToRoomWithToken(
+      'test-signal-rate-limit',
+      roomId,
+      senderSession.accessToken,
+    );
+    const reconnectDelivery = waitForFrame(
+      receiver.ws,
+      (msg) => msg.type === 'signal' && msg.event === 'authorized.reconnected',
+    );
+    reconnected.ws.send(JSON.stringify({
+      type: 'signal',
+      event: 'authorized.reconnected',
+      payload: { connectionId: reconnected.connectionId },
+      requestId: 'reconnected-authorized',
+    }));
+    const reconnectSent = await waitForFrame(
+      reconnected.ws,
+      (msg) => msg.type === 'signal_sent' && msg.requestId === 'reconnected-authorized',
+    );
+    const reconnectReceived = await reconnectDelivery;
+    expect(reconnectSent.event).toBe('authorized.reconnected');
+    expect(reconnectReceived.meta.connectionId).toBe(reconnected.connectionId);
+    expect(reconnected.connectionId).not.toBe(sender.connectionId);
+
+    deniedSender.ws.close();
+    reconnected.ws.close();
+    receiver.ws.close();
+  });
+
   it('includeSelf echoes the signal back to the sending connection', async () => {
     const roomId = `signals-self-${uid()}`;
     const sender = await connectToRoom('test-signals', roomId);

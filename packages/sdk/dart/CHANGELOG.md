@@ -1,3 +1,9 @@
+## 0.5.0
+
+- Synchronized the Dart workspace and generated API surfaces with EdgeBase
+  0.5.0
+- No Dart-specific API compatibility break is introduced
+
 ## 0.4.9
 
 - Synchronized the Dart workspace with the EdgeBase 0.4.9 patch release

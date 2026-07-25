@@ -4,7 +4,7 @@
  * Key regression: requests=0 must be honoured (ban-mode),
  * not silently swallowed by a truthy check.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
 import {
   counter,
@@ -17,6 +17,12 @@ import {
 } from '../middleware/rate-limit.js';
 import type { EdgeBaseConfig } from '@edge-base/shared';
 import { setConfig } from '../lib/do-router.js';
+import { signAccessToken } from '../lib/jwt.js';
+import {
+  clearFunctionRegistry,
+  rebuildCompiledRoutes,
+  registerFunction,
+} from '../lib/functions.js';
 
 // ─── parseWindow ───
 
@@ -459,5 +465,192 @@ describe('rateLimitMiddleware — runtime client-IP boundary', () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
+  });
+});
+
+describe('rateLimitMiddleware — authenticated identity boundary', () => {
+  const jwtSecret = 'rate-limit-user-identity-test-secret';
+  const gatewaySecret = 'a'.repeat(64);
+  const env = {
+    EDGEBASE_RUNTIME_MODE: 'self-hosted',
+    EDGEBASE_SELF_HOST_GATEWAY_SECRET: gatewaySecret,
+    JWT_USER_SECRET: jwtSecret,
+  };
+
+  afterEach(() => {
+    clearFunctionRegistry();
+    rebuildCompiledRoutes();
+  });
+
+  function createApp() {
+    setConfig({
+      release: true,
+      rateLimiting: {
+        functions: { requests: 1, window: '60s' },
+        global: { requests: 100, window: '60s' },
+      },
+    });
+    const app = new Hono();
+    app.use('*', rateLimitMiddleware as never);
+    app.post('/api/functions/probe', (c) => c.json({ ok: true }));
+    return app;
+  }
+
+  async function authenticatedRequest(options: {
+    userId: string;
+    sessionId: string;
+    clientIp: string;
+    path?: string;
+  }) {
+    const token = await signAccessToken({
+      sub: options.userId,
+      sid: options.sessionId,
+      email: `${options.userId}@example.com`,
+    }, jwtSecret);
+    return new Request(`http://localhost${options.path ?? '/api/functions/probe'}`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'x-edgebase-self-host-gateway': gatewaySecret,
+        'x-forwarded-for': options.clientIp,
+      },
+    });
+  }
+
+  it('keeps two verified users behind one self-hosted proxy in independent buckets', async () => {
+    counter.reset();
+    const app = createApp();
+    const sharedIp = '198.51.100.42';
+
+    const first = await app.fetch(await authenticatedRequest({
+      userId: 'user-a',
+      sessionId: 'session-a',
+      clientIp: sharedIp,
+    }), env as never);
+    const second = await app.fetch(await authenticatedRequest({
+      userId: 'user-b',
+      sessionId: 'session-b',
+      clientIp: sharedIp,
+    }), env as never);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+  });
+
+  it('keeps one verified user in one bucket across sessions and client IPs', async () => {
+    counter.reset();
+    const app = createApp();
+
+    const first = await app.fetch(await authenticatedRequest({
+      userId: 'user-a',
+      sessionId: 'session-a-1',
+      clientIp: '198.51.100.50',
+    }), env as never);
+    const renewed = await app.fetch(await authenticatedRequest({
+      userId: 'user-a',
+      sessionId: 'session-a-2',
+      clientIp: '198.51.100.51',
+    }), env as never);
+
+    expect(first.status).toBe(200);
+    expect(renewed.status).toBe(429);
+  });
+
+  it('uses the verified user key for both group and global binding ceilings', async () => {
+    counter.reset();
+    const app = createApp();
+    const functionsLimit = vi.fn().mockResolvedValue({ success: true });
+    const globalLimit = vi.fn().mockResolvedValue({ success: true });
+
+    const response = await app.fetch(await authenticatedRequest({
+      userId: 'binding-user',
+      sessionId: 'binding-session',
+      clientIp: '198.51.100.60',
+    }), {
+      ...env,
+      FUNCTIONS_RATE_LIMITER: { limit: functionsLimit },
+      GLOBAL_RATE_LIMITER: { limit: globalLimit },
+    } as never);
+
+    expect(response.status).toBe(200);
+    expect(functionsLimit).toHaveBeenCalledWith({ key: 'user:binding-user' });
+    expect(globalLimit).toHaveBeenCalledWith({ key: 'user:binding-user' });
+  });
+
+  it('keeps invalid tokens on one trusted IP bucket', async () => {
+    counter.reset();
+    const app = createApp();
+    const headers = {
+      authorization: 'Bearer not-a-valid-access-token',
+      'x-edgebase-self-host-gateway': gatewaySecret,
+      'x-forwarded-for': '198.51.100.70',
+    };
+
+    const first = await app.fetch(new Request('http://localhost/api/functions/probe', {
+      method: 'POST', headers,
+    }), env as never);
+    const second = await app.fetch(new Request('http://localhost/api/functions/probe', {
+      method: 'POST', headers,
+    }), env as never);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+  });
+
+  it('keeps custom-bearer Functions on one trusted IP bucket', async () => {
+    counter.reset();
+    registerFunction('protocol', {
+      trigger: { type: 'http', method: 'POST' },
+      customBearerAuth: true,
+      handler: async () => ({ ok: true }),
+    });
+    rebuildCompiledRoutes();
+    const app = createApp();
+    app.post('/api/functions/protocol', (c) => c.json({ ok: true }));
+    const sharedIp = '198.51.100.80';
+
+    const first = await app.fetch(await authenticatedRequest({
+      userId: 'protocol-user-a',
+      sessionId: 'protocol-session-a',
+      clientIp: sharedIp,
+      path: '/api/functions/protocol',
+    }), env as never);
+    const second = await app.fetch(await authenticatedRequest({
+      userId: 'protocol-user-b',
+      sessionId: 'protocol-session-b',
+      clientIp: sharedIp,
+      path: '/api/functions/protocol',
+    }), env as never);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+  });
+
+  it('keeps auth endpoints on one trusted IP bucket', async () => {
+    counter.reset();
+    setConfig({
+      release: true,
+      rateLimiting: { global: { requests: 1, window: '60s' } },
+    });
+    const app = new Hono();
+    app.use('*', rateLimitMiddleware as never);
+    app.post('/api/auth/probe', (c) => c.json({ ok: true }));
+    const sharedIp = '198.51.100.90';
+
+    const first = await app.fetch(await authenticatedRequest({
+      userId: 'auth-user-a',
+      sessionId: 'auth-session-a',
+      clientIp: sharedIp,
+      path: '/api/auth/probe',
+    }), env as never);
+    const second = await app.fetch(await authenticatedRequest({
+      userId: 'auth-user-b',
+      sessionId: 'auth-session-b',
+      clientIp: sharedIp,
+      path: '/api/auth/probe',
+    }), env as never);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
   });
 });

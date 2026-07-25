@@ -170,4 +170,20 @@ export default defineFunction({
       { name: 'future', relativePath: 'duplicate.ts', scheduleTriggers: [{ exportName: 'default', cron: '5 6 * * *' }] },
     ], {})).toThrow(/Duplicate managed schedule identity/);
   });
+
+  it('enforces the exact UTF-8 target identity bound while building the manifest', () => {
+    const exactRoute = `${'가'.repeat(78)}a`;
+    const exact = buildManagedScheduleManifest([{
+      name: exactRoute,
+      relativePath: 'exact.ts',
+      scheduleTriggers: [{ exportName: 'default', cron: '* * * * *' }],
+    }], {});
+    expect(new TextEncoder().encode(exact.entries[0]?.id).byteLength).toBe(256);
+
+    expect(() => buildManagedScheduleManifest([{
+      name: `${exactRoute}b`,
+      relativePath: 'over.ts',
+      scheduleTriggers: [{ exportName: 'default', cron: '* * * * *' }],
+    }], {})).toThrow(/1-256 UTF-8 bytes/);
+  });
 });

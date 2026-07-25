@@ -60,18 +60,30 @@ Every incoming request is classified into a group based on its URL path. Each gr
 
 | Group | Path Prefix | Default Limit | Identifier | Purpose |
 |-------|-------------|---------------|------------|---------|
-| `global` | API and control routes | 10,000,000 / 60s | IP | Last-resort API safety net |
-| `db` | `/api/db/*` | 100 / 60s | IP | DB CRUD abuse prevention |
-| `storage` | `/api/storage/*` | 50 / 60s | IP | File upload/download throttle |
-| `functions` | `/api/functions/*` | 50 / 60s | IP | Custom function call throttle |
+| `global` | API and control routes | 10,000,000 / 60s | verified user on standard APIs; otherwise IP | Last-resort API safety net |
+| `db` | `/api/db/*` | 100 / 60s | verified user; otherwise IP | DB CRUD abuse prevention |
+| `storage` | `/api/storage/*` | 50 / 60s | verified user; otherwise IP | File upload/download throttle |
+| `functions` | `/api/functions/*` | 50 / 60s | verified user; otherwise IP | Custom function call throttle |
 | `auth` | `/api/auth/*` | 30 / 60s | IP | Auth endpoint protection |
 | `authSignin` | `/api/auth/signin` | 10 / 1m | email | Brute-force login prevention |
 | `authSignup` | `/api/auth/signup` | 10 / 60s | IP | Signup spam prevention |
-| `events` | `/api/events/*` | 100 / 60s | IP | SSE/event endpoint throttle |
+| `events` | `/api/events/*` | 100 / 60s | verified user; otherwise IP | SSE/event endpoint throttle |
 
 :::info Layered Enforcement
 Non-global routes are checked against **both** their group limit and the global limit. For example, a request to `/api/db/app/tables/posts` must pass both the `db` and `global` counters.
 :::
+
+For standard EdgeBase user access tokens, both the software counter and binding
+ceiling use `user:<signed subject>` as the key. The signature is checked before
+any session/database read, and the verified payload is reused by the admitted
+auth middleware. The same user therefore shares one budget across renewed
+tokens, tabs, sessions, and IP changes, while different users behind one proxy,
+carrier NAT, or corporate egress keep independent budgets.
+
+Anonymous requests, invalid or expired tokens, auth endpoints, admin/control
+routes, and App Functions that opt into custom Bearer authentication remain
+keyed by the runtime-authoritative client IP. EdgeBase never derives a rate key
+from an unverified token claim.
 
 Static `GET`/`HEAD` responses served from the configured frontend or the
 built-in admin/harness mounts bypass both the software and Cloudflare `global`
@@ -97,7 +109,7 @@ The `window` field accepts a duration string:
 
 ## Service Key Bypass
 
-Requests authenticated with a [Service Key](/docs/server/config-reference) bypass EdgeBase's app-level rate limits entirely (`global`, `db`, `storage`, `functions`, `auth`). This keeps trusted server-to-server traffic, migrations, and admin jobs from being throttled by IP-based counters.
+Requests authenticated with a [Service Key](/docs/server/config-reference) bypass EdgeBase's app-level rate limits entirely (`global`, `db`, `storage`, `functions`, `auth`). This keeps trusted server-to-server traffic, migrations, and admin jobs from being throttled by end-user counters.
 
 The same bypass semantics apply to all Admin SDKs.
 
@@ -164,14 +176,16 @@ Both layers work when self-hosting with Docker. [Miniflare](https://miniflare.de
 
 That means the soft counter is often **more consistent per process** in local/self-hosted setups, but it is still best to think of the whole system as abuse protection rather than strict quota enforcement.
 
-:::danger Reverse Proxy Required for IP-Based Rate Limiting
+:::danger Reverse Proxy Authority for IP-Based Fallbacks
 On a CLI-declared Cloudflare runtime, the tamper-proof `CF-Connecting-IP`
 header identifies clients. Docker and packaged runtimes ignore that
 client-supplied header. Their generated gateway strips spoofed forwarding and
 internal-proof headers, writes an authoritative set, and injects a fresh proof
 before the Worker accepts it.
 
-Behind Nginx or Caddy, list only the exact immediate proxy peers in
+This network identity remains authoritative for anonymous and auth traffic,
+custom Bearer protocols, service-key IP constraints, and pending WebSocket
+admission. Behind Nginx or Caddy, list only the exact immediate proxy peers in
 `EDGEBASE_TRUSTED_PROXY_CIDRS` and configure the proxy to overwrite the full
 forwarded set. Without a reverse proxy, leave the CIDR list empty; the gateway
 uses the direct socket peer and ignores client-provided forwarding authority.

@@ -83,12 +83,17 @@ startup check and 15-minute cadence.
 
 ## Scheduling and isolation
 
-The scheduler derives each job's resource capacity from Docker's CPU and memory
+Before any job starts, the runner requires a Docker server native to the host
+architecture with at least 8 CPUs and a 16 GiB allocation (Docker must report
+at least 15.0 GiB after VM overhead). A mismatched architecture or undersized
+engine fails closed instead of beginning a diagnostic or recorded run.
+
+The scheduler derives each job's resource capacity from that checked Docker
 allocation, but starts public CI jobs sequentially. Heavy server, Docker,
 release, mutation and C++ jobs therefore never overlap with another job, and
 lighter matrix jobs also wait for the active job to finish.
 
-The recommended Apple Silicon Colima allocation is:
+The required Apple Silicon Colima allocation is:
 
 ```sh
 colima start --cpu 8 --memory 16

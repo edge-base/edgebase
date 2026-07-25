@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  MAX_SELF_HOST_SCHEDULE_REQUEST_BYTES,
   MAX_SELF_HOST_SCHEDULE_RESPONSE_BYTES,
+  utf8ByteLength,
   type SelfHostScheduleControlRequest,
   type SelfHostScheduleRequestEnvelope,
+  type SelfHostScheduleRequestTarget,
   type SelfHostScheduleWireOutcome,
 } from '@edge-base/shared';
 
@@ -43,7 +46,7 @@ function target(id: string, mode: 'execute' | 'reconcile' = 'execute') {
 }
 
 function envelope(
-  targets = [target('one')],
+  targets: SelfHostScheduleRequestTarget[] = [target('one')],
   scheduledTime = Date.parse('2026-07-16T12:30:00.000Z'),
 ): SelfHostScheduleRequestEnvelope {
   return { cron: '* * * * *', scheduledTime, targets };
@@ -86,6 +89,18 @@ async function postSchedules(body: unknown, headers: Record<string, string> = {}
       ...headers,
     },
     body: JSON.stringify(body),
+  });
+}
+
+async function postRawSchedules(source: string, headers: Record<string, string> = {}) {
+  return controlRequest('/schedules', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-edgebase-self-host-control': CONTROL_SECRET,
+      ...headers,
+    },
+    body: source,
   });
 }
 
@@ -273,5 +288,44 @@ describe('self-host authenticated control plane', () => {
     const response = await postSchedules(requestBody([current]));
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({ outcome: 'blocked' });
+  });
+
+  it('accepts request bodies at the exact byte cap and rejects one byte over', async () => {
+    const current = envelope();
+    const body = JSON.stringify(requestBody([current]));
+    executeManagedScheduledEnvelopesMock.mockResolvedValue({
+      complete: true,
+      outcomes: [outcome(current, target('one').id)],
+    });
+
+    for (const expectedBytes of [MAX_SELF_HOST_SCHEDULE_REQUEST_BYTES - 1, MAX_SELF_HOST_SCHEDULE_REQUEST_BYTES]) {
+      const source = `${body}${' '.repeat(expectedBytes - utf8ByteLength(body))}`;
+      expect(utf8ByteLength(source)).toBe(expectedBytes);
+      const response = await postRawSchedules(source, {
+        'content-length': String(expectedBytes),
+      });
+      expect(response.status).toBe(200);
+    }
+
+    const over = `${body}${' '.repeat(MAX_SELF_HOST_SCHEDULE_REQUEST_BYTES + 1 - utf8ByteLength(body))}`;
+    const response = await postRawSchedules(over);
+    expect(response.status).toBe(413);
+    expect(executeManagedScheduledEnvelopesMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('accepts an exact UTF-8 target id and rejects one byte over before execution', async () => {
+    const exactRoute = `${'가'.repeat(78)}a`;
+    const exactId = `app-function:${exactRoute}#default`;
+    expect(utf8ByteLength(exactId)).toBe(256);
+    const current = envelope([{ id: exactId, mode: 'execute' }]);
+    executeManagedScheduledEnvelopesMock.mockResolvedValue({
+      complete: true,
+      outcomes: [outcome(current, exactId)],
+    });
+    expect((await postSchedules(requestBody([current]))).status).toBe(200);
+
+    const over = envelope([{ id: `${exactId}b`, mode: 'execute' }]);
+    expect((await postSchedules(requestBody([over]))).status).toBe(400);
+    expect(executeManagedScheduledEnvelopesMock).toHaveBeenCalledTimes(1);
   });
 });

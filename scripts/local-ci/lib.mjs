@@ -211,6 +211,36 @@ export function schedulerCapacity(cpus, memoryGiB) {
   };
 }
 
+export function assertDockerCapacityRequirements(
+  capacity,
+  host = { platform: process.platform, architecture: process.arch },
+) {
+  const normalizeArchitecture = (architecture) => {
+    if (['arm64', 'aarch64'].includes(architecture)) return 'arm64';
+    if (['amd64', 'x64', 'x86_64'].includes(architecture)) return 'amd64';
+    return architecture;
+  };
+  const hostArchitecture = normalizeArchitecture(host.architecture);
+  const dockerArchitecture = normalizeArchitecture(capacity.architecture);
+  if (dockerArchitecture !== hostArchitecture) {
+    throw new Error(
+      `Local CI requires a native ${hostArchitecture} Docker server on `
+        + `${host.platform}/${host.architecture}; received ${capacity.architecture}.`,
+    );
+  }
+  if (!Number.isFinite(capacity.cpus) || capacity.cpus < 8) {
+    throw new Error(
+      `Local CI requires at least 8 CPUs; Docker reports ${String(capacity.cpus)}.`,
+    );
+  }
+  if (!Number.isFinite(capacity.memoryGiB) || capacity.memoryGiB < 15) {
+    throw new Error(
+      'Local CI requires a 16 GiB allocation '
+        + `(at least 15.0 GiB reported); Docker reports ${capacity.memoryGiB.toFixed(1)} GiB.`,
+    );
+  }
+}
+
 export async function dockerCapacity(repoRoot) {
   const [result, endpoint] = await Promise.all([
     run('docker', ['info', '--format', '{{json .}}'], { cwd: repoRoot }),

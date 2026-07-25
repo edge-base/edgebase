@@ -22,6 +22,7 @@ export function buildRecordsQuery({
 
 	if (search) params.set('search', search);
 	if (sortKey) params.set('sort', `${sortKey}:${sortDir}`);
+	if (includeTotal === true) params.set('includeTotal', 'true');
 	if (includeTotal === false) params.set('includeTotal', '0');
 
 	return params.toString();

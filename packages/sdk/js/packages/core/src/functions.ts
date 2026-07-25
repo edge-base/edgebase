@@ -27,10 +27,18 @@ export interface FunctionCallOptions {
   /** Turnstile token for a function declared with `captcha: true`. */
   captchaToken?: string;
   /**
-   * Optional deadline covering response headers and body consumption.
+   * Optional deadline covering response headers and JSON body consumption.
+   * For `callRaw()`, the deadline ends when the unread Response is handed to
+   * the caller, which then owns stream consumption and cancellation.
    * A timed-out mutation may already have committed and is not retried.
    */
   timeoutMs?: number;
+  /**
+   * Optional caller cancellation signal. Cancellation covers authentication,
+   * transport, retries, and JSON response consumption. `callRaw()` returns the
+   * unread response while keeping its body bound to this signal.
+   */
+  signal?: AbortSignal;
 }
 
 // ─── FunctionsClient ───
@@ -55,6 +63,18 @@ export class FunctionsClient {
   async call<T = unknown>(name: string, options?: FunctionCallOptions): Promise<T> {
     const method = options?.method ?? 'POST';
     const path = `/api/functions/${name}`;
+
+    if (options?.signal) {
+      return this.httpClient.requestFunction<T>(
+        method,
+        path,
+        options.body,
+        options.query,
+        options.captchaToken,
+        options.timeoutMs,
+        options.signal,
+      );
+    }
 
     if (options?.captchaToken || options?.timeoutMs !== undefined) {
       return this.httpClient.requestFunction<T>(
@@ -81,6 +101,34 @@ export class FunctionsClient {
       default:
         return this.httpClient.post<T>(path, options?.body);
     }
+  }
+
+  /**
+   * Call a function and return its exact successful Response without reading
+   * the body. Use this for streaming or binary payloads. Non-success responses
+   * still throw an EdgeBaseError through the ordinary Function transport.
+   */
+  async callRaw(name: string, options?: FunctionCallOptions): Promise<Response> {
+    const method = options?.method ?? 'POST';
+    if (options?.signal) {
+      return this.httpClient.requestFunctionRaw(
+        method,
+        `/api/functions/${name}`,
+        options.body,
+        options.query,
+        options.captchaToken,
+        options.timeoutMs,
+        options.signal,
+      );
+    }
+    return this.httpClient.requestFunctionRaw(
+      method,
+      `/api/functions/${name}`,
+      options?.body,
+      options?.query,
+      options?.captchaToken,
+      options?.timeoutMs,
+    );
   }
 
   /** GET /api/functions/{path} */

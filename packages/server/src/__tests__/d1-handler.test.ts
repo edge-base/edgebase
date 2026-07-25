@@ -33,6 +33,8 @@ function createMockD1(options: {
   firstResults?: unknown[];
   /** Per-call sequential results for `.all()` */
   allResults?: Array<{ results: unknown[] }>;
+  /** One-based batch calls that should fail before publishing their statements. */
+  batchFailures?: number[];
 } = {}): D1Database & { _calls: MockCall[]; _batchCalls: number; _batchStmts: string[][] } {
   const calls: MockCall[] = [];
   let firstCallIdx = 0;
@@ -77,6 +79,9 @@ function createMockD1(options: {
     batch: async (stmts: any[]) => {
       batchCalls++;
       batchStmts.push(stmts.map((s: any) => s._sql));
+      if (options.batchFailures?.includes(batchCalls)) {
+        throw new Error(`synthetic D1 batch failure ${batchCalls}`);
+      }
       return stmts;
     },
     _calls: calls,
@@ -244,6 +249,38 @@ describe('ensureD1Schema — schema update', () => {
     ))).toBe(true);
   });
 
+  it('self-heals a missing physical-reference index when the current hash is already stored', async () => {
+    const tableConfig: TableConfig = {
+      schema: { categoryId: { type: 'string', references: 'categories' } },
+    };
+    const db = createMockD1({
+      firstResults: [{ value: computeSchemaHashSync(tableConfig) }],
+      allResults: [
+        { results: [
+          { name: 'id' },
+          { name: 'createdAt' },
+          { name: 'updatedAt' },
+          { name: 'categoryId' },
+        ] },
+        { results: [] },
+        { results: [{
+          from: 'categoryId',
+          table: 'categories',
+          to: 'id',
+          on_update: 'NO ACTION',
+          on_delete: 'SET NULL',
+          match: 'NONE',
+        }] },
+      ],
+    });
+
+    await ensureD1Schema(db, 'workspace-reference-index', { posts: tableConfig });
+
+    expect(db._batchStmts.flat().filter((sql) => sql ===
+      'CREATE INDEX IF NOT EXISTS "idx_posts_categoryId" ON "posts"("categoryId");'
+    )).toHaveLength(1);
+  });
+
   it('adds unique fields with a separate index in the same transactional batch', async () => {
     const db = createMockD1({
       firstResults: [{ value: 'stale-hash' }],
@@ -404,6 +441,123 @@ describe('ensureD1Schema — schema update', () => {
       && call.bindings[0] === 'schemaHash:contacts'
     )).toBe(false);
   });
+
+  it('rebuilds removed D1 foreign keys and declared indexes in one bounded batch', async () => {
+    const db = createMockD1({
+      firstResults: [{ value: 'stale-hash' }],
+      allResults: [
+        { results: [
+          { name: 'id' },
+          { name: 'createdAt' },
+          { name: 'updatedAt' },
+          { name: 'workspaceId' },
+          { name: 'pageId' },
+          { name: 'message' },
+        ] },
+        { results: [] },
+        { results: [
+          {
+            from: 'pageId',
+            table: 'pages',
+            to: 'id',
+            on_update: 'NO ACTION',
+            on_delete: 'CASCADE',
+            match: 'NONE',
+          },
+          {
+            from: 'workspaceId',
+            table: 'workspaces',
+            to: 'id',
+            on_update: 'NO ACTION',
+            on_delete: 'CASCADE',
+            match: 'NONE',
+          },
+        ] },
+        { results: [] },
+      ],
+    });
+
+    await ensureD1Schema(db, 'central', {
+      notifications: {
+        schema: {
+          workspaceId: {
+            type: 'string',
+            required: true,
+            references: { table: 'workspaces', onDelete: 'CASCADE' },
+          },
+          pageId: { type: 'string' },
+          message: { type: 'string', unique: true },
+        },
+        indexes: [{ fields: ['pageId'] }],
+      },
+    });
+
+    const rebuildBatch = db._batchStmts.find((statements) =>
+      statements.some((sql) => sql.startsWith('CREATE TABLE "__edgebase_rebuild_notifications"')),
+    );
+    expect(rebuildBatch).toBeDefined();
+    expect(rebuildBatch).toEqual(expect.arrayContaining([
+      expect.stringContaining('INSERT INTO "__edgebase_rebuild_notifications"'),
+      'DROP TABLE "notifications";',
+      'ALTER TABLE "__edgebase_rebuild_notifications" RENAME TO "notifications";',
+      'CREATE INDEX IF NOT EXISTS "idx_notifications_pageId" ON "notifications"("pageId");',
+      'CREATE INDEX IF NOT EXISTS "idx_notifications_workspaceId" ON "notifications"("workspaceId");',
+    ]));
+    expect(rebuildBatch?.filter((sql) => sql === 'DROP TABLE "notifications";'))
+      .toHaveLength(1);
+    expect(db._batchStmts.flat().filter((sql) =>
+      sql === 'CREATE INDEX IF NOT EXISTS "idx_notifications_pageId" ON "notifications"("pageId");'
+    )).toHaveLength(1);
+  });
+
+  it('keeps a failed D1 foreign-key rebuild retryable without advancing the schema hash', async () => {
+    const physicalState = [
+      { results: [
+        { name: 'id' },
+        { name: 'createdAt' },
+        { name: 'updatedAt' },
+        { name: 'workspaceId' },
+        { name: 'pageId' },
+      ] },
+      { results: [] },
+      { results: [{
+        from: 'pageId',
+        table: 'pages',
+        to: 'id',
+        on_update: 'NO ACTION',
+        on_delete: 'CASCADE',
+        match: 'NONE',
+      }] },
+      { results: [] },
+    ];
+    const db = createMockD1({
+      firstResults: [{ value: 'stale-hash' }, { value: 'stale-hash' }],
+      allResults: [...physicalState, ...physicalState],
+      batchFailures: [1],
+    });
+    const tables = {
+      notifications: {
+        schema: {
+          workspaceId: { type: 'string' as const },
+          pageId: { type: 'string' as const },
+        },
+      },
+    };
+
+    await expect(ensureD1Schema(db, 'central-retry', tables))
+      .rejects.toThrow(/synthetic D1 batch failure 1/);
+    expect(db._calls.some((call) =>
+      call.sql.includes('INSERT INTO "_meta"')
+      && call.bindings[0] === 'schemaHash:notifications'
+    )).toBe(false);
+
+    await expect(ensureD1Schema(db, 'central-retry', tables)).resolves.toBeUndefined();
+    expect(db._batchCalls).toBe(2);
+    expect(db._calls.filter((call) =>
+      call.sql.includes('INSERT INTO "_meta"')
+      && call.bindings[0] === 'schemaHash:notifications'
+    )).toHaveLength(1);
+  });
 });
 
 // ─── C. ensureD1Schema — migrations ─────────────────────────────────────────
@@ -476,6 +630,7 @@ describe('ensureD1Schema — migrations', () => {
           { name: 'email' },
         ] },
         { results: [] },
+        { results: [] },
         { results: [
           { name: 'id' },
           { name: 'createdAt' },
@@ -531,6 +686,7 @@ describe('ensureD1Schema — migrations', () => {
           { name: 'updatedAt' },
           { name: 'email' },
         ] },
+        { results: [] },
         { results: [] },
         { results: [
           { name: 'id' },

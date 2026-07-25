@@ -396,12 +396,15 @@ describe('buildFunctionContext admin.db', () => {
     });
 
     expect(ctx.email).toBeDefined();
+    expect((ctx.email as unknown as { supportsIdempotency?: boolean }).supportsIdempotency).toBe(true);
+    const message = {
+      to: 'member@example.com',
+      subject: 'Workspace invite',
+      html: '<p>Join the workspace</p>',
+      idempotencyKey: 'workspace-invite-synthetic',
+    };
     await expect(
-      ctx.email?.send({
-        to: 'member@example.com',
-        subject: 'Workspace invite',
-        html: '<p>Join the workspace</p>',
-      }),
+      ctx.email?.send(message),
     ).resolves.toEqual({ success: true, messageId: 'msg_1' });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -410,6 +413,7 @@ describe('buildFunctionContext admin.db', () => {
         method: 'POST',
         headers: expect.objectContaining({
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'workspace-invite-synthetic',
         }),
         body: JSON.stringify({
           from: 'noreply@example.com',
@@ -419,6 +423,37 @@ describe('buildFunctionContext admin.db', () => {
         }),
       }),
     );
+  });
+
+  it.each([
+    ['empty', '   ', 'email.send() idempotencyKey must not be empty.'],
+    ['oversized', 'x'.repeat(257), 'email.send() idempotencyKey must be at most 256 characters.'],
+  ])('rejects an %s function email idempotency key before the provider call', async (
+    _variant,
+    idempotencyKey,
+    expectedMessage,
+  ) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const ctx = buildFunctionContext({
+      request: new Request('http://localhost/api/functions/send-invite'),
+      auth: null,
+      databaseNamespace: {} as DurableObjectNamespace,
+      authNamespace: {} as DurableObjectNamespace,
+      d1Database: {} as D1Database,
+      config: {
+        email: { provider: 'resend', apiKey: 're_key', from: 'noreply@example.com' },
+      },
+    });
+    const message = {
+      to: 'member@example.com',
+      subject: 'Workspace invite',
+      text: 'Join the workspace',
+      idempotencyKey,
+    };
+
+    await expect(ctx.email?.send(message)).rejects.toThrow(expectedMessage);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('omits the email sender when no provider is configured', () => {

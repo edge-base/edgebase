@@ -40,8 +40,8 @@ Technical limits for EdgeBase Analytics.
 
 | Group | Default | Key | Notes |
 |-------|---------|-----|-------|
-| `events` | **100 req / 60s** | IP | Applies to `POST /api/analytics/track` |
-| `global` | **10,000,000 req / 60s** | IP | Applies to all other analytics endpoints |
+| `events` | **100 req / 60s** | verified user / IP fallback | Applies to `POST /api/analytics/track` |
+| `global` | **10,000,000 req / 60s** | verified user / IP fallback | Applies to all other analytics endpoints |
 
 The `events` rate limit protects the event ingestion endpoint from abuse, especially for anonymous (unauthenticated) callers.
 

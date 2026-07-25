@@ -395,6 +395,13 @@ auto post = client.db("app").table("posts").insert(R"({
 `insert()` throws an error on duplicate ID (UNIQUE constraint). Use `upsert()` if you want to update the existing record instead of failing.
 :::
 
+The object passed to `insert()` is request data, not the stored row. EdgeBase
+may materialize storage-owned fields such as `id`, `createdAt`, and `updatedAt`
+when the write commits. Treat the row returned by `insert()` (or each row
+returned by `insertMany()`) as the canonical committed state; do not continue
+from the input object when a later write depends on generated fields or a row
+revision.
+
 ## Upsert
 
 Insert a new record, or update it if a record with the same ID (or unique field) already exists:
@@ -1069,6 +1076,7 @@ const page2 = await client.db('app').table('posts')
 const page3 = await client.db('app').table('posts')
   .page(3)
   .limit(20)
+  .includeTotal(true)
   .getList();
 
 // Response: { items: [...], total: 150, page: 3, perPage: 20 }
@@ -1103,13 +1111,23 @@ const prevPage = await client.db('app').table('posts')
 // { items: [...], cursor: "last-item-id", hasMore: true }
 ```
 
-#### Skipping the total count
+#### Opting in to the total count
 
-Every list request runs a separate `COUNT` query to populate `total`. On large tables you can skip it by adding the `includeTotal=0` query parameter (also accepts `false`). `total` then comes back as `null`, while `hasMore` and `cursor` continue to drive pagination:
+List and search requests skip the exact `COUNT` query by default and return `total: null`. Request an exact total only when needed with `.includeTotal(true)` or the `includeTotal=true` query parameter. Omission, `.includeTotal(false)`, `includeTotal=false`, and `includeTotal=0` all keep `total` as `null`; `hasMore` and `cursor` continue to drive pagination.
+
+Without an exact count, a full page conservatively returns `hasMore: true`,
+including the exact-final-page case. Continue once with the returned pagination
+state; an empty or short next page terminates the drain without a table-wide
+count.
 
 ```typescript
-// GET /api/db/app/tables/posts?limit=20&includeTotal=0
-// Response: { items: [...], total: null, hasMore: true, cursor: "last-item-id" }
+const counted = await client.db('app').table('posts')
+  .limit(20)
+  .includeTotal(true)
+  .getList();
+
+// GET /api/db/app/tables/posts?limit=20&includeTotal=true
+// Response: { items: [...], total: 150, hasMore: true, cursor: "last-item-id" }
 ```
 
 This behaves identically across all storage providers (Durable Objects, D1, and PostgreSQL).
@@ -1489,9 +1507,12 @@ await client.db('app').transact([
 ]);
 ```
 
-The default response contains one full result entry per operation. For writes
-that can touch very large rows, request the compact acknowledgment before the
-transaction starts:
+The default response contains one full result entry per operation. An insert's
+`results[index].inserted` value is the canonical committed row after EdgeBase
+has materialized storage-owned fields; the corresponding operation's `data`
+object is only input and must not be used as the stored row. For writes that can
+touch very large rows, request the compact acknowledgment before the transaction
+starts:
 
 ```typescript
 const acknowledgment = await client.db('app').transact(
@@ -1676,7 +1697,7 @@ For more details, see [Advanced — Full-Text Search](advanced#full-text-search)
 
 ## Quotas & Limits
 
-### Rate Limits (per IP, 60-second window)
+### Rate Limits (per verified user, or per IP without standard user auth)
 
 | Category | Limit |
 |----------|-------|

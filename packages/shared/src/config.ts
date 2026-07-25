@@ -20,8 +20,11 @@ export interface SchemaField {
    * Object form: { table: 'users', onDelete: 'CASCADE' }
    * String short form: 'users' or 'users(id)'
    * Note: PRAGMA foreign_keys = ON is set at DB init in database-do.ts.
+   * Valid physical references automatically receive a non-unique index unless
+   * the field is already a primary key/unique or leads an explicit index.
    * Auth-user references (`users`, `_users`, `_users_public`) are logical-only
-   * because auth data lives in AUTH_DB, so no physical FK is emitted for them.
+   * because auth data lives in AUTH_DB, so neither a physical FK nor an
+   * automatic reference index is emitted for them.
    */
   references?: string | FkReference;
   /** SQLite CHECK expression. e.g. check: 'score >= 0 AND score <= 100' (#133 §35) */
@@ -1922,11 +1925,15 @@ export interface FunctionContext {
   db?: unknown;
   /** Configured server-side email sender, when an EdgeBase email provider is available. */
   email?: {
+    /** Whether the configured provider guarantees deduplication for a stable idempotency key. */
+    readonly supportsIdempotency: boolean;
     send(options: {
       to: string;
       subject: string;
       html?: string;
       text?: string;
+      /** Optional provider request identity. Must be non-empty and at most 256 characters. */
+      idempotencyKey?: string;
     }): Promise<{ success: boolean; messageId?: string }>;
   };
   /** Trigger metadata for DB/storage/auth/schedule functions. */
@@ -2042,6 +2049,9 @@ const VALID_FIELD_TYPES: readonly string[] = [
 /** Auto-field names that cannot be type-overridden in user schema. */
 const AUTO_FIELD_NAMES: readonly string[] = ['id', 'createdAt', 'updatedAt'];
 
+/** Provider-maintained columns that must never overlap user data. */
+const INTERNAL_FIELD_NAMES: readonly string[] = ['_fts', '_fts_text'];
+
 /**
  * Validate table name uniqueness across all DB blocks. (§18)
  * Throws if the same table name appears in multiple DB blocks.
@@ -2057,6 +2067,29 @@ function validateTableUniqueness(databases: Record<string, DbBlock>): void {
         );
       }
       seen.set(tableName, dbKey);
+    }
+  }
+}
+
+/** Prevent configured tables from occupying provider-managed FTS object names. */
+function validateFtsArtifactNameCollisions(databases: Record<string, DbBlock>): void {
+  for (const [dbKey, dbBlock] of Object.entries(databases)) {
+    const tables = dbBlock.tables ?? {};
+    const tableNames = new Set(Object.keys(tables));
+    const usesPostgres = dbBlock.provider === 'postgres' || dbBlock.provider === 'neon';
+
+    for (const [tableName, tableConfig] of Object.entries(tables)) {
+      if (!tableConfig.fts?.length) continue;
+      const artifactNames = usesPostgres
+        ? [`idx_${tableName}_fts`, `idx_${tableName}_fts_text_trgm`]
+        : [`${tableName}_fts`, `${tableName}_ai`, `${tableName}_ad`, `${tableName}_au`];
+      for (const artifactName of artifactNames) {
+        if (!tableNames.has(artifactName)) continue;
+        throw new Error(
+          `DB '${dbKey}' table '${artifactName}' collides with the provider-managed `
+          + `FTS artifact for table '${tableName}'. Rename one of the configured tables.`,
+        );
+      }
     }
   }
 }
@@ -2462,8 +2495,20 @@ export function defineConfig(config: EdgeBaseConfig): EdgeBaseConfig {
     // Validate each DB block's table schemas
     for (const [dbKey, dbBlock] of Object.entries(config.databases)) {
       for (const [tableName, tableConfig] of Object.entries(dbBlock.tables ?? {})) {
+        for (const ftsField of tableConfig.fts ?? []) {
+          if (INTERNAL_FIELD_NAMES.includes(ftsField)) {
+            throw new Error(
+              `DB '${dbKey}' table '${tableName}': FTS field '${ftsField}' is reserved for internal search state.`,
+            );
+          }
+        }
         if (!tableConfig.schema) continue;
         for (const [field, def] of Object.entries(tableConfig.schema)) {
+          if (INTERNAL_FIELD_NAMES.includes(field)) {
+            throw new Error(
+              `DB '${dbKey}' table '${tableName}.${field}': field name '${field}' is reserved for internal search state.`,
+            );
+          }
           // Auto-fields: only `false` (disable) is allowed, type override is blocked
           if (AUTO_FIELD_NAMES.includes(field)) {
             if (def !== false) {
@@ -2490,6 +2535,7 @@ export function defineConfig(config: EdgeBaseConfig): EdgeBaseConfig {
 
     // Validate table name uniqueness (§18)
     validateTableUniqueness(config.databases);
+    validateFtsArtifactNameCollisions(config.databases);
   }
 
   // ─── Plugin Validation ───

@@ -773,6 +773,21 @@ export default defineConfig({
             },
         },
 
+        'test-signal-rate-limit': {
+            public: true,
+            runtime: {
+                target: 'rooms',
+            },
+            rateLimit: {
+                actions: 8,
+                signals: 1,
+                admin: 2,
+            },
+            access: {
+                signal: (_auth, _roomId, event) => event !== 'denied.by.access',
+            },
+        },
+
         // ─── Full Simulation Namespace (Phase 4) ─────────────────────────
         'test-simulation': {
             maxPlayers: 4,

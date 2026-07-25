@@ -125,7 +125,8 @@ Notes on config ownership:
 - `wrangler.toml` `[triggers]` is generated deploy input, not a manually merged schedule registry.
 - `cloudflare.extraCrons` adds extra wake-ups for the Worker's `scheduled()` handler; it does not automatically route execution into a specific App Function.
 - Docker and directory/portable pack manifests carry the same schedule manifest digest as the app bundle, so self-hosted runtimes do not rescan project source.
-- Generated Docker and pack launchers verify the manifest plus SHA-256/byte contracts for the gateway, schedule supervisor, and Docker entrypoint before launch. They bind Wrangler to loopback HTTP, prove ownership through a fresh authenticated control secret, validate schedule state, run the first supervisor pass, and only then open the external gateway. The gateway is the sole public listener and blocks every internal/scheduled control path for HTTP and WebSocket requests.
+- Generated Docker and pack launchers verify the manifest plus SHA-256/byte contracts for the gateway, schedule supervisor, and Docker entrypoint before launch. They bind Wrangler to loopback HTTP, prove ownership through a fresh authenticated control secret, validate schedule state, run the first supervisor pass, and only then open the external gateway. Invalid regular schedule-state content is moved to one fixed `.corrupt` sibling and rebuilt through the manifest plus durable delivery authority; path, permission, or quarantine failures stay fatal. The gateway is the sole public listener and blocks every internal/scheduled control path for HTTP and WebSocket requests.
+- Self-host launchers log each initial schedule outcome once. Later successful passes stay quiet; failed or ambiguous attempts remain error-level records with their target and boundary identity, and the first later success for that target emits one recovery record.
 - `edgebase dev` and the server package's `dev:raw` command are development tools, not claimed self-host deployment launchers. They intentionally omit the external gateway and long-lived self-host schedule supervisor. Cloudflare deploys instead use provider cron events; production self-hosting must use the generated Docker or pack launcher.
 
 Infrastructure services:
@@ -192,7 +193,9 @@ npx edgebase docker run
 The generated container exposes only the gateway port. Wrangler listens on a
 separate loopback-only HTTP port, and the container will not open external
 admission if the authenticated runtime readiness check, runtime-asset digest,
-schedule manifest, or durable schedule-state validation fails. `LOCAL_PROTOCOL=https`
+schedule manifest, or non-recoverable schedule-state filesystem/quarantine
+check fails. Invalid regular schedule-state content is quarantined and rebuilt
+before admission. `LOCAL_PROTOCOL=https`
 terminates TLS at this gateway and requires `HTTPS_CERT_PATH` plus
 `HTTPS_KEY_PATH`. When a reverse proxy terminates TLS, list only its exact peer
 addresses in `EDGEBASE_TRUSTED_PROXY_CIDRS`; untrusted peers cannot supply

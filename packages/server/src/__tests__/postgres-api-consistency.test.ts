@@ -32,6 +32,13 @@ const CONFIG = defineConfig({
             delete: () => true,
           },
         },
+        fts_docs: {
+          schema: {
+            title: { type: 'string', required: true },
+            status: { type: 'string' },
+          },
+          fts: ['title', 'status'],
+        },
         // Auto timestamps disabled so an empty update body yields a genuinely
         // empty change set (exercises the no-op early-return path).
         api_notes: {
@@ -87,9 +94,10 @@ async function callPg(
     { body?: unknown; search?: string; query?: string; table?: string } = {},
 ) {
   const { handlePgRequest } = await import('../lib/postgres-handler.js');
-  const qs = search !== undefined
-    ? `?search=${encodeURIComponent(search)}`
-    : query !== undefined ? `?${query}` : '';
+  const queryParts: string[] = [];
+  if (search !== undefined) queryParts.push(`search=${encodeURIComponent(search)}`);
+  if (query !== undefined) queryParts.push(query);
+  const qs = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
   const url = `http://internal/api/db/shared${path}${qs}`;
   const ctx = buildInternalHandlerContext({
     env: makeEnv(),
@@ -118,7 +126,29 @@ describe('postgres API consistency (D1/DO parity)', () => {
     expect(calls.some((c) => /ILIKE/i.test(c.sql))).toBe(false);
   });
 
-  it('runs an ILIKE search over text fields when a term is provided', async () => {
+  it('runs an explicitly counted ILIKE search over text fields', async () => {
+    const hit = { id: 'doc-1', title: 'hello world', status: 'open' };
+    const calls = mockExecutorModule((sql) => {
+      if (/ILIKE/i.test(sql) && !/COUNT/i.test(sql)) return { rows: [hit], rowCount: 1 };
+      if (/COUNT/i.test(sql)) return { rows: [{ total: 1 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    });
+    const response = await callPg('GET', '/tables/api_docs/search', {
+      search: 'hello',
+      query: 'includeTotal=true',
+    });
+    expect(response.status).toBe(200);
+    const json = (await response.json()) as { items: unknown[]; total: number; hasMore: boolean };
+    expect(json.items).toHaveLength(1);
+    expect(json.total).toBe(1);
+    expect(json.hasMore).toBe(false);
+    // The search scans the schema's text columns (title, status), not just id.
+    const searchSql = calls.find((c) => /ILIKE/i.test(c.sql))?.sql ?? '';
+    expect(searchSql).toMatch(/"title"/);
+    expect(calls.filter((c) => /COUNT/i.test(c.sql))).toHaveLength(1);
+  });
+
+  it('omits the search COUNT and returns total null by default', async () => {
     const hit = { id: 'doc-1', title: 'hello world', status: 'open' };
     const calls = mockExecutorModule((sql) => {
       if (/ILIKE/i.test(sql) && !/COUNT/i.test(sql)) return { rows: [hit], rowCount: 1 };
@@ -127,12 +157,58 @@ describe('postgres API consistency (D1/DO parity)', () => {
     });
     const response = await callPg('GET', '/tables/api_docs/search', { search: 'hello' });
     expect(response.status).toBe(200);
-    const json = (await response.json()) as { items: unknown[]; total: number };
+    const json = (await response.json()) as { items: unknown[]; total: number | null; hasMore: boolean };
     expect(json.items).toHaveLength(1);
-    expect(json.total).toBe(1);
-    // The search scans the schema's text columns (title, status), not just id.
-    const searchSql = calls.find((c) => /ILIKE/i.test(c.sql))?.sql ?? '';
-    expect(searchSql).toMatch(/"title"/);
+    expect(json.total).toBeNull();
+    expect(json.hasMore).toBe(false);
+    expect(calls.some((c) => /COUNT/i.test(c.sql))).toBe(false);
+  });
+
+  it('reports hasMore from a full source page when search COUNT is omitted', async () => {
+    const hits = [
+      { id: 'doc-1', title: 'hello one', status: 'open' },
+      { id: 'doc-2', title: 'hello two', status: 'open' },
+    ];
+    const calls = mockExecutorModule((sql) => {
+      if (/ILIKE/i.test(sql) && !/COUNT/i.test(sql)) return { rows: hits, rowCount: hits.length };
+      return { rows: [], rowCount: 0 };
+    });
+    const response = await callPg('GET', '/tables/api_docs/search', {
+      search: 'hello',
+      query: 'limit=2&includeTotal=false&sort=id:asc',
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      items: [expect.objectContaining({ id: 'doc-1' }), expect.objectContaining({ id: 'doc-2' })],
+      total: null,
+      hasMore: true,
+    });
+    // This is deliberately conservative for the exact-N final page: without a
+    // COUNT, collectors probe once more and terminate on the empty next page.
+    expect(calls.some((c) => /COUNT/i.test(c.sql))).toBe(false);
+  });
+
+  it('routes configured PostgreSQL FTS through the indexed substring corpus', async () => {
+    const hit = { id: 'doc-1', title: 'hello world', status: 'open', _fts_text: 'hello world open' };
+    const calls = mockExecutorModule((sql) => {
+      if (/"_fts_text"\s+ILIKE/i.test(sql) && !/COUNT/i.test(sql)) {
+        return { rows: [hit], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const response = await callPg('GET', '/tables/fts_docs/search', {
+      search: 'hello',
+      table: 'fts_docs',
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      items: [expect.objectContaining({ id: 'doc-1', title: 'hello world' })],
+      total: null,
+      hasMore: false,
+    });
+    const searchSql = calls.find((call) => /ILIKE/i.test(call.sql))?.sql ?? '';
+    expect(searchSql).toContain('"_fts_text" ILIKE');
+    expect(searchSql).not.toContain('"title"::text ILIKE');
   });
 
   it('returns the existing record with 200 for an empty update body (no 400)', async () => {
@@ -172,8 +248,24 @@ describe('postgres API consistency (D1/DO parity)', () => {
     expect(json).not.toHaveProperty('errors');
   });
 
-  it('lists records with a total count', async () => {
-    mockExecutorModule((sql) => {
+  it('lists records with a total count only when explicitly requested', async () => {
+    const calls = mockExecutorModule((sql) => {
+      if (/COUNT/i.test(sql)) return { rows: [{ total: 2 }], rowCount: 1 };
+      if (sql.startsWith('SELECT')) {
+        return { rows: [{ id: 'a', title: 'A' }, { id: 'b', title: 'B' }], rowCount: 2 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const response = await callPg('GET', '/tables/api_docs', { query: 'includeTotal=true' });
+    expect(response.status).toBe(200);
+    const json = (await response.json()) as { items: unknown[]; total: number };
+    expect(json.items).toHaveLength(2);
+    expect(json.total).toBe(2);
+    expect(calls.filter((c) => /COUNT/i.test(c.sql))).toHaveLength(1);
+  });
+
+  it('omits the list COUNT and returns total null by default', async () => {
+    const calls = mockExecutorModule((sql) => {
       if (/COUNT/i.test(sql)) return { rows: [{ total: 2 }], rowCount: 1 };
       if (sql.startsWith('SELECT')) {
         return { rows: [{ id: 'a', title: 'A' }, { id: 'b', title: 'B' }], rowCount: 2 };
@@ -182,9 +274,10 @@ describe('postgres API consistency (D1/DO parity)', () => {
     });
     const response = await callPg('GET', '/tables/api_docs');
     expect(response.status).toBe(200);
-    const json = (await response.json()) as { items: unknown[]; total: number };
+    const json = (await response.json()) as { items: unknown[]; total: number | null };
     expect(json.items).toHaveLength(2);
-    expect(json.total).toBe(2);
+    expect(json.total).toBeNull();
+    expect(calls.some((c) => /COUNT/i.test(c.sql))).toBe(false);
   });
 
   it('skips the COUNT query when includeTotal=0 (total is null)', async () => {

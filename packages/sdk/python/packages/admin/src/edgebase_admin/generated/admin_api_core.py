@@ -1,7 +1,7 @@
 """Auto-generated admin API Core — DO NOT EDIT.
 
 Regenerate: npx tsx tools/sdk-codegen/generate.ts
-Source: openapi.json (0.4.9)
+Source: openapi.json (0.5.0)
 """
 
 from __future__ import annotations

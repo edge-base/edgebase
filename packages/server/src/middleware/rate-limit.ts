@@ -12,6 +12,8 @@ import { parseConfig } from '../lib/do-router.js';
 import { getTrustedClientIp } from '../lib/client-ip.js';
 import { resolveFrontendAssetPath } from '../lib/frontend-assets.js';
 import { normalizeFrontendMountPath } from '../lib/frontend-config.js';
+import { usesCustomBearerAuth } from '../lib/functions.js';
+import { verifyAccessToken } from '../lib/jwt.js';
 
 type HonoEnv = { Bindings: Env };
 
@@ -297,7 +299,8 @@ export function getGroup(path: string): string {
  *
  * Auth routes are included in global group.
  * Valid Service Key requests bypass app-level rate limits.
- * Identifier: always IP-based (auth middleware runs after rate limit).
+ * Identifier: stable signed user ID for standard authenticated APIs; trusted
+ * client IP for anonymous, invalid, auth/control, and custom-bearer traffic.
  */
 export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) => {
   const path = new URL(c.req.url).pathname;
@@ -312,7 +315,7 @@ export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) =
   }
   const group = getGroup(path);
 
-  // ── Determine identifier — always IP ──
+  // ── Determine trusted network authority ──
   // Security: the CLI-managed runtime mode decides whether CF-Connecting-IP is
   // authoritative. Self-hosted runtimes ignore it and X-Forwarded-For unless
   // trustSelfHostedProxy is explicitly enabled for a proxy that overwrites XFF.
@@ -321,7 +324,9 @@ export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) =
   const ip = getTrustedClientIp(c.env, c.req) ?? 'unknown';
 
   // ── Service Key check ──
-  const serviceKeyHeader = extractServiceKeyHeader(c.req) ?? extractBearerToken(c.req) ?? undefined;
+  const explicitServiceKeyHeader = extractServiceKeyHeader(c.req) ?? undefined;
+  const bearerToken = extractBearerToken(c.req) ?? undefined;
+  const serviceKeyHeader = explicitServiceKeyHeader ?? bearerToken;
   let isServiceKey = false;
   if (serviceKeyHeader) {
     const constraintCtx: ConstraintContext = {
@@ -337,9 +342,35 @@ export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) =
     return;
   }
 
+  // Standard user access tokens use one stable signed subject across tabs,
+  // sessions and network paths. Verify only the signature here, before any
+  // session/authority read, then hand the payload to the admitted auth
+  // middleware so the same request does not repeat the cryptographic check.
+  // Auth endpoints and custom-bearer Functions retain their protocol-specific
+  // anonymous/IP admission boundary.
+  let identifier = ip;
+  const isStandardUserApi = path.startsWith('/api/')
+    && !isPathAtOrBelow(path, '/api/auth')
+    && explicitServiceKeyHeader === undefined
+    && bearerToken !== undefined
+    && !usesCustomBearerAuth(path, c.req.method);
+  if (isStandardUserApi && c.env.JWT_USER_SECRET) {
+    try {
+      const payload = await verifyAccessToken(bearerToken, c.env.JWT_USER_SECRET);
+      if (typeof payload.sub === 'string' && payload.sub.length > 0) {
+        identifier = `user:${payload.sub}`;
+        c.set('rateLimitAccessToken', { token: bearerToken, payload });
+      }
+    } catch {
+      // Invalid/expired tokens remain on the trusted IP bucket. The normal auth
+      // middleware preserves the existing 401/anonymous behavior after rate
+      // admission and does not trust this failed precheck.
+    }
+  }
+
   // ── Layer 1: Software counter (config-driven) ──
   const { requests, windowSec } = getLimit(config, group);
-  const counterKey = `${group}:${ip}`;
+  const counterKey = `${group}:${identifier}`;
 
   if (!counter.check(counterKey, requests, windowSec)) {
     c.header('Retry-After', String(counter.getRetryAfter(counterKey)));
@@ -352,7 +383,7 @@ export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) =
   // ── Layer 2: Binding ceiling ──
   const limiter = getBinding(c.env, group);
   if (limiter) {
-    const { success } = await limiter.limit({ key: ip });
+    const { success } = await limiter.limit({ key: identifier });
     if (!success) {
       c.header('Retry-After', '60');
       return c.json(
@@ -366,7 +397,7 @@ export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) =
   if (group !== 'global') {
     // Software counter for global
     const globalLimit = getLimit(config, 'global');
-    const globalKey = `global:${ip}`;
+    const globalKey = `global:${identifier}`;
     if (!counter.check(globalKey, globalLimit.requests, globalLimit.windowSec)) {
       c.header('Retry-After', String(counter.getRetryAfter(globalKey)));
       return c.json(
@@ -378,7 +409,7 @@ export const rateLimitMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) =
     // Binding ceiling for global
     const globalLimiter = getBinding(c.env, 'global');
     if (globalLimiter) {
-      const { success } = await globalLimiter.limit({ key: ip });
+      const { success } = await globalLimiter.limit({ key: identifier });
       if (!success) {
         c.header('Retry-After', '60');
         return c.json(

@@ -2599,6 +2599,119 @@ describe('generateTempWranglerToml', () => {
     rmSync(result!);
   });
 
+  it('adds every mandatory self-host runtime binding to a minimal custom Wrangler source', () => {
+    const wranglerPath = join(tmpDir, 'wrangler.toml');
+    writeFileSync(wranglerPath, 'name = "my-worker"\n');
+
+    const result = generateTempWranglerToml(wranglerPath, {
+      bindings: [],
+      runtimeMode: 'self-hosted',
+      ensureSelfHostRuntimeBindings: true,
+    });
+
+    expect(result).not.toBeNull();
+    const content = readFileSync(result!, 'utf-8');
+    for (const [binding, className] of [
+      ['DATABASE', 'DatabaseDO'],
+      ['AUTH', 'AuthDO'],
+      ['DATABASE_LIVE', 'DatabaseLiveDO'],
+      ['ROOMS', 'RoomsDO'],
+      ['LOGS', 'LogsDO'],
+    ]) {
+      expect.soft(content.match(new RegExp(`name = "${binding}"`, 'g')) ?? []).toHaveLength(1);
+      expect.soft(content).toContain(`class_name = "${className}"`);
+      expect.soft(content).toContain(`"${className}"`);
+    }
+    expect.soft(content.match(/binding = "KV"/g) ?? []).toHaveLength(1);
+    expect.soft(content).toContain('id = "local"');
+    expect.soft(content.match(/binding = "STORAGE"/g) ?? []).toHaveLength(1);
+    expect.soft(content).toContain('bucket_name = "');
+    rmSync(result!);
+  });
+
+  it('preserves compatible explicit self-host runtime resource identities exactly once', () => {
+    const wranglerPath = join(tmpDir, 'wrangler.toml');
+    writeFileSync(wranglerPath, [
+      'name = "my-worker"',
+      '',
+      '[durable_objects]',
+      'bindings = [',
+      '  { name = "DATABASE", class_name = "DatabaseDO" },',
+      '  { name = "AUTH", class_name = "AuthDO" },',
+      '  { name = "DATABASE_LIVE", class_name = "DatabaseLiveDO" },',
+      '  { name = "ROOMS", class_name = "RoomsDO" },',
+      '  { name = "LOGS", class_name = "LogsDO" },',
+      ']',
+      '',
+      '[[migrations]]',
+      'tag = "custom-core-v7"',
+      'new_sqlite_classes = ["DatabaseDO", "AuthDO", "DatabaseLiveDO", "RoomsDO", "LogsDO"]',
+      '',
+      '[[kv_namespaces]]',
+      'binding = "KV"',
+      'id = "custom-kv-id"',
+      '',
+      '[[r2_buckets]]',
+      'binding = "STORAGE"',
+      'bucket_name = "custom-storage-bucket"',
+    ].join('\n'));
+
+    const result = generateTempWranglerToml(wranglerPath, {
+      bindings: [],
+      runtimeMode: 'self-hosted',
+      ensureSelfHostRuntimeBindings: true,
+    });
+    expect(result).not.toBeNull();
+    const content = readFileSync(result!, 'utf-8');
+    expect(content.match(/name = "DATABASE_LIVE"/g) ?? []).toHaveLength(1);
+    expect(content.match(/binding = "KV"/g) ?? []).toHaveLength(1);
+    expect(content.match(/binding = "STORAGE"/g) ?? []).toHaveLength(1);
+    expect(content).toContain('id = "custom-kv-id"');
+    expect(content).toContain('bucket_name = "custom-storage-bucket"');
+    expect(content).toContain('tag = "custom-core-v7"');
+    rmSync(result!);
+  });
+
+  it.each([
+    [
+      'wrong class',
+      [
+        'name = "my-worker"',
+        '[durable_objects]',
+        'bindings = [{ name = "DATABASE_LIVE", class_name = "WrongDO" }]',
+      ].join('\n'),
+    ],
+    [
+      'duplicate declaration',
+      [
+        'name = "my-worker"',
+        '[durable_objects]',
+        'bindings = [',
+        '  { name = "DATABASE_LIVE", class_name = "DatabaseLiveDO" },',
+        '  { name = "DATABASE_LIVE", class_name = "DatabaseLiveDO" },',
+        ']',
+      ].join('\n'),
+    ],
+    [
+      'wrong resource type',
+      [
+        'name = "my-worker"',
+        '[[kv_namespaces]]',
+        'binding = "DATABASE_LIVE"',
+        'id = "wrong-type"',
+      ].join('\n'),
+    ],
+  ])('rejects a reserved self-host binding %s before artifact generation', (_label, source) => {
+    const wranglerPath = join(tmpDir, 'wrangler.toml');
+    writeFileSync(wranglerPath, source);
+
+    expect(() => generateTempWranglerToml(wranglerPath, {
+      bindings: [],
+      runtimeMode: 'self-hosted',
+      ensureSelfHostRuntimeBindings: true,
+    })).toThrow(/reserved self-host binding.*DATABASE_LIVE/i);
+  });
+
   it('injects EdgeBase assets when no assets block is present', () => {
     const wranglerPath = join(tmpDir, 'wrangler.toml');
     writeFileSync(wranglerPath, 'name = "my-worker"\n');

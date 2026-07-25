@@ -20,6 +20,7 @@ import {
 } from '../lib/functions.js';
 import { parseConfig } from '../lib/do-router.js';
 import { resolveRootServiceKey } from '../lib/service-key.js';
+import { normalizeDatabaseError } from '../lib/errors.js';
 import type { AuthContext } from '../lib/functions.js';
 import { captchaMiddleware } from '../middleware/captcha-verify.js';
 import { FunctionError } from '@edge-base/shared';
@@ -242,6 +243,11 @@ functionsRoute.all('/:functionName{.+}', async (c) => {
               ...(err.details ? { details: err.details } : {}),
             };
       return c.json(body, status as 400);
+    }
+
+    const normalizedStorageError = normalizeDatabaseError(err);
+    if (normalizedStorageError) {
+      return c.json(normalizedStorageError.toJSON(), normalizedStorageError.code as 400);
     }
 
     console.error(`[EdgeBase] HTTP function '${matched.route.name}' error:`, err);

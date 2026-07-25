@@ -107,8 +107,12 @@ const url = bucket.getUrl('user-1.jpg');
 
 const functions = new FunctionsClient(http);
 const health = await functions.get('health');
+const archive = await functions.callRaw('reports/archive', {
+  method: 'POST',
+  body: { reportId: 'report-1' },
+});
 
-console.log(posts.items, url, health);
+console.log(posts.items, url, health, archive.headers.get('content-type'));
 ```
 
 ## Core API

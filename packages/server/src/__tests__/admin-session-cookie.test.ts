@@ -346,4 +346,27 @@ describe('admin refresh cookie transport', () => {
     expect(proven.headers.get('Set-Cookie')).toContain('__Host-edgebase-admin-refresh=');
     expect(proven.headers.get('Set-Cookie')).toContain('Secure');
   });
+
+  it('accepts same-origin admin cookie auth through a proven gateway that rewrites the upstream host', async () => {
+    const secret = 'd'.repeat(64);
+    setConfig({ release: true, trustSelfHostedProxy: true });
+    const response = await createApp().request('http://127.0.0.1:8788/issue', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://nas.example.test:25781',
+        'X-Forwarded-Host': 'nas.example.test:25781',
+        'X-Forwarded-Proto': 'https',
+        'X-EdgeBase-Auth-Transport': 'cookie',
+        'X-EdgeBase-Self-Host-Gateway': secret,
+      },
+    }, {
+      EDGEBASE_RUNTIME_MODE: 'self-hosted',
+      EDGEBASE_SELF_HOST_GATEWAY_SECRET: secret,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Set-Cookie'))
+      .toContain('__Host-edgebase-admin-refresh=');
+    expect(response.headers.get('Set-Cookie')).toContain('Secure');
+  });
 });

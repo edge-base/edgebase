@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgeBase API",
-    "version": "0.4.9"
+    "version": "0.5.0"
   },
   "components": {
     "schemas": {},
@@ -54,7 +54,7 @@
                     },
                     "version": {
                       "type": "string",
-                      "example": "0.4.9"
+                      "example": "0.5.0"
                     }
                   },
                   "required": [
@@ -6111,11 +6111,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
-              "example": "false"
+              "description": "Set to \"true\" to run the exact COUNT query; omitted, \"false\", or \"0\" returns total null",
+              "example": "true"
             },
             "required": false,
-            "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
+            "description": "Set to \"true\" to run the exact COUNT query; omitted, \"false\", or \"0\" returns total null",
             "name": "includeTotal",
             "in": "query"
           },
@@ -6775,11 +6775,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
-              "example": "false"
+              "description": "Set to \"true\" to run the exact COUNT query; omitted, \"false\", or \"0\" returns total null",
+              "example": "true"
             },
             "required": false,
-            "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
+            "description": "Set to \"true\" to run the exact COUNT query; omitted, \"false\", or \"0\" returns total null",
             "name": "includeTotal",
             "in": "query"
           },
@@ -7732,11 +7732,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
-              "example": "false"
+              "description": "Set to \"true\" to run the exact COUNT query; omitted, \"false\", or \"0\" returns total null",
+              "example": "true"
             },
             "required": false,
-            "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
+            "description": "Set to \"true\" to run the exact COUNT query; omitted, \"false\", or \"0\" returns total null",
             "name": "includeTotal",
             "in": "query"
           },
@@ -8440,11 +8440,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
-              "example": "false"
+              "description": "Set to \"true\" to run the exact COUNT query; omitted, \"false\", or \"0\" returns total null",
+              "example": "true"
             },
             "required": false,
-            "description": "Set to \"false\" or \"0\" to skip the COUNT query; total is null",
+            "description": "Set to \"true\" to run the exact COUNT query; omitted, \"false\", or \"0\" returns total null",
             "name": "includeTotal",
             "in": "query"
           },

@@ -37,12 +37,6 @@ interface DODump {
   timestamp: string;
 }
 
-interface D1Dump {
-  type: 'd1';
-  tables: Record<string, unknown[]>;
-  timestamp: string;
-}
-
 interface StorageObject {
   key: string;
   size: number;

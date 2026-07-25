@@ -291,6 +291,37 @@ describe('1-06 batch — batch-by-filter update', () => {
     expect(data.processed).toBeLessThanOrEqual(2);
   });
 
+  it('batch-by-filter boolean false predicate updates the exact target', async () => {
+    const marker = `Boolean Batch ${crypto.randomUUID()}`;
+    const { data: target } = await api('POST', '/api/db/shared/tables/posts', {
+      title: marker,
+      isPublished: false,
+      views: 10,
+    });
+    const { data: decoy } = await api('POST', '/api/db/shared/tables/posts', {
+      title: marker,
+      isPublished: true,
+      views: 20,
+    });
+    createdIds.push(target.id, decoy.id);
+
+    const result = await api('POST', '/api/db/shared/tables/posts/batch-by-filter', {
+      action: 'update',
+      filter: [
+        ['title', '==', marker],
+        ['isPublished', '==', false],
+      ],
+      update: { views: 99 },
+      limit: 10,
+    });
+    const targetAfter = await api('GET', `/api/db/shared/tables/posts/${target.id}`);
+    const decoyAfter = await api('GET', `/api/db/shared/tables/posts/${decoy.id}`);
+
+    expect(result).toMatchObject({ status: 200, data: { processed: 1, succeeded: 1 } });
+    expect(targetAfter.data.views).toBe(99);
+    expect(decoyAfter.data.views).toBe(20);
+  });
+
   it('batch-by-filter: 0건 매칭 → processed=0, succeeded=0', async () => {
     const { status, data } = await api('POST', '/api/db/shared/tables/posts/batch-by-filter', {
       action: 'delete',

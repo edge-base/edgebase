@@ -1,6 +1,6 @@
 {
     "name": "@edge-base/cli",
-    "version": "0.4.9",
+    "version": "0.5.0",
     "description": "CLI for EdgeBase — create, develop, and deploy EdgeBase projects",
     "license": "MIT",
     "repository": {
@@ -31,7 +31,7 @@
     ],
     "scripts": {
         "build": "tsc && node ./scripts/copy-assets.mjs",
-        "lint": "eslint src/ --max-warnings 0",
+        "lint": "eslint src/ test/ --max-warnings 0",
         "test": "vitest run --exclude test/build-app.test.ts --exclude test/pack.test.ts --exclude test/pack-distribution.test.ts && vitest run test/build-app.test.ts && vitest run test/pack.test.ts && vitest run test/pack-distribution.test.ts",
         "test:compat": "vitest run --exclude test/build-app.test.ts --exclude test/pack.test.ts --exclude test/pack-distribution.test.ts && vitest run test/build-app.test.ts && vitest run test/pack-distribution.test.ts",
         "test:pack-smoke": "node ./scripts/pack-smoke.mjs",
@@ -53,7 +53,7 @@
         "pg": "^8.16.3",
         "tsx": "^4.20.6",
         "ts-morph": "^27.0.2",
-        "wrangler": "4.103.0"
+        "wrangler": "4.114.0"
     },
     "devDependencies": {
         "@types/node": "^25.2.3",

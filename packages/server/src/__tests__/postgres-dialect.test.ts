@@ -8,7 +8,7 @@
  *   B. Query engine — PostgreSQL contains (ILIKE)
  *   C. Query engine — PostgreSQL IN operator
  *   D. Query engine — PostgreSQL OR filters
- *   E. Query engine — PostgreSQL search (ILIKE across columns, no FTS5)
+ *   E. Query engine — PostgreSQL indexed substring search
  *   F. Query engine — PostgreSQL countSql consistency
  *   G. Default dialect behavior (SQLite fallback)
  *   H. executePostgresQuery — export validation
@@ -20,8 +20,12 @@ import {
   buildCountQuery,
   buildGetQuery,
   buildSearchQuery,
+  POSTGRES_FTS_TEXT_COLUMN,
 } from '../lib/query-engine.js';
+import { generatePgFTSDDL } from '../lib/schema.js';
 import { executePostgresQuery } from '../lib/postgres-executor.js';
+
+const POSTGRES_SUBSTRING_CORPUS = `"${POSTGRES_FTS_TEXT_COLUMN}"`;
 
 // ─── A. PostgreSQL dialect — bind params ($1, $2, ...) ────────────────────────
 
@@ -179,7 +183,7 @@ describe('PostgreSQL dialect — OR filters', () => {
   });
 });
 
-// ─── E. PostgreSQL dialect — search (ILIKE, no FTS5) ──────────────────────────
+// ─── E. PostgreSQL dialect — indexed substring search ─────────────────────────
 
 describe('PostgreSQL dialect — search', () => {
   it('buildListQuery search serializes the row instead of casting the table name', () => {
@@ -194,15 +198,27 @@ describe('PostgreSQL dialect — search', () => {
     expect(params).toEqual(['active', 'widget', 10, 0]);
   });
 
-  it('uses ILIKE instead of FTS5 MATCH', () => {
-    const { sql, params } = buildSearchQuery('products', 'widget', {
+  it('configured FTS DDL generates a pg_trgm index over one substring corpus', () => {
+    const ftsDDL = generatePgFTSDDL('products', ['name', 'description']);
+    expect(ftsDDL.some((ddl) => /CREATE\s+EXTENSION\s+IF\s+NOT\s+EXISTS\s+pg_trgm/i.test(ddl))).toBe(true);
+    expect(ftsDDL.some((ddl) => (
+      ddl.includes(`USING gin(${POSTGRES_SUBSTRING_CORPUS} gin_trgm_ops)`)
+    ))).toBe(true);
+  });
+
+  it('configured FTS query searches the indexed substring corpus instead of source fields', () => {
+    const { sql, params, countSql, countParams } = buildSearchQuery('products', 'widget', {
       ftsFields: ['name', 'description'],
     }, 'postgres');
-    expect(sql).toContain('ILIKE');
+
+    expect(sql).toContain(`${POSTGRES_SUBSTRING_CORPUS} ILIKE`);
+    expect(sql).not.toContain('"name"::text ILIKE');
+    expect(sql).not.toContain('"description"::text ILIKE');
     expect(sql).not.toContain('MATCH');
-    expect(sql).not.toContain('_fts');
     expect(sql).not.toContain('highlight(');
-    expect(params).toContain('widget');
+    expect(params.filter((value) => value === 'widget')).toHaveLength(1);
+    expect(countSql).toContain(`${POSTGRES_SUBSTRING_CORPUS} ILIKE`);
+    expect(countParams?.filter((value) => value === 'widget')).toHaveLength(1);
   });
 
   it('search with no ftsFields uses id as default search field', () => {
@@ -210,24 +226,46 @@ describe('PostgreSQL dialect — search', () => {
     expect(sql).toContain('"id"::text ILIKE');
   });
 
-  it('search ILIKE produces OR conditions for multiple fields', () => {
+  it('configured FTS combines multiple source fields into one corpus predicate', () => {
     const { sql } = buildSearchQuery('products', 'q', {
       ftsFields: ['name', 'description', 'sku'],
     }, 'postgres');
-    expect(sql).toContain('OR');
-    expect(sql).toContain('"name"::text ILIKE');
-    expect(sql).toContain('"description"::text ILIKE');
-    expect(sql).toContain('"sku"::text ILIKE');
+    expect(sql).toContain(`${POSTGRES_SUBSTRING_CORPUS} ILIKE`);
+    expect(sql).not.toContain(' OR ');
+    expect(sql).not.toContain('"name"::text ILIKE');
+    expect(sql).not.toContain('"description"::text ILIKE');
+    expect(sql).not.toContain('"sku"::text ILIKE');
   });
 
-  it('search params: one per field + limit + offset', () => {
+  it('configured FTS binds one corpus term plus limit and offset', () => {
     const { params } = buildSearchQuery('products', 'q', {
       ftsFields: ['name', 'description'],
       limit: 10,
       offset: 5,
     }, 'postgres');
-    // 2 fields + limit + offset
-    expect(params).toEqual(['q', 'q', 10, 5]);
+    expect(params).toEqual(['q', 10, 5]);
+  });
+
+  it('treats PostgreSQL LIKE metacharacters literally in search and count', () => {
+    const term = String.raw`50%_off\path`;
+    const escaped = String.raw`50\%\_off\\path`;
+    const { sql, params, countSql, countParams } = buildSearchQuery('products', term, {
+      ftsFields: ['name'],
+    }, 'postgres');
+
+    expect(sql).toContain("ESCAPE E'\\\\'");
+    expect(countSql).toContain("ESCAPE E'\\\\'");
+    expect(params[0]).toBe(escaped);
+    expect(countParams?.[0]).toBe(escaped);
+
+    const list = buildListQuery('products', {
+      search: term,
+      pagination: { limit: 5 },
+    }, 'postgres');
+    expect(list.sql).toContain("ESCAPE E'\\\\'");
+    expect(list.countSql).toContain("ESCAPE E'\\\\'");
+    expect(list.params[0]).toBe(escaped);
+    expect(list.countParams?.[0]).toBe(escaped);
   });
 
   it('search uses $N placeholders', () => {

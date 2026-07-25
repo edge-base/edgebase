@@ -2,7 +2,11 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { PluginInstance } from '@edge-base/shared';
-import { buildManagedD1DatabaseName, extractWranglerWorkerName } from './managed-resource-names.js';
+import {
+  buildManagedD1DatabaseName,
+  buildManagedR2BucketName,
+  extractWranglerWorkerName,
+} from './managed-resource-names.js';
 import { RESERVED_HOSTED_WORKER_SECRET_NAMES } from './wrangler-secrets.js';
 
 export interface ProvisionedBinding {
@@ -44,6 +48,8 @@ interface GenerateTempWranglerBaseOptions {
   runtimeMode?: EdgeBaseRuntimeMode;
   /** Compatibility flags required by the generated runtime only. */
   requiredCompatibilityFlags?: string[];
+  /** Restore and validate the finite core binding set used by self-host runtimes. */
+  ensureSelfHostRuntimeBindings?: boolean;
 }
 
 export type GenerateTempWranglerTomlOptions =
@@ -483,6 +489,217 @@ function ensureManagedAssetsBlock(
   };
 }
 
+const SELF_HOST_DURABLE_OBJECT_BINDINGS = Object.freeze([
+  { name: 'DATABASE', className: 'DatabaseDO' },
+  { name: 'AUTH', className: 'AuthDO' },
+  { name: 'DATABASE_LIVE', className: 'DatabaseLiveDO' },
+  { name: 'ROOMS', className: 'RoomsDO' },
+  { name: 'LOGS', className: 'LogsDO' },
+]);
+const SELF_HOST_CORE_MIGRATION_TAG = 'edgebase-self-host-core-v1';
+
+function maskTomlComments(value: string): string {
+  const characters = value.split('');
+  let quote = '';
+  let escaped = false;
+  for (let index = 0; index < characters.length; index += 1) {
+    const character = characters[index];
+    if (quote) {
+      if (quote === '"' && character === '\\' && !escaped) {
+        escaped = true;
+        continue;
+      }
+      if (character === quote && !escaped) quote = '';
+      escaped = false;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character !== '#') continue;
+    while (index < characters.length && characters[index] !== '\n') {
+      characters[index] = ' ';
+      index += 1;
+    }
+  }
+  return characters.join('');
+}
+
+function quotedAssignment(value: string, name: string): string | null {
+  const match = new RegExp(`\\b${name}\\s*=\\s*["']([^"']+)["']`).exec(value);
+  return match?.[1] ?? null;
+}
+
+function rootTableRange(maskedToml: string, tableName: string): {
+  headerStart: number;
+  bodyStart: number;
+  bodyEnd: number;
+} | null {
+  const header = new RegExp(`^[ \\t]*\\[${tableName}\\][^\\n]*(?:\\n|$)`, 'm').exec(maskedToml);
+  if (!header || header.index === undefined) return null;
+  const bodyStart = header.index + header[0].length;
+  const nextHeader = /^[ \t]*\[(?:\[)?[^\n]+\]\]?[ \t]*(?:#.*)?$/m.exec(
+    maskedToml.slice(bodyStart),
+  );
+  return {
+    headerStart: header.index,
+    bodyStart,
+    bodyEnd: nextHeader?.index === undefined ? maskedToml.length : bodyStart + nextHeader.index,
+  };
+}
+
+function arrayTableBlocks(maskedToml: string, tableName: string): string[] {
+  const blocks: string[] = [];
+  const headerPattern = new RegExp(`^[ \\t]*\\[\\[${tableName}\\]\\][^\\n]*(?:\\n|$)`, 'gm');
+  for (const header of maskedToml.matchAll(headerPattern)) {
+    if (header.index === undefined) continue;
+    const bodyStart = header.index + header[0].length;
+    const nextHeader = /^[ \t]*\[(?:\[)?[^\n]+\]\]?[ \t]*(?:#.*)?$/m.exec(
+      maskedToml.slice(bodyStart),
+    );
+    const bodyEnd = nextHeader?.index === undefined
+      ? maskedToml.length
+      : bodyStart + nextHeader.index;
+    blocks.push(maskedToml.slice(bodyStart, bodyEnd));
+  }
+  return blocks;
+}
+
+function parseQuotedArray(value: string): string[] {
+  return [...value.matchAll(/["']([^"']+)["']/g)].map((match) => match[1]);
+}
+
+function ensureSelfHostRuntimeBindings(
+  wranglerToml: string,
+  workerName: string,
+): { normalized: string; changed: boolean } {
+  const masked = maskTomlComments(wranglerToml);
+  const expectedDoClasses = new Map(
+    SELF_HOST_DURABLE_OBJECT_BINDINGS.map(({ name, className }) => [name, className]),
+  );
+  const reservedBindingNames = new Set([...expectedDoClasses.keys(), 'KV', 'STORAGE']);
+  const arrayBindings = new Map<string, string[]>();
+  for (const tableName of [
+    'kv_namespaces',
+    'r2_buckets',
+    'd1_databases',
+    'vectorize',
+    'hyperdrive',
+    'services',
+  ]) {
+    for (const block of arrayTableBlocks(masked, tableName)) {
+      const binding = quotedAssignment(block, 'binding');
+      if (!binding) continue;
+      const tables = arrayBindings.get(binding) ?? [];
+      tables.push(tableName);
+      arrayBindings.set(binding, tables);
+    }
+  }
+  for (const reservedName of reservedBindingNames) {
+    const tables = arrayBindings.get(reservedName) ?? [];
+    const expectedTable = reservedName === 'KV'
+      ? 'kv_namespaces'
+      : (reservedName === 'STORAGE' ? 'r2_buckets' : null);
+    if (
+      (expectedTable === null && tables.length > 0)
+      || tables.some((tableName) => tableName !== expectedTable)
+      || tables.length > 1
+    ) {
+      throw new Error(
+        `Reserved self-host binding ${reservedName} has a conflicting resource declaration.`,
+      );
+    }
+  }
+
+  const durableRange = rootTableRange(masked, 'durable_objects');
+  const existingDoEntries: Array<{ name: string; className: string | null }> = [];
+  let durableBindingMatch: RegExpExecArray | null = null;
+  if (durableRange) {
+    const durableBody = masked.slice(durableRange.bodyStart, durableRange.bodyEnd);
+    durableBindingMatch = /\bbindings\s*=\s*\[([\s\S]*?)\]/m.exec(durableBody);
+    if (durableBindingMatch) {
+      for (const entry of durableBindingMatch[1].matchAll(/\{([^{}]*)\}/g)) {
+        const name = quotedAssignment(entry[1], 'name');
+        const className = quotedAssignment(entry[1], 'class_name');
+        if (name) existingDoEntries.push({ name, className });
+      }
+    }
+  }
+  for (const reservedName of ['KV', 'STORAGE']) {
+    if (existingDoEntries.some((entry) => entry.name === reservedName)) {
+      throw new Error(
+        `Reserved self-host binding ${reservedName} has a conflicting resource declaration.`,
+      );
+    }
+  }
+  for (const [name, className] of expectedDoClasses) {
+    const matches = existingDoEntries.filter((entry) => entry.name === name);
+    if (matches.length > 1 || (matches.length === 1 && matches[0].className !== className)) {
+      throw new Error(`Reserved self-host binding ${name} has a conflicting Durable Object class.`);
+    }
+  }
+
+  let normalized = wranglerToml;
+  const missingDoBindings = SELF_HOST_DURABLE_OBJECT_BINDINGS.filter(
+    ({ name }) => !existingDoEntries.some((entry) => entry.name === name),
+  );
+  if (missingDoBindings.length > 0) {
+    const serialized = missingDoBindings
+      .map(({ name, className }) => `  { name = "${name}", class_name = "${className}" }`)
+      .join(',\n');
+    if (!durableRange) {
+      normalized = `${normalized.replace(/\s*$/, '')}\n\n[durable_objects]\nbindings = [\n${serialized}\n]\n`;
+    } else if (!durableBindingMatch) {
+      normalized = `${normalized.slice(0, durableRange.bodyEnd).replace(/\s*$/, '')}\n`
+        + `bindings = [\n${serialized}\n]\n`
+        + normalized.slice(durableRange.bodyEnd);
+    } else {
+      const assignmentStart = durableRange.bodyStart + durableBindingMatch.index;
+      const assignmentEnd = assignmentStart + durableBindingMatch[0].length;
+      const existingBody = durableBindingMatch[1].trimEnd();
+      const separator = existingBody.trim().length === 0
+        ? ''
+        : (existingBody.trimEnd().endsWith(',') ? '\n' : ',\n');
+      const replacement = `bindings = [${existingBody}${separator}${serialized}\n]`;
+      normalized = normalized.slice(0, assignmentStart)
+        + replacement
+        + normalized.slice(assignmentEnd);
+    }
+  }
+
+  const migrationClasses = new Set<string>();
+  for (const match of masked.matchAll(/\bnew_sqlite_classes\s*=\s*\[([^\]]*)\]/g)) {
+    for (const className of parseQuotedArray(match[1])) migrationClasses.add(className);
+  }
+  const missingMigrationClasses = SELF_HOST_DURABLE_OBJECT_BINDINGS
+    .map(({ className }) => className)
+    .filter((className) => !migrationClasses.has(className));
+  if (missingMigrationClasses.length > 0) {
+    if (new RegExp(`\\btag\\s*=\\s*["']${SELF_HOST_CORE_MIGRATION_TAG}["']`).test(masked)) {
+      throw new Error(
+        `Reserved self-host migration tag ${SELF_HOST_CORE_MIGRATION_TAG} is incomplete.`,
+      );
+    }
+    normalized = `${normalized.replace(/\s*$/, '')}\n\n[[migrations]]\n`
+      + `tag = "${SELF_HOST_CORE_MIGRATION_TAG}"\n`
+      + `new_sqlite_classes = [${missingMigrationClasses.map((name) => `"${name}"`).join(', ')}]\n`;
+  }
+
+  const kvTables = arrayBindings.get('KV') ?? [];
+  if (kvTables.length === 0) {
+    normalized = `${normalized.replace(/\s*$/, '')}\n\n[[kv_namespaces]]\n`
+      + 'binding = "KV"\nid = "local"\n';
+  }
+  const storageTables = arrayBindings.get('STORAGE') ?? [];
+  if (storageTables.length === 0) {
+    normalized = `${normalized.replace(/\s*$/, '')}\n\n[[r2_buckets]]\n`
+      + `binding = "STORAGE"\nbucket_name = "${buildManagedR2BucketName(workerName)}"\n`;
+  }
+
+  return { normalized, changed: normalized !== wranglerToml };
+}
+
 /**
  * Merge plugin tables into the user's config databases (in-memory).
  * Plugins declare tables in their PluginInstance; CLI adds them to the target DB block.
@@ -559,6 +776,13 @@ export function generateTempWranglerToml(
     );
   const { normalized: normalizedOriginal, changed: normalizedAssetsRouting } =
     ensureManagedAssetsBlock(compatibilityNormalized);
+  const workerName = extractWranglerWorkerName(original) || 'edgebase';
+  const {
+    normalized: selfHostNormalized,
+    changed: normalizedSelfHostBindings,
+  } = options.ensureSelfHostRuntimeBindings
+    ? ensureSelfHostRuntimeBindings(normalizedOriginal, workerName)
+    : { normalized: normalizedOriginal, changed: false };
 
   if (
     bindings.length === 0 &&
@@ -567,12 +791,12 @@ export function generateTempWranglerToml(
     !sendEmailBinding &&
     !normalizedRuntimeMode &&
     !normalizedCompatibilityFlags &&
-    !normalizedAssetsRouting
+    !normalizedAssetsRouting &&
+    !normalizedSelfHostBindings
   ) {
     return null;
   }
 
-  const workerName = extractWranglerWorkerName(original) || 'edgebase';
   const kvBindingNames = new Set(
     bindings.filter((binding) => binding.type === 'kv_namespace').map((binding) => binding.binding),
   );
@@ -581,7 +805,7 @@ export function generateTempWranglerToml(
   );
   const rateLimitBindingNames = new Set(rateLimitBindings.map((binding) => binding.binding));
   const hasRequiredSendEmailBinding = sendEmailBinding
-    ? [...normalizedOriginal.matchAll(
+    ? [...selfHostNormalized.matchAll(
         /(?:^|\n)\[\[send_email\]\]([\s\S]*?)(?=\n\[\[|\n\[|$)/g,
       )].some((match) => {
         const nameMatch = match[1].match(/^\s*name\s*=\s*["']([^"']+)["']\s*$/m);
@@ -590,14 +814,14 @@ export function generateTempWranglerToml(
     : false;
   let sanitizedOriginal =
     rateLimitBindingNames.size > 0
-      ? normalizedOriginal.replace(/\n?\[\[unsafe\.bindings\]\][\s\S]*?(?=\n\[\[|\n\[|$)/g, (block) => {
+      ? selfHostNormalized.replace(/\n?\[\[unsafe\.bindings\]\][\s\S]*?(?=\n\[\[|\n\[|$)/g, (block) => {
           const nameMatch = block.match(/^\s*name\s*=\s*"([^"]+)"/m);
           if (nameMatch && rateLimitBindingNames.has(nameMatch[1])) {
             return '';
           }
           return block;
         })
-      : normalizedOriginal;
+      : selfHostNormalized;
   if (kvBindingNames.size > 0) {
     sanitizedOriginal = sanitizedOriginal.replace(
       /\n?\[\[kv_namespaces\]\][\s\S]*?(?=\n\[\[|\n\[|$)/g,
@@ -700,6 +924,7 @@ export function generateTempWranglerToml(
     && !normalizedAssetsRouting
     && !normalizedRuntimeMode
     && !normalizedCompatibilityFlags
+    && !normalizedSelfHostBindings
     && (!sendEmailBinding || hasRequiredSendEmailBinding)
   ) return null;
 

@@ -24,7 +24,7 @@ import {
   buildManagedWorkerName,
 } from './managed-resource-names.js';
 import { deriveProjectSlug, INTERNAL_D1_BINDINGS } from './project-runtime.js';
-import { resolveWranglerTool } from './wrangler.js';
+import { prepareWranglerDevTool, resolveWranglerTool } from './wrangler.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_ROOT = resolve(__dirname, '../../../..');
@@ -173,6 +173,8 @@ run_worker_first = true
 export function resolveWranglerCommand(): { command: string; argsPrefix: string[] } {
   return resolveWranglerTool(process.cwd());
 }
+
+export { prepareWranglerDevTool };
 
 function copyRuntimeDir(source: string, target: string): void {
   if (!existsSync(source)) {

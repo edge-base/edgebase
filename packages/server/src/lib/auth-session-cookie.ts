@@ -5,7 +5,10 @@ import type { Env } from '../types.js';
 import { parseConfig } from './do-router.js';
 import { parseDuration } from './jwt.js';
 import { matchOrigin } from '../middleware/cors.js';
-import { trustsSelfHostedProxyHeaders } from './public-origin.js';
+import {
+  resolvePublicRequestOrigin,
+  trustsSelfHostedProxyHeaders,
+} from './public-origin.js';
 import { getTrustedClientIp } from './client-ip.js';
 
 const AUTH_TRANSPORT_HEADER = 'X-EdgeBase-Auth-Transport';
@@ -160,14 +163,12 @@ export function assertAuthTransportAllowed(c: AuthContext): void {
     if (browserOrigin.protocol !== 'http:' && browserOrigin.protocol !== 'https:') {
       throw new Error('unsupported origin scheme');
     }
-    requestUrl = new URL(c.req.url);
-    // A trusted TLS-terminating proxy makes the browser-facing origin HTTPS
-    // even though the upstream request is HTTP. Reconstruct only the scheme
-    // covered by the explicit proxy-trust contract; never trust a forwarded
-    // host here.
-    if (requestUrl.protocol === 'http:' && isSecureRequest(c)) {
-      requestUrl.protocol = 'https:';
-    }
+    // A verified CLI gateway (or the legacy explicit operator trust contract)
+    // has already authenticated and normalized the complete forwarded tuple.
+    // Use that same authority for the browser-facing same-origin comparison;
+    // direct, Cloudflare, and unproven self-host requests still resolve only
+    // from their runtime Request URL.
+    requestUrl = new URL(resolvePublicRequestOrigin(c.env, c.req));
   } catch {
     throw new EdgeBaseError(
       403,

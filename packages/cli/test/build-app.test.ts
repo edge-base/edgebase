@@ -336,18 +336,24 @@ export const quarterHour = defineFunction({
     const firstGatewayPath = join(firstSelfHostDir, 'self-host-gateway.mjs');
     const firstSupervisorPath = join(firstSelfHostDir, 'self-host-schedule-supervisor.mjs');
     const firstDockerEntrypointPath = join(firstSelfHostDir, 'self-host-docker-entrypoint.mjs');
+    const firstWranglerRuntimePath = join(firstSelfHostDir, 'self-host-wrangler-runtime.mjs');
+    const firstProxyWorkerPath = join(firstSelfHostDir, 'self-host-proxy-worker.js');
 
     expect(onDisk.schedules).toEqual(first.manifest.schedules);
     expect(onDisk.selfHost).toEqual(first.manifest.selfHost);
     expect(readdirSync(firstSelfHostDir).sort()).toEqual([
       'self-host-docker-entrypoint.mjs',
       'self-host-gateway.mjs',
+      'self-host-proxy-worker.js',
       'self-host-schedule-supervisor.mjs',
+      'self-host-wrangler-runtime.mjs',
     ]);
     for (const asset of [
       onDisk.selfHost.gateway,
       onDisk.selfHost.scheduleSupervisor,
       onDisk.selfHost.dockerEntrypoint,
+      onDisk.selfHost.wranglerRuntime,
+      onDisk.selfHost.proxyWorker,
     ]) {
       const content = readFileSync(join(first.outputDir, asset.path));
       expect(asset.bytes).toBe(content.byteLength);
@@ -362,6 +368,12 @@ export const quarterHour = defineFunction({
     );
     expect(readFileSync(firstDockerEntrypointPath)).toEqual(
       readFileSync(join(secondSelfHostDir, 'self-host-docker-entrypoint.mjs')),
+    );
+    expect(readFileSync(firstWranglerRuntimePath)).toEqual(
+      readFileSync(join(secondSelfHostDir, 'self-host-wrangler-runtime.mjs')),
+    );
+    expect(readFileSync(firstProxyWorkerPath)).toEqual(
+      readFileSync(join(secondSelfHostDir, 'self-host-proxy-worker.js')),
     );
     await expect(inspectBundledSupervisor(firstSupervisorPath)).resolves.toBe('function');
     await expect(validateBundledSelfHostManifest(
@@ -400,7 +412,9 @@ export default defineFunction({
     expect(readdirSync(firstSelfHostDir).sort()).toEqual([
       'self-host-docker-entrypoint.mjs',
       'self-host-gateway.mjs',
+      'self-host-proxy-worker.js',
       'self-host-schedule-supervisor.mjs',
+      'self-host-wrangler-runtime.mjs',
     ]);
     expect(readFileSync(firstGatewayPath)).toEqual(readFileSync(gatewaySourcePath));
     expect(readFileSync(firstSupervisorPath)).toEqual(
@@ -925,7 +939,7 @@ export default defineConfig({
     expect(readBundledPackageVersion(portableNodeModules, 'miniflare')).toBe(expectedPortableMiniflareVersion);
     expect(resolveBundledWranglerMiniflareVersion(portableNodeModules)).toBe(expectedPortableMiniflareVersion);
     expect(bundledPortableMiniflareEntries).toEqual(
-      bundledPortableMiniflareEntries.map((entry) => (
+      bundledPortableMiniflareEntries.map(() => (
         expect.stringMatching(new RegExp(`^miniflare@${escapeRegExp(expectedPortableMiniflareVersion)}`))
       )),
     );

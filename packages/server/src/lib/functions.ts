@@ -72,11 +72,13 @@ export interface AdminAuthContext {
 }
 
 export interface FunctionEmailProxy {
+  readonly supportsIdempotency: boolean;
   send(options: {
     to: string;
     subject: string;
     html?: string;
     text?: string;
+    idempotencyKey?: string;
   }): Promise<{ success: boolean; messageId?: string }>;
 }
 
@@ -858,6 +860,32 @@ interface BuildAdminDbProxyOptions {
   preferDirectDo?: boolean;
 }
 
+type InternalSearchRelatedTableRef<T = Record<string, unknown>> = TableRef<T> & {
+  searchRelated(input: unknown): Promise<unknown>;
+};
+
+function attachInternalSearchRelated<T>(
+  table: TableRef<T>,
+  transport: InternalHttpTransport,
+  namespace: string,
+  instanceId: string | undefined,
+  tableName: string,
+): TableRef<T> {
+  const encodedTableName = encodeURIComponent(tableName);
+  const path = instanceId
+    ? `/api/db/${namespace}/${instanceId}/tables/${encodedTableName}/search-related`
+    : `/api/db/${namespace}/tables/${encodedTableName}/search-related`;
+
+  Object.defineProperty(table, 'searchRelated', {
+    configurable: true,
+    enumerable: false,
+    writable: false,
+    value: (input: unknown) => transport.request('POST', path, { body: input }),
+  });
+
+  return table as InternalSearchRelatedTableRef<T>;
+}
+
 // ─── Shared SQL executor — provider-aware direct paths → HTTP fallback ───
 
 export interface SqlProviderAwareOptions {
@@ -955,7 +983,7 @@ export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAd
       dbContext: { namespace, instanceId: normalizedId },
     });
     const dbApi = new DefaultDbApi(transport);
-    return new DbRef(
+    const dbRef = new DbRef(
       dbApi,
       namespace,
       normalizedId,
@@ -964,6 +992,23 @@ export function buildAdminDbProxy(options: BuildAdminDbProxyOptions): FunctionAd
       httpClient, // enables table().sql`...` tagged template
       sqlExecutor,
     );
+    const createTable = dbRef.table.bind(dbRef) as <T = Record<string, unknown>>(
+      name: string,
+    ) => TableRef<T>;
+    Object.defineProperty(dbRef, 'table', {
+      configurable: false,
+      enumerable: false,
+      writable: false,
+      value: <T = Record<string, unknown>>(name: string) =>
+        attachInternalSearchRelated(
+          createTable<T>(name),
+          transport,
+          namespace,
+          normalizedId,
+          name,
+        ),
+    });
+    return dbRef;
   };
 }
 
@@ -1233,13 +1278,21 @@ export function buildFunctionContext(options: BuildFunctionContextOptions): Func
   const emailProvider = createEmailProvider(options.config.email, options.env);
   const email: FunctionEmailProxy | undefined = emailProvider
     ? {
+        supportsIdempotency: emailProvider.supportsIdempotency,
         async send(message) {
           const to = message.to.trim();
           const subject = message.subject.trim();
           if (!to) throw new Error('email.send() requires a recipient.');
           if (!subject) throw new Error('email.send() requires a subject.');
+          const idempotencyKey = message.idempotencyKey?.trim();
+          if (message.idempotencyKey !== undefined && !idempotencyKey) {
+            throw new Error('email.send() idempotencyKey must not be empty.');
+          }
+          if (idempotencyKey && idempotencyKey.length > 256) {
+            throw new Error('email.send() idempotencyKey must be at most 256 characters.');
+          }
           const html = message.html ?? textEmailToHtml(message.text ?? '');
-          return emailProvider.send({ to, subject, html });
+          return emailProvider.send({ to, subject, html, idempotencyKey });
         },
       }
     : undefined;
@@ -1491,35 +1544,90 @@ export async function executeDbTriggers(
   /** Namespace/id of the DO that fired the trigger (§5). */
   triggerOrigin: { namespace: string; id?: string },
 ): Promise<void> {
-  const functions = getFunctionsByTrigger('db', {
-    type: 'db',
-    table: tableName2,
-    event,
-  } as DbTrigger);
-  if (functions.length === 0) return;
+  await executeDbTriggerBatch(
+    [{ table: tableName2, event, data }],
+    contextOptions,
+    triggerOrigin,
+  );
+}
+
+export const DB_TRIGGER_BATCH_MAX_CONCURRENCY = 8;
+
+export interface DbTriggerBatchItem {
+  table: string;
+  event: 'insert' | 'update' | 'delete';
+  data: { before?: Record<string, unknown>; after?: Record<string, unknown> };
+}
+
+/**
+ * Execute one committed mutation's DB-trigger rows under one bounded owner.
+ *
+ * The registry is snapshotted once per source mutation. Rows run in at most
+ * eight lanes while matching functions for one row retain registration order.
+ * Failures remain best-effort and are never retried.
+ */
+export async function executeDbTriggerBatch(
+  items: readonly DbTriggerBatchItem[],
+  contextOptions: Omit<BuildFunctionContextOptions, 'data' | 'request' | 'auth'>,
+  triggerOrigin: { namespace: string; id?: string },
+): Promise<void> {
+  if (items.length === 0) return;
+
+  const functionsByEvent = new Map<
+    string,
+    Array<{ name: string; definition: FunctionDefinition }>
+  >();
+  for (const [key, definition] of functionRegistry) {
+    if (definition.trigger.type !== 'db') continue;
+    const trigger = definition.trigger as DbTrigger;
+    const eventKey = `${trigger.table}\u0000${trigger.event}`;
+    const matching = functionsByEvent.get(eventKey) ?? [];
+    matching.push({ name: getRegistryName(key, definition), definition });
+    functionsByEvent.set(eventKey, matching);
+  }
+
+  const admittedRows = items.flatMap((item) => {
+    const functions = functionsByEvent.get(`${item.table}\u0000${item.event}`);
+    return functions && functions.length > 0 ? [{ item, functions }] : [];
+  });
+  if (admittedRows.length === 0) return;
 
   const dummyRequest = new Request('http://internal/trigger', { method: 'POST' });
+  let nextRowIndex = 0;
 
-  for (const { name, definition } of functions) {
-    try {
-      const ctx = buildFunctionContext({
-        ...contextOptions,
-        request: dummyRequest,
-        auth: null,
-        data,
-        triggerInfo: {
-          namespace: triggerOrigin.namespace,
-          id: triggerOrigin.id,
-          table: tableName2,
-          event,
-        },
-      });
-      await definition.handler(ctx);
-    } catch (err) {
-      // Best-effort — log and continue
-      console.error(`[EdgeBase] DB trigger '${name}' (${tableName2}:${event}) failed:`, err);
+  const drainLane = async (): Promise<void> => {
+    while (nextRowIndex < admittedRows.length) {
+      const rowIndex = nextRowIndex;
+      nextRowIndex += 1;
+      const { item, functions } = admittedRows[rowIndex];
+      for (const { name, definition } of functions) {
+        try {
+          const ctx = buildFunctionContext({
+            ...contextOptions,
+            request: dummyRequest,
+            auth: null,
+            data: item.data,
+            triggerInfo: {
+              namespace: triggerOrigin.namespace,
+              id: triggerOrigin.id,
+              table: item.table,
+              event: item.event,
+            },
+          });
+          await definition.handler(ctx);
+        } catch (err) {
+          // Best-effort — log and continue
+          console.error(
+            `[EdgeBase] DB trigger '${name}' (${item.table}:${item.event}) failed:`,
+            err,
+          );
+        }
+      }
     }
-  }
+  };
+
+  const laneCount = Math.min(DB_TRIGGER_BATCH_MAX_CONCURRENCY, admittedRows.length);
+  await Promise.all(Array.from({ length: laneCount }, () => drainLane()));
 }
 
 // ─── KV / D1 / Vectorize Proxy Builders ───

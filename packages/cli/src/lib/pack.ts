@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   createAppBundle,
@@ -13,6 +13,10 @@ import {
   RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS,
 } from './deploy-shared.js';
 import { resolveLocalDevBindings } from './project-runtime.js';
+import {
+  publishPackArtifact,
+  type PackArtifactPublicationPoint,
+} from './pack-artifact-publication.js';
 
 const EDGEBASE_CONFIG_FILES = ['edgebase.config.ts', 'edgebase.config.js'];
 const PACK_RUNTIME_MAIN = '.edgebase/runtime/server/src/index.ts';
@@ -81,6 +85,16 @@ export interface EdgeBaseArchiveManifest {
 
 export type CreateDirPackArtifactOptions = CreateAppBundleOptions;
 
+export type PackArtifactFaultPoint = PackArtifactPublicationPoint
+  | 'after-portable-app-copy'
+  | 'after-portable-runtime-copy'
+  | 'after-portable-launcher-write'
+  | 'after-portable-manifest-write'
+  | 'after-portable-symlink-validation'
+  | 'after-portable-signing'
+  | 'after-archive-create'
+  | 'after-archive-validation';
+
 export interface CreatePortablePackArtifactOptions extends CreateAppBundleOptions {
   appName?: string;
   /**
@@ -88,6 +102,8 @@ export interface CreatePortablePackArtifactOptions extends CreateAppBundleOption
    * that is not a previously generated EdgeBase pack artifact.
    */
   force?: boolean;
+  /** @internal Fault injection for portable/archive publication recovery tests. */
+  artifactPublicationFaultInjector?: (point: PackArtifactFaultPoint) => void;
 }
 
 // Marker files that a prior EdgeBase pack artifact leaves at (or under) its
@@ -99,11 +115,141 @@ const PACK_ARTIFACT_MARKERS = [
   { path: 'edgebase-pack.json', format: 'dir' },
 ] as const;
 
+const PORTABLE_ARTIFACT_COPY_MAX_ENTRIES = 1_000_000;
+const PORTABLE_ARTIFACT_COPY_MAX_BYTES = 16 * 1024 * 1024 * 1024;
+
+interface PortableArtifactCopyLimits {
+  maxEntries?: number;
+  maxBytes?: number;
+}
+
 function isPathWithinRoot(rootPath: string, targetPath: string): boolean {
   const relativePath = relative(rootPath, targetPath);
   return relativePath === '' || (!relativePath.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)
     && relativePath !== '..'
     && !isAbsolute(relativePath));
+}
+
+/**
+ * Copy a directory-pack generation into a portable staging tree without
+ * retaining symbolic links to that generation. Node's recursive cp currently
+ * rewrites directory links to absolute source paths even with dereference
+ * enabled, so portable artifacts need an explicit materializing traversal.
+ */
+function copyPortableArtifactTree(
+  sourceRoot: string,
+  destinationRoot: string,
+  limits: PortableArtifactCopyLimits = {},
+): void {
+  const maxEntries = limits.maxEntries ?? PORTABLE_ARTIFACT_COPY_MAX_ENTRIES;
+  const maxBytes = limits.maxBytes ?? PORTABLE_ARTIFACT_COPY_MAX_BYTES;
+  if (!Number.isSafeInteger(maxEntries) || maxEntries < 1) {
+    throw new Error('Portable artifact copy maxEntries must be a positive safe integer.');
+  }
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+    throw new Error('Portable artifact copy maxBytes must be a non-negative safe integer.');
+  }
+
+  const canonicalSourceRoot = realpathSync(sourceRoot);
+  if (!lstatSync(canonicalSourceRoot).isDirectory()) {
+    throw new Error(`Portable artifact copy source must resolve to a directory: ${sourceRoot}`);
+  }
+
+  const destinationParent = dirname(destinationRoot);
+  mkdirSync(destinationParent, { recursive: true });
+  const canonicalDestinationRoot = join(realpathSync(destinationParent), basename(destinationRoot));
+  if (isPathWithinRoot(canonicalSourceRoot, canonicalDestinationRoot)) {
+    throw new Error('Portable artifact copy destination must be outside its source tree.');
+  }
+  try {
+    lstatSync(destinationRoot);
+    throw new Error(`Portable artifact copy destination already exists: ${destinationRoot}`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+
+  const activeDirectories = new Set<string>();
+  let copiedEntries = 0;
+  let copiedBytes = 0;
+
+  const consumeEntry = (entryPath: string): void => {
+    copiedEntries += 1;
+    if (copiedEntries > maxEntries) {
+      throw new Error(
+        `Portable artifact copy exceeded its ${maxEntries}-entry limit at: ${entryPath}`,
+      );
+    }
+  };
+
+  const consumeBytes = (byteCount: number, entryPath: string): void => {
+    copiedBytes += byteCount;
+    if (!Number.isSafeInteger(copiedBytes) || copiedBytes > maxBytes) {
+      throw new Error(
+        `Portable artifact copy exceeded its ${maxBytes}-byte limit at: ${entryPath}`,
+      );
+    }
+  };
+
+  const copyEntry = (sourceEntry: string, destinationEntry: string): void => {
+    consumeEntry(sourceEntry);
+    let sourceStat = lstatSync(sourceEntry);
+    let canonicalSourceEntry = sourceEntry;
+
+    if (sourceStat.isSymbolicLink()) {
+      const linkTarget = readlinkSync(sourceEntry);
+      try {
+        canonicalSourceEntry = realpathSync(sourceEntry);
+      } catch {
+        throw new Error(
+          `Refusing to materialize a broken portable artifact symbolic link: ${sourceEntry} -> ${linkTarget}`,
+        );
+      }
+      if (!isPathWithinRoot(canonicalSourceRoot, canonicalSourceEntry)) {
+        throw new Error(
+          `Refusing to materialize a portable artifact symbolic link outside its source root: ${sourceEntry} -> ${linkTarget}`,
+        );
+      }
+      sourceStat = lstatSync(canonicalSourceEntry);
+    } else if (sourceStat.isDirectory()) {
+      canonicalSourceEntry = realpathSync(sourceEntry);
+      if (!isPathWithinRoot(canonicalSourceRoot, canonicalSourceEntry)) {
+        throw new Error(`Portable artifact directory escaped its source root: ${sourceEntry}`);
+      }
+    }
+
+    if (sourceStat.isDirectory()) {
+      if (activeDirectories.has(canonicalSourceEntry)) {
+        throw new Error(`Refusing to materialize a cyclic portable artifact directory: ${sourceEntry}`);
+      }
+      activeDirectories.add(canonicalSourceEntry);
+      try {
+        mkdirSync(destinationEntry, { mode: sourceStat.mode & 0o777 });
+        for (const entry of readdirSync(canonicalSourceEntry).sort()) {
+          copyEntry(join(canonicalSourceEntry, entry), join(destinationEntry, entry));
+        }
+        chmodSync(destinationEntry, sourceStat.mode & 0o777);
+      } finally {
+        activeDirectories.delete(canonicalSourceEntry);
+      }
+      return;
+    }
+
+    if (sourceStat.isFile()) {
+      consumeBytes(sourceStat.size, sourceEntry);
+      copyFileSync(canonicalSourceEntry, destinationEntry);
+      chmodSync(destinationEntry, sourceStat.mode & 0o777);
+      return;
+    }
+
+    throw new Error(`Refusing to copy unsupported portable artifact entry: ${sourceEntry}`);
+  };
+
+  try {
+    copyEntry(canonicalSourceRoot, destinationRoot);
+  } catch (error) {
+    rmSync(destinationRoot, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function isPriorPackArtifactDir(dir: string): boolean {
@@ -132,10 +278,14 @@ function isPriorPackArtifactDir(dir: string): boolean {
   });
 }
 
-function assertArtifactSymlinksContained(
+export function assertArtifactSymlinksContained(
   artifactRoot: string,
-  options: { allowGenerationPointerRoot?: boolean } = {},
+  options: { allowGenerationPointerRoot?: boolean; maxEntries?: number } = {},
 ): void {
+  const maxEntries = options.maxEntries ?? PORTABLE_ARTIFACT_COPY_MAX_ENTRIES;
+  if (!Number.isSafeInteger(maxEntries) || maxEntries < 1) {
+    throw new Error('Portable artifact symlink validation maxEntries must be a positive safe integer.');
+  }
   const rootStat = lstatSync(artifactRoot);
   if (
     (!rootStat.isDirectory() && !rootStat.isSymbolicLink())
@@ -164,14 +314,23 @@ function assertArtifactSymlinksContained(
     return true;
   };
 
+  let visitedEntries = 0;
   const visit = (currentDir: string): void => {
     for (const entry of readdirSync(currentDir)) {
       const entryPath = join(currentDir, entry);
+      visitedEntries += 1;
+      if (visitedEntries > maxEntries) {
+        throw new Error(
+          `Portable artifact symlink validation exceeded its ${maxEntries}-entry limit at: ${entryPath}`,
+        );
+      }
       const entryStat = lstatSync(entryPath);
       if (entryStat.isSymbolicLink()) {
         const linkTarget = readlinkSync(entryPath);
         if (!symlinkTraversalStaysWithinRoot(entryPath, linkTarget)) {
-          throw new Error(`Portable artifact contains a non-portable symbolic link outside its root: ${entryPath}`);
+          throw new Error(
+            `Portable artifact contains a non-portable symbolic link outside its root: ${entryPath} -> ${linkTarget}`,
+          );
         }
         let canonicalTarget: string;
         try {
@@ -650,34 +809,54 @@ function copyPortableNodeRuntime(
   }
 }
 
-export function createArchiveFromPortableArtifact(sourcePath: string, archivePath: string): EdgeBaseArchiveManifest['archiveType'] {
+export function createArchiveFromPortableArtifact(
+  sourcePath: string,
+  archivePath: string,
+  options: {
+    force?: boolean;
+    faultInjector?: (point: PackArtifactFaultPoint) => void;
+  } = {},
+): EdgeBaseArchiveManifest['archiveType'] {
   assertArtifactSymlinksContained(sourcePath);
-  rmSync(archivePath, { force: true, recursive: true });
-  mkdirSync(dirname(archivePath), { recursive: true });
-
-  if (process.platform === 'darwin') {
-    execFileSync('ditto', ['-c', '-k', '--keepParent', basename(sourcePath), archivePath], {
-      cwd: dirname(sourcePath),
-      stdio: 'pipe',
-    });
-    return 'zip';
-  }
-
-  if (process.platform === 'win32') {
-    execFileSync('powershell', [
-      '-NoProfile',
-      '-Command',
-      `Compress-Archive -Path '${sourcePath.replace(/'/g, "''")}' -DestinationPath '${archivePath.replace(/'/g, "''")}' -Force`,
-    ], {
-      stdio: 'pipe',
-    });
-    return 'zip';
-  }
-
-  execFileSync('tar', ['-czf', archivePath, '-C', dirname(sourcePath), basename(sourcePath)], {
-    stdio: 'pipe',
+  return publishPackArtifact({
+    outputPath: archivePath,
+    kind: 'file',
+    admitExisting: (outputPath) => assertSafePackOutputPath(outputPath, options.force),
+    build(stagingPath) {
+      let archiveType: EdgeBaseArchiveManifest['archiveType'];
+      if (process.platform === 'darwin') {
+        execFileSync('ditto', ['-c', '-k', '--keepParent', basename(sourcePath), stagingPath], {
+          cwd: dirname(sourcePath),
+          stdio: 'pipe',
+        });
+        archiveType = 'zip';
+      } else if (process.platform === 'win32') {
+        execFileSync('powershell', [
+          '-NoProfile',
+          '-Command',
+          `Compress-Archive -Path '${sourcePath.replace(/'/g, "''")}' -DestinationPath '${stagingPath.replace(/'/g, "''")}' -Force`,
+        ], {
+          stdio: 'pipe',
+        });
+        archiveType = 'zip';
+      } else {
+        execFileSync('tar', ['-czf', stagingPath, '-C', dirname(sourcePath), basename(sourcePath)], {
+          stdio: 'pipe',
+        });
+        archiveType = 'tar.gz';
+      }
+      options.faultInjector?.('after-archive-create');
+      return archiveType;
+    },
+    validate(stagedArchivePath) {
+      const info = lstatSync(stagedArchivePath);
+      if (!info.isFile() || info.size <= 0) {
+        throw new Error(`Portable archive staging did not produce a non-empty file: ${stagedArchivePath}`);
+      }
+      options.faultInjector?.('after-archive-validation');
+    },
+    faultInjector: options.faultInjector,
   });
-  return 'tar.gz';
 }
 
 function ensurePackRuntimeMain(wranglerToml: string): string {
@@ -715,6 +894,7 @@ function finalizePackWrangler(projectDir: string, outputDir: string): void {
     triggerMode: 'preserve',
     runtimeMode: 'self-hosted',
     requiredCompatibilityFlags: RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS,
+    ensureSelfHostRuntimeBindings: true,
   });
 
   const finalized = ensurePackRuntimeMain(
@@ -874,6 +1054,85 @@ function readJson(filePath) {
   }
 }
 
+async function loadDatabaseSync() {
+  const previousNoWarnings = process.env.NODE_NO_WARNINGS;
+  process.env.NODE_NO_WARNINGS = '1';
+  try {
+    const sqlite = await import('node:sqlite');
+    await new Promise((resolveTurn) => setImmediate(resolveTurn));
+    return sqlite.DatabaseSync;
+  } finally {
+    if (previousNoWarnings === undefined) {
+      delete process.env.NODE_NO_WARNINGS;
+    } else {
+      process.env.NODE_NO_WARNINGS = previousNoWarnings;
+    }
+  }
+}
+
+function isLaunchClaimBusyError(error) {
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && (
+      error.errcode === 5
+      || /database is (?:locked|busy)/i.test(String(error.message || ''))
+    )
+  );
+}
+
+async function acquireLaunchClaim(claimPath) {
+  if (!SINGLE_INSTANCE) return null;
+
+  const DatabaseSync = await loadDatabaseSync();
+  let database = null;
+  try {
+    database = new DatabaseSync(claimPath);
+    database.exec('PRAGMA busy_timeout = 0;');
+    database.exec(
+      'CREATE TABLE IF NOT EXISTS launcher_claim ('
+        + 'singleton INTEGER PRIMARY KEY CHECK (singleton = 1), '
+        + 'pid INTEGER NOT NULL, owner_token TEXT NOT NULL, created_at TEXT NOT NULL'
+        + ');',
+    );
+    database.exec('BEGIN IMMEDIATE;');
+    const ownerToken = randomBytes(32).toString('hex');
+    database.prepare(
+      'INSERT OR REPLACE INTO launcher_claim '
+        + '(singleton, pid, owner_token, created_at) VALUES (1, ?, ?, ?)',
+    ).run(process.pid, ownerToken, new Date().toISOString());
+    return { database, ownerToken, released: false };
+  } catch (error) {
+    try {
+      database?.close();
+    } catch {
+      // The failed connection owns no reusable launcher state.
+    }
+    if (isLaunchClaimBusyError(error)) {
+      throw new Error(
+        'Another EdgeBase launcher is already starting for this data directory.',
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+}
+
+function releaseLaunchClaim(claim) {
+  if (!claim || claim.released) return;
+  claim.released = true;
+  try {
+    claim.database.exec('ROLLBACK;');
+  } catch {
+    // A failed or implicitly rolled-back transaction is already released.
+  }
+  try {
+    claim.database.close();
+  } catch {
+    // Process exit will release any remaining operating-system handle.
+  }
+}
+
 function verifySelfHostAssets(manifestPath, artifactRoot) {
   const source = readFileSync(manifestPath);
   if (source.byteLength > 4 * 1024 * 1024) throw new Error('edgebase-app manifest is too large.');
@@ -890,6 +1149,8 @@ function verifySelfHostAssets(manifestPath, artifactRoot) {
     gateway: '.edgebase/self-host/self-host-gateway.mjs',
     scheduleSupervisor: '.edgebase/self-host/self-host-schedule-supervisor.mjs',
     dockerEntrypoint: '.edgebase/self-host/self-host-docker-entrypoint.mjs',
+    wranglerRuntime: '.edgebase/self-host/self-host-wrangler-runtime.mjs',
+    proxyWorker: '.edgebase/self-host/self-host-proxy-worker.js',
   };
   const assets = {};
   for (const [name, expectedPath] of Object.entries(expected)) {
@@ -1257,7 +1518,6 @@ function readActiveInstance(lockPath, host) {
 
   const lock = readJson(lockPath);
   if (!lock || typeof lock.port !== 'number' || typeof lock.pid !== 'number') {
-    removeFileIfExists(lockPath);
     return null;
   }
 
@@ -1266,7 +1526,6 @@ function readActiveInstance(lockPath, host) {
   }
 
   if (!isProcessAlive(lock.pid)) {
-    removeFileIfExists(lockPath);
     return null;
   }
 
@@ -1335,7 +1594,7 @@ if (
   throw new Error('Self-host manifest authority changed during startup validation.');
 }
 const { startSelfHostGateway } = gatewayModule;
-const { createSelfHostScheduleSupervisor } = supervisorModule;
+const { createSelfHostScheduleSupervisor, createSelfHostScheduleOutcomeLogger } = supervisorModule;
 const options = parseArgs(process.argv.slice(2));
 const dataRoot = resolveDataRoot(options.dataDir);
 const workDir = join(dataRoot, DEFAULT_RUNTIME_DIR);
@@ -1344,12 +1603,10 @@ const persistDir = options.persistTo
   : join(dataRoot, DEFAULT_STATE_DIR);
 const statePath = join(dataRoot, 'launcher-state.json');
 const lockPath = join(dataRoot, 'launcher-lock.json');
+const claimPath = join(dataRoot, 'launcher-claim.sqlite');
 const logPath = join(dataRoot, 'launcher.log');
 const scheduleStatePath = join(dataRoot, 'self-host-schedule-state.json');
 mkdirSync(dataRoot, { recursive: true });
-mkdirSync(workDir, { recursive: true });
-mkdirSync(persistDir, { recursive: true });
-const logStream = createWriteStream(logPath, { flags: 'a' });
 
 const envFileCandidates = [
   join(process.cwd(), '.env'),
@@ -1393,6 +1650,22 @@ mergedEnv.EDGEBASE_SELF_HOST_SCHEDULE_DIGEST = runtimeAuthority.scheduleDigest;
 const devVarsPath = join(workDir, '.dev.vars');
 const wranglerBin = resolveWranglerBin(runtimeNodeModules);
 const existingInstance = readActiveInstance(lockPath, options.host);
+let launchClaim = null;
+const cleanupLaunchClaim = () => {
+  releaseLaunchClaim(launchClaim);
+  launchClaim = null;
+};
+if (!(existingInstance && !options.port)) {
+  launchClaim = await acquireLaunchClaim(claimPath);
+  process.once('exit', cleanupLaunchClaim);
+  if (!existingInstance) {
+    removeFileIfExists(lockPath);
+  }
+}
+const claimOwnerToken = launchClaim?.ownerToken ?? '';
+mkdirSync(workDir, { recursive: true });
+mkdirSync(persistDir, { recursive: true });
+const logStream = createWriteStream(logPath, { flags: 'a' });
 const selectedPort = existingInstance && !options.port
   ? { port: existingInstance.port, source: 'existing' }
   : await resolveSelectedPort(options.host, options.port, statePath);
@@ -1444,13 +1717,17 @@ const cleanupRuntimeEnv = () => {
 };
 const cleanupLock = () => {
   const current = readJson(lockPath);
-  if (current?.pid === process.pid) {
+  if (
+    current?.pid === process.pid
+    && (!SINGLE_INSTANCE || current?.claimOwnerToken === claimOwnerToken)
+  ) {
     removeFileIfExists(lockPath);
   }
 };
 process.on('exit', () => {
   cleanupLock();
   cleanupRuntimeEnv();
+  cleanupLaunchClaim();
 });
 
 // A second launcher that only focuses an already-running instance must not
@@ -1489,6 +1766,7 @@ if (options.dryRun) {
     devVarsMode,
     statePath,
     lockPath,
+    claimPath,
     existingInstance: Boolean(existingInstance && !options.port),
     openUrl,
   };
@@ -1571,6 +1849,7 @@ const beginShutdown = (signal = 'SIGTERM') => {
       signalProcessTree(child.pid, 'SIGKILL');
       await waitForProcessGroupExit(child.pid, deadline);
     }
+    cleanupLaunchClaim();
   })();
   return shutdownPromise;
 };
@@ -1615,6 +1894,11 @@ try {
       key: readFileSync(process.env.HTTPS_KEY_PATH),
     };
   }
+  const scheduleOutcomeLogger = createSelfHostScheduleOutcomeLogger({
+    prefix: '[EdgeBase]',
+    writeInfo: (line) => logStream.write(line + '\\n'),
+    writeError: (line) => logStream.write(line + '\\n'),
+  });
   scheduleSupervisor = createSelfHostScheduleSupervisor({
     manifestPath: appManifestPath,
     statePath: scheduleStatePath,
@@ -1628,9 +1912,7 @@ try {
         : supervisorAbortController.signal,
     }),
     onReport: (report) => {
-      for (const outcome of report.outcomes) {
-        logStream.write('[EdgeBase] schedule outcome ' + JSON.stringify(outcome) + '\\n');
-      }
+      scheduleOutcomeLogger.report(report);
     },
     onError: (error) => {
       logStream.write('[EdgeBase] schedule supervisor degraded: ' + String(error?.stack || error) + '\\n');
@@ -1643,9 +1925,10 @@ try {
   if (initialReport.structuralReady !== true || !scheduleSupervisor.getStatus().structuralReady) {
     throw new Error('Initial schedule pass did not establish structural readiness.');
   }
-  for (const outcome of initialReport.outcomes) {
-    logStream.write('[EdgeBase] schedule outcome ' + JSON.stringify(outcome) + '\\n');
-  }
+  scheduleOutcomeLogger.report(initialReport, { initial: true });
+  const reportGatewayEvent = (event) => {
+    logStream.write('[EdgeBase] gateway ' + JSON.stringify(event) + '\\n');
+  };
   gateway = await raceChild(startSelfHostGateway({
     host: options.host,
     port: selectedPort.port,
@@ -1654,6 +1937,15 @@ try {
     ...(tls ? { tls } : {}),
     trustedProxyCidrs,
     workerTrustSecret: gatewaySecret,
+    maxConnections: process.env.EDGEBASE_GATEWAY_MAX_CONNECTIONS,
+    maxRequestBodyBytes: process.env.EDGEBASE_GATEWAY_MAX_REQUEST_BODY_BYTES,
+    headersTimeoutMs: process.env.EDGEBASE_GATEWAY_HEADERS_TIMEOUT_MS,
+    requestTimeoutMs: process.env.EDGEBASE_GATEWAY_REQUEST_TIMEOUT_MS,
+    idleTimeoutMs: process.env.EDGEBASE_GATEWAY_IDLE_TIMEOUT_MS,
+    keepAliveTimeoutMs: process.env.EDGEBASE_GATEWAY_KEEP_ALIVE_TIMEOUT_MS,
+    upstreamTimeoutMs: process.env.EDGEBASE_GATEWAY_UPSTREAM_TIMEOUT_MS,
+    eventCoalesceWindowMs: process.env.EDGEBASE_GATEWAY_EVENT_COALESCE_WINDOW_MS,
+    onEvent: reportGatewayEvent,
     healthProvider: () => scheduleSupervisor?.getStatus() ?? {
       state: 'idle',
       structuralReady: false,
@@ -1703,6 +1995,7 @@ if (options.open) {
 // A controller that observes this file may immediately ask the app to stop.
 saveJson(lockPath, {
   pid: process.pid,
+  claimOwnerToken,
   childPid: child.pid ?? null,
   childProcessGroupId: process.platform === 'win32' ? null : (child.pid ?? null),
   host: options.host,
@@ -1763,36 +2056,38 @@ node "%SCRIPT_DIR%\\${manifest.launcher.entry}" %*
 }
 
 function createMacPortableArtifact(
+  stagingPath: string,
   outputPath: string,
   appName: string,
   dirArtifact: CreateDirPackArtifactResult,
-  force = false,
+  faultInjector?: (point: PackArtifactFaultPoint) => void,
 ): CreatePortablePackArtifactResult {
   const executableName = sanitizeExecutableName(appName);
-  const contentsDir = join(outputPath, 'Contents');
+  const contentsDir = join(stagingPath, 'Contents');
   const macOsDir = join(contentsDir, 'MacOS');
   const frameworksDir = join(contentsDir, 'Frameworks');
   const resourcesDir = join(contentsDir, 'Resources');
-  const bundledAppDir = join(resourcesDir, 'app');
-  const embeddedNodePath = join(macOsDir, 'node');
-  const launcherPath = join(macOsDir, executableName);
+  const stagedBundledAppDir = join(resourcesDir, 'app');
+  const stagedEmbeddedNodePath = join(macOsDir, 'node');
+  const stagedLauncherPath = join(macOsDir, executableName);
+  const publishedContentsDir = join(outputPath, 'Contents');
+  const publishedResourcesDir = join(publishedContentsDir, 'Resources');
+  const bundledAppDir = join(publishedResourcesDir, 'app');
+  const embeddedNodePath = join(publishedContentsDir, 'MacOS', 'node');
+  const launcherPath = join(publishedContentsDir, 'MacOS', executableName);
 
-  assertSafePackOutputPath(outputPath, force);
-  rmSync(outputPath, { recursive: true, force: true });
   mkdirSync(macOsDir, { recursive: true });
   mkdirSync(frameworksDir, { recursive: true });
   mkdirSync(resourcesDir, { recursive: true });
-  cpSync(dirArtifact.outputDir, bundledAppDir, {
-    recursive: true,
-    force: true,
-    dereference: true,
-  });
-  copyPortableNodeRuntime(embeddedNodePath, {
+  copyPortableArtifactTree(dirArtifact.outputDir, stagedBundledAppDir);
+  faultInjector?.('after-portable-app-copy');
+  copyPortableNodeRuntime(stagedEmbeddedNodePath, {
     macFrameworksDir: frameworksDir,
   });
+  faultInjector?.('after-portable-runtime-copy');
 
   writeFileSync(
-    launcherPath,
+    stagedLauncherPath,
     `#!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
@@ -1802,7 +2097,8 @@ exec "$SCRIPT_DIR/node" "$APP_DIR/launcher.mjs" "$@"
 `,
     'utf-8',
   );
-  chmodSync(launcherPath, 0o755);
+  chmodSync(stagedLauncherPath, 0o755);
+  faultInjector?.('after-portable-launcher-write');
 
   writeFileSync(
     join(contentsDir, 'Info.plist'),
@@ -1841,10 +2137,14 @@ exec "$SCRIPT_DIR/node" "$APP_DIR/launcher.mjs" "$@"
     projectName: dirArtifact.manifest.projectName,
     artifactKind: 'macos-app',
   });
-  const manifestPath = join(resourcesDir, 'edgebase-portable.json');
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
-  assertArtifactSymlinksContained(outputPath);
-  signMacPortableBundle(outputPath);
+  const stagedManifestPath = join(resourcesDir, 'edgebase-portable.json');
+  const manifestPath = join(publishedResourcesDir, 'edgebase-portable.json');
+  writeFileSync(stagedManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+  faultInjector?.('after-portable-manifest-write');
+  assertArtifactSymlinksContained(stagingPath);
+  faultInjector?.('after-portable-symlink-validation');
+  signMacPortableBundle(stagingPath);
+  faultInjector?.('after-portable-signing');
 
   return {
     format: 'portable',
@@ -1862,32 +2162,32 @@ exec "$SCRIPT_DIR/node" "$APP_DIR/launcher.mjs" "$@"
 }
 
 function createPortableDirectoryArtifact(
+  stagingPath: string,
   outputPath: string,
   dirArtifact: CreateDirPackArtifactResult,
-  force = false,
+  faultInjector?: (point: PackArtifactFaultPoint) => void,
 ): CreatePortablePackArtifactResult {
+  const stagedBundledAppDir = join(stagingPath, 'app');
+  const stagedBinDir = join(stagingPath, 'bin');
   const bundledAppDir = join(outputPath, 'app');
-  const binDir = join(outputPath, 'bin');
   const embeddedNodeName = process.platform === 'win32' ? 'node.exe' : 'node';
-  const embeddedNodePath = join(binDir, embeddedNodeName);
+  const stagedEmbeddedNodePath = join(stagedBinDir, embeddedNodeName);
+  const embeddedNodePath = join(outputPath, 'bin', embeddedNodeName);
   const launcherName = process.platform === 'win32' ? 'run.cmd' : 'run.sh';
+  const stagedLauncherPath = join(stagingPath, launcherName);
   const launcherPath = join(outputPath, launcherName);
 
-  assertSafePackOutputPath(outputPath, force);
-  rmSync(outputPath, { recursive: true, force: true });
-  mkdirSync(binDir, { recursive: true });
-  cpSync(dirArtifact.outputDir, bundledAppDir, {
-    recursive: true,
-    force: true,
-    dereference: true,
+  mkdirSync(stagedBinDir, { recursive: true });
+  copyPortableArtifactTree(dirArtifact.outputDir, stagedBundledAppDir);
+  faultInjector?.('after-portable-app-copy');
+  copyPortableNodeRuntime(stagedEmbeddedNodePath, {
+    portableLibDir: process.platform === 'linux' ? join(stagingPath, 'lib') : undefined,
   });
-  copyPortableNodeRuntime(embeddedNodePath, {
-    portableLibDir: process.platform === 'linux' ? join(outputPath, 'lib') : undefined,
-  });
+  faultInjector?.('after-portable-runtime-copy');
 
   if (process.platform === 'win32') {
     writeFileSync(
-      launcherPath,
+      stagedLauncherPath,
       `@echo off
 set SCRIPT_DIR=%~dp0
 "%SCRIPT_DIR%bin\\node.exe" "%SCRIPT_DIR%app\\launcher.mjs" %*
@@ -1899,7 +2199,7 @@ set SCRIPT_DIR=%~dp0
       ? 'export LD_LIBRARY_PATH="$SCRIPT_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n'
       : '';
     writeFileSync(
-      launcherPath,
+      stagedLauncherPath,
       `#!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
@@ -1907,8 +2207,9 @@ ${libraryEnvExport}exec "$SCRIPT_DIR/bin/${embeddedNodeName}" "$SCRIPT_DIR/app/l
 `,
       'utf-8',
     );
-    chmodSync(launcherPath, 0o755);
+    chmodSync(stagedLauncherPath, 0o755);
   }
+  faultInjector?.('after-portable-launcher-write');
 
   const manifest = buildPortableManifest({
     outputPath,
@@ -1920,9 +2221,12 @@ ${libraryEnvExport}exec "$SCRIPT_DIR/bin/${embeddedNodeName}" "$SCRIPT_DIR/app/l
     projectName: dirArtifact.manifest.projectName,
     artifactKind: 'portable-dir',
   });
+  const stagedManifestPath = join(stagingPath, 'edgebase-portable.json');
   const manifestPath = join(outputPath, 'edgebase-portable.json');
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
-  assertArtifactSymlinksContained(outputPath);
+  writeFileSync(stagedManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+  faultInjector?.('after-portable-manifest-write');
+  assertArtifactSymlinksContained(stagingPath);
+  faultInjector?.('after-portable-symlink-validation');
 
   return {
     format: 'portable',
@@ -1988,12 +2292,33 @@ export function createPortablePackArtifact(
     options.outputDir,
   );
   const appName = options.appName ?? basename(outputPath);
-
-  if (process.platform === 'darwin') {
-    return createMacPortableArtifact(outputPath, appName, dirArtifact, options.force);
-  }
-
-  return createPortableDirectoryArtifact(outputPath, dirArtifact, options.force);
+  return publishPackArtifact({
+    outputPath,
+    kind: 'directory',
+    admitExisting: (publishedOutputPath) => assertSafePackOutputPath(
+      publishedOutputPath,
+      options.force,
+    ),
+    build(stagingPath, publishedOutputPath) {
+      if (process.platform === 'darwin') {
+        return createMacPortableArtifact(
+          stagingPath,
+          publishedOutputPath,
+          appName,
+          dirArtifact,
+          options.artifactPublicationFaultInjector,
+        );
+      }
+      return createPortableDirectoryArtifact(
+        stagingPath,
+        publishedOutputPath,
+        dirArtifact,
+        options.artifactPublicationFaultInjector,
+      );
+    },
+    validate: (artifactPath) => assertArtifactSymlinksContained(artifactPath),
+    faultInjector: options.artifactPublicationFaultInjector,
+  });
 }
 
 export function createArchivePackArtifact(
@@ -2018,10 +2343,14 @@ export function createArchivePackArtifact(
     portableArtifact.packManifest.projectName,
     options.outputDir,
   );
-  // The archive output is normally a single file, but a user-supplied
-  // -o <path> could point at a directory; guard before the recursive rm.
-  assertSafePackOutputPath(outputPath, options.force);
-  const archiveType = createArchiveFromPortableArtifact(portableArtifact.outputPath, outputPath);
+  const archiveType = createArchiveFromPortableArtifact(
+    portableArtifact.outputPath,
+    outputPath,
+    {
+      force: options.force,
+      faultInjector: options.artifactPublicationFaultInjector,
+    },
+  );
   const manifest = buildArchiveManifest({
     outputPath,
     sourcePortablePath: portableArtifact.outputPath,
@@ -2051,6 +2380,7 @@ export function createArchivePackArtifact(
 export const __packTestUtils = {
   assertArtifactSymlinksContained,
   assertSafePackOutputPath,
+  copyPortableArtifactTree,
   isPriorPackArtifactDir,
 };
 

@@ -1,7 +1,19 @@
 import { Command } from 'commander';
 import { spawn, execFileSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import {
+  chmodSync,
+  copyFileSync,
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import chalk from 'chalk';
 import { raiseCliError, raiseNeedsInput } from '../lib/agent-contract.js';
@@ -14,13 +26,19 @@ import {
   validateAdminEmail,
   type EnsureBootstrapAdminResult,
 } from '../lib/admin-bootstrap.js';
-import { createAppBundle } from '../lib/app-bundle.js';
+import { createAppBundle, type CreateAppBundleResult } from '../lib/app-bundle.js';
+import {
+  createDockerContextGenerationManager,
+  type DockerContextGenerationManager,
+  type DockerContextLease,
+} from '../lib/docker-context-generation.js';
 import {
   generateTempWranglerToml,
   RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS,
 } from '../lib/deploy-shared.js';
 import { loadConfigSafe } from '../lib/load-config.js';
 import { resolveLocalDevBindings } from '../lib/project-runtime.js';
+import { assertArtifactSymlinksContained } from '../lib/pack.js';
 
 const EDGEBASE_CONFIG_FILES = ['edgebase.config.ts', 'edgebase.config.js'];
 const SELF_HOSTING_GUIDE_URL = 'https://edgebase.fun/docs/getting-started/self-hosting';
@@ -71,16 +89,25 @@ function dockerContainerExists(name: string): boolean {
 
 async function runDockerProcess(
   args: string[],
-  options: { cwd?: string; inheritOutput?: boolean },
+  options: {
+    cwd?: string;
+    inheritOutput?: boolean;
+    spawnProcess?: typeof spawn;
+    signalTarget?: Pick<NodeJS.Process, 'on' | 'off'>;
+  },
 ): Promise<DockerProcessResult> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn('docker', args, {
+    const spawnProcess = options.spawnProcess ?? spawn;
+    const signalTarget = options.signalTarget ?? process;
+    const child = spawnProcess('docker', args, {
       cwd: options.cwd,
       stdio: options.inheritOutput ? 'inherit' : ['ignore', 'pipe', 'pipe'],
     });
 
     let stdout = '';
     let stderr = '';
+    let spawnError: Error | null = null;
+    let settled = false;
 
     if (!options.inheritOutput) {
       child.stdout?.on('data', (chunk: string | Buffer) => {
@@ -92,34 +119,43 @@ async function runDockerProcess(
     }
 
     const signalForwarders: Array<[NodeJS.Signals, () => void]> = [];
-    if (options.inheritOutput) {
-      for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-        const forward = () => child.kill(signal);
-        signalForwarders.push([signal, forward]);
-        process.on(signal, forward);
-      }
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+      const forward = () => {
+        child.kill(signal);
+      };
+      signalForwarders.push([signal, forward]);
+      signalTarget.on(signal, forward);
     }
 
     const cleanup = () => {
       for (const [signal, forward] of signalForwarders) {
-        process.off(signal, forward);
+        signalTarget.off(signal, forward);
       }
     };
 
-    child.on('error', (error) => {
-      cleanup();
-      reject(error);
+    child.once('error', (error) => {
+      spawnError = error;
     });
 
-    child.on('exit', (code) => {
+    child.once('close', (code, signal) => {
+      if (settled) return;
+      settled = true;
       cleanup();
-      if (code === 0) {
+      if (spawnError) {
+        Object.assign(spawnError, { stdout, stderr, exitCode: code, signal });
+        reject(spawnError);
+        return;
+      }
+      if (code === 0 && signal === null) {
         resolvePromise({ stdout: stdout.trim(), stderr: stderr.trim() });
         return;
       }
 
-      const error = new Error(stderr.trim() || stdout.trim() || `docker ${args[0]} failed.`);
-      Object.assign(error, { stdout, stderr, code });
+      const fallback = signal
+        ? `docker ${args[0]} terminated by ${signal}.`
+        : `docker ${args[0]} failed with exit code ${code ?? 'unknown'}.`;
+      const error = new Error(stderr.trim() || stdout.trim() || fallback);
+      Object.assign(error, { stdout, stderr, code, signal });
       reject(error);
     });
   });
@@ -387,24 +423,203 @@ function copyProjectDockerContextFiles(projectDir: string, contextDir: string): 
   }
 }
 
-function prepareDockerBuildContext(projectDir: string, dockerBundleDir: string): string {
-  const contextDir = resolve(projectDir, '.edgebase', 'targets', 'docker-context');
-  const contextBundleDir = join(contextDir, '.edgebase', 'targets', 'docker-app');
+type DockerContextPublication = 'current' | 'export';
+
+interface DockerBuildContext {
+  projectDir: string;
+  bundleDir: string;
+  bundleGeneration: string;
+  contextDir: string;
+  contextGenerationId: string;
+}
+
+interface WithDockerBuildContextOptions {
+  publication: DockerContextPublication;
+  bundleCreator?: typeof createAppBundle;
+  generationManagerFactory?: (projectDir: string) => DockerContextGenerationManager;
+  bundleFinalizer?: (projectDir: string, stagingDir: string) => void;
+}
+
+function validateDockerBundleGeneration(
+  workDir: string,
+  bundle: CreateAppBundleResult,
+): { bundleDir: string; generation: string } {
+  const canonicalWorkDir = realpathSync(workDir);
+  const expectedPointer = join(resolve(workDir), 'app');
+  if (resolve(bundle.outputDir) !== expectedPointer) {
+    throw new Error(`Docker app bundle returned an unexpected output pointer: ${bundle.outputDir}`);
+  }
+  if (resolve(bundle.manifestPath) !== join(expectedPointer, 'edgebase-app.json')) {
+    throw new Error(`Docker app bundle returned an unexpected manifest pointer: ${bundle.manifestPath}`);
+  }
+
+  const pointerInfo = lstatSync(expectedPointer);
+  if (!pointerInfo.isSymbolicLink()) {
+    throw new Error(`Docker app bundle output must be an immutable generation symlink: ${expectedPointer}`);
+  }
+
+  const generationsDir = join(resolve(workDir), '.app.generations');
+  const generationsInfo = lstatSync(generationsDir);
+  if (!generationsInfo.isDirectory() || generationsInfo.isSymbolicLink()) {
+    throw new Error(`Docker app bundle generation root must be a real directory: ${generationsDir}`);
+  }
+  const canonicalGenerationsDir = realpathSync(generationsDir);
+  if (
+    dirname(canonicalGenerationsDir) !== canonicalWorkDir
+    || basename(canonicalGenerationsDir) !== '.app.generations'
+  ) {
+    throw new Error(`Docker app bundle generation root escapes its exact work directory: ${generationsDir}`);
+  }
+
+  const bundleDir = realpathSync(expectedPointer);
+  const bundleInfo = lstatSync(bundleDir);
+  if (
+    !bundleInfo.isDirectory()
+    || bundleInfo.isSymbolicLink()
+    || dirname(bundleDir) !== canonicalGenerationsDir
+  ) {
+    throw new Error(`Docker app bundle pointer must resolve to one direct generation child: ${expectedPointer}`);
+  }
+
+  const generation = bundle.manifest?.generation;
+  if (
+    bundle.format !== 'app-bundle'
+    || bundle.manifest?.format !== 'app-bundle'
+    || typeof generation !== 'string'
+    || !/^sha256:[a-f0-9]{64}$/.test(generation)
+  ) {
+    throw new Error(`Docker app bundle returned an invalid generation manifest: ${expectedPointer}`);
+  }
+  if (!basename(bundleDir).startsWith(`${generation.slice('sha256:'.length)}-`)) {
+    throw new Error(`Docker app bundle generation directory does not match its manifest: ${bundleDir}`);
+  }
+
+  const exactManifestPath = join(bundleDir, 'edgebase-app.json');
+  const exactManifest = JSON.parse(readFileSync(exactManifestPath, 'utf-8')) as {
+    schemaVersion?: unknown;
+    format?: unknown;
+    generation?: unknown;
+  };
+  if (
+    exactManifest.schemaVersion !== 1
+    || exactManifest.format !== 'app-bundle'
+    || exactManifest.generation !== generation
+  ) {
+    throw new Error(`Docker app bundle generation manifest does not match the returned bundle: ${exactManifestPath}`);
+  }
+
+  return { bundleDir, generation };
+}
+
+function populateDockerBuildContext(
+  projectDir: string,
+  bundleDir: string,
+  stagingDir: string,
+): void {
   const sourceDockerfile = resolve(projectDir, 'Dockerfile');
   const sourceDockerignore = resolve(projectDir, '.dockerignore');
-
-  rmSync(contextDir, { recursive: true, force: true });
-  mkdirSync(join(contextDir, '.edgebase', 'targets'), { recursive: true });
-  copyFileSync(sourceDockerfile, join(contextDir, 'Dockerfile'));
-  writeFileSync(join(contextDir, '.dockerignore'), buildSyntheticDockerignore(sourceDockerignore));
-  cpSync(dockerBundleDir, contextBundleDir, {
+  mkdirSync(join(stagingDir, '.edgebase', 'targets'), { recursive: true });
+  copyFileSync(sourceDockerfile, join(stagingDir, 'Dockerfile'));
+  writeFileSync(join(stagingDir, '.dockerignore'), buildSyntheticDockerignore(sourceDockerignore));
+  const bundledAppDir = join(stagingDir, '.edgebase', 'targets', 'docker-app');
+  cpSync(bundleDir, bundledAppDir, {
     recursive: true,
-    force: true,
-    dereference: true,
+    force: false,
+    errorOnExist: true,
+    dereference: false,
+    verbatimSymlinks: true,
   });
-  copyProjectDockerContextFiles(projectDir, contextDir);
+  assertArtifactSymlinksContained(bundledAppDir);
+  copyProjectDockerContextFiles(projectDir, stagingDir);
+}
 
-  return contextDir;
+async function withDockerBuildContext<T>(
+  projectDir: string,
+  options: WithDockerBuildContextOptions,
+  callback: (context: DockerBuildContext) => T | Promise<T>,
+): Promise<T> {
+  const manager = (options.generationManagerFactory ?? createDockerContextGenerationManager)(projectDir);
+  manager.recoverLegacyCurrent();
+  manager.collectGarbage();
+
+  let lease: DockerContextLease | undefined;
+  let result: T | undefined;
+  let primaryError: unknown;
+  let failed = false;
+  try {
+    lease = manager.createLease();
+    const contextGenerationId = [
+      'docker',
+      process.pid,
+      Date.now().toString(36),
+      randomBytes(8).toString('hex'),
+    ].join('-');
+    lease = manager.setPlannedGeneration(lease, contextGenerationId);
+    const workDir = manager.allocateBundleWork(lease);
+    const bundleCreator = options.bundleCreator ?? createAppBundle;
+    const bundleFinalizer = options.bundleFinalizer ?? finalizeDockerWrangler;
+    const bundle = bundleCreator(projectDir, {
+      outputDir: join(workDir, 'app'),
+      overwrite: false,
+      portableDependencies: true,
+      dependencyProfile: 'docker',
+      stagedGenerationFinalizer(stagingDir) {
+        bundleFinalizer(projectDir, stagingDir);
+      },
+    });
+    const exactBundle = validateDockerBundleGeneration(workDir, bundle);
+    const contextGeneration = manager.publishGeneration(lease, (stagingDir) => {
+      populateDockerBuildContext(projectDir, exactBundle.bundleDir, stagingDir);
+    });
+    const retainedBundleDir = join(
+      contextGeneration.path,
+      '.edgebase',
+      'targets',
+      'docker-app',
+    );
+    lease = options.publication === 'current'
+      ? manager.publishCurrent(lease, contextGeneration)
+      : manager.publishExport(lease, contextGeneration);
+    result = await callback({
+      projectDir,
+      bundleDir: retainedBundleDir,
+      bundleGeneration: exactBundle.generation,
+      contextDir: contextGeneration.path,
+      contextGenerationId: contextGeneration.id,
+    });
+  } catch (error) {
+    failed = true;
+    primaryError = error;
+  }
+
+  const cleanupErrors: unknown[] = [];
+  if (lease) {
+    try {
+      lease = manager.markReleased(lease);
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  try {
+    manager.collectGarbage();
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+
+  if (failed) {
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [primaryError, ...cleanupErrors],
+        'Docker build context work failed and lease cleanup did not finish.',
+      );
+    }
+    throw primaryError;
+  }
+  if (cleanupErrors.length === 1) throw cleanupErrors[0];
+  if (cleanupErrors.length > 1) {
+    throw new AggregateError(cleanupErrors, 'Docker build context lease cleanup did not finish.');
+  }
+  return result as T;
 }
 
 function finalizeDockerWrangler(projectDir: string, outputDir: string): void {
@@ -424,6 +639,7 @@ function finalizeDockerWrangler(projectDir: string, outputDir: string): void {
     triggerMode: 'preserve',
     runtimeMode: 'self-hosted',
     requiredCompatibilityFlags: RUNTIME_PROCESS_ENV_COMPATIBILITY_FLAGS,
+    ensureSelfHostRuntimeBindings: true,
   });
 
   if (!generatedPath) return;
@@ -550,8 +766,8 @@ export const _internals = {
   assertProtectedDockerfile,
   assertProtectedDockerImage,
   consumesProtectedEntrypoint,
-  finalizeDockerWrangler,
-  prepareDockerBuildContext,
+  runDockerProcess,
+  withDockerBuildContext,
   isDockerDaemonResponsive,
 };
 
@@ -588,18 +804,53 @@ dockerCommand
       ensureDockerAvailable();
     }
 
-    let dockerBundle: ReturnType<typeof createAppBundle>;
+    const args = buildDockerBuildArgs(options);
+    let dockerFailed = false;
+    let dockerFailure: unknown;
+    let dockerContext: DockerBuildContext;
     try {
-      dockerBundle = createAppBundle(projectDir, {
-        outputDir: join('.edgebase', 'targets', 'docker-app'),
-        overwrite: true,
-        portableDependencies: true,
-        dependencyProfile: 'docker',
-        stagedGenerationFinalizer(stagingDir) {
-          finalizeDockerWrangler(projectDir, stagingDir);
+      dockerContext = await withDockerBuildContext(
+        projectDir,
+        { publication: options.contextOnly ? 'export' : 'current' },
+        async (context) => {
+          if (options.contextOnly) return context;
+
+          if (!isQuiet()) {
+            console.log(chalk.blue('🐳 Building EdgeBase Docker image...'));
+            console.log(chalk.dim(`  Tag: ${options.tag}`));
+            console.log(chalk.dim(`  Bundle: ${context.bundleDir}`));
+            console.log(chalk.dim(`  Context: ${context.contextDir}`));
+            console.log();
+          }
+
+          try {
+            await runDockerProcess(args, {
+              cwd: context.contextDir,
+              inheritOutput: !isJson(),
+            });
+            assertProtectedDockerImage(options.tag);
+          } catch (error) {
+            dockerFailed = true;
+            dockerFailure = error;
+            throw error;
+          }
+          return context;
         },
-      });
+      );
     } catch (error) {
+      if (dockerFailed) {
+        const failure = extractCommandFailure(dockerFailure);
+        raiseCliError({
+          code: 'docker_build_failed',
+          message: failure.message,
+          hint: 'Inspect the Docker build context and Docker daemon logs, then retry.',
+          details: {
+            tag: options.tag,
+            ...(failure.stderr ? { stderr: failure.stderr } : {}),
+            ...(failure.stdout ? { stdout: failure.stdout } : {}),
+          },
+        });
+      }
       const message = error instanceof Error ? error.message : String(error);
       raiseCliError({
         code: 'docker_bundle_failed',
@@ -607,8 +858,6 @@ dockerCommand
         hint: 'Run the command from an EdgeBase app project with edgebase.config.ts, then retry `npx edgebase docker build`.',
       });
     }
-    const args = buildDockerBuildArgs(options);
-    const contextDir = prepareDockerBuildContext(projectDir, dockerBundle.outputDir);
 
     if (options.contextOnly) {
       if (isJson()) {
@@ -617,47 +866,19 @@ dockerCommand
           operation: 'build-context',
           tag: options.tag,
           projectDir,
-          bundleDir: dockerBundle.outputDir,
-          contextDir,
+          bundleDir: dockerContext.bundleDir,
+          contextDir: dockerContext.contextDir,
         }));
         return;
       }
 
       console.log(chalk.green('✓ Docker build context prepared successfully!'));
-      console.log(chalk.dim(`  Bundle: ${dockerBundle.outputDir}`));
-      console.log(chalk.dim(`  Context: ${contextDir}`));
+      console.log(chalk.dim(`  Bundle generation: ${dockerContext.bundleGeneration}`));
+      console.log(chalk.dim(`  Context: ${dockerContext.contextDir}`));
       console.log();
       console.log(chalk.dim('  Build with:'));
-      console.log(`  ${chalk.cyan(`docker build -t ${options.tag} ${contextDir}`)}`);
+      console.log(`  ${chalk.cyan(`docker build -t ${options.tag} ${dockerContext.contextDir}`)}`);
       return;
-    }
-
-    if (!isQuiet()) {
-      console.log(chalk.blue('🐳 Building EdgeBase Docker image...'));
-      console.log(chalk.dim(`  Tag: ${options.tag}`));
-      console.log(chalk.dim(`  Bundle: ${dockerBundle.outputDir}`));
-      console.log(chalk.dim(`  Context: ${contextDir}`));
-      console.log();
-    }
-
-    try {
-      await runDockerProcess(args, {
-        cwd: contextDir,
-        inheritOutput: !isJson(),
-      });
-      assertProtectedDockerImage(options.tag);
-    } catch (error) {
-      const failure = extractCommandFailure(error);
-      raiseCliError({
-        code: 'docker_build_failed',
-        message: failure.message,
-        hint: 'Inspect the Docker build context and Docker daemon logs, then retry.',
-        details: {
-          tag: options.tag,
-          ...(failure.stderr ? { stderr: failure.stderr } : {}),
-          ...(failure.stdout ? { stdout: failure.stdout } : {}),
-        },
-      });
     }
 
     if (isJson()) {
@@ -666,8 +887,8 @@ dockerCommand
         operation: 'build',
         tag: options.tag,
         projectDir,
-        bundleDir: dockerBundle.outputDir,
-        contextDir,
+        bundleDir: dockerContext.bundleDir,
+        contextDir: dockerContext.contextDir,
       }));
       return;
     }

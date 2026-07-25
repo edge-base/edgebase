@@ -103,23 +103,22 @@ describe('1-04 query — buildListQuery WHERE 필터', () => {
     expect(params).toContain('hello');
   });
 
-  it('in → IN (?, ?, ?)', () => {
+  it('in → SQLite JSON set bind', () => {
     const { sql, params } = buildListQuery('posts', { filters: [['authorId', 'in', ['a', 'b', 'c']]] });
-    expect(sql).toContain('"authorId" IN (?, ?, ?)');
-    expect(params).toContain('a');
-    expect(params).toContain('b');
-    expect(params).toContain('c');
+    expect(sql).toContain('"authorId" IN (SELECT value FROM json_each(?))');
+    expect(params).toContain(JSON.stringify(['a', 'b', 'c']));
   });
 
   it('not in', () => {
     const { sql, params } = buildListQuery('posts', { filters: [['status', 'not in', ['deleted', 'banned']]] });
-    expect(sql).toContain('"status" NOT IN (?, ?)');
+    expect(sql).toContain('"status" NOT IN (SELECT value FROM json_each(?))');
+    expect(params).toContain(JSON.stringify(['deleted', 'banned']));
   });
 
-  it('빈 배열 in → IN ()', () => {
+  it('빈 배열 in → empty JSON set', () => {
     const { sql, params } = buildListQuery('posts', { filters: [['id', 'in', []]] });
-    expect(sql).toContain('IN ()');
-    expect(params).toHaveLength(1); // only LIMIT default
+    expect(sql).toContain('IN (SELECT value FROM json_each(?))');
+    expect(params).toEqual(['[]', 100]);
   });
 
   it('복합 AND 조건', () => {
@@ -308,8 +307,8 @@ describe('1-04 query — parseQueryParams', () => {
 describe('1-04 query — WHERE == 엣지 케이스', () => {
   it('== null 비교', () => {
     const { sql, params } = buildListQuery('posts', { filters: [['deletedAt', '==', null]] });
-    expect(sql).toContain('"deletedAt" = ?');
-    expect(params).toContain(null);
+    expect(sql).toContain('"deletedAt" IS NULL');
+    expect(params).not.toContain(null);
   });
 
   it('== 빈 문자열', () => {
@@ -334,8 +333,8 @@ describe('1-04 query — WHERE == 엣지 케이스', () => {
 describe('1-04 query — WHERE != 엣지 케이스', () => {
   it('!= null', () => {
     const { sql, params } = buildListQuery('posts', { filters: [['deletedAt', '!=', null]] });
-    expect(sql).toContain('"deletedAt" != ?');
-    expect(params).toContain(null);
+    expect(sql).toContain('"deletedAt" IS NOT NULL');
+    expect(params).not.toContain(null);
   });
 
   it('!= 빈 문자열', () => {
@@ -406,36 +405,35 @@ describe('1-04 query — WHERE contains 엣지 케이스', () => {
 describe('1-04 query — WHERE in 엣지 케이스', () => {
   it('in 단일 값 배열', () => {
     const { sql, params } = buildListQuery('posts', { filters: [['authorId', 'in', ['only-one']]] });
-    expect(sql).toContain('"authorId" IN (?)');
-    expect(params).toContain('only-one');
+    expect(sql).toContain('"authorId" IN (SELECT value FROM json_each(?))');
+    expect(params).toContain(JSON.stringify(['only-one']));
   });
 
   it('in 숫자 배열', () => {
     const { sql, params } = buildListQuery('posts', { filters: [['views', 'in', [10, 20, 30]]] });
-    expect(sql).toContain('"views" IN (?, ?, ?)');
-    expect(params).toContain(10);
-    expect(params).toContain(20);
-    expect(params).toContain(30);
+    expect(sql).toContain('"views" IN (SELECT value FROM json_each(?))');
+    expect(params).toContain(JSON.stringify([10, 20, 30]));
   });
 
   it('in 많은 값 (20개)', () => {
     const ids = Array.from({ length: 20 }, (_, i) => `id-${i}`);
-    const { sql } = buildListQuery('posts', { filters: [['id', 'in', ids]] });
-    const placeholders = ids.map(() => '?').join(', ');
-    expect(sql).toContain(`"id" IN (${placeholders})`);
+    const { sql, params } = buildListQuery('posts', { filters: [['id', 'in', ids]] });
+    expect(sql).toContain('"id" IN (SELECT value FROM json_each(?))');
+    expect(params).toContain(JSON.stringify(ids));
   });
 });
 
 describe('1-04 query — WHERE not in 엣지 케이스', () => {
   it('not in 빈 배열', () => {
-    const { sql } = buildListQuery('posts', { filters: [['status', 'not in', []]] });
-    expect(sql).toContain('"status" NOT IN ()');
+    const { sql, params } = buildListQuery('posts', { filters: [['status', 'not in', []]] });
+    expect(sql).toContain('"status" NOT IN (SELECT value FROM json_each(?))');
+    expect(params).toContain('[]');
   });
 
   it('not in 단일 값', () => {
     const { sql, params } = buildListQuery('posts', { filters: [['status', 'not in', ['deleted']]] });
-    expect(sql).toContain('"status" NOT IN (?)');
-    expect(params).toContain('deleted');
+    expect(sql).toContain('"status" NOT IN (SELECT value FROM json_each(?))');
+    expect(params).toContain(JSON.stringify(['deleted']));
   });
 
 });

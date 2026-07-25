@@ -5,12 +5,33 @@ import {
   request as requestHttp,
 } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
+import { readFileSync, statfsSync } from 'node:fs';
 import { BlockList, isIP } from 'node:net';
 import { clearTimeout, setTimeout } from 'node:timers';
 import { URL } from 'node:url';
 
 const LOOPBACK_UPSTREAM_HOST = '127.0.0.1';
 const HEALTH_PATH = '/__edgebase/health';
+const DEFAULT_MAX_CONNECTIONS = 512;
+const DEFAULT_MAX_REQUEST_BODY_BYTES = 5 * 1024 ** 3;
+const DEFAULT_HEADERS_TIMEOUT_MS = 15_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 15 * 60_000;
+const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
+const DEFAULT_KEEP_ALIVE_TIMEOUT_MS = 5_000;
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 5 * 60_000;
+const DEFAULT_EVENT_COALESCE_WINDOW_MS = 5_000;
+const DEFAULT_MEMORY_SAMPLE_INTERVAL_MS = 250;
+const DEFAULT_MEMORY_LIMIT_REFRESH_INTERVAL_MS = 5_000;
+const DEFAULT_MEMORY_HIGH_WATERMARK_RATIO = 0.8;
+const DEFAULT_MEMORY_RECOVERY_WATERMARK_RATIO = 0.75;
+const DEFAULT_MEMORY_MINIMUM_HEADROOM_BYTES = 256 * 1024 ** 2;
+const DEFAULT_MEMORY_RETRY_AFTER_SECONDS = 1;
+const DEFAULT_STORAGE_SAMPLE_INTERVAL_MS = 250;
+const DEFAULT_STORAGE_MINIMUM_FREE_BYTES = 512 * 1024 ** 2;
+const DEFAULT_STORAGE_RECOVERY_HEADROOM_BYTES = 128 * 1024 ** 2;
+const DEFAULT_STORAGE_RETRY_AFTER_SECONDS = 5;
+const MAX_CONFIGURED_FILESYSTEM_BYTES = BigInt(Number.MAX_SAFE_INTEGER);
+const RATIO_SCALE = 10_000n;
 const WORKER_TRUST_HEADER = 'x-edgebase-self-host-gateway';
 const WORKER_TRUST_SECRET_PATTERN = /^[a-f0-9]{64}$/;
 const CONTROL_PATH_FAMILIES = Object.freeze([
@@ -59,6 +80,494 @@ function normalizeDrainTimeout(value) {
     throw new TypeError('drainTimeoutMs must be an integer between 0 and 300000.');
   }
   return timeout;
+}
+
+function normalizeBoundedInteger(value, label, defaultValue, maximum) {
+  const candidate = value === undefined
+    ? defaultValue
+    : (typeof value === 'string' && value.trim() !== '' ? Number(value) : value);
+  if (!Number.isSafeInteger(candidate) || candidate < 1 || candidate > maximum) {
+    throw new TypeError(`${label} must be an integer between 1 and ${maximum}.`);
+  }
+  return candidate;
+}
+
+function normalizeRatio(value, label, defaultValue) {
+  const candidate = value === undefined ? defaultValue : Number(value);
+  if (!Number.isFinite(candidate) || candidate <= 0 || candidate >= 1) {
+    throw new TypeError(`${label} must be a number greater than 0 and less than 1.`);
+  }
+  const scaled = BigInt(Math.round(candidate * Number(RATIO_SCALE)));
+  if (scaled <= 0n || scaled >= RATIO_SCALE) {
+    throw new TypeError(`${label} is outside the supported four-decimal precision.`);
+  }
+  return { scaled };
+}
+
+function normalizeFilesystemByteCount(value, label, defaultValue) {
+  const candidate = value === undefined ? defaultValue : value;
+  let bytes;
+  if (typeof candidate === 'bigint') {
+    bytes = candidate;
+  } else if (typeof candidate === 'number' && Number.isSafeInteger(candidate)) {
+    bytes = BigInt(candidate);
+  } else if (typeof candidate === 'string' && /^\d+$/.test(candidate.trim())) {
+    bytes = BigInt(candidate.trim());
+  } else {
+    throw new TypeError(`${label} must be a nonnegative integer byte count.`);
+  }
+  if (bytes < 0n || bytes > MAX_CONFIGURED_FILESYSTEM_BYTES) {
+    throw new TypeError(`${label} must be between 0 and Number.MAX_SAFE_INTEGER.`);
+  }
+  return bytes;
+}
+
+function statfsAvailableBytes(value) {
+  if (!value || typeof value !== 'object') {
+    throw new TypeError('statfs must return an object.');
+  }
+  const toNonnegativeBigInt = (candidate, label, allowZero) => {
+    let parsed;
+    if (typeof candidate === 'bigint') parsed = candidate;
+    else if (typeof candidate === 'number' && Number.isSafeInteger(candidate)) {
+      parsed = BigInt(candidate);
+    } else {
+      throw new TypeError(`statfs ${label} must be an integer.`);
+    }
+    if (parsed < 0n || (!allowZero && parsed === 0n)) {
+      throw new TypeError(`statfs ${label} is outside its valid range.`);
+    }
+    return parsed;
+  };
+  const availableBlocks = toNonnegativeBigInt(value.bavail, 'bavail', true);
+  const blockSize = toNonnegativeBigInt(value.bsize, 'bsize', false);
+  return availableBlocks * blockSize;
+}
+
+function statusByteCount(bytes) {
+  if (bytes === null) return null;
+  return bytes <= MAX_CONFIGURED_FILESYSTEM_BYTES ? Number(bytes) : bytes.toString();
+}
+
+function parseCgroupByteCount(value, { allowUnlimited = false } = {}) {
+  const source = Buffer.isBuffer(value) ? value.toString('utf8') : String(value ?? '');
+  const normalized = source.trim();
+  if (allowUnlimited && normalized === 'max') return { kind: 'unlimited' };
+  if (!/^\d+$/.test(normalized)) return { kind: 'invalid' };
+  const bytes = BigInt(normalized);
+  if (allowUnlimited && bytes > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return { kind: 'unlimited' };
+  }
+  if (bytes > BigInt(Number.MAX_SAFE_INTEGER)) return { kind: 'invalid' };
+  return { kind: 'finite', bytes };
+}
+
+function parseCgroupInactiveFileBytes(value, keys) {
+  const source = Buffer.isBuffer(value) ? value.toString('utf8') : String(value ?? '');
+  if (!source || !Array.isArray(keys) || keys.length === 0) return null;
+  const wanted = new Set(keys);
+  const values = new Map();
+  for (const line of source.split(/\r?\n/u)) {
+    const match = /^([a-z0-9_]+)\s+(\d+)$/u.exec(line.trim());
+    if (!match || !wanted.has(match[1])) continue;
+    const parsed = parseCgroupByteCount(match[2]);
+    if (parsed.kind === 'finite') values.set(match[1], parsed.bytes);
+  }
+  for (const key of keys) {
+    if (values.has(key)) return values.get(key);
+  }
+  return null;
+}
+
+function cgroupWorkingSetBytes(currentBytes, inactiveFileBytes) {
+  if (inactiveFileBytes === null) return currentBytes;
+  return inactiveFileBytes >= currentBytes ? 0n : currentBytes - inactiveFileBytes;
+}
+
+/**
+ * Build one cached whole-cgroup memory admission controller. Missing or
+ * explicitly unlimited cgroups remain admitted; a previously observed
+ * pressure state stays closed across transient sensor failures until a valid
+ * recovery sample arrives.
+ */
+export function createCgroupMemoryAdmissionController(options = {}) {
+  const readFile = options.readFile ?? ((path) => readFileSync(path, 'utf8'));
+  const now = options.now ?? Date.now;
+  if (typeof readFile !== 'function') throw new TypeError('readFile must be a function.');
+  if (typeof now !== 'function') throw new TypeError('now must be a function.');
+  const sampleIntervalMs = normalizeBoundedInteger(
+    options.sampleIntervalMs,
+    'sampleIntervalMs',
+    DEFAULT_MEMORY_SAMPLE_INTERVAL_MS,
+    60_000,
+  );
+  const limitRefreshIntervalMs = normalizeBoundedInteger(
+    options.limitRefreshIntervalMs,
+    'limitRefreshIntervalMs',
+    DEFAULT_MEMORY_LIMIT_REFRESH_INTERVAL_MS,
+    300_000,
+  );
+  if (limitRefreshIntervalMs < sampleIntervalMs) {
+    throw new TypeError('limitRefreshIntervalMs must be greater than or equal to sampleIntervalMs.');
+  }
+  const highWatermark = normalizeRatio(
+    options.highWatermarkRatio,
+    'highWatermarkRatio',
+    DEFAULT_MEMORY_HIGH_WATERMARK_RATIO,
+  );
+  const recoveryWatermark = normalizeRatio(
+    options.recoveryWatermarkRatio,
+    'recoveryWatermarkRatio',
+    DEFAULT_MEMORY_RECOVERY_WATERMARK_RATIO,
+  );
+  if (recoveryWatermark.scaled >= highWatermark.scaled) {
+    throw new TypeError('recoveryWatermarkRatio must be lower than highWatermarkRatio.');
+  }
+  const minimumHeadroomBytes = normalizeBoundedInteger(
+    options.minimumHeadroomBytes,
+    'minimumHeadroomBytes',
+    DEFAULT_MEMORY_MINIMUM_HEADROOM_BYTES,
+    16 * 1024 ** 3,
+  );
+  const retryAfterSeconds = normalizeBoundedInteger(
+    options.retryAfterSeconds,
+    'retryAfterSeconds',
+    DEFAULT_MEMORY_RETRY_AFTER_SECONDS,
+    60,
+  );
+  const sources = [
+    {
+      name: 'cgroup-v2',
+      currentPath: '/sys/fs/cgroup/memory.current',
+      limitPath: '/sys/fs/cgroup/memory.max',
+      statPath: '/sys/fs/cgroup/memory.stat',
+      inactiveFileKeys: ['inactive_file'],
+    },
+    {
+      name: 'cgroup-v1',
+      currentPath: '/sys/fs/cgroup/memory/memory.usage_in_bytes',
+      limitPath: '/sys/fs/cgroup/memory/memory.limit_in_bytes',
+      statPath: '/sys/fs/cgroup/memory/memory.stat',
+      inactiveFileKeys: ['total_inactive_file', 'inactive_file'],
+    },
+  ];
+  const pressureDecision = Object.freeze({
+    allowed: false,
+    reason: 'memory_pressure',
+    retryAfterSeconds,
+  });
+  let selectedSource = null;
+  let currentBytes = null;
+  let rawCurrentBytes = null;
+  let inactiveFileBytes = null;
+  let limitBytes = null;
+  let outcome = 'unavailable';
+  let shedding = false;
+  let sampledAt = null;
+  let nextSampleAt = Number.NEGATIVE_INFINITY;
+  let nextLimitRefreshAt = Number.NEGATIVE_INFINITY;
+
+  const safeRead = (path) => {
+    try {
+      return readFile(path);
+    } catch {
+      return undefined;
+    }
+  };
+  const evaluate = () => {
+    if (currentBytes === null || limitBytes === null) return;
+    const ratioThreshold = (limitBytes * highWatermark.scaled) / RATIO_SCALE;
+    const headroom = BigInt(minimumHeadroomBytes);
+    const headroomThreshold = limitBytes > headroom ? limitBytes - headroom : 0n;
+    const highThreshold = ratioThreshold < headroomThreshold
+      ? ratioThreshold
+      : headroomThreshold;
+    const ratioRecoveryThreshold = (limitBytes * recoveryWatermark.scaled) / RATIO_SCALE;
+    const hysteresisBytes = (
+      limitBytes * (highWatermark.scaled - recoveryWatermark.scaled)
+    ) / RATIO_SCALE;
+    const headroomRecoveryThreshold = highThreshold > hysteresisBytes
+      ? highThreshold - hysteresisBytes
+      : 0n;
+    const recoveryThreshold = ratioRecoveryThreshold < headroomRecoveryThreshold
+      ? ratioRecoveryThreshold
+      : headroomRecoveryThreshold;
+    if (shedding) {
+      if (currentBytes <= recoveryThreshold && limitBytes - currentBytes >= headroom) {
+        shedding = false;
+      }
+    } else if (currentBytes >= highThreshold || limitBytes - currentBytes <= headroom) {
+      shedding = true;
+    }
+    outcome = shedding ? 'shedding' : 'ready';
+  };
+  const discover = () => {
+    const wasShedding = shedding;
+    for (const candidate of sources) {
+      const parsedLimit = parseCgroupByteCount(safeRead(candidate.limitPath), {
+        allowUnlimited: true,
+      });
+      if (parsedLimit.kind === 'invalid') continue;
+      selectedSource = candidate;
+      if (parsedLimit.kind === 'unlimited') {
+        currentBytes = null;
+        rawCurrentBytes = null;
+        inactiveFileBytes = null;
+        limitBytes = null;
+        outcome = 'unlimited';
+        shedding = false;
+        return;
+      }
+      const parsedCurrent = parseCgroupByteCount(safeRead(candidate.currentPath));
+      if (parsedCurrent.kind !== 'finite') continue;
+      rawCurrentBytes = parsedCurrent.bytes;
+      inactiveFileBytes = parseCgroupInactiveFileBytes(
+        safeRead(candidate.statPath),
+        candidate.inactiveFileKeys,
+      );
+      currentBytes = cgroupWorkingSetBytes(rawCurrentBytes, inactiveFileBytes);
+      limitBytes = parsedLimit.bytes;
+      evaluate();
+      return;
+    }
+    selectedSource = null;
+    currentBytes = null;
+    rawCurrentBytes = null;
+    inactiveFileBytes = null;
+    limitBytes = null;
+    shedding = wasShedding;
+    outcome = wasShedding ? 'shedding' : 'unavailable';
+  };
+  const sample = () => {
+    const sampledNow = Number(now());
+    if (!Number.isFinite(sampledNow)) return;
+    if (sampledNow >= nextLimitRefreshAt) {
+      discover();
+      sampledAt = sampledNow;
+      nextSampleAt = sampledNow + sampleIntervalMs;
+      nextLimitRefreshAt = sampledNow + limitRefreshIntervalMs;
+      return;
+    }
+    if (outcome === 'unlimited' || selectedSource === null || sampledNow < nextSampleAt) return;
+    const parsedCurrent = parseCgroupByteCount(safeRead(selectedSource.currentPath));
+    sampledAt = sampledNow;
+    nextSampleAt = sampledNow + sampleIntervalMs;
+    if (parsedCurrent.kind === 'finite') {
+      rawCurrentBytes = parsedCurrent.bytes;
+      inactiveFileBytes = parseCgroupInactiveFileBytes(
+        safeRead(selectedSource.statPath),
+        selectedSource.inactiveFileKeys,
+      );
+      currentBytes = cgroupWorkingSetBytes(rawCurrentBytes, inactiveFileBytes);
+      evaluate();
+      return;
+    }
+    const wasShedding = shedding;
+    currentBytes = null;
+    rawCurrentBytes = null;
+    inactiveFileBytes = null;
+    shedding = wasShedding;
+    outcome = wasShedding ? 'shedding' : 'unavailable';
+  };
+  return Object.freeze({
+    decision() {
+      sample();
+      return shedding ? pressureDecision : true;
+    },
+    status() {
+      sample();
+      return Object.freeze({
+        source: selectedSource?.name ?? null,
+        outcome,
+        currentBytes: currentBytes === null ? null : Number(currentBytes),
+        rawCurrentBytes: rawCurrentBytes === null ? null : Number(rawCurrentBytes),
+        inactiveFileBytes: inactiveFileBytes === null ? null : Number(inactiveFileBytes),
+        limitBytes: limitBytes === null ? null : Number(limitBytes),
+        sampledAt,
+      });
+    },
+  });
+}
+
+/**
+ * Build one cached admission controller for a persistence filesystem. Failed
+ * probes close admission, while pressure remains closed until a distinct
+ * recovery watermark is observed.
+ */
+export function createFilesystemCapacityAdmissionController(options = {}) {
+  const path = typeof options.path === 'string' ? options.path.trim() : '';
+  const readStatfs = options.readStatfs
+    ?? ((target) => statfsSync(target, { bigint: true }));
+  const now = options.now ?? Date.now;
+  if (!path) throw new TypeError('path must be a non-empty string.');
+  if (typeof readStatfs !== 'function') throw new TypeError('readStatfs must be a function.');
+  if (typeof now !== 'function') throw new TypeError('now must be a function.');
+  const sampleIntervalMs = normalizeBoundedInteger(
+    options.sampleIntervalMs,
+    'sampleIntervalMs',
+    DEFAULT_STORAGE_SAMPLE_INTERVAL_MS,
+    60_000,
+  );
+  const minimumFreeBytes = normalizeFilesystemByteCount(
+    options.minimumFreeBytes,
+    'minimumFreeBytes',
+    DEFAULT_STORAGE_MINIMUM_FREE_BYTES,
+  );
+  let recoveryFreeBytes;
+  if (options.recoveryFreeBytes === undefined) {
+    recoveryFreeBytes = minimumFreeBytes + BigInt(DEFAULT_STORAGE_RECOVERY_HEADROOM_BYTES);
+    if (recoveryFreeBytes > MAX_CONFIGURED_FILESYSTEM_BYTES) {
+      throw new TypeError('minimumFreeBytes leaves no safe recovery headroom.');
+    }
+  } else {
+    recoveryFreeBytes = normalizeFilesystemByteCount(
+      options.recoveryFreeBytes,
+      'recoveryFreeBytes',
+      0,
+    );
+  }
+  if (recoveryFreeBytes <= minimumFreeBytes) {
+    throw new TypeError('recoveryFreeBytes must be greater than minimumFreeBytes.');
+  }
+  const retryAfterSeconds = normalizeBoundedInteger(
+    options.retryAfterSeconds,
+    'retryAfterSeconds',
+    DEFAULT_STORAGE_RETRY_AFTER_SECONDS,
+    60,
+  );
+  const pressureDecision = Object.freeze({
+    allowed: false,
+    reason: 'storage_pressure',
+    retryAfterSeconds,
+  });
+  const probeFailedDecision = Object.freeze({
+    allowed: false,
+    reason: 'storage_probe_failed',
+    retryAfterSeconds,
+  });
+  let availableBytes = null;
+  let outcome = 'unavailable';
+  let shedding = false;
+  let sampledAt = null;
+  let nextSampleAt = Number.NEGATIVE_INFINITY;
+
+  const sample = () => {
+    let sampledNow;
+    try {
+      sampledNow = Number(now());
+    } catch {
+      sampledNow = Number.NaN;
+    }
+    if (!Number.isFinite(sampledNow)) {
+      availableBytes = null;
+      outcome = 'unavailable';
+      return;
+    }
+    if (sampledNow < nextSampleAt) return;
+    sampledAt = sampledNow;
+    nextSampleAt = sampledNow + sampleIntervalMs;
+    try {
+      availableBytes = statfsAvailableBytes(readStatfs(path));
+    } catch {
+      availableBytes = null;
+      outcome = 'unavailable';
+      return;
+    }
+    if (shedding) {
+      if (availableBytes >= recoveryFreeBytes) shedding = false;
+    } else if (availableBytes < minimumFreeBytes) {
+      shedding = true;
+    }
+    outcome = shedding ? 'shedding' : 'ready';
+  };
+
+  return Object.freeze({
+    decision() {
+      sample();
+      if (outcome === 'unavailable') return probeFailedDecision;
+      return shedding ? pressureDecision : true;
+    },
+    status() {
+      sample();
+      return Object.freeze({
+        path,
+        outcome,
+        availableBytes: statusByteCount(availableBytes),
+        minimumFreeBytes: statusByteCount(minimumFreeBytes),
+        recoveryFreeBytes: statusByteCount(recoveryFreeBytes),
+        sampledAt,
+      });
+    },
+  });
+}
+
+function createEventReporter(onEvent, coalesceWindowMs) {
+  if (!onEvent) {
+    return Object.freeze({ report() {}, flush() {} });
+  }
+  const states = new Map();
+  const emit = (payload) => {
+    try {
+      onEvent(Object.freeze(payload));
+    } catch {
+      // Operational reporting must never change gateway behavior.
+    }
+  };
+  return Object.freeze({
+    report(event) {
+      const now = Date.now();
+      const { aggregationClass = '', ...payload } = event;
+      const key = `${payload.event}:${payload.reason}:${aggregationClass}`;
+      const state = states.get(key);
+      if (!state) {
+        states.set(key, { emittedAt: now, suppressed: 0, lastEvent: payload });
+        emit({ schemaVersion: 1, ...payload, occurrences: 1, suppressed: 0 });
+        return;
+      }
+      if (now - state.emittedAt < coalesceWindowMs) {
+        state.suppressed += 1;
+        state.lastEvent = payload;
+        return;
+      }
+      emit({
+        schemaVersion: 1,
+        ...payload,
+        occurrences: state.suppressed + 1,
+        suppressed: state.suppressed,
+      });
+      state.emittedAt = now;
+      state.suppressed = 0;
+      state.lastEvent = payload;
+    },
+    flush() {
+      for (const state of states.values()) {
+        if (state.suppressed === 0) continue;
+        emit({
+          schemaVersion: 1,
+          ...state.lastEvent,
+          occurrences: state.suppressed,
+          suppressed: state.suppressed,
+          summary: true,
+        });
+        state.suppressed = 0;
+      }
+    },
+  });
+}
+
+function sanitizedErrorCode(error) {
+  const code = error && typeof error === 'object' ? error.code : undefined;
+  return typeof code === 'string' && /^[A-Z0-9_]{1,64}$/.test(code) ? code : undefined;
+}
+
+function declaredContentLength(rawHeaders) {
+  const values = rawHeaderValues(rawHeaders, 'content-length');
+  if (values.length !== 1 || !/^\d+$/.test(values[0].trim())) return null;
+  try {
+    return BigInt(values[0].trim());
+  } catch {
+    return null;
+  }
 }
 
 function hasTlsMaterial(value) {
@@ -432,7 +941,7 @@ function blockedTargetFromClientError(error) {
   return match ? resolveRequestTarget(match[1]).kind === 'blocked' : false;
 }
 
-function writeHttpFailure(request, response, statusCode, body) {
+function writeHttpFailure(request, response, statusCode, body, retryAfterSeconds) {
   if (response.destroyed || response.writableEnded) return;
   const payload = Buffer.from(body, 'utf8');
   response.statusCode = statusCode;
@@ -440,6 +949,9 @@ function writeHttpFailure(request, response, statusCode, body) {
   response.setHeader('Content-Type', 'text/plain; charset=utf-8');
   response.setHeader('Content-Length', String(payload.length));
   response.setHeader('Connection', 'close');
+  if (retryAfterSeconds !== undefined) {
+    response.setHeader('Retry-After', String(retryAfterSeconds));
+  }
   response.end(request.method === 'HEAD' ? undefined : payload);
 }
 
@@ -491,7 +1003,7 @@ function writeHealthResponse(request, response, healthProvider, admissionAllowed
   response.end(body);
 }
 
-function writeRawFailure(socket, statusCode, body) {
+function writeRawFailure(socket, statusCode, body, retryAfterSeconds) {
   if (socket.destroyed) return;
   const payload = Buffer.from(body, 'utf8');
   const reason = STATUS_CODES[statusCode] || 'Error';
@@ -500,6 +1012,7 @@ function writeRawFailure(socket, statusCode, body) {
     + 'Cache-Control: no-store\r\n'
     + 'Content-Type: text/plain; charset=utf-8\r\n'
     + `Content-Length: ${payload.length}\r\n`
+    + (retryAfterSeconds === undefined ? '' : `Retry-After: ${retryAfterSeconds}\r\n`)
     + 'Connection: close\r\n'
     + '\r\n'
     + payload,
@@ -528,23 +1041,32 @@ function destroySockets(sockets) {
   }
 }
 
-function relayRequestBody(clientRequest, upstreamRequest, trailerNames) {
-  let backpressured = false;
+function relayRequestBody(
+  clientRequest,
+  upstreamRequest,
+  trailerNames,
+  maxRequestBodyBytes,
+  onLimit,
+) {
+  let receivedBytes = 0;
+  let rejected = false;
 
   clientRequest.on('data', (chunk) => {
-    if (upstreamRequest.destroyed) return;
-    if (!upstreamRequest.write(chunk)) {
-      backpressured = true;
+    if (rejected || upstreamRequest.destroyed) return;
+    if (receivedBytes + chunk.length > maxRequestBodyBytes) {
+      rejected = true;
       clientRequest.pause();
+      onLimit();
+      return;
     }
-  });
-  upstreamRequest.on('drain', () => {
-    if (!backpressured) return;
-    backpressured = false;
-    clientRequest.resume();
+    receivedBytes += chunk.length;
+    clientRequest.pause();
+    upstreamRequest.write(chunk, () => {
+      if (!rejected && !upstreamRequest.destroyed) clientRequest.resume();
+    });
   });
   clientRequest.once('end', () => {
-    if (upstreamRequest.destroyed) return;
+    if (rejected || upstreamRequest.destroyed) return;
     const trailers = trailersFromRawHeaders(clientRequest.rawTrailers, trailerNames);
     if (Object.keys(trailers).length > 0) upstreamRequest.addTrailers(trailers);
     upstreamRequest.end();
@@ -598,10 +1120,62 @@ export async function startSelfHostGateway(options = {}) {
   const upstreamPort = normalizePort(options.upstreamPort, 'upstreamPort');
   const protocol = options.protocol ?? 'http';
   const defaultDrainTimeoutMs = normalizeDrainTimeout(options.drainTimeoutMs);
+  const maxConnections = normalizeBoundedInteger(
+    options.maxConnections,
+    'maxConnections',
+    DEFAULT_MAX_CONNECTIONS,
+    65_535,
+  );
+  const maxRequestBodyBytes = normalizeBoundedInteger(
+    options.maxRequestBodyBytes,
+    'maxRequestBodyBytes',
+    DEFAULT_MAX_REQUEST_BODY_BYTES,
+    DEFAULT_MAX_REQUEST_BODY_BYTES,
+  );
+  const headersTimeoutMs = normalizeBoundedInteger(
+    options.headersTimeoutMs,
+    'headersTimeoutMs',
+    DEFAULT_HEADERS_TIMEOUT_MS,
+    300_000,
+  );
+  const requestTimeoutMs = normalizeBoundedInteger(
+    options.requestTimeoutMs,
+    'requestTimeoutMs',
+    DEFAULT_REQUEST_TIMEOUT_MS,
+    86_400_000,
+  );
+  const idleTimeoutMs = normalizeBoundedInteger(
+    options.idleTimeoutMs,
+    'idleTimeoutMs',
+    DEFAULT_IDLE_TIMEOUT_MS,
+    3_600_000,
+  );
+  const keepAliveTimeoutMs = normalizeBoundedInteger(
+    options.keepAliveTimeoutMs,
+    'keepAliveTimeoutMs',
+    DEFAULT_KEEP_ALIVE_TIMEOUT_MS,
+    300_000,
+  );
+  const upstreamTimeoutMs = normalizeBoundedInteger(
+    options.upstreamTimeoutMs,
+    'upstreamTimeoutMs',
+    DEFAULT_UPSTREAM_TIMEOUT_MS,
+    3_600_000,
+  );
+  const eventCoalesceWindowMs = normalizeBoundedInteger(
+    options.eventCoalesceWindowMs,
+    'eventCoalesceWindowMs',
+    DEFAULT_EVENT_COALESCE_WINDOW_MS,
+    60_000,
+  );
   const trustedProxyMatcher = createTrustedProxyMatcher(options.trustedProxyCidrs);
   const workerTrustSecret = options.workerTrustSecret;
   const healthProvider = options.healthProvider;
   const admissionGuard = options.admissionGuard;
+  const memoryAdmissionController = options.memoryAdmissionController
+    ?? createCgroupMemoryAdmissionController();
+  const storageAdmissionController = options.storageAdmissionController;
+  const onEvent = options.onEvent;
 
   if (typeof workerTrustSecret !== 'string' || !WORKER_TRUST_SECRET_PATTERN.test(workerTrustSecret)) {
     throw new TypeError('workerTrustSecret must be 32 random bytes encoded as lowercase hex.');
@@ -611,6 +1185,26 @@ export async function startSelfHostGateway(options = {}) {
   }
   if (admissionGuard !== undefined && typeof admissionGuard !== 'function') {
     throw new TypeError('admissionGuard must be a synchronous function.');
+  }
+  if (
+    !memoryAdmissionController
+    || typeof memoryAdmissionController !== 'object'
+    || typeof memoryAdmissionController.decision !== 'function'
+  ) {
+    throw new TypeError('memoryAdmissionController must expose a synchronous decision function.');
+  }
+  if (
+    storageAdmissionController !== undefined
+    && (
+      !storageAdmissionController
+      || typeof storageAdmissionController !== 'object'
+      || typeof storageAdmissionController.decision !== 'function'
+    )
+  ) {
+    throw new TypeError('storageAdmissionController must expose a synchronous decision function.');
+  }
+  if (onEvent !== undefined && typeof onEvent !== 'function') {
+    throw new TypeError('onEvent must be a synchronous function.');
   }
 
   if (protocol !== 'http' && protocol !== 'https') {
@@ -631,6 +1225,18 @@ export async function startSelfHostGateway(options = {}) {
 
   let accepting = true;
   let stopPromise;
+  const eventReporter = createEventReporter(onEvent, eventCoalesceWindowMs);
+  const reportEvent = (level, event, reason, statusCode, error, aggregationClass) => {
+    const errorCode = sanitizedErrorCode(error);
+    eventReporter.report({
+      level,
+      event,
+      reason,
+      statusCode,
+      ...(errorCode ? { errorCode } : {}),
+      ...(aggregationClass ? { aggregationClass } : {}),
+    });
+  };
   const inboundSockets = new Set();
   const upstreamSockets = new Set();
   const upgradedSockets = new Set();
@@ -642,47 +1248,188 @@ export async function startSelfHostGateway(options = {}) {
     for (const resolve of drainWaiters) resolve();
     drainWaiters.clear();
   };
-  const admissionAllowed = () => {
-    if (!accepting) return false;
-    try {
-      return admissionGuard ? admissionGuard() === true : true;
-    } catch {
-      return false;
+  const allowedDecision = Object.freeze({ allowed: true });
+  const closedDecision = Object.freeze({
+    allowed: false,
+    statusCode: 503,
+    body: 'Gateway is stopping.\n',
+    reason: 'admission_closed',
+    retryAfterSeconds: undefined,
+  });
+  const memoryPressureDecisions = new Map();
+  const memoryPressureDecision = (retryAfterSeconds) => {
+    let decision = memoryPressureDecisions.get(retryAfterSeconds);
+    if (!decision) {
+      decision = Object.freeze({
+        allowed: false,
+        statusCode: 429,
+        body: 'Container memory pressure. Retry later.\n',
+        reason: 'memory_pressure',
+        retryAfterSeconds,
+      });
+      memoryPressureDecisions.set(retryAfterSeconds, decision);
     }
+    return decision;
   };
+  const storageFailureDecisions = new Map();
+  const storageFailureDecision = (reason, retryAfterSeconds) => {
+    const key = `${reason}:${retryAfterSeconds}`;
+    let decision = storageFailureDecisions.get(key);
+    if (!decision) {
+      const pressure = reason === 'storage_pressure';
+      decision = Object.freeze({
+        allowed: false,
+        statusCode: pressure ? 507 : 503,
+        body: pressure
+          ? 'Persistence storage is too full. Free disk space and retry.\n'
+          : 'Persistence storage is unavailable. Retry later.\n',
+        reason,
+        retryAfterSeconds,
+      });
+      storageFailureDecisions.set(key, decision);
+    }
+    return decision;
+  };
+  const currentAdmissionDecision = () => {
+    if (!accepting) return closedDecision;
+    try {
+      if (admissionGuard && admissionGuard() !== true) return closedDecision;
+    } catch {
+      return closedDecision;
+    }
+    let memoryDecision;
+    try {
+      memoryDecision = memoryAdmissionController.decision();
+    } catch {
+      return closedDecision;
+    }
+    if (memoryDecision !== true && (
+      memoryDecision
+      && typeof memoryDecision === 'object'
+      && !Array.isArray(memoryDecision)
+      && Object.keys(memoryDecision).sort().join(',') === 'allowed,reason,retryAfterSeconds'
+      && memoryDecision.allowed === false
+      && memoryDecision.reason === 'memory_pressure'
+      && Number.isInteger(memoryDecision.retryAfterSeconds)
+      && memoryDecision.retryAfterSeconds >= 1
+      && memoryDecision.retryAfterSeconds <= 60
+    )) {
+      return memoryPressureDecision(memoryDecision.retryAfterSeconds);
+    }
+    if (memoryDecision !== true) return closedDecision;
+    if (!storageAdmissionController) return allowedDecision;
+    let storageDecision;
+    try {
+      storageDecision = storageAdmissionController.decision();
+    } catch {
+      return storageFailureDecision('storage_probe_failed', DEFAULT_STORAGE_RETRY_AFTER_SECONDS);
+    }
+    if (storageDecision === true) return allowedDecision;
+    if (
+      storageDecision
+      && typeof storageDecision === 'object'
+      && !Array.isArray(storageDecision)
+      && Object.keys(storageDecision).sort().join(',') === 'allowed,reason,retryAfterSeconds'
+      && storageDecision.allowed === false
+      && (
+        storageDecision.reason === 'storage_pressure'
+        || storageDecision.reason === 'storage_probe_failed'
+      )
+      && Number.isInteger(storageDecision.retryAfterSeconds)
+      && storageDecision.retryAfterSeconds >= 1
+      && storageDecision.retryAfterSeconds <= 60
+    ) {
+      return storageFailureDecision(storageDecision.reason, storageDecision.retryAfterSeconds);
+    }
+    return storageFailureDecision('storage_probe_failed', DEFAULT_STORAGE_RETRY_AFTER_SECONDS);
+  };
+  const admissionAllowed = () => currentAdmissionDecision().allowed;
   const waitForNormalDrain = () => {
     if (activeNormal.size === 0) return Promise.resolve();
     return new Promise((resolve) => drainWaiters.add(resolve));
   };
+  const rejectHttp = (
+    request,
+    response,
+    statusCode,
+    body,
+    reason,
+    aggregationClass,
+    retryAfterSeconds,
+  ) => {
+    reportEvent(
+      'warning',
+      'gateway_request_rejected',
+      reason,
+      statusCode,
+      undefined,
+      aggregationClass,
+    );
+    writeHttpFailure(request, response, statusCode, body, retryAfterSeconds);
+  };
+  const rejectRaw = (socket, statusCode, body, reason, retryAfterSeconds) => {
+    reportEvent('warning', 'gateway_request_rejected', reason, statusCode);
+    writeRawFailure(socket, statusCode, body, retryAfterSeconds);
+  };
 
   const proxyHttp = (clientRequest, clientResponse, expectContinue = false) => {
     if (clientRequest.method === 'CONNECT') {
-      writeHttpFailure(clientRequest, clientResponse, 405, 'CONNECT is not allowed.\n');
+      rejectHttp(
+        clientRequest,
+        clientResponse,
+        405,
+        'CONNECT is not allowed.\n',
+        'connect_not_allowed',
+      );
       return;
     }
     if (
       clientRequest.headers.upgrade !== undefined
       || connectionNominations(clientRequest.rawHeaders).has('upgrade')
     ) {
-      writeHttpFailure(clientRequest, clientResponse, 400, 'Unsupported protocol upgrade.\n');
+      rejectHttp(
+        clientRequest,
+        clientResponse,
+        400,
+        'Unsupported protocol upgrade.\n',
+        'unsupported_upgrade',
+      );
       return;
     }
 
     const target = resolveRequestTarget(clientRequest.url);
     if (target.kind === 'blocked') {
-      writeHttpFailure(clientRequest, clientResponse, 404, 'Not found.\n');
+      rejectHttp(clientRequest, clientResponse, 404, 'Not found.\n', 'blocked_target');
       return;
     }
     if (target.kind !== 'proxy') {
-      writeHttpFailure(clientRequest, clientResponse, 400, 'Invalid request target.\n');
+      rejectHttp(
+        clientRequest,
+        clientResponse,
+        400,
+        'Invalid request target.\n',
+        'invalid_target',
+      );
       return;
     }
     if (target.target === HEALTH_PATH) {
+      if (clientRequest.method !== 'GET') {
+        reportEvent('warning', 'gateway_request_rejected', 'health_method_not_allowed', 405);
+      }
       writeHealthResponse(clientRequest, clientResponse, healthProvider, admissionAllowed());
       return;
     }
-    if (!admissionAllowed()) {
-      writeHttpFailure(clientRequest, clientResponse, 503, 'Gateway is stopping.\n');
+    const admission = currentAdmissionDecision();
+    if (!admission.allowed) {
+      rejectHttp(
+        clientRequest,
+        clientResponse,
+        admission.statusCode,
+        admission.body,
+        admission.reason,
+        undefined,
+        admission.retryAfterSeconds,
+      );
       return;
     }
 
@@ -694,16 +1441,37 @@ export async function startSelfHostGateway(options = {}) {
       workerTrustSecret,
     });
     if (!preparedRequestHeaders) {
-      writeHttpFailure(clientRequest, clientResponse, 400, 'Invalid Host authority.\n');
+      rejectHttp(
+        clientRequest,
+        clientResponse,
+        400,
+        'Invalid Host authority.\n',
+        'invalid_authority',
+      );
+      return;
+    }
+    const contentLength = declaredContentLength(clientRequest.rawHeaders);
+    if (contentLength !== null && contentLength > BigInt(maxRequestBodyBytes)) {
+      rejectHttp(
+        clientRequest,
+        clientResponse,
+        413,
+        'Request body is too large.\n',
+        'request_body_too_large',
+        'declared_length',
+      );
       return;
     }
     const exchange = {
+      clientSocket: clientRequest.socket,
       upstreamRequest: undefined,
       upstreamResponse: undefined,
       settled: false,
+      requestEnded: false,
       responseStarted: false,
       bodyStarted: false,
       clientAborted: false,
+      terminalFailure: false,
     };
     activeNormal.add(exchange);
     const settle = () => {
@@ -724,12 +1492,22 @@ export async function startSelfHostGateway(options = {}) {
         setHost: false,
         agent: false,
       });
-    } catch {
+    } catch (error) {
+      reportEvent('error', 'gateway_upstream_failure', 'upstream_error', 502, error);
       writeHttpFailure(clientRequest, clientResponse, 502, 'Upstream unavailable.\n');
       settle();
       return;
     }
     exchange.upstreamRequest = upstreamRequest;
+    upstreamRequest.setTimeout(upstreamTimeoutMs, () => {
+      if (exchange.terminalFailure || exchange.clientAborted || exchange.settled) return;
+      exchange.terminalFailure = true;
+      reportEvent('warning', 'gateway_timeout', 'upstream_idle_timeout', 504);
+      if (exchange.responseStarted || clientResponse.headersSent) clientResponse.destroy();
+      else writeHttpFailure(clientRequest, clientResponse, 504, 'Upstream timed out.\n');
+      exchange.upstreamResponse?.destroy();
+      upstreamRequest.destroy();
+    });
 
     upstreamRequest.once('socket', (socket) => trackSocket(upstreamSockets, socket));
     upstreamRequest.once('response', (upstreamResponse) => {
@@ -761,8 +1539,15 @@ export async function startSelfHostGateway(options = {}) {
       upstreamResponse.once('aborted', () => clientResponse.destroy());
       upstreamResponse.once('error', () => clientResponse.destroy());
     });
-    upstreamRequest.once('error', () => {
-      if (exchange.clientAborted || clientResponse.destroyed || clientResponse.writableEnded) return;
+    upstreamRequest.once('error', (error) => {
+      if (
+        exchange.terminalFailure
+        || exchange.clientAborted
+        || clientResponse.destroyed
+        || clientResponse.writableEnded
+      ) return;
+      exchange.terminalFailure = true;
+      reportEvent('error', 'gateway_upstream_failure', 'upstream_error', 502, error);
       if (exchange.responseStarted || clientResponse.headersSent) clientResponse.destroy();
       else writeHttpFailure(clientRequest, clientResponse, 502, 'Upstream unavailable.\n');
     });
@@ -777,6 +1562,9 @@ export async function startSelfHostGateway(options = {}) {
       upstreamRequest.destroy();
       exchange.upstreamResponse?.destroy();
     });
+    clientRequest.once('end', () => {
+      exchange.requestEnded = true;
+    });
     clientResponse.once('finish', settle);
     clientResponse.once('close', () => {
       if (!clientResponse.writableFinished) {
@@ -790,7 +1578,32 @@ export async function startSelfHostGateway(options = {}) {
     const startBody = () => {
       if (exchange.bodyStarted || exchange.responseStarted || exchange.clientAborted) return;
       exchange.bodyStarted = true;
-      relayRequestBody(clientRequest, upstreamRequest, preparedRequestHeaders.trailerNames);
+      relayRequestBody(
+        clientRequest,
+        upstreamRequest,
+        preparedRequestHeaders.trailerNames,
+        maxRequestBodyBytes,
+        () => {
+          if (exchange.terminalFailure || exchange.settled) return;
+          exchange.terminalFailure = true;
+          reportEvent(
+            'warning',
+            'gateway_request_rejected',
+            'request_body_too_large',
+            413,
+            undefined,
+            'stream_limit',
+          );
+          writeHttpFailure(
+            clientRequest,
+            clientResponse,
+            413,
+            'Request body is too large.\n',
+          );
+          exchange.upstreamResponse?.destroy();
+          upstreamRequest.destroy();
+        },
+      );
     };
     if (expectContinue) {
       upstreamRequest.once('continue', () => {
@@ -806,29 +1619,36 @@ export async function startSelfHostGateway(options = {}) {
   const proxyUpgrade = (request, clientSocket, clientHead) => {
     trackSocket(upgradedSockets, clientSocket);
     if (request.method !== 'GET') {
-      writeRawFailure(clientSocket, 400, 'Invalid WebSocket method.\n');
+      rejectRaw(clientSocket, 400, 'Invalid WebSocket method.\n', 'invalid_websocket_method');
       return;
     }
     const target = resolveRequestTarget(request.url);
     if (target.kind === 'blocked') {
-      writeRawFailure(clientSocket, 404, 'Not found.\n');
+      rejectRaw(clientSocket, 404, 'Not found.\n', 'blocked_target');
       return;
     }
     if (target.kind !== 'proxy') {
-      writeRawFailure(clientSocket, 400, 'Invalid request target.\n');
+      rejectRaw(clientSocket, 400, 'Invalid request target.\n', 'invalid_target');
       return;
     }
     if (target.target === HEALTH_PATH) {
-      writeRawFailure(clientSocket, 404, 'Not found.\n');
+      rejectRaw(clientSocket, 404, 'Not found.\n', 'health_upgrade_not_allowed');
       return;
     }
-    if (!admissionAllowed()) {
-      writeRawFailure(clientSocket, 503, 'Gateway is stopping.\n');
+    const admission = currentAdmissionDecision();
+    if (!admission.allowed) {
+      rejectRaw(
+        clientSocket,
+        admission.statusCode,
+        admission.body,
+        admission.reason,
+        admission.retryAfterSeconds,
+      );
       return;
     }
     const upgrade = String(request.headers.upgrade ?? '').trim().toLowerCase();
     if (upgrade !== 'websocket' || !connectionNominations(request.rawHeaders).has('upgrade')) {
-      writeRawFailure(clientSocket, 400, 'Unsupported protocol upgrade.\n');
+      rejectRaw(clientSocket, 400, 'Unsupported protocol upgrade.\n', 'unsupported_upgrade');
       return;
     }
 
@@ -840,11 +1660,12 @@ export async function startSelfHostGateway(options = {}) {
       workerTrustSecret,
     });
     if (!preparedHeaders) {
-      writeRawFailure(clientSocket, 400, 'Invalid Host authority.\n');
+      rejectRaw(clientSocket, 400, 'Invalid Host authority.\n', 'invalid_authority');
       return;
     }
     let peerSocket;
     let responseStarted = false;
+    let terminalFailure = false;
     let upstreamRequest;
     try {
       upstreamRequest = requestHttp({
@@ -856,10 +1677,19 @@ export async function startSelfHostGateway(options = {}) {
         setHost: false,
         agent: false,
       });
-    } catch {
+    } catch (error) {
+      reportEvent('error', 'gateway_upstream_failure', 'upstream_error', 502, error);
       writeRawFailure(clientSocket, 502, 'Upstream unavailable.\n');
       return;
     }
+
+    upstreamRequest.setTimeout(upstreamTimeoutMs, () => {
+      if (terminalFailure || responseStarted || clientSocket.destroyed) return;
+      terminalFailure = true;
+      reportEvent('warning', 'gateway_timeout', 'upstream_idle_timeout', 504);
+      writeRawFailure(clientSocket, 504, 'Upstream timed out.\n');
+      upstreamRequest.destroy();
+    });
 
     upstreamRequest.once('socket', (socket) => {
       peerSocket = socket;
@@ -893,7 +1723,10 @@ export async function startSelfHostGateway(options = {}) {
       upstreamResponse.once('aborted', () => clientSocket.destroy());
       upstreamResponse.once('error', () => clientSocket.destroy());
     });
-    upstreamRequest.once('error', () => {
+    upstreamRequest.once('error', (error) => {
+      if (terminalFailure) return;
+      terminalFailure = true;
+      reportEvent('error', 'gateway_upstream_failure', 'upstream_error', 502, error);
       if (!responseStarted && !clientSocket.destroyed) {
         writeRawFailure(clientSocket, 502, 'Upstream unavailable.\n');
       } else if (!clientSocket.destroyed) {
@@ -919,19 +1752,43 @@ export async function startSelfHostGateway(options = {}) {
       allowHalfOpen: true,
     })
     : createHttpServer({ allowHalfOpen: true });
-  server.timeout = 0;
-  server.requestTimeout = 0;
+  server.maxConnections = maxConnections;
+  server.headersTimeout = headersTimeoutMs;
+  server.requestTimeout = requestTimeoutMs;
+  server.connectionsCheckingInterval = Math.min(1_000, headersTimeoutMs, requestTimeoutMs);
+  server.timeout = idleTimeoutMs;
+  server.keepAliveTimeout = keepAliveTimeoutMs;
   server.on('connection', (socket) => trackSocket(inboundSockets, socket));
+  server.on('drop', () => {
+    reportEvent('warning', 'gateway_connection_dropped', 'connection_limit', 503);
+  });
+  server.on('timeout', (socket) => {
+    const socketExchanges = [...activeNormal]
+      .filter((exchange) => exchange.clientSocket === socket);
+    if (socketExchanges.length > 0 && socketExchanges.every((exchange) => exchange.requestEnded)) {
+      return;
+    }
+    reportEvent('warning', 'gateway_timeout', 'socket_idle_timeout', 408);
+    socket.destroy();
+  });
   server.on('request', (request, response) => proxyHttp(request, response, false));
   server.on('checkContinue', (request, response) => proxyHttp(request, response, true));
   server.on('upgrade', proxyUpgrade);
   server.on('connect', (_request, socket) => {
     trackSocket(upgradedSockets, socket);
-    writeRawFailure(socket, 405, 'CONNECT is not allowed.\n');
+    rejectRaw(socket, 405, 'CONNECT is not allowed.\n', 'connect_not_allowed');
   });
   server.on('clientError', (error, socket) => {
-    if (blockedTargetFromClientError(error)) writeRawFailure(socket, 404, 'Not found.\n');
-    else writeRawFailure(socket, 400, 'Invalid HTTP request.\n');
+    if (sanitizedErrorCode(error) === 'ERR_HTTP_REQUEST_TIMEOUT') {
+      reportEvent('warning', 'gateway_timeout', 'request_deadline', 408, error);
+      writeRawFailure(socket, 408, 'Request timed out.\n');
+    } else if (blockedTargetFromClientError(error)) {
+      reportEvent('warning', 'gateway_request_rejected', 'blocked_target', 404, error);
+      writeRawFailure(socket, 404, 'Not found.\n');
+    } else {
+      reportEvent('warning', 'gateway_request_rejected', 'client_parse_error', 400, error);
+      writeRawFailure(socket, 400, 'Invalid HTTP request.\n');
+    }
   });
 
   await new Promise((resolve, reject) => {
@@ -1000,6 +1857,7 @@ export async function startSelfHostGateway(options = {}) {
         destroySockets(upstreamSockets);
         await waitWithTimeout(closePromise, 250);
       }
+      eventReporter.flush();
     })();
     return stopPromise;
   };
@@ -1012,6 +1870,13 @@ export async function startSelfHostGateway(options = {}) {
     protocol,
     upstreamHost: LOOPBACK_UPSTREAM_HOST,
     upstreamPort,
+    maxConnections,
+    maxRequestBodyBytes,
+    headersTimeoutMs,
+    requestTimeoutMs,
+    idleTimeoutMs,
+    keepAliveTimeoutMs,
+    upstreamTimeoutMs,
     trustedProxyCidrs: trustedProxyMatcher.cidrs,
     stopAdmission,
     stop,

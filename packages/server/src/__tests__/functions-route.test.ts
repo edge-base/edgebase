@@ -294,6 +294,31 @@ describe('functionsRoute FunctionError compatibility', () => {
       details: { depth: 6 },
     });
   });
+
+  it('normalizes caught filesystem exhaustion without exposing the underlying path', async () => {
+    registerFunction('disk-full', {
+      trigger: { type: 'http', method: 'POST' },
+      handler: async () => {
+        throw Object.assign(new Error('/data/private/path: no space left on device'), {
+          code: 'ENOSPC',
+        });
+      },
+    });
+    rebuildCompiledRoutes();
+
+    const response = await createApp().fetch(
+      new Request('http://localhost/api/functions/disk-full', { method: 'POST' }),
+      createEnv(),
+      createExecutionContext(),
+    );
+
+    expect(response.status).toBe(507);
+    await expect(response.json()).resolves.toEqual({
+      code: 507,
+      message: 'Persistence storage is full. Free disk space and retry.',
+      slug: 'insufficient-storage',
+    });
+  });
 });
 
 describe('functionsRoute HTTP contracts', () => {

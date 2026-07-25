@@ -9,6 +9,7 @@ import {
   getProviderBindingName,
   withPostgresConnection,
 } from './postgres-executor.js';
+import { stripInternalPgFields } from './postgres-table-utils.js';
 
 interface DumpNamespaceTablesOptions {
   includeMeta?: boolean;
@@ -53,7 +54,7 @@ export async function dumpNamespaceTables(
       for (const tableName of tableNames) {
         try {
           const result = await query(`SELECT * FROM "${tableName}"`, []);
-          tables[tableName] = result.rows;
+          tables[tableName] = result.rows.map((row) => stripInternalPgFields(row));
         } catch {
           tables[tableName] = [];
         }

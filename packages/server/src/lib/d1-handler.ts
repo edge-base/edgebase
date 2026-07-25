@@ -29,11 +29,17 @@ import { parseConfig, getD1BindingName } from './do-router.js';
 import { ensureD1Schema } from './d1-schema-init.js';
 import {
   buildListQuery, buildCountQuery, buildGetQuery, buildSearchQuery, buildSubstringSearchQuery,
-  parseQueryParams,
+  buildSqliteFtsArtifactQuery, normalizeSQLiteBooleanQueryOptions, parseQueryParams,
+  sqliteFtsArtifactsAreHealthy, sqliteFtsNeedsSubstringFallback,
   type FilterTuple,
 } from './query-engine.js';
 import { summarizeValidationErrors, validateInsert, validateUpdate } from './validation.js';
 import { buildEffectiveSchema } from './schema.js';
+import {
+  createSearchRelatedCursor,
+  validateSearchRelatedInput,
+  type SearchRelatedInput,
+} from './related-search-constraint.js';
 import { generateId } from './uuid.js';
 import { parseUpdateBody } from './op-parser.js';
 import { emitDbLiveEvent, emitDbLiveBatchEvent } from './database-live-emitter.js';
@@ -125,6 +131,29 @@ export async function handleD1Request(
   }
 
   if (method === 'POST') {
+    if (pathSuffix === '/search-related') {
+      if (!isServiceKey) {
+        return c.json({
+          code: 403,
+          message: 'Related search is available only to trusted server code.',
+        }, 403);
+      }
+      let rawInput: unknown;
+      try {
+        rawInput = await c.req.json();
+      } catch {
+        return c.json({
+          code: 400,
+          message: invalidD1BodyMessage(`related search on table '${tableName}'`),
+        }, 400);
+      }
+      const input = validateSearchRelatedInput(
+        rawInput,
+        tableName,
+        resolved.dbBlock.tables ?? {},
+      );
+      return handleSearchRelated(c, resolved, tableName, tableConfig, input);
+    }
     if (pathSuffix === '/batch') {
       return handleBatch(c, resolved, tableName, tableConfig, auth, isServiceKey);
     }
@@ -145,6 +174,98 @@ export async function handleD1Request(
   }
 
   return c.json({ code: 405, message: 'Method not allowed' }, 405);
+}
+
+async function handleSearchRelated(
+  c: Context<HonoEnv>,
+  resolved: D1ResolvedDb,
+  tableName: string,
+  tableConfig: TableConfig,
+  input: SearchRelatedInput,
+): Promise<Response> {
+  const configuredFtsFields = tableConfig.fts?.length ? tableConfig.fts : null;
+  const searchFields = configuredFtsFields ?? getTextFields(tableConfig);
+  const pagination = {
+    // Read one bounded overflow row so an exactly-full terminal page does not
+    // invent a continuation. The extra row is never returned to the caller.
+    limit: input.limit + 1,
+  };
+  const sort = input.order;
+  const needsSubstringFallback = [input.query, ...(input.queryVariants ?? [])]
+    .some(sqliteFtsNeedsSubstringFallback);
+
+  let ftsArtifactsHealthy = false;
+  if (configuredFtsFields) {
+    const artifactQuery = buildSqliteFtsArtifactQuery(tableName);
+    const artifacts = await executeD1Query(resolved.db, artifactQuery.sql, artifactQuery.params);
+    ftsArtifactsHealthy = sqliteFtsArtifactsAreHealthy(
+      tableName,
+      configuredFtsFields,
+      artifacts.rows,
+    );
+  }
+
+  if (configuredFtsFields && !needsSubstringFallback && !ftsArtifactsHealthy) {
+    throw new EdgeBaseError(
+      503,
+      `Indexed search for table '${tableName}' is unavailable because its FTS artifacts are unhealthy.`,
+    );
+  }
+
+  const useIndexedFts = !!configuredFtsFields && !needsSubstringFallback;
+  const searchQuery = useIndexedFts
+    ? buildSearchQuery(tableName, input.query, {
+      pagination,
+      sort,
+      ftsFields: configuredFtsFields ?? undefined,
+      queryVariants: input.queryVariants,
+      searchRelatedKeyset: { order: input.order, after: input.after },
+      relatedSearch: input.relation,
+    }, 'sqlite')
+    : buildSubstringSearchQuery(tableName, input.query, {
+      pagination,
+      sort,
+      fields: searchFields,
+      queryVariants: input.queryVariants,
+      searchRelatedKeyset: { order: input.order, after: input.after },
+      relatedSearch: input.relation,
+    }, 'sqlite');
+
+  let sourceItems: Record<string, unknown>[];
+  try {
+    const result = await executeD1Query(resolved.db, searchQuery.sql, searchQuery.params);
+    sourceItems = result.rows.map((row) => normalizeRow(stripInternalFields(row), tableConfig));
+  } catch (error) {
+    if (!useIndexedFts) throw error;
+    throw new EdgeBaseError(
+      503,
+      `Indexed search for table '${tableName}' failed; refusing an unindexed full-table fallback.`,
+    );
+  }
+
+  let total: number | null = null;
+  if (input.includeTotal && searchQuery.countSql) {
+    const countResult = await executeD1Query(
+      resolved.db,
+      searchQuery.countSql,
+      searchQuery.countParams ?? [],
+    );
+    total = Number(countResult.rows[0]?.total ?? sourceItems.length);
+  }
+  const hasMore = sourceItems.length > input.limit;
+  const items = sourceItems.slice(0, input.limit);
+  const cursor = hasMore && items.length > 0
+    ? createSearchRelatedCursor(items[items.length - 1]!, input.order)
+    : null;
+
+  return c.json({
+    items,
+    total,
+    hasMore,
+    cursor,
+    page: null,
+    perPage: input.limit,
+  });
 }
 
 function invalidD1BodyMessage(context: string): string {
@@ -441,7 +562,10 @@ async function handleList(
     tableName,
     responseCursorStore,
   );
-  const queryOpts = parseQueryParams(boundedQuery.params);
+  const queryOpts = normalizeSQLiteBooleanQueryOptions(
+    parseQueryParams(boundedQuery.params),
+    tableConfig.schema,
+  );
   let query = buildListQuery(tableName, queryOpts, 'sqlite');
   let result;
   try {
@@ -496,9 +620,9 @@ async function handleList(
   const items = entries.map(({ item }) => item);
   const cursorRecordIds = entries.map(({ cursorId }) => cursorId);
 
-  // Get total count — skip the COUNT query when ?includeTotal=0/false (total stays null)
+  // Exact totals are opt-in; omission/false stays null.
   let total: number | null = null;
-  const includeTotal = !['0', 'false'].includes((c.req.query('includeTotal') ?? '').toLowerCase());
+  const includeTotal = queryOpts.includeTotal === true;
   if (includeTotal && countSql && countParams) {
     const countResult = await executeD1Query(resolved.db, countSql, countParams);
     total = Number(countResult.rows[0]?.total ?? 0);
@@ -545,7 +669,10 @@ async function handleCount(
     return c.json(error.toJSON(), error.status as 403);
   }
 
-  const queryOpts = parseQueryParams(Object.fromEntries(new URL(c.req.url).searchParams));
+  const queryOpts = normalizeSQLiteBooleanQueryOptions(
+    parseQueryParams(Object.fromEntries(new URL(c.req.url).searchParams)),
+    tableConfig.schema,
+  );
   const { sql, params } = buildCountQuery(tableName, queryOpts.filters, queryOpts.orFilters, 'sqlite');
   const result = await executeD1Query(resolved.db, sql, params);
   const total = result.rows[0]?.total ?? 0;
@@ -575,7 +702,10 @@ async function handleSearch(
     responseCursorStore,
     { search: true },
   );
-  const queryOpts = parseQueryParams(boundedQuery.params);
+  const queryOpts = normalizeSQLiteBooleanQueryOptions(
+    parseQueryParams(boundedQuery.params),
+    tableConfig.schema,
+  );
   const searchTerm = queryOpts.search || '';
   if (!searchTerm) {
     if (boundedQuery.maxResponseBytes !== undefined) {
@@ -584,7 +714,7 @@ async function handleSearch(
         tableName,
         items: [],
         cursorRecordIds: [],
-        total: 0,
+        total: queryOpts.includeTotal === true ? 0 : null,
         perPage: queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 100,
         sourceHasMore: false,
         cursorStore: responseCursorStore,
@@ -593,52 +723,71 @@ async function handleSearch(
     return c.json({ items: [] });
   }
 
-  const ftsFields = tableConfig.fts?.length
-    ? tableConfig.fts
-    : getTextFields(tableConfig);
+  const configuredFtsFields = tableConfig.fts?.length ? tableConfig.fts : null;
+  const searchFields = configuredFtsFields ?? getTextFields(tableConfig);
 
   let sourceItems: Record<string, unknown>[];
-  let total: number | null = 0;
+  let total: number | null = null;
+  const includeTotal = queryOpts.includeTotal === true;
   const limit = queryOpts.pagination?.limit ?? queryOpts.pagination?.perPage ?? 100;
   const offset = queryOpts.pagination?.offset ?? ((queryOpts.pagination?.page ?? 1) - 1) * limit;
-  const searchQuery = buildSearchQuery(tableName, searchTerm, {
+  const buildIndexedQuery = () => buildSearchQuery(tableName, searchTerm, {
     pagination: queryOpts.pagination,
     filters: queryOpts.filters,
     orFilters: queryOpts.orFilters,
     sort: queryOpts.sort,
-    ftsFields,
+    ftsFields: configuredFtsFields ?? undefined,
   }, 'sqlite');
-  try {
-    const result = await executeD1Query(resolved.db, searchQuery.sql, searchQuery.params);
-    sourceItems = result.rows.map(r => normalizeRow(stripInternalFields(r), tableConfig));
-    const includeTotal = !['0', 'false'].includes((c.req.query('includeTotal') ?? '').toLowerCase());
-    if (includeTotal && searchQuery.countSql) {
-      const countResult = await executeD1Query(resolved.db, searchQuery.countSql, searchQuery.countParams ?? []);
-      total = Number(countResult.rows[0]?.total ?? sourceItems.length);
-    } else if (!includeTotal) {
-      total = null;
-    }
-  } catch {
-    sourceItems = [];
+  const buildFallbackQuery = () => buildSubstringSearchQuery(tableName, searchTerm, {
+    pagination: queryOpts.pagination,
+    filters: queryOpts.filters,
+    orFilters: queryOpts.orFilters,
+    sort: queryOpts.sort,
+    fields: searchFields,
+  }, 'sqlite');
+
+  let ftsArtifactsHealthy = false;
+  if (configuredFtsFields) {
+    const artifactQuery = buildSqliteFtsArtifactQuery(tableName);
+    const artifacts = await executeD1Query(resolved.db, artifactQuery.sql, artifactQuery.params);
+    ftsArtifactsHealthy = sqliteFtsArtifactsAreHealthy(
+      tableName,
+      configuredFtsFields,
+      artifacts.rows,
+    );
   }
 
-  if (sourceItems.length === 0 && ftsFields.length > 0) {
-    const fallback = buildSubstringSearchQuery(tableName, searchTerm, {
-      pagination: queryOpts.pagination,
-      filters: queryOpts.filters,
-      orFilters: queryOpts.orFilters,
-      sort: queryOpts.sort,
-      fields: ftsFields,
-    }, 'sqlite');
-    const result = await executeD1Query(resolved.db, fallback.sql, fallback.params);
-    sourceItems = result.rows.map((row) => normalizeRow(stripInternalFields(row), tableConfig));
-    const includeTotal = !['0', 'false'].includes((c.req.query('includeTotal') ?? '').toLowerCase());
-    if (includeTotal && fallback.countSql) {
-      const countResult = await executeD1Query(resolved.db, fallback.countSql, fallback.countParams ?? []);
-      total = Number(countResult.rows[0]?.total ?? sourceItems.length);
-    } else if (!includeTotal) {
-      total = null;
-    }
+  const needsSubstringFallback = sqliteFtsNeedsSubstringFallback(searchTerm);
+  if (configuredFtsFields && !needsSubstringFallback && !ftsArtifactsHealthy) {
+    throw new EdgeBaseError(
+      503,
+      `Indexed search for table '${tableName}' is unavailable because its FTS artifacts are unhealthy.`,
+    );
+  }
+  const useIndexedFts = !!configuredFtsFields && !needsSubstringFallback;
+  const effectiveSearchQuery = useIndexedFts ? buildIndexedQuery() : buildFallbackQuery();
+  try {
+    const result = await executeD1Query(
+      resolved.db,
+      effectiveSearchQuery.sql,
+      effectiveSearchQuery.params,
+    );
+    sourceItems = result.rows.map(r => normalizeRow(stripInternalFields(r), tableConfig));
+  } catch (error) {
+    if (!useIndexedFts) throw error;
+    throw new EdgeBaseError(
+      503,
+      `Indexed search for table '${tableName}' failed; refusing an unindexed full-table fallback.`,
+    );
+  }
+
+  if (includeTotal && effectiveSearchQuery.countSql) {
+    const countResult = await executeD1Query(
+      resolved.db,
+      effectiveSearchQuery.countSql,
+      effectiveSearchQuery.countParams ?? [],
+    );
+    total = Number(countResult.rows[0]?.total ?? sourceItems.length);
   }
 
   // Apply read rules
@@ -684,7 +833,12 @@ async function handleSearch(
 
   const items = entries.map(({ item }) => item);
 
-  return c.json({ items, total, hasMore: total !== null && total > offset + items.length, cursor: null, page: null, perPage: limit });
+  // Without COUNT, a full page is conservatively probeable; exact-N drains
+  // terminate on the next empty page instead of scanning to count.
+  const hasMore = total !== null
+    ? total > offset + sourceItems.length
+    : sourceItems.length === limit;
+  return c.json({ items, total, hasMore, cursor: null, page: null, perPage: limit });
 }
 
 // ─── GET ───
@@ -1845,11 +1999,16 @@ async function handleBatchByFilter(
   const limit = Math.min(body.limit ?? 500, 500);
 
   // Find matching records using buildListQuery
-  const { sql: selectSql, params: selectParams } = buildListQuery(tableName, {
+  const batchQueryOptions = normalizeSQLiteBooleanQueryOptions({
     filters: body.filter,
     orFilters: body.orFilter,
     pagination: { limit },
-  }, 'sqlite');
+  }, tableConfig.schema);
+  const { sql: selectSql, params: selectParams } = buildListQuery(
+    tableName,
+    batchQueryOptions,
+    'sqlite',
+  );
   const selectResult = await executeD1Query(resolved.db, selectSql, selectParams);
   const allRows = selectResult.rows;
   const processed = allRows.length;

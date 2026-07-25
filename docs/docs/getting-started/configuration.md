@@ -195,7 +195,7 @@ For rooms, release mode is also fail-closed: `metadata`, `join`, and `action` re
 | `required`   | `boolean`  | Field must be present on create                                     |
 | `default`    | `any`      | Default value if not provided                                       |
 | `unique`     | `boolean`  | Unique constraint                                                   |
-| `references` | `string`   | Foreign key reference to another table                              |
+| `references` | `string`   | Foreign key reference; physical references are indexed automatically |
 | `min`        | `number`   | Minimum value (number) or minimum length (string)                   |
 | `max`        | `number`   | Maximum value (number) or maximum length (string)                   |
 | `pattern`    | `string`   | Regex validation pattern                                            |

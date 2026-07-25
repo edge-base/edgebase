@@ -538,6 +538,13 @@ post =
 </TabItem>
 </Tabs>
 
+The object passed to `insert()` is request data, not the stored row. EdgeBase
+may materialize storage-owned fields such as `id`, `createdAt`, and `updatedAt`
+when the write commits. Treat the row returned by `insert()` (or each row
+returned by `insertMany()`) as the canonical committed state; do not continue
+from the input object when a later write depends on generated fields or a row
+revision.
+
 ## Read
 
 ### Get a single record

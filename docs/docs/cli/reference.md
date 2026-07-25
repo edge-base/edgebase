@@ -70,6 +70,27 @@ Long-running commands still treat `Ctrl+C` as an immediate cancellation. If a us
 | `NEON_API_KEY` | Optional `edgebase neon setup` helper when you want non-interactive Neon provisioning |
 | `EDGEBASE_TRUSTED_PROXY_CIDRS` | Docker/pack launcher peers whose complete forwarded header set may be preserved |
 | `LOCAL_PROTOCOL`, `HTTPS_CERT_PATH`, `HTTPS_KEY_PATH` | Explicit TLS termination at the generated Docker/pack gateway |
+| `EDGEBASE_GATEWAY_MAX_CONNECTIONS` | Docker/pack public-gateway connection cap; default `512`, range 1–65,535 |
+| `EDGEBASE_GATEWAY_MAX_REQUEST_BODY_BYTES` | Streaming request cap; default and maximum `5368709120` (5 GiB) |
+| `EDGEBASE_GATEWAY_HEADERS_TIMEOUT_MS` | Complete-header deadline; default `15000`, maximum `300000` |
+| `EDGEBASE_GATEWAY_REQUEST_TIMEOUT_MS` | Complete-request deadline; default `900000`, maximum `86400000` |
+| `EDGEBASE_GATEWAY_IDLE_TIMEOUT_MS` | Ordinary inbound socket idle timeout; default `30000`, maximum `3600000` |
+| `EDGEBASE_GATEWAY_KEEP_ALIVE_TIMEOUT_MS` | Idle keep-alive timeout; default `5000`, maximum `300000` |
+| `EDGEBASE_GATEWAY_UPSTREAM_TIMEOUT_MS` | Loopback-upstream idle timeout; default `300000`, maximum `3600000` |
+| `EDGEBASE_GATEWAY_EVENT_COALESCE_WINDOW_MS` | Metadata-only failure-event collection window; default `5000`, maximum `60000` |
+| `EDGEBASE_GATEWAY_MIN_FREE_BYTES` | Persistence reserve; default `536870912` (512 MiB), nonnegative safe integer |
+| `EDGEBASE_GATEWAY_RECOVERY_FREE_BYTES` | Reopen watermark; default is the reserve plus `134217728` (128 MiB) and must be greater than the reserve |
+
+All gateway values are positive integers. Invalid values fail launcher startup
+before external admission. Established WebSockets clear HTTP idle/upstream
+timers. Gateway operational events are coalesced by finite controlled event
+class and omit request URLs, queries, headers, bodies, credentials, and client
+identity.
+
+The Docker/pack gateway shares one cached filesystem sample across HTTP,
+WebSocket, and health admission. Storage pressure returns retryable `507`
+without sending new work upstream; a failed capacity probe returns retryable
+`503`. This physical reserve is not a content or tenant quota.
 
 ## Project Lifecycle
 

@@ -58,6 +58,8 @@ const SELF_HOST_ASSET_PATHS = Object.freeze({
   gateway: '.edgebase/self-host/self-host-gateway.mjs',
   scheduleSupervisor: '.edgebase/self-host/self-host-schedule-supervisor.mjs',
   dockerEntrypoint: '.edgebase/self-host/self-host-docker-entrypoint.mjs',
+  wranglerRuntime: '.edgebase/self-host/self-host-wrangler-runtime.mjs',
+  proxyWorker: '.edgebase/self-host/self-host-proxy-worker.js',
 });
 
 export type SelfHostManagedScheduleSource =
@@ -117,6 +119,8 @@ export interface ValidatedSelfHostRuntimeManifest {
   gateway: ValidatedSelfHostAssetManifest;
   scheduleSupervisor: ValidatedSelfHostAssetManifest;
   dockerEntrypoint: ValidatedSelfHostAssetManifest;
+  wranglerRuntime: ValidatedSelfHostAssetManifest;
+  proxyWorker: ValidatedSelfHostAssetManifest;
 }
 
 export interface SelfHostScheduleTargetState {
@@ -150,6 +154,16 @@ export type SelfHostScheduleDispatcher = (
 export interface SelfHostScheduleStateStore {
   read(path: string): Promise<SelfHostScheduleState | null>;
   write(path: string, state: SelfHostScheduleState): Promise<void>;
+}
+
+export interface SelfHostScheduleStateQuarantineEvent {
+  path: string;
+  quarantinePath: string;
+  reason: string;
+}
+
+export interface ReadSelfHostScheduleStateOptions {
+  onQuarantine?: (event: SelfHostScheduleStateQuarantineEvent) => void;
 }
 
 export interface DispatchSelfHostScheduleBoundaryOptions extends SelfHostScheduleBoundary {
@@ -228,6 +242,49 @@ export interface SelfHostScheduleSupervisorStatus {
   lastAttemptAt: number | null;
   lastSuccessfulPassAt: number | null;
   lastError: string | null;
+}
+
+export interface CreateSelfHostScheduleOutcomeLoggerOptions {
+  prefix?: string;
+  writeInfo?: (line: string) => void;
+  writeError?: (line: string) => void;
+}
+
+export interface SelfHostScheduleOutcomeLogger {
+  report(report: SelfHostSchedulePassReport, options?: { initial?: boolean }): void;
+}
+
+export function createSelfHostScheduleOutcomeLogger(
+  options: CreateSelfHostScheduleOutcomeLoggerOptions = {},
+): SelfHostScheduleOutcomeLogger {
+  const prefix = options.prefix?.trim() || '[EdgeBase]';
+  const writeInfo = options.writeInfo ?? ((line: string) => process.stdout.write(`${line}\n`));
+  const writeError = options.writeError ?? ((line: string) => process.stderr.write(`${line}\n`));
+  const failedTargets = new Set<string>();
+  let generation: string | null = null;
+
+  return {
+    report(report, { initial = false } = {}) {
+      if (report.generation !== generation) {
+        failedTargets.clear();
+        generation = report.generation;
+      }
+      for (const outcome of report.outcomes) {
+        const serialized = JSON.stringify(outcome);
+        if (outcome.status === 'succeeded') {
+          const recovered = failedTargets.delete(outcome.targetId);
+          if (initial) {
+            writeInfo(`${prefix} initial schedule outcome ${serialized}`);
+          } else if (recovered) {
+            writeInfo(`${prefix} schedule outcome recovered ${serialized}`);
+          }
+          continue;
+        }
+        failedTargets.add(outcome.targetId);
+        writeError(`${prefix} schedule outcome ${outcome.status} ${serialized}`);
+      }
+    },
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -323,7 +380,15 @@ function normalizeSelfHostRuntimeManifest(value: unknown): ValidatedSelfHostRunt
   const selfHost = assertRecord(value, 'edgebase-app selfHost');
   assertExactKeys(
     selfHost,
-    ['schemaVersion', 'generation', 'gateway', 'scheduleSupervisor', 'dockerEntrypoint'],
+    [
+      'schemaVersion',
+      'generation',
+      'gateway',
+      'scheduleSupervisor',
+      'dockerEntrypoint',
+      'wranglerRuntime',
+      'proxyWorker',
+    ],
     'edgebase-app selfHost',
   );
   if (selfHost.schemaVersion !== 1) {
@@ -344,6 +409,16 @@ function normalizeSelfHostRuntimeManifest(value: unknown): ValidatedSelfHostRunt
       selfHost.dockerEntrypoint,
       SELF_HOST_ASSET_PATHS.dockerEntrypoint,
       'edgebase-app selfHost.dockerEntrypoint',
+    ),
+    wranglerRuntime: normalizeSelfHostAsset(
+      selfHost.wranglerRuntime,
+      SELF_HOST_ASSET_PATHS.wranglerRuntime,
+      'edgebase-app selfHost.wranglerRuntime',
+    ),
+    proxyWorker: normalizeSelfHostAsset(
+      selfHost.proxyWorker,
+      SELF_HOST_ASSET_PATHS.proxyWorker,
+      'edgebase-app selfHost.proxyWorker',
     ),
   };
   const generation = readSha256(selfHost.generation, 'edgebase-app selfHost.generation');
@@ -589,20 +664,29 @@ export function validateSelfHostAppManifest(
   };
 }
 
+class InvalidBoundedJsonFileError extends Error {}
+
 async function readJsonFileBounded(path: string, maxBytes: number, context: string): Promise<unknown> {
   const fileStat = await stat(path);
   if (!fileStat.isFile()) throw new Error(`${context} is not a regular file: ${path}`);
   if (fileStat.size > maxBytes) {
-    throw new Error(`${context} exceeds the ${maxBytes}-byte limit: ${path}`);
+    throw new InvalidBoundedJsonFileError(
+      `${context} exceeds the ${maxBytes}-byte limit: ${path}`,
+    );
   }
   const source = await readFile(path, 'utf8');
   if (Buffer.byteLength(source) > maxBytes) {
-    throw new Error(`${context} exceeds the ${maxBytes}-byte limit: ${path}`);
+    throw new InvalidBoundedJsonFileError(
+      `${context} exceeds the ${maxBytes}-byte limit: ${path}`,
+    );
   }
   try {
     return JSON.parse(source) as unknown;
   } catch (error) {
-    throw new Error(`${context} is not valid JSON: ${path}`, { cause: error });
+    throw new InvalidBoundedJsonFileError(
+      `${context} is not valid JSON: ${path}`,
+      { cause: error },
+    );
   }
 }
 
@@ -617,6 +701,8 @@ export async function readSelfHostAppManifest(
     gateway: manifest.selfHost.gateway,
     scheduleSupervisor: manifest.selfHost.scheduleSupervisor,
     dockerEntrypoint: manifest.selfHost.dockerEntrypoint,
+    wranglerRuntime: manifest.selfHost.wranglerRuntime,
+    proxyWorker: manifest.selfHost.proxyWorker,
   })) {
     const assetPath = join(dirname(resolvedManifestPath), asset.path);
     const assetStat = await lstat(assetPath);
@@ -752,16 +838,79 @@ export function validateSelfHostScheduleState(value: unknown): SelfHostScheduleS
   return { schemaVersion: 2, generation, manifestDigest, targets };
 }
 
+function quarantineReason(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 512);
+}
+
+async function quarantineInvalidSelfHostScheduleState(
+  path: string,
+  error: unknown,
+  options: ReadSelfHostScheduleStateOptions,
+): Promise<null> {
+  const quarantinePath = `${path}.corrupt`;
+  try {
+    await unlink(quarantinePath);
+  } catch (unlinkError) {
+    if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw new Error(
+        `Invalid self-host schedule state could not quarantine '${path}' at '${quarantinePath}'.`,
+        { cause: unlinkError },
+      );
+    }
+  }
+  try {
+    await rename(path, quarantinePath);
+  } catch (renameError) {
+    if ((renameError as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new Error(
+      `Invalid self-host schedule state could not quarantine '${path}' at '${quarantinePath}'.`,
+      { cause: renameError },
+    );
+  }
+  try {
+    await syncParentDirectory(dirname(path));
+  } catch (syncError) {
+    throw new Error(
+      `Invalid self-host schedule state quarantine was not durably committed at '${quarantinePath}'.`,
+      { cause: syncError },
+    );
+  }
+
+  const event: SelfHostScheduleStateQuarantineEvent = {
+    path,
+    quarantinePath,
+    reason: quarantineReason(error),
+  };
+  const onQuarantine = options.onQuarantine ?? ((quarantine) => {
+    process.stderr.write(
+      `Self-host schedule state was invalid and moved to '${quarantine.quarantinePath}'; `
+      + `rebuilding from durable delivery authority. Reason: ${quarantine.reason}\n`,
+    );
+  });
+  try {
+    onQuarantine(event);
+  } catch {
+    // A diagnostic sink cannot turn a completed quarantine back into a boot wedge.
+  }
+  return null;
+}
+
 export async function readSelfHostScheduleState(
   path: string,
+  options: ReadSelfHostScheduleStateOptions = {},
 ): Promise<SelfHostScheduleState | null> {
+  let value: unknown;
   try {
-    return validateSelfHostScheduleState(
-      await readJsonFileBounded(path, MAX_STATE_BYTES, 'self-host schedule state'),
-    );
+    value = await readJsonFileBounded(path, MAX_STATE_BYTES, 'self-host schedule state');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw error;
+    if (!(error instanceof InvalidBoundedJsonFileError)) throw error;
+    return quarantineInvalidSelfHostScheduleState(path, error, options);
+  }
+  try {
+    return validateSelfHostScheduleState(value);
+  } catch (error) {
+    return quarantineInvalidSelfHostScheduleState(path, error, options);
   }
 }
 

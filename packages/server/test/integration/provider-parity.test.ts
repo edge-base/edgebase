@@ -4,10 +4,10 @@
  * Pins two behaviors that were promoted/unified across providers so all three
  * (Durable Objects, D1, PostgreSQL) share one contract:
  *
- *   1. `?includeTotal=0` (or `false`) on LIST skips the COUNT query and returns
- *      `total: null`, while `hasMore`/`cursor` still drive pagination. Verified
- *      on the D1 path ('shared' namespace) and the DO path ('txdo' namespace).
- *      (PostgreSQL already had this; it is unit-only with a mocked executor.)
+ *   1. LIST/search totals are opt-in: omission, `0`, or `false` returns
+ *      `total: null`; only explicit `true` returns an exact number. Verified on
+ *      the D1 path ('shared') and DO path ('txdo'). PostgreSQL uses a mocked
+ *      executor unit test so its exact count-query cardinality is observable.
  *
  *   2. DO rule-rejection wording now matches D1's canonical
  *      d1RuleRejectedMessage format exactly:
@@ -59,16 +59,16 @@ afterAll(async () => {
   }
 });
 
-// ─── 1. includeTotal — skip COUNT, total:null (D1 + DO parity) ────────────────
+// ─── 1. includeTotal — exact totals are opt-in (D1 + DO parity) ──────────────
 
-describe('provider parity — includeTotal skips the COUNT query', () => {
-  it('D1 (shared/posts): includeTotal=0 → total null, default → number', async () => {
-    const seeded = await skApi('POST', '/api/db/shared/tables/posts', { title: 'parity-d1-total' });
+describe('provider parity — includeTotal exact counts are opt-in', () => {
+  it('D1 list: explicit true counts, false/zero stay null, and omission is null', async () => {
+    const title = `parityd1total${crypto.randomUUID().slice(0, 8)}`;
+    const seeded = await skApi('POST', '/api/db/shared/tables/posts', { title });
     expect([200, 201].includes(seeded.status)).toBe(true);
     cleanup.push({ path: '/api/db/shared/tables/posts', id: seeded.data.id });
 
-    const withTotal = await skApi('GET', '/api/db/shared/tables/posts?limit=5');
-    expect(withTotal.status).toBe(200);
+    const withTotal = await skApi('GET', '/api/db/shared/tables/posts?limit=5&includeTotal=true');
     expect(typeof withTotal.data.total).toBe('number');
 
     const skip0 = await skApi('GET', '/api/db/shared/tables/posts?limit=5&includeTotal=0');
@@ -80,15 +80,39 @@ describe('provider parity — includeTotal skips the COUNT query', () => {
 
     const skipFalse = await skApi('GET', '/api/db/shared/tables/posts?limit=5&includeTotal=false');
     expect(skipFalse.data.total).toBeNull();
+
+    const omitted = await skApi('GET', '/api/db/shared/tables/posts?limit=5');
+    expect(omitted.status).toBe(200);
+    expect(omitted.data.total).toBeNull();
   });
 
-  it('DO (txdo/tx_posts): includeTotal=0 → total null, default → number', async () => {
-    const seeded = await skApi('POST', '/api/db/txdo/tables/tx_posts', { title: 'parity-do-total' });
+  it('D1 search: explicit true counts and omission is null', async () => {
+    const title = `parityd1search${crypto.randomUUID().slice(0, 8)}`;
+    const seeded = await skApi('POST', '/api/db/shared/tables/posts', { title });
+    expect([200, 201].includes(seeded.status)).toBe(true);
+    cleanup.push({ path: '/api/db/shared/tables/posts', id: seeded.data.id });
+
+    const searchWithTotal = await skApi(
+      'GET',
+      `/api/db/shared/tables/posts/search?search=${encodeURIComponent(title)}&limit=5&includeTotal=true`,
+    );
+    expect(searchWithTotal.status).toBe(200);
+    expect(typeof searchWithTotal.data.total).toBe('number');
+    const searchOmitted = await skApi(
+      'GET',
+      `/api/db/shared/tables/posts/search?search=${encodeURIComponent(title)}&limit=5`,
+    );
+    expect(searchOmitted.status).toBe(200);
+    expect(searchOmitted.data.total).toBeNull();
+  });
+
+  it('DO list: explicit true counts, false/zero stay null, and omission is null', async () => {
+    const title = `paritydototal${crypto.randomUUID().slice(0, 8)}`;
+    const seeded = await skApi('POST', '/api/db/txdo/tables/tx_posts', { title });
     expect([200, 201].includes(seeded.status)).toBe(true);
     cleanup.push({ path: '/api/db/txdo/tables/tx_posts', id: seeded.data.id });
 
-    const withTotal = await skApi('GET', '/api/db/txdo/tables/tx_posts?limit=5');
-    expect(withTotal.status).toBe(200);
+    const withTotal = await skApi('GET', '/api/db/txdo/tables/tx_posts?limit=5&includeTotal=true');
     expect(typeof withTotal.data.total).toBe('number');
 
     const skip0 = await skApi('GET', '/api/db/txdo/tables/tx_posts?limit=5&includeTotal=0');
@@ -99,10 +123,71 @@ describe('provider parity — includeTotal skips the COUNT query', () => {
 
     const skipFalse = await skApi('GET', '/api/db/txdo/tables/tx_posts?limit=5&includeTotal=false');
     expect(skipFalse.data.total).toBeNull();
+
+    const omitted = await skApi('GET', '/api/db/txdo/tables/tx_posts?limit=5');
+    expect(omitted.status).toBe(200);
+    expect(omitted.data.total).toBeNull();
+  });
+
+  it('DO search without configured FTS: schema text fields return results and explicit true counts', async () => {
+    const title = `paritydosearch${crypto.randomUUID().slice(0, 8)}`;
+    const seeded = await skApi('POST', '/api/db/txdo/tables/tx_posts', { title });
+    expect([200, 201].includes(seeded.status)).toBe(true);
+    cleanup.push({ path: '/api/db/txdo/tables/tx_posts', id: seeded.data.id });
+
+    const searchWithTotal = await skApi(
+      'GET',
+      `/api/db/txdo/tables/tx_posts/search?search=${encodeURIComponent(title)}&limit=5&includeTotal=true`,
+    );
+    expect(searchWithTotal.status).toBe(200);
+    expect(typeof searchWithTotal.data.total).toBe('number');
+    expect(searchWithTotal.data.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: seeded.data.id, title })]),
+    );
+  });
+
+  it('DO search: omission is null', async () => {
+    const title = `paritydosearchomit${crypto.randomUUID().slice(0, 8)}`;
+    const seeded = await skApi('POST', '/api/db/txdo/tables/tx_posts', { title });
+    expect([200, 201].includes(seeded.status)).toBe(true);
+    cleanup.push({ path: '/api/db/txdo/tables/tx_posts', id: seeded.data.id });
+
+    const searchOmitted = await skApi(
+      'GET',
+      `/api/db/txdo/tables/tx_posts/search?search=${encodeURIComponent(title)}&limit=5`,
+    );
+    expect(searchOmitted.status).toBe(200);
+    expect(searchOmitted.data.total).toBeNull();
   });
 });
 
-// ─── 2. DO rule-rejection wording matches D1's canonical format ───────────────
+// ─── 2. Bounded set filters stay within each SQLite provider budget ───────────
+
+describe('provider parity — SQLite set-filter bind budget', () => {
+  it('DO list keeps 100 set members plus pagination inside one statement', async () => {
+    const title = `paritydoset${crypto.randomUUID().slice(0, 8)}`;
+    const seeded = await skApi('POST', '/api/db/txdo/tables/tx_posts', { title });
+    expect([200, 201].includes(seeded.status)).toBe(true);
+    cleanup.push({ path: '/api/db/txdo/tables/tx_posts', id: seeded.data.id });
+
+    const titles = [
+      title,
+      ...Array.from({ length: 99 }, (_, index) => `missing-title-${index}`),
+    ];
+    const filter = encodeURIComponent(JSON.stringify([['title', 'in', titles]]));
+    const result = await skApi(
+      'GET',
+      `/api/db/txdo/tables/tx_posts?filter=${filter}&limit=100&offset=0`,
+    );
+
+    expect(result.status).toBe(200);
+    expect(result.data.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: seeded.data.id, title })]),
+    );
+  });
+});
+
+// ─── 3. DO rule-rejection wording matches D1's canonical format ───────────────
 
 describe('provider parity — DO rule-rejection wording matches D1', () => {
   it('single-record update denial → canonical id-bearing message', async () => {

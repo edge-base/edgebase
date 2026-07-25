@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -210,7 +210,6 @@ describe('Snapshot I/O', () => {
 
   it('loadSnapshot returns null for malformed JSON', () => {
     const filePath = getSnapshotPath(tmpDir);
-    const { writeFileSync } = require('node:fs');
     writeFileSync(filePath, 'not-valid-json', 'utf-8');
     const loaded = loadSnapshot(tmpDir);
     expect(loaded).toBeNull();

@@ -2,7 +2,8 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -10,6 +11,9 @@ const APP_ROOT = '/app';
 const MANIFEST_PATH = join(APP_ROOT, 'edgebase-app.json');
 const CONTROL_ROOT = '/__edgebase/internal/self-host';
 const STARTUP_TIMEOUT_MS = 90_000;
+const RUNTIME_PREBUILD_TIMEOUT_MS = 180_000;
+const RUNTIME_PREBUILD_MAX_BYTES = 64 * 1024 * 1024;
+const RUNTIME_PREBUILD_GROUP_SHUTDOWN_TIMEOUT_MS = 2_000;
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 const GATEWAY_DRAIN_TIMEOUT_MS = 5_000;
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/;
@@ -38,6 +42,8 @@ function verifySelfHostAssets() {
     gateway: '.edgebase/self-host/self-host-gateway.mjs',
     scheduleSupervisor: '.edgebase/self-host/self-host-schedule-supervisor.mjs',
     dockerEntrypoint: '.edgebase/self-host/self-host-docker-entrypoint.mjs',
+    wranglerRuntime: '.edgebase/self-host/self-host-wrangler-runtime.mjs',
+    proxyWorker: '.edgebase/self-host/self-host-proxy-worker.js',
   };
   const assets = {};
   for (const [name, expectedPath] of Object.entries(expected)) {
@@ -142,7 +148,10 @@ async function waitForOwnedRuntime(origin, secret, authority, raceChild, signal)
     try {
       const response = await raceChild(fetch(`${origin}${CONTROL_ROOT}/ready`, {
         headers: { 'x-edgebase-self-host-control': secret },
-        signal: AbortSignal.any([signal, AbortSignal.timeout(1_000)]),
+        signal: AbortSignal.any([
+          signal,
+          AbortSignal.timeout(Math.max(1, remainingMs(deadline))),
+        ]),
       }), 'authenticated readiness');
       if (response.ok) {
         const payload = await raceChild(response.json(), 'authenticated readiness body');
@@ -164,10 +173,117 @@ async function waitForOwnedRuntime(origin, secret, authority, raceChild, signal)
   throw new Error('Timed out waiting for authenticated internal Wrangler readiness.');
 }
 
+function prebuildSelfHostRuntime({
+  appRoot = APP_ROOT,
+  configPath = wranglerConfig,
+  temporaryRoot = process.env.TMPDIR || '/tmp',
+  wranglerCommand = 'wrangler',
+  wranglerArgsPrefix = [],
+} = {}) {
+  const linuxProcessGroupHasRunnableMember = (pid) => {
+    if (process.platform !== 'linux') return null;
+    let entries;
+    try {
+      entries = readdirSync('/proc', { withFileTypes: true });
+    } catch {
+      return null;
+    }
+    let foundMember = false;
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
+      try {
+        const stat = readFileSync(`/proc/${entry.name}/stat`, 'utf8');
+        const commandEnd = stat.lastIndexOf(')');
+        if (commandEnd < 0) continue;
+        const fields = stat.slice(commandEnd + 2).split(' ');
+        if (Number(fields[2]) !== pid) continue;
+        foundMember = true;
+        if (fields[0] !== 'Z' && fields[0] !== 'X') return true;
+      } catch (error) {
+        if (error?.code !== 'ENOENT' && error?.code !== 'ESRCH') return null;
+      }
+    }
+    return foundMember ? false : null;
+  };
+  const processGroupAlive = (pid) => {
+    try {
+      process.kill(-pid, 0);
+      return linuxProcessGroupHasRunnableMember(pid) ?? true;
+    } catch (error) {
+      if (error?.code === 'ESRCH' || error?.code === 'EPERM') return false;
+      throw error;
+    }
+  };
+  const reapProcessGroup = (pid) => {
+    if (process.platform === 'win32' || !Number.isInteger(pid) || pid < 1) return;
+    if (!processGroupAlive(pid)) return;
+    const sleeper = new Int32Array(new SharedArrayBuffer(4));
+    const waitUntilGone = () => {
+      const deadline = Date.now() + RUNTIME_PREBUILD_GROUP_SHUTDOWN_TIMEOUT_MS;
+      while (processGroupAlive(pid) && Date.now() < deadline) {
+        Atomics.wait(sleeper, 0, 0, 20);
+      }
+      return !processGroupAlive(pid);
+    };
+    process.kill(-pid, 'SIGTERM');
+    if (waitUntilGone()) return;
+    process.kill(-pid, 'SIGKILL');
+    if (!waitUntilGone()) {
+      throw new Error('Wrangler self-host runtime prebuild process group did not exit.');
+    }
+  };
+  const outputDir = mkdtempSync(join(temporaryRoot, 'edgebase-self-host-worker-'));
+  const cleanup = () => rmSync(outputDir, { recursive: true, force: true });
+  try {
+    const result = spawnSync(
+      wranglerCommand,
+      [...wranglerArgsPrefix, 'deploy', '--dry-run', '--outdir', outputDir, '--config', configPath],
+      {
+        cwd: appRoot,
+        env: {
+          ...process.env,
+          CLOUDFLARE_INCLUDE_PROCESS_ENV: 'false',
+          WRANGLER_SEND_METRICS: 'false',
+        },
+        stdio: 'inherit',
+        detached: process.platform !== 'win32',
+        timeout: RUNTIME_PREBUILD_TIMEOUT_MS,
+      },
+    );
+    reapProcessGroup(result.pid);
+    if (result.error) {
+      throw new Error('Wrangler self-host runtime prebuild failed.', { cause: result.error });
+    }
+    if (result.status !== 0 || result.signal) {
+      throw new Error(
+        `Wrangler self-host runtime prebuild exited with code=${String(result.status)} `
+          + `signal=${String(result.signal)}.`,
+      );
+    }
+    const entryPath = join(outputDir, 'index.js');
+    const entry = lstatSync(entryPath);
+    if (
+      !entry.isFile()
+      || entry.isSymbolicLink()
+      || entry.size < 1
+      || entry.size > RUNTIME_PREBUILD_MAX_BYTES
+    ) {
+      throw new Error('Wrangler self-host runtime prebuild produced an invalid worker entry.');
+    }
+    return { entryPath, cleanup };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
 const { manifest, assets } = verifySelfHostAssets();
 const gatewayModule = await import(pathToFileURL(join(APP_ROOT, assets.gateway.path)).href);
 const supervisorModule = await import(
   pathToFileURL(join(APP_ROOT, assets.scheduleSupervisor.path)).href
+);
+const wranglerRuntimeModule = await import(
+  pathToFileURL(join(APP_ROOT, assets.wranglerRuntime.path)).href
 );
 const validatedManifest = await supervisorModule.readSelfHostAppManifest(MANIFEST_PATH);
 if (
@@ -182,6 +298,11 @@ const externalPort = positivePort(process.env.PORT || '8787', 'PORT');
 const internalPort = positivePort(process.env.EDGEBASE_INTERNAL_PORT || '8788', 'EDGEBASE_INTERNAL_PORT');
 if (externalPort === internalPort) throw new Error('PORT and EDGEBASE_INTERNAL_PORT must differ.');
 const persistDir = process.env.PERSIST_DIR || '/data';
+const filesystemAdmissionController = gatewayModule.createFilesystemCapacityAdmissionController({
+  path: persistDir,
+  minimumFreeBytes: process.env.EDGEBASE_GATEWAY_MIN_FREE_BYTES,
+  recoveryFreeBytes: process.env.EDGEBASE_GATEWAY_RECOVERY_FREE_BYTES,
+});
 const wranglerConfig = process.env.WRANGLER_CONFIG || 'wrangler.toml';
 const protocol = process.env.LOCAL_PROTOCOL || 'http';
 if (protocol !== 'http' && protocol !== 'https') throw new Error('LOCAL_PROTOCOL must be http or https.');
@@ -197,8 +318,20 @@ process.env.EDGEBASE_SELF_HOST_GATEWAY_SECRET = gatewaySecret;
 process.env.EDGEBASE_SELF_HOST_APP_GENERATION = runtimeAuthority.generation;
 process.env.EDGEBASE_SELF_HOST_SCHEDULE_DIGEST = runtimeAuthority.scheduleDigest;
 
+const wranglerTool = wranglerRuntimeModule.prepareSelfHostWranglerTool({
+  baseDir: APP_ROOT,
+  cacheRoot: join(tmpdir(), 'edgebase-self-host-wrangler-runtime'),
+  proxyWorkerPath: join(APP_ROOT, assets.proxyWorker.path),
+});
+const runtimeBundle = prebuildSelfHostRuntime({
+  wranglerCommand: wranglerTool.command,
+  wranglerArgsPrefix: wranglerTool.argsPrefix,
+});
+process.once('exit', runtimeBundle.cleanup);
 const wranglerArgs = [
   'dev',
+  runtimeBundle.entryPath,
+  '--no-bundle',
   '--config', wranglerConfig,
   '--port', String(internalPort),
   '--ip', '127.0.0.1',
@@ -210,7 +343,7 @@ const wranglerArgs = [
   '--var', `EDGEBASE_SELF_HOST_APP_GENERATION:${runtimeAuthority.generation}`,
   '--var', `EDGEBASE_SELF_HOST_SCHEDULE_DIGEST:${runtimeAuthority.scheduleDigest}`,
 ];
-const child = spawn('wrangler', wranglerArgs, {
+const child = spawn(wranglerTool.command, [...wranglerTool.argsPrefix, ...wranglerArgs], {
   cwd: APP_ROOT,
   env: process.env,
   stdio: 'inherit',
@@ -259,6 +392,7 @@ async function shutdown(signal = 'SIGTERM', requestedExitCode = 0) {
       signalOwnedProcessGroup(child, 'SIGKILL');
       await waitForOwnedProcessGroupExit(child, deadline);
     }
+    runtimeBundle.cleanup();
     process.exitCode = Math.max(process.exitCode || 0, requestedExitCode);
   })();
   return shutdownPromise;
@@ -300,6 +434,11 @@ try {
       key: readFileSync(process.env.HTTPS_KEY_PATH),
     }
     : undefined;
+  const scheduleOutcomeLogger = supervisorModule.createSelfHostScheduleOutcomeLogger({
+    prefix: '[EdgeBase]',
+    writeInfo: (line) => console.log(line),
+    writeError: (line) => console.error(line),
+  });
   supervisor = supervisorModule.createSelfHostScheduleSupervisor({
     manifestPath: MANIFEST_PATH,
     statePath: scheduleStatePath,
@@ -307,9 +446,7 @@ try {
     controlSecret,
     signal: lifecycleAbort.signal,
     onReport(report) {
-      for (const outcome of report.outcomes) {
-        console.log('[EdgeBase] schedule outcome', JSON.stringify(outcome));
-      }
+      scheduleOutcomeLogger.report(report);
     },
     onError(error) {
       console.error('[EdgeBase] schedule supervisor blocked', error);
@@ -319,9 +456,10 @@ try {
   if (initialReport.structuralReady !== true || !supervisor.getStatus().structuralReady) {
     throw new Error('Initial schedule pass did not establish structural readiness.');
   }
-  for (const outcome of initialReport.outcomes) {
-    console.log('[EdgeBase] initial schedule outcome', JSON.stringify(outcome));
-  }
+  scheduleOutcomeLogger.report(initialReport, { initial: true });
+  const reportGatewayEvent = (event) => {
+    console.error('[EdgeBase] gateway ' + JSON.stringify(event));
+  };
   gateway = await raceChild(gatewayModule.startSelfHostGateway({
     host: externalHost,
     port: externalPort,
@@ -330,6 +468,16 @@ try {
     ...(tls ? { tls } : {}),
     trustedProxyCidrs,
     workerTrustSecret: gatewaySecret,
+    maxConnections: process.env.EDGEBASE_GATEWAY_MAX_CONNECTIONS,
+    maxRequestBodyBytes: process.env.EDGEBASE_GATEWAY_MAX_REQUEST_BODY_BYTES,
+    headersTimeoutMs: process.env.EDGEBASE_GATEWAY_HEADERS_TIMEOUT_MS,
+    requestTimeoutMs: process.env.EDGEBASE_GATEWAY_REQUEST_TIMEOUT_MS,
+    idleTimeoutMs: process.env.EDGEBASE_GATEWAY_IDLE_TIMEOUT_MS,
+    keepAliveTimeoutMs: process.env.EDGEBASE_GATEWAY_KEEP_ALIVE_TIMEOUT_MS,
+    upstreamTimeoutMs: process.env.EDGEBASE_GATEWAY_UPSTREAM_TIMEOUT_MS,
+    eventCoalesceWindowMs: process.env.EDGEBASE_GATEWAY_EVENT_COALESCE_WINDOW_MS,
+    storageAdmissionController: filesystemAdmissionController,
+    onEvent: reportGatewayEvent,
     healthProvider: () => supervisor?.getStatus() ?? {
       state: 'idle',
       structuralReady: false,

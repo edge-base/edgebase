@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+### Changed
+
+- Synchronized the Kotlin SDK packages and generated API surfaces with
+  EdgeBase 0.5.0.
+- No Kotlin-specific API compatibility break is introduced.
+
 ## 0.4.9
 
 ### Changed

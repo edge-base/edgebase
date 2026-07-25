@@ -10,7 +10,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
     npm install -g npm@12.0.1 && \
-    npm install -g wrangler@4.103.0
+    npm install -g wrangler@4.114.0
 
 WORKDIR /app
 

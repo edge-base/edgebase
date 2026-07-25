@@ -710,4 +710,34 @@ describe('refresh cookie session transport', () => {
     expect(proven.headers.get('Set-Cookie')).toContain('__Host-gateway-refresh=');
     expect(proven.headers.get('Set-Cookie')).toContain('Secure');
   });
+
+  it('accepts same-origin cookie auth through a proven self-host gateway that rewrites the upstream host', async () => {
+    const secret = 'c'.repeat(64);
+    setConfig({
+      release: true,
+      trustSelfHostedProxy: true,
+      auth: {
+        session: {
+          cookie: { enabled: true, name: 'gateway-refresh', sameSite: 'strict' },
+        },
+      },
+    });
+    const response = await createApp().request('http://127.0.0.1:8788/issue', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://nas.example.test:25781',
+        'X-Forwarded-Host': 'nas.example.test:25781',
+        'X-Forwarded-Proto': 'https',
+        'X-EdgeBase-Auth-Transport': 'cookie',
+        'X-EdgeBase-Self-Host-Gateway': secret,
+      },
+    }, {
+      EDGEBASE_RUNTIME_MODE: 'self-hosted',
+      EDGEBASE_SELF_HOST_GATEWAY_SECRET: secret,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Set-Cookie')).toContain('__Host-gateway-refresh=');
+    expect(response.headers.get('Set-Cookie')).toContain('Secure');
+  });
 });

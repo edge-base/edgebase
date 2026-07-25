@@ -354,7 +354,14 @@ The defaults are intentionally conservative. Increase them during development, b
 
 **Symptom:** Legitimate users get rate limited while traffic is low.
 
-**Fix:** The default rate limiting keys on client IP. If your users are behind a shared IP (corporate VPN, mobile carrier NAT), many users share the same rate limit bucket. Consider increasing the limits or adjusting the window.
+**Fix:** Standard API requests with valid EdgeBase access tokens use the signed
+user ID, so different users behind a corporate VPN, carrier NAT, or reverse
+proxy have independent budgets. Check that the request carries the normal
+EdgeBase access token and is not an anonymous, auth, admin/control, or
+custom-Bearer protocol request; those deliberately retain the authoritative IP
+bucket. For self-hosting, also verify the generated gateway and exact trusted
+proxy CIDRs. Increase an IP-keyed limit or adjust its window only when that
+shared anonymous/auth policy is intentional.
 
 ---
 

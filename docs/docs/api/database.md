@@ -46,7 +46,7 @@ Retrieve a list of records from a table. Supports filtering, sorting, and two pa
 | `before`        | string | `01J...`                             | Cursor pagination (backward)                                    |
 | `orFilter`      | JSON   | `[["type","==","news"],["featured","==",true]]` | OR condition filter (maximum 5 conditions)                      |
 | `fields`        | string | `id,title`                           | Comma-separated projection; bounded responses must include `id` |
-| `includeTotal`  | boolean/string | `false`                       | Set `false` or `0` to skip `COUNT`; `total` is `null`            |
+| `includeTotal`  | boolean/string | omitted                       | Set `true` to run the exact `COUNT`; omitted, `false`, or `0` returns `total: null` |
 | `maxResponseBytes` | number | `262144`                          | Opt in to an exact serialized UTF-8 response cap (minimum 512)   |
 | `responseAfter` | string | `~edgebase-response-cursor-v1...`    | Opaque forward cursor returned by a bounded request              |
 | `responseBefore` | string | `~edgebase-response-cursor-v1...`   | Opaque backward cursor returned by a bounded request             |
@@ -60,11 +60,11 @@ Retrieve a list of records from a table. Supports filtering, sorting, and two pa
 :::
 
 :::tip Offset-based pagination
-When using `offset`, the response includes pagination metadata: `total` (total record count), `page` (computed page number), and `perPage` (records per page). For example, `?offset=20&limit=10` returns `page: 3` and `perPage: 10` along with the total count. This is useful for building paginated UIs with page number navigation.
+When using `offset`, the response includes `page` (computed page number) and `perPage` (records per page). Exact totals are opt-in: add `includeTotal=true` to receive a numeric `total`; otherwise `total` is `null`. For example, `?offset=20&limit=10&includeTotal=true` returns `page: 3`, `perPage: 10`, and the total count.
 :::
 
 ```bash
-curl "https://your-project.edgebase.fun/api/db/shared/tables/posts?filter=[[\"status\",\"==\",\"published\"]]&sort=createdAt:desc&limit=20" \
+curl "https://your-project.edgebase.fun/api/db/shared/tables/posts?filter=[[\"status\",\"==\",\"published\"]]&sort=createdAt:desc&limit=20&includeTotal=true" \
   -H "Authorization: Bearer <accessToken>"
 ```
 
@@ -346,13 +346,14 @@ curl "https://your-project.edgebase.fun/api/db/shared/tables/posts/count?filter=
 
 ### `GET /api/db/shared/tables/:name/search`
 
-Perform a full-text search (FTS) query. Requires the table to have `fts` configured in the schema.
+Search configured FTS fields when an FTS index is present. Without an FTS configuration, EdgeBase searches the table's declared string and text fields by substring.
 
 | Query Parameter  | Type    | Default    | Description                            |
 | ---------------- | ------- | ---------- | -------------------------------------- |
 | `q`              | string  | --         | Search query term                      |
 | `limit`          | number  |            | Maximum number of results              |
 | `offset`         | number  |            | Number of results to skip              |
+| `includeTotal`   | boolean/string | omitted | Set `true` to run the exact `COUNT`; omitted, `false`, or `0` returns `total: null` |
 | `highlightPre`   | string  | `<mark>`   | Opening highlight tag                  |
 | `highlightPost`  | string  | `</mark>`  | Closing highlight tag                  |
 

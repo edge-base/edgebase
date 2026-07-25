@@ -727,6 +727,78 @@ describe('defineConfig', () => {
     expect(config.databases?.shared?.tables?.posts?.schema?.title).toEqual({ type: 'string' });
   });
 
+  it.each(['_fts', '_fts_text'])('rejects reserved internal search field %s', (field) => {
+    expect(() => defineConfig({
+      databases: {
+        shared: {
+          provider: 'postgres',
+          tables: {
+            blocks: {
+              schema: {
+                [field]: { type: field === '_fts' ? 'json' : 'string' },
+              },
+            },
+          },
+        },
+      },
+    })).toThrow(`field name '${field}' is reserved for internal search state`);
+  });
+
+  it.each(['_fts', '_fts_text'])('rejects reserved internal FTS source %s', (field) => {
+    expect(() => defineConfig({
+      databases: {
+        shared: {
+          tables: {
+            blocks: {
+              schema: { title: { type: 'string' } },
+              fts: [field],
+            },
+          },
+        },
+      },
+    })).toThrow(`FTS field '${field}' is reserved for internal search state`);
+  });
+
+  it.each(['docs_fts', 'docs_ai', 'docs_ad', 'docs_au'])(
+    'rejects SQLite table name collision with managed FTS artifact %s',
+    (artifactName) => {
+      expect(() => defineConfig({
+        databases: {
+          shared: {
+            provider: 'd1',
+            tables: {
+              docs: {
+                schema: { title: { type: 'string' } },
+                fts: ['title'],
+              },
+              [artifactName]: { schema: { value: { type: 'string' } } },
+            },
+          },
+        },
+      })).toThrow(/collides with the provider-managed FTS artifact/);
+    },
+  );
+
+  it.each(['idx_docs_fts', 'idx_docs_fts_text_trgm'])(
+    'rejects PostgreSQL table name collision with managed FTS index %s',
+    (artifactName) => {
+      expect(() => defineConfig({
+        databases: {
+          shared: {
+            provider: 'postgres',
+            tables: {
+              docs: {
+                schema: { title: { type: 'string' } },
+                fts: ['title'],
+              },
+              [artifactName]: { schema: { value: { type: 'string' } } },
+            },
+          },
+        },
+      })).toThrow(/collides with the provider-managed FTS artifact/);
+    },
+  );
+
   it('should preserve access and handlers across runtime config surfaces', () => {
     const config = defineConfig({
       databases: {

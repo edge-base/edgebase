@@ -46,8 +46,8 @@ Upload priority: explicit value > `File.type` > extension-based MIME (~50 mappin
 
 | Group | Default | Key | Configurable |
 |-------|---------|-----|:---:|
-| `storage` | **50 req / 60s** | IP | Yes |
-| `global` | **10,000,000 req / 60s** | IP | Yes |
+| `storage` | **50 req / 60s** | verified user / IP fallback | Yes |
+| `global` | **10,000,000 req / 60s** | verified user / IP fallback | Yes |
 
 Service Key requests bypass the `storage` group limit.
 
@@ -65,4 +65,10 @@ That storage bypass applies across all Admin SDKs.
 
 :::tip Self-hosting
 When running on Docker, R2 is emulated as local file storage. The 100 MB single-upload limit and multipart limits still apply (Miniflare emulation), but there is no egress cost.
+
+The generated Docker and pack gateway accepts at most 5 GiB in one HTTP request,
+matching the maximum multipart-part size. The standard JavaScript SDK uploads
+multipart data in 5 MiB parts, so normal SDK traffic stays well below that
+gateway ceiling. Operators may lower the gateway cap with
+`EDGEBASE_GATEWAY_MAX_REQUEST_BODY_BYTES`, but cannot raise it above 5 GiB.
 :::

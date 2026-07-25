@@ -21,12 +21,16 @@ import {
   generatePgPreparationColumnDDL,
   generatePgFTSDDL,
   generatePgIndexDDL,
+  computePgFtsSignature,
+  buildPgFtsTriggerFunctionBody,
+  resolveTableIndexes,
   buildEffectiveSchema,
   computeSchemaHashSync,
   planPostgresFieldUniqueIndex,
   postgresUniqueDuplicateError,
   type PostgresIndexState,
 } from './schema.js';
+import { escapePgIdentifier } from './postgres-table-utils.js';
 
 // Track schema initialization promises so CRUD requests do not re-run the full
 // schema/meta scan on every query in the same Worker process.
@@ -205,6 +209,14 @@ async function initPgTable(
     if (config.migrations?.length) {
       const maxVersion = Math.max(...config.migrations.map((m: MigrationConfig) => m.version));
       await setMeta(connectionString, `migration_version:${tableName}`, String(maxVersion), query);
+    }
+    if (config.fts?.length) {
+      await setMeta(
+        connectionString,
+        `fts_signature:${tableName}`,
+        computePgFtsSignature(config.fts),
+        query,
+      );
     }
   } else {
     await runPgExistingTableUpgrade(
@@ -393,20 +405,462 @@ async function ensurePgFTSAndIndexes(
   query: PostgresExecutor,
 ): Promise<void> {
   // Re-apply indexes (CREATE IF NOT EXISTS is idempotent)
-  if (config.indexes?.length) {
-    const indexDDLs = generatePgIndexDDL(tableName, config.indexes);
+  const indexes = resolveTableIndexes(config);
+  if (indexes.length > 0) {
+    const indexDDLs = generatePgIndexDDL(tableName, indexes);
     for (const ddl of indexDDLs) {
       await query(ddl, []);
     }
   }
 
-  // Re-apply FTS (uses CREATE OR REPLACE and DROP TRIGGER IF EXISTS)
+  // Rebuild/backfill the additive substring corpus only when the configured
+  // definition changes. The signature is stored last in the surrounding
+  // transaction, so a partial DDL/backfill failure remains retryable.
   if (config.fts?.length) {
+    const signatureKey = `fts_signature:${tableName}`;
+    const desiredSignature = computePgFtsSignature(config.fts);
+    const storedSignature = await getMeta(connectionString, signatureKey, query);
+    const priorFields = parsePgFtsSignatureFields(storedSignature) ?? config.fts;
+    const artifactHealth = await inspectPgFtsArtifacts(
+      tableName,
+      config.fts,
+      priorFields,
+      query,
+    );
+    if (storedSignature === desiredSignature && pgFtsArtifactsAreHealthy(artifactHealth)) {
+      return;
+    }
+
+    if (!artifactHealth.tableFound) {
+      throw new Error(`PostgreSQL FTS target table '${tableName}' was not found in the current schema.`);
+    }
+    if (artifactHealth.legacyColumnPresent && !artifactHealth.legacyColumn) {
+      throw new Error(`PostgreSQL FTS helper column '_fts' on '${tableName}' has an incompatible type.`);
+    }
+    if (artifactHealth.textColumnPresent && !artifactHealth.textColumn) {
+      throw new Error(`PostgreSQL FTS helper column '_fts_text' on '${tableName}' has an incompatible type.`);
+    }
+
+    assertPgFtsArtifactRepairSafe(
+      tableName,
+      `${tableName}_fts_trigger()`,
+      'function',
+      artifactHealth.maintenanceFunction,
+      artifactHealth.maintenanceFunctionNameOccupied,
+      artifactHealth.maintenanceFunctionRepairable,
+    );
+    assertPgFtsArtifactRepairSafe(
+      tableName,
+      `${tableName}_fts_update`,
+      'trigger',
+      artifactHealth.maintenanceTrigger,
+      artifactHealth.maintenanceTriggerNameOccupied,
+      artifactHealth.maintenanceTriggerRepairable,
+    );
+
+    assertPgFtsIndexRepairSafe(
+      tableName,
+      `idx_${tableName}_fts`,
+      artifactHealth.legacyIndex,
+      artifactHealth.legacyIndexNameOccupied,
+      artifactHealth.legacyIndexRepairable,
+    );
+    assertPgFtsIndexRepairSafe(
+      tableName,
+      `idx_${tableName}_fts_text_trgm`,
+      artifactHealth.trigramIndex,
+      artifactHealth.trigramIndexNameOccupied,
+      artifactHealth.trigramIndexRepairable,
+    );
+
+    // CREATE INDEX IF NOT EXISTS cannot replace a same-name invalid index.
+    // Drop only exact-shape, target-owned artifacts proven invalid/unready;
+    // foreign or manual collisions fail above without destructive cleanup.
+    if (artifactHealth.legacyIndexRepairable) {
+      await query(
+        `DROP INDEX IF EXISTS ${escapePgIdentifier(artifactHealth.schemaName)}.${escapePgIdentifier(`idx_${tableName}_fts`)}`,
+        [],
+      );
+    }
+    if (artifactHealth.trigramIndexRepairable) {
+      await query(
+        `DROP INDEX IF EXISTS ${escapePgIdentifier(artifactHealth.schemaName)}.${escapePgIdentifier(`idx_${tableName}_fts_text_trgm`)}`,
+        [],
+      );
+    }
+
     const ftsDDLs = generatePgFTSDDL(tableName, config.fts);
     for (const ddl of ftsDDLs) {
       await query(ddl, []);
     }
+    await setMeta(connectionString, signatureKey, desiredSignature, query);
   }
+}
+
+interface PgFtsArtifactHealth {
+  schemaName: string;
+  tableFound: boolean;
+  legacyColumnPresent: boolean;
+  legacyColumn: boolean;
+  textColumnPresent: boolean;
+  textColumn: boolean;
+  maintenanceFunction: boolean;
+  maintenanceFunctionNameOccupied: boolean;
+  maintenanceFunctionRepairable: boolean;
+  maintenanceTrigger: boolean;
+  maintenanceTriggerNameOccupied: boolean;
+  maintenanceTriggerRepairable: boolean;
+  legacyIndex: boolean;
+  legacyIndexNameOccupied: boolean;
+  legacyIndexRepairable: boolean;
+  trigramIndex: boolean;
+  trigramIndexNameOccupied: boolean;
+  trigramIndexRepairable: boolean;
+}
+
+function pgBoolean(value: unknown): boolean {
+  return value === true || value === 't' || value === 1 || value === '1';
+}
+
+function pgFtsArtifactsAreHealthy(health: PgFtsArtifactHealth): boolean {
+  return health.tableFound
+    && health.legacyColumn
+    && health.textColumn
+    && health.maintenanceFunction
+    && health.maintenanceTrigger
+    && health.legacyIndex
+    && health.trigramIndex;
+}
+
+function assertPgFtsIndexRepairSafe(
+  tableName: string,
+  indexName: string,
+  healthy: boolean,
+  nameOccupied: boolean,
+  repairable: boolean,
+): void {
+  if (healthy || !nameOccupied || repairable) return;
+  throw new Error(
+    `PostgreSQL FTS index name collision for '${indexName}': `
+    + `the existing object is not a repairable index owned by table '${tableName}'.`,
+  );
+}
+
+function assertPgFtsArtifactRepairSafe(
+  tableName: string,
+  artifactName: string,
+  artifactKind: 'function' | 'trigger',
+  healthy: boolean,
+  nameOccupied: boolean,
+  repairable: boolean,
+): void {
+  if (healthy || !nameOccupied || repairable) return;
+  throw new Error(
+    `PostgreSQL FTS ${artifactKind} name collision for '${artifactName}': `
+    + `the existing object is not a repairable artifact owned by table '${tableName}'.`,
+  );
+}
+
+function parsePgFtsSignatureFields(signature: string | null): string[] | null {
+  if (!signature) return null;
+  const separator = signature.indexOf(':');
+  if (separator < 0) return null;
+  try {
+    const fields = JSON.parse(signature.slice(separator + 1)) as unknown;
+    if (!Array.isArray(fields) || fields.some((field) => typeof field !== 'string')) return null;
+    return computePgFtsSignature(fields) === signature ? fields : null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildPgFtsArtifactQuery(
+  tableName: string,
+  desiredFields: readonly string[],
+  priorFields: readonly string[] = desiredFields,
+): {
+  sql: string;
+  params: string[];
+} {
+  const triggerName = `${tableName}_fts_update`;
+  const functionName = `${tableName}_fts_trigger`;
+  const legacyIndexName = `idx_${tableName}_fts`;
+  const trigramIndexName = `idx_${tableName}_fts_text_trgm`;
+  const desiredFunctionBody = buildPgFtsTriggerFunctionBody(desiredFields);
+  const priorFunctionBody = buildPgFtsTriggerFunctionBody(priorFields);
+  return {
+    sql: `WITH target AS MATERIALIZED (
+  SELECT c.oid AS table_oid, n.oid AS namespace_oid, n.nspname AS schema_name
+  FROM pg_catalog.pg_class AS c
+  JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+  WHERE c.relname = $1
+    AND n.nspname = pg_catalog.current_schema()
+    AND c.relkind IN ('r', 'p')
+  LIMIT 1
+), legacy_named AS MATERIALIZED (
+  SELECT
+    obj.oid AS object_oid,
+    obj.relkind AS object_kind,
+    obj.relam AS access_method_oid,
+    i.indrelid AS table_oid,
+    i.indisvalid AS is_valid,
+    i.indisready AS is_ready,
+    i.indislive AS is_live,
+    i.indnkeyatts AS key_count,
+    i.indnatts AS attribute_count,
+    i.indpred AS predicate,
+    i.indexprs AS expressions,
+    i.indkey AS attribute_numbers,
+    i.indclass AS opclass_oids
+  FROM pg_catalog.pg_class AS obj
+  JOIN pg_catalog.pg_namespace AS n ON n.oid = obj.relnamespace
+  LEFT JOIN pg_catalog.pg_index AS i ON i.indexrelid = obj.oid
+  WHERE obj.relname = $4
+    AND n.nspname = pg_catalog.current_schema()
+  LIMIT 1
+), trigram_named AS MATERIALIZED (
+  SELECT
+    obj.oid AS object_oid,
+    obj.relkind AS object_kind,
+    obj.relam AS access_method_oid,
+    i.indrelid AS table_oid,
+    i.indisvalid AS is_valid,
+    i.indisready AS is_ready,
+    i.indislive AS is_live,
+    i.indnkeyatts AS key_count,
+    i.indnatts AS attribute_count,
+    i.indpred AS predicate,
+    i.indexprs AS expressions,
+    i.indkey AS attribute_numbers,
+    i.indclass AS opclass_oids
+  FROM pg_catalog.pg_class AS obj
+  JOIN pg_catalog.pg_namespace AS n ON n.oid = obj.relnamespace
+  LEFT JOIN pg_catalog.pg_index AS i ON i.indexrelid = obj.oid
+  WHERE obj.relname = $5
+    AND n.nspname = pg_catalog.current_schema()
+  LIMIT 1
+)
+SELECT
+  COALESCE((SELECT schema_name FROM target LIMIT 1), '') AS "schemaName",
+  EXISTS (SELECT 1 FROM target LIMIT 1) AS "tableFound",
+  EXISTS (
+    SELECT 1 FROM target AS t
+    JOIN pg_catalog.pg_attribute AS a ON a.attrelid = t.table_oid
+    WHERE a.attname = '_fts' AND a.attnum > 0 AND NOT a.attisdropped
+    LIMIT 1
+  ) AS "legacyColumnPresent",
+  EXISTS (
+    SELECT 1 FROM target AS t
+    JOIN pg_catalog.pg_attribute AS a ON a.attrelid = t.table_oid
+    WHERE a.attname = '_fts' AND a.attnum > 0 AND NOT a.attisdropped
+      AND a.atttypid = pg_catalog.to_regtype('pg_catalog.tsvector')
+    LIMIT 1
+  ) AS "legacyColumn",
+  EXISTS (
+    SELECT 1 FROM target AS t
+    JOIN pg_catalog.pg_attribute AS a ON a.attrelid = t.table_oid
+    WHERE a.attname = '_fts_text' AND a.attnum > 0 AND NOT a.attisdropped
+    LIMIT 1
+  ) AS "textColumnPresent",
+  EXISTS (
+    SELECT 1 FROM target AS t
+    JOIN pg_catalog.pg_attribute AS a ON a.attrelid = t.table_oid
+    WHERE a.attname = '_fts_text' AND a.attnum > 0 AND NOT a.attisdropped
+      AND a.atttypid = pg_catalog.to_regtype('pg_catalog.text')
+    LIMIT 1
+  ) AS "textColumn",
+  EXISTS (
+    SELECT 1
+    FROM target AS target_table
+    JOIN pg_catalog.pg_proc AS p ON p.pronamespace = target_table.namespace_oid
+    JOIN pg_catalog.pg_language AS language ON language.oid = p.prolang
+    WHERE p.proname = $3
+      AND p.pronargs = 0
+      AND p.prorettype = pg_catalog.to_regtype('pg_catalog.trigger')
+      AND p.prokind = 'f'
+      AND language.lanname = 'plpgsql'
+      AND p.prosrc = $6
+    LIMIT 1
+  ) AS "maintenanceFunction",
+  EXISTS (
+    SELECT 1
+    FROM target AS target_table
+    JOIN pg_catalog.pg_proc AS p ON p.pronamespace = target_table.namespace_oid
+    WHERE p.proname = $3 AND p.pronargs = 0
+    LIMIT 1
+  ) AS "maintenanceFunctionNameOccupied",
+  EXISTS (
+    SELECT 1
+    FROM target AS target_table
+    JOIN pg_catalog.pg_proc AS p ON p.pronamespace = target_table.namespace_oid
+    JOIN pg_catalog.pg_language AS language ON language.oid = p.prolang
+    WHERE p.proname = $3
+      AND p.pronargs = 0
+      AND p.prorettype = pg_catalog.to_regtype('pg_catalog.trigger')
+      AND p.prokind = 'f'
+      AND language.lanname = 'plpgsql'
+      AND p.prosrc IN ($6, $7)
+    LIMIT 1
+  ) AS "maintenanceFunctionRepairable",
+  EXISTS (
+    SELECT 1
+    FROM target AS target_table
+    JOIN pg_catalog.pg_trigger AS t ON t.tgrelid = target_table.table_oid
+    JOIN pg_catalog.pg_proc AS p ON p.oid = t.tgfoid
+    JOIN pg_catalog.pg_language AS language ON language.oid = p.prolang
+    WHERE t.tgname = $2
+      AND NOT t.tgisinternal
+      AND t.tgenabled IN ('O', 'A')
+      AND t.tgtype = 23
+      AND t.tgqual IS NULL
+      AND p.proname = $3
+      AND p.pronamespace = target_table.namespace_oid
+      AND p.pronargs = 0
+      AND p.prorettype = pg_catalog.to_regtype('pg_catalog.trigger')
+      AND p.prokind = 'f'
+      AND language.lanname = 'plpgsql'
+      AND p.prosrc = $6
+    LIMIT 1
+  ) AS "maintenanceTrigger",
+  EXISTS (
+    SELECT 1
+    FROM target AS target_table
+    JOIN pg_catalog.pg_trigger AS t ON t.tgrelid = target_table.table_oid
+    WHERE t.tgname = $2
+    LIMIT 1
+  ) AS "maintenanceTriggerNameOccupied",
+  EXISTS (
+    SELECT 1
+    FROM target AS target_table
+    JOIN pg_catalog.pg_trigger AS t ON t.tgrelid = target_table.table_oid
+    JOIN pg_catalog.pg_proc AS p ON p.oid = t.tgfoid
+    JOIN pg_catalog.pg_language AS language ON language.oid = p.prolang
+    WHERE t.tgname = $2
+      AND NOT t.tgisinternal
+      AND p.proname = $3
+      AND p.pronamespace = target_table.namespace_oid
+      AND p.pronargs = 0
+      AND p.prorettype = pg_catalog.to_regtype('pg_catalog.trigger')
+      AND p.prokind = 'f'
+      AND language.lanname = 'plpgsql'
+      AND p.prosrc IN ($6, $7)
+    LIMIT 1
+  ) AS "maintenanceTriggerRepairable",
+  EXISTS (
+    SELECT 1
+    FROM legacy_named AS named
+    JOIN target AS t ON named.table_oid = t.table_oid
+    JOIN pg_catalog.pg_am AS am ON am.oid = named.access_method_oid
+    JOIN pg_catalog.pg_attribute AS a
+      ON a.attrelid = t.table_oid AND a.attnum = ANY(named.attribute_numbers)
+    JOIN pg_catalog.pg_opclass AS opc ON opc.oid = ANY(named.opclass_oids)
+    WHERE named.object_kind = 'i' AND am.amname = 'gin'
+      AND named.key_count = 1 AND named.attribute_count = 1
+      AND named.predicate IS NULL AND named.expressions IS NULL
+      AND a.attname = '_fts'
+      AND a.atttypid = pg_catalog.to_regtype('pg_catalog.tsvector')
+      AND opc.opcname = 'tsvector_ops'
+      AND named.is_valid AND named.is_ready AND named.is_live
+    LIMIT 1
+  ) AS "legacyIndex",
+  EXISTS (SELECT 1 FROM legacy_named LIMIT 1) AS "legacyIndexNameOccupied",
+  EXISTS (
+    SELECT 1
+    FROM legacy_named AS named
+    JOIN target AS t ON named.table_oid = t.table_oid
+    JOIN pg_catalog.pg_am AS am ON am.oid = named.access_method_oid
+    JOIN pg_catalog.pg_attribute AS a
+      ON a.attrelid = t.table_oid AND a.attnum = ANY(named.attribute_numbers)
+    JOIN pg_catalog.pg_opclass AS opc ON opc.oid = ANY(named.opclass_oids)
+    WHERE named.object_kind = 'i' AND am.amname = 'gin'
+      AND named.key_count = 1 AND named.attribute_count = 1
+      AND named.predicate IS NULL AND named.expressions IS NULL
+      AND a.attname = '_fts'
+      AND a.atttypid = pg_catalog.to_regtype('pg_catalog.tsvector')
+      AND opc.opcname = 'tsvector_ops'
+      AND NOT (named.is_valid AND named.is_ready AND named.is_live)
+    LIMIT 1
+  ) AS "legacyIndexRepairable",
+  EXISTS (
+    SELECT 1
+    FROM trigram_named AS named
+    JOIN target AS t ON named.table_oid = t.table_oid
+    JOIN pg_catalog.pg_am AS am ON am.oid = named.access_method_oid
+    JOIN pg_catalog.pg_attribute AS a
+      ON a.attrelid = t.table_oid AND a.attnum = ANY(named.attribute_numbers)
+    JOIN pg_catalog.pg_opclass AS opc ON opc.oid = ANY(named.opclass_oids)
+    WHERE named.object_kind = 'i' AND am.amname = 'gin'
+      AND named.key_count = 1 AND named.attribute_count = 1
+      AND named.predicate IS NULL AND named.expressions IS NULL
+      AND a.attname = '_fts_text'
+      AND a.atttypid = pg_catalog.to_regtype('pg_catalog.text')
+      AND opc.opcname = 'gin_trgm_ops'
+      AND named.is_valid AND named.is_ready AND named.is_live
+    LIMIT 1
+  ) AS "trigramIndex",
+  EXISTS (SELECT 1 FROM trigram_named LIMIT 1) AS "trigramIndexNameOccupied",
+  EXISTS (
+    SELECT 1
+    FROM trigram_named AS named
+    JOIN target AS t ON named.table_oid = t.table_oid
+    JOIN pg_catalog.pg_am AS am ON am.oid = named.access_method_oid
+    JOIN pg_catalog.pg_attribute AS a
+      ON a.attrelid = t.table_oid AND a.attnum = ANY(named.attribute_numbers)
+    JOIN pg_catalog.pg_opclass AS opc ON opc.oid = ANY(named.opclass_oids)
+    WHERE named.object_kind = 'i' AND am.amname = 'gin'
+      AND named.key_count = 1 AND named.attribute_count = 1
+      AND named.predicate IS NULL AND named.expressions IS NULL
+      AND a.attname = '_fts_text'
+      AND a.atttypid = pg_catalog.to_regtype('pg_catalog.text')
+      AND opc.opcname = 'gin_trgm_ops'
+      AND NOT (named.is_valid AND named.is_ready AND named.is_live)
+    LIMIT 1
+  ) AS "trigramIndexRepairable"`,
+    params: [
+      tableName,
+      triggerName,
+      functionName,
+      legacyIndexName,
+      trigramIndexName,
+      desiredFunctionBody,
+      priorFunctionBody,
+    ],
+  };
+}
+
+/**
+ * Read one bounded physical-state row. Each EXISTS probe is constrained by the
+ * target relation and an exact artifact name; no user-table rows are touched.
+ */
+async function inspectPgFtsArtifacts(
+  tableName: string,
+  desiredFields: readonly string[],
+  priorFields: readonly string[],
+  query: PostgresExecutor,
+): Promise<PgFtsArtifactHealth> {
+  const artifactQuery = buildPgFtsArtifactQuery(tableName, desiredFields, priorFields);
+  const result = await query(artifactQuery.sql, artifactQuery.params);
+  const row = result.rows[0] ?? {};
+  return {
+    schemaName: typeof row.schemaName === 'string' ? row.schemaName : '',
+    tableFound: pgBoolean(row.tableFound),
+    legacyColumnPresent: pgBoolean(row.legacyColumnPresent),
+    legacyColumn: pgBoolean(row.legacyColumn),
+    textColumnPresent: pgBoolean(row.textColumnPresent),
+    textColumn: pgBoolean(row.textColumn),
+    maintenanceFunction: pgBoolean(row.maintenanceFunction),
+    maintenanceFunctionNameOccupied: pgBoolean(row.maintenanceFunctionNameOccupied),
+    maintenanceFunctionRepairable: pgBoolean(row.maintenanceFunctionRepairable),
+    maintenanceTrigger: pgBoolean(row.maintenanceTrigger),
+    maintenanceTriggerNameOccupied: pgBoolean(row.maintenanceTriggerNameOccupied),
+    maintenanceTriggerRepairable: pgBoolean(row.maintenanceTriggerRepairable),
+    legacyIndex: pgBoolean(row.legacyIndex),
+    legacyIndexNameOccupied: pgBoolean(row.legacyIndexNameOccupied),
+    legacyIndexRepairable: pgBoolean(row.legacyIndexRepairable),
+    trigramIndex: pgBoolean(row.trigramIndex),
+    trigramIndexNameOccupied: pgBoolean(row.trigramIndexNameOccupied),
+    trigramIndexRepairable: pgBoolean(row.trigramIndexRepairable),
+  };
 }
 
 // ─── Migration Engine ───

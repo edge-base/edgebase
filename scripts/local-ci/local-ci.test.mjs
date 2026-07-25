@@ -18,6 +18,7 @@ import {
   jobsForLocalCiProfile,
 } from './jobs.mjs';
 import {
+  assertDockerCapacityRequirements,
   dockerPullArgs,
   mutationFileList,
   schedulerCapacity,
@@ -349,6 +350,39 @@ test('npm release checks use native Linux while the complete gate retains amd64'
   assert.equal(needsAmd64EmulationLimit('aarch64', 'linux/amd64'), true);
   assert.equal(needsAmd64EmulationLimit('aarch64', 'linux/arm64'), false);
   assert.equal(needsAmd64EmulationLimit('amd64', 'linux/amd64'), false);
+});
+
+test('local CI refuses non-native or undersized Docker engines before launching jobs', () => {
+  const nativeHost = { platform: 'darwin', architecture: 'arm64' };
+  assert.throws(
+    () => assertDockerCapacityRequirements({
+      architecture: 'x86_64',
+      cpus: 8,
+      memoryGiB: 15.6,
+    }, nativeHost),
+    /native arm64 Docker server/,
+  );
+  assert.throws(
+    () => assertDockerCapacityRequirements({
+      architecture: 'aarch64',
+      cpus: 4,
+      memoryGiB: 15.6,
+    }, nativeHost),
+    /at least 8 CPUs/,
+  );
+  assert.throws(
+    () => assertDockerCapacityRequirements({
+      architecture: 'aarch64',
+      cpus: 8,
+      memoryGiB: 7.8,
+    }, nativeHost),
+    /16 GiB allocation/,
+  );
+  assert.doesNotThrow(() => assertDockerCapacityRequirements({
+    architecture: 'aarch64',
+    cpus: 8,
+    memoryGiB: 15.5,
+  }, nativeHost));
 });
 
 test('isolated local release checks retain hosted timeouts outside local CI', async () => {

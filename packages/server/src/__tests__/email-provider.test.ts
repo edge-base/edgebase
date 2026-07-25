@@ -262,6 +262,34 @@ describe('SESProvider', () => {
 });
 
 describe('ResendProvider', () => {
+  it('advertises and forwards one stable provider idempotency key', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: 'resend-stable-1' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new ResendProvider('re_key', 'noreply@example.com');
+    expect((provider as unknown as { supportsIdempotency?: boolean }).supportsIdempotency).toBe(true);
+    const message = {
+      to: 'user@example.com',
+      subject: 'Stable delivery',
+      html: '<p>hello</p>',
+      idempotencyKey: 'database-automation-delivery-synthetic',
+    };
+    await expect(provider.send(message)).resolves.toEqual({
+      success: true,
+      messageId: 'resend-stable-1',
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get('idempotency-key')).toBe(
+      'database-automation-delivery-synthetic',
+    );
+  });
+
   it('posts to the Resend API and returns the message id on success', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: 'resend-1' }), {
@@ -407,6 +435,28 @@ describe('SendGridProvider failure path', () => {
 });
 
 describe('MockEmailProvider', () => {
+  it('advertises and forwards one stable provider idempotency key', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({ messageId: 'mock-stable-1' }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new MockEmailProvider('https://mock.example/email', 'noreply@example.com');
+    expect((provider as unknown as { supportsIdempotency?: boolean }).supportsIdempotency).toBe(true);
+    const message = {
+      to: 'user@example.com',
+      subject: 'Stable delivery',
+      html: '<p>hello</p>',
+      idempotencyKey: 'database-automation-delivery-synthetic',
+    };
+    await provider.send(message);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get('idempotency-key')).toBe(
+      'database-automation-delivery-synthetic',
+    );
+  });
+
   it('normalizes a trailing slash in the endpoint and returns failure on non-2xx', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('nope', { status: 500 }),
@@ -543,6 +593,18 @@ describe('createEmailProvider provider selection', () => {
   it('constructs a CloudflareEmailProvider even without an apiKey', () => {
     const provider = createEmailProvider({ provider: 'cloudflare', from: 'noreply@example.com' });
     expect(provider).toBeInstanceOf(CloudflareEmailProvider);
+  });
+
+  it('does not advertise guaranteed idempotency for unsupported providers', () => {
+    const providers = [
+      createEmailProvider({ provider: 'sendgrid', apiKey: 'SG.key', from: 'noreply@example.com' }),
+      createEmailProvider({ provider: 'mailgun', apiKey: 'mg-key', from: 'noreply@example.com' }),
+      createEmailProvider({ provider: 'ses', apiKey: 'AKIA:secret', from: 'noreply@example.com' }),
+      createEmailProvider({ provider: 'cloudflare', from: 'noreply@example.com' }),
+    ];
+    expect(providers.map((provider) => (
+      (provider as unknown as { supportsIdempotency?: boolean })?.supportsIdempotency
+    ))).toEqual([false, false, false, false]);
   });
 
   it('returns null for an unknown provider', () => {

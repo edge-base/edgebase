@@ -1,3 +1,9 @@
+## 0.5.0
+
+- Synchronized the Flutter package and generated API surfaces with EdgeBase
+  0.5.0
+- No Dart-specific API compatibility break is introduced
+
 ## 0.4.9
 
 - Synchronized the Flutter package with the EdgeBase 0.4.9 patch release

@@ -19,9 +19,14 @@ import {
   buildGetQuery,
   buildSearchQuery,
   buildSubstringSearchQuery,
+  buildSqliteFtsArtifactQuery,
   parseQueryParams,
   QUERY_PARAM_KEYS,
+  inspectSqliteFtsArtifacts,
+  sqliteFtsArtifactsAreHealthy,
+  sqliteFtsNeedsSubstringFallback,
 } from '../lib/query-engine.js';
+import { generateFTS5DDL, generateFTS5Triggers } from '../lib/schema.js';
 
 // ─── A. buildGetQuery ─────────────────────────────────────────────────────────
 
@@ -137,22 +142,86 @@ describe('buildListQuery — filter operators', () => {
     expect(params).toContain('hello');
   });
 
-  it('in → IN (?, ?, ?)', () => {
+  it('in → one SQLite JSON set bind', () => {
     const { sql, params } = buildListQuery('posts', { filters: [['status', 'in', ['a', 'b', 'c']]] });
-    expect(sql).toContain('IN (?, ?, ?)');
-    expect(params).toContain('a');
-    expect(params).toContain('c');
+    expect(sql).toContain('IN (SELECT value FROM json_each(?))');
+    expect(params).toContain(JSON.stringify(['a', 'b', 'c']));
   });
 
   it('not in → NOT IN', () => {
-    const { sql } = buildListQuery('posts', { filters: [['status', 'not in', ['deleted', 'spam']]] });
-    expect(sql).toContain('NOT IN');
+    const { sql, params } = buildListQuery('posts', { filters: [['status', 'not in', ['deleted', 'spam']]] });
+    expect(sql).toContain('NOT IN (SELECT value FROM json_each(?))');
+    expect(params).toContain(JSON.stringify(['deleted', 'spam']));
   });
 
   it('in with empty array', () => {
-    const { sql } = buildListQuery('posts', { filters: [['status', 'in', []]] });
-    // Empty IN() should generate "IN ()" which might return 0 results
-    expect(sql).toContain('IN ()');
+    const { sql, params } = buildListQuery('posts', { filters: [['status', 'in', []]] });
+    expect(sql).toContain('IN (SELECT value FROM json_each(?))');
+    expect(params).toContain('[]');
+  });
+
+  it('contains-any → one SQLite JSON set bind', () => {
+    const { sql, params } = buildListQuery('posts', {
+      filters: [['tags', 'contains-any', ['hot', 'featured']]],
+    });
+    expect(sql).toContain(
+      'EXISTS (SELECT 1 FROM json_each("tags") WHERE value IN (SELECT value FROM json_each(?)))',
+    );
+    expect(params).toContain(JSON.stringify(['hot', 'featured']));
+  });
+
+  it('preserves mixed SQLite JSON scalar types in one set bind', () => {
+    const values = ['text', 7, true, false, null];
+    const { params, countParams } = buildListQuery('posts', {
+      filters: [['mixed', 'in', values]],
+    });
+    expect(params).toEqual([JSON.stringify(values), 100]);
+    expect(countParams).toEqual([JSON.stringify(values)]);
+  });
+
+  it('composes independent SQLite sets with cursor pagination in stable bind order', () => {
+    const statuses = ['active', 'pending'];
+    const tags = ['hot', 'featured'];
+    const result = buildListQuery('posts', {
+      filters: [['status', 'in', statuses]],
+      orFilters: [['tags', 'contains-any', tags]],
+      pagination: { after: 'cursor-1', limit: 25 },
+    });
+    expect(result.params).toEqual([
+      JSON.stringify(statuses),
+      JSON.stringify(tags),
+      'cursor-1',
+      25,
+    ]);
+    expect(result.countSql).toBeUndefined();
+  });
+
+  it('keeps a 100-member SQLite set filter inside the statement bind budget', () => {
+    const ids = Array.from({ length: 100 }, (_, index) => `page-${index}`);
+    const { sql, params, countSql, countParams } = buildListQuery('posts', {
+      filters: [['id', 'in', ids]],
+      pagination: { limit: 100, offset: 0 },
+    }, 'sqlite');
+
+    expect(sql).toContain('"id" IN (SELECT value FROM json_each(?))');
+    expect(params).toEqual([JSON.stringify(ids), 100, 0]);
+    expect(countSql).toContain('"id" IN (SELECT value FROM json_each(?))');
+    expect(countParams).toEqual([JSON.stringify(ids)]);
+  });
+
+  it('retains native PostgreSQL placeholders for the same bounded set', () => {
+    const ids = Array.from({ length: 100 }, (_, index) => `page-${index}`);
+    const { sql, params, countSql, countParams } = buildListQuery('posts', {
+      filters: [['id', 'in', ids]],
+      pagination: { limit: 100, offset: 0 },
+    }, 'postgres');
+
+    expect(sql).not.toContain('json_each');
+    expect(sql).toContain('"id" IN ($1, $2, $3');
+    expect(sql).toContain('$100)');
+    expect(params).toEqual([...ids, 100, 0]);
+    expect(countSql).toContain('"id" IN ($1, $2, $3');
+    expect(countParams).toEqual(ids);
   });
 
   it('multiple filters → AND', () => {
@@ -358,10 +427,10 @@ describe('buildSearchQuery', () => {
       sort: [{ field: 'createdAt', direction: 'desc' }],
       pagination: { limit: 5, offset: 10 },
     });
-    expect(sql).toContain('"status" = ?');
-    expect(sql).toContain('ORDER BY "createdAt" DESC, "id" ASC');
+    expect(sql).toContain('"posts"."status" = ?');
+    expect(sql).toContain('ORDER BY "posts"."createdAt" DESC, "posts"."id" ASC');
     expect(params).toEqual(['"q"*', 'published', 5, 10]);
-    expect(countSql).toContain('"status" = ?');
+    expect(countSql).toContain('"posts"."status" = ?');
     expect(countParams).toEqual(['"q"*', 'published']);
   });
 });
@@ -380,6 +449,59 @@ describe('buildSubstringSearchQuery', () => {
     expect(params).toEqual(['needle', 'draft', 2, 1]);
     expect(countSql).toContain('"status" = ?');
     expect(countParams).toEqual(['needle', 'draft']);
+  });
+
+  it('escapes PostgreSQL LIKE metacharacters for every searched field and count', () => {
+    const term = String.raw`100%_literal\path`;
+    const escaped = String.raw`100\%\_literal\\path`;
+    const result = buildSubstringSearchQuery('posts', term, {
+      fields: ['title', 'body'],
+    }, 'postgres');
+
+    expect(result.sql.match(/ESCAPE E'\\\\'/g)).toHaveLength(2);
+    expect(result.countSql?.match(/ESCAPE E'\\\\'/g)).toHaveLength(2);
+    expect(result.params.slice(0, 2)).toEqual([escaped, escaped]);
+    expect(result.countParams).toEqual([escaped, escaped]);
+  });
+});
+
+describe('SQLite configured FTS fallback boundary', () => {
+  it('requires compatibility fallback when any effective token is under three code points', () => {
+    expect(sqliteFtsNeedsSubstringFallback('한')).toBe(true);
+    expect(sqliteFtsNeedsSubstringFallback('한지')).toBe(true);
+    expect(sqliteFtsNeedsSubstringFallback('한지문')).toBe(false);
+    expect(sqliteFtsNeedsSubstringFallback('indexed 한')).toBe(true);
+    expect(sqliteFtsNeedsSubstringFallback('🙂')).toBe(true);
+  });
+
+  it('checks exact FTS ownership and generated trigger bodies with a collision-safe cap', () => {
+    const query = buildSqliteFtsArtifactQuery('docs');
+    expect(query.sql).toContain('LIMIT 8');
+    expect(query.sql).toContain('"tbl_name" AS "tableName"');
+    expect(query.sql).toContain('"sql"');
+    expect(query.params).toEqual(['docs_fts', 'docs_ai', 'docs_ad', 'docs_au']);
+    const sql = [generateFTS5DDL('docs', ['title']), ...generateFTS5Triggers('docs', ['title'])];
+    const rows = [
+      { name: 'docs_fts', type: 'table', tableName: 'docs_fts', sql: sql[0] },
+      { name: 'docs_ai', type: 'trigger', tableName: 'docs', sql: sql[1] },
+      { name: 'docs_ad', type: 'trigger', tableName: 'docs', sql: sql[2] },
+      { name: 'docs_au', type: 'trigger', tableName: 'docs', sql: sql[3] },
+    ];
+    expect(sqliteFtsArtifactsAreHealthy('docs', ['title'], rows)).toBe(true);
+    expect(sqliteFtsArtifactsAreHealthy('docs', ['title'], rows.slice(0, 3))).toBe(false);
+
+    const noOpTrigger = rows.map((row) => row.name === 'docs_ai'
+      ? { ...row, sql: 'CREATE TRIGGER "docs_ai" AFTER INSERT ON "docs" BEGIN SELECT 1; END' }
+      : row);
+    expect(inspectSqliteFtsArtifacts('docs', ['title'], ['title'], noOpTrigger))
+      .toEqual({ healthy: false, rebuildSafe: false });
+
+    const duplicateForeignTable = [
+      ...rows,
+      { name: 'docs_ai', type: 'table', tableName: 'docs_ai', sql: 'CREATE TABLE "docs_ai" (id TEXT)' },
+    ];
+    expect(inspectSqliteFtsArtifacts('docs', ['title'], ['title'], duplicateForeignTable))
+      .toEqual({ healthy: false, rebuildSafe: false });
   });
 });
 

@@ -73,6 +73,15 @@ export interface BatchByFilterResult {
   errors: Array<{ chunkIndex: number; chunkSize: number; error: EdgeBaseError }>;
 }
 
+export type EdgeBaseTableRecord = Record<string, unknown>;
+export type EdgeBaseTableMap = Record<string, EdgeBaseTableRecord>;
+
+/** Caller-supplied values for an insert request. This object is not the stored row. */
+export type InsertInput<T> = Partial<T>;
+
+/** The row materialized and returned by storage after an insert commits. */
+export type CommittedRow<T> = T;
+
 /**
  * One operation inside db.transact().
  * Applied in order, atomically — if any operation fails, nothing is written.
@@ -80,7 +89,7 @@ export interface BatchByFilterResult {
  * when unmet, closing check-then-write races without a client round-trip.
  */
 export type TransactOperation =
-  | { table: string; op: 'insert'; data: Record<string, unknown> }
+  | { table: string; op: 'insert'; data: InsertInput<EdgeBaseTableRecord> }
   | { table: string; op: 'update'; id: string; data: Record<string, unknown> }
   | { table: string; op: 'delete'; id: string }
   | {
@@ -101,9 +110,37 @@ export type TransactOperation =
       fencedBy?: { table: string; id: string; field: string };
     };
 
+/** Full result entry for an insert operation after storage-owned fields exist. */
+export interface TransactInsertResult<T = EdgeBaseTableRecord> {
+  inserted: CommittedRow<T>;
+}
+
+/** Infer an operation's full-result entry without overstating non-insert shapes. */
+export type TransactOperationResult<
+  Operation extends TransactOperation,
+  Tables extends EdgeBaseTableMap = EdgeBaseTableMap,
+> = Operation extends { table: infer TableName extends string; op: 'insert' }
+  ? TransactInsertResult<
+      TableName extends keyof Tables ? Tables[TableName] : EdgeBaseTableRecord
+    >
+  : Record<string, unknown>;
+
+/** Ordered full-result entries corresponding to the submitted operations. */
+export type TransactResults<
+  Operations extends readonly TransactOperation[],
+  Tables extends EdgeBaseTableMap = EdgeBaseTableMap,
+> = {
+  -readonly [Index in keyof Operations]: Operations[Index] extends TransactOperation
+    ? TransactOperationResult<Operations[Index], Tables>
+    : never;
+};
+
 /** Result of db.transact() — one entry per operation, in request order. */
-export interface TransactResult {
-  results: Array<Record<string, unknown>>;
+export interface TransactResult<
+  Operations extends readonly TransactOperation[] = readonly TransactOperation[],
+  Tables extends EdgeBaseTableMap = EdgeBaseTableMap,
+> {
+  results: TransactResults<Operations, Tables>;
 }
 
 export const MAX_COMPACT_TRANSACT_RESPONSE_BYTES = 39;
@@ -129,9 +166,6 @@ export type TableSqlExecutor = (
   query: string,
   params?: unknown[],
 ) => Promise<unknown[]>;
-
-export type EdgeBaseTableRecord = Record<string, unknown>;
-export type EdgeBaseTableMap = Record<string, EdgeBaseTableRecord>;
 
 const warnedClientSideSnapshotFilters = new Set<string>();
 
@@ -557,8 +591,8 @@ export class TableRef<T = Record<string, unknown>> {
 
   /**
    * Choose whether list/search responses calculate the total matching count.
-   * The default remains true on the server. Bounded maintenance and cursor
-   * consumers that never read `total` should opt out to avoid a full COUNT.
+   * Exact totals are opt-in. Omission or false skips the COUNT and returns
+   * `total: null`; pass true only when the numeric total is required.
    */
   includeTotal(include: boolean): TableRef<T> {
     if (typeof include !== 'boolean') {
@@ -793,8 +827,11 @@ export class TableRef<T = Record<string, unknown>> {
     return result.items[0] ?? null;
   }
 
-  /** Insert a new record */
-  async insert(data: Partial<T>): Promise<T> {
+  /**
+   * Insert a new record and return the committed row materialized by storage.
+   * The input is request data only; use the return value as canonical state.
+   */
+  async insert(data: InsertInput<T>): Promise<CommittedRow<T>> {
     return coreInsert<T>(this.core, this.namespace, this.instanceId, this.name, data);
   }
 
@@ -883,7 +920,7 @@ export class TableRef<T = Record<string, unknown>> {
    * Auto-chunks into 500-item batches.
    * Each chunk is an independent transaction — partial failure possible across chunks.
    */
-  async insertMany(items: Array<Partial<T>>): Promise<T[]> {
+  async insertMany(items: Array<InsertInput<T>>): Promise<Array<CommittedRow<T>>> {
     const CHUNK_SIZE = 500;
 
     // Fast path: no chunking needed
@@ -1229,18 +1266,23 @@ export class DbRef<Tables extends EdgeBaseTableMap = EdgeBaseTableMap> {
    *   { table: 'audit_events', op: 'insert', data: { action: 'grant' } },
    * ]);
    */
-  transact(operations: TransactOperation[]): Promise<TransactResult>;
-  transact(operations: TransactOperation[], options: TransactFullOptions): Promise<TransactResult>;
-  transact(
-    operations: TransactOperation[],
+  transact<const Operations extends readonly TransactOperation[]>(
+    operations: Operations,
+  ): Promise<TransactResult<Operations, Tables>>;
+  transact<const Operations extends readonly TransactOperation[]>(
+    operations: Operations,
+    options: TransactFullOptions,
+  ): Promise<TransactResult<Operations, Tables>>;
+  transact<const Operations extends readonly TransactOperation[]>(
+    operations: Operations,
     options: TransactCompactOptions,
   ): Promise<CompactTransactResult>;
-  transact(
-    operations: TransactOperation[],
+  transact<const Operations extends readonly TransactOperation[]>(
+    operations: Operations,
     options: TransactOptions,
-  ): Promise<TransactResult | CompactTransactResult>;
+  ): Promise<TransactResult<Operations, Tables> | CompactTransactResult>;
   async transact(
-    operations: TransactOperation[],
+    operations: readonly TransactOperation[],
     options: TransactOptions = {},
   ): Promise<TransactResult | CompactTransactResult> {
     if (options.resultMode !== undefined && options.resultMode !== 'full' && options.resultMode !== 'compact') {

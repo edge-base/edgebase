@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.5.0 — 2026-07-25
+
+### Added
+
+- Database list and related-search APIs now support bounded response sizes,
+  opt-in totals, portable continuation behavior, and required-ancestor
+  constraints across SQLite, D1, and PostgreSQL.
+- Self-hosted Docker and packed applications now publish isolated runtime
+  generations atomically, supervise schedules durably, and apply explicit
+  memory, storage, process, and transport limits.
+- JavaScript function calls support caller cancellation and raw `Response`
+  results, while database writes expose storage-committed row types.
+
+### Fixed
+
+- The self-host proxy now preserves trusted browser origins for secure cookie
+  authentication, isolates WebSocket admission, bounds single-CPU request
+  pressure, and releases completed, aborted, unread, and abandoned response
+  bodies without losing later requests.
+- Authentication authority reads are single-flight, authenticated rate limits
+  use stable identities, and session cookies remain fail-closed behind proven
+  gateway hops.
+- Database triggers drain in bounded batches, physical reference fields are
+  indexed, and transaction, null-filter, boolean-filter, migration, and schema
+  behavior is consistent across supported providers.
+- Release dependencies no longer include the blocking high-severity advisories
+  found by the package audit.
+- Local npm release verification now refuses non-native or undersized Docker
+  engines before launching jobs.
+
 ## 0.4.9 — 2026-07-17
 
 ### Added

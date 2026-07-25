@@ -168,6 +168,7 @@ export default defineFunction({
 ## Execution Model
 
 - **Async**: Triggers run via `ctx.waitUntil()` after the API response is sent. The client gets their CUD response immediately.
+- **Bounded batch dispatch**: One committed batch or transaction uses one registry snapshot and one `ctx.waitUntil()` owner, with at most eight rows executing handlers concurrently. Matching handlers for a row retain registration order.
 - **Best-effort**: If a trigger fails, the error is logged but the original operation is **not** rolled back. Triggers are independent of the source transaction.
 - **No retry**: Failed triggers are not automatically retried. Design triggers to be idempotent where possible.
 

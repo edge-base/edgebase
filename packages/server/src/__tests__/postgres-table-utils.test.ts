@@ -99,7 +99,12 @@ describe('postgres table utils', () => {
   });
 
   it('stripInternalPgFields removes internal postgres helper columns', () => {
-    expect(stripInternalPgFields({ id: 'row-1', _fts: 'vector', title: 'hello' })).toEqual({
+    expect(stripInternalPgFields({
+      id: 'row-1',
+      _fts: 'vector',
+      _fts_text: 'hello',
+      title: 'hello',
+    })).toEqual({
       id: 'row-1',
       title: 'hello',
     });

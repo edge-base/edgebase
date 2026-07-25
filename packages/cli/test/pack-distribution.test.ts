@@ -1,11 +1,11 @@
 import { execFileSync, spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createArchiveFromPortableArtifact } from '../src/lib/pack.js';
+import { createArchiveFromPortableArtifact, createPortablePackArtifact } from '../src/lib/pack.js';
 import { resolveTsxCommand } from '../src/lib/node-tools.js';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -481,7 +481,7 @@ export default defineConfig({
       appName: 'Portable Test',
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(result.stderr).toBe('');
 
     const payload = JSON.parse(result.stdout) as {
@@ -502,6 +502,8 @@ export default defineConfig({
           gateway: { path: string; digest: string; bytes: number };
           scheduleSupervisor: { path: string; digest: string; bytes: number };
           dockerEntrypoint: { path: string; digest: string; bytes: number };
+          wranglerRuntime: { path: string; digest: string; bytes: number };
+          proxyWorker: { path: string; digest: string; bytes: number };
         };
         launcher: {
           defaultOpenPath: string;
@@ -526,6 +528,8 @@ export default defineConfig({
         gateway: { path: string; digest: string; bytes: number };
         scheduleSupervisor: { path: string; digest: string; bytes: number };
         dockerEntrypoint: { path: string; digest: string; bytes: number };
+        wranglerRuntime: { path: string; digest: string; bytes: number };
+        proxyWorker: { path: string; digest: string; bytes: number };
       };
     };
     expect(payload.packManifest.schedules.digest).toBe(portableAppManifest.schedules.digest);
@@ -541,6 +545,14 @@ export default defineConfig({
     expect(existsSync(join(
       payload.bundledAppDir,
       payload.packManifest.selfHost.dockerEntrypoint.path,
+    ))).toBe(true);
+    expect(existsSync(join(
+      payload.bundledAppDir,
+      payload.packManifest.selfHost.wranglerRuntime.path,
+    ))).toBe(true);
+    expect(existsSync(join(
+      payload.bundledAppDir,
+      payload.packManifest.selfHost.proxyWorker.path,
     ))).toBe(true);
     const appDataRoot = resolveAppDataRoot(payload.packManifest.launcher.appDataDirName);
     appDataDirs.push(appDataRoot);
@@ -623,6 +635,94 @@ export default defineConfig({
     expect(existsSync(archivePath)).toBe(true);
   });
 
+  it.skipIf(process.platform === 'win32')(
+    'preserves the previous complete archive when the replacement compressor fails',
+    () => {
+      const projectDir = createTempProject('archive-replacement-failure');
+      const portableArtifactPath = createFakePortableArtifact(projectDir);
+      const archivePath = join(
+        projectDir,
+        process.platform === 'linux' ? 'portable-test.tar.gz' : 'portable-test.zip',
+      );
+      const previousArchive = Buffer.from('previous-complete-archive');
+      writeFileSync(archivePath, previousArchive);
+
+      const fakeBinDir = join(projectDir, 'fake-bin');
+      const compressor = process.platform === 'darwin' ? 'ditto' : 'tar';
+      mkdirSync(fakeBinDir, { recursive: true });
+      const fakeCompressorPath = join(fakeBinDir, compressor);
+      writeFileSync(fakeCompressorPath, '#!/usr/bin/env bash\nexit 23\n');
+      chmodSync(fakeCompressorPath, 0o755);
+
+      const previousPath = process.env.PATH;
+      process.env.PATH = `${fakeBinDir}:${previousPath ?? ''}`;
+      try {
+        expect(() => createArchiveFromPortableArtifact(portableArtifactPath, archivePath)).toThrow();
+      } finally {
+        if (previousPath === undefined) delete process.env.PATH;
+        else process.env.PATH = previousPath;
+      }
+
+      expect(readFileSync(archivePath)).toEqual(previousArchive);
+    },
+  );
+
+  it.skipIf(process.platform !== 'darwin')(
+    'preserves the previous complete macOS portable artifact when signing fails',
+    { timeout: 120_000 },
+    () => {
+      const projectDir = createTempProject('portable-replacement-signing-failure');
+      mkdirSync(join(projectDir, 'functions'), { recursive: true });
+      writeFileSync(
+        join(projectDir, 'edgebase.config.ts'),
+        `import { defineConfig } from '@edge-base/shared';
+
+export default defineConfig({
+  databases: {
+    shared: {
+      tables: {},
+    },
+  },
+});
+`,
+      );
+      writeFileSync(
+        join(projectDir, 'functions', 'health.ts'),
+        'export default async () => new Response("ok");\n',
+      );
+
+      const outputName = 'Portable Replacement.app';
+      const outputPath = join(projectDir, outputName);
+      const sentinelPath = join(outputPath, 'previous-complete.txt');
+      mkdirSync(join(outputPath, 'Contents', 'Resources'), { recursive: true });
+      writeFileSync(
+        join(outputPath, 'Contents', 'Resources', 'edgebase-portable.json'),
+        `${JSON.stringify({ schemaVersion: 1, format: 'portable' })}\n`,
+      );
+      writeFileSync(sentinelPath, 'previous-complete-portable');
+
+      const fakeBinDir = join(projectDir, 'fake-bin');
+      mkdirSync(fakeBinDir, { recursive: true });
+      const fakeCodesignPath = join(fakeBinDir, 'codesign');
+      writeFileSync(fakeCodesignPath, '#!/usr/bin/env bash\nexit 23\n');
+      chmodSync(fakeCodesignPath, 0o755);
+
+      const previousPath = process.env.PATH;
+      process.env.PATH = `${fakeBinDir}:${previousPath ?? ''}`;
+      try {
+        expect(() => createPortablePackArtifact(projectDir, {
+          outputDir: outputName,
+          appName: 'Portable Replacement',
+        })).toThrow();
+      } finally {
+        if (previousPath === undefined) delete process.env.PATH;
+        else process.env.PATH = previousPath;
+      }
+
+      expect(readFileSync(sentinelPath, 'utf-8')).toBe('previous-complete-portable');
+    },
+  );
+
   it.skipIf(!RUN_PORTABLE_DISTRIBUTION_SMOKE || process.platform !== 'darwin')(
     'launches a portable macOS app via open and starts the bundled launcher',
     async () => {
@@ -657,7 +757,7 @@ export default defineConfig({
         appName: 'Portable Open',
       });
 
-      expect(result.status).toBe(0);
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.stderr).toBe('');
 
       const payload = JSON.parse(result.stdout) as {
@@ -761,7 +861,7 @@ export default defineConfig({
       appName: 'Portable Runtime',
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(result.stderr).toBe('');
 
     const payload = JSON.parse(result.stdout) as {

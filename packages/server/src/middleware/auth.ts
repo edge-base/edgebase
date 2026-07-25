@@ -14,6 +14,7 @@ import {
   verifyAccessToken,
   TokenExpiredError,
   TokenInvalidError,
+  type VerifiedToken,
 } from '../lib/jwt.js';
 import {
   buildKeymap,
@@ -33,6 +34,10 @@ declare module 'hono' {
   interface ContextVariableMap {
     auth: AuthContext | null;
     serviceKeyToken: string | null;
+    rateLimitAccessToken: {
+      token: string;
+      payload: VerifiedToken;
+    } | null;
   }
 }
 
@@ -87,14 +92,17 @@ export async function resolveAuthContextFromToken(
   env: AuthResolutionEnv,
   token: string,
   request: Request,
-  options: { skipSessionValidation?: boolean } = {},
+  options: {
+    skipSessionValidation?: boolean;
+    verifiedPayload?: VerifiedToken;
+  } = {},
 ): Promise<AuthContext> {
   const secret = env.JWT_USER_SECRET;
   if (!secret) {
     throw new TokenInvalidError('Authentication service not configured.');
   }
 
-  const payload = await verifyAccessToken(token, secret);
+  const payload = options.verifiedPayload ?? await verifyAccessToken(token, secret);
   const auth = buildAuthContextFromPayload(payload as Record<string, unknown>);
   if (auth.sessionId && !options.skipSessionValidation) {
     const active = await isAuthSessionActive(
@@ -185,11 +193,17 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next):
       // sid before any fresh mutation.
       pathname === '/api/auth/link/email'
     );
+    const rateLimitAccessToken = c.get('rateLimitAccessToken');
     const auth = await resolveAuthContextFromToken(
       c.env,
       token,
       c.req.raw,
-      { skipSessionValidation },
+      {
+        skipSessionValidation,
+        verifiedPayload: rateLimitAccessToken?.token === token
+          ? rateLimitAccessToken.payload
+          : undefined,
+      },
     );
     c.set('auth', auth);
     return next();

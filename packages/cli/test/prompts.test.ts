@@ -5,7 +5,7 @@
  * and promptSelect return explicit structured requirements instead of
  * silently picking a value when input is required.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { setContext } from '../src/lib/cli-context.js';
 import { promptText, promptSelect } from '../src/lib/prompts.js';
 

@@ -12,6 +12,14 @@ import {
   parseCronField,
   pluginFunctionScheduleIdentity,
 } from '../src/cron.js';
+import {
+  MAX_MANAGED_CRON_UTF8_BYTES,
+  MAX_MANAGED_SCHEDULE_TARGET_ID_UTF8_BYTES,
+  assertManagedCronWireBound,
+  assertManagedScheduleTargetIdWireBound,
+  truncateUtf8,
+  utf8ByteLength,
+} from '../src/self-host-schedule.js';
 
 describe('portable cron grammar', () => {
   it('normalizes whitespace and supports numeric lists, ranges, and steps', () => {
@@ -102,5 +110,25 @@ describe('portable cron grammar', () => {
       id: 'system:maintenance',
       cron: '0 3 * * *',
     });
+  });
+});
+
+describe('self-host schedule wire bounds', () => {
+  it('enforces exact and over-limit UTF-8 cron and target boundaries', () => {
+    const exactUnicode = `${'가'.repeat(85)}a`;
+    expect(utf8ByteLength(exactUnicode)).toBe(MAX_MANAGED_CRON_UTF8_BYTES);
+    expect(MAX_MANAGED_SCHEDULE_TARGET_ID_UTF8_BYTES).toBe(MAX_MANAGED_CRON_UTF8_BYTES);
+    expect(() => assertManagedCronWireBound(exactUnicode)).not.toThrow();
+    expect(() => assertManagedScheduleTargetIdWireBound(exactUnicode)).not.toThrow();
+    expect(() => assertManagedCronWireBound(`${exactUnicode}b`)).toThrow(/1-256 UTF-8 bytes/);
+    expect(() => assertManagedScheduleTargetIdWireBound(`${exactUnicode}b`)).toThrow(/1-256 UTF-8 bytes/);
+    expect(truncateUtf8(`${exactUnicode}b`, MAX_MANAGED_CRON_UTF8_BYTES)).toBe(exactUnicode);
+  });
+
+  it('accepts a valid portable cron at the raw byte cap and rejects one byte over', () => {
+    const normalized = `${Array.from({ length: 124 }, () => '0').join(',')} * * * *`;
+    expect(utf8ByteLength(normalized)).toBe(MAX_MANAGED_CRON_UTF8_BYTES - 1);
+    expect(normalizeCronExpression(` ${normalized}`)).toBe(normalized);
+    expect(() => normalizeCronExpression(`  ${normalized}`)).toThrow(/1-256 UTF-8 bytes/);
   });
 });

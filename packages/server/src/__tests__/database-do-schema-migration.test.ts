@@ -8,6 +8,8 @@ import {
 import { setConfig } from '../lib/do-router.js';
 import {
   computeSchemaHashSync,
+  generateFTS5DDL,
+  generateFTS5Triggers,
   generateSQLiteAddColumnDDLs,
   normalizeSQLiteAddColumnField,
 } from '../lib/schema.js';
@@ -24,9 +26,16 @@ vi.mock('cloudflare:workers', () => ({
   },
 }));
 
-function createSQLiteCtx(db: DatabaseSync, executedSQL: string[]) {
+function createSQLiteCtx(
+  db: DatabaseSync,
+  executedSQL: string[],
+  options: { failOnSQL?: (query: string) => boolean } = {},
+) {
   const exec = vi.fn((query: string, ...params: unknown[]) => {
     executedSQL.push(query);
+    if (options.failOnSQL?.(query)) {
+      throw new Error(`synthetic SQL failure: ${query}`);
+    }
     return db.prepare(query).all(...(params as never[]));
   });
 
@@ -74,11 +83,12 @@ async function initializeExistingWorkspace(
   db: DatabaseSync,
   executedSQL: string[],
   config: EdgeBaseConfig,
+  options: { failOnSQL?: (query: string) => boolean } = {},
 ): Promise<Response> {
   setConfig(config);
   const { DatabaseDO } = await import('../durable-objects/database-do.js');
   const databaseDo = new DatabaseDO(
-    createSQLiteCtx(db, executedSQL),
+    createSQLiteCtx(db, executedSQL, options),
     createEnv() as never,
   );
   return databaseDo.fetch(new Request('http://do/not-a-route', {
@@ -171,6 +181,72 @@ describe('DatabaseDO existing-table schema migration', () => {
       insert.run('first-mapping', 'page-1', 'workspace:page-1');
       expect(() => insert.run('duplicate-mapping', 'page-2', 'workspace:page-1'))
         .toThrow(/UNIQUE constraint failed/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('self-heals a reference index and uses it for a 5,000-row child lookup', async () => {
+    const db = new DatabaseSync(':memory:');
+    const executedSQL: string[] = [];
+    const tableConfig: TableConfig = {
+      schema: {
+        parentId: { type: 'string', references: 'parents' },
+        value: { type: 'string' },
+      },
+    };
+
+    try {
+      db.exec(`
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE parents (id TEXT PRIMARY KEY);
+        CREATE TABLE children (
+          id TEXT PRIMARY KEY,
+          createdAt TEXT,
+          updatedAt TEXT,
+          parentId TEXT REFERENCES parents(id) ON DELETE SET NULL,
+          value TEXT
+        );
+        INSERT INTO parents (id) VALUES ('parent-0'), ('parent-1');
+        INSERT INTO _meta (key, value)
+          VALUES ('schemaHash:children', '${computeSchemaHashSync(tableConfig)}');
+      `);
+      const insert = db.prepare(
+        'INSERT INTO children (id, parentId, value) VALUES (?, ?, ?)',
+      );
+      db.exec('BEGIN');
+      for (let index = 0; index < 5_000; index++) {
+        insert.run(
+          `child-${String(index).padStart(4, '0')}`,
+          `parent-${index % 2}`,
+          `value-${index}`,
+        );
+      }
+      db.exec('COMMIT');
+
+      const response = await initializeExistingWorkspace(
+        db,
+        executedSQL,
+        createWorkspaceConfig('children', tableConfig),
+      );
+
+      expect(response.status).toBe(404);
+      expect(db.prepare('PRAGMA index_list("children")').all()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'idx_children_parentId', unique: 0, origin: 'c' }),
+        ]),
+      );
+      const plan = db.prepare(
+        'EXPLAIN QUERY PLAN SELECT id FROM children WHERE parentId = ?',
+      ).all('parent-1');
+      expect(plan).toEqual([
+        expect.objectContaining({ detail: expect.stringContaining('idx_children_parentId') }),
+      ]);
+      expect(plan.some((row) => String(row.detail).startsWith('SCAN children'))).toBe(false);
+      expect(executedSQL.filter((sql) => sql ===
+        'CREATE INDEX IF NOT EXISTS "idx_children_parentId" ON "children"("parentId")'
+      )).toHaveLength(1);
     } finally {
       db.close();
     }
@@ -545,6 +621,304 @@ describe('DatabaseDO existing-table schema migration', () => {
       expect(
         db.prepare('SELECT value FROM _meta WHERE key = ?').get('schemaHash:contacts'),
       ).toMatchObject({ value: 'stale-schema-hash' });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('rebuilds removed foreign keys while preserving rows, indexes, unique fields, and triggers', async () => {
+    const db = new DatabaseSync(':memory:');
+    const executedSQL: string[] = [];
+    const tableConfig: TableConfig = {
+      schema: {
+        workspaceId: {
+          type: 'string',
+          required: true,
+          references: { table: 'workspaces', onDelete: 'CASCADE' },
+        },
+        pageId: { type: 'string' },
+        message: { type: 'string', unique: true },
+      },
+      indexes: [{ fields: ['pageId'] }],
+      fts: ['message'],
+    };
+    const managedFtsDDL = [
+      generateFTS5DDL('notifications', ['message']),
+      ...generateFTS5Triggers('notifications', ['message']),
+    ].join('\n');
+
+    try {
+      db.exec(`
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+        CREATE TABLE pages (id TEXT PRIMARY KEY);
+        CREATE TABLE notification_audit (notificationId TEXT NOT NULL);
+        CREATE TABLE notifications (
+          id TEXT PRIMARY KEY,
+          createdAt TEXT,
+          updatedAt TEXT,
+          workspaceId TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          pageId TEXT REFERENCES pages(id) ON DELETE CASCADE,
+          message TEXT
+        );
+        CREATE INDEX legacy_notifications_message ON notifications(message);
+        CREATE TRIGGER notifications_audit AFTER INSERT ON notifications BEGIN
+          INSERT INTO notification_audit(notificationId) VALUES (new.id);
+        END;
+        ${managedFtsDDL}
+        INSERT INTO workspaces (id) VALUES ('workspace-1');
+        INSERT INTO pages (id) VALUES ('page-legacy');
+        INSERT INTO notifications (id, createdAt, updatedAt, workspaceId, pageId, message)
+          VALUES ('notification-1', 'created', 'updated', 'workspace-1', 'page-legacy', 'first');
+        DELETE FROM notification_audit;
+        INSERT INTO _meta (key, value) VALUES ('schemaHash:notifications', 'stale-schema-hash');
+      `);
+
+      const config = createWorkspaceConfig('notifications', tableConfig);
+      const response = await initializeExistingWorkspace(db, executedSQL, config);
+
+      expect(response.status).toBe(404);
+      expect(db.prepare('PRAGMA foreign_key_list("notifications")').all()).toEqual([
+        expect.objectContaining({
+          from: 'workspaceId',
+          table: 'workspaces',
+          to: 'id',
+          on_delete: 'CASCADE',
+        }),
+      ]);
+      expect(db.prepare('SELECT * FROM notifications').all()).toEqual([
+        {
+          id: 'notification-1',
+          createdAt: 'created',
+          updatedAt: 'updated',
+          workspaceId: 'workspace-1',
+          pageId: 'page-legacy',
+          message: 'first',
+        },
+      ]);
+      const indexes = db.prepare('PRAGMA index_list("notifications")').all();
+      expect(indexes.find((row) => row.name === 'idx_notifications_pageId'))
+        .toMatchObject({ unique: 0, origin: 'c' });
+      expect(indexes.some((row) => row.name === 'legacy_notifications_message')).toBe(true);
+      expect(indexes.some((row) => row.unique === 1 && row.origin === 'u')).toBe(true);
+      expect(db.prepare(
+        'SELECT sql FROM sqlite_master WHERE type = ? AND name = ?',
+      ).get('trigger', 'notifications_audit')).toMatchObject({
+        sql: expect.stringContaining('INSERT INTO notification_audit'),
+      });
+      expect(db.prepare(
+        'SELECT message FROM notifications_fts WHERE notifications_fts MATCH ?',
+      ).all('first')).toEqual([{ message: 'first' }]);
+      expect(db.prepare(
+        'SELECT name FROM sqlite_master WHERE type = ? AND name IN (?, ?, ?) ORDER BY name',
+      ).all('trigger', 'notifications_ai', 'notifications_ad', 'notifications_au'))
+        .toEqual([
+          { name: 'notifications_ad' },
+          { name: 'notifications_ai' },
+          { name: 'notifications_au' },
+        ]);
+
+      db.prepare(
+        'INSERT INTO notifications (id, workspaceId, pageId, message) VALUES (?, ?, ?, ?)',
+      ).run('notification-2', 'workspace-1', 'page-not-central', 'second');
+      expect(db.prepare('SELECT notificationId FROM notification_audit').all())
+        .toEqual([{ notificationId: 'notification-2' }]);
+      expect(db.prepare(
+        'SELECT message FROM notifications_fts WHERE notifications_fts MATCH ?',
+      ).all('second')).toEqual([{ message: 'second' }]);
+      expect(() => db.prepare(
+        'INSERT INTO notifications (id, workspaceId, message) VALUES (?, ?, ?)',
+      ).run('notification-duplicate', 'workspace-1', 'second'))
+        .toThrow(/UNIQUE constraint failed/);
+
+      const rebuildCount = executedSQL.filter((sql) =>
+        sql.startsWith('CREATE TABLE "__edgebase_rebuild_notifications"'),
+      ).length;
+      const secondResponse = await initializeExistingWorkspace(db, executedSQL, config);
+      expect(secondResponse.status).toBe(404);
+      expect(executedSQL.filter((sql) =>
+        sql.startsWith('CREATE TABLE "__edgebase_rebuild_notifications"'),
+      )).toHaveLength(rebuildCount);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('preserves a self-referential hierarchy while reconciling its foreign-key action', async () => {
+    const db = new DatabaseSync(':memory:');
+    const executedSQL: string[] = [];
+
+    try {
+      db.exec(`
+        PRAGMA foreign_keys = OFF;
+        CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE folders (
+          id TEXT PRIMARY KEY,
+          createdAt TEXT,
+          updatedAt TEXT,
+          parentId TEXT REFERENCES folders(id) ON DELETE SET NULL
+        );
+        INSERT INTO folders (id, parentId) VALUES ('child', 'parent');
+        INSERT INTO folders (id, parentId) VALUES ('parent', NULL);
+        INSERT INTO _meta (key, value) VALUES ('schemaHash:folders', 'stale-schema-hash');
+      `);
+      const config = createWorkspaceConfig('folders', {
+        schema: {
+          parentId: {
+            type: 'string',
+            references: { table: 'folders', onDelete: 'CASCADE' },
+          },
+        },
+      });
+
+      const response = await initializeExistingWorkspace(db, executedSQL, config);
+
+      expect(response.status).toBe(404);
+      expect(db.prepare('SELECT id, parentId FROM folders ORDER BY id').all()).toEqual([
+        { id: 'child', parentId: 'parent' },
+        { id: 'parent', parentId: null },
+      ]);
+      expect(db.prepare('PRAGMA foreign_key_list("folders")').all()).toEqual([
+        expect.objectContaining({
+          from: 'parentId',
+          table: 'folders',
+          to: 'id',
+          on_delete: 'CASCADE',
+        }),
+      ]);
+      expect(executedSQL).toContain('PRAGMA defer_foreign_keys = ON');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('fails closed without deleting rows when another table references the rebuild target', async () => {
+    const db = new DatabaseSync(':memory:');
+    const executedSQL: string[] = [];
+
+    try {
+      db.exec(`
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE pages (id TEXT PRIMARY KEY);
+        CREATE TABLE notifications (
+          id TEXT PRIMARY KEY,
+          createdAt TEXT,
+          updatedAt TEXT,
+          pageId TEXT REFERENCES pages(id) ON DELETE CASCADE,
+          message TEXT
+        );
+        CREATE TABLE deliveries (
+          id TEXT PRIMARY KEY,
+          notificationId TEXT REFERENCES notifications(id) ON DELETE CASCADE
+        );
+        INSERT INTO pages (id) VALUES ('page-legacy');
+        INSERT INTO notifications (id, pageId, message)
+          VALUES ('notification-1', 'page-legacy', 'first');
+        INSERT INTO deliveries (id, notificationId)
+          VALUES ('delivery-1', 'notification-1');
+        INSERT INTO _meta (key, value) VALUES
+          ('schemaHash:notifications', 'stale-schema-hash');
+      `);
+      const config = createWorkspaceConfig('notifications', {
+        schema: {
+          pageId: { type: 'string' },
+          message: { type: 'string' },
+        },
+      });
+
+      await expect(initializeExistingWorkspace(db, executedSQL, config))
+        .rejects.toThrow(/referenced by 'deliveries.notificationId'/);
+
+      expect(db.prepare('SELECT id FROM notifications').all())
+        .toEqual([{ id: 'notification-1' }]);
+      expect(db.prepare('SELECT id, notificationId FROM deliveries').all())
+        .toEqual([{ id: 'delivery-1', notificationId: 'notification-1' }]);
+      expect(db.prepare('PRAGMA foreign_key_list("notifications")').all()).toEqual([
+        expect.objectContaining({ from: 'pageId', table: 'pages' }),
+      ]);
+      expect(db.prepare('SELECT value FROM _meta WHERE key = ?')
+        .get('schemaHash:notifications')).toEqual({ value: 'stale-schema-hash' });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('rolls back a removed-FK rebuild and migration metadata, then retries cleanly', async () => {
+    const db = new DatabaseSync(':memory:');
+    const executedSQL: string[] = [];
+    const tableConfig: TableConfig = {
+      schema: {
+        workspaceId: {
+          type: 'string',
+          required: true,
+          references: { table: 'workspaces', onDelete: 'CASCADE' },
+        },
+        pageId: { type: 'string' },
+        message: { type: 'string' },
+      },
+      migrations: [{
+        version: 2,
+        description: 'Update the synthetic notification',
+        up: `UPDATE notifications SET message = 'migrated' WHERE id = 'notification-1'`,
+      }],
+    };
+
+    try {
+      db.exec(`
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+        CREATE TABLE pages (id TEXT PRIMARY KEY);
+        CREATE TABLE notifications (
+          id TEXT PRIMARY KEY,
+          createdAt TEXT,
+          updatedAt TEXT,
+          workspaceId TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          pageId TEXT REFERENCES pages(id) ON DELETE CASCADE,
+          message TEXT
+        );
+        INSERT INTO workspaces (id) VALUES ('workspace-1');
+        INSERT INTO pages (id) VALUES ('page-legacy');
+        INSERT INTO notifications (id, workspaceId, pageId, message)
+          VALUES ('notification-1', 'workspace-1', 'page-legacy', 'original');
+        INSERT INTO _meta (key, value) VALUES
+          ('schemaHash:notifications', 'stale-schema-hash'),
+          ('migration_version:notifications', '1');
+      `);
+      const config = createWorkspaceConfig('notifications', tableConfig);
+
+      await expect(initializeExistingWorkspace(db, executedSQL, config, {
+        failOnSQL: (sql) => sql.startsWith(
+          'ALTER TABLE "__edgebase_rebuild_notifications" RENAME TO "notifications"',
+        ),
+      })).rejects.toThrow(/synthetic SQL failure/);
+
+      expect(db.prepare('SELECT message FROM notifications WHERE id = ?')
+        .get('notification-1')).toEqual({ message: 'original' });
+      expect(db.prepare('PRAGMA foreign_key_list("notifications")').all()).toHaveLength(2);
+      expect(db.prepare('SELECT value FROM _meta WHERE key = ?')
+        .get('schemaHash:notifications')).toEqual({ value: 'stale-schema-hash' });
+      expect(db.prepare('SELECT value FROM _meta WHERE key = ?')
+        .get('migration_version:notifications')).toEqual({ value: '1' });
+      expect(db.prepare(
+        'SELECT name FROM sqlite_master WHERE name = ?',
+      ).get('__edgebase_rebuild_notifications')).toBeUndefined();
+
+      const retryResponse = await initializeExistingWorkspace(db, executedSQL, config);
+      expect(retryResponse.status).toBe(404);
+      expect(db.prepare('SELECT message FROM notifications WHERE id = ?')
+        .get('notification-1')).toEqual({ message: 'migrated' });
+      expect(db.prepare('PRAGMA foreign_key_list("notifications")').all()).toEqual([
+        expect.objectContaining({ from: 'workspaceId', table: 'workspaces' }),
+      ]);
+      expect(db.prepare('SELECT value FROM _meta WHERE key = ?')
+        .get('migration_version:notifications')).toEqual({ value: '2' });
+      expect(db.prepare('SELECT value FROM _meta WHERE key = ?')
+        .get('schemaHash:notifications')).toEqual({
+          value: computeSchemaHashSync(tableConfig),
+        });
     } finally {
       db.close();
     }

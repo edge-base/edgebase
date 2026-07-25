@@ -60,6 +60,7 @@ and nesting limits inside the function.
 | `insert` | Async (`ctx.waitUntil()`) | Never blocks API response |
 | `update` | Async (`ctx.waitUntil()`) | |
 | `delete` | Async (`ctx.waitUntil()`) | |
+| Batch/transaction concurrency | **8 rows** | One registry snapshot and one `waitUntil()` owner per committed source mutation; matching functions for each row keep registration order |
 | Trigger error | Logged only | Best-effort; does not roll back the CUD operation |
 
 ## Authentication Triggers
@@ -90,8 +91,11 @@ and nesting limits inside the function.
 
 | Group | Default | Key | Configurable |
 |-------|---------|-----|:---:|
-| `functions` | **50 req / 60s** | IP | Yes |
-| `global` | **10,000,000 req / 60s** | IP | Yes |
+| `functions` | **50 req / 60s** | verified user / IP fallback | Yes |
+| `global` | **10,000,000 req / 60s** | verified user / IP fallback | Yes |
+
+Functions that opt into custom Bearer authentication retain the authoritative
+IP key because EdgeBase does not interpret or trust that protocol's token.
 
 Service Key requests bypass the `functions` group limit.
 
