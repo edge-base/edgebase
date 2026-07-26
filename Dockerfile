@@ -1,4 +1,4 @@
-FROM node:22-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf
+FROM node:26-slim@sha256:715e55e4b84e4bb0ff48e49b398a848f08e55daed8eb6a0ea1839ae53bc57583
 
 # workerd requires glibc, so use Debian slim instead of Alpine. Keep npm pinned
 # to the audited release used by consumer runtime images. The generated
