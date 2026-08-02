@@ -43,29 +43,29 @@
     "dependencies": {
         "@edge-base/core": "workspace:*",
         "@edge-base/shared": "workspace:*",
-        "@hono/zod-openapi": "^1.2.2",
-        "@simplewebauthn/server": "^10",
+        "@hono/zod-openapi": "^1.5.1",
+        "@simplewebauthn/server": "^13",
         "bcryptjs": "^3.0.3",
-        "hono": "4.12.25",
-        "jose": "^6.0.0",
-        "pg": "^8.16.3",
-        "zod": "^4.3.6"
+        "hono": "4.12.32",
+        "jose": "^6.2.4",
+        "pg": "^8.22.0",
+        "zod": "^4.4.3"
     },
     "devDependencies": {
-        "@cloudflare/vitest-pool-workers": "^0.8.71",
-        "@cloudflare/workers-types": "4.20260305.1",
-        "@stryker-mutator/core": "^8.7.0",
-        "@stryker-mutator/typescript-checker": "^8.7.0",
-        "@stryker-mutator/vitest-runner": "^8.7.0",
-        "@types/pg": "^8.11.0",
+        "@cloudflare/vitest-pool-workers": "^0.18.8",
+        "@cloudflare/workers-types": "5.20260726.1",
+        "@stryker-mutator/core": "^9.6.1",
+        "@stryker-mutator/typescript-checker": "^9.6.1",
+        "@stryker-mutator/vitest-runner": "^9.6.1",
+        "@types/pg": "^8.20.0",
         "@types/ws": "^8.18.1",
-        "@vitest/runner": "3.2.6",
-        "@vitest/snapshot": "3.2.6",
-        "@vitest/coverage-v8": "3.2.6",
-        "fast-check": "^4.5.3",
-        "typescript": "^5.7.0",
-        "vitest": "^3.2.6",
+        "@vitest/runner": "4.1.10",
+        "@vitest/snapshot": "4.1.10",
+        "@vitest/coverage-v8": "4.1.10",
+        "fast-check": "^4.9.0",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10",
         "wrangler": "4.114.0",
-        "ws": "^8.21.0"
+        "ws": "^8.21.1"
     }
 }

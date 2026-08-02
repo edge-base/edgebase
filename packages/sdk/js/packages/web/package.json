@@ -53,8 +53,8 @@
     },
     "devDependencies": {
         "fake-indexeddb": "^6.2.5",
-        "typescript": "^5.7.0",
-        "vitest": "^3.2.6",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10",
         "yjs": "^13.6.31"
     }
 }
