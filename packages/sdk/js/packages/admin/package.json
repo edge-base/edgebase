@@ -41,12 +41,12 @@
         "prepack": "pnpm run build"
     },
     "dependencies": {
-        "@codemirror/lang-html": "^6.4.11",
+        "@codemirror/lang-html": "^6.4.12",
         "@edge-base/core": "workspace:*"
     },
     "devDependencies": {
-        "fast-check": "^4.5.3",
-        "typescript": "^5.7.0",
-        "vitest": "^3.2.6"
+        "fast-check": "^4.9.0",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
     }
 }
