@@ -7,10 +7,10 @@
 //   :admin   — JVM-only admin SDK (depends on :core JVM artifact)
 
 plugins {
-    kotlin("multiplatform") version "2.1.10" apply false
-    kotlin("jvm") version "2.1.10" apply false
-    kotlin("plugin.serialization") version "2.1.10" apply false
-    id("com.android.library") version "8.2.0" apply false
+    kotlin("multiplatform") version "2.4.10" apply false
+    kotlin("jvm") version "2.4.10" apply false
+    kotlin("plugin.serialization") version "2.4.10" apply false
+    id("com.android.library") version "9.3.1" apply false
 }
 
 val edgebaseReleaseVersion = "0.5.0"
